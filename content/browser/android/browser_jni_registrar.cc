@@ -6,7 +6,10 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
+#include "content/browser/accessibility/browser_accessibility_android.h"
+#include "content/browser/accessibility/browser_accessibility_manager_android.h"
 #include "content/browser/android/android_browser_process.h"
+#include "content/browser/android/browser_startup_config.h"
 #include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/android/content_settings.h"
 #include "content/browser/android/content_video_view.h"
@@ -21,8 +24,11 @@
 #include "content/browser/android/surface_texture_peer_browser_impl.h"
 #include "content/browser/android/touch_point.h"
 #include "content/browser/android/tracing_intent_handler.h"
+#include "content/browser/android/vibration_message_filter.h"
 #include "content/browser/android/web_contents_observer_android.h"
+#include "content/browser/device_orientation/data_fetcher_impl_android.h"
 #include "content/browser/geolocation/location_api_adapter_android.h"
+#include "content/browser/power_save_blocker_android.h"
 #include "content/browser/renderer_host/ime_adapter_android.h"
 #include "content/browser/renderer_host/java/java_bound_object.h"
 #include "content/browser/speech/speech_recognizer_impl_android.h"
@@ -31,32 +37,37 @@ using content::SurfaceTexturePeerBrowserImpl;
 
 namespace {
 base::android::RegistrationMethod kContentRegisteredMethods[] = {
-  { "AndroidLocationApiAdapter",
-    content::AndroidLocationApiAdapter::RegisterGeolocationService },
-  { "AndroidBrowserProcess", content::RegisterAndroidBrowserProcess },
-  { "ChildProcessLauncher", content::RegisterChildProcessLauncher },
-  { "ContentSettings", content::ContentSettings::RegisterContentSettings },
-  { "ContentViewRenderView",
-    content::ContentViewRenderView::RegisterContentViewRenderView },
-  { "ContentVideoView", content::ContentVideoView::RegisterContentVideoView },
-  { "ContentViewCore", content::RegisterContentViewCore },
-  { "DateTimePickerAndroid", content::RegisterDateTimeChooserAndroid},
-  { "DownloadControllerAndroidImpl",
-    content::DownloadControllerAndroidImpl::RegisterDownloadController },
-  { "InterstitialPageDelegateAndroid",
-    content::InterstitialPageDelegateAndroid
-        ::RegisterInterstitialPageDelegateAndroid },
-  { "MediaResourceGetterImpl",
-    content::MediaResourceGetterImpl::RegisterMediaResourceGetter },
-  { "LoadUrlParams", content::RegisterLoadUrlParams },
-  { "RegisterImeAdapter", content::RegisterImeAdapter },
-  { "SpeechRecognizerImplAndroid",
-    content::SpeechRecognizerImplAndroid::RegisterSpeechRecognizer },
-  { "TouchPoint", content::RegisterTouchPoint },
-  { "TracingIntentHandler", content::RegisterTracingIntentHandler },
-  { "WebContentsObserverAndroid", content::RegisterWebContentsObserverAndroid },
-  { "WebViewStatics", content::RegisterWebViewStatics },
-};
+    {"AndroidLocationApiAdapter",
+     content::AndroidLocationApiAdapter::RegisterGeolocationService},
+    {"AndroidBrowserProcess", content::RegisterAndroidBrowserProcess},
+    {"BrowserAccessibilityManager",
+     content::RegisterBrowserAccessibilityManager},
+    {"BrowserStartupConfiguration", content::RegisterBrowserStartupConfig},
+    {"ChildProcessLauncher", content::RegisterChildProcessLauncher},
+    {"ContentSettings", content::ContentSettings::RegisterContentSettings},
+    {"ContentViewRenderView",
+     content::ContentViewRenderView::RegisterContentViewRenderView},
+    {"ContentVideoView", content::ContentVideoView::RegisterContentVideoView},
+    {"ContentViewCore", content::RegisterContentViewCore},
+    {"DataFetcherImplAndroid", content::DataFetcherImplAndroid::Register},
+    {"DateTimePickerAndroid", content::RegisterDateTimeChooserAndroid},
+    {"DownloadControllerAndroidImpl",
+     content::DownloadControllerAndroidImpl::RegisterDownloadController},
+    {"InterstitialPageDelegateAndroid",
+     content::InterstitialPageDelegateAndroid::
+         RegisterInterstitialPageDelegateAndroid},
+    {"MediaResourceGetterImpl",
+     content::MediaResourceGetterImpl::RegisterMediaResourceGetter},
+    {"LoadUrlParams", content::RegisterLoadUrlParams},
+    {"PowerSaveBlock", content::RegisterPowerSaveBlocker},
+    {"RegisterImeAdapter", content::RegisterImeAdapter},
+    {"SpeechRecognizerImplAndroid",
+     content::SpeechRecognizerImplAndroid::RegisterSpeechRecognizer},
+    {"TouchPoint", content::RegisterTouchPoint},
+    {"TracingIntentHandler", content::RegisterTracingIntentHandler},
+    {"VibrationMessageFilter", content::VibrationMessageFilter::Register},
+    {"WebContentsObserverAndroid", content::RegisterWebContentsObserverAndroid},
+    {"WebViewStatics", content::RegisterWebViewStatics}, };
 
 }  // namespace
 

@@ -13,6 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/devtools/devtools_file_helper.h"
+#include "chrome/browser/devtools/devtools_file_system_indexer.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_frontend_host_delegate.h"
@@ -56,13 +57,17 @@ class DevToolsWindow : private content::NotificationObserver,
                        private content::WebContentsDelegate,
                        private content::DevToolsFrontendHostDelegate {
  public:
+  typedef base::Callback<void(bool)> InfoBarCallback;
+
   static const char kDevToolsApp[];
+
+  virtual ~DevToolsWindow();
+
   static std::string GetDevToolsWindowPlacementPrefKey();
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
   static DevToolsWindow* GetDockedInstanceForInspectedTab(
       content::WebContents* inspected_tab);
   static bool IsDevToolsWindow(content::RenderViewHost* window_rvh);
-
   static DevToolsWindow* OpenDevToolsWindowForWorker(
       Profile* profile,
       content::DevToolsAgentHost* worker_agent);
@@ -84,18 +89,18 @@ class DevToolsWindow : private content::NotificationObserver,
   static void InspectElement(
       content::RenderViewHost* inspected_rvh, int x, int y);
 
-  virtual ~DevToolsWindow();
+  static int GetMinimumWidth();
+  static int GetMinimumHeight();
+  static int GetMinimizedHeight();
 
-  // Overridden from DevToolsClientHost.
+  // content::DevToolsFrontendHostDelegate:
   virtual void InspectedContentsClosing() OVERRIDE;
-  content::RenderViewHost* GetRenderViewHost();
-
-  void Show(DevToolsToggleAction action);
 
   content::WebContents* web_contents() { return web_contents_; }
   Browser* browser() { return browser_; }  // For tests.
-  DevToolsDockSide dock_side() { return dock_side_; }
+  DevToolsDockSide dock_side() const { return dock_side_; }
 
+  content::RenderViewHost* GetRenderViewHost();
   content::DevToolsClientHost* GetDevToolsClientHostForTest();
 
   // Returns preferred devtools window width for given |container_width|. It
@@ -110,57 +115,43 @@ class DevToolsWindow : private content::NotificationObserver,
   // Called only for the case when devtools window is docked to bottom.
   int GetHeight(int container_height);
 
-  // Returns the minimum width devtools window needs.
-  int GetMinimumWidth();
-
-  // Returns the minimum height devtools window needs.
-  int GetMinimumHeight();
-
   // Stores preferred devtools window width for this instance.
   void SetWidth(int width);
 
   // Stores preferred devtools window height for this instance.
   void SetHeight(int height);
 
-  // Returns the height in minimized mode.
-  int GetMinimizedHeight();
+  void Show(DevToolsToggleAction action);
 
  private:
   friend class DevToolsControllerTest;
-  static DevToolsWindow* Create(Profile* profile,
-                                const GURL& frontend_url,
-                                content::RenderViewHost* inspected_rvh,
-                                DevToolsDockSide dock_side,
-                                bool shared_worker_frontend);
+
   DevToolsWindow(Profile* profile,
                  const GURL& frontend_url,
                  content::RenderViewHost* inspected_rvh,
                  DevToolsDockSide dock_side);
 
-  void CreateDevToolsBrowser();
-  bool FindInspectedBrowserAndTabIndex(Browser**, int* tab);
-  BrowserWindow* GetInspectedBrowserWindow();
-  bool IsInspectedBrowserPopup();
-  void UpdateFrontendDockSide();
-  void Hide();
-
-  // Overridden from content::NotificationObserver.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
-  void ScheduleAction(DevToolsToggleAction action);
-  void DoAction();
+  static DevToolsWindow* Create(Profile* profile,
+                                const GURL& frontend_url,
+                                content::RenderViewHost* inspected_rvh,
+                                DevToolsDockSide dock_side,
+                                bool shared_worker_frontend);
   static GURL GetDevToolsURL(Profile* profile,
                              const GURL& base_url,
                              DevToolsDockSide dock_side,
                              bool shared_worker_frontend);
-  void UpdateTheme();
-  void AddDevToolsExtensionsToClient();
-  void CallClientFunction(const std::string& function_name,
-                          const base::Value* arg1 = NULL,
-                          const base::Value* arg2 = NULL);
-  // Overridden from content::WebContentsDelegate.
+  static DevToolsWindow* FindDevToolsWindow(content::DevToolsAgentHost*);
+  static DevToolsWindow* AsDevToolsWindow(content::RenderViewHost*);
+  static DevToolsDockSide GetDockSideFromPrefs(Profile* profile);
+  static std::string SideToString(DevToolsDockSide dock_side);
+  static DevToolsDockSide SideFromString(const std::string& dock_side);
+
+  // content::NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+  // content::WebContentsDelegate:
   virtual content::WebContents* OpenURLFromTab(
       content::WebContents* source,
       const content::OpenURLParams& params) OVERRIDE;
@@ -170,7 +161,7 @@ class DevToolsWindow : private content::NotificationObserver,
                               const gfx::Rect& initial_pos,
                               bool user_gesture,
                               bool* was_blocked) OVERRIDE;
-  virtual void CloseContents(content::WebContents* source) OVERRIDE {}
+  virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event,
@@ -188,10 +179,7 @@ class DevToolsWindow : private content::NotificationObserver,
       const content::FileChooserParams& params) OVERRIDE;
   virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
 
-  static DevToolsWindow* FindDevToolsWindow(content::DevToolsAgentHost*);
-  static DevToolsWindow* AsDevToolsWindow(content::RenderViewHost*);
-
-  // content::DevToolsFrontendHostDelegate overrides.
+  // content::DevToolsFrontendHostDelegate:
   virtual void ActivateWindow() OVERRIDE;
   virtual void ChangeAttachedWindowHeight(unsigned height) OVERRIDE;
   virtual void CloseWindow() OVERRIDE;
@@ -206,24 +194,49 @@ class DevToolsWindow : private content::NotificationObserver,
   virtual void RequestFileSystems() OVERRIDE;
   virtual void AddFileSystem() OVERRIDE;
   virtual void RemoveFileSystem(const std::string& file_system_path) OVERRIDE;
+  virtual void IndexPath(int request_id,
+                         const std::string& file_system_path) OVERRIDE;
+  virtual void StopIndexing(int request_id) OVERRIDE;
+  virtual void SearchInPath(int request_id,
+                            const std::string& file_system_path,
+                            const std::string& query) OVERRIDE;
 
   // DevToolsFileHelper callbacks.
   void FileSavedAs(const std::string& url);
   void AppendedTo(const std::string& url);
   void FileSystemsLoaded(
       const std::vector<DevToolsFileHelper::FileSystem>& file_systems);
-  void ShowDevToolsConfirmInfoBar(
-      const string16& message,
-      const base::Callback<void(bool)>& callback);
   void FileSystemAdded(const DevToolsFileHelper::FileSystem& file_system);
+  void IndexingTotalWorkCalculated(int request_id,
+                                   const std::string& file_system_path,
+                                   int total_work);
+  void IndexingWorked(int request_id,
+                      const std::string& file_system_path,
+                      int worked);
+  void IndexingDone(int request_id, const std::string& file_system_path);
+  void SearchCompleted(int request_id,
+                       const std::string& file_system_path,
+                       const std::vector<std::string>& file_paths);
+  void ShowDevToolsConfirmInfoBar(const string16& message,
+                                  const InfoBarCallback& callback);
 
+  void CreateDevToolsBrowser();
+  bool FindInspectedBrowserAndTabIndex(Browser**, int* tab);
+  BrowserWindow* GetInspectedBrowserWindow();
+  bool IsInspectedBrowserPopup();
+  void UpdateFrontendDockSide();
+  void Hide();
+  void ScheduleAction(DevToolsToggleAction action);
+  void DoAction();
+  void UpdateTheme();
+  void AddDevToolsExtensionsToClient();
+  void CallClientFunction(const std::string& function_name,
+                          const base::Value* arg1,
+                          const base::Value* arg2,
+                          const base::Value* arg3);
   void UpdateBrowserToolbar();
   bool IsDocked();
   void Restore();
-  static DevToolsDockSide GetDockSideFromPrefs(Profile* profile);
-  static std::string SideToString(DevToolsDockSide dock_side);
-  static DevToolsDockSide SideFromString(const std::string& dock_side);
-
   content::WebContents* GetInspectedWebContents();
 
   class InspectedWebContentsObserver;
@@ -241,9 +254,16 @@ class DevToolsWindow : private content::NotificationObserver,
   scoped_ptr<content::DevToolsClientHost> frontend_host_;
   base::WeakPtrFactory<DevToolsWindow> weak_factory_;
   scoped_ptr<DevToolsFileHelper> file_helper_;
+  scoped_refptr<DevToolsFileSystemIndexer> file_system_indexer_;
+  typedef std::map<
+      int,
+      scoped_refptr<DevToolsFileSystemIndexer::FileSystemIndexingJob> >
+      IndexingJobsMap;
+  IndexingJobsMap indexing_jobs_;
   int width_;
   int height_;
   DevToolsDockSide dock_side_before_minimized_;
+
   DISALLOW_COPY_AND_ASSIGN(DevToolsWindow);
 };
 

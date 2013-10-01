@@ -16,10 +16,13 @@
 #include "net/http/http_network_transaction.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/socket/socket_test_util.h"
+#include "net/socket/ssl_client_socket.h"
+#include "net/socket/transport_client_socket_pool.h"
 #include "net/spdy/buffered_spdy_framer.h"
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/spdy/spdy_session.h"
+#include "net/spdy/spdy_session_pool.h"
 #include "net/spdy/spdy_stream.h"
 
 namespace net {
@@ -27,8 +30,9 @@ namespace net {
 namespace {
 
 bool next_proto_is_spdy(NextProto next_proto) {
-  return next_proto >= kProtoSPDYMinimumVersion &&
-         next_proto <= kProtoSPDYMaximumVersion;
+  // TODO(akalin): Change this to kProtoSPDYMinimumVersion once we
+  // stop supporting SPDY/1.
+  return next_proto >= kProtoSPDY2 && next_proto <= kProtoSPDYMaximumVersion;
 }
 
 // Parses a URL into the scheme, host, and path components required for a
@@ -46,6 +50,16 @@ void ParseUrl(base::StringPiece url, std::string* scheme, std::string* host,
 }
 
 }  // namespace
+
+std::vector<NextProto> SpdyNextProtos() {
+  std::vector<NextProto> next_protos;
+  for (int i = kProtoMinimumVersion; i <= kProtoMaximumVersion; ++i) {
+    NextProto proto = static_cast<NextProto>(i);
+    if (proto != kProtoSPDY1 && proto != kProtoSPDY21)
+      next_protos.push_back(proto);
+  }
+  return next_protos;
+}
 
 // Chop a frame into an array of MockWrites.
 // |data| is the frame to chop.
@@ -231,9 +245,8 @@ class PriorityGetter : public BufferedSpdyFramerVisitorInterface {
                         SpdyGoAwayStatus status) OVERRIDE {}
   virtual void OnWindowUpdate(SpdyStreamId stream_id,
                               uint32 delta_window_size) OVERRIDE {}
-  virtual void OnSynStreamCompressed(
-      size_t uncompressed_size,
-      size_t compressed_size) OVERRIDE {}
+  virtual void OnPushPromise(SpdyStreamId stream_id,
+                             SpdyStreamId promised_stream_id) OVERRIDE {}
 
  private:
   SpdyPriority priority_;
@@ -257,7 +270,7 @@ bool GetSpdyPriority(SpdyMajorVersion version,
 
 base::WeakPtr<SpdyStream> CreateStreamSynchronously(
     SpdyStreamType type,
-    const scoped_refptr<SpdySession>& session,
+    const base::WeakPtr<SpdySession>& session,
     const GURL& url,
     RequestPriority priority,
     const BoundNetLog& net_log) {
@@ -281,7 +294,8 @@ CompletionCallback StreamReleaserCallback::MakeCallback(
 
 void StreamReleaserCallback::OnComplete(
     SpdyStreamRequest* request, int result) {
-  request->ReleaseStream()->Cancel();
+  if (result == OK)
+    request->ReleaseStream()->Cancel();
   SetResult(result);
 }
 
@@ -387,7 +401,7 @@ HttpNetworkSession* SpdySessionDependencies::SpdyCreateSession(
   params.client_socket_factory = session_deps->socket_factory.get();
   HttpNetworkSession* http_session = new HttpNetworkSession(params);
   SpdySessionPoolPeer pool_peer(http_session->spdy_session_pool());
-  pool_peer.EnableSendingInitialSettings(false);
+  pool_peer.SetEnableSendingInitialData(false);
   return http_session;
 }
 
@@ -399,7 +413,7 @@ HttpNetworkSession* SpdySessionDependencies::SpdyCreateSessionDeterministic(
       session_deps->deterministic_socket_factory.get();
   HttpNetworkSession* http_session = new HttpNetworkSession(params);
   SpdySessionPoolPeer pool_peer(http_session->spdy_session_pool());
-  pool_peer.EnableSendingInitialSettings(false);
+  pool_peer.SetEnableSendingInitialData(false);
   return http_session;
 }
 
@@ -418,7 +432,8 @@ net::HttpNetworkSession::Params SpdySessionDependencies::CreateSessionParams(
   params.ssl_config_service = session_deps->ssl_config_service.get();
   params.http_auth_handler_factory =
       session_deps->http_auth_handler_factory.get();
-  params.http_server_properties = &session_deps->http_server_properties;
+  params.http_server_properties =
+      session_deps->http_server_properties.GetWeakPtr();
   params.enable_spdy_compression = session_deps->enable_compression;
   params.enable_spdy_ping_based_connection_checking = session_deps->enable_ping;
   params.enable_user_alternate_protocol_ports =
@@ -443,7 +458,8 @@ SpdyURLRequestContext::SpdyURLRequestContext(NextProto protocol)
   storage_.set_ssl_config_service(new SSLConfigServiceDefaults);
   storage_.set_http_auth_handler_factory(HttpAuthHandlerFactory::CreateDefault(
       host_resolver()));
-  storage_.set_http_server_properties(new HttpServerPropertiesImpl);
+  storage_.set_http_server_properties(
+      scoped_ptr<HttpServerProperties>(new HttpServerPropertiesImpl()));
   net::HttpNetworkSession::Params params;
   params.client_socket_factory = &socket_factory_;
   params.host_resolver = host_resolver();
@@ -460,7 +476,7 @@ SpdyURLRequestContext::SpdyURLRequestContext(NextProto protocol)
   scoped_refptr<HttpNetworkSession> network_session(
       new HttpNetworkSession(params));
   SpdySessionPoolPeer pool_peer(network_session->spdy_session_pool());
-  pool_peer.EnableSendingInitialSettings(false);
+  pool_peer.SetEnableSendingInitialData(false);
   storage_.set_http_transaction_factory(new HttpCache(
       network_session.get(), HttpCache::DefaultBackend::InMemory(0)));
 }
@@ -468,65 +484,215 @@ SpdyURLRequestContext::SpdyURLRequestContext(NextProto protocol)
 SpdyURLRequestContext::~SpdyURLRequestContext() {
 }
 
-SpdySessionPoolPeer::SpdySessionPoolPeer(SpdySessionPool* pool) : pool_(pool) {
+bool HasSpdySession(SpdySessionPool* pool, const SpdySessionKey& key) {
+  return pool->FindAvailableSession(key, BoundNetLog()) != NULL;
 }
 
-void SpdySessionPoolPeer::AddAlias(
-    const IPEndPoint& address,
-    const SpdySessionKey& key) {
-  pool_->AddAlias(address, key);
+namespace {
+
+base::WeakPtr<SpdySession> CreateSpdySessionHelper(
+    const scoped_refptr<HttpNetworkSession>& http_session,
+    const SpdySessionKey& key,
+    const BoundNetLog& net_log,
+    Error expected_status,
+    bool is_secure) {
+  EXPECT_FALSE(HasSpdySession(http_session->spdy_session_pool(), key));
+
+  scoped_refptr<TransportSocketParams> transport_params(
+      new TransportSocketParams(
+          key.host_port_pair(), MEDIUM, false, false,
+          OnHostResolutionCallback()));
+
+  scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
+  TestCompletionCallback callback;
+
+  int rv = ERR_UNEXPECTED;
+  if (is_secure) {
+    SSLConfig ssl_config;
+    scoped_refptr<SOCKSSocketParams> socks_params;
+    scoped_refptr<HttpProxySocketParams> http_proxy_params;
+    scoped_refptr<SSLSocketParams> ssl_params(
+        new SSLSocketParams(transport_params,
+                            socks_params,
+                            http_proxy_params,
+                            ProxyServer::SCHEME_DIRECT,
+                            key.host_port_pair(),
+                            ssl_config,
+                            key.privacy_mode(),
+                            0,
+                            false,
+                            false));
+    rv = connection->Init(key.host_port_pair().ToString(),
+                          ssl_params,
+                          MEDIUM,
+                          callback.callback(),
+                          http_session->GetSSLSocketPool(
+                              HttpNetworkSession::NORMAL_SOCKET_POOL),
+                          net_log);
+  } else {
+    rv = connection->Init(key.host_port_pair().ToString(),
+                          transport_params,
+                          MEDIUM,
+                          callback.callback(),
+                          http_session->GetTransportSocketPool(
+                              HttpNetworkSession::NORMAL_SOCKET_POOL),
+                          net_log);
+  }
+
+  if (rv == ERR_IO_PENDING)
+    rv = callback.WaitForResult();
+
+  EXPECT_EQ(OK, rv);
+
+  base::WeakPtr<SpdySession> spdy_session;
+  EXPECT_EQ(
+      expected_status,
+      http_session->spdy_session_pool()->CreateAvailableSessionFromSocket(
+          key, connection.Pass(), net_log, OK, &spdy_session,
+          is_secure));
+  EXPECT_EQ(expected_status == OK, spdy_session != NULL);
+  EXPECT_EQ(expected_status == OK,
+            HasSpdySession(http_session->spdy_session_pool(), key));
+  return spdy_session;
+}
+
+}  // namespace
+
+base::WeakPtr<SpdySession> CreateInsecureSpdySession(
+    const scoped_refptr<HttpNetworkSession>& http_session,
+    const SpdySessionKey& key,
+    const BoundNetLog& net_log) {
+  return CreateSpdySessionHelper(http_session, key, net_log,
+                                 OK, false /* is_secure */);
+}
+
+void TryCreateInsecureSpdySessionExpectingFailure(
+    const scoped_refptr<HttpNetworkSession>& http_session,
+    const SpdySessionKey& key,
+    Error expected_error,
+    const BoundNetLog& net_log) {
+  DCHECK_LT(expected_error, ERR_IO_PENDING);
+  CreateSpdySessionHelper(http_session, key, net_log,
+                          expected_error, false /* is_secure */);
+}
+
+base::WeakPtr<SpdySession> CreateSecureSpdySession(
+    const scoped_refptr<HttpNetworkSession>& http_session,
+    const SpdySessionKey& key,
+    const BoundNetLog& net_log) {
+  return CreateSpdySessionHelper(http_session, key, net_log,
+                                 OK, true /* is_secure */);
+}
+
+namespace {
+
+// A ClientSocket used for CreateFakeSpdySession() below.
+class FakeSpdySessionClientSocket : public MockClientSocket {
+ public:
+  FakeSpdySessionClientSocket(int read_result)
+      : MockClientSocket(BoundNetLog()),
+        read_result_(read_result) {}
+
+  virtual ~FakeSpdySessionClientSocket() {}
+
+  virtual int Read(IOBuffer* buf, int buf_len,
+                   const CompletionCallback& callback) OVERRIDE {
+    return read_result_;
+  }
+
+  virtual int Write(IOBuffer* buf, int buf_len,
+                    const CompletionCallback& callback) OVERRIDE {
+    return ERR_IO_PENDING;
+  }
+
+  // Return kProtoUnknown to use the pool's default protocol.
+  virtual NextProto GetNegotiatedProtocol() const OVERRIDE {
+    return kProtoUnknown;
+  }
+
+  // The functions below are not expected to be called.
+
+  virtual int Connect(const CompletionCallback& callback) OVERRIDE {
+    ADD_FAILURE();
+    return ERR_UNEXPECTED;
+  }
+
+  virtual bool WasEverUsed() const OVERRIDE {
+    ADD_FAILURE();
+    return false;
+  }
+
+  virtual bool UsingTCPFastOpen() const OVERRIDE {
+    ADD_FAILURE();
+    return false;
+  }
+
+  virtual bool WasNpnNegotiated() const OVERRIDE {
+    ADD_FAILURE();
+    return false;
+  }
+
+  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE {
+    ADD_FAILURE();
+    return false;
+  }
+
+ private:
+  int read_result_;
+};
+
+base::WeakPtr<SpdySession> CreateFakeSpdySessionHelper(
+    SpdySessionPool* pool,
+    const SpdySessionKey& key,
+    Error expected_status) {
+  EXPECT_NE(expected_status, ERR_IO_PENDING);
+  EXPECT_FALSE(HasSpdySession(pool, key));
+  base::WeakPtr<SpdySession> spdy_session;
+  scoped_ptr<ClientSocketHandle> handle(new ClientSocketHandle());
+  handle->set_socket(new FakeSpdySessionClientSocket(
+      expected_status == OK ? ERR_IO_PENDING : expected_status));
+  EXPECT_EQ(
+      expected_status,
+      pool->CreateAvailableSessionFromSocket(
+          key, handle.Pass(), BoundNetLog(), OK, &spdy_session,
+          true /* is_secure */));
+  EXPECT_EQ(expected_status == OK, spdy_session != NULL);
+  EXPECT_EQ(expected_status == OK, HasSpdySession(pool, key));
+  return spdy_session;
+}
+
+}  // namespace
+
+base::WeakPtr<SpdySession> CreateFakeSpdySession(SpdySessionPool* pool,
+                                                 const SpdySessionKey& key) {
+  return CreateFakeSpdySessionHelper(pool, key, OK);
+}
+
+void TryCreateFakeSpdySessionExpectingFailure(SpdySessionPool* pool,
+                                              const SpdySessionKey& key,
+                                              Error expected_error) {
+  DCHECK_LT(expected_error, ERR_IO_PENDING);
+  CreateFakeSpdySessionHelper(pool, key, expected_error);
+}
+
+SpdySessionPoolPeer::SpdySessionPoolPeer(SpdySessionPool* pool) : pool_(pool) {
 }
 
 void SpdySessionPoolPeer::RemoveAliases(const SpdySessionKey& key) {
   pool_->RemoveAliases(key);
 }
 
-void SpdySessionPoolPeer::RemoveSpdySession(
-    const scoped_refptr<SpdySession>& session) {
-  pool_->Remove(session);
-}
-
 void SpdySessionPoolPeer::DisableDomainAuthenticationVerification() {
   pool_->verify_domain_authentication_ = false;
 }
 
-void SpdySessionPoolPeer::EnableSendingInitialSettings(bool enabled) {
-  pool_->enable_sending_initial_settings_ = enabled;
-}
-
-NextProto NextProtoFromSpdyVersion(SpdyMajorVersion spdy_version) {
-  switch (spdy_version) {
-  case SPDY2:
-    return kProtoSPDY2;
-  case SPDY3:
-    return kProtoSPDY3;
-  case SPDY4:
-    return kProtoSPDY4a2;
-  default:
-    NOTREACHED();
-    return kProtoUnknown;
-  }
-}
-
-SpdyMajorVersion SpdyVersionFromNextProto(NextProto next_proto) {
-  switch (next_proto) {
-  case kProtoSPDY2:
-  case kProtoSPDY21:
-    return SPDY2;
-  case kProtoSPDY3:
-  case kProtoSPDY31:
-    return SPDY3;
-  case kProtoSPDY4a2:
-    return SPDY4;
-  default:
-    NOTREACHED();
-    return SPDY2;
-  }
+void SpdySessionPoolPeer::SetEnableSendingInitialData(bool enabled) {
+  pool_->enable_sending_initial_data_ = enabled;
 }
 
 SpdyTestUtil::SpdyTestUtil(NextProto protocol)
     : protocol_(protocol),
-      spdy_version_(SpdyVersionFromNextProto(protocol)) {
+      spdy_version_(NextProtoToSpdyMajorVersion(protocol)) {
   DCHECK(next_proto_is_spdy(protocol)) << "Invalid protocol: " << protocol;
 }
 

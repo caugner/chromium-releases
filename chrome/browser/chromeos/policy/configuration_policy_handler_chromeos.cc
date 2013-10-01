@@ -7,16 +7,20 @@
 #include <string>
 
 #include "ash/magnifier/magnifier_constants.h"
+#include "base/callback.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_value_map.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/policy/login_screen_power_management_policy.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/policy_error_map.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/dbus/power_policy_controller.h"
 #include "chromeos/network/onc/onc_constants.h"
 #include "chromeos/network/onc/onc_signature.h"
 #include "chromeos/network/onc/onc_utils.h"
@@ -32,14 +36,18 @@ namespace policy {
 NetworkConfigurationPolicyHandler*
 NetworkConfigurationPolicyHandler::CreateForUserPolicy() {
   return new NetworkConfigurationPolicyHandler(
-      key::kOpenNetworkConfiguration, onc::ONC_SOURCE_USER_POLICY);
+      key::kOpenNetworkConfiguration,
+      onc::ONC_SOURCE_USER_POLICY,
+      prefs::kOpenNetworkConfiguration);
 }
 
 // static
 NetworkConfigurationPolicyHandler*
 NetworkConfigurationPolicyHandler::CreateForDevicePolicy() {
   return new NetworkConfigurationPolicyHandler(
-      key::kDeviceOpenNetworkConfiguration, onc::ONC_SOURCE_DEVICE_POLICY);
+      key::kDeviceOpenNetworkConfiguration,
+      onc::ONC_SOURCE_DEVICE_POLICY,
+      prefs::kDeviceOpenNetworkConfiguration);
 }
 
 NetworkConfigurationPolicyHandler::~NetworkConfigurationPolicyHandler() {}
@@ -73,12 +81,10 @@ bool NetworkConfigurationPolicyHandler::CheckPolicySettings(
     onc::Validator::Result validation_result;
     root_dict = validator.ValidateAndRepairObject(
         &onc::kToplevelConfigurationSignature, *root_dict, &validation_result);
-    if (validation_result == onc::Validator::VALID_WITH_WARNINGS) {
-      errors->AddError(policy_name(),
-                       IDS_POLICY_NETWORK_CONFIG_IMPORT_PARTIAL);
-    } else if (validation_result == onc::Validator::INVALID) {
+    if (validation_result == onc::Validator::VALID_WITH_WARNINGS)
+      errors->AddError(policy_name(), IDS_POLICY_NETWORK_CONFIG_IMPORT_PARTIAL);
+    else if (validation_result == onc::Validator::INVALID)
       errors->AddError(policy_name(), IDS_POLICY_NETWORK_CONFIG_IMPORT_FAILED);
-    }
 
     // In any case, don't reject the policy as some networks or certificates
     // could still be applied.
@@ -90,8 +96,19 @@ bool NetworkConfigurationPolicyHandler::CheckPolicySettings(
 void NetworkConfigurationPolicyHandler::ApplyPolicySettings(
     const PolicyMap& policies,
     PrefValueMap* prefs) {
-  // Network policy is read directly from the provider and injected into
-  // NetworkLibrary, so no need to convert the policy settings into prefs.
+  const base::Value* value = policies.GetValue(policy_name());
+  if (!value)
+    return;
+
+  std::string onc_blob;
+  value->GetAsString(&onc_blob);
+
+  scoped_ptr<base::ListValue> network_configs(new base::ListValue);
+  base::ListValue certificates;
+  chromeos::onc::ParseAndValidateOncForImport(
+      onc_blob, onc_source_, "", network_configs.get(), &certificates);
+
+  prefs->SetValue(pref_path_, network_configs.release());
 }
 
 void NetworkConfigurationPolicyHandler::PrepareForDisplaying(
@@ -103,14 +120,17 @@ void NetworkConfigurationPolicyHandler::PrepareForDisplaying(
   if (!sanitized_config)
     sanitized_config = base::Value::CreateNullValue();
 
-  policies->Set(policy_name(), entry->level, entry->scope, sanitized_config);
+  policies->Set(policy_name(), entry->level, entry->scope,
+                sanitized_config, NULL);
 }
 
 NetworkConfigurationPolicyHandler::NetworkConfigurationPolicyHandler(
     const char* policy_name,
-    chromeos::onc::ONCSource onc_source)
+    chromeos::onc::ONCSource onc_source,
+    const char* pref_path)
     : TypeCheckingPolicyHandler(policy_name, base::Value::TYPE_STRING),
-      onc_source_(onc_source) {
+      onc_source_(onc_source),
+      pref_path_(pref_path) {
 }
 
 // static
@@ -186,6 +206,56 @@ void ScreenMagnifierPolicyHandler::ApplyPolicySettings(
                     base::Value::CreateBooleanValue(value_in_range != 0));
     prefs->SetValue(prefs::kScreenMagnifierType,
                     base::Value::CreateIntegerValue(value_in_range));
+  }
+}
+
+LoginScreenPowerManagementPolicyHandler::
+    LoginScreenPowerManagementPolicyHandler()
+    : TypeCheckingPolicyHandler(key::kDeviceLoginScreenPowerManagement,
+                                base::Value::TYPE_STRING) {
+}
+
+LoginScreenPowerManagementPolicyHandler::
+    ~LoginScreenPowerManagementPolicyHandler() {
+}
+
+bool LoginScreenPowerManagementPolicyHandler::CheckPolicySettings(
+    const PolicyMap& policies,
+    PolicyErrorMap* errors) {
+  const base::Value* value;
+  if (!CheckAndGetValue(policies, errors, &value))
+    return false;
+
+  if (!value)
+    return true;
+
+  std::string json;
+  value->GetAsString(&json);
+  return LoginScreenPowerManagementPolicy().Init(json, errors);
+}
+
+void LoginScreenPowerManagementPolicyHandler::ApplyPolicySettings(
+    const PolicyMap& policies,
+    PrefValueMap* prefs) {
+}
+
+DeprecatedIdleActionHandler::DeprecatedIdleActionHandler()
+    : IntRangePolicyHandlerBase(
+          key::kIdleAction,
+          chromeos::PowerPolicyController::ACTION_SUSPEND,
+          chromeos::PowerPolicyController::ACTION_DO_NOTHING,
+          false) {}
+
+DeprecatedIdleActionHandler::~DeprecatedIdleActionHandler() {}
+
+void DeprecatedIdleActionHandler::ApplyPolicySettings(const PolicyMap& policies,
+                                                      PrefValueMap* prefs) {
+  const base::Value* value = policies.GetValue(policy_name());
+  if (value && EnsureInRange(value, NULL, NULL)) {
+    if (!prefs->GetValue(prefs::kPowerAcIdleAction, NULL))
+      prefs->SetValue(prefs::kPowerAcIdleAction, value->DeepCopy());
+    if (!prefs->GetValue(prefs::kPowerBatteryIdleAction, NULL))
+      prefs->SetValue(prefs::kPowerBatteryIdleAction, value->DeepCopy());
   }
 }
 

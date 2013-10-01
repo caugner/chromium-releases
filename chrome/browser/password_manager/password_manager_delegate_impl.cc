@@ -40,7 +40,8 @@
 class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   // If we won't be showing the one-click signin infobar, creates a save
-  // password delegate and adds it to the InfoBarService for |web_contents|.
+  // password infobar delegate and adds it to the InfoBarService for
+  // |web_contents|.
   static void Create(content::WebContents* web_contents,
                      PasswordFormManager* form_to_save);
 
@@ -81,19 +82,16 @@ void SavePasswordInfoBarDelegate::Create(content::WebContents* web_contents,
                                          PasswordFormManager* form_to_save) {
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   // Don't show the password manager infobar if this form is for a google
-  // account and we are going to show the one-click singin infobar.
-  // For now, one-click signin is fully implemented only on windows.
+  // account and we are going to show the one-click signin infobar.
   GURL realm(form_to_save->realm());
   // TODO(mathp): Checking only against associated_username() causes a bug
   // referenced here: crbug.com/133275
-  if ((realm == GURL(GaiaUrls::GetInstance()->gaia_login_form_realm()) ||
-       realm == GURL("https://www.google.com/")) &&
+  if (((realm == GURL(GaiaUrls::GetInstance()->gaia_login_form_realm())) ||
+       (realm == GURL("https://www.google.com/"))) &&
       OneClickSigninHelper::CanOffer(
-          web_contents,
-          OneClickSigninHelper::CAN_OFFER_FOR_INTERSTITAL_ONLY,
-          UTF16ToUTF8(form_to_save->associated_username()), NULL)) {
+          web_contents, OneClickSigninHelper::CAN_OFFER_FOR_INTERSTITAL_ONLY,
+          UTF16ToUTF8(form_to_save->associated_username()), NULL))
     return;
-  }
 #endif
 
   InfoBarService* infobar_service =
@@ -167,16 +165,10 @@ PasswordManagerDelegateImpl::~PasswordManagerDelegateImpl() {
 
 void PasswordManagerDelegateImpl::FillPasswordForm(
     const autofill::PasswordFormFillData& form_data) {
-  autofill::AutofillDriverImpl* autofill_driver =
-      autofill::AutofillDriverImpl::FromWebContents(web_contents_);
-  // Browser process will own popup UI, so renderer should not show the popup.
-  bool disable_popup = autofill_driver->autofill_manager()->IsNativeUiEnabled();
-
   web_contents_->GetRenderViewHost()->Send(
       new AutofillMsg_FillPasswordForm(
           web_contents_->GetRenderViewHost()->GetRoutingID(),
-          form_data,
-          disable_popup));
+          form_data));
 }
 
 void PasswordManagerDelegateImpl::AddSavePasswordInfoBarIfPermitted(

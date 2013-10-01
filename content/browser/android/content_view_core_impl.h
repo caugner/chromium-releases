@@ -13,18 +13,16 @@
 #include "base/compiler_specific.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/process.h"
+#include "base/process/process.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "googleurl/src/gurl.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/rect_f.h"
-
-struct WebMenuItem;
+#include "url/gurl.h"
 
 namespace ui {
 class ViewAndroid;
@@ -33,6 +31,7 @@ class WindowAndroid;
 
 namespace content {
 class RenderWidgetHostViewAndroid;
+struct MenuItem;
 
 // TODO(jrg): this is a shell.  Upstream the rest.
 class ContentViewCoreImpl : public ContentViewCore,
@@ -61,10 +60,6 @@ class ContentViewCoreImpl : public ContentViewCore,
   virtual float GetDpiScale() const OVERRIDE;
   virtual void RequestContentClipping(const gfx::Rect& clipping,
                                       const gfx::Size& content_size) OVERRIDE;
-  virtual void AddFrameInfoCallback(
-      const UpdateFrameInfoCallback& callback) OVERRIDE;
-  virtual void RemoveFrameInfoCallback(
-      const UpdateFrameInfoCallback& callback) OVERRIDE;
 
   // --------------------------------------------------------------------------
   // Methods called from Java via JNI
@@ -160,7 +155,8 @@ class ContentViewCoreImpl : public ContentViewCore,
   void EvaluateJavaScript(JNIEnv* env,
                           jobject obj,
                           jstring script,
-                          jobject callback);
+                          jobject callback,
+                          jboolean start_renderer);
   int GetNativeImeAdapter(JNIEnv* env, jobject obj);
   void SetFocus(JNIEnv* env, jobject obj, jboolean focused);
   void ScrollFocusedEditableNodeIntoView(JNIEnv* env, jobject obj);
@@ -221,6 +217,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                                   jint player_id,
                                   jobject jsurface);
   void DetachExternalVideoSurface(JNIEnv* env, jobject obj, jint player_id);
+  void SetAccessibilityEnabled(JNIEnv* env, jobject obj, bool enabled);
 
   // --------------------------------------------------------------------------
   // Public methods that call to Java via JNI
@@ -230,7 +227,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   // |multiple| defines if it should support multi-select.
   // If not |multiple|, |selected_item| sets the initially selected item.
   // Otherwise, item's "checked" flag selects it.
-  void ShowSelectPopupMenu(const std::vector<WebMenuItem>& items,
+  void ShowSelectPopupMenu(const std::vector<MenuItem>& items,
                            int selected_item,
                            bool multiple);
 
@@ -257,6 +254,7 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   bool HasFocus();
   void ConfirmTouchEvent(InputEventAckState ack_result);
+  void UnhandledFlingStartEvent();
   void HasTouchEventHandlers(bool need_touch_events);
   void OnSelectionChanged(const std::string& text);
   void OnSelectionBoundsChanged(
@@ -324,6 +322,8 @@ class ContentViewCoreImpl : public ContentViewCore,
   WebKit::WebGestureEvent MakeGestureEvent(
       WebKit::WebInputEvent::Type type, long time_ms, float x, float y) const;
 
+  void SendBeginFrame(base::TimeTicks frame_time);
+
   gfx::Size GetViewportSizePix() const;
   gfx::Size GetViewportSizeOffsetPix() const;
 
@@ -363,8 +363,6 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   // The owning window that has a hold of main application activity.
   ui::WindowAndroid* window_android_;
-
-  std::vector<UpdateFrameInfoCallback> update_frame_info_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentViewCoreImpl);
 };

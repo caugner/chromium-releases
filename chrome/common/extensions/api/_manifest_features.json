@@ -146,14 +146,20 @@
       ]
     }
   ],
-  "export": {
-    "channel": "dev",
-    "extension_types": ["shared_module"],
-    "whitelist": [
-      "gpcckkmippodnppallflahfabmeilgjg", // browser and unit tests
-      "6EAED1924DB611B6EEF2A664BD077BE7EAD33B8F"
-    ]
-  },
+  "export": [
+    {
+      "channel": "stable",
+      "extension_types": ["shared_module"],
+      "whitelist": [
+        "6EAED1924DB611B6EEF2A664BD077BE7EAD33B8F",
+        "4EB74897CB187C7633357C2FE832E0AD6A44883A"
+      ]
+    },
+    {
+      "channel": "dev",
+      "extension_types": ["shared_module"]
+    }
+  ],
   "externally_connectable": {
     "channel": "stable",
     "extension_types": [
@@ -177,7 +183,7 @@
     "extension_types": "all"
   },
   "import": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": "all"
   },
   "incognito": {
@@ -203,8 +209,8 @@
     "extension_types": "all"
   },
   "media_galleries_handlers": {
-    "channel": "stable",
-    "extension_types": ["packaged_app", "platform_app"]
+    "channel": "dev",
+    "extension_types": ["platform_app"]
   },
   "mime_types": {
     "channel": "stable",
@@ -248,7 +254,11 @@
       "mdbihdcgjmagbcapkhhkjbbdlkflmbfo",  // unit_tests
       "pmofbkohncoogjjhahejjfbppikbjigm",  // Google Now
       "hkhhlkdconhgemhegnplaldnmnmkaemd",  // Get Started App
-      "nmmhkkegccagdldgiimedpiccmgmieda"  // In-app payments support app.
+      "nmmhkkegccagdldgiimedpiccmgmieda",  // In-app payments support app.
+      "4B1D0E19C6C43C008C44A8278C8B5BFE15ABEB3C",
+      "F7FA7ABC1ECB89BA8EE6656847EFABBF43BB9BCA",
+      "1A26E32DE447A17CBE5E9750CDBA78F58539B39C", // TODO(rockot): Kill these.
+      "E61F841D8210B6A9891E5384CB665FBED31FCD7B"  // See http://crbug.com/281715
     ]
   },
   "offline_enabled": {
@@ -281,10 +291,6 @@
     "channel": "stable",
     "extension_types": ["extension"],
     "max_manifest_version": 1
-  },
-  "page_launcher": {
-    "channel": "dev",
-    "extension_types": ["platform_app"]
   },
   "permissions": {
     "channel": "stable",

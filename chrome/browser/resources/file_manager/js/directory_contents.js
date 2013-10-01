@@ -170,13 +170,6 @@ DirectoryContents.prototype.replaceContextFileList = function() {
 };
 
 /**
- * @return {string} The path.
- */
-DirectoryContents.prototype.getPath = function() {
-  throw 'Not implemented.';
-};
-
-/**
  * @return {boolean} If the scan is active.
  */
 DirectoryContents.prototype.isScanning = function() {
@@ -257,7 +250,7 @@ DirectoryContents.prototype.lastChunkReceived = function() {
  * This is called by the table code before a sort happens, so that we can
  * go fetch data for the sort field that we may not have yet.
  * @param {string} field Sort field.
- * @param {function} callback Called when done.
+ * @param {function(Object)} callback Called when done.
  * @private
  */
 DirectoryContents.prototype.prepareSort_ = function(field, callback) {
@@ -266,7 +259,7 @@ DirectoryContents.prototype.prepareSort_ = function(field, callback) {
 
 /**
  * @param {Array.<Entry>} entries Files.
- * @param {function} callback Callback on done.
+ * @param {function(Object)} callback Callback on done.
  */
 DirectoryContents.prototype.prefetchMetadata = function(entries, callback) {
   this.context_.metadataCache.get(entries, 'filesystem', callback);
@@ -274,7 +267,7 @@ DirectoryContents.prototype.prefetchMetadata = function(entries, callback) {
 
 /**
  * @param {Array.<Entry>} entries Files.
- * @param {function} callback Callback on done.
+ * @param {function(Object)} callback Callback on done.
  */
 DirectoryContents.prototype.reloadMetadata = function(entries, callback) {
   this.context_.metadataCache.clear(entries, '*');
@@ -313,8 +306,8 @@ DirectoryContents.prototype.onNewEntries = function(entries) {
 
 /**
  * @param {string} name Directory name.
- * @param {function} successCallback Called on success.
- * @param {function} errorCallback On error.
+ * @param {function(DirectoryEntry)} successCallback Called on success.
+ * @param {function(FileError)} errorCallback On error.
  */
 DirectoryContents.prototype.createDirectory = function(
     name, successCallback, errorCallback) {
@@ -344,13 +337,6 @@ DirectoryContentsBasic.prototype.__proto__ = DirectoryContents.prototype;
  */
 DirectoryContentsBasic.prototype.clone = function() {
   return new DirectoryContentsBasic(this.context_, this.entry_);
-};
-
-/**
- * @return {string} Current path.
- */
-DirectoryContentsBasic.prototype.getPath = function() {
-  return this.entry_.fullPath;
 };
 
 /**
@@ -419,8 +405,8 @@ DirectoryContentsBasic.prototype.recordMetrics_ = function() {
 
 /**
  * @param {string} name Directory name.
- * @param {function} successCallback Called on success.
- * @param {function} errorCallback On error.
+ * @param {function(Entry)} successCallback Called on success.
+ * @param {function(FileError)} errorCallback On error.
  */
 DirectoryContentsBasic.prototype.createDirectory = function(
     name, successCallback, errorCallback) {
@@ -514,13 +500,6 @@ DirectoryContentsDriveSearch.prototype.getLastNonSearchDirectoryEntry =
 };
 
 /**
- * @return {string} The path.
- */
-DirectoryContentsDriveSearch.prototype.getPath = function() {
-  return this.directoryEntry_.fullPath;
-};
-
-/**
  * Start directory scan.
  */
 DirectoryContentsDriveSearch.prototype.scan = function() {
@@ -596,13 +575,6 @@ DirectoryContentsLocalSearch.prototype.__proto__ = DirectoryContents.prototype;
 DirectoryContentsLocalSearch.prototype.clone = function() {
   return new DirectoryContentsLocalSearch(
       this.context_, this.directoryEntry_, this.query_);
-};
-
-/**
- * @return {string} The path.
- */
-DirectoryContentsLocalSearch.prototype.getPath = function() {
-  return this.directoryEntry_.fullPath;
 };
 
 /**
@@ -766,13 +738,6 @@ DirectoryContentsDriveSearchMetadata.prototype.getDirectoryEntry = function() {
 DirectoryContentsDriveSearchMetadata.prototype.getLastNonSearchDirectoryEntry =
     function() {
   return this.driveDirEntry_;
-};
-
-/**
- * @return {string} The path.
- */
-DirectoryContentsDriveSearchMetadata.prototype.getPath = function() {
-  return this.fakeDirEntry_.fullPath;
 };
 
 /**

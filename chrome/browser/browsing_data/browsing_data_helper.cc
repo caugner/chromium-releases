@@ -11,8 +11,7 @@
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "extensions/common/constants.h"
-#include "googleurl/src/gurl.h"
-#include "third_party/WebKit/public/platform/WebString.h"
+#include "url/gurl.h"
 
 // Static
 bool BrowsingDataHelper::IsWebScheme(const std::string& scheme) {
@@ -34,11 +33,6 @@ bool BrowsingDataHelper::IsWebScheme(const std::string& scheme) {
 }
 
 // Static
-bool BrowsingDataHelper::IsWebScheme(const WebKit::WebString& scheme) {
-  return BrowsingDataHelper::IsWebScheme(UTF16ToUTF8(scheme));
-}
-
-// Static
 bool BrowsingDataHelper::HasWebScheme(const GURL& origin) {
   return BrowsingDataHelper::IsWebScheme(origin.scheme());
 }
@@ -46,11 +40,6 @@ bool BrowsingDataHelper::HasWebScheme(const GURL& origin) {
 // Static
 bool BrowsingDataHelper::IsExtensionScheme(const std::string& scheme) {
   return scheme == extensions::kExtensionScheme;
-}
-
-// Static
-bool BrowsingDataHelper::IsExtensionScheme(const WebKit::WebString& scheme) {
-  return BrowsingDataHelper::IsExtensionScheme(UTF16ToUTF8(scheme));
 }
 
 // Static

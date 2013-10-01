@@ -9,7 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/process.h"
+#include "base/process/process.h"
 #include "chrome/test/chromedriver/chrome/chrome_impl.h"
 
 class AutomationExtension;
@@ -20,8 +20,6 @@ class ChromeDesktopImpl : public ChromeImpl {
  public:
   ChromeDesktopImpl(
       scoped_ptr<DevToolsHttpClient> client,
-      const std::string& version,
-      int build_no,
       ScopedVector<DevToolsEventListener>& devtools_event_listeners,
       Log* log,
       base::ProcessHandle process,

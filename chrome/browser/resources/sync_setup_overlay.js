@@ -11,12 +11,6 @@ cr.define('options', function() {
   // True if the synced account uses 'encrypt everything'.
   var useEncryptEverything_ = false;
 
-  // True if the support for keystore encryption is enabled. Controls whether
-  // the new unified encryption UI is displayed instead of the old encryption
-  // ui (where passphrase and encrypted types could be set independently of
-  // each other).
-  var keystoreEncryptionEnabled_ = false;
-
   // An object used as a cache of the arguments passed in while initially
   // displaying the advanced sync settings dialog. Used to switch between the
   // options in the main drop-down menu. Reset when the dialog is closed.
@@ -66,9 +60,6 @@ cr.define('options', function() {
       OptionsPage.prototype.initializePage.call(this);
 
       var self = this;
-      $('google-option').onchange = $('explicit-option').onchange = function() {
-        self.onPassphraseRadioChanged_();
-      };
       $('basic-encryption-option').onchange =
           $('full-encryption-option').onchange = function() {
         self.onEncryptionRadioChanged_();
@@ -112,38 +103,6 @@ cr.define('options', function() {
     /** @override */
     didClosePage: function() {
       chrome.send('SyncSetupDidClosePage');
-    },
-
-    getEncryptionRadioCheckedValue_: function() {
-      var f = $('choose-data-types-form');
-      for (var i = 0; i < f.encrypt.length; ++i) {
-        if (f.encrypt[i].checked)
-          return f.encrypt[i].value;
-      }
-
-      return undefined;
-    },
-
-    getPassphraseRadioCheckedValue_: function() {
-      var f = $('choose-data-types-form');
-      for (var i = 0; i < f.option.length; ++i) {
-        if (f.option[i].checked) {
-          return f.option[i].value;
-        }
-      }
-
-      return undefined;
-    },
-
-    disableEncryptionRadioGroup_: function() {
-      var f = $('choose-data-types-form');
-      for (var i = 0; i < f.encrypt.length; ++i)
-        f.encrypt[i].disabled = true;
-    },
-
-    onPassphraseRadioChanged_: function() {
-      var visible = this.getPassphraseRadioCheckedValue_() == 'explicit';
-      $('sync-custom-passphrase').hidden = !visible;
     },
 
     onEncryptionRadioChanged_: function() {
@@ -229,10 +188,8 @@ cr.define('options', function() {
       mismatchError.hidden = true;
 
       var f = $('choose-data-types-form');
-      if ((this.getPassphraseRadioCheckedValue_() != 'explicit' ||
-           $('google-option').disabled) &&
-          (!$('full-encryption-option').checked ||
-           $('basic-encryption-option').disabled)) {
+      if (!$('full-encryption-option').checked ||
+           $('basic-encryption-option').disabled) {
         return true;
       }
 
@@ -262,12 +219,7 @@ cr.define('options', function() {
         return;
       }
 
-      var encryptAllData = this.getEncryptionRadioCheckedValue_() == 'all';
-      if (!encryptAllData &&
-          $('full-encryption-option').checked &&
-          this.keystoreEncryptionEnabled_) {
-        encryptAllData = true;
-      }
+      var encryptAllData = $('full-encryption-option').checked;
 
       var usePassphrase;
       var customPassphrase;
@@ -284,10 +236,8 @@ cr.define('options', function() {
         // the passphrase and finish configuration. If the user has enabled
         // encrypted datatypes, the PSS will prompt again specifying that the
         // passphrase failed.
-      } else if ((!$('google-option').disabled &&
-                  this.getPassphraseRadioCheckedValue_() == 'explicit') ||
-                 (!$('basic-encryption-option').disabled &&
-                  $('full-encryption-option').checked)) {
+      } else if (!$('basic-encryption-option').disabled &&
+                  $('full-encryption-option').checked) {
         // The user is setting a custom passphrase for the first time.
         if (!this.checkPassphraseMatch_())
           return;
@@ -301,7 +251,9 @@ cr.define('options', function() {
       // Don't allow the user to tweak the settings once we send the
       // configuration to the backend.
       this.setInputElementsDisabledState_(true);
-      this.animateDisableLink_($('use-default-link'), true, null);
+      $('use-default-link').hidden = true;
+      $('use-default-link').disabled = true;
+      $('use-default-link').onclick = null;
 
       // These values need to be kept in sync with where they are read in
       // SyncSetupFlow::GetDataTypeChoiceData().
@@ -344,37 +296,13 @@ cr.define('options', function() {
         configureElements[i].disabled = disabled;
       $('sync-select-datatypes').disabled = disabled;
 
-      var self = this;
-      this.animateDisableLink_($('customize-link'), disabled, function() {
-        self.showCustomizePage_(null, DataTypeSelection.SYNC_EVERYTHING);
+      $('customize-link').hidden = disabled;
+      $('customize-link').disabled = disabled;
+      $('customize-link').onclick = (disabled ? null : function() {
+        SyncSetupOverlay.showCustomizePage(null,
+                                           DataTypeSelection.SYNC_EVERYTHING);
+        return false;
       });
-    },
-
-    /**
-     * Animate a link being enabled/disabled. The link is hidden by animating
-     * its opacity, but to ensure the user doesn't click it during that time,
-     * its onclick handler is changed to null as well.
-     * @param {HTMLElement} elt The anchor element to enable/disable.
-     * @param {boolean} disabled True if the link should be disabled.
-     * @param {function} enabledFunction The onclick handler when the link is
-     *     enabled.
-     * @private
-     */
-    animateDisableLink_: function(elt, disabled, enabledFunction) {
-      if (disabled) {
-        elt.classList.add('transparent');
-        elt.onclick = null;
-        elt.addEventListener('webkitTransitionEnd', function f(e) {
-          if (e.propertyName != 'opacity')
-            return;
-          elt.removeEventListener('webkitTransitionEnd', f);
-          elt.classList.remove('transparent');
-          elt.hidden = true;
-        });
-      } else {
-        elt.hidden = false;
-        elt.onclick = enabledFunction;
-      }
     },
 
     /**
@@ -464,13 +392,6 @@ cr.define('options', function() {
     },
 
     setEncryptionRadios_: function(args) {
-      if (args.encryptAllData) {
-        $('encrypt-all-option').checked = true;
-        this.disableEncryptionRadioGroup_();
-      } else {
-        $('encrypt-sensitive-option').checked = true;
-      }
-
       if (!args.encryptAllData && !args.usePassphrase) {
         $('basic-encryption-option').checked = true;
       } else {
@@ -480,23 +401,9 @@ cr.define('options', function() {
       }
     },
 
-    setPassphraseRadios_: function(args) {
-      if (args.usePassphrase) {
-        $('explicit-option').checked = true;
-
-        // The passphrase, once set, cannot be unset, but we show a reset link.
-        $('explicit-option').disabled = true;
-        $('google-option').disabled = true;
-        $('sync-custom-passphrase').hidden = true;
-      } else {
-        $('google-option').checked = true;
-      }
-    },
-
     setCheckboxesAndErrors_: function(args) {
       this.setChooseDataTypesCheckboxes_(args);
       this.setEncryptionRadios_(args);
-      this.setPassphraseRadios_(args);
     },
 
     showConfigure_: function(args) {
@@ -512,7 +419,7 @@ cr.define('options', function() {
       // between its drop-down menu items as follows:
       // "Sync everything": Show encryption and passphrase sections, and disable
       // and check all data type checkboxes.
-      // "Sync everything": Hide encryption and passphrase sections, and disable
+      // "Sync nothing": Hide encryption and passphrase sections, and disable
       // and uncheck all data type checkboxes.
       // "Choose what to sync": Show encryption and passphrase sections, enable
       // data type checkboxes, and restore their checked state to the last time
@@ -545,17 +452,22 @@ cr.define('options', function() {
         this.useEncryptEverything_ = args.encryptAllData;
 
         // Determine whether to display the 'OK, sync everything' confirmation
-        // dialog or the advanced sync settings dialog.
+        // dialog or the advanced sync settings dialog, and assign focus to the
+        // OK button, or to the passphrase field if a passphrase is required.
         this.usePassphrase_ = args.usePassphrase;
-        this.keystoreEncryptionEnabled_ = args.keystoreEncryptionEnabled;
         if (args.showSyncEverythingPage == false || this.usePassphrase_ ||
             args.syncAllDataTypes == false || args.showPassphrase) {
           var index = args.syncAllDataTypes ?
                           DataTypeSelection.SYNC_EVERYTHING :
                           DataTypeSelection.CHOOSE_WHAT_TO_SYNC;
           this.showCustomizePage_(args, index);
+          if (args.showPassphrase)
+            $('passphrase').focus();
+          else
+            $('choose-datatypes-ok').focus();
         } else {
           this.showSyncEverythingPage_();
+          $('confirm-everything-ok').focus();
         }
       }
     },
@@ -580,22 +492,11 @@ cr.define('options', function() {
       // The default state is to sync everything.
       this.setDataTypeCheckboxes_(DataTypeSelection.SYNC_EVERYTHING);
 
-      // Encrypt passwords is the default, but don't set it if the previously
-      // synced account is already set to encrypt everything.
-      if (!this.useEncryptEverything_)
-        $('encrypt-sensitive-option').checked = true;
-
-      // If the account is not synced with a custom passphrase, reset the
-      // passphrase radio when switching to the 'Sync everything' page.
-      if (!this.usePassphrase_) {
-        $('google-option').checked = true;
+      if (!this.usePassphrase_)
         $('sync-custom-passphrase').hidden = true;
-      }
 
       if (!this.useEncryptEverything_ && !this.usePassphrase_)
         $('basic-encryption-option').checked = true;
-
-      $('confirm-everything-ok').focus();
     },
 
     /**
@@ -613,13 +514,14 @@ cr.define('options', function() {
       this.setDataTypeCheckboxesEnabled_(false);
 
       // Hide the encryption section.
-      $('customize-sync-encryption').hidden = true;
       $('customize-sync-encryption-new').hidden = true;
       $('sync-custom-passphrase-container').hidden = true;
       $('sync-existing-passphrase-container').hidden = true;
 
       // Hide the "use default settings" link.
       $('use-default-link').hidden = true;
+      $('use-default-link').disabled = true;
+      $('use-default-link').onclick = null;
     },
 
     /**
@@ -634,6 +536,8 @@ cr.define('options', function() {
       // Once we require a passphrase, we prevent the user from returning to
       // the Sync Everything pane.
       $('use-default-link').hidden = true;
+      $('use-default-link').disabled = true;
+      $('use-default-link').onclick = null;
       $('sync-custom-passphrase-container').hidden = true;
       $('sync-existing-passphrase-container').hidden = false;
 
@@ -658,7 +562,6 @@ cr.define('options', function() {
           !(args.usePassphrase && args.passphraseFailed);
 
       $('sync-passphrase-warning').hidden = false;
-      $('passphrase').focus();
     },
 
     /**
@@ -672,17 +575,8 @@ cr.define('options', function() {
       $('customize-sync-preferences').hidden = false;
 
       $('sync-custom-passphrase-container').hidden = false;
-
-      if (this.keystoreEncryptionEnabled_) {
-        $('customize-sync-encryption').hidden = true;
-        $('sync-custom-passphrase-options').hidden = true;
-        $('sync-new-encryption-section-container').hidden = false;
-        $('customize-sync-encryption-new').hidden = false;
-      } else {
-        $('customize-sync-encryption').hidden = false;
-        $('sync-custom-passphrase-options').hidden = false;
-        $('customize-sync-encryption-new').hidden = true;
-      }
+      $('sync-new-encryption-section-container').hidden = false;
+      $('customize-sync-encryption-new').hidden = false;
 
       $('sync-existing-passphrase-container').hidden = true;
 
@@ -690,19 +584,17 @@ cr.define('options', function() {
       this.setDataTypeCheckboxesEnabled_(
           index == DataTypeSelection.CHOOSE_WHAT_TO_SYNC);
 
-      // The passphrase input may need to take over focus from the OK button, so
-      // set focus before that logic.
-      $('choose-datatypes-ok').focus();
-
       if (args && args.showPassphrase) {
         this.showPassphraseContainer_(args);
       } else {
         // We only show the 'Use Default' link if we're not prompting for an
         // existing passphrase.
-        var self = this;
-        this.animateDisableLink_($('use-default-link'), false, function() {
-          self.showSyncEverythingPage_();
-        });
+        $('use-default-link').hidden = false;
+        $('use-default-link').disabled = false;
+        $('use-default-link').onclick = function() {
+          SyncSetupOverlay.showSyncEverythingPage();
+          return false;
+        };
       }
     },
 
@@ -757,7 +649,7 @@ cr.define('options', function() {
      *     visible.
      */
     setThrobbersVisible_: function(visible) {
-      var throbbers = document.getElementsByClassName('throbber');
+      var throbbers = this.pageDiv.getElementsByClassName('throbber');
       for (var i = 0; i < throbbers.length; i++)
         throbbers[i].style.visibility = visible ? 'visible' : 'hidden';
     },
@@ -812,14 +704,6 @@ cr.define('options', function() {
     },
 
     /**
-     * Steps into the appropriate Sync Setup error UI.
-     * @private
-     */
-    showErrorUI_: function() {
-      chrome.send('SyncSetupShowErrorUI');
-    },
-
-    /**
      * Determines the appropriate page to show in the Sync Setup UI based on
      * the state of the Sync backend. Does nothing if the user is not signed in.
      * @private
@@ -851,10 +735,6 @@ cr.define('options', function() {
     SyncSetupOverlay.getInstance().closeOverlay_();
   };
 
-  SyncSetupOverlay.showErrorUI = function() {
-    SyncSetupOverlay.getInstance().showErrorUI_();
-  };
-
   SyncSetupOverlay.showSetupUI = function() {
     SyncSetupOverlay.getInstance().showSetupUI_();
   };
@@ -869,6 +749,14 @@ cr.define('options', function() {
 
   SyncSetupOverlay.showSyncSetupPage = function(page, args) {
     SyncSetupOverlay.getInstance().showSyncSetupPage_(page, args);
+  };
+
+  SyncSetupOverlay.showCustomizePage = function(args, index) {
+    SyncSetupOverlay.getInstance().showCustomizePage_(args, index);
+  };
+
+  SyncSetupOverlay.showSyncEverythingPage = function() {
+    SyncSetupOverlay.getInstance().showSyncEverythingPage_();
   };
 
   SyncSetupOverlay.showStopSyncingUI = function() {

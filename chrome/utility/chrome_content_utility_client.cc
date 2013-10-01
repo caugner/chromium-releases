@@ -7,27 +7,34 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/path_service.h"
+#include "base/time/time.h"
 #include "chrome/common/chrome_utility_messages.h"
-#include "chrome/common/extensions/chrome_manifest_handlers.h"
+#include "chrome/common/extensions/chrome_extensions_client.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/manifest.h"
-#include "chrome/common/extensions/permissions/chrome_api_permissions.h"
-#include "chrome/common/extensions/unpacker.h"
 #include "chrome/common/extensions/update_manifest.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
-#include "chrome/common/web_resource/web_resource_unpacker.h"
+#include "chrome/utility/extensions/unpacker.h"
 #include "chrome/utility/profile_import_handler.h"
+#include "chrome/utility/web_resource_unpacker.h"
+#include "content/public/child/image_decoder_utils.h"
+#include "content/public/common/content_paths.h"
 #include "content/public/utility/utility_thread.h"
+#include "media/base/media.h"
+#include "media/base/media_file_checker.h"
 #include "printing/page_range.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/zlib/google/zip.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/rect.h"
-#include "webkit/glue/image_decoder.h"
+#include "ui/gfx/size.h"
 
 #if defined(OS_WIN)
 #include "base/file_util.h"
@@ -35,15 +42,25 @@
 #include "base/win/iat_patch_function.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/utility/itunes_pref_parser_win.h"
+#include "chrome/utility/media_galleries/itunes_pref_parser_win.h"
 #include "printing/emf_win.h"
 #include "ui/gfx/gdi_util.h"
 #endif  // defined(OS_WIN)
 
-#if defined(ENABLE_PRINTING)
+#if defined(OS_WIN) || defined(OS_MACOSX)
+#include "chrome/utility/media_galleries/itunes_library_parser.h"
+#include "chrome/utility/media_galleries/picasa_album_table_reader.h"
+#include "chrome/utility/media_galleries/picasa_albums_indexer.h"
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+#if defined(ENABLE_FULL_PRINTING)
 #include "chrome/common/child_process_logging.h"
 #include "printing/backend/print_backend.h"
 #endif
+
+#if defined(ENABLE_MDNS)
+#include "chrome/utility/local_discovery/service_discovery_message_handler.h"
+#endif  // ENABLE_MDNS
 
 namespace chrome {
 
@@ -61,8 +78,12 @@ void ReleaseProcessIfNeeded() {
 
 ChromeContentUtilityClient::ChromeContentUtilityClient() {
 #if !defined(OS_ANDROID)
-  import_handler_.reset(new ProfileImportHandler());
-#endif
+  handlers_.push_back(new ProfileImportHandler());
+#endif  // OS_ANDROID
+
+#if defined(ENABLE_MDNS)
+  handlers_.push_back(new local_discovery::ServiceDiscoveryMessageHandler());
+#endif  // ENABLE_MDNS
 }
 
 ChromeContentUtilityClient::~ChromeContentUtilityClient() {
@@ -74,7 +95,7 @@ void ChromeContentUtilityClient::UtilityThreadStarted() {
   // only because we need this DLL only on Windows.
   base::FilePath pdf;
   if (PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf) &&
-      file_util::PathExists(pdf)) {
+      base::PathExists(pdf)) {
     bool rv = !!LoadLibrary(pdf.value().c_str());
     DCHECK(rv) << "Couldn't load PDF plugin";
   }
@@ -108,6 +129,10 @@ bool ChromeContentUtilityClient::OnMessageReceived(
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection,
                         OnAnalyzeZipFileForDownloadProtection)
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CheckMediaFile, OnCheckMediaFile)
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+
 #if defined(OS_CHROMEOS)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CreateZipFile, OnCreateZipFile)
 #endif  // defined(OS_CHROMEOS)
@@ -117,15 +142,35 @@ bool ChromeContentUtilityClient::OnMessageReceived(
                         OnParseITunesPrefXml)
 #endif  // defined(OS_WIN)
 
+#if defined(OS_WIN) || defined(OS_MACOSX)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseITunesLibraryXmlFile,
+                        OnParseITunesLibraryXmlFile)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParsePicasaPMPDatabase,
+                        OnParsePicasaPMPDatabase)
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
-#if !defined(OS_ANDROID)
-  if (!handled)
-    handled = import_handler_->OnMessageReceived(message);
-#endif
+  for (Handlers::iterator it = handlers_.begin();
+       !handled && it != handlers_.end(); ++it) {
+    handled = (*it)->OnMessageReceived(message);
+  }
 
   return handled;
+}
+
+// static
+void ChromeContentUtilityClient::PreSandboxStartup() {
+#if defined(ENABLE_MDNS)
+  local_discovery::ServiceDiscoveryMessageHandler::PreSandboxStartup();
+#endif  // ENABLE_MDNS
+
+  // Load media libraries for media file validation.
+  base::FilePath media_path;
+  PathService::Get(content::DIR_MEDIA_LIBS, &media_path);
+  if (!media_path.empty())
+    media::InitializeMediaLibrary(media_path);
 }
 
 void ChromeContentUtilityClient::OnUnpackExtension(
@@ -135,9 +180,8 @@ void ChromeContentUtilityClient::OnUnpackExtension(
     int creation_flags) {
   CHECK_GT(location, extensions::Manifest::INVALID_LOCATION);
   CHECK_LT(location, extensions::Manifest::NUM_LOCATIONS);
-  extensions::PermissionsInfo::GetInstance()->InitializeWithDelegate(
-      extensions::ChromeAPIPermissions());
-  extensions::RegisterChromeManifestHandlers();
+  extensions::ExtensionsClient::Set(
+      extensions::ChromeExtensionsClient::GetInstance());
   extensions::Unpacker unpacker(
       extension_path,
       extension_id,
@@ -186,9 +230,9 @@ void ChromeContentUtilityClient::OnParseUpdateManifest(const std::string& xml) {
 
 void ChromeContentUtilityClient::OnDecodeImage(
     const std::vector<unsigned char>& encoded_data) {
-  webkit_glue::ImageDecoder decoder;
-  const SkBitmap& decoded_image = decoder.Decode(&encoded_data[0],
-                                                 encoded_data.size());
+  const SkBitmap& decoded_image = content::DecodeImage(&encoded_data[0],
+                                                       gfx::Size(),
+                                                       encoded_data.size());
   if (decoded_image.empty()) {
     Send(new ChromeUtilityHostMsg_DecodeImage_Failed());
   } else {
@@ -450,7 +494,7 @@ void ChromeContentUtilityClient::OnParseJSON(const std::string& json) {
 
 void ChromeContentUtilityClient::OnGetPrinterCapsAndDefaults(
     const std::string& printer_name) {
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
   scoped_refptr<printing::PrintBackend> print_backend =
       printing::PrintBackend::CreateInstance(NULL);
   printing::PrinterCapsAndDefaults printer_info;
@@ -461,7 +505,7 @@ void ChromeContentUtilityClient::OnGetPrinterCapsAndDefaults(
   if (print_backend->GetPrinterCapsAndDefaults(printer_name, &printer_info)) {
     Send(new ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Succeeded(
         printer_name, printer_info));
-  } else
+  } else  // NOLINT
 #endif
   {
     Send(new ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Failed(
@@ -476,7 +520,7 @@ void ChromeContentUtilityClient::OnStartupPing() {
 }
 
 void ChromeContentUtilityClient::OnAnalyzeZipFileForDownloadProtection(
-    IPC::PlatformFileForTransit zip_file) {
+    const IPC::PlatformFileForTransit& zip_file) {
   safe_browsing::zip_analyzer::Results results;
   safe_browsing::zip_analyzer::AnalyzeZipFile(
       IPC::PlatformFileForTransitToPlatformFile(zip_file), &results);
@@ -484,6 +528,19 @@ void ChromeContentUtilityClient::OnAnalyzeZipFileForDownloadProtection(
       results));
   ReleaseProcessIfNeeded();
 }
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+void ChromeContentUtilityClient::OnCheckMediaFile(
+    int64 milliseconds_of_decoding,
+    const IPC::PlatformFileForTransit& media_file) {
+  media::MediaFileChecker
+      checker(IPC::PlatformFileForTransitToPlatformFile(media_file));
+  const bool check_success = checker.Start(
+      base::TimeDelta::FromMilliseconds(milliseconds_of_decoding));
+  Send(new ChromeUtilityHostMsg_CheckMediaFile_Finished(check_success));
+  ReleaseProcessIfNeeded();
+}
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
 #if defined(OS_WIN)
 void ChromeContentUtilityClient::OnParseITunesPrefXml(
@@ -494,5 +551,60 @@ void ChromeContentUtilityClient::OnParseITunesPrefXml(
   ReleaseProcessIfNeeded();
 }
 #endif  // defined(OS_WIN)
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
+void ChromeContentUtilityClient::OnParseITunesLibraryXmlFile(
+    const IPC::PlatformFileForTransit& itunes_library_file) {
+  itunes::ITunesLibraryParser parser;
+  base::PlatformFile file =
+      IPC::PlatformFileForTransitToPlatformFile(itunes_library_file);
+  bool result = parser.Parse(
+      itunes::ITunesLibraryParser::ReadITunesLibraryXmlFile(file));
+  Send(new ChromeUtilityHostMsg_GotITunesLibrary(result, parser.library()));
+  ReleaseProcessIfNeeded();
+}
+
+void ChromeContentUtilityClient::OnParsePicasaPMPDatabase(
+    const picasa::AlbumTableFilesForTransit& album_table_files) {
+  picasa::AlbumTableFiles files;
+  files.indicator_file = IPC::PlatformFileForTransitToPlatformFile(
+      album_table_files.indicator_file);
+  files.category_file = IPC::PlatformFileForTransitToPlatformFile(
+      album_table_files.category_file);
+  files.date_file = IPC::PlatformFileForTransitToPlatformFile(
+      album_table_files.date_file);
+  files.filename_file = IPC::PlatformFileForTransitToPlatformFile(
+      album_table_files.filename_file);
+  files.name_file = IPC::PlatformFileForTransitToPlatformFile(
+      album_table_files.name_file);
+  files.token_file = IPC::PlatformFileForTransitToPlatformFile(
+      album_table_files.token_file);
+  files.uid_file = IPC::PlatformFileForTransitToPlatformFile(
+      album_table_files.uid_file);
+
+  picasa::PicasaAlbumTableReader reader(files);
+  bool parse_success = reader.Init();
+  Send(new ChromeUtilityHostMsg_ParsePicasaPMPDatabase_Finished(
+      parse_success,
+      reader.albums(),
+      reader.folders()));
+  ReleaseProcessIfNeeded();
+}
+
+void OnIndexPicasaAlbumsContents(
+    const picasa::AlbumUIDSet& album_uids,
+    const std::vector<picasa::FolderINIContents>& folders_inis) {
+  picasa::PicasaAlbumsIndexer indexer(album_uids);
+  for (std::vector<picasa::FolderINIContents>::const_iterator it =
+           folders_inis.begin();
+       it != folders_inis.end(); ++it) {
+    indexer.ParseFolderINI(it->folder_path, it->ini_contents);
+  }
+
+  Send(new ChromeUtilityHostMsg_IndexPicasaAlbumsContents_Finished(
+      indexer.albums_images()));
+  ReleaseProcessIfNeeded();
+}
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
 }  // namespace chrome

@@ -10,13 +10,15 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 
 class TranslateURLFetcher;
 
 class TranslateScript {
  public:
   typedef base::Callback<void(bool, const std::string&)> Callback;
+
+  static const int kFetcherId = 0;
 
   TranslateScript();
   virtual ~TranslateScript();

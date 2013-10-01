@@ -11,11 +11,12 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/process_info.h"
-#include "base/process_util.h"
+#include "base/process/process_handle.h"
+#include "base/process/process_info.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/win/message_window.h"
 #include "base/win/metro.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/win_util.h"
@@ -93,16 +94,16 @@ std::string EscapeQueryParamValue(const std::string& text, bool use_plus) {
 
 // END COPY from net/base/escape.cc
 
-}
+}  // namespace
 
 namespace chrome {
 
 HWND FindRunningChromeWindow(const base::FilePath& user_data_dir) {
-  return FindWindowEx(HWND_MESSAGE, NULL, chrome::kMessageWindowClass,
-                      user_data_dir.value().c_str());
+  return base::win::MessageWindow::FindWindow(user_data_dir.value());
 }
 
-NotifyChromeResult AttemptToNotifyRunningChrome(HWND remote_window) {
+NotifyChromeResult AttemptToNotifyRunningChrome(HWND remote_window,
+                                                bool fast_start) {
   DCHECK(remote_window);
   static const char kSearchUrl[] =
       "http://www.google.com/search?q=%s&sourceid=chrome&ie=UTF-8";
@@ -148,7 +149,10 @@ NotifyChromeResult AttemptToNotifyRunningChrome(HWND remote_window) {
   command_line.AppendSwitchASCII(
       switches::kOriginalProcessStartTime,
       base::Int64ToString(
-          base::CurrentProcessInfo::CreationTime()->ToInternalValue()));
+          base::CurrentProcessInfo::CreationTime().ToInternalValue()));
+
+  if (fast_start)
+    command_line.AppendSwitch(switches::kFastStart);
 
   // Send the command line to the remote chrome window.
   // Format is "START\0<<<current directory>>>\0<<<commandline>>>".

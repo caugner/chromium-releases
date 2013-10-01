@@ -3,6 +3,8 @@
 # found in the LICENSE file.
 
 import logging
+import os
+import re
 import signal
 import subprocess
 import sys
@@ -32,14 +34,21 @@ class _SingleProcessPerfProfiler(object):
     self._proc.send_signal(signal.SIGINT)
     exit_code = self._proc.wait()
     try:
-      if exit_code not in (0, -2):
+      if exit_code == 128:
+        raise Exception(
+            """perf failed with exit code 128.
+Try rerunning this script under sudo or setting
+/proc/sys/kernel/perf_event_paranoid to "-1".\nOutput:\n%s""" %
+            self._GetStdOut())
+      elif exit_code not in (0, -2):
         raise Exception(
             'perf failed with exit code %d. Output:\n%s' % (exit_code,
                                                             self._GetStdOut()))
     finally:
       self._tmp_output_file.close()
     print 'To view the profile, run:'
-    print '  perf report -i %s' % self._output_file
+    print '  perf report -n -i %s' % self._output_file
+    return self._output_file
 
   def _GetStdOut(self):
     self._tmp_output_file.flush()
@@ -58,6 +67,8 @@ class PerfProfiler(profiler.Profiler):
     process_output_file_map = self._GetProcessOutputFileMap()
     self._process_profilers = []
     for pid, output_file in process_output_file_map.iteritems():
+      if 'zygote' in output_file:
+        continue
       self._process_profilers.append(
           _SingleProcessPerfProfiler(pid, output_file, platform_backend))
 
@@ -67,9 +78,10 @@ class PerfProfiler(profiler.Profiler):
 
   @classmethod
   def is_supported(cls, options):
-    if (sys.platform != 'linux2'
-        or options.browser_type.startswith('android')
-        or options.browser_type.startswith('cros')):
+    if sys.platform != 'linux2':
+      return False
+    if options and (options.browser_type.startswith('android')
+                    or options.browser_type.startswith('cros')):
       return False
     try:
       return not subprocess.Popen(['perf', '--version'],
@@ -78,6 +90,39 @@ class PerfProfiler(profiler.Profiler):
     except OSError:
       return False
 
+  @classmethod
+  def CustomizeBrowserOptions(cls, options):
+    options.AppendExtraBrowserArg('--no-sandbox')
+    options.AppendExtraBrowserArg('--allow-sandbox-debugging')
+
   def CollectProfile(self):
+    output_files = []
     for single_process in self._process_profilers:
-      single_process.CollectProfile()
+      output_files.append(single_process.CollectProfile())
+    return output_files
+
+  @classmethod
+  def GetTopSamples(cls, file_name, number):
+    """Parses the perf generated profile in |file_name| and returns a
+    {function: period} dict of the |number| hottests functions.
+    """
+    assert os.path.exists(file_name)
+    report = subprocess.Popen(
+        ['perf', 'report', '--show-total-period', '-U', '-t', '^', '-i',
+         file_name],
+        stdout=subprocess.PIPE, stderr=open(os.devnull, 'w')).communicate()[0]
+    period_by_function = {}
+    for line in report.split('\n'):
+      if not line or line.startswith('#'):
+        continue
+      fields = line.split('^')
+      if len(fields) != 5:
+        continue
+      period = int(fields[1])
+      function = fields[4].partition(' ')[2]
+      function = re.sub('<.*>', '', function)  # Strip template params.
+      function = re.sub('[(].*[)]', '', function)  # Strip function params.
+      period_by_function[function] = period
+      if len(period_by_function) == number:
+        break
+    return period_by_function

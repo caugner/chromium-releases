@@ -8,6 +8,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -28,7 +29,6 @@
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -39,6 +39,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "grit/generated_resources.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -302,12 +303,12 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeHostedAppTabs) {
   // The app under test acts on URLs whose host is "localhost",
   // so the URLs we navigate to must have host "localhost".
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   GURL::Replacements replace_host;
   std::string host_str("localhost");  // must stay in scope with replace_host
   replace_host.SetHostStr(host_str);
-  GURL base_url = test_server()->GetURL(
-      "files/extensions/api_test/app_process/");
+  GURL base_url = embedded_test_server()->GetURL(
+      "/extensions/api_test/app_process/");
   base_url = base_url.ReplaceComponents(replace_host);
 
   // Open a new tab to an app URL before the app is loaded.
@@ -456,7 +457,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
 
 // Checks that task manager counts a worker thread JS heap size.
 // http://crbug.com/241066
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, WebWorkerJSHeapMemory) {
+// Flaky, http://crbug.com/259368
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, DISABLED_WebWorkerJSHeapMemory) {
   GURL url(ui_test_utils::GetTestUrl(base::FilePath(
       base::FilePath::kCurrentDirectory), base::FilePath(kTitle1File)));
   ui_test_utils::NavigateToURL(browser(), url);

@@ -153,6 +153,44 @@ remoting.ClientSession.prototype.setOnStateChange = function(onStateChange) {
   this.onStateChange_ = onStateChange;
 };
 
+/**
+ * Called when the window or desktop size or the scaling settings change,
+ * to set the scroll-bar visibility.
+ *
+ * TODO(jamiewalch): crbug.com/252796: Remove this once crbug.com/240772 is
+ * fixed.
+ */
+remoting.ClientSession.prototype.updateScrollbarVisibility = function() {
+  var needsVerticalScroll = false;
+  var needsHorizontalScroll = false;
+  if (!this.shrinkToFit_) {
+    // Determine whether or not horizontal or vertical scrollbars are
+    // required, taking into account their width.
+    needsVerticalScroll = window.innerHeight < this.plugin.desktopHeight;
+    needsHorizontalScroll = window.innerWidth < this.plugin.desktopWidth;
+    var kScrollBarWidth = 16;
+    if (needsHorizontalScroll && !needsVerticalScroll) {
+      needsVerticalScroll =
+          window.innerHeight - kScrollBarWidth < this.plugin.desktopHeight;
+    } else if (!needsHorizontalScroll && needsVerticalScroll) {
+      needsHorizontalScroll =
+          window.innerWidth - kScrollBarWidth < this.plugin.desktopWidth;
+    }
+  }
+
+  var htmlNode = /** @type {HTMLElement} */ (document.body.parentNode);
+  if (needsHorizontalScroll) {
+    htmlNode.classList.remove('no-horizontal-scroll');
+  } else {
+    htmlNode.classList.add('no-horizontal-scroll');
+  }
+  if (needsVerticalScroll) {
+    htmlNode.classList.remove('no-vertical-scroll');
+  } else {
+    htmlNode.classList.add('no-vertical-scroll');
+  }
+};
+
 // Note that the positive values in both of these enums are copied directly
 // from chromoting_scriptable_object.h and must be kept in sync. The negative
 // values represent state transitions that occur within the web-app that have
@@ -442,12 +480,17 @@ remoting.ClientSession.prototype.removePlugin = function() {
     this.plugin.cleanup();
     this.plugin = null;
   }
+
+  // Delete event handlers that aren't relevent when not connected.
   this.resizeToClientButton_.removeEventListener(
       'click', this.callSetScreenMode_, false);
   this.shrinkToFitButton_.removeEventListener(
       'click', this.callSetScreenMode_, false);
   this.fullScreenButton_.removeEventListener(
       'click', this.callToggleFullScreen_, false);
+
+  // In case the user had selected full-screen mode, cancel it now.
+  document.webkitCancelFullScreen();
 };
 
 /**
@@ -640,6 +683,7 @@ remoting.ClientSession.prototype.setScreenMode_ =
 
   this.shrinkToFit_ = shrinkToFit;
   this.resizeToClient_ = resizeToClient;
+  this.updateScrollbarVisibility();
 
   if (this.hostId != '') {
     var options = {};
@@ -653,13 +697,6 @@ remoting.ClientSession.prototype.setScreenMode_ =
     this.scroll_(0, 0);
   }
 
-  // TODO(jamiewalch): crbug.com/252796: Remove this once crbug.com/240772
-  // is fixed.
-  if (this.shrinkToFit_) {
-    document.body.parentNode.classList.add('no-scroll');
-  } else {
-    document.body.parentNode.classList.remove('no-scroll');
-  }
 }
 
 /**
@@ -915,6 +952,8 @@ remoting.ClientSession.prototype.onResize = function() {
   // If bump-scrolling is enabled, adjust the plugin margins to fully utilize
   // the new window area.
   this.scroll_(0, 0);
+
+  this.updateScrollbarVisibility();
 };
 
 /**
@@ -955,6 +994,7 @@ remoting.ClientSession.prototype.onDesktopSizeChanged_ = function() {
               this.plugin.desktopXDpi + 'x' +
               this.plugin.desktopYDpi + ' DPI');
   this.updateDimensions();
+  this.updateScrollbarVisibility();
 };
 
 /**

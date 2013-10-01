@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/message_loop.h"
-#include "googleurl/src/gurl.h"
+#include "base/message_loop/message_loop.h"
+#include "url/gurl.h"
 
 using std::string;
 using std::vector;

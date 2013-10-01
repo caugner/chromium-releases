@@ -8,7 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -18,9 +18,8 @@
 #include "chrome/browser/extensions/webstore_startup_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/chrome_manifest_handlers.h"
+#include "chrome/common/extensions/chrome_extensions_client.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/permissions/chrome_api_permissions.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "ipc/ipc_message.h"
@@ -38,9 +37,7 @@ void PrintPackExtensionMessage(const std::string& message) {
 namespace extensions {
 
 StartupHelper::StartupHelper() : pack_job_succeeded_(false) {
-  PermissionsInfo::GetInstance()->InitializeWithDelegate(
-      ChromeAPIPermissions());
-  RegisterChromeManifestHandlers();
+  ExtensionsClient::Set(ChromeExtensionsClient::GetInstance());
 }
 
 void StartupHelper::OnPackSuccess(
@@ -107,7 +104,8 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
   virtual void OnUnpackSuccess(const base::FilePath& temp_dir,
                                const base::FilePath& extension_root,
                                const base::DictionaryValue* original_manifest,
-                               const Extension* extension) OVERRIDE {
+                               const Extension* extension,
+                               const SkBitmap& install_icon) OVERRIDE {
     finished_ = true;
     success_ = true;
     BrowserThread::PostTask(BrowserThread::UI,
@@ -139,7 +137,6 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
 
     scoped_refptr<SandboxedUnpacker> unpacker(
         new SandboxedUnpacker(crx_file_,
-                              true /* out of process */,
                               Manifest::INTERNAL,
                               0, /* no special creation flags */
                               temp_dir_,

@@ -16,8 +16,8 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "media/base/video_frame.h"
 #include "ui/base/latency_info.h"
 #include "ui/gfx/native_widget_types.h"
@@ -45,17 +45,9 @@ class RenderWidgetHostViewMac;
 // RenderWidgetHostViewCocoa for blitting the IOSurface.
 class CompositingIOSurfaceMac {
  public:
-  // Passed to Create() to specify the ordering of the surface relative to the
-  // containing window.
-  enum SurfaceOrder {
-    SURFACE_ORDER_ABOVE_WINDOW = 0,
-    SURFACE_ORDER_BELOW_WINDOW = 1,
-  };
-
   // Returns NULL if IOSurface support is missing or GL APIs fail. Specify in
   // |order| the desired ordering relationship of the surface to the containing
   // window.
-  static CompositingIOSurfaceMac* Create(int window_number);
   static CompositingIOSurfaceMac* Create(
       const scoped_refptr<CompositingIOSurfaceContext>& context);
   ~CompositingIOSurfaceMac();
@@ -78,7 +70,6 @@ class CompositingIOSurfaceMac {
                      float window_scale_factor,
                      RenderWidgetHostViewFrameSubscriber* frame_subscriber,
                      bool using_core_animation);
-  bool DrawIOSurface(RenderWidgetHostViewMac* render_widget_host_view);
 
   // Copy the data of the "live" OpenGL texture referring to this IOSurfaceRef
   // into |out|. The copied region is specified with |src_pixel_subrect| and
@@ -103,13 +94,6 @@ class CompositingIOSurfaceMac {
   // process is no longer referencing it, this will delete the IOSurface.
   void UnrefIOSurface();
 
-  // Call when globalFrameDidChange is received on the NSView.
-  void GlobalFrameDidChange();
-
-  // Disassociate the GL context with the NSView and unref the IOSurface. Do
-  // this to switch to software drawing mode.
-  void ClearDrawable();
-
   bool HasIOSurface() { return !!io_surface_.get(); }
 
   const gfx::Size& pixel_io_surface_size() const {
@@ -120,6 +104,9 @@ class CompositingIOSurfaceMac {
   float scale_factor() const { return scale_factor_; }
 
   bool is_vsync_disabled() const;
+
+  void SetContext(
+      const scoped_refptr<CompositingIOSurfaceContext>& new_context);
 
   const scoped_refptr<CompositingIOSurfaceContext>& context() {
     return context_;
@@ -216,6 +203,7 @@ class CompositingIOSurfaceMac {
     void PrepareForAsynchronousReadback();
 
     const scoped_ptr<CompositingIOSurfaceTransformer> transformer;
+    GLenum output_readback_format;
     int num_outputs;
     GLuint output_textures[3];  // Not owned.
     // Note: For YUV, the |output_texture_sizes| widths are in terms of 4-byte
@@ -299,9 +287,11 @@ class CompositingIOSurfaceMac {
       const scoped_refptr<media::VideoFrame>& video_frame_output);
 
   // Scan the list of started asynchronous copies and test if each one has
-  // completed.
-  void FinishAllCopies();
-  void FinishAllCopiesWithinContext(
+  // completed. If |block_until_finished| is true, then block until all
+  // pending copies are finished.
+  void CheckIfAllCopiesAreFinished(bool block_until_finished);
+  void CheckIfAllCopiesAreFinishedWithinContext(
+      bool block_until_finished,
       std::vector<base::Closure>* done_callbacks);
 
   void FailAllCopies();

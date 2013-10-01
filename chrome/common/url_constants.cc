@@ -4,7 +4,11 @@
 
 #include "chrome/common/url_constants.h"
 
-#include "googleurl/src/url_util.h"
+#include <algorithm>
+
+#include "base/basictypes.h"
+#include "content/public/common/url_constants.h"
+#include "url/url_util.h"
 
 namespace chrome {
 
@@ -29,6 +33,7 @@ const char kChromeUIConflictsURL[] = "chrome://conflicts/";
 const char kChromeUIConstrainedHTMLTestURL[] = "chrome://constrained-test/";
 const char kChromeUICrashesURL[] = "chrome://crashes/";
 const char kChromeUICreditsURL[] = "chrome://credits/";
+const char kChromeUIDevicesURL[] = "chrome://devices/";
 const char kChromeUIDevToolsURL[] =
     "chrome-devtools://devtools/bundled/devtools.html";
 const char kChromeUIDownloadsURL[] = "chrome://downloads/";
@@ -64,8 +69,9 @@ const char kChromeUIPluginsURL[] = "chrome://plugins/";
 const char kChromeUIPolicyURL[] = "chrome://policy/";
 const char kChromeUIProfileSigninConfirmationURL[] =
     "chrome://profile-signin-confirmation/";
+const char kChromeUIUserManagerURL[] = "chrome://user-manager/";
 const char kChromeUIPrintURL[] = "chrome://print/";
-const char kChromeUISessionFaviconURL[] = "chrome://session-favicon/";
+const char kChromeUIRestartURL[] = "chrome://restart/";
 const char kChromeUISettingsURL[] = "chrome://settings/";
 const char kChromeUISettingsFrameURL[] = "chrome://settings-frame/";
 const char kChromeUISuggestionsInternalsURL[] =
@@ -103,6 +109,7 @@ const char kChromeUIOSCreditsURL[] = "chrome://os-credits/";
 const char kChromeUIProxySettingsURL[] = "chrome://proxy-settings/";
 const char kChromeUISimUnlockURL[] = "chrome://sim-unlock/";
 const char kChromeUISlideshowURL[] = "chrome://slideshow/";
+const char kChromeUISlowURL[] = "chrome://slow/";
 const char kChromeUISystemInfoURL[] = "chrome://system/";
 const char kChromeUITermsOemURL[] = "chrome://terms/oem";
 const char kChromeUIUserImageURL[] = "chrome://userimage/";
@@ -119,11 +126,17 @@ const char kChromeUIFileManagerURL[] = "chrome://files/";
 #if defined(USE_AURA)
 const char kChromeUIGestureConfigURL[] = "chrome://gesture/";
 const char kChromeUIGestureConfigHost[] = "gesture";
+const char kChromeUISalsaURL[] = "chrome://salsa/";
+const char kChromeUISalsaHost[] = "salsa";
 #endif
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
 const char kChromeUITabModalConfirmDialogURL[] =
     "chrome://tab-modal-confirm-dialog/";
+#endif
+
+#if defined(ENABLE_WEBRTC)
+const char kChromeUIWebRtcLogsURL[] = "chrome://webrtc-logs/";
 #endif
 
 // Add Chrome UI hosts here, in alphabetical order.
@@ -144,6 +157,7 @@ const char kChromeUICrashesHost[] = "crashes";
 const char kChromeUICrashHost[] = "crash";
 const char kChromeUICreditsHost[] = "credits";
 const char kChromeUIDefaultHost[] = "version";
+const char kChromeUIDevicesHost[] = "devices";
 const char kChromeUIDevToolsHost[] = "devtools";
 const char kChromeUIDevToolsBundledPath[] = "bundled";
 const char kChromeUIDevToolsRemotePath[] = "remote";
@@ -185,11 +199,12 @@ const char kChromeUIPluginsHost[] = "plugins";
 const char kChromeUIPolicyHost[] = "policy";
 const char kChromeUIProfileSigninConfirmationHost[] =
     "profile-signin-confirmation";
+const char kChromeUIUserManagerHost[] = "user-manager";
 const char kChromeUIPredictorsHost[] = "predictors";
 const char kChromeUIPrintHost[] = "print";
 const char kChromeUIProfilerHost[] = "profiler";
 const char kChromeUIQuotaInternalsHost[] = "quota-internals";
-const char kChromeUISessionFaviconHost[] = "session-favicon";
+const char kChromeUIRestartHost[] = "restart";
 const char kChromeUISettingsHost[] = "settings";
 const char kChromeUISettingsFrameHost[] = "settings-frame";
 const char kChromeUIShorthangHost[] = "shorthang";
@@ -248,6 +263,7 @@ const char kChromeUIProxySettingsHost[] = "proxy-settings";
 const char kChromeUIRotateHost[] = "rotate";
 const char kChromeUISimUnlockHost[] = "sim-unlock";
 const char kChromeUISlideshowHost[] = "slideshow";
+const char kChromeUISlowHost[] = "slow";
 const char kChromeUISystemInfoHost[] = "system";
 const char kChromeUIUserImageHost[] = "userimage";
 
@@ -271,6 +287,10 @@ const char kChromeUIFileManagerHost[] = "files";
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
 const char kChromeUITabModalConfirmDialogHost[] = "tab-modal-confirm-dialog";
+#endif
+
+#if defined(ENABLE_WEBRTC)
+const char kChromeUIWebRtcLogsHost[] = "webrtc-logs";
 #endif
 
 // Option sub pages.
@@ -450,6 +470,9 @@ const char kSyncLearnMoreURL[] =
 const char kDownloadScanningLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ib_download_scan";
 
+const char kDownloadPotentiallyUnwantedLearnMoreURL[] =
+    "https://support.google.com/chrome/?p=ui_protect_settings";
+
 const char kDownloadInterruptedLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ui_download_errors";
 
@@ -476,9 +499,6 @@ const char kSyncEncryptionHelpURL[] =
 const char kSyncErrorsHelpURL[] =
     "https://support.google.com/chrome/?p=settings_sync_error";
 
-const char kChromeToMobileLearnMoreURL[] =
-    "https://support.google.com/chrome/?p=ib_chrome_to_mobile";
-
 const char kSideloadWipeoutHelpURL[] =
     "https://support.google.com/chrome/?p=ui_remove_non_cws_extensions";
 
@@ -495,6 +515,96 @@ const char kLearnMoreEnterpriseURL[] =
 const char kNotificationsHelpURL[] =
     "https://support.google.com/chrome/?p=ui_notifications";
 
+// Add hosts here to be included in chrome://chrome-urls (about:about).
+// These hosts will also be suggested by BuiltinProvider.
+const char* const kChromeHostURLs[] = {
+  kChromeUICacheHost,
+  kChromeUIChromeURLsHost,
+  kChromeUICrashesHost,
+  kChromeUICreditsHost,
+  kChromeUIDNSHost,
+  kChromeUIFlagsHost,
+  kChromeUIHistoryHost,
+  kChromeUIIPCHost,
+  kChromeUIMemoryHost,
+  kChromeUIMemoryInternalsHost,
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  kChromeUINetExportHost,
+#endif
+  kChromeUINetInternalsHost,
+  kChromeUINewTabHost,
+  kChromeUIOmniboxHost,
+  kChromeUIPredictorsHost,
+  kChromeUIProfilerHost,
+  kChromeUIQuotaInternalsHost,
+  kChromeUISignInInternalsHost,
+  kChromeUIStatsHost,
+  kChromeUISyncInternalsHost,
+  kChromeUITermsHost,
+  kChromeUITranslateInternalsHost,
+  kChromeUIUserActionsHost,
+  kChromeUIVersionHost,
+#if defined(OS_ANDROID)
+  kChromeUIWelcomeHost,
+#else
+  kChromeUIBookmarksHost,
+  kChromeUIDownloadsHost,
+  kChromeUIFlashHost,
+  kChromeUIInspectHost,
+  kChromeUIPluginsHost,
+  kChromeUISettingsHost,
+#endif
+#if defined(OS_WIN)
+  kChromeUIConflictsHost,
+#endif
+#if defined(OS_LINUX) || defined(OS_OPENBSD)
+  kChromeUILinuxProxyConfigHost,
+  kChromeUISandboxHost,
+#endif
+#if defined(OS_CHROMEOS)
+  kChromeUIChooseMobileNetworkHost,
+  kChromeUICryptohomeHost,
+  kChromeUIDiagnosticsHost,
+  kChromeUIDiscardsHost,
+  kChromeUIDriveInternalsHost,
+  kChromeUIImageBurnerHost,
+  kChromeUIKeyboardOverlayHost,
+  kChromeUILoginHost,
+  kChromeUINetworkHost,
+  kChromeUIOobeHost,
+  kChromeUIOSCreditsHost,
+  kChromeUIProxySettingsHost,
+  kChromeUISystemInfoHost,
+  kChromeUITaskManagerHost,
+#endif
+#if !defined(DISABLE_NACL)
+  kChromeUINaClHost,
+#endif
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  kChromeUIPolicyHost,
+#endif
+#if defined(ENABLE_EXTENSIONS)
+  kChromeUIExtensionsHost,
+#endif
+#if defined(ENABLE_FULL_PRINTING)
+  kChromeUIPrintHost,
+#endif
+  content::kChromeUIAccessibilityHost,
+  content::kChromeUIAppCacheInternalsHost,
+  content::kChromeUIBlobInternalsHost,
+  content::kChromeUIGpuHost,
+  content::kChromeUIHistogramHost,
+  content::kChromeUIIndexedDBInternalsHost,
+  content::kChromeUIMediaInternalsHost,
+  content::kChromeUINetworkViewCacheHost,
+  content::kChromeUITracingHost,
+  content::kChromeUIWebRTCInternalsHost,
+#if defined(ENABLE_WEBRTC)
+  kChromeUIWebRtcLogsHost,
+#endif
+};
+const size_t kNumberOfChromeHostURLs = arraysize(kChromeHostURLs);
+
 const char* const kChromeDebugURLs[] = {
   content::kChromeUICrashURL,
   content::kChromeUIKillURL,
@@ -504,22 +614,20 @@ const char* const kChromeDebugURLs[] = {
   content::kChromeUIGpuCrashURL,
   content::kChromeUIGpuHangURL,
   content::kChromeUIPpapiFlashCrashURL,
-  content::kChromeUIPpapiFlashHangURL
+  content::kChromeUIPpapiFlashHangURL,
+  chrome::kChromeUIRestartURL
 };
 const int kNumberOfChromeDebugURLs =
     static_cast<int>(arraysize(kChromeDebugURLs));
 
 const char kExtensionResourceScheme[] = "chrome-extension-resource";
+const char kChromeNativeScheme[] = "chrome-native";
 
 const char kChromeSearchScheme[] = "chrome-search";
 const char kChromeSearchLocalNtpHost[] = "local-ntp";
 const char kChromeSearchLocalNtpUrl[] =
     "chrome-search://local-ntp/local-ntp.html";
-const char kChromeSearchLocalGoogleNtpUrl[] =
-    "chrome-search://local-ntp/local-ntp.html?isGoogle";
-
-const char kChromeSearchSuggestionHost[] = "suggestion";
-const char kChromeSearchSuggestionUrl[] = "chrome-search://suggestion/";
+const char kChromeSearchOnlineNtpHost[] = "online-ntp";
 
 const char kChromeSearchMostVisitedHost[] = "most-visited";
 const char kChromeSearchMostVisitedUrl[] = "chrome-search://most-visited/";

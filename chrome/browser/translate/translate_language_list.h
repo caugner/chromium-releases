@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/web_resource/resource_request_allowed_notifier.h"
 
 class TranslateURLFetcher;
@@ -20,6 +20,8 @@ class TranslateURLFetcher;
 // This class is defined to be owned only by TranslateManager.
 class TranslateLanguageList : public ResourceRequestAllowedNotifier::Observer {
  public:
+  static const int kFetcherId = 1;
+
   TranslateLanguageList();
   virtual ~TranslateLanguageList();
 
@@ -57,6 +59,7 @@ class TranslateLanguageList : public ResourceRequestAllowedNotifier::Observer {
   // static const values shared with our browser tests.
   static const char kLanguageListCallbackName[];
   static const char kTargetLanguagesKey[];
+  static const char kAlphaLanguagesKey[];
 
  private:
   // Callback function called when TranslateURLFetcher::Request() is finished.
@@ -64,27 +67,15 @@ class TranslateLanguageList : public ResourceRequestAllowedNotifier::Observer {
                                    bool success,
                                    const std::string& data);
 
-  // Updates |all_supported_languages_| to contain the union of
-  // |supported_languages_| and |supported_alpha_languages_|.
-  void UpdateSupportedLanguages();
-
-  // The languages supported by the translation server.
-  std::set<std::string> supported_languages_;
-
-  // The alpha languages supported by the translation server.
-  std::set<std::string> supported_alpha_languages_;
-
-  // All the languages supported by the translation server. It contains the
-  // union of |supported_languages_| and |supported_alpha_languages_|.
+  // All the languages supported by the translation server.
   std::set<std::string> all_supported_languages_;
 
-  // A LanguageListFetcher instance to fetch a server providing supported
-  // language list.
-  scoped_ptr<TranslateURLFetcher> language_list_fetcher_;
+  // Alpha languages supported by the translation server.
+  std::set<std::string> alpha_languages_;
 
-  // A LanguageListFetcher instance to fetch a server providing supported alpha
-  // language list.
-  scoped_ptr<TranslateURLFetcher> alpha_language_list_fetcher_;
+  // A LanguageListFetcher instance to fetch a server providing supported
+  // language list including alpha languages.
+  scoped_ptr<TranslateURLFetcher> language_list_fetcher_;
 
   // The last-updated time when the language list is sent.
   base::Time last_updated_;

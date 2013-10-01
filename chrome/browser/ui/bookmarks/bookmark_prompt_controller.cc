@@ -22,7 +22,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/metrics/variations/variation_ids.h"
-#include "chrome/common/metrics/variations/variations_util.h"
+#include "chrome/common/metrics/variations/variations_associated_data.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -229,8 +229,9 @@ bool BookmarkPromptController::IsEnabled() {
           kBookmarkPromptTrialName, 100, kBookmarkPromptDefaultGroup,
           date_range->expiration_date.year,
           date_range->expiration_date.month,
-          date_range->expiration_date.day_of_month, NULL));
-  trial->UseOneTimeRandomization();
+          date_range->expiration_date.day_of_month,
+          base::FieldTrial::ONE_TIME_RANDOMIZED,
+          NULL));
   trial->AppendGroup(kBookmarkPromptControlGroup, 10);
   trial->AppendGroup(kBookmarkPromptExperimentGroup, 10);
 

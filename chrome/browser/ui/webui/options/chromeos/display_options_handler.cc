@@ -9,6 +9,7 @@
 #include "ash/display/display_controller.h"
 #include "ash/display/display_manager.h"
 #include "ash/display/output_configurator_animation.h"
+#include "ash/display/resolution_notification_controller.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "base/bind.h"
@@ -19,12 +20,13 @@
 #include "chrome/browser/chromeos/display/display_preferences.h"
 #include "chromeos/display/output_configurator.h"
 #include "content/public/browser/web_ui.h"
+#include "grit/ash_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/rect.h"
-#include "ui/gfx/safe_integer_conversions.h"
 #include "ui/gfx/screen.h"
+#include "ui/gfx/size_conversions.h"
 
 using ash::internal::DisplayManager;
 
@@ -51,6 +53,11 @@ int64 GetDisplayId(const base::ListValue* args) {
   }
 
   return display_id;
+}
+
+bool CompareResolution(ash::internal::Resolution r1,
+                       ash::internal::Resolution r2) {
+  return r1.size.GetArea() < r2.size.GetArea();
 }
 
 }  // namespace
@@ -95,11 +102,11 @@ void DisplayOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("orientation0", l10n_util::GetStringUTF16(
       IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_STANDARD_ORIENTATION));
   localized_strings->SetString("orientation90", l10n_util::GetStringUTF16(
-      IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_ORIENTATION_90));
+      IDS_ASH_STATUS_TRAY_DISPLAY_ORIENTATION_90));
   localized_strings->SetString("orientation180", l10n_util::GetStringUTF16(
-      IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_ORIENTATION_180));
+      IDS_ASH_STATUS_TRAY_DISPLAY_ORIENTATION_180));
   localized_strings->SetString("orientation270", l10n_util::GetStringUTF16(
-      IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_ORIENTATION_270));
+      IDS_ASH_STATUS_TRAY_DISPLAY_ORIENTATION_270));
   localized_strings->SetString(
       "startCalibratingOverscan", l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_START_CALIBRATING_OVERSCAN));
@@ -131,6 +138,10 @@ void DisplayOptionsHandler::RegisterMessages() {
       base::Bind(&DisplayOptionsHandler::HandleSetUIScale,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
+      "setResolution",
+      base::Bind(&DisplayOptionsHandler::HandleSetResolution,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
       "setOrientation",
       base::Bind(&DisplayOptionsHandler::HandleSetOrientation,
                  base::Unretained(this)));
@@ -146,7 +157,7 @@ void DisplayOptionsHandler::OnDisplayConfigurationChanged() {
 void DisplayOptionsHandler::SendAllDisplayInfo() {
   DisplayManager* display_manager = GetDisplayManager();
 
-  std::vector<const gfx::Display*> displays;
+  std::vector<gfx::Display> displays;
   for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
     displays.push_back(display_manager->GetDisplayAt(i));
   }
@@ -154,7 +165,7 @@ void DisplayOptionsHandler::SendAllDisplayInfo() {
 }
 
 void DisplayOptionsHandler::SendDisplayInfo(
-    const std::vector<const gfx::Display*> displays) {
+    const std::vector<gfx::Display>& displays) {
   DisplayManager* display_manager = GetDisplayManager();
   ash::DisplayController* display_controller =
       ash::Shell::GetInstance()->display_controller();
@@ -163,46 +174,70 @@ void DisplayOptionsHandler::SendDisplayInfo(
   int64 primary_id = ash::Shell::GetScreen()->GetPrimaryDisplay().id();
   base::ListValue js_displays;
   for (size_t i = 0; i < displays.size(); ++i) {
-    const gfx::Display* display = displays[i];
+    const gfx::Display& display = displays[i];
     const ash::internal::DisplayInfo& display_info =
-        display_manager->GetDisplayInfo(display->id());
-    const gfx::Rect& bounds = display->bounds();
+        display_manager->GetDisplayInfo(display.id());
+    const gfx::Rect& bounds = display.bounds();
     base::DictionaryValue* js_display = new base::DictionaryValue();
-    js_display->SetString("id", base::Int64ToString(display->id()));
+    js_display->SetString("id", base::Int64ToString(display.id()));
     js_display->SetInteger("x", bounds.x());
     js_display->SetInteger("y", bounds.y());
     js_display->SetInteger("width", bounds.width());
     js_display->SetInteger("height", bounds.height());
     js_display->SetString("name",
-                          display_manager->GetDisplayNameForId(display->id()));
-    js_display->SetBoolean("isPrimary", display->id() == primary_id);
-    js_display->SetBoolean("isInternal", display->IsInternal());
+                          display_manager->GetDisplayNameForId(display.id()));
+    js_display->SetBoolean("isPrimary", display.id() == primary_id);
+    js_display->SetBoolean("isInternal", display.IsInternal());
     js_display->SetInteger("orientation",
                            static_cast<int>(display_info.rotation()));
-    std::vector<float> ui_scales = DisplayManager::GetScalesForDisplay(
-        display_info);
-    base::ListValue* js_scales = new base::ListValue();
-    gfx::SizeF base_size = display_info.bounds_in_pixel().size();
-    base_size.Scale(1.0f / display->device_scale_factor());
-    if (display_info.rotation() == gfx::Display::ROTATE_90 ||
-        display_info.rotation() == gfx::Display::ROTATE_270) {
-      float tmp = base_size.width();
-      base_size.set_width(base_size.height());
-      base_size.set_height(tmp);
+    std::vector<ash::internal::Resolution> resolutions;
+    std::vector<float> ui_scales;
+    if (display.IsInternal()) {
+      ui_scales = DisplayManager::GetScalesForDisplay(display_info);
+      gfx::SizeF base_size = display_info.bounds_in_pixel().size();
+      base_size.Scale(1.0f / display.device_scale_factor());
+      if (display_info.rotation() == gfx::Display::ROTATE_90 ||
+          display_info.rotation() == gfx::Display::ROTATE_270) {
+        float tmp = base_size.width();
+        base_size.set_width(base_size.height());
+        base_size.set_height(tmp);
+      }
+      for (size_t i = 0; i < ui_scales.size(); ++i) {
+        gfx::SizeF new_size = base_size;
+        new_size.Scale(ui_scales[i]);
+        resolutions.push_back(ash::internal::Resolution(
+            gfx::ToFlooredSize(new_size), false /* interlaced */));
+      }
+    } else {
+      for (size_t i = 0; i < display_info.resolutions().size(); ++i)
+        resolutions.push_back(display_info.resolutions()[i]);
     }
+    std::sort(resolutions.begin(), resolutions.end(), CompareResolution);
 
-    for (size_t i = 0; i < ui_scales.size(); ++i) {
-      base::DictionaryValue* scale_info = new base::DictionaryValue();
-      scale_info->SetDouble("scale", ui_scales[i]);
-      scale_info->SetInteger(
-          "width", gfx::ToFlooredInt(base_size.width() * ui_scales[i]));
-      scale_info->SetInteger(
-          "height", gfx::ToFlooredInt(base_size.height() * ui_scales[i]));
-      scale_info->SetBoolean("selected",
-                             display_info.ui_scale() == ui_scales[i]);
-      js_scales->Append(scale_info);
+    base::ListValue* js_resolutions = new base::ListValue();
+    gfx::Size current_size(bounds.width() * display.device_scale_factor(),
+                           bounds.height() * display.device_scale_factor());
+    for (size_t i = 0; i < resolutions.size(); ++i) {
+      base::DictionaryValue* resolution_info = new base::DictionaryValue();
+      if (!ui_scales.empty()) {
+        resolution_info->SetDouble("scale", ui_scales[i]);
+        if (ui_scales[i] == 1.0f)
+          resolution_info->SetBoolean("isBest", true);
+        resolution_info->SetBoolean(
+            "selected", display_info.ui_scale() == ui_scales[i]);
+      } else {
+        // Picks the largest one as the "best", which is the last element
+        // because |resolutions| is sorted by its area.
+        if (i == resolutions.size() - 1)
+          resolution_info->SetBoolean("isBest", true);
+        resolution_info->SetBoolean(
+            "selected", (resolutions[i].size == current_size));
+      }
+      resolution_info->SetInteger("width", resolutions[i].size.width());
+      resolution_info->SetInteger("height",resolutions[i].size.height());
+      js_resolutions->Append(resolution_info);
     }
-    js_display->Set("uiScales", js_scales);
+    js_display->Set("resolutions", js_resolutions);
     js_displays.Append(js_display);
   }
 
@@ -227,7 +262,7 @@ void DisplayOptionsHandler::OnFadeOutForMirroringFinished(bool is_mirroring) {
 
 void DisplayOptionsHandler::OnFadeOutForDisplayLayoutFinished(
     int position, int offset) {
-  SetCurrentAndDefaultDisplayLayout(
+  SetCurrentDisplayLayout(
       ash::DisplayLayout::FromInts(position, offset));
   ash::Shell::GetInstance()->output_configurator_animation()->
       StartFadeInAnimation();
@@ -284,18 +319,60 @@ void DisplayOptionsHandler::HandleSetUIScale(const base::ListValue* args) {
   if (display_id == gfx::Display::kInvalidDisplayID)
     return;
 
-  std::string ui_scale_value;
   double ui_scale = 0.0f;
-  if (!args->GetString(1, &ui_scale_value)) {
-    LOG(ERROR) << "Ca't find new ui_scale";
-    return;
-  }
-  if (!base::StringToDouble(ui_scale_value, &ui_scale)) {
-    LOG(ERROR) << "Invalid ui_scale: " << ui_scale_value;
+  if (!args->GetDouble(1, &ui_scale) || ui_scale == 0.0f) {
+    LOG(ERROR) << "Can't find new ui_scale";
     return;
   }
 
   GetDisplayManager()->SetDisplayUIScale(display_id, ui_scale);
+}
+
+void DisplayOptionsHandler::HandleSetResolution(const base::ListValue* args) {
+  DCHECK(!args->empty());
+  int64 display_id = GetDisplayId(args);
+  if (display_id == gfx::Display::kInvalidDisplayID)
+    return;
+
+  double width = 0.0f;
+  double height = 0.0f;
+  if (!args->GetDouble(1, &width) || width == 0.0f) {
+    LOG(ERROR) << "Can't find new width";
+    return;
+  }
+  if (!args->GetDouble(2, &height) || height == 0.0f) {
+    LOG(ERROR) << "Can't find new height";
+    return;
+  }
+
+  const ash::internal::DisplayInfo& display_info =
+      GetDisplayManager()->GetDisplayInfo(display_id);
+  gfx::Size new_resolution = gfx::ToFlooredSize(gfx::SizeF(width, height));
+  gfx::Size old_resolution = display_info.size_in_pixel();
+  bool has_new_resolution = false;
+  bool has_old_resolution = false;
+  for (size_t i = 0; i < display_info.resolutions().size(); ++i) {
+    ash::internal::Resolution resolution = display_info.resolutions()[i];
+    if (resolution.size == new_resolution)
+      has_new_resolution = true;
+    if (resolution.size == old_resolution)
+      has_old_resolution = true;
+  }
+  if (!has_new_resolution) {
+    LOG(ERROR) << "No new resolution " << new_resolution.ToString()
+               << " is found in the display info " << display_info.ToString();
+    return;
+  }
+  if (!has_old_resolution) {
+    LOG(ERROR) << "No old resolution " << old_resolution.ToString()
+               << " is found in the display info " << display_info.ToString();
+    return;
+  }
+
+  ash::Shell::GetInstance()->resolution_notification_controller()->
+      SetDisplayResolutionAndNotify(
+          display_id, old_resolution, new_resolution,
+          base::Bind(&StoreDisplayPrefs));
 }
 
 void DisplayOptionsHandler::HandleSetOrientation(const base::ListValue* args) {

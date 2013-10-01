@@ -68,6 +68,13 @@ class CHROMEOS_EXPORT DebugDaemonClient {
   // Gets information about modem status as json.
   virtual void GetModemStatus(const GetModemStatusCallback& callback) = 0;
 
+  // Called once GetWiMaxStatus() is complete.
+  typedef base::Callback<void(bool succeeded, const std::string& status)>
+      GetWiMaxStatusCallback;
+
+  // Gets information about WiMAX status as json.
+  virtual void GetWiMaxStatus(const GetWiMaxStatusCallback& callback) = 0;
+
   // Called once GetNetworkInterfaces() is complete. Takes two parameters:
   // - succeeded: information was obtained successfully.
   // - status: network interfaces information in json. For details, please refer
@@ -88,10 +95,13 @@ class CHROMEOS_EXPORT DebugDaemonClient {
   virtual void GetPerfData(uint32_t duration,
                            const GetPerfDataCallback& callback) = 0;
 
-  // Callback type for GetAllLogs() or GetUserLogFiles().
+  // Callback type for GetScrubbedLogs(), GetAllLogs() or GetUserLogFiles().
   typedef base::Callback<void(bool succeeded,
                               const std::map<std::string, std::string>& logs)>
       GetLogsCallback;
+
+  // Gets scrubbed logs from debugd.
+  virtual void GetScrubbedLogs(const GetLogsCallback& callback) = 0;
 
   // Gets all logs collected by debugd.
   virtual void GetAllLogs(const GetLogsCallback& callback) = 0;

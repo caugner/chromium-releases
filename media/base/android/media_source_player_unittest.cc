@@ -16,6 +16,8 @@
 
 namespace media {
 
+static const int kDefaultDurationInMs = 10000;
+
 // Mock of MediaPlayerManager for testing purpose
 class MockMediaPlayerManager : public MediaPlayerManager {
  public:
@@ -33,7 +35,10 @@ class MockMediaPlayerManager : public MediaPlayerManager {
   virtual void OnMediaMetadataChanged(
       int player_id, base::TimeDelta duration, int width, int height,
       bool success) OVERRIDE {}
-  virtual void OnPlaybackComplete(int player_id) OVERRIDE {}
+  virtual void OnPlaybackComplete(int player_id) OVERRIDE {
+    if (message_loop_.is_running())
+      message_loop_.Quit();
+  }
   virtual void OnMediaInterrupted(int player_id) OVERRIDE {}
   virtual void OnBufferingUpdate(int player_id, int percentage) OVERRIDE {}
   virtual void OnSeekComplete(int player_id,
@@ -44,8 +49,8 @@ class MockMediaPlayerManager : public MediaPlayerManager {
   virtual MediaPlayerAndroid* GetFullscreenPlayer() OVERRIDE { return NULL; }
   virtual MediaPlayerAndroid* GetPlayer(int player_id) OVERRIDE { return NULL; }
   virtual void DestroyAllMediaPlayers() OVERRIDE {}
-  virtual void OnReadFromDemuxer(int player_id, media::DemuxerStream::Type type,
-                                 bool seek_done) OVERRIDE {
+  virtual void OnReadFromDemuxer(int player_id,
+                                 media::DemuxerStream::Type type) OVERRIDE {
     num_requests_++;
     if (message_loop_.is_running())
       message_loop_.Quit();
@@ -58,6 +63,7 @@ class MockMediaPlayerManager : public MediaPlayerManager {
   virtual media::MediaDrmBridge* GetDrmBridge(int media_keys_id) OVERRIDE {
     return NULL;
   }
+  virtual void OnProtectedSurfaceRequested(int player_id) OVERRIDE {}
   virtual void OnKeyAdded(int key_id,
                           const std::string& session_id) OVERRIDE {}
   virtual void OnKeyError(int key_id,
@@ -66,7 +72,7 @@ class MockMediaPlayerManager : public MediaPlayerManager {
                           int system_code) OVERRIDE {}
   virtual void OnKeyMessage(int key_id,
                             const std::string& session_id,
-                            const std::string& message,
+                            const std::vector<uint8>& message,
                             const std::string& destination_url) OVERRIDE {}
 
   int num_requests() const { return num_requests_; }
@@ -91,9 +97,12 @@ class MediaSourcePlayerTest : public testing::Test {
  protected:
   // Get the decoder job from the MediaSourcePlayer.
   MediaDecoderJob* GetMediaDecoderJob(bool is_audio) {
-    if (is_audio)
-      return player_->audio_decoder_job_.get();
-    return player_->video_decoder_job_.get();
+    if (is_audio) {
+      return reinterpret_cast<MediaDecoderJob*>(
+          player_->audio_decoder_job_.get());
+    }
+    return reinterpret_cast<MediaDecoderJob*>(
+        player_->video_decoder_job_.get());
   }
 
   // Starts an audio decoder job.
@@ -103,10 +112,11 @@ class MediaSourcePlayerTest : public testing::Test {
     params.audio_channels = 2;
     params.audio_sampling_rate = 44100;
     params.is_audio_encrypted = false;
+    params.duration_ms = kDefaultDurationInMs;
     scoped_refptr<DecoderBuffer> buffer = ReadTestDataFile("vorbis-extradata");
     params.audio_extra_data = std::vector<uint8>(
-        buffer->GetData(),
-        buffer->GetData() + buffer->GetDataSize());
+        buffer->data(),
+        buffer->data() + buffer->data_size());
     Start(params);
   }
 
@@ -115,6 +125,7 @@ class MediaSourcePlayerTest : public testing::Test {
     params.video_codec = kCodecVP8;
     params.video_size = gfx::Size(320, 240);
     params.is_video_encrypted = false;
+    params.duration_ms = kDefaultDurationInMs;
     Start(params);
   }
 
@@ -132,13 +143,30 @@ class MediaSourcePlayerTest : public testing::Test {
     ack_params.access_units[0].status = DemuxerStream::kOk;
     scoped_refptr<DecoderBuffer> buffer = ReadTestDataFile("vorbis-packet-0");
     ack_params.access_units[0].data = std::vector<uint8>(
-        buffer->GetData(), buffer->GetData() + buffer->GetDataSize());
+        buffer->data(), buffer->data() + buffer->data_size());
     // Vorbis needs 4 extra bytes padding on Android to decode properly. Check
     // NuMediaExtractor.cpp in Android source code.
     uint8 padding[4] = { 0xff , 0xff , 0xff , 0xff };
     ack_params.access_units[0].data.insert(
         ack_params.access_units[0].data.end(), padding, padding + 4);
     return ack_params;
+  }
+
+  MediaPlayerHostMsg_ReadFromDemuxerAck_Params
+        CreateReadFromDemuxerAckForVideo() {
+    MediaPlayerHostMsg_ReadFromDemuxerAck_Params ack_params;
+    ack_params.type = DemuxerStream::VIDEO;
+    ack_params.access_units.resize(1);
+    ack_params.access_units[0].status = DemuxerStream::kOk;
+    scoped_refptr<DecoderBuffer> buffer =
+        ReadTestDataFile("vp8-I-frame-320x240");
+    ack_params.access_units[0].data = std::vector<uint8>(
+        buffer->data(), buffer->data() + buffer->data_size());
+    return ack_params;
+  }
+
+  base::TimeTicks StartTimeTicks() {
+    return player_->start_time_ticks_;
   }
 
  protected:
@@ -168,6 +196,7 @@ TEST_F(MediaSourcePlayerTest, StartAudioDecoderWithInvalidConfig) {
   params.audio_channels = 2;
   params.audio_sampling_rate = 44100;
   params.is_audio_encrypted = false;
+  params.duration_ms = kDefaultDurationInMs;
   uint8 invalid_codec_data[] = { 0x00, 0xff, 0xff, 0xff, 0xff };
   params.audio_extra_data.insert(params.audio_extra_data.begin(),
                                  invalid_codec_data, invalid_codec_data + 4);
@@ -267,12 +296,12 @@ TEST_F(MediaSourcePlayerTest, StartAfterSeekFinish) {
     return;
 
   // Test decoder job will not start until all pending seek event is handled.
-
   MediaPlayerHostMsg_DemuxerReady_Params params;
   params.audio_codec = kCodecVorbis;
   params.audio_channels = 2;
   params.audio_sampling_rate = 44100;
   params.is_audio_encrypted = false;
+  params.duration_ms = kDefaultDurationInMs;
   player_->DemuxerReady(params);
   EXPECT_EQ(NULL, GetMediaDecoderJob(true));
   EXPECT_EQ(0, manager_->num_requests());
@@ -323,6 +352,111 @@ TEST_F(MediaSourcePlayerTest, StartImmediatelyAfterPause) {
   // The decoder job should finish and a new request will be sent.
   EXPECT_EQ(2, manager_->num_requests());
   EXPECT_FALSE(GetMediaDecoderJob(true)->is_decoding());
+}
+
+TEST_F(MediaSourcePlayerTest, DecoderJobsCannotStartWithoutAudio) {
+  if (!MediaCodecBridge::IsAvailable())
+    return;
+
+  // Test that when Start() is called, video decoder jobs will wait for audio
+  // decoder job before start decoding the data.
+  MediaPlayerHostMsg_DemuxerReady_Params params;
+  params.audio_codec = kCodecVorbis;
+  params.audio_channels = 2;
+  params.audio_sampling_rate = 44100;
+  params.is_audio_encrypted = false;
+  scoped_refptr<DecoderBuffer> buffer = ReadTestDataFile("vorbis-extradata");
+  params.audio_extra_data = std::vector<uint8>(
+      buffer->data(),
+      buffer->data() + buffer->data_size());
+  params.video_codec = kCodecVP8;
+  params.video_size = gfx::Size(320, 240);
+  params.is_video_encrypted = false;
+  params.duration_ms = kDefaultDurationInMs;
+  Start(params);
+  EXPECT_EQ(0, manager_->num_requests());
+
+  scoped_refptr<gfx::SurfaceTextureBridge> surface_texture(
+      new gfx::SurfaceTextureBridge(0));
+  gfx::ScopedJavaSurface surface(surface_texture.get());
+  player_->SetVideoSurface(surface.Pass());
+  EXPECT_EQ(1u, manager_->last_seek_request_id());
+  player_->OnSeekRequestAck(manager_->last_seek_request_id());
+
+  MediaDecoderJob* audio_decoder_job = GetMediaDecoderJob(true);
+  MediaDecoderJob* video_decoder_job = GetMediaDecoderJob(false);
+  EXPECT_EQ(2, manager_->num_requests());
+  EXPECT_FALSE(audio_decoder_job->is_decoding());
+  EXPECT_FALSE(video_decoder_job->is_decoding());
+
+  // Sending audio data to player, audio decoder should not start.
+  player_->ReadFromDemuxerAck(CreateReadFromDemuxerAckForVideo());
+  EXPECT_FALSE(video_decoder_job->is_decoding());
+
+  // Sending video data to player, both decoders should start now.
+  player_->ReadFromDemuxerAck(CreateReadFromDemuxerAckForAudio());
+  EXPECT_TRUE(audio_decoder_job->is_decoding());
+  EXPECT_TRUE(video_decoder_job->is_decoding());
+}
+
+// Disabled due to http://crbug.com/266041.
+// TODO(xhwang/qinmin): Fix this test and reenable it.
+TEST_F(MediaSourcePlayerTest,
+       DISABLED_StartTimeTicksResetAfterDecoderUnderruns) {
+  if (!MediaCodecBridge::IsAvailable())
+    return;
+
+  // Test start time ticks will reset after decoder job underruns.
+  StartAudioDecoderJob();
+  EXPECT_TRUE(NULL != GetMediaDecoderJob(true));
+  EXPECT_EQ(1, manager_->num_requests());
+  player_->ReadFromDemuxerAck(CreateReadFromDemuxerAckForAudio());
+  EXPECT_TRUE(GetMediaDecoderJob(true)->is_decoding());
+
+  manager_->message_loop()->Run();
+  // The decoder job should finish and a new request will be sent.
+  EXPECT_EQ(2, manager_->num_requests());
+  EXPECT_FALSE(GetMediaDecoderJob(true)->is_decoding());
+  base::TimeTicks previous = StartTimeTicks();
+
+  // Let the decoder timeout and execute the OnDecoderStarved() callback.
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
+  manager_->message_loop()->RunUntilIdle();
+
+  // Send new data to the decoder. This should reset the start time ticks.
+  player_->ReadFromDemuxerAck(CreateReadFromDemuxerAckForAudio());
+  base::TimeTicks current = StartTimeTicks();
+  EXPECT_LE(100.0, (current - previous).InMillisecondsF());
+}
+
+TEST_F(MediaSourcePlayerTest, NoRequestForDataAfterInputEOS) {
+  if (!MediaCodecBridge::IsAvailable())
+    return;
+
+  // Test MediaSourcePlayer will not request for new data after input EOS is
+  // reached.
+  scoped_refptr<gfx::SurfaceTextureBridge> surface_texture(
+      new gfx::SurfaceTextureBridge(0));
+  gfx::ScopedJavaSurface surface(surface_texture.get());
+  player_->SetVideoSurface(surface.Pass());
+  StartVideoDecoderJob();
+  player_->OnSeekRequestAck(manager_->last_seek_request_id());
+  EXPECT_EQ(1, manager_->num_requests());
+  // Send the first input chunk.
+  player_->ReadFromDemuxerAck(CreateReadFromDemuxerAckForVideo());
+  manager_->message_loop()->Run();
+  EXPECT_EQ(2, manager_->num_requests());
+
+  // Send EOS.
+  MediaPlayerHostMsg_ReadFromDemuxerAck_Params ack_params;
+  ack_params.type = DemuxerStream::VIDEO;
+  ack_params.access_units.resize(1);
+  ack_params.access_units[0].status = DemuxerStream::kOk;
+  ack_params.access_units[0].end_of_stream = true;
+  player_->ReadFromDemuxerAck(ack_params);
+  manager_->message_loop()->Run();
+  // No more request for data should be made.
+  EXPECT_EQ(2, manager_->num_requests());
 }
 
 }  // namespace media

@@ -4,20 +4,26 @@
 
 #include "chrome/browser/ui/cocoa/autofill/autofill_dialog_cocoa.h"
 
+#include "base/bind.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/scoped_nsobject.h"
-#include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
+#include "base/message_loop/message_loop.h"
+#include "base/strings/sys_string_conversions.h"
+#include "chrome/browser/ui/autofill/autofill_dialog_view_delegate.h"
 #include "chrome/browser/ui/chrome_style.h"
 #include "chrome/browser/ui/chrome_style.h"
 #include "chrome/browser/ui/chrome_style.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_account_chooser.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_details_container.h"
+#include "chrome/browser/ui/cocoa/autofill/autofill_dialog_constants.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_main_container.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_section_container.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_sign_in_container.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_button.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_sheet.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_window.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #import "ui/base/cocoa/flipped_view.h"
 #include "ui/base/cocoa/window_size_constants.h"
 
@@ -32,12 +38,13 @@ namespace autofill {
 
 // static
 AutofillDialogView* AutofillDialogView::Create(
-    AutofillDialogController* controller) {
-  return new AutofillDialogCocoa(controller);
+    AutofillDialogViewDelegate* delegate) {
+  return new AutofillDialogCocoa(delegate);
 }
 
-AutofillDialogCocoa::AutofillDialogCocoa(AutofillDialogController* controller)
-    : controller_(controller) {
+AutofillDialogCocoa::AutofillDialogCocoa(AutofillDialogViewDelegate* delegate)
+    : close_weak_ptr_factory_(this),
+      delegate_(delegate) {
 }
 
 AutofillDialogCocoa::~AutofillDialogCocoa() {
@@ -45,24 +52,36 @@ AutofillDialogCocoa::~AutofillDialogCocoa() {
 
 void AutofillDialogCocoa::Show() {
   // This should only be called once.
-  DCHECK(!sheet_controller_.get());
-  sheet_controller_.reset([[AutofillDialogWindowController alloc]
-       initWithWebContents:controller_->web_contents()
+  DCHECK(!sheet_delegate_.get());
+  sheet_delegate_.reset([[AutofillDialogWindowController alloc]
+       initWithWebContents:delegate_->GetWebContents()
             autofillDialog:this]);
   base::scoped_nsobject<CustomConstrainedWindowSheet> sheet(
       [[CustomConstrainedWindowSheet alloc]
-          initWithCustomWindow:[sheet_controller_ window]]);
+          initWithCustomWindow:[sheet_delegate_ window]]);
   constrained_window_.reset(
-      new ConstrainedWindowMac(this, controller_->web_contents(), sheet));
+      new ConstrainedWindowMac(this, delegate_->GetWebContents(), sheet));
 }
 
-// Closes the sheet and ends the modal loop. Triggers cleanup sequence.
 void AutofillDialogCocoa::Hide() {
+  [sheet_delegate_ hide];
+}
+
+void AutofillDialogCocoa::PerformClose() {
+  if (!close_weak_ptr_factory_.HasWeakPtrs()) {
+    base::MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&AutofillDialogCocoa::CloseNow,
+                   close_weak_ptr_factory_.GetWeakPtr()));
+  }
+}
+
+void AutofillDialogCocoa::CloseNow() {
   constrained_window_->CloseWebContentsModalDialog();
 }
 
 void AutofillDialogCocoa::UpdateAccountChooser() {
-  [sheet_controller_ updateAccountChooser];
+  [sheet_delegate_ updateAccountChooser];
 }
 
 void AutofillDialogCocoa::UpdateButtonStrip() {
@@ -75,22 +94,24 @@ void AutofillDialogCocoa::UpdateForErrors() {
 }
 
 void AutofillDialogCocoa::UpdateNotificationArea() {
+  [sheet_delegate_ updateNotificationArea];
 }
 
 void AutofillDialogCocoa::UpdateAutocheckoutStepsArea() {
 }
 
 void AutofillDialogCocoa::UpdateSection(DialogSection section) {
-  [sheet_controller_ updateSection:section];
+  [sheet_delegate_ updateSection:section];
 }
 
 void AutofillDialogCocoa::FillSection(DialogSection section,
                                       const DetailInput& originating_input) {
+  [sheet_delegate_ fillSection:section forInput:originating_input];
 }
 
 void AutofillDialogCocoa::GetUserInput(DialogSection section,
                                        DetailOutputMap* output) {
-  [sheet_controller_ getInputs:output forSection:section];
+  [sheet_delegate_ getInputs:output forSection:section];
 }
 
 string16 AutofillDialogCocoa::GetCvc() {
@@ -98,37 +119,91 @@ string16 AutofillDialogCocoa::GetCvc() {
 }
 
 bool AutofillDialogCocoa::SaveDetailsLocally() {
-  return false;
+  return [sheet_delegate_ saveDetailsLocally];
 }
 
 const content::NavigationController* AutofillDialogCocoa::ShowSignIn() {
-  return [sheet_controller_ showSignIn];
+  return [sheet_delegate_ showSignIn];
 }
 
 void AutofillDialogCocoa::HideSignIn() {
-  [sheet_controller_ hideSignIn];
+  [sheet_delegate_ hideSignIn];
 }
 
 void AutofillDialogCocoa::UpdateProgressBar(double value) {}
 
 void AutofillDialogCocoa::ModelChanged() {
-  [sheet_controller_ modelChanged];
+  [sheet_delegate_ modelChanged];
 }
 
 void AutofillDialogCocoa::OnSignInResize(const gfx::Size& pref_size) {
   // TODO(groby): Implement Mac support for this.
 }
 
+TestableAutofillDialogView* AutofillDialogCocoa::GetTestableView() {
+  return this;
+}
+
+void AutofillDialogCocoa::SubmitForTesting() {
+  [sheet_delegate_ accept:nil];
+}
+
+void AutofillDialogCocoa::CancelForTesting() {
+  [sheet_delegate_ cancel:nil];
+}
+
+string16 AutofillDialogCocoa::GetTextContentsOfInput(const DetailInput& input) {
+  for (size_t i = SECTION_MIN; i <= SECTION_MAX; ++i) {
+    DialogSection section = static_cast<DialogSection>(i);
+    DetailOutputMap contents;
+    [sheet_delegate_ getInputs:&contents forSection:section];
+    DetailOutputMap::const_iterator it = contents.find(&input);
+    if (it != contents.end())
+      return it->second;
+  }
+
+  NOTREACHED();
+  return string16();
+}
+
+void AutofillDialogCocoa::SetTextContentsOfInput(const DetailInput& input,
+                                                 const string16& contents) {
+  [sheet_delegate_ setTextContents:base::SysUTF16ToNSString(contents)
+                            forInput:input];
+}
+
+void AutofillDialogCocoa::SetTextContentsOfSuggestionInput(
+    DialogSection section,
+    const base::string16& text) {
+  [sheet_delegate_ setTextContents:base::SysUTF16ToNSString(text)
+              ofSuggestionForSection:section];
+}
+
+void AutofillDialogCocoa::ActivateInput(const DetailInput& input) {
+  [sheet_delegate_ activateFieldForInput:input];
+}
+
+gfx::Size AutofillDialogCocoa::GetSize() const {
+  return gfx::Size(NSSizeToCGSize([[sheet_delegate_ window] frame].size));
+}
+
 void AutofillDialogCocoa::OnConstrainedWindowClosed(
     ConstrainedWindowMac* window) {
   constrained_window_.reset();
-  // |this| belongs to |controller_|, so no self-destruction here.
-  controller_->ViewClosed();
+  // |this| belongs to |delegate_|, so no self-destruction here.
+  delegate_->ViewClosed();
 }
 
 }  // autofill
 
 #pragma mark Window Controller
+
+@interface AutofillDialogWindowController ()
+
+// Notification that the WebContent's view frame has changed.
+- (void)onContentViewFrameDidChange:(NSNotification*)notification;
+
+@end
 
 @implementation AutofillDialogWindowController
 
@@ -145,12 +220,12 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
     autofillDialog_ = autofillDialog;
 
     mainContainer_.reset([[AutofillMainContainer alloc]
-                             initWithController:autofillDialog->controller()]);
+                             initWithDelegate:autofillDialog->delegate()]);
     [mainContainer_ setTarget:self];
 
     signInContainer_.reset(
         [[AutofillSignInContainer alloc]
-            initWithController:autofillDialog->controller()]);
+            initWithDelegate:autofillDialog->delegate()]);
     [[signInContainer_ view] setHidden:YES];
 
     NSRect clientRect = [[mainContainer_ view] frame];
@@ -164,7 +239,7 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
     headerRect.origin.y = NSMaxY(clientRect);
     accountChooser_.reset([[AutofillAccountChooser alloc]
                               initWithFrame:headerRect
-                                 controller:autofillDialog->controller()]);
+                                 delegate:autofillDialog->delegate()]);
 
     // This needs a flipped content view because otherwise the size
     // animation looks odd. However, replacing the contentView for constrained
@@ -176,16 +251,36 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
     [flippedContentView setAutoresizingMask:
         (NSViewWidthSizable | NSViewHeightSizable)];
     [[[self window] contentView] addSubview:flippedContentView];
+    [mainContainer_ setAnchorView:[[accountChooser_ subviews] objectAtIndex:1]];
 
     NSRect contentRect = clientRect;
-    contentRect.origin = NSMakePoint(0, 0);
+    contentRect.origin = NSZeroPoint;
     contentRect.size.width += 2 * chrome_style::kHorizontalPadding;
     contentRect.size.height += NSHeight(headerRect) +
                                chrome_style::kClientBottomPadding +
                                chrome_style::kTitleTopPadding;
     [self performLayout];
+
+    // Resizing the browser causes the ConstrainedWindow to move.
+    // Observe that to allow resizes based on browser size.
+    NSView* contentView = [[self window] contentView];
+    [contentView setPostsFrameChangedNotifications:YES];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(onContentViewFrameDidChange:)
+               name:NSWindowDidMoveNotification
+             object:[self window]];
   }
   return self;
+}
+
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [super dealloc];
+}
+
+- (void)onContentViewFrameDidChange:(NSNotification*)notification {
+  [self performLayout];
 }
 
 - (void)requestRelayout {
@@ -201,18 +296,25 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
   NSSize headerSize = NSMakeSize(contentSize.width, kAccountChooserHeight);
   NSSize size = NSMakeSize(
       std::max(contentSize.width, headerSize.width),
-      contentSize.height + headerSize.height + kRelatedControlVerticalSpacing);
+      contentSize.height + headerSize.height + kDetailTopPadding);
   size.width += 2 * chrome_style::kHorizontalPadding;
   size.height += chrome_style::kClientBottomPadding +
                  chrome_style::kTitleTopPadding;
+
+  // Show as much of the main view as is possible without going past the
+  // bottom of the browser window.
+  NSRect dialogFrameRect = [[self window] frame];
+  NSRect browserFrameRect =
+      [webContents_->GetView()->GetTopLevelNativeWindow() frame];
+  dialogFrameRect.size.height =
+      NSMaxY(dialogFrameRect) - NSMinY(browserFrameRect);
+  dialogFrameRect = [[self window] contentRectForFrameRect:dialogFrameRect];
+  size.height = std::min(NSHeight(dialogFrameRect), size.height);
+
   return size;
 }
 
 - (void)performLayout {
-  // Don't animate when we first show the window.
-  BOOL shouldAnimate =
-      !NSEqualRects(ui::kWindowSizeDeterminedLater, [[self window] frame]);
-
   NSRect contentRect = NSZeroRect;
   contentRect.size = [self preferredSize];
   NSRect clientRect = NSInsetRect(
@@ -221,9 +323,11 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
   clientRect.size.height -= chrome_style::kTitleTopPadding +
                             chrome_style::kClientBottomPadding;
 
-  NSRect headerRect, mainRect;
+  NSRect headerRect, mainRect, dummyRect;
   NSDivideRect(clientRect, &headerRect, &mainRect,
                kAccountChooserHeight, NSMinYEdge);
+  NSDivideRect(mainRect, &dummyRect, &mainRect,
+               kDetailTopPadding, NSMinYEdge);
 
   [accountChooser_ setFrame:headerRect];
   if ([[signInContainer_ view] isHidden]) {
@@ -234,26 +338,40 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
   }
 
   NSRect frameRect = [[self window] frameRectForContentRect:contentRect];
-  [[self window] setFrame:frameRect display:YES animate:shouldAnimate];
+  [[self window] setFrame:frameRect display:YES];
 }
 
 - (IBAction)accept:(id)sender {
-  // TODO(groby): Validation goes here.
-  autofillDialog_->controller()->OnAccept();
+  if ([mainContainer_ validate])
+    autofillDialog_->delegate()->OnAccept();
 }
 
 - (IBAction)cancel:(id)sender {
-  // TODO(groby): Validation goes here.
-  autofillDialog_->controller()->OnCancel();
-  autofillDialog_->Hide();
+  autofillDialog_->delegate()->OnCancel();
+  autofillDialog_->PerformClose();
+}
+
+- (void)hide {
+  autofillDialog_->delegate()->OnCancel();
+  autofillDialog_->PerformClose();
+}
+
+- (void)updateNotificationArea {
+  [mainContainer_ updateNotificationArea];
 }
 
 - (void)updateAccountChooser {
   [accountChooser_ update];
+  [mainContainer_ updateLegalDocuments];
 }
 
 - (void)updateSection:(autofill::DialogSection)section {
   [[mainContainer_ sectionForId:section] update];
+}
+
+- (void)fillSection:(autofill::DialogSection)section
+           forInput:(const autofill::DetailInput&)input {
+  [[mainContainer_ sectionForId:section] fillForInput:input];
 }
 
 - (content::NavigationController*)showSignIn {
@@ -270,6 +388,10 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
   [[mainContainer_ sectionForId:section] getInputs:output];
 }
 
+- (BOOL)saveDetailsLocally {
+  return [mainContainer_ saveDetailsLocally];
+}
+
 - (void)hideSignIn {
   [[signInContainer_ view] setHidden:YES];
   [[mainContainer_ view] setHidden:NO];
@@ -278,6 +400,32 @@ void AutofillDialogCocoa::OnConstrainedWindowClosed(
 
 - (void)modelChanged {
   [mainContainer_ modelChanged];
+}
+
+@end
+
+
+@implementation AutofillDialogWindowController (TestableAutofillDialogView)
+
+- (void)setTextContents:(NSString*)text
+               forInput:(const autofill::DetailInput&)input {
+  for (size_t i = autofill::SECTION_MIN; i <= autofill::SECTION_MAX; ++i) {
+    autofill::DialogSection section = static_cast<autofill::DialogSection>(i);
+    // TODO(groby): Need to find the section for an input directly - wasteful.
+    [[mainContainer_ sectionForId:section] setFieldValue:text forInput:input];
+  }
+}
+
+- (void)setTextContents:(NSString*)text
+ ofSuggestionForSection:(autofill::DialogSection)section {
+  [[mainContainer_ sectionForId:section] setSuggestionFieldValue:text];
+}
+
+- (void)activateFieldForInput:(const autofill::DetailInput&)input {
+  for (size_t i = autofill::SECTION_MIN; i <= autofill::SECTION_MAX; ++i) {
+    autofill::DialogSection section = static_cast<autofill::DialogSection>(i);
+    [[mainContainer_ sectionForId:section] activateFieldForInput:input];
+  }
 }
 
 @end

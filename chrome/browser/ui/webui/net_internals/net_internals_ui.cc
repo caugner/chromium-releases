@@ -17,7 +17,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/platform_file.h"
 #include "base/prefs/pref_member.h"
 #include "base/sequenced_task_runner_helpers.h"
@@ -31,6 +31,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -38,17 +39,16 @@
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/connection_tester.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
 #include "chrome/common/cancelable_task_tracker.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -78,12 +78,11 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/system/syslogs_provider.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/debug_daemon_client.h"
-#include "chromeos/network/certificate_handler.h"
+#include "chromeos/network/onc/onc_certificate_importer_impl.h"
 #include "chromeos/network/onc/onc_constants.h"
 #include "chromeos/network/onc/onc_utils.h"
 #endif
@@ -323,7 +322,7 @@ void CloseDebugLogFile(PassPlatformFile pass_platform_file) {
 void CloseAndDeleteDebugLogFile(PassPlatformFile pass_platform_file,
                                 const base::FilePath& file_path) {
   CloseDebugLogFile(pass_platform_file);
-  file_util::Delete(file_path, false);
+  base::DeleteFile(file_path, false);
 }
 
 // Called upon completion of |WriteDebugLogToFile|. Closes file
@@ -556,7 +555,6 @@ class NetInternalsMessageHandler::IOThreadImpl
   void OnGetBadProxies(const ListValue* list);
   void OnClearBadProxies(const ListValue* list);
   void OnGetHostResolverInfo(const ListValue* list);
-  void OnRunIPv6Probe(const ListValue* list);
   void OnClearHostResolverCache(const ListValue* list);
   void OnEnableIPv6(const ListValue* list);
   void OnStartConnectionTests(const ListValue* list);
@@ -720,10 +718,6 @@ void NetInternalsMessageHandler::RegisterMessages() {
       "getHostResolverInfo",
       base::Bind(&IOThreadImpl::CallbackHelper,
                  &IOThreadImpl::OnGetHostResolverInfo, proxy_));
-  web_ui()->RegisterMessageCallback(
-      "onRunIPv6Probe",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnRunIPv6Probe, proxy_));
   web_ui()->RegisterMessageCallback(
       "clearHostResolverCache",
       base::Bind(&IOThreadImpl::CallbackHelper,
@@ -1207,17 +1201,6 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverInfo(
   SendJavascriptCommand("receivedHostResolverInfo", dict);
 }
 
-void NetInternalsMessageHandler::IOThreadImpl::OnRunIPv6Probe(
-    const ListValue* list) {
-  DCHECK(!list);
-  net::HostResolver* resolver = GetMainContext()->host_resolver();
-
-  // Have to set the default address family manually before calling
-  // ProbeIPv6Support.
-  resolver->SetDefaultAddressFamily(net::ADDRESS_FAMILY_UNSPECIFIED);
-  resolver->ProbeIPv6Support();
-}
-
 void NetInternalsMessageHandler::IOThreadImpl::OnClearHostResolverCache(
     const ListValue* list) {
   DCHECK(!list);
@@ -1568,22 +1551,23 @@ void NetInternalsMessageHandler::OnImportONCFile(const ListValue* list) {
   std::string error;
   if (!chromeos::onc::ParseAndValidateOncForImport(
           onc_blob, onc_source, passcode, &network_configs, &certificates)) {
-    error = "Errors occurred during the ONC parsing.";
+    error = "Errors occurred during the ONC parsing. ";
+    LOG(ERROR) << error;
+  }
+
+  chromeos::onc::CertificateImporterImpl cert_importer;
+  if (!cert_importer.ImportCertificates(certificates, onc_source, NULL)) {
+    error += "Some certificates couldn't be imported. ";
     LOG(ERROR) << error;
   }
 
   chromeos::NetworkLibrary* network_library =
-      chromeos::CrosLibrary::Get()->GetNetworkLibrary();
+      chromeos::NetworkLibrary::Get();
   network_library->LoadOncNetworks(network_configs, onc_source);
+
   // Now that we've added the networks, we need to rescan them so they'll be
   // available from the menu more immediately.
   network_library->RequestNetworkScan();
-
-  chromeos::CertificateHandler certificate_handler;
-  if (!certificate_handler.ImportCertificates(certificates, onc_source, NULL)) {
-    error += "Some certificates couldn't be imported.";
-    LOG(ERROR) << error;
-  }
 
   SendJavascriptCommand("receivedONCFileParse",
                         Value::CreateStringValue(error));

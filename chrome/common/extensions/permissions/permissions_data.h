@@ -64,6 +64,10 @@ class PermissionsData {
       const Extension* extension);
   static APIPermissionSet* GetInitialAPIPermissions(Extension* extension);
 
+  // Set the scriptable hosts for the given |extension| during initialization.
+  static void SetInitialScriptableHosts(Extension* extension,
+                                        const URLPatternSet& scriptable_hosts);
+
   // Return the active (runtime) permissions for the given |extension|.
   static scoped_refptr<const PermissionSet> GetActivePermissions(
       const Extension* extension);
@@ -89,10 +93,13 @@ class PermissionsData {
   // Returns true if the |extension| has the given |permission|. Prefer
   // IsExtensionWithPermissionOrSuggestInConsole when developers may be using an
   // api that requires a permission they didn't know about, e.g. open web apis.
+  // Note this does not include APIs with no corresponding permission, like
+  // "runtime" or "browserAction".
+  // TODO(mpcomplete): drop the "API" from these names, it's confusing.
   static bool HasAPIPermission(const Extension* extension,
                                APIPermission::ID permission);
   static bool HasAPIPermission(const Extension* extension,
-                               const std::string& function_name);
+                               const std::string& permission_name);
   static bool HasAPIPermissionForTab(const Extension* extension,
                                      int tab_id,
                                      APIPermission::ID permission);
@@ -134,6 +141,12 @@ class PermissionsData {
   // should display at install time. The messages are returned as strings
   // for convenience.
   static std::vector<string16> GetPermissionMessageStrings(
+      const Extension* extension);
+
+  // Returns the full list of permission details for messages that the given
+  // |extension| should display at install time. The messages are returned as
+  // strings for convenience.
+  static std::vector<string16> GetPermissionMessageDetailsStrings(
       const Extension* extension);
 
   // Returns true if the given |extension| can execute script on a page. If a

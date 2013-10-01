@@ -4,6 +4,9 @@
 
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 
+#include "apps/native_app_window.h"
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "ash/ash_switches.h"
 #include "ash/display/display_controller.h"
 #include "ash/launcher/launcher.h"
@@ -16,6 +19,7 @@
 #include "ash/wm/window_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/automation/automation_util.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
@@ -23,7 +27,6 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/ash/launcher/browser_shortcut_launcher_item_controller.h"
@@ -32,25 +35,25 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/app_list/views/apps_grid_view.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
 
+using apps::ShellWindow;
 using extensions::Extension;
 using content::WebContents;
 
@@ -69,16 +72,16 @@ class TestEvent : public ui::Event {
 };
 
 class TestShellWindowRegistryObserver
-    : public extensions::ShellWindowRegistry::Observer {
+    : public apps::ShellWindowRegistry::Observer {
  public:
   explicit TestShellWindowRegistryObserver(Profile* profile)
       : profile_(profile),
         icon_updates_(0) {
-    extensions::ShellWindowRegistry::Get(profile_)->AddObserver(this);
+    apps::ShellWindowRegistry::Get(profile_)->AddObserver(this);
   }
 
   virtual ~TestShellWindowRegistryObserver() {
-    extensions::ShellWindowRegistry::Get(profile_)->RemoveObserver(this);
+    apps::ShellWindowRegistry::Get(profile_)->RemoveObserver(this);
   }
 
   // Overridden from ShellWindowRegistry::Observer:
@@ -694,7 +697,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformPerAppAppBrowserTest,
                        AppPanelClickBehavior) {
   // Enable experimental APIs to allow panel creation.
   CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableExperimentalExtensionApis);
+      extensions::switches::kEnableExperimentalExtensionApis);
   // Launch a platform app and create a panel window for it.
   const Extension* extension1 = LoadAndLaunchPlatformApp("launch");
   ShellWindow::CreateParams params;
@@ -751,7 +754,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformPerAppAppBrowserTest, SetIcon) {
 
   // Enable experimental APIs to allow panel creation.
   CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableExperimentalExtensionApis);
+      extensions::switches::kEnableExperimentalExtensionApis);
 
   int base_launcher_item_count = launcher_model()->item_count();
   ExtensionTestMessageListener launched_listener("Launched", false);
@@ -1340,6 +1343,66 @@ IN_PROC_BROWSER_TEST_F(LauncherPerAppAppBrowserTestNoDefaultBrowser,
   // After activation our browser should be active again.
   launcher_->ActivateLauncherItem(0);
   EXPECT_EQ(window1, ash::wm::GetActiveWindow());
+}
+
+// Checks that after a session restore, we do not start applications on an
+// activation.
+IN_PROC_BROWSER_TEST_F(LauncherPerAppAppBrowserTest,
+    ActivateAfterSessionRestore) {
+  EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
+
+  // Create a known application.
+  ChromeLauncherController* controller =
+      static_cast<ChromeLauncherController*>(launcher_->delegate());
+  ash::LauncherID shortcut_id = CreateShortcut("app1");
+
+  // Create a new browser - without activating it - and load an "app" into it.
+  Browser::CreateParams params =
+      Browser::CreateParams(profile(), chrome::GetActiveDesktop());
+  params.initial_show_state = ui::SHOW_STATE_INACTIVE;
+  Browser* browser2 = new Browser(params);
+  controller->SetRefocusURLPatternForTest(
+      shortcut_id, GURL("http://www.example.com/path/*"));
+  std::string url = "http://www.example.com/path/bla";
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser2,
+      GURL(url),
+      NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+
+  // Remember the number of tabs for each browser.
+  TabStripModel* tab_strip = browser()->tab_strip_model();
+  int tab_count1 = tab_strip->count();
+  TabStripModel* tab_strip2 = browser2->tab_strip_model();
+  int tab_count2 = tab_strip2->count();
+
+  // Check that we have two browsers and the inactive browser remained inactive.
+  EXPECT_EQ(2u, chrome::GetTotalBrowserCount());
+  EXPECT_EQ(chrome::FindBrowserWithWindow(ash::wm::GetActiveWindow()),
+            browser());
+  // Check that the LRU browser list does only contain the original browser.
+  BrowserList* ash_browser_list =
+      BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
+  BrowserList::const_reverse_iterator it =
+      ash_browser_list->begin_last_active();
+  EXPECT_EQ(*it, browser());
+  ++it;
+  EXPECT_EQ(it, ash_browser_list->end_last_active());
+
+  // Now request to either activate an existing app or create a new one.
+  controller->ItemSelected(*model_->ItemByID(shortcut_id),
+                           ui::KeyEvent(ui::ET_KEY_RELEASED,
+                                        ui::VKEY_RETURN,
+                                        0,
+                                        false));
+
+  // Check that we have set focus on the existing application and nothing new
+  // was created.
+  EXPECT_EQ(2u, chrome::GetTotalBrowserCount());
+  EXPECT_EQ(tab_count1, tab_strip->count());
+  EXPECT_EQ(tab_count2, tab_strip2->count());
+  EXPECT_EQ(chrome::FindBrowserWithWindow(ash::wm::GetActiveWindow()),
+            browser2);
 }
 
 // Do various drag and drop interaction tests between the application list and

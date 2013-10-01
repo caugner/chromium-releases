@@ -32,6 +32,20 @@
 #managed-user-creation .below-marketing {
   font-size: 12px;
   line-height: 18px;
+  max-height: 184px;
+  overflow-x: auto;
+}
+
+.below-marketing::-webkit-scrollbar {
+  width: 8px;
+}
+
+.below-marketing::-webkit-scrollbar-track-piece {
+  background: #888
+}
+
+.below-marketing::-webkit-scrollbar-thumb {
+  background: #eee
 }
 
 #managed-user-creation .page-no-marketing {
@@ -45,9 +59,9 @@
   line-height: 24px;
 }
 
-#managed-user-creation strong {
+.below-marketing strong {
   color: #000;
-  font-weight: normal;
+  font-weight: bold;
 }
 
 #managed-user-creation .page-title-explanation {
@@ -85,14 +99,33 @@
 }
 
 #managed-user-creation-intro .below-marketing {
-  margin: 40px 40px 0;
+  margin: 20px 40px 0;
+}
+
+#managed-user-creation-intro-alternate-text {
+  margin-bottom: 12px;
+  margin-top: 12px;
+}
+
+#managed-user-creation-intro-text-3 {
+  margin-top: 12px;
 }
 
 #managed-user-creation-created-1 .below-marketing {
-  margin: 55px 100px 0;
+  margin: 20px 40px 0;
 }
 
-#managed-user-creation-created-1-text-2,
+#managed-user-creation-created-1-text-1 {
+  max-width: 600px;
+  word-wrap: break-word;
+}
+
+#managed-user-creation-created-1-text-2 {
+  margin-top: 20px;
+  max-width: 600px;
+  word-wrap: break-word;
+}
+
 #managed-user-creation-created-1-text-3 {
   margin-top: 20px;
 }
@@ -107,6 +140,8 @@
   margin-top: 10px;
 }
 
+input.managed-user-creation-manager-password,
+#managed-user-creation-name,
 #managed-user-creation-password {
   padding: 4px 6px;
 }
@@ -139,8 +174,17 @@
 }
 
 #managed-user-creation-error {
-  padding: 100px 50px;
+  padding: 175px 120px 0;
   text-align: center;
+}
+
+#managed-user-creation-error .error-icon {
+  -webkit-margin-after: 50px;
+}
+
+#managed-user-creation-error  .error-message-paragraph {
+  -webkit-margin-after: 40px;
+  -webkit-margin-before: 30px;
 }
 
 .screen-control-button {
@@ -185,11 +229,13 @@
 .manager-pod .managed-user-creation-manager-email {
   color: #666;
   font-size: small;
+  max-height: 16px;
 }
 
 .manager-pod .managed-user-creation-manager-name {
   color: #000;
   font-size: small;
+  max-height: 16px;
 }
 
 #managed-user-creation-status {
@@ -200,8 +246,17 @@
   color: rgb(207, 93, 70);
 }
 
+#managed-user-creation-status .spinner-wrapper {
+  -webkit-margin-start: 3px;
+  display: -webkit-inline-box;
+  margin-top: 3px;
+  vertical-align: top;
+}
+
 #managed-user-creation-status .id-text {
-  margin-top: 2px;
+  display: -webkit-inline-box;
+  margin-top: 1px;
+  vertical-align: baseline;
 }
 
 .manager-pod.focused {
@@ -218,7 +273,8 @@
 }
 
 .manager-pod .password-error,
-#managed-user-creation .password-error {
+#managed-user-creation .password-error,
+#managed-user-creation .duplicate-name {
   border: 1px solid red !important;
 }
 

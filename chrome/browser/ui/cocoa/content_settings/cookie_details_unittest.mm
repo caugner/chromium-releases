@@ -5,10 +5,10 @@
 #include "base/strings/sys_string_conversions.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/ui/cocoa/content_settings/cookie_details.h"
-#include "googleurl/src/gurl.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/parsed_cookie.h"
 #import "testing/gtest_mac.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -142,7 +142,8 @@ TEST_F(CookiesDetailsTest, CreateForTreeIndexedDB) {
   content::IndexedDBInfo info(origin,
                               size,
                               last_modified,
-                              file_path);
+                              file_path,
+                              0);
 
   details.reset([[CocoaCookieDetails alloc] initWithIndexedDBInfo:&info]);
 

@@ -119,9 +119,9 @@ void TestRenderPass::AppendOneOfEveryQuadType(
                              resource5,
                              rect,
                              gfx::RectF(),
-                             WebKit::WebFilterOperations(),
+                             FilterOperations(),
                              skia::RefPtr<SkImageFilter>(),
-                             WebKit::WebFilterOperations());
+                             FilterOperations());
     AppendQuad(render_pass_quad.PassAs<DrawQuad>());
 
     scoped_ptr<cc::RenderPassDrawQuad> render_pass_replica_quad =
@@ -133,9 +133,9 @@ void TestRenderPass::AppendOneOfEveryQuadType(
                                      resource5,
                                      rect,
                                      gfx::RectF(),
-                                     WebKit::WebFilterOperations(),
+                                     FilterOperations(),
                                      skia::RefPtr<SkImageFilter>(),
-                                     WebKit::WebFilterOperations());
+                                     FilterOperations());
     AppendQuad(render_pass_replica_quad.PassAs<DrawQuad>());
   }
 
@@ -165,6 +165,7 @@ void TestRenderPass::AppendOneOfEveryQuadType(
                        false,
                        gfx::PointF(0.f, 0.f),
                        gfx::PointF(1.f, 1.f),
+                       SK_ColorTRANSPARENT,
                        vertex_opacity,
                        false);
   AppendQuad(texture_quad.PassAs<DrawQuad>());

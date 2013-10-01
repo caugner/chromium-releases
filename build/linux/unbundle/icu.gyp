@@ -33,12 +33,12 @@
       'dependencies': ['system_icu'],
       'export_dependent_settings': ['system_icu'],
       'variables': {
-        'headers_root_path': 'public/i18n',
+        'headers_root_path': 'source/i18n',
         'header_filenames': [
           # This list can easily be updated using the command below:
-          # find third_party/icu/public/i18n -iname '*.h' \
+          # find third_party/icu/source/i18n/unicode -iname '*.h' \
           # -printf "'%p',\n" | \
-          # sed -e 's|third_party/icu/public/i18n/||' | sort -u
+          # sed -e 's|third_party/icu/source/i18n/||' | sort -u
           'unicode/basictz.h',
           'unicode/bmsearch.h',
           'unicode/bms.h',
@@ -119,12 +119,12 @@
       'dependencies': ['system_icu'],
       'export_dependent_settings': ['system_icu'],
       'variables': {
-        'headers_root_path': 'public/common',
+        'headers_root_path': 'source/common',
         'header_filenames': [
           # This list can easily be updated using the command below:
-          # find third_party/icu/public/common -iname '*.h' \
+          # find third_party/icu/source/common/unicode -iname '*.h' \
           # -printf "'%p',\n" | \
-          # sed -e 's|third_party/icu/public/common/||' | sort -u
+          # sed -e 's|third_party/icu/source/common/||' | sort -u
           'unicode/brkiter.h',
           'unicode/bytestream.h',
           'unicode/caniter.h',

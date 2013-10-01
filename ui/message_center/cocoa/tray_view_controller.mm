@@ -7,7 +7,7 @@
 #include <cmath>
 
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "grit/ui_resources.h"
 #include "grit/ui_strings.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -35,7 +35,7 @@ const int kBackButtonSize = 16;
   frozen_ = frozen;
 }
 
--(NSPoint)constrainScrollPoint:(NSPoint)proposedNewOrigin {
+- (NSPoint)constrainScrollPoint:(NSPoint)proposedNewOrigin {
   return frozen_ ? [self documentVisibleRect].origin :
       [super constrainScrollPoint:proposedNewOrigin];
 }
@@ -69,6 +69,9 @@ const int kBackButtonSize = 16;
 // When all visible notificatons slide out, re-enable controls and remove
 // notifications from the message center.
 - (void)finalizeClearAll;
+
+// Sets the images of the quiet mode button based on the message center state.
+- (void)updateQuietModeButtonImage;
 @end
 
 namespace {
@@ -105,6 +108,15 @@ const CGFloat kTrayBottomMargin = 75;
     notificationsPendingRemoval_.reset([[NSMutableArray alloc] init]);
   }
   return self;
+}
+
+- (NSString*)trayTitle {
+  return [title_ stringValue];
+}
+
+- (void)setTrayTitle:(NSString*)title {
+  [title_ setStringValue:title];
+  [title_ sizeToFit];
 }
 
 - (void)onWindowClosing {
@@ -159,13 +171,6 @@ const CGFloat kTrayBottomMargin = 75;
 - (void)onMessageCenterTrayChanged {
   if (settingsController_)
     return [self updateTrayViewAndWindow];
-
-  // When the window is visible, the only update is to remove notifications
-  // dismissed by the user.
-  if ([[[self view] window] isVisible]) {
-    [self closeNotificationsByUser];
-    return;
-  }
 
   std::map<std::string, MCNotificationController*> newMap;
 
@@ -230,18 +235,12 @@ const CGFloat kTrayBottomMargin = 75;
 }
 
 - (void)toggleQuietMode:(id)sender {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  if (messageCenter_->IsQuietMode()) {
+  if (messageCenter_->IsQuietMode())
     messageCenter_->SetQuietMode(false);
-    [pauseButton_ setTrackingEnabled:YES];
-    [pauseButton_ setDefaultImage:
-        rb.GetNativeImageNamed(IDR_NOTIFICATION_PAUSE).ToNSImage()];
-  } else {
+  else
     messageCenter_->EnterQuietModeWithExpire(base::TimeDelta::FromDays(1));
-    [pauseButton_ setTrackingEnabled:NO];
-    [pauseButton_ setDefaultImage:
-        rb.GetNativeImageNamed(IDR_NOTIFICATION_PAUSE_PRESSED).ToNSImage()];
-  }
+
+  [self updateQuietModeButtonImage];
 }
 
 - (void)clearAllNotifications:(id)sender {
@@ -283,7 +282,8 @@ const CGFloat kTrayBottomMargin = 75;
   message_center::NotifierSettingsProvider* provider =
       messageCenter_->GetNotifierSettingsProvider();
   settingsController_.reset(
-      [[MCSettingsController alloc] initWithProvider:provider]);
+      [[MCSettingsController alloc] initWithProvider:provider
+                                  trayViewController:self]);
 
   [[self view] addSubview:[settingsController_ view]];
 
@@ -297,6 +297,17 @@ const CGFloat kTrayBottomMargin = 75;
   [scrollView_ setHidden:YES];
 
   [[[self view] window] recalculateKeyViewLoop];
+
+  [self updateTrayViewAndWindow];
+}
+
+- (void)updateSettings {
+  // TODO(jianli): This class should not be calling -loadView, but instead
+  // should just observe a resize notification.
+  // (http://crbug.com/270251)
+  [[settingsController_ view] removeFromSuperview];
+  [settingsController_ loadView];
+  [[self view] addSubview:[settingsController_ view]];
 
   [self updateTrayViewAndWindow];
 }
@@ -489,16 +500,13 @@ const CGFloat kTrayBottomMargin = 75;
   [view addSubview:clearAllButton_];
 
   // Create the pause button.
-  defaultImage = rb.GetNativeImageNamed(IDR_NOTIFICATION_PAUSE).ToNSImage();
   NSRect pauseButtonFrame = getButtonFrame(
       NSMinX(clearAllButtonFrame) - kButtonXMargin,
       defaultImage);
   pauseButton_.reset([[HoverImageButton alloc] initWithFrame:pauseButtonFrame]);
-  [pauseButton_ setDefaultImage:defaultImage];
-  [pauseButton_ setHoverImage:
-      rb.GetNativeImageNamed(IDR_NOTIFICATION_PAUSE_HOVER).ToNSImage()];
-  [pauseButton_ setPressedImage:
-      rb.GetNativeImageNamed(IDR_NOTIFICATION_PAUSE_PRESSED).ToNSImage()];
+  [self updateQuietModeButtonImage];
+  [pauseButton_ setHoverImage: rb.GetNativeImageNamed(
+      IDR_NOTIFICATION_DO_NOT_DISTURB_HOVER).ToNSImage()];
   [pauseButton_ setToolTip:
       l10n_util::GetNSString(IDS_MESSAGE_CENTER_QUIET_MODE_BUTTON_TOOLTIP)];
   [[pauseButton_ cell]
@@ -733,6 +741,19 @@ const CGFloat kTrayBottomMargin = 75;
   [clipView_ setFrozen:NO];
 
   messageCenter_->RemoveAllNotifications(true);
+}
+
+- (void)updateQuietModeButtonImage {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  if (messageCenter_->IsQuietMode()) {
+    [pauseButton_ setTrackingEnabled:NO];
+    [pauseButton_ setDefaultImage: rb.GetNativeImageNamed(
+        IDR_NOTIFICATION_DO_NOT_DISTURB_PRESSED).ToNSImage()];
+  } else {
+    [pauseButton_ setTrackingEnabled:YES];
+    [pauseButton_ setDefaultImage:
+        rb.GetNativeImageNamed(IDR_NOTIFICATION_DO_NOT_DISTURB).ToNSImage()];
+  }
 }
 
 @end

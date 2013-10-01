@@ -10,6 +10,7 @@ from StringIO import StringIO
 import appengine_blobstore as blobstore
 from appengine_url_fetcher import AppEngineUrlFetcher
 from appengine_wrappers import GetAppVersion, urlfetch
+from docs_server_utils import StringIdentity
 from file_system import FileSystem, StatInfo
 from future import Future
 from object_store_creator import ObjectStoreCreator
@@ -70,17 +71,16 @@ class GithubFileSystem(FileSystem):
   @staticmethod
   def Create(object_store_creator):
     return GithubFileSystem(
-        AppEngineUrlFetcher(url_constants.GITHUB_URL),
+        url_constants.GITHUB_URL,
         blobstore.AppEngineBlobstore(),
         object_store_creator)
 
-  def __init__(self, fetcher, blobstore, object_store_creator):
-    # Password store doesn't depend on channel, and if we don't cancel the app
-    # version then the whole advantage of having it in the first place is
-    # greatly lessened (likewise it should always start populated).
+  def __init__(self, url, blobstore, object_store_creator):
+    # If we key the password store on the app version then the whole advantage
+    # of having it in the first place is greatly lessened (likewise it should
+    # always start populated).
     password_store = object_store_creator.Create(
         GithubFileSystem,
-        channel=None,
         app_version=None,
         category='password',
         start_empty=False)
@@ -92,12 +92,10 @@ class GithubFileSystem(FileSystem):
       password_store.SetMulti({'username': USERNAME, 'password': PASSWORD})
       self._username, self._password = (USERNAME, PASSWORD)
 
-    self._fetcher = fetcher
+    self._url = url
+    self._fetcher = AppEngineUrlFetcher(url)
     self._blobstore = blobstore
-    # Github has no knowledge of Chrome channels, set channel to None.
-    self._stat_object_store = object_store_creator.Create(
-        GithubFileSystem,
-        channel=None)
+    self._stat_object_store = object_store_creator.Create(GithubFileSystem)
     self._version = None
     self._GetZip(self.Stat(ZIP_KEY).version)
 
@@ -182,24 +180,29 @@ class GithubFileSystem(FileSystem):
                                    username=USERNAME,
                                    password=PASSWORD)
     except urlfetch.DownloadError as e:
-      logging.error('GithubFileSystem Stat: %s' % e)
+      logging.warning('GithubFileSystem Stat: %s' % e)
       return self._DefaultStat(path)
+
     # Check if Github authentication failed.
     if result.status_code == 401:
-      logging.error('Github authentication failed for %s, falling back to '
-                    'unauthenticated.' % USERNAME)
+      logging.warning('Github authentication failed for %s, falling back to '
+                      'unauthenticated.' % USERNAME)
       try:
         result = self._fetcher.Fetch('commits/HEAD')
       except urlfetch.DownloadError as e:
-        logging.error('GithubFileSystem Stat: %s' % e)
+        logging.warning('GithubFileSystem Stat: %s' % e)
         return self._DefaultStat(path)
-    version = (json.loads(result.content).get('commit', {})
-                                         .get('tree', {})
-                                         .get('sha', None))
-    # Check if the JSON was valid, and set to 0 if not.
-    if version is not None:
+
+    # Parse response JSON - but sometimes github gives us invalid JSON.
+    try:
+      version = json.loads(result.content)['commit']['tree']['sha']
       self._stat_object_store.Set(path, version)
-    else:
-      logging.warning('Problem fetching commit hash from github.')
+      return StatInfo(version)
+    except StandardError as e:
+      logging.warning(
+          ('%s: got invalid or unexpected JSON from github. Response status ' +
+           'was %s, content %s') % (e, result.status_code, result.content))
       return self._DefaultStat(path)
-    return StatInfo(version)
+
+  def GetIdentity(self):
+    return '%s@%s' % (self.__class__.__name__, StringIdentity(self._url))

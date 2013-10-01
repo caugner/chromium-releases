@@ -15,7 +15,6 @@
 #include "content/test/content_browser_test_utils.h"
 #include "content/test/net/url_request_mock_http_job.h"
 #include "ui/gfx/rect.h"
-#include "webkit/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
 #include "base/win/registry.h"
@@ -57,10 +56,6 @@ class PluginTest : public ContentBrowserTest {
                       KEY_WRITE) == ERROR_SUCCESS) {
         regkey.CreateKey(L"BROWSER_TESTS.EXE", KEY_READ);
       }
-    } else if (strcmp(test_info->name(), "MediaPlayerOld") == 0) {
-      // When testing the old WMP plugin, we need to force Chrome to not load
-      // the new plugin.
-      command_line->AppendSwitch(switches::kUseOldWMPPlugin);
     } else if (strcmp(test_info->name(), "FlashSecurity") == 0) {
       command_line->AppendSwitchASCII(switches::kTestSandbox,
                                       "security_tests.dll");
@@ -113,7 +108,7 @@ class PluginTest : public ContentBrowserTest {
 
   void TestPlugin(const char* filename) {
     base::FilePath path = GetTestFilePath("plugin", filename);
-    if (!file_util::PathExists(path)) {
+    if (!base::PathExists(path)) {
       const testing::TestInfo* const test_info =
           testing::UnitTest::GetInstance()->current_test_info();
       LOG(INFO) << "PluginTest." << test_info->name() <<
@@ -340,6 +335,10 @@ IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE(PluginThreadAsyncCall)) {
   LoadAndWait(GetURL("plugin_thread_async_call.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(PluginTest, PluginSingleRangeRequest) {
+  LoadAndWait(GetURL("plugin_single_range_request.html"));
+}
+
 // Test checking the privacy mode is on.
 // If this flakes on Linux, use http://crbug.com/104380
 IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE(PrivateEnabled)) {
@@ -430,11 +429,6 @@ IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE(Quicktime)) {
 // Disabled - http://crbug.com/44662
 IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE(MediaPlayerNew)) {
   TestPlugin("wmp_new.html");
-}
-
-// http://crbug.com/4809
-IN_PROC_BROWSER_TEST_F(PluginTest, DISABLED_MediaPlayerOld) {
-  TestPlugin("wmp_old.html");
 }
 
 // Disabled - http://crbug.com/44673

@@ -6,8 +6,9 @@
 #define CHROME_UTILITY_CHROME_CONTENT_UTILITY_CLIENT_H_
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/platform_file.h"
+#include "chrome/common/media_galleries/picasa_types.h"
 #include "content/public/utility/content_utility_client.h"
 #include "ipc/ipc_platform_file.h"
 #include "printing/pdf_render_settings.h"
@@ -27,15 +28,17 @@ struct PageRange;
 
 namespace chrome {
 
-class ProfileImportHandler;
+class UtilityMessageHandler;
 
 class ChromeContentUtilityClient : public content::ContentUtilityClient {
  public:
   ChromeContentUtilityClient();
-  ~ChromeContentUtilityClient();
+  virtual ~ChromeContentUtilityClient();
 
   virtual void UtilityThreadStarted() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+
+  static void PreSandboxStartup();
 
  private:
   // IPC message handlers.
@@ -78,13 +81,30 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   void OnGetPrinterCapsAndDefaults(const std::string& printer_name);
   void OnStartupPing();
   void OnAnalyzeZipFileForDownloadProtection(
-      IPC::PlatformFileForTransit zip_file);
+      const IPC::PlatformFileForTransit& zip_file);
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  void OnCheckMediaFile(int64 milliseconds_of_decoding,
+                        const IPC::PlatformFileForTransit& media_file);
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
 #if defined(OS_WIN)
   void OnParseITunesPrefXml(const std::string& itunes_xml_data);
 #endif  // defined(OS_WIN)
 
-  scoped_ptr<ProfileImportHandler> import_handler_;
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  void OnParseITunesLibraryXmlFile(
+      const IPC::PlatformFileForTransit& itunes_library_file);
+
+  void OnParsePicasaPMPDatabase(
+      const picasa::AlbumTableFilesForTransit& album_table_files);
+
+  void OnIndexPicasaAlbumsContents(
+      const picasa::AlbumUIDSet& album_uids,
+      const std::vector<picasa::FolderINIContents>& folders_inis);
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+  typedef ScopedVector<UtilityMessageHandler> Handlers;
+  Handlers handlers_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentUtilityClient);
 };

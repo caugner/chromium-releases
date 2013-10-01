@@ -15,8 +15,9 @@
 #include "base/nix/xdg_util.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/custom_theme_supplier.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/hover_controller_gtk.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
@@ -298,7 +298,6 @@ void GtkThemeService::Init(Profile* profile) {
   registrar_.Add(prefs::kUsesSystemTheme,
                  base::Bind(&GtkThemeService::OnUsesSystemThemeChanged,
                             base::Unretained(this)));
-  use_gtk_ = profile->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme);
   ThemeService::Init(profile);
 }
 
@@ -309,14 +308,6 @@ gfx::ImageSkia* GtkThemeService::GetImageSkiaNamed(int id) const {
 }
 
 gfx::Image GtkThemeService::GetImageNamed(int id) const {
-  // TODO(akuegel): Remove this once we have the default managed user theme.
-  if (ManagedUserService::ProfileIsManaged(profile())) {
-    if (id == IDR_THEME_FRAME)
-      id = IDR_MANAGED_USER_THEME_FRAME;
-    else if (id == IDR_THEME_FRAME_INACTIVE)
-      id = IDR_MANAGED_USER_THEME_FRAME_INACTIVE;
-  }
-
   // Try to get our cached version:
   ImageCache::const_iterator it = gtk_images_.find(id);
   if (it != gtk_images_.end())
@@ -333,14 +324,6 @@ gfx::Image GtkThemeService::GetImageNamed(int id) const {
 }
 
 SkColor GtkThemeService::GetColor(int id) const {
-  // TODO(akuegel): Remove this once we have the default managed user theme.
-  if (ManagedUserService::ProfileIsManaged(profile())) {
-    if (id == ThemeProperties::COLOR_FRAME)
-      id = ThemeProperties::COLOR_FRAME_MANAGED_USER;
-    else if (id == ThemeProperties::COLOR_FRAME_INACTIVE)
-      id = ThemeProperties::COLOR_FRAME_MANAGED_USER_INACTIVE;
-  }
-
   if (use_gtk_) {
     ColorMap::const_iterator it = colors_.find(id);
     if (it != colors_.end())
@@ -365,18 +348,21 @@ void GtkThemeService::InitThemesFor(content::NotificationObserver* observer) {
 
 void GtkThemeService::SetTheme(const extensions::Extension* extension) {
   profile()->GetPrefs()->SetBoolean(prefs::kUsesSystemTheme, false);
+  use_gtk_ = false;
   LoadDefaultValues();
   ThemeService::SetTheme(extension);
 }
 
 void GtkThemeService::UseDefaultTheme() {
   profile()->GetPrefs()->SetBoolean(prefs::kUsesSystemTheme, false);
+  use_gtk_ = false;
   LoadDefaultValues();
   ThemeService::UseDefaultTheme();
 }
 
 void GtkThemeService::SetNativeTheme() {
   profile()->GetPrefs()->SetBoolean(prefs::kUsesSystemTheme, true);
+  use_gtk_ = true;
   ClearAllThemeData();
   LoadGtkValues();
   NotifyThemeChanged();
@@ -384,6 +370,18 @@ void GtkThemeService::SetNativeTheme() {
 
 bool GtkThemeService::UsingDefaultTheme() const {
   return !use_gtk_ && ThemeService::UsingDefaultTheme();
+}
+
+void GtkThemeService::SetCustomDefaultTheme(
+    scoped_refptr<CustomThemeSupplier> theme_supplier) {
+  profile()->GetPrefs()->SetBoolean(prefs::kUsesSystemTheme, false);
+  use_gtk_ = false;
+  LoadDefaultValues();
+  ThemeService::SetCustomDefaultTheme(theme_supplier);
+}
+
+bool GtkThemeService::ShouldInitWithNativeTheme() const {
+  return profile()->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme);
 }
 
 bool GtkThemeService::UsingNativeTheme() const {
@@ -642,27 +640,23 @@ bool GtkThemeService::DefaultUsesSystemTheme() {
   return false;
 }
 
-void GtkThemeService::ClearAllThemeData() {
-  colors_.clear();
-  tints_.clear();
-
-  ThemeService::ClearAllThemeData();
-}
-
 void GtkThemeService::LoadThemePrefs() {
-  if (use_gtk_) {
-    LoadGtkValues();
-    set_ready();
-  } else {
-    LoadDefaultValues();
-    ThemeService::LoadThemePrefs();
-  }
+  // Initialize the values sent to webkit with the default values.
+  // ThemeService::LoadThemePrefs() will replace them with values for the native
+  // gtk theme if necessary.
+  LoadDefaultValues();
+
+  // This takes care of calling SetNativeTheme() if necessary.
+  ThemeService::LoadThemePrefs();
 
   SetXDGIconTheme();
   RebuildMenuIconSets();
 }
 
 void GtkThemeService::NotifyThemeChanged() {
+  if (!ready_)
+    return;
+
   ThemeService::NotifyThemeChanged();
 
   // Notify all GtkChromeButtons of their new rendering mode:
@@ -695,6 +689,8 @@ void GtkThemeService::NotifyThemeChanged() {
 }
 
 void GtkThemeService::FreePlatformCaches() {
+  colors_.clear();
+  tints_.clear();
   ThemeService::FreePlatformCaches();
   STLDeleteValues(&gtk_images_);
 }

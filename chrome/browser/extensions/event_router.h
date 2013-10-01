@@ -143,6 +143,13 @@ class EventRouter : public content::NotificationObserver,
   virtual void DispatchEventToExtension(const std::string& extension_id,
                                         scoped_ptr<Event> event);
 
+  // Dispatches |event| to the given extension as if the extension has a lazy
+  // listener for it. NOTE: This should be used rarely, for dispatching events
+  // to extensions that haven't had a chance to add their own listeners yet, eg:
+  // newly installed extensions.
+  void DispatchEventWithLazyListener(const std::string& extension_id,
+                                     scoped_ptr<Event> event);
+
   // Record the Event Ack from the renderer. (One less event in-flight.)
   void OnEventAck(Profile* profile, const std::string& extension_id);
 
@@ -267,8 +274,6 @@ class EventRouter : public content::NotificationObserver,
 
   typedef base::hash_map<std::string, Observer*> ObserverMap;
   ObserverMap observers_;
-
-  ActivityLog* activity_log_;
 
   // True if we should dispatch the event signalling that Chrome was updated
   // upon loading an extension.

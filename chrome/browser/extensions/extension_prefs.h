@@ -11,8 +11,9 @@
 
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/extension_scoped_prefs.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/extensions/extension.h"
@@ -187,6 +188,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   // for the App.
   void OnExtensionInstalled(const Extension* extension,
                             Extension::State initial_state,
+                            Blacklist::BlacklistState blacklist_state,
                             const syncer::StringOrdinal& page_ordinal);
 
   // Called when an extension is uninstalled, so that prefs get cleaned up.
@@ -370,6 +372,9 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
 
   // Returns true if the user enabled this extension to be loaded in incognito
   // mode.
+  //
+  // IMPORTANT: you probably want to use ExtensionService::IsIncognitoEnabled
+  // instead of this method.
   bool IsIncognitoEnabled(const std::string& extension_id);
   void SetIsIncognitoEnabled(const std::string& extension_id, bool enabled);
 
@@ -408,6 +413,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   // to install it.
   void SetDelayedInstallInfo(const Extension* extension,
                              Extension::State initial_state,
+                             Blacklist::BlacklistState blacklist_state,
                              DelayReason delay_reason,
                              const syncer::StringOrdinal& page_ordinal);
 
@@ -462,7 +468,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   // found.
   base::Time GetInstallTime(const std::string& extension_id) const;
 
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   bool extensions_disabled() { return extensions_disabled_; }
 
@@ -494,13 +500,6 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
         const std::string& extension_id) const;
   void SetGeometryCache(const std::string& extension_id,
                         scoped_ptr<base::DictionaryValue> cache);
-
-  // The path of the directory containing the last file chosen by the user in
-  // response to a chrome.fileSystem.chooseEntry() call for this extension.
-  bool GetLastChooseEntryDirectory(const std::string& extension_id,
-                                   base::FilePath* result) const;
-  void SetLastChooseEntryDirectory(const std::string& extension_id,
-                                   const base::FilePath& value);
 
  private:
   friend class ExtensionPrefsBlacklistedExtensions;  // Unit test.
@@ -592,6 +591,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   void PopulateExtensionInfoPrefs(const Extension* extension,
                                   const base::Time install_time,
                                   Extension::State initial_state,
+                                  Blacklist::BlacklistState blacklist_state,
                                   base::DictionaryValue* extension_dict);
 
   // Helper function to complete initialization of the values in

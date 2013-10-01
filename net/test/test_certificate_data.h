@@ -9,26 +9,22 @@ static const char kNistSPKIHash[] =
     "\x15\x60\xde\x65\x4e\x03\x9f\xd0\x08\x82"
     "\xa9\x6a\xc4\x65\x8e\x6f\x92\x06\x84\x35";
 
-// kCertSESPKIs contains the SHA1 hashes of the SPKIs of the certse.pem
+// kSatvedaSPKIs contains the SHA1 hashes of the SPKIs of the satveda.pem
 // certificate chain, in order.
-static const char kCertSESPKIs[3][21] = {
-  "\x3f\x6c\xf3\xf1\xc9\xdf\xb6\x63\xa8\x05"
-  "\x44\x75\x9a\xac\x21\x4a\x74\xb2\xa5\xa4",
-  "\xae\x4a\xd7\xf9\xb3\x80\xe1\x12\x93\x32"
-  "\xbb\x52\xde\x5a\x09\x0c\x52\x1b\x33\xd0",
-  "\xb1\x81\x08\x1a\x19\xa4\xc0\x94\x1f\xfa"
-  "\xe8\x95\x28\xc1\x24\xc9\x9b\x34\xac\xc7",
+static const char kSatvedaSPKIs[2][21] = {
+  "\xd6\x2d\x7a\x12\x02\x7f\x9b\x8e\x4f\x2b"
+  "\x07\xc5\xfb\xf9\x2a\x2e\x9a\xcc\x0e\xe3",
+  "\xba\x2e\xb5\xa8\x3e\x13\x23\xd9\x53\x4b"
+  "\x5e\x65\xbc\xe7\xa3\x13\x5d\xd0\xa9\x96",
 };
 
-// kCertSESPKIsSHA256 contains the SHA256 hashes of the SPKIs of the certse.pem
-// certificate chain, in order.
-static const char kCertSESPKIsSHA256[3][33] = {
-  "\x32\xa4\x69\x36\xf0\xae\x10\x71\xe1\x97\xb6\xf8\xf8\x77\x2e\x2a"
-  "\x4e\x3e\xca\x80\xb9\x38\x8c\xfb\xcd\xf0\xf2\xd0\xfb\x67\x76\xe9",
-  "\x39\x35\x7a\x39\x20\x03\x66\xb4\x2e\x14\xc2\x2d\x68\x17\x3e\xe5"
-  "\x7b\xc8\xb4\xad\x4b\x8d\xe8\x9f\xcb\xfc\xaf\x22\xd8\x4d\x8e\xf3",
-  "\x25\xb4\x1b\x50\x6e\x49\x30\x95\x28\x23\xa6\xeb\x9f\x1d\x31\xde"
-  "\xf6\x45\xea\x38\xa5\xc6\xc6\xa9\x6d\x71\x95\x7e\x38\x4d\xf0\x58",
+// kSatvedaSPKIsSHA256 contains the SHA256 hashes of the SPKIs of the
+// satveda.pem certificate chain, in order.
+static const char kSatvedaSPKIsSHA256[2][33] = {
+  "\xb9\x42\xab\xf2\x08\x63\xef\x81\x70\x88\x45\xc4\x39\xa2\x6e\x9c"
+  "\x2f\x9a\xf9\xf4\xcb\x23\x61\xd4\x83\x97\x61\x6d\xf2\x5b\x27\xa8",
+  "\x32\xb6\x4b\x66\x72\x7a\x20\x63\xe4\x06\x6f\x3b\x95\x8c\xb0\xaa"
+  "\xee\x57\x6a\x5e\xce\xfd\x95\x33\x99\xbb\x88\x74\x73\x1d\x95\x87",
 };
 
 // Certificates for test data. They're obtained with:
@@ -785,70 +781,6 @@ const uint8 VARIABLE_IS_NOT_USED MITDN[] = {
   0x6F, 0x67, 0x79, 0x31, 0x15, 0x30, 0x13, 0x06, 0x03, 0x55, 0x04, 0x0B,
   0x13, 0x0C, 0x43, 0x6C, 0x69, 0x65, 0x6E, 0x74, 0x20, 0x43, 0x41, 0x20,
   0x76, 0x31
-};
-
-//  31:d=2  hl=2 l=  91 cons:   SEQUENCE
-//  33:d=3  hl=2 l=  11 cons:    SET
-//  35:d=4  hl=2 l=   9 cons:     SEQUENCE
-//  37:d=5  hl=2 l=   3 prim:      OBJECT            :countryName
-//  42:d=5  hl=2 l=   2 prim:      PRINTABLESTRING   :US
-//  46:d=3  hl=2 l=  24 cons:    SET
-//  48:d=4  hl=2 l=  22 cons:     SEQUENCE
-//  50:d=5  hl=2 l=   3 prim:      OBJECT            :organizationName
-//  55:d=5  hl=2 l=  15 prim:      PRINTABLESTRING   :U.S. Government
-//  72:d=3  hl=2 l=  12 cons:    SET
-//  74:d=4  hl=2 l=  10 cons:     SEQUENCE
-//  76:d=5  hl=2 l=   3 prim:      OBJECT            :organizationalUnitName
-//  81:d=5  hl=2 l=   3 prim:      PRINTABLESTRING   :DoD
-//  86:d=3  hl=2 l=  12 cons:    SET
-//  88:d=4  hl=2 l=  10 cons:     SEQUENCE
-//  90:d=5  hl=2 l=   3 prim:      OBJECT            :organizationalUnitName
-//  95:d=5  hl=2 l=   3 prim:      PRINTABLESTRING   :PKI
-// 100:d=3  hl=2 l=  22 cons:    SET
-// 102:d=4  hl=2 l=  20 cons:     SEQUENCE
-// 104:d=5  hl=2 l=   3 prim:      OBJECT            :commonName
-// 109:d=5  hl=2 l=  13 prim:      PRINTABLESTRING   :DoD Root CA 2
-const uint8 VARIABLE_IS_NOT_USED DodRootCA2DN[] = {
-  0x30, 0x5b, 0x31, 0x0b, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x06, 0x13,
-  0x02, 0x55, 0x53, 0x31, 0x18, 0x30, 0x16, 0x06, 0x03, 0x55, 0x04, 0x0a,
-  0x13, 0x0f, 0x55, 0x2e, 0x53, 0x2e, 0x20, 0x47, 0x6f, 0x76, 0x65, 0x72,
-  0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55,
-  0x04, 0x0b, 0x13, 0x03, 0x44, 0x6f, 0x44, 0x31, 0x0c, 0x30, 0x0a, 0x06,
-  0x03, 0x55, 0x04, 0x0b, 0x13, 0x03, 0x50, 0x4b, 0x49, 0x31, 0x16, 0x30,
-  0x14, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13, 0x0d, 0x44, 0x6f, 0x44, 0x20,
-  0x52, 0x6f, 0x6f, 0x74, 0x20, 0x43, 0x41, 0x20, 0x32
-};
-
-//  33:d=2  hl=2 l=  87 cons:   SEQUENCE
-//  35:d=3  hl=2 l=  11 cons:    SET
-//  37:d=4  hl=2 l=   9 cons:     SEQUENCE
-//  39:d=5  hl=2 l=   3 prim:      OBJECT            :countryName
-//  44:d=5  hl=2 l=   2 prim:      PRINTABLESTRING   :US
-//  48:d=3  hl=2 l=  24 cons:    SET
-//  50:d=4  hl=2 l=  22 cons:     SEQUENCE
-//  52:d=5  hl=2 l=   3 prim:      OBJECT            :organizationName
-//  57:d=5  hl=2 l=  15 prim:      PRINTABLESTRING   :U.S. Government
-//  74:d=3  hl=2 l=  12 cons:    SET
-//  76:d=4  hl=2 l=  10 cons:     SEQUENCE
-//  78:d=5  hl=2 l=   3 prim:      OBJECT            :organizationalUnitName
-//  83:d=5  hl=2 l=   3 prim:      PRINTABLESTRING   :DoD
-//  88:d=3  hl=2 l=  12 cons:    SET
-//  90:d=4  hl=2 l=  10 cons:     SEQUENCE
-//  92:d=5  hl=2 l=   3 prim:      OBJECT            :organizationalUnitName
-//  97:d=5  hl=2 l=   3 prim:      PRINTABLESTRING   :PKI
-// 102:d=3  hl=2 l=  18 cons:    SET
-// 104:d=4  hl=2 l=  16 cons:     SEQUENCE
-// 106:d=5  hl=2 l=   3 prim:      OBJECT            :commonName
-// 111:d=5  hl=2 l=   9 prim:      PRINTABLESTRING   :DOD CA-17
-const uint8 VARIABLE_IS_NOT_USED DodCA17DN[] = {
-  0x30, 0x57, 0x31, 0x0b, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x06, 0x13,
-  0x02, 0x55, 0x53, 0x31, 0x18, 0x30, 0x16, 0x06, 0x03, 0x55, 0x04, 0x0a,
-  0x13, 0x0f, 0x55, 0x2e, 0x53, 0x2e, 0x20, 0x47, 0x6f, 0x76, 0x65, 0x72,
-  0x6e, 0x6d, 0x65, 0x6e, 0x74, 0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55,
-  0x04, 0x0b, 0x13, 0x03, 0x44, 0x6f, 0x44, 0x31, 0x0c, 0x30, 0x0a, 0x06,
-  0x03, 0x55, 0x04, 0x0b, 0x13, 0x03, 0x50, 0x4b, 0x49, 0x31, 0x12, 0x30,
-  0x10, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13, 0x09, 0x44, 0x4f, 0x44, 0x20,
-  0x43, 0x41, 0x2d, 0x31, 0x37
 };
 
 }  // namespace

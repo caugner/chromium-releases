@@ -6,7 +6,7 @@
 #define PPAPI_SHARED_IMPL_TEST_GLOBALS_H_
 
 #include "base/compiler_specific.h"
-#include "base/shared_memory.h"
+#include "base/memory/shared_memory.h"
 #include "ppapi/shared_impl/callback_tracker.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/resource_tracker.h"
@@ -71,6 +71,7 @@ class TestGlobals : public PpapiGlobals {
                                       const std::string& source,
                                       const std::string& value) OVERRIDE;
   virtual MessageLoopShared* GetCurrentMessageLoop() OVERRIDE;
+  virtual base::TaskRunner* GetFileTaskRunner(PP_Instance instance) OVERRIDE;
 
   // PpapiGlobals overrides:
   virtual bool IsHostGlobals() const OVERRIDE;

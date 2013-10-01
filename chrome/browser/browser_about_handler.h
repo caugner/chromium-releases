@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/process.h"
+#include "base/process/process.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"  // USE_TCMALLOC
 
@@ -35,9 +35,6 @@ bool WillHandleBrowserAboutURL(GURL* url,
 // dialogs. This function handles those cases, and returns true if so. In this
 // case, normal tab navigation should be skipped.
 bool HandleNonNavigationAboutURL(const GURL& url);
-
-// Gets the paths that are shown in chrome://chrome-urls.
-std::vector<std::string> ChromePaths();
 
 #if defined(USE_TCMALLOC)
 // A map of header strings (e.g. "Browser", "Renderer PID 123")

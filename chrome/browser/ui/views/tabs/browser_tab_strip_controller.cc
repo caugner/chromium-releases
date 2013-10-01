@@ -8,9 +8,11 @@
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
@@ -21,7 +23,6 @@
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -248,9 +249,12 @@ bool BrowserTabStripController::IsTabPinned(int model_index) const {
 }
 
 bool BrowserTabStripController::IsNewTabPage(int model_index) const {
-  return model_->ContainsIndex(model_index) &&
-      model_->GetWebContentsAt(model_index)->GetURL() ==
-      GURL(chrome::kChromeUINewTabURL);
+  if (!model_->ContainsIndex(model_index))
+    return false;
+
+  const WebContents* contents = model_->GetWebContentsAt(model_index);
+  return contents && (contents->GetURL() == GURL(chrome::kChromeUINewTabURL) ||
+      chrome::IsInstantNTP(contents));
 }
 
 void BrowserTabStripController::SelectTab(int model_index) {

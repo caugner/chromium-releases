@@ -5,8 +5,10 @@
 #ifndef UI_APP_LIST_VIEWS_APP_LIST_MAIN_VIEW_H_
 #define UI_APP_LIST_VIEWS_APP_LIST_MAIN_VIEW_H_
 
+#include <string>
+
 #include "base/memory/scoped_vector.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "ui/app_list/apps_grid_view_delegate.h"
 #include "ui/app_list/search_box_view_delegate.h"
 #include "ui/app_list/search_result_list_view_delegate.h"
@@ -82,6 +84,8 @@ class AppListMainView : public views::View,
   virtual void InvokeResultAction(SearchResult* result,
                                   int action_index,
                                   int event_flags) OVERRIDE;
+  virtual void OnResultInstalled(SearchResult* result) OVERRIDE;
+  virtual void OnResultUninstalled(SearchResult* result) OVERRIDE;
 
   AppListViewDelegate* delegate_;
   AppListModel* model_;

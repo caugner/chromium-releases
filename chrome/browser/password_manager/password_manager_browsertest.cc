@@ -4,14 +4,16 @@
 
 #include <string>
 
+#include "base/command_line.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/password_manager/test_password_store.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -24,6 +26,9 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
+
+// NavigationObserver ---------------------------------------------------------
+
 namespace {
 
 class NavigationObserver : public content::NotificationObserver,
@@ -32,7 +37,7 @@ class NavigationObserver : public content::NotificationObserver,
   explicit NavigationObserver(content::WebContents* web_contents)
       : content::WebContentsObserver(web_contents),
         message_loop_runner_(new content::MessageLoopRunner),
-        info_bar_shown_(false),
+        infobar_shown_(false),
         infobar_service_(InfoBarService::FromWebContents(web_contents)) {
     registrar_.Add(this,
                    chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
@@ -41,27 +46,15 @@ class NavigationObserver : public content::NotificationObserver,
 
   virtual ~NavigationObserver() {}
 
-  void Wait() {
-    message_loop_runner_->Run();
-  }
-
-  bool InfoBarWasShown() {
-    return info_bar_shown_;
-  }
-
   // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
-    // Accept in the infobar.
-    InfoBarDelegate* infobar = infobar_service_->infobar_at(0);
-    ConfirmInfoBarDelegate* confirm_infobar =
-        infobar->AsConfirmInfoBarDelegate();
-    confirm_infobar->Accept();
-    info_bar_shown_ = true;
+    infobar_service_->infobar_at(0)->AsConfirmInfoBarDelegate()->Accept();
+    infobar_shown_ = true;
   }
 
-  // content::WebContentsObserver
+  // content::WebContentsObserver:
   virtual void DidFinishLoad(
       int64 frame_id,
       const GURL& validated_url,
@@ -70,20 +63,35 @@ class NavigationObserver : public content::NotificationObserver,
     message_loop_runner_->Quit();
   }
 
+  bool infobar_shown() const { return infobar_shown_; }
+
+  void Wait() {
+    message_loop_runner_->Run();
+  }
+
  private:
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
-  bool info_bar_shown_;
+  bool infobar_shown_;
   content::NotificationRegistrar registrar_;
   InfoBarService* infobar_service_;
+
+  DISALLOW_COPY_AND_ASSIGN(NavigationObserver);
 };
 
 }  // namespace
 
+
+// PasswordManagerBrowserTest -------------------------------------------------
+
 class PasswordManagerBrowserTest : public InProcessBrowserTest {
  public:
+  PasswordManagerBrowserTest() {}
+  virtual ~PasswordManagerBrowserTest() {}
+
+  // InProcessBrowserTest:
   virtual void SetUpOnMainThread() OVERRIDE {
     // Use TestPasswordStore to remove a possible race. Normally the
-    // PasswordStore does it's database manipulation on the DB thread, which
+    // PasswordStore does its database manipulation on the DB thread, which
     // creates a possible race during navigation. Specifically the
     // PasswordManager will ignore any forms in a page if the load from the
     // PasswordStore has not completed.
@@ -99,9 +107,21 @@ class PasswordManagerBrowserTest : public InProcessBrowserTest {
   content::RenderViewHost* RenderViewHost() {
     return WebContents()->GetRenderViewHost();
   }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(PasswordManagerBrowserTest);
 };
 
+
+// Actual tests ---------------------------------------------------------------
+
 IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest, PromptForXHRSubmit) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   ASSERT_TRUE(test_server()->Start());
 
   GURL url = test_server()->GetURL("files/password/password_xhr_submit.html");
@@ -118,7 +138,7 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest, PromptForXHRSubmit) {
       "document.getElementById('submit_button').click()";
   ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), fill_and_submit));
   observer.Wait();
-  EXPECT_TRUE(observer.InfoBarWasShown());
+  EXPECT_TRUE(observer.infobar_shown());
 }
 
 IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest, NoPromptForOtherXHR) {
@@ -139,5 +159,5 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest, NoPromptForOtherXHR) {
       "send_xhr()";
   ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), fill_and_navigate));
   observer.Wait();
-  EXPECT_FALSE(observer.InfoBarWasShown());
+  EXPECT_FALSE(observer.infobar_shown());
 }

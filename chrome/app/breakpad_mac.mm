@@ -19,21 +19,13 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #import "base/mac/scoped_nsautorelease_pool.h"
-#include "base/path_service.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
 #import "breakpad/src/client/mac/Framework/Breakpad.h"
 #include "chrome/common/child_process_logging.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/crash_keys.h"
-#include "chrome/common/dump_without_crashing.h"
-#include "chrome/common/env_vars.h"
-#include "chrome/common/logging_chrome.h"
-#include "chrome/installer/util/google_update_settings.h"
-#include "components/breakpad/common/breakpad_paths.h"
-#include "components/nacl/common/nacl_switches.h"
-#include "native_client/src/trusted/service_runtime/osx/crash_filter.h"
+#include "content/public/common/content_switches.h"
+#include "components/breakpad/breakpad_client.h"
 #include "policy/policy_constants.h"
 
 namespace {
@@ -103,15 +95,6 @@ bool FatalMessageHandler(int severity, const char* file, int line,
   // caller to do it.
   return false;
 }
-
-#if !defined(DISABLE_NACL)
-bool NaClBreakpadCrashFilter(int exception_type,
-                             int exception_code,
-                             mach_port_t crashing_thread,
-                             void* context) {
-  return !NaClMachThreadIsInUntrusted(crashing_thread);
-}
-#endif
 
 // BreakpadGenerateAndSendReport() does not report the current
 // thread.  This class can be used to spin up a thread to run it.
@@ -196,8 +179,9 @@ void InitCrashReporter() {
       // Controlled by the user. The crash reporter may be enabled by
       // preference or through an environment variable, but the kDisableBreakpad
       // switch overrides both.
-      enable_breakpad = GoogleUpdateSettings::GetCollectStatsConsent() ||
-          getenv(env_vars::kHeadless) != NULL;
+      enable_breakpad =
+          breakpad::GetBreakpadClient()->GetCollectStatsConsent() ||
+          breakpad::GetBreakpadClient()->IsRunningUnattended();
       enable_breakpad &= !command_line->HasSwitch(switches::kDisableBreakpad);
     }
   } else {
@@ -239,30 +223,8 @@ void InitCrashReporter() {
   if (is_browser)
     [breakpad_config setObject:@"NO" forKey:@BREAKPAD_SEND_AND_EXIT];
 
-  // By setting the BREAKPAD_DUMP_LOCATION environment variable, an alternate
-  // location to write brekapad crash dumps can be set.
-  const char* alternate_minidump_location = getenv("BREAKPAD_DUMP_LOCATION");
-  if (alternate_minidump_location) {
-    base::FilePath alternate_minidump_location_path(
-        alternate_minidump_location);
-    if (!file_util::PathExists(alternate_minidump_location_path)) {
-      LOG(ERROR) << "Directory " << alternate_minidump_location <<
-          " doesn't exist";
-    } else {
-      PathService::Override(
-          breakpad::DIR_CRASH_DUMPS,
-          base::FilePath(alternate_minidump_location));
-      if (is_browser) {
-        // Print out confirmation message to the stdout, but only print
-        // from browser process so we don't flood the terminal.
-        LOG(WARNING) << "Breakpad dumps will now be written in " <<
-            alternate_minidump_location;
-      }
-    }
-  }
-
   base::FilePath dir_crash_dumps;
-  PathService::Get(breakpad::DIR_CRASH_DUMPS, &dir_crash_dumps);
+  breakpad::GetBreakpadClient()->GetCrashDumpLocation(&dir_crash_dumps);
   [breakpad_config setObject:base::SysUTF8ToNSString(dir_crash_dumps.value())
                       forKey:@BREAKPAD_DUMP_DIRECTORY];
 
@@ -276,7 +238,7 @@ void InitCrashReporter() {
   // Initialize the scoped crash key system.
   base::debug::SetCrashKeyReportingFunctions(&SetCrashKeyValueImpl,
                                              &ClearCrashKeyValueImpl);
-  crash_keys::RegisterChromeCrashKeys();
+  breakpad::GetBreakpadClient()->RegisterCrashKeys();
 
   // Set Breakpad metadata values.  These values are added to Info.plist during
   // the branded Google Chrome.app build.
@@ -292,7 +254,8 @@ void InitCrashReporter() {
   }
 
   logging::SetLogMessageHandler(&FatalMessageHandler);
-  logging::SetDumpWithoutCrashingFunction(&DumpHelper::DumpWithoutCrashing);
+  breakpad::GetBreakpadClient()->SetDumpWithoutCrashingFunction(
+      &DumpHelper::DumpWithoutCrashing);
 
   // abort() sends SIGABRT, which breakpad does not intercept.
   // Register a signal handler to crash in a way breakpad will
@@ -317,11 +280,7 @@ void InitCrashProcessInfo() {
     process_type = base::SysUTF8ToNSString(process_type_switch);
   }
 
-#if !defined(DISABLE_NACL)
-  if (process_type_switch == switches::kNaClLoaderProcess) {
-    BreakpadSetFilterCallback(gBreakpadRef, NaClBreakpadCrashFilter, NULL);
-  }
-#endif
+  breakpad::GetBreakpadClient()->InstallAdditionalFilters(gBreakpadRef);
 
   // Store process type in crash dump.
   SetCrashKeyValue(@"ptype", process_type);

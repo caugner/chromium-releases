@@ -10,6 +10,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/value_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/admin_policy.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_store.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
@@ -19,20 +20,19 @@
 #include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
-#include "chrome/common/extensions/user_script.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/url_pattern.h"
+#include "extensions/common/user_script.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -184,10 +184,6 @@ const char kPrefWasInstalledByDefault[] = "was_installed_by_default";
 
 // Key for Geometry Cache preference.
 const char kPrefGeometryCache[] = "geometry_cache";
-
-// Key for the path of the directory of the file last chosen by the user in
-// response to a chrome.fileSystem.chooseEntry() call.
-const char kLastChooseEntryDirectory[] = "last_choose_file_directory";
 
 // Provider of write access to a dictionary storing extension prefs.
 class ScopedExtensionPrefUpdate : public DictionaryPrefUpdate {
@@ -542,7 +538,9 @@ PermissionSet* ExtensionPrefs::ReadPrefAsPermissionSet(
   const ListValue* api_values = NULL;
   std::string api_pref = JoinPrefs(pref_key, kPrefAPIs);
   if (ReadPrefAsList(extension_id, api_pref, &api_values)) {
-    APIPermissionSet::ParseFromJSON(api_values, &apis, NULL, NULL);
+    APIPermissionSet::ParseFromJSON(api_values,
+                                    APIPermissionSet::kAllowInternalPermissions,
+                                    &apis, NULL, NULL);
   }
 
   // Retrieve the explicit host permissions.
@@ -1165,12 +1163,13 @@ void ExtensionPrefs::SetToolbarOrder(const ExtensionIdList& extension_ids) {
 void ExtensionPrefs::OnExtensionInstalled(
     const Extension* extension,
     Extension::State initial_state,
+    Blacklist::BlacklistState blacklist_state,
     const syncer::StringOrdinal& page_ordinal) {
   ScopedExtensionPrefUpdate update(prefs_, extension->id());
   DictionaryValue* extension_dict = update.Get();
   const base::Time install_time = time_provider_->GetCurrentTime();
   PopulateExtensionInfoPrefs(extension, install_time, initial_state,
-                             extension_dict);
+                             blacklist_state, extension_dict);
   FinishExtensionInfoPrefs(extension->id(), install_time,
                            extension->RequiresSortOrdinal(),
                            page_ordinal, extension_dict);
@@ -1331,11 +1330,12 @@ ExtensionPrefs::GetInstalledExtensionsInfo() const {
 void ExtensionPrefs::SetDelayedInstallInfo(
     const Extension* extension,
     Extension::State initial_state,
+    Blacklist::BlacklistState blacklist_state,
     DelayReason delay_reason,
     const syncer::StringOrdinal& page_ordinal) {
   DictionaryValue* extension_dict = new DictionaryValue();
   PopulateExtensionInfoPrefs(extension, time_provider_->GetCurrentTime(),
-                             initial_state, extension_dict);
+                             initial_state, blacklist_state, extension_dict);
 
   // Add transient data that is needed by FinishDelayedInstallInfo(), but
   // should not be in the final extension prefs. All entries here should have
@@ -1392,7 +1392,10 @@ bool ExtensionPrefs::FinishDelayedInstallInfo(
           base::Int64ToString(install_time.ToInternalValue())));
 
   // Commit the delayed install data.
-  extension_dict->MergeDictionary(pending_install_dict);
+  for (DictionaryValue::Iterator it(*pending_install_dict); !it.IsAtEnd();
+       it.Advance()) {
+    extension_dict->Set(it.key(), it.value().DeepCopy());
+  }
   FinishExtensionInfoPrefs(extension_id, install_time, needs_sort_ordinal,
                            suggested_page_ordinal, extension_dict);
   return true;
@@ -1659,25 +1662,6 @@ void ExtensionPrefs::SetGeometryCache(
   UpdateExtensionPref(extension_id, kPrefGeometryCache, cache.release());
 }
 
-bool ExtensionPrefs::GetLastChooseEntryDirectory(
-    const std::string& extension_id, base::FilePath* result) const {
-  const DictionaryValue* dictionary = GetExtensionPref(extension_id);
-  if (!dictionary)
-    return false;
-
-  const Value* value;
-  if (!dictionary->Get(kLastChooseEntryDirectory, &value))
-    return false;
-
-  return base::GetValueAsFilePath(*value, result);
-}
-
-void ExtensionPrefs::SetLastChooseEntryDirectory(
-    const std::string& extension_id, const base::FilePath& value) {
-  UpdateExtensionPref(extension_id, kLastChooseEntryDirectory,
-                      base::CreateFilePathValue(value));
-}
-
 ExtensionPrefs::ExtensionPrefs(
     PrefService* prefs,
     const base::FilePath& root_dir,
@@ -1704,7 +1688,7 @@ bool ExtensionPrefs::NeedsStorageGarbageCollection() {
 }
 
 // static
-void ExtensionPrefs::RegisterUserPrefs(
+void ExtensionPrefs::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterDictionaryPref(
       kExtensionsPref, user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
@@ -1787,6 +1771,7 @@ void ExtensionPrefs::PopulateExtensionInfoPrefs(
     const Extension* extension,
     const base::Time install_time,
     Extension::State initial_state,
+    Blacklist::BlacklistState blacklist_state,
     DictionaryValue* extension_dict) {
   // Leave the state blank for component extensions so that old chrome versions
   // loading new profiles do not fail in GetInstalledExtensionInfo. Older
@@ -1808,6 +1793,8 @@ void ExtensionPrefs::PopulateExtensionInfoPrefs(
   extension_dict->Set(kPrefInstallTime,
                       Value::CreateStringValue(
                           base::Int64ToString(install_time.ToInternalValue())));
+  if (blacklist_state == Blacklist::BLACKLISTED)
+    extension_dict->Set(kPrefBlacklist, Value::CreateBooleanValue(true));
 
   base::FilePath::StringType path = MakePathRelative(install_directory_,
                                                      extension->path());

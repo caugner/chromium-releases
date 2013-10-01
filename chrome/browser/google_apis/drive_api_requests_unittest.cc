@@ -3,20 +3,19 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/google_apis/auth_service.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/drive_api_requests.h"
 #include "chrome/browser/google_apis/drive_api_url_generator.h"
+#include "chrome/browser/google_apis/dummy_auth_service.h"
 #include "chrome/browser/google_apis/request_sender.h"
 #include "chrome/browser/google_apis/test_util.h"
-#include "chrome/test/base/testing_profile.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -27,7 +26,6 @@ namespace google_apis {
 
 namespace {
 
-const char kTestDriveApiAuthToken[] = "testtoken";
 const char kTestETag[] = "test_etag";
 const char kTestUserAgent[] = "test-user-agent";
 
@@ -41,30 +39,24 @@ const char kTestChildrenResponse[] =
 
 const char kTestUploadExistingFilePath[] = "/upload/existingfile/path";
 const char kTestUploadNewFilePath[] = "/upload/newfile/path";
+const char kTestDownloadPathPrefix[] = "/download/";
 
 }  // namespace
 
 class DriveApiRequestsTest : public testing::Test {
  public:
   DriveApiRequestsTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD),
-        test_server_(content::BrowserThread::GetMessageLoopProxyForThread(
-            content::BrowserThread::IO)) {
+      : test_server_(message_loop_.message_loop_proxy()) {
   }
 
   virtual void SetUp() OVERRIDE {
-    profile_.reset(new TestingProfile);
-
     request_context_getter_ = new net::TestURLRequestContextGetter(
-        content::BrowserThread::GetMessageLoopProxyForThread(
-            content::BrowserThread::IO));
+        message_loop_.message_loop_proxy());
 
-    request_sender_.reset(new RequestSender(profile_.get(),
+    request_sender_.reset(new RequestSender(new DummyAuthService,
                                             request_context_getter_.get(),
-                                            std::vector<std::string>(),
+                                            message_loop_.message_loop_proxy(),
                                             kTestUserAgent));
-    request_sender_->auth_service()->set_access_token_for_testing(
-        kTestDriveApiAuthToken);
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
@@ -76,6 +68,9 @@ class DriveApiRequestsTest : public testing::Test {
         base::Bind(&DriveApiRequestsTest::HandleDataFileRequest,
                    base::Unretained(this)));
     test_server_.RegisterRequestHandler(
+        base::Bind(&DriveApiRequestsTest::HandlePreconditionFailedRequest,
+                   base::Unretained(this)));
+    test_server_.RegisterRequestHandler(
         base::Bind(&DriveApiRequestsTest::HandleResumeUploadRequest,
                    base::Unretained(this)));
     test_server_.RegisterRequestHandler(
@@ -84,9 +79,13 @@ class DriveApiRequestsTest : public testing::Test {
     test_server_.RegisterRequestHandler(
         base::Bind(&DriveApiRequestsTest::HandleContentResponse,
                    base::Unretained(this)));
+    test_server_.RegisterRequestHandler(
+        base::Bind(&DriveApiRequestsTest::HandleDownloadRequest,
+                   base::Unretained(this)));
 
+    GURL test_base_url = test_util::GetBaseUrlForTesting(test_server_.port());
     url_generator_.reset(new DriveApiUrlGenerator(
-        test_util::GetBaseUrlForTesting(test_server_.port())));
+        test_base_url, test_base_url.Resolve(kTestDownloadPathPrefix)));
 
     // Reset the server's expected behavior just in case.
     ResetExpectedResponse();
@@ -94,15 +93,8 @@ class DriveApiRequestsTest : public testing::Test {
     content_length_ = 0;
   }
 
-  virtual void TearDown() OVERRIDE {
-    EXPECT_TRUE(test_server_.ShutdownAndWaitUntilComplete());
-    request_context_getter_ = NULL;
-    ResetExpectedResponse();
-  }
-
-  content::TestBrowserThreadBundle thread_bundle_;
+  base::MessageLoopForIO message_loop_;  // Test server needs IO thread.
   net::test_server::EmbeddedTestServer test_server_;
-  scoped_ptr<TestingProfile> profile_;
   scoped_ptr<RequestSender> request_sender_;
   scoped_ptr<DriveApiUrlGenerator> url_generator_;
   scoped_refptr<net::TestURLRequestContextGetter> request_context_getter_;
@@ -115,6 +107,10 @@ class DriveApiRequestsTest : public testing::Test {
   // This is a path string in the expected response header from the server
   // for initiating file uploading.
   std::string expected_upload_path_;
+
+  // This is a path to the file which contains expected response for
+  // PRECONDITION_FAILED response.
+  base::FilePath expected_precondition_failed_file_path_;
 
   // These are content and its type in the expected response from the server.
   // See also HandleContentResponse below.
@@ -150,7 +146,7 @@ class DriveApiRequestsTest : public testing::Test {
     // Return the response with just "204 No Content" status code.
     scoped_ptr<net::test_server::BasicHttpResponse> http_response(
         new net::test_server::BasicHttpResponse);
-    http_response->set_code(net::test_server::NO_CONTENT);
+    http_response->set_code(net::HTTP_NO_CONTENT);
     return http_response.PassAs<net::test_server::HttpResponse>();
   }
 
@@ -173,6 +169,33 @@ class DriveApiRequestsTest : public testing::Test {
         expected_data_file_path_).PassAs<net::test_server::HttpResponse>();
   }
 
+  // Returns PRECONDITION_FAILED response for ETag mismatching with error JSON
+  // content specified by |expected_precondition_failed_file_path_|.
+  // To use this method, it is necessary to set the variable to the appropriate
+  // file path before sending the request to the server.
+  scoped_ptr<net::test_server::HttpResponse> HandlePreconditionFailedRequest(
+      const net::test_server::HttpRequest& request) {
+    if (expected_precondition_failed_file_path_.empty()) {
+      // The file is not specified. Delegate the process to the next handler.
+      return scoped_ptr<net::test_server::HttpResponse>();
+    }
+
+    http_request_ = request;
+
+    scoped_ptr<net::test_server::BasicHttpResponse> response(
+        new net::test_server::BasicHttpResponse);
+    response->set_code(net::HTTP_PRECONDITION_FAILED);
+
+    std::string content;
+    if (file_util::ReadFileToString(expected_precondition_failed_file_path_,
+                                    &content)) {
+      response->set_content(content);
+      response->set_content_type("application/json");
+    }
+
+    return response.PassAs<net::test_server::HttpResponse>();
+  }
+
   // Returns the response based on set expected upload url.
   // The response contains the url in its "Location: " header. Also, it doesn't
   // have any content.
@@ -192,26 +215,17 @@ class DriveApiRequestsTest : public testing::Test {
     scoped_ptr<net::test_server::BasicHttpResponse> response(
         new net::test_server::BasicHttpResponse);
 
-    // Check an ETag.
-    std::map<std::string, std::string>::const_iterator found =
-        request.headers.find("If-Match");
-    if (found != request.headers.end() &&
-        found->second != "*" &&
-        found->second != kTestETag) {
-      response->set_code(net::test_server::PRECONDITION);
-      return response.PassAs<net::test_server::HttpResponse>();
-    }
-
     // Check if the X-Upload-Content-Length is present. If yes, store the
     // length of the file.
-    found = request.headers.find("X-Upload-Content-Length");
+    std::map<std::string, std::string>::const_iterator found =
+        request.headers.find("X-Upload-Content-Length");
     if (found == request.headers.end() ||
         !base::StringToInt64(found->second, &content_length_)) {
       return scoped_ptr<net::test_server::HttpResponse>();
     }
     received_bytes_ = 0;
 
-    response->set_code(net::test_server::SUCCESS);
+    response->set_code(net::HTTP_OK);
     response->AddCustomHeader(
         "Location",
         test_server_.base_url().Resolve(expected_upload_path_).spec());
@@ -256,7 +270,7 @@ class DriveApiRequestsTest : public testing::Test {
       scoped_ptr<net::test_server::BasicHttpResponse> response(
           new net::test_server::BasicHttpResponse);
       // Set RESUME INCOMPLETE (308) status code.
-      response->set_code(net::test_server::RESUME_INCOMPLETE);
+      response->set_code(static_cast<net::HttpStatusCode>(308));
 
       // Add Range header to the response, based on the values of
       // Content-Range header in the request.
@@ -273,11 +287,11 @@ class DriveApiRequestsTest : public testing::Test {
     // (dummy) metadata.
     scoped_ptr<net::test_server::BasicHttpResponse> response =
         test_util::CreateHttpResponseFromFile(
-            test_util::GetTestFilePath("chromeos/drive/file_entry.json"));
+            test_util::GetTestFilePath("drive/file_entry.json"));
 
     // The response code is CREATED if it is new file uploading.
     if (http_request_.relative_url == kTestUploadNewFilePath) {
-      response->set_code(net::test_server::CREATED);
+      response->set_code(net::HTTP_CREATED);
     }
 
     return response.PassAs<net::test_server::HttpResponse>();
@@ -298,9 +312,31 @@ class DriveApiRequestsTest : public testing::Test {
 
     scoped_ptr<net::test_server::BasicHttpResponse> response(
         new net::test_server::BasicHttpResponse);
-    response->set_code(net::test_server::SUCCESS);
+    response->set_code(net::HTTP_OK);
     response->set_content_type(expected_content_type_);
     response->set_content(expected_content_);
+    return response.PassAs<net::test_server::HttpResponse>();
+  }
+
+  // Handles a request for downloading a file.
+  scoped_ptr<net::test_server::HttpResponse> HandleDownloadRequest(
+      const net::test_server::HttpRequest& request) {
+    http_request_ = request;
+
+    const GURL absolute_url = test_server_.GetURL(request.relative_url);
+    std::string id;
+    if (!test_util::RemovePrefix(absolute_url.path(),
+                                 kTestDownloadPathPrefix,
+                                 &id)) {
+      return scoped_ptr<net::test_server::HttpResponse>();
+    }
+
+    // For testing, returns a text with |id| repeated 3 times.
+    scoped_ptr<net::test_server::BasicHttpResponse> response(
+        new net::test_server::BasicHttpResponse);
+    response->set_code(net::HTTP_OK);
+    response->set_content(id + id + id);
+    response->set_content_type("text/plain");
     return response.PassAs<net::test_server::HttpResponse>();
   }
 
@@ -312,7 +348,7 @@ class DriveApiRequestsTest : public testing::Test {
 TEST_F(DriveApiRequestsTest, GetAboutRequest_ValidJson) {
   // Set an expected data file containing valid result.
   expected_data_file_path_ = test_util::GetTestFilePath(
-      "chromeos/drive/about.json");
+      "drive/about.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<AboutResource> about_resource;
@@ -321,7 +357,6 @@ TEST_F(DriveApiRequestsTest, GetAboutRequest_ValidJson) {
     base::RunLoop run_loop;
     GetAboutRequest* request = new GetAboutRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -336,7 +371,7 @@ TEST_F(DriveApiRequestsTest, GetAboutRequest_ValidJson) {
 
   scoped_ptr<AboutResource> expected(
       AboutResource::CreateFrom(
-          *test_util::LoadJSONFile("chromeos/drive/about.json")));
+          *test_util::LoadJSONFile("drive/about.json")));
   ASSERT_TRUE(about_resource.get());
   EXPECT_EQ(expected->largest_change_id(), about_resource->largest_change_id());
   EXPECT_EQ(expected->quota_bytes_total(), about_resource->quota_bytes_total());
@@ -347,7 +382,7 @@ TEST_F(DriveApiRequestsTest, GetAboutRequest_ValidJson) {
 TEST_F(DriveApiRequestsTest, GetAboutRequest_InvalidJson) {
   // Set an expected data file containing invalid result.
   expected_data_file_path_ = test_util::GetTestFilePath(
-      "chromeos/gdata/testfile.txt");
+      "gdata/testfile.txt");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<AboutResource> about_resource;
@@ -356,7 +391,6 @@ TEST_F(DriveApiRequestsTest, GetAboutRequest_InvalidJson) {
     base::RunLoop run_loop;
     GetAboutRequest* request = new GetAboutRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -375,7 +409,7 @@ TEST_F(DriveApiRequestsTest, GetAboutRequest_InvalidJson) {
 TEST_F(DriveApiRequestsTest, GetApplistRequest) {
   // Set an expected data file containing valid result.
   expected_data_file_path_ = test_util::GetTestFilePath(
-      "chromeos/drive/applist.json");
+      "drive/applist.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<base::Value> result;
@@ -384,7 +418,6 @@ TEST_F(DriveApiRequestsTest, GetApplistRequest) {
     base::RunLoop run_loop;
     GetApplistRequest* request = new GetApplistRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -402,7 +435,7 @@ TEST_F(DriveApiRequestsTest, GetApplistRequest) {
 TEST_F(DriveApiRequestsTest, GetChangelistRequest) {
   // Set an expected data file containing valid result.
   expected_data_file_path_ = test_util::GetTestFilePath(
-      "chromeos/drive/changelist.json");
+      "drive/changelist.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<base::Value> result;
@@ -411,7 +444,6 @@ TEST_F(DriveApiRequestsTest, GetChangelistRequest) {
     base::RunLoop run_loop;
     GetChangelistRequest* request = new GetChangelistRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         true,  // include deleted
         100,  // start changestamp
@@ -433,7 +465,7 @@ TEST_F(DriveApiRequestsTest, GetChangelistRequest) {
 TEST_F(DriveApiRequestsTest, GetFilelistRequest) {
   // Set an expected data file containing valid result.
   expected_data_file_path_ = test_util::GetTestFilePath(
-      "chromeos/drive/filelist.json");
+      "drive/filelist.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<base::Value> result;
@@ -442,7 +474,6 @@ TEST_F(DriveApiRequestsTest, GetFilelistRequest) {
     base::RunLoop run_loop;
     GetFilelistRequest* request = new GetFilelistRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         "\"abcde\" in parents",
         50,  // max results
@@ -463,7 +494,7 @@ TEST_F(DriveApiRequestsTest, GetFilelistRequest) {
 TEST_F(DriveApiRequestsTest, ContinueGetFileListRequest) {
   // Set an expected data file containing valid result.
   expected_data_file_path_ = test_util::GetTestFilePath(
-      "chromeos/drive/filelist.json");
+      "drive/filelist.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<base::Value> result;
@@ -473,7 +504,6 @@ TEST_F(DriveApiRequestsTest, ContinueGetFileListRequest) {
     drive::ContinueGetFileListRequest* request =
         new drive::ContinueGetFileListRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             test_server_.GetURL("/continue/get/file/list"),
             test_util::CreateQuitCallback(
                 &run_loop,
@@ -491,7 +521,7 @@ TEST_F(DriveApiRequestsTest, ContinueGetFileListRequest) {
 TEST_F(DriveApiRequestsTest, CreateDirectoryRequest) {
   // Set an expected data file containing the directory's entry data.
   expected_data_file_path_ =
-      test_util::GetTestFilePath("chromeos/drive/directory_entry.json");
+      test_util::GetTestFilePath("drive/directory_entry.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<FileResource> file_resource;
@@ -502,7 +532,6 @@ TEST_F(DriveApiRequestsTest, CreateDirectoryRequest) {
     drive::CreateDirectoryRequest* request =
         new drive::CreateDirectoryRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             "root",
             "new directory",
@@ -522,7 +551,7 @@ TEST_F(DriveApiRequestsTest, CreateDirectoryRequest) {
 
   scoped_ptr<FileResource> expected(
       FileResource::CreateFrom(
-          *test_util::LoadJSONFile("chromeos/drive/directory_entry.json")));
+          *test_util::LoadJSONFile("drive/directory_entry.json")));
 
   // Sanity check.
   ASSERT_TRUE(file_resource.get());
@@ -537,7 +566,7 @@ TEST_F(DriveApiRequestsTest, RenameResourceRequest) {
   // Set an expected data file containing the directory's entry data.
   // It'd be returned if we rename a directory.
   expected_data_file_path_ =
-      test_util::GetTestFilePath("chromeos/drive/directory_entry.json");
+      test_util::GetTestFilePath("drive/directory_entry.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
 
@@ -547,10 +576,9 @@ TEST_F(DriveApiRequestsTest, RenameResourceRequest) {
     drive::RenameResourceRequest* request =
         new drive::RenameResourceRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             "resource_id",
-            "new name",
+            "new title",
             test_util::CreateQuitCallback(
                 &run_loop,
                 test_util::CreateCopyResultCallback(&error)));
@@ -564,14 +592,14 @@ TEST_F(DriveApiRequestsTest, RenameResourceRequest) {
   EXPECT_EQ("application/json", http_request_.headers["Content-Type"]);
 
   EXPECT_TRUE(http_request_.has_content);
-  EXPECT_EQ("{\"title\":\"new name\"}", http_request_.content);
+  EXPECT_EQ("{\"title\":\"new title\"}", http_request_.content);
 }
 
 TEST_F(DriveApiRequestsTest, TouchResourceRequest) {
   // Set an expected data file containing the directory's entry data.
   // It'd be returned if we rename a directory.
   expected_data_file_path_ =
-      test_util::GetTestFilePath("chromeos/drive/directory_entry.json");
+      test_util::GetTestFilePath("drive/directory_entry.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<FileResource> file_resource;
@@ -584,7 +612,6 @@ TEST_F(DriveApiRequestsTest, TouchResourceRequest) {
     base::RunLoop run_loop;
     drive::TouchResourceRequest* request = new drive::TouchResourceRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         "resource_id",
         base::Time::FromUTCExploded(kModifiedDate),
@@ -613,22 +640,21 @@ TEST_F(DriveApiRequestsTest, CopyResourceRequest) {
   // Set an expected data file containing the dummy file entry data.
   // It'd be returned if we copy a file.
   expected_data_file_path_ =
-      test_util::GetTestFilePath("chromeos/drive/file_entry.json");
+      test_util::GetTestFilePath("drive/file_entry.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<FileResource> file_resource;
 
-  // Copy the file to a new file named "new name".
+  // Copy the file to a new file named "new title".
   {
     base::RunLoop run_loop;
     drive::CopyResourceRequest* request =
         new drive::CopyResourceRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             "resource_id",
             "parent_resource_id",
-            "new name",
+            "new title",
             test_util::CreateQuitCallback(
                 &run_loop,
                 test_util::CreateCopyResultCallback(&error, &file_resource)));
@@ -643,7 +669,7 @@ TEST_F(DriveApiRequestsTest, CopyResourceRequest) {
 
   EXPECT_TRUE(http_request_.has_content);
   EXPECT_EQ(
-      "{\"parents\":[{\"id\":\"parent_resource_id\"}],\"title\":\"new name\"}",
+      "{\"parents\":[{\"id\":\"parent_resource_id\"}],\"title\":\"new title\"}",
       http_request_.content);
   EXPECT_TRUE(file_resource);
 }
@@ -652,22 +678,21 @@ TEST_F(DriveApiRequestsTest, CopyResourceRequest_EmptyParentResourceId) {
   // Set an expected data file containing the dummy file entry data.
   // It'd be returned if we copy a file.
   expected_data_file_path_ =
-      test_util::GetTestFilePath("chromeos/drive/file_entry.json");
+      test_util::GetTestFilePath("drive/file_entry.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<FileResource> file_resource;
 
-  // Copy the file to a new file named "new name".
+  // Copy the file to a new file named "new title".
   {
     base::RunLoop run_loop;
     drive::CopyResourceRequest* request =
         new drive::CopyResourceRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             "resource_id",
             std::string(),  // parent resource id.
-            "new name",
+            "new title",
             test_util::CreateQuitCallback(
                 &run_loop,
                 test_util::CreateCopyResultCallback(&error, &file_resource)));
@@ -681,7 +706,7 @@ TEST_F(DriveApiRequestsTest, CopyResourceRequest_EmptyParentResourceId) {
   EXPECT_EQ("application/json", http_request_.headers["Content-Type"]);
 
   EXPECT_TRUE(http_request_.has_content);
-  EXPECT_EQ("{\"title\":\"new name\"}", http_request_.content);
+  EXPECT_EQ("{\"title\":\"new title\"}", http_request_.content);
   EXPECT_TRUE(file_resource);
 }
 
@@ -689,7 +714,7 @@ TEST_F(DriveApiRequestsTest, TrashResourceRequest) {
   // Set data for the expected result. Directory entry should be returned
   // if the trashing entry is a directory, so using it here should be fine.
   expected_data_file_path_ =
-      test_util::GetTestFilePath("chromeos/drive/directory_entry.json");
+      test_util::GetTestFilePath("drive/directory_entry.json");
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
 
@@ -699,7 +724,6 @@ TEST_F(DriveApiRequestsTest, TrashResourceRequest) {
     drive::TrashResourceRequest* request =
         new drive::TrashResourceRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             "resource_id",
             test_util::CreateQuitCallback(
@@ -730,7 +754,6 @@ TEST_F(DriveApiRequestsTest, InsertResourceRequest) {
     drive::InsertResourceRequest* request =
         new drive::InsertResourceRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             "parent_resource_id",
             "resource_id",
@@ -761,7 +784,6 @@ TEST_F(DriveApiRequestsTest, DeleteResourceRequest) {
     drive::DeleteResourceRequest* request =
         new drive::DeleteResourceRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             "parent_resource_id",
             "resource_id",
@@ -799,7 +821,6 @@ TEST_F(DriveApiRequestsTest, UploadNewFileRequest) {
     drive::InitiateUploadNewFileRequest* request =
         new drive::InitiateUploadNewFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             kTestContentType,
             kTestContent.size(),
@@ -839,7 +860,6 @@ TEST_F(DriveApiRequestsTest, UploadNewFileRequest) {
     drive::ResumeUploadRequest* resume_request =
         new drive::ResumeUploadRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             upload_url,
             0,  // start_position
             kTestContent.size(),  // end_position (exclusive)
@@ -893,7 +913,6 @@ TEST_F(DriveApiRequestsTest, UploadNewEmptyFileRequest) {
     drive::InitiateUploadNewFileRequest* request =
         new drive::InitiateUploadNewFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             kTestContentType,
             0,
@@ -932,7 +951,6 @@ TEST_F(DriveApiRequestsTest, UploadNewEmptyFileRequest) {
     drive::ResumeUploadRequest* resume_request =
         new drive::ResumeUploadRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             upload_url,
             0,  // start_position
             0,  // end_position (exclusive)
@@ -984,7 +1002,6 @@ TEST_F(DriveApiRequestsTest, UploadNewLargeFileRequest) {
     drive::InitiateUploadNewFileRequest* request =
         new drive::InitiateUploadNewFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             kTestContentType,
             kTestContent.size(),
@@ -1027,7 +1044,6 @@ TEST_F(DriveApiRequestsTest, UploadNewLargeFileRequest) {
       drive::GetUploadStatusRequest* get_upload_status_request =
           new drive::GetUploadStatusRequest(
               request_sender_.get(),
-              request_context_getter_.get(),
               upload_url,
               kTestContent.size(),
               test_util::CreateQuitCallback(
@@ -1069,7 +1085,6 @@ TEST_F(DriveApiRequestsTest, UploadNewLargeFileRequest) {
       drive::ResumeUploadRequest* resume_request =
           new drive::ResumeUploadRequest(
               request_sender_.get(),
-              request_context_getter_.get(),
               upload_url,
               start_position,
               end_position,
@@ -1119,7 +1134,6 @@ TEST_F(DriveApiRequestsTest, UploadNewLargeFileRequest) {
       drive::GetUploadStatusRequest* get_upload_status_request =
           new drive::GetUploadStatusRequest(
               request_sender_.get(),
-              request_context_getter_.get(),
               upload_url,
               kTestContent.size(),
               test_util::CreateQuitCallback(
@@ -1166,7 +1180,6 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequest) {
     drive::InitiateUploadExistingFileRequest* request =
         new drive::InitiateUploadExistingFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             kTestContentType,
             kTestContent.size(),
@@ -1201,7 +1214,6 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequest) {
     drive::ResumeUploadRequest* resume_request =
         new drive::ResumeUploadRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             upload_url,
             0,  // start_position
             kTestContent.size(),  // end_position (exclusive)
@@ -1255,7 +1267,6 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequestWithETag) {
     drive::InitiateUploadExistingFileRequest* request =
         new drive::InitiateUploadExistingFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             kTestContentType,
             kTestContent.size(),
@@ -1290,7 +1301,6 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequestWithETag) {
     drive::ResumeUploadRequest* resume_request =
         new drive::ResumeUploadRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             upload_url,
             0,  // start_position
             kTestContent.size(),  // end_position (exclusive)
@@ -1329,6 +1339,11 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequestWithETagConflicting) {
   // Set an expected url for uploading.
   expected_upload_path_ = kTestUploadExistingFilePath;
 
+  // If it turned out that the etag is conflicting, PRECONDITION_FAILED should
+  // be returned.
+  expected_precondition_failed_file_path_ =
+      test_util::GetTestFilePath("drive/error.json");
+
   const char kTestContentType[] = "text/plain";
   const std::string kTestContent(100, 'a');
 
@@ -1341,7 +1356,6 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequestWithETagConflicting) {
     drive::InitiateUploadExistingFileRequest* request =
         new drive::InitiateUploadExistingFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             kTestContentType,
             kTestContent.size(),
@@ -1365,6 +1379,138 @@ TEST_F(DriveApiRequestsTest, UploadExistingFileRequestWithETagConflicting) {
             http_request_.relative_url);
   EXPECT_TRUE(http_request_.has_content);
   EXPECT_TRUE(http_request_.content.empty());
+}
+
+TEST_F(DriveApiRequestsTest,
+       UploadExistingFileRequestWithETagConflictOnResumeUpload) {
+  // Set an expected url for uploading.
+  expected_upload_path_ = kTestUploadExistingFilePath;
+
+  const char kTestContentType[] = "text/plain";
+  const std::string kTestContent(100, 'a');
+  const base::FilePath kTestFilePath =
+      temp_dir_.path().AppendASCII("upload_file.txt");
+  ASSERT_TRUE(test_util::WriteStringToFile(kTestFilePath, kTestContent));
+
+  GDataErrorCode error = GDATA_OTHER_ERROR;
+  GURL upload_url;
+
+  // Initiate uploading a new file to the directory with "parent_resource_id".
+  {
+    base::RunLoop run_loop;
+    drive::InitiateUploadExistingFileRequest* request =
+        new drive::InitiateUploadExistingFileRequest(
+            request_sender_.get(),
+            *url_generator_,
+            kTestContentType,
+            kTestContent.size(),
+            "resource_id",  // The resource id of the file to be overwritten.
+            kTestETag,
+            test_util::CreateQuitCallback(
+                &run_loop,
+                test_util::CreateCopyResultCallback(&error, &upload_url)));
+    request_sender_->StartRequestWithRetry(request);
+    run_loop.Run();
+  }
+
+  EXPECT_EQ(HTTP_SUCCESS, error);
+  EXPECT_EQ(kTestUploadExistingFilePath, upload_url.path());
+  EXPECT_EQ(kTestContentType, http_request_.headers["X-Upload-Content-Type"]);
+  EXPECT_EQ(base::Int64ToString(kTestContent.size()),
+            http_request_.headers["X-Upload-Content-Length"]);
+  EXPECT_EQ(kTestETag, http_request_.headers["If-Match"]);
+
+  EXPECT_EQ(net::test_server::METHOD_PUT, http_request_.method);
+  EXPECT_EQ("/upload/drive/v2/files/resource_id?uploadType=resumable",
+            http_request_.relative_url);
+  EXPECT_TRUE(http_request_.has_content);
+  EXPECT_TRUE(http_request_.content.empty());
+
+  // Set PRECONDITION_FAILED to the server. This is the emulation of the
+  // confliction during uploading.
+  expected_precondition_failed_file_path_ =
+      test_util::GetTestFilePath("drive/error.json");
+
+  // Upload the content to the upload URL.
+  UploadRangeResponse response;
+  scoped_ptr<FileResource> new_entry;
+
+  {
+    base::RunLoop run_loop;
+    drive::ResumeUploadRequest* resume_request =
+        new drive::ResumeUploadRequest(
+            request_sender_.get(),
+            upload_url,
+            0,  // start_position
+            kTestContent.size(),  // end_position (exclusive)
+            kTestContent.size(),  // content_length,
+            kTestContentType,
+            kTestFilePath,
+            test_util::CreateQuitCallback(
+                &run_loop,
+                test_util::CreateCopyResultCallback(&response, &new_entry)),
+            ProgressCallback());
+    request_sender_->StartRequestWithRetry(resume_request);
+    run_loop.Run();
+  }
+
+  // METHOD_PUT should be used to upload data.
+  EXPECT_EQ(net::test_server::METHOD_PUT, http_request_.method);
+  // Request should go to the upload URL.
+  EXPECT_EQ(upload_url.path(), http_request_.relative_url);
+  // Content-Range header should be added.
+  EXPECT_EQ("bytes 0-" +
+            base::Int64ToString(kTestContent.size() - 1) + "/" +
+            base::Int64ToString(kTestContent.size()),
+            http_request_.headers["Content-Range"]);
+  // The upload content should be set in the HTTP request.
+  EXPECT_TRUE(http_request_.has_content);
+  EXPECT_EQ(kTestContent, http_request_.content);
+
+  // Check the response.
+  EXPECT_EQ(HTTP_PRECONDITION, response.code);
+  // The start and end positions should be set to -1 for error.
+  EXPECT_EQ(-1, response.start_position_received);
+  EXPECT_EQ(-1, response.end_position_received);
+
+  // New entry should be NULL.
+  EXPECT_FALSE(new_entry.get());
+}
+
+TEST_F(DriveApiRequestsTest, DownloadFileRequest) {
+  const base::FilePath kDownloadedFilePath =
+      temp_dir_.path().AppendASCII("cache_file");
+  const std::string kTestId("dummyId");
+
+  GDataErrorCode result_code = GDATA_OTHER_ERROR;
+  base::FilePath temp_file;
+  {
+    base::RunLoop run_loop;
+    drive::DownloadFileRequest* request = new drive::DownloadFileRequest(
+        request_sender_.get(),
+        *url_generator_,
+        kTestId,
+        kDownloadedFilePath,
+        test_util::CreateQuitCallback(
+            &run_loop,
+            test_util::CreateCopyResultCallback(&result_code, &temp_file)),
+        GetContentCallback(),
+        ProgressCallback());
+    request_sender_->StartRequestWithRetry(request);
+    run_loop.Run();
+  }
+
+  std::string contents;
+  file_util::ReadFileToString(temp_file, &contents);
+  base::DeleteFile(temp_file, false);
+
+  EXPECT_EQ(HTTP_SUCCESS, result_code);
+  EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
+  EXPECT_EQ(kTestDownloadPathPrefix + kTestId, http_request_.relative_url);
+  EXPECT_EQ(kDownloadedFilePath, temp_file);
+
+  const std::string expected_contents = kTestId + kTestId + kTestId;
+  EXPECT_EQ(expected_contents, contents);
 }
 
 }  // namespace google_apis

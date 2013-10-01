@@ -15,10 +15,10 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/google/google_url_tracker_map_entry.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/network_change_notifier.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
+#include "url/gurl.h"
 
 class GoogleURLTrackerNavigationHelper;
 class PrefService;
@@ -105,8 +105,7 @@ class GoogleURLTracker : public net::URLFetcherDelegate,
   // |pending_id| is the unique ID of the newly pending NavigationEntry.
   // If there is already a visible GoogleURLTracker infobar for this tab, this
   // function resets its associated pending entry ID to the new ID.  Otherwise
-  // this function creates a (still-invisible) InfoBarDelegate for the
-  // associated tab.
+  // this function creates a map entry for the associated tab.
   virtual void OnNavigationPending(
       content::NavigationController* navigation_controller,
       InfoBarService* infobar_service,

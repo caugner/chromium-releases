@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/feature_switch.h"
-#include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/notification_details.h"
@@ -142,6 +142,10 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest,
                                     expected_change);
   }
 
+  // Same as UpdateExtension but waits for the extension to be idle first.
+  const extensions::Extension* UpdateExtensionWaitForIdle(
+      const std::string& id, const base::FilePath& path, int expected_change);
+
   // Same as |InstallExtension| but with the normal extension UI showing up
   // (for e.g. info bar on success).
   const extensions::Extension* InstallExtensionWithUI(
@@ -170,7 +174,7 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest,
         std::string(), path, INSTALL_UI_TYPE_CANCEL, 0);
   }
 
-  void ReloadExtension(const std::string& extension_id);
+  void ReloadExtension(const std::string extension_id);
 
   void UnloadExtension(const std::string& extension_id);
 
@@ -279,7 +283,8 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest,
       int expected_change,
       extensions::Manifest::Location install_source,
       Browser* browser,
-      bool from_webstore);
+      bool from_webstore,
+      bool wait_for_idle);
 
   bool WaitForExtensionViewsToLoad();
 
@@ -292,7 +297,7 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest,
   int target_visible_page_action_count_;
 
   // Make the current channel "dev" for the duration of the test.
-  extensions::Feature::ScopedCurrentChannel current_channel_;
+  extensions::ScopedCurrentChannel current_channel_;
 
   // Disable external install UI.
   extensions::FeatureSwitch::ScopedOverride

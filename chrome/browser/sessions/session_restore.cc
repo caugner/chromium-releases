@@ -20,6 +20,7 @@
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/performance_monitor/startup_timer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -33,9 +34,8 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
+#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/common/cancelable_task_tracker.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/navigation_controller.h"
@@ -567,11 +567,12 @@ class SessionRestoreImpl : public content::NotificationObserver {
     return browser_;
   }
 
-  // Restore window(s) from a foreign session.
-  void RestoreForeignSession(
+  // Restore window(s) from a foreign session. Returns newly created Browsers.
+  std::vector<Browser*> RestoreForeignSession(
       std::vector<const SessionWindow*>::const_iterator begin,
       std::vector<const SessionWindow*>::const_iterator end) {
     StartTabCreation();
+    std::vector<Browser*> browsers;
     // Create a browser instance to put the restored tabs in.
     for (std::vector<const SessionWindow*>::const_iterator i = begin;
          i != end; ++i) {
@@ -580,6 +581,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
           (*i)->bounds,
           (*i)->show_state,
           (*i)->app_name);
+      browsers.push_back(browser);
 
       // Restore and show the browser.
       const int initial_tab_count = 0;
@@ -594,13 +596,15 @@ class SessionRestoreImpl : public content::NotificationObserver {
 
     // Always create in a new window
     FinishedTabCreation(true, true);
+    return browsers;
   }
 
   // Restore a single tab from a foreign session.
   // Opens in the tab in the last active browser, unless disposition is
-  // NEW_WINDOW, in which case the tab will be opened in a new browser.
-  void RestoreForeignTab(const SessionTab& tab,
-                         WindowOpenDisposition disposition) {
+  // NEW_WINDOW, in which case the tab will be opened in a new browser. Returns
+  // the WebContents of the restored tab.
+  WebContents* RestoreForeignTab(const SessionTab& tab,
+                                 WindowOpenDisposition disposition) {
     DCHECK(!tab.navigations.empty());
     int selected_index = tab.current_navigation_index;
     selected_index = std::max(
@@ -616,19 +620,20 @@ class SessionRestoreImpl : public content::NotificationObserver {
 
     RecordAppLaunchForTab(browser, tab, selected_index);
 
+    WebContents* web_contents;
     if (disposition == CURRENT_TAB) {
       DCHECK(!use_new_window);
-      chrome::ReplaceRestoredTab(browser,
-                                 tab.navigations,
-                                 selected_index,
-                                 true,
-                                 tab.extension_app_id,
-                                 NULL,
-                                 tab.user_agent_override);
+      web_contents = chrome::ReplaceRestoredTab(browser,
+                                                tab.navigations,
+                                                selected_index,
+                                                true,
+                                                tab.extension_app_id,
+                                                NULL,
+                                                tab.user_agent_override);
     } else {
       int tab_index =
           use_new_window ? 0 : browser->tab_strip_model()->active_index() + 1;
-      WebContents* web_contents = chrome::AddRestoredTab(
+      web_contents = chrome::AddRestoredTab(
           browser,
           tab.navigations,
           tab_index,
@@ -653,6 +658,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
     // Since FinishedTabCreation() is not called here, |this| will leak if we
     // are not in sychronous mode.
     DCHECK(synchronous_);
+    return web_contents;
   }
 
   virtual ~SessionRestoreImpl() {
@@ -951,7 +957,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
       const extensions::Extension* extension =
           browser->profile()->GetExtensionService()->GetInstalledApp(url);
       if (extension) {
-        AppLauncherHandler::RecordAppLaunchType(
+        CoreAppLauncherHandler::RecordAppLaunchType(
             extension_misc::APP_LAUNCH_SESSION_RESTORE,
             extension->GetType());
       }
@@ -1044,19 +1050,14 @@ class SessionRestoreImpl : public content::NotificationObserver {
 
     // Set up the file access rights for the selected navigation entry.
     const int id = web_contents->GetRenderProcessHost()->GetID();
-    const int read_file_permissions =
-        base::PLATFORM_FILE_OPEN |
-        base::PLATFORM_FILE_READ |
-        base::PLATFORM_FILE_EXCLUSIVE_READ |
-        base::PLATFORM_FILE_ASYNC;
     const content::PageState& page_state =
         tab.navigations.at(selected_index).page_state();
     const std::vector<base::FilePath>& file_paths =
         page_state.GetReferencedFiles();
     for (std::vector<base::FilePath>::const_iterator file = file_paths.begin();
          file != file_paths.end(); ++file) {
-      content::ChildProcessSecurityPolicy::GetInstance()->
-          GrantPermissionsForFile(id, *file, read_file_permissions);
+      content::ChildProcessSecurityPolicy::GetInstance()->GrantReadFile(id,
+                                                                        *file);
     }
 
     if (schedule_load)
@@ -1224,7 +1225,7 @@ Browser* SessionRestore::RestoreSession(
 }
 
 // static
-void SessionRestore::RestoreForeignSessionWindows(
+std::vector<Browser*> SessionRestore::RestoreForeignSessionWindows(
     Profile* profile,
     chrome::HostDesktopType host_desktop_type,
     std::vector<const SessionWindow*>::const_iterator begin,
@@ -1232,11 +1233,11 @@ void SessionRestore::RestoreForeignSessionWindows(
   std::vector<GURL> gurls;
   SessionRestoreImpl restorer(profile,
       static_cast<Browser*>(NULL), host_desktop_type, true, false, true, gurls);
-  restorer.RestoreForeignSession(begin, end);
+  return restorer.RestoreForeignSession(begin, end);
 }
 
 // static
-void SessionRestore::RestoreForeignSessionTab(
+WebContents* SessionRestore::RestoreForeignSessionTab(
     content::WebContents* source_web_contents,
     const SessionTab& tab,
     WindowOpenDisposition disposition) {
@@ -1245,7 +1246,7 @@ void SessionRestore::RestoreForeignSessionTab(
   std::vector<GURL> gurls;
   SessionRestoreImpl restorer(profile, browser, browser->host_desktop_type(),
                               true, false, false, gurls);
-  restorer.RestoreForeignTab(tab, disposition);
+  return restorer.RestoreForeignTab(tab, disposition);
 }
 
 // static

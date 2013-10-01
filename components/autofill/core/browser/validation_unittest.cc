@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "components/autofill/core/browser/validation.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -39,6 +39,9 @@ const char* const kValidNumbers[] = {
   "4222-2222-2222-2",
   "5019717010103742",
   "6331101999990016",
+
+  // A UnionPay card that doesn't pass the Luhn checksum
+  "6200000000000000",
 };
 const char* const kInvalidNumbers[] = {
   "4111 1111 112", /* too short */

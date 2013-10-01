@@ -23,6 +23,7 @@
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/component_updater/component_updater_configurator.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
@@ -61,18 +62,16 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/status_icons/status_tray.h"
+#include "chrome/browser/storage_monitor/storage_monitor.h"
 #include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
 #include "chrome/browser/ui/bookmarks/bookmark_prompt_controller.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/chrome_manifest_handlers.h"
+#include "chrome/common/extensions/chrome_extensions_client.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/extensions/permissions/chrome_api_permissions.h"
-#include "chrome/common/extensions/permissions/permissions_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/switch_utils.h"
 #include "chrome/common/url_constants.h"
@@ -106,17 +105,12 @@
 #include "ui/aura/env.h"
 #endif
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
 #endif
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugins/plugins_resource_service.h"
-#endif
-
-#if defined(OS_MACOSX)
-#include "apps/app_shim/app_shim_host_manager_mac.h"
-#include "chrome/browser/ui/app_list/app_list_service.h"
 #endif
 
 #if defined(ENABLE_WEBRTC)
@@ -188,9 +182,8 @@ BrowserProcessImpl::BrowserProcessImpl(
   InitIdleMonitor();
 #endif
 
-  extensions::PermissionsInfo::GetInstance()->InitializeWithDelegate(
-      extensions::ChromeAPIPermissions());
-  extensions::RegisterChromeManifestHandlers();
+  extensions::ExtensionsClient::Set(
+      extensions::ChromeExtensionsClient::GetInstance());
   extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
   ExtensionRendererState::GetInstance()->Init();
 
@@ -251,6 +244,15 @@ void BrowserProcessImpl::StartTearDown() {
 
   ExtensionRendererState::GetInstance()->Shutdown();
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  media_file_system_registry_.reset();
+  // Delete |storage_monitor_| now. Otherwise the FILE thread would be gone
+  // when we try to release it in the dtor and Valgrind would report a
+  // leak on almost every single browser_test.
+  // TODO(gbillock): Make this unnecessary.
+  storage_monitor_.reset();
+#endif
+
   message_center::MessageCenter::Shutdown();
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -267,10 +269,6 @@ void BrowserProcessImpl::StartTearDown() {
   // Delete aura after the metrics service has been deleted as it accesses
   // monitor information.
   aura::Env::DeleteInstance();
-#endif
-
-#if defined(OS_MACOSX)
-  app_shim_host_manager_.reset();
 #endif
 
   platform_part()->StartTearDown();
@@ -565,7 +563,7 @@ printing::PrintJobManager* BrowserProcessImpl::print_job_manager() {
 
 printing::PrintPreviewDialogController*
     BrowserProcessImpl::print_preview_dialog_controller() {
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
   DCHECK(CalledOnValidThread());
   if (!print_preview_dialog_controller_.get())
     CreatePrintPreviewDialogController();
@@ -578,7 +576,7 @@ printing::PrintPreviewDialogController*
 
 printing::BackgroundPrintingManager*
     BrowserProcessImpl::background_printing_manager() {
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
   DCHECK(CalledOnValidThread());
   if (!background_printing_manager_.get())
     CreateBackgroundPrintingManager();
@@ -619,9 +617,24 @@ BookmarkPromptController* BrowserProcessImpl::bookmark_prompt_controller() {
 #endif
 }
 
+chrome::StorageMonitor* BrowserProcessImpl::storage_monitor() {
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  return NULL;
+#else
+  return storage_monitor_.get();
+#endif
+}
+
+void BrowserProcessImpl::set_storage_monitor_for_test(
+    scoped_ptr<chrome::StorageMonitor> monitor) {
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  storage_monitor_ = monitor.Pass();
+#endif
+}
+
 chrome::MediaFileSystemRegistry*
 BrowserProcessImpl::media_file_system_registry() {
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
     return NULL;
 #else
   if (!media_file_system_registry_)
@@ -702,6 +715,11 @@ BackgroundModeManager* BrowserProcessImpl::background_mode_manager() {
   NOTIMPLEMENTED();
   return NULL;
 #endif
+}
+
+void BrowserProcessImpl::set_background_mode_manager_for_test(
+    scoped_ptr<BackgroundModeManager> manager) {
+  background_mode_manager_ = manager.Pass();
 }
 
 StatusTray* BrowserProcessImpl::status_tray() {
@@ -905,10 +923,11 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
   }
 #endif
 
-#if defined(OS_MACOSX)
-  app_shim_host_manager_.reset(new AppShimHostManager);
-  AppListService::InitAll(NULL);
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  storage_monitor_.reset(chrome::StorageMonitor::Create());
 #endif
+
+  platform_part_->PreMainMessageLoopRun();
 }
 
 void BrowserProcessImpl::CreateIconManager() {
@@ -945,7 +964,7 @@ void BrowserProcessImpl::CreateStatusTray() {
 }
 
 void BrowserProcessImpl::CreatePrintPreviewDialogController() {
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
   DCHECK(print_preview_dialog_controller_.get() == NULL);
   print_preview_dialog_controller_ =
       new printing::PrintPreviewDialogController();
@@ -955,7 +974,7 @@ void BrowserProcessImpl::CreatePrintPreviewDialogController() {
 }
 
 void BrowserProcessImpl::CreateBackgroundPrintingManager() {
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
   DCHECK(background_printing_manager_.get() == NULL);
   background_printing_manager_.reset(new printing::BackgroundPrintingManager());
 #else

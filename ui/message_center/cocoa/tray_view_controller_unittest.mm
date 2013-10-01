@@ -5,7 +5,7 @@
 #import "ui/message_center/cocoa/tray_view_controller.h"
 
 #include "base/mac/scoped_nsobject.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #import "ui/base/test/ui_cocoa_test_helper.h"
@@ -206,7 +206,8 @@ namespace {
 Notifier* NewNotifier(const std::string& id,
                       const std::string& title,
                       bool enabled) {
-  return new Notifier(id, base::UTF8ToUTF16(title), enabled);
+  NotifierId notifier_id(NotifierId::APPLICATION, id);
+  return new Notifier(notifier_id, base::UTF8ToUTF16(title), enabled);
 }
 
 }  // namespace

@@ -10,23 +10,25 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/favicon/favicon_types.h"
+#include "chrome/common/favicon/favicon_url_parser.h"
 #include "chrome/common/omnibox_focus_state.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 #include "content/public/renderer/render_view.h"
-#include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
 #include "net/base/escape.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "url/gurl.h"
 
 namespace {
 
-// Size of the results cache.
-const size_t kMaxInstantAutocompleteResultItemCacheSize = 100;
+// The size of the InstantMostVisitedItem cache.
+const size_t kMaxInstantMostVisitedItemCacheSize = 100;
 
 // Returns true if items stored in |old_item_id_pairs| and |new_items| are
 // equal.
@@ -49,21 +51,18 @@ bool AreMostVisitedItemsEqual(
 
 namespace internal {  // for testing
 
-// Parses |url| and fills in |id| with the InstantRestrictedID obtained from the
-// |url|. |render_view_id| is the ID of the associated RenderView.
+// Parses |path| and fills in |id| with the InstantRestrictedID obtained from
+// the |path|. |render_view_id| is the ID of the associated RenderView.
 //
-// Valid |url| forms:
-// chrome-search://favicon/<view_id>/<restricted_id>
-// chrome-search://thumb/<view_id>/<restricted_id>
+// |path| is a pair of |render_view_id| and |restricted_id|, and it is
+// contained in Instant Extended URLs. A valid |path| is in the form:
+// <render_view_id>/<restricted_id>
 //
-// If the |url| is valid, returns true and fills in |id| with restricted_id
-// value. If the |url| is invalid, returns false and |id| is not set.
-bool GetInstantRestrictedIDFromURL(int render_view_id,
-                                   const GURL& url,
-                                   InstantRestrictedID* id) {
-  // Strip leading path.
-  std::string path = url.path().substr(1);
-
+// If the |path| is valid, returns true and fills in |id| with restricted_id
+// value. If the |path| is invalid, returns false and |id| is not set.
+bool GetInstantRestrictedIDFromPath(int render_view_id,
+                                    const std::string& path,
+                                    InstantRestrictedID* id) {
   // Check that the path is of Most visited item ID form.
   std::vector<std::string> tokens;
   if (Tokenize(path, "/", &tokens) != 2)
@@ -75,61 +74,171 @@ bool GetInstantRestrictedIDFromURL(int render_view_id,
   return base::StringToInt(tokens[1], id);
 }
 
+bool GetRestrictedIDFromFaviconUrl(int render_view_id,
+                                   const GURL& url,
+                                   std::string* favicon_params,
+                                   InstantRestrictedID* rid) {
+  // Strip leading slash.
+  std::string raw_path = url.path();
+  DCHECK_GT(raw_path.length(), (size_t) 0);
+  DCHECK_EQ(raw_path[0], '/');
+  raw_path = raw_path.substr(1);
+
+  chrome::ParsedFaviconPath parsed;
+  if (!chrome::ParseFaviconPath(raw_path, chrome::FAVICON, &parsed))
+    return false;
+
+  // The part of the URL which details the favicon parameters should be returned
+  // so the favicon URL can be reconstructed, by replacing the restricted_id
+  // with the actual URL from which the favicon is being requested.
+  *favicon_params = raw_path.substr(0, parsed.path_index);
+
+  // The part of the favicon URL which is supposed to contain the URL from
+  // which the favicon is being requested (i.e., the page's URL) actually
+  // contains a pair in the format "<view_id>/<restricted_id>". If the page's
+  // URL is not in the expected format then the execution must be stopped,
+  // returning |true|, indicating that the favicon URL should be translated
+  // without the page's URL part, to prevent search providers from spoofing
+  // the user's browsing history. For example, the following favicon URL
+  // "chrome-search://favicon/http://www.secretsite.com" it is not in the
+  // expected format "chrome-search://favicon/<view_id>/<restricted_id>" so
+  // the pages's URL part ("http://www.secretsite.com") should be removed
+  // entirely from the translated URL otherwise the search engine would know
+  // if the user has visited that page (by verifying whether the favicon URL
+  // returns an image for a particular page's URL); the translated URL in this
+  // case would be "chrome-search://favicon/" which would simply return the
+  // default favicon.
+  std::string id_part = raw_path.substr(parsed.path_index);
+  InstantRestrictedID id;
+  if (!GetInstantRestrictedIDFromPath(render_view_id, id_part, &id))
+    return true;
+
+  *rid = id;
+  return true;
+}
+
+// Parses a thumbnail |url| and fills in |id| with the InstantRestrictedID
+// obtained from the |url|. |render_view_id| is the ID of the associated
+// RenderView.
+//
+// Valid |url| forms:
+// chrome-search://thumb/<view_id>/<restricted_id>
+//
+// If the |url| is valid, returns true and fills in |id| with restricted_id
+// value. If the |url| is invalid, returns false and |id| is not set.
+bool GetRestrictedIDFromThumbnailUrl(int render_view_id,
+                                     const GURL& url,
+                                     InstantRestrictedID* id) {
+  // Strip leading slash.
+  std::string path = url.path();
+  DCHECK_GT(path.length(), (size_t) 0);
+  DCHECK_EQ(path[0], '/');
+  path = path.substr(1);
+
+  return GetInstantRestrictedIDFromPath(render_view_id, path, id);
+}
+
 }  // namespace internal
 
 SearchBox::SearchBox(content::RenderView* render_view)
     : content::RenderViewObserver(render_view),
       content::RenderViewObserverTracker<SearchBox>(render_view),
-      verbatim_(false),
-      query_is_restricted_(false),
-      selection_start_(0),
-      selection_end_(0),
-      start_margin_(0),
-      is_focused_(false),
-      is_key_capture_enabled_(false),
-      is_input_in_progress_(false),
-      display_instant_results_(false),
-      omnibox_font_size_(0),
-      app_launcher_enabled_(false),
-      autocomplete_results_cache_(kMaxInstantAutocompleteResultItemCacheSize),
-      most_visited_items_cache_(kMaxInstantMostVisitedItemCacheSize) {
+    app_launcher_enabled_(false),
+    is_focused_(false),
+    is_input_in_progress_(false),
+    is_key_capture_enabled_(false),
+    most_visited_items_cache_(kMaxInstantMostVisitedItemCacheSize),
+    omnibox_font_(),
+    omnibox_font_size_(12),
+    query_(),
+    start_margin_(0),
+    width_(0) {
 }
 
 SearchBox::~SearchBox() {
 }
 
-void SearchBox::SetSuggestions(
-    const std::vector<InstantSuggestion>& suggestions) {
-  if (!suggestions.empty() &&
-      suggestions[0].behavior == INSTANT_COMPLETE_REPLACE) {
-    SetQuery(suggestions[0].text, true);
-    selection_start_ = selection_end_ = query_.size();
+void SearchBox::CountMouseover() {
+  render_view()->Send(new ChromeViewHostMsg_CountMouseover(
+      render_view()->GetRoutingID(), render_view()->GetPageId()));
+}
+
+void SearchBox::DeleteMostVisitedItem(
+    InstantRestrictedID most_visited_item_id) {
+  render_view()->Send(new ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem(
+      render_view()->GetRoutingID(), render_view()->GetPageId(),
+      GetURLForMostVisitedItem(most_visited_item_id)));
+}
+
+bool SearchBox::GenerateFaviconURLFromTransientURL(const GURL& transient_url,
+                                                   GURL* url) const {
+  std::string favicon_params;
+  InstantRestrictedID rid = -1;
+  bool success = internal::GetRestrictedIDFromFaviconUrl(
+      render_view()->GetRoutingID(), transient_url, &favicon_params, &rid);
+  if (!success)
+    return false;
+
+  InstantMostVisitedItem item;
+  std::string item_url;
+  if (rid != -1 && GetMostVisitedItemWithID(rid, &item))
+    item_url = item.url.spec();
+
+  *url = GURL(base::StringPrintf("chrome-search://favicon/%s%s",
+                                 favicon_params.c_str(),
+                                 item_url.c_str()));
+  return true;
+}
+
+bool SearchBox::GenerateThumbnailURLFromTransientURL(const GURL& transient_url,
+                                                     GURL* url) const {
+  InstantRestrictedID rid = 0;
+  if (!internal::GetRestrictedIDFromThumbnailUrl(render_view()->GetRoutingID(),
+                                                 transient_url, &rid)) {
+    return false;
   }
-  // Explicitly allow empty vector to be sent to the browser.
-  render_view()->Send(new ChromeViewHostMsg_SetSuggestions(
-      render_view()->GetRoutingID(), render_view()->GetPageId(), suggestions));
+
+  GURL most_visited_item_url(GetURLForMostVisitedItem(rid));
+  if (most_visited_item_url.is_empty())
+    return false;
+  *url = GURL(base::StringPrintf("chrome-search://thumb/%s",
+                                 most_visited_item_url.spec().c_str()));
+  return true;
+}
+
+void SearchBox::GetMostVisitedItems(
+    std::vector<InstantMostVisitedItemIDPair>* items) const {
+  return most_visited_items_cache_.GetCurrentItems(items);
+}
+
+bool SearchBox::GetMostVisitedItemWithID(
+    InstantRestrictedID most_visited_item_id,
+    InstantMostVisitedItem* item) const {
+  return most_visited_items_cache_.GetItemWithRestrictedID(most_visited_item_id,
+                                                           item);
+}
+
+const ThemeBackgroundInfo& SearchBox::GetThemeBackgroundInfo() {
+  return theme_info_;
+}
+
+void SearchBox::NavigateToURL(const GURL& url,
+                              content::PageTransition transition,
+                              WindowOpenDisposition disposition,
+                              bool is_search_type) {
+  render_view()->Send(new ChromeViewHostMsg_SearchBoxNavigate(
+      render_view()->GetRoutingID(), render_view()->GetPageId(),
+      url, transition, disposition, is_search_type));
+}
+
+void SearchBox::Paste(const string16& text) {
+  render_view()->Send(new ChromeViewHostMsg_PasteAndOpenDropdown(
+      render_view()->GetRoutingID(), render_view()->GetPageId(), text));
 }
 
 void SearchBox::SetVoiceSearchSupported(bool supported) {
   render_view()->Send(new ChromeViewHostMsg_SetVoiceSearchSupported(
       render_view()->GetRoutingID(), render_view()->GetPageId(), supported));
-}
-
-void SearchBox::MarkQueryAsRestricted() {
-  query_is_restricted_ = true;
-  query_.clear();
-}
-
-void SearchBox::ShowInstantOverlay(int height, InstantSizeUnits units) {
-  render_view()->Send(new ChromeViewHostMsg_ShowInstantOverlay(
-      render_view()->GetRoutingID(), render_view()->GetPageId(), height,
-      units));
-}
-
-void SearchBox::FocusOmnibox() {
-  render_view()->Send(new ChromeViewHostMsg_FocusOmnibox(
-      render_view()->GetRoutingID(), render_view()->GetPageId(),
-      OMNIBOX_FOCUS_VISIBLE));
 }
 
 void SearchBox::StartCapturingKeyStrokes() {
@@ -144,20 +253,10 @@ void SearchBox::StopCapturingKeyStrokes() {
       OMNIBOX_FOCUS_NONE));
 }
 
-void SearchBox::NavigateToURL(const GURL& url,
-                              content::PageTransition transition,
-                              WindowOpenDisposition disposition,
-                              bool is_search_type) {
-  render_view()->Send(new ChromeViewHostMsg_SearchBoxNavigate(
-      render_view()->GetRoutingID(), render_view()->GetPageId(),
-      url, transition, disposition, is_search_type));
-}
-
-void SearchBox::DeleteMostVisitedItem(
-    InstantRestrictedID most_visited_item_id) {
-  render_view()->Send(new ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem(
-      render_view()->GetRoutingID(), render_view()->GetPageId(),
-      GetURLForMostVisitedItem(most_visited_item_id)));
+void SearchBox::UndoAllMostVisitedDeletions() {
+  render_view()->Send(
+      new ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions(
+      render_view()->GetRoutingID(), render_view()->GetPageId()));
 }
 
 void SearchBox::UndoMostVisitedDeletion(
@@ -167,205 +266,29 @@ void SearchBox::UndoMostVisitedDeletion(
       GetURLForMostVisitedItem(most_visited_item_id)));
 }
 
-void SearchBox::UndoAllMostVisitedDeletions() {
-  render_view()->Send(
-      new ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions(
-      render_view()->GetRoutingID(), render_view()->GetPageId()));
-}
-
-void SearchBox::ShowBars() {
-  DVLOG(1) << render_view() << " ShowBars";
-  render_view()->Send(new ChromeViewHostMsg_SearchBoxShowBars(
-      render_view()->GetRoutingID(), render_view()->GetPageId()));
-}
-
-void SearchBox::HideBars() {
-  DVLOG(1) << render_view() << " HideBars";
-  render_view()->Send(new ChromeViewHostMsg_SearchBoxHideBars(
-      render_view()->GetRoutingID(), render_view()->GetPageId()));
-}
-
-int SearchBox::GetStartMargin() const {
-  return static_cast<int>(start_margin_ / GetZoom());
-}
-
-gfx::Rect SearchBox::GetPopupBounds() const {
-  double zoom = GetZoom();
-  return gfx::Rect(static_cast<int>(popup_bounds_.x() / zoom),
-                   static_cast<int>(popup_bounds_.y() / zoom),
-                   static_cast<int>(popup_bounds_.width() / zoom),
-                   static_cast<int>(popup_bounds_.height() / zoom));
-}
-
-void SearchBox::GetAutocompleteResults(
-    std::vector<InstantAutocompleteResultIDPair>* results) const {
-  autocomplete_results_cache_.GetCurrentItems(results);
-}
-
-bool SearchBox::GetAutocompleteResultWithID(
-    InstantRestrictedID autocomplete_result_id,
-    InstantAutocompleteResult* result) const {
-  return autocomplete_results_cache_.GetItemWithRestrictedID(
-      autocomplete_result_id, result);
-}
-
-const ThemeBackgroundInfo& SearchBox::GetThemeBackgroundInfo() {
-  return theme_info_;
-}
-
-bool SearchBox::GenerateThumbnailURLFromTransientURL(const GURL& transient_url,
-                                                     GURL* url) const {
-  InstantRestrictedID rid = 0;
-  if (!internal::GetInstantRestrictedIDFromURL(render_view()->GetRoutingID(),
-                                               transient_url, &rid)) {
-    return false;
-  }
-
-  GURL most_visited_item_url(GetURLForMostVisitedItem(rid));
-  if (most_visited_item_url.is_empty())
-    return false;
-  *url = GURL(base::StringPrintf("chrome-search://thumb/%s",
-                                 most_visited_item_url.spec().c_str()));
-  return true;
-}
-
-bool SearchBox::GenerateFaviconURLFromTransientURL(const GURL& transient_url,
-                                                   GURL* url) const {
-  InstantRestrictedID rid = 0;
-  if (!internal::GetInstantRestrictedIDFromURL(render_view()->GetRoutingID(),
-                                               transient_url, &rid)) {
-    return false;
-  }
-
-  GURL most_visited_item_url(GetURLForMostVisitedItem(rid));
-  if (most_visited_item_url.is_empty())
-    return false;
-  *url = GURL(base::StringPrintf("chrome-search://favicon/%s",
-                                 most_visited_item_url.spec().c_str()));
-  return true;
-}
-
 bool SearchBox::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SearchBox, message)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxChange, OnChange)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxSubmit, OnSubmit)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxCancel, OnCancel)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxPopupResize, OnPopupResize)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxMarginChange, OnMarginChange)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxBarsHidden, OnBarsHidden)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_DetermineIfPageSupportsInstant,
                         OnDetermineIfPageSupportsInstant)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxAutocompleteResults,
-                        OnAutocompleteResults)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxUpOrDownKeyPressed,
-                        OnUpOrDownKeyPressed)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxEscKeyPressed, OnEscKeyPressed)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxCancelSelection,
-                        OnCancelSelection)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxSetDisplayInstantResults,
-                        OnSetDisplayInstantResults)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxFocusChanged, OnFocusChanged)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxSetInputInProgress,
-                        OnSetInputInProgress)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxThemeChanged,
-                        OnThemeChanged)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxFontInformation,
                         OnFontInformationReceived)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxPromoInformation,
-                        OnPromoInformationReceived)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxMarginChange, OnMarginChange)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxMostVisitedItemsChanged,
                         OnMostVisitedChanged)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxPromoInformation,
+                        OnPromoInformationReceived)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxSetInputInProgress,
+                        OnSetInputInProgress)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxSubmit, OnSubmit)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxThemeChanged,
+                        OnThemeChanged)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxToggleVoiceSearch,
                         OnToggleVoiceSearch)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
-}
-
-void SearchBox::OnChange(const string16& query,
-                         bool verbatim,
-                         size_t selection_start,
-                         size_t selection_end) {
-  SetQuery(query, verbatim);
-  selection_start_ = selection_start;
-  selection_end_ = selection_end;
-
-  // If |query| is empty, this is due to the user backspacing away all the text
-  // in the omnibox, or hitting Escape to restore the "permanent URL", or
-  // switching tabs, etc. In all these cases, there will be no corresponding
-  // OnAutocompleteResults(), so clear the autocomplete results ourselves, by
-  // adding an empty set. Don't notify the page using an "onnativesuggestions"
-  // event, though.
-  if (query.empty()) {
-    autocomplete_results_cache_.AddItems(
-        std::vector<InstantAutocompleteResult>());
-  }
-
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    DVLOG(1) << render_view() << " OnChange";
-    extensions_v8::SearchBoxExtension::DispatchChange(
-        render_view()->GetWebView()->mainFrame());
-  }
-}
-
-void SearchBox::OnSubmit(const string16& query) {
-  // Submit() is called when the user hits Enter to commit the omnibox text.
-  // If |query| is non-blank, the user committed a search. If it's blank, the
-  // omnibox text was a URL, and the user is navigating to it, in which case
-  // we shouldn't update the |query_| or associated state.
-  if (!query.empty()) {
-    SetQuery(query, true);
-    selection_start_ = selection_end_ = query_.size();
-  }
-
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    DVLOG(1) << render_view() << " OnSubmit";
-    extensions_v8::SearchBoxExtension::DispatchSubmit(
-        render_view()->GetWebView()->mainFrame());
-  }
-
-  if (!query.empty())
-    Reset();
-}
-
-void SearchBox::OnCancel(const string16& query) {
-  SetQuery(query, true);
-  selection_start_ = selection_end_ = query_.size();
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    DVLOG(1) << render_view() << " OnCancel";
-    extensions_v8::SearchBoxExtension::DispatchCancel(
-        render_view()->GetWebView()->mainFrame());
-  }
-  Reset();
-}
-
-void SearchBox::OnPopupResize(const gfx::Rect& bounds) {
-  popup_bounds_ = bounds;
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    DVLOG(1) << render_view() << " OnPopupResize";
-    extensions_v8::SearchBoxExtension::DispatchResize(
-        render_view()->GetWebView()->mainFrame());
-  }
-}
-
-void SearchBox::OnMarginChange(int margin, int width) {
-  start_margin_ = margin;
-
-  // Override only the width parameter of the popup bounds.
-  popup_bounds_.set_width(width);
-
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    extensions_v8::SearchBoxExtension::DispatchMarginChange(
-        render_view()->GetWebView()->mainFrame());
-  }
-}
-
-void SearchBox::OnBarsHidden() {
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    extensions_v8::SearchBoxExtension::DispatchBarsHidden(
-        render_view()->GetWebView()->mainFrame());
-  }
 }
 
 void SearchBox::OnDetermineIfPageSupportsInstant() {
@@ -375,46 +298,6 @@ void SearchBox::OnDetermineIfPageSupportsInstant() {
     DVLOG(1) << render_view() << " PageSupportsInstant: " << result;
     render_view()->Send(new ChromeViewHostMsg_InstantSupportDetermined(
         render_view()->GetRoutingID(), render_view()->GetPageId(), result));
-  }
-}
-
-void SearchBox::OnAutocompleteResults(
-    const std::vector<InstantAutocompleteResult>& results) {
-  autocomplete_results_cache_.AddItems(results);
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    DVLOG(1) << render_view() << " OnAutocompleteResults";
-    extensions_v8::SearchBoxExtension::DispatchAutocompleteResults(
-        render_view()->GetWebView()->mainFrame());
-  }
-}
-
-void SearchBox::OnUpOrDownKeyPressed(int count) {
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    DVLOG(1) << render_view() << " OnKeyPress: " << count;
-    extensions_v8::SearchBoxExtension::DispatchUpOrDownKeyPress(
-        render_view()->GetWebView()->mainFrame(), count);
-  }
-}
-
-void SearchBox::OnEscKeyPressed() {
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    DVLOG(1) << render_view() << " OnEscKeyPressed ";
-    extensions_v8::SearchBoxExtension::DispatchEscKeyPress(
-        render_view()->GetWebView()->mainFrame());
-  }
-}
-
-void SearchBox::OnCancelSelection(const string16& query,
-                                  bool verbatim,
-                                  size_t selection_start,
-                                  size_t selection_end) {
-  SetQuery(query, verbatim);
-  selection_start_ = selection_start;
-  selection_end_ = selection_end;
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    DVLOG(1) << render_view() << " OnKeyPress ESC";
-    extensions_v8::SearchBoxExtension::DispatchEscKeyPress(
-        render_view()->GetWebView()->mainFrame());
   }
 }
 
@@ -451,81 +334,19 @@ void SearchBox::OnFocusChanged(OmniboxFocusState new_focus_state,
   }
 }
 
-void SearchBox::OnSetInputInProgress(bool is_input_in_progress) {
-  if (is_input_in_progress_ != is_input_in_progress) {
-    is_input_in_progress_ = is_input_in_progress;
-    DVLOG(1) << render_view() << " OnSetInputInProgress";
-    if (render_view()->GetWebView() &&
-        render_view()->GetWebView()->mainFrame()) {
-      if (is_input_in_progress_) {
-        extensions_v8::SearchBoxExtension::DispatchInputStart(
-            render_view()->GetWebView()->mainFrame());
-      } else {
-        extensions_v8::SearchBoxExtension::DispatchInputCancel(
-            render_view()->GetWebView()->mainFrame());
-      }
-    }
-  }
-}
-
-void SearchBox::OnSetDisplayInstantResults(bool display_instant_results) {
-  display_instant_results_ = display_instant_results;
-}
-
-void SearchBox::OnThemeChanged(const ThemeBackgroundInfo& theme_info) {
-  // Do not send duplicate notifications.
-  if (theme_info_ == theme_info)
-    return;
-
-  theme_info_ = theme_info;
-  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
-    extensions_v8::SearchBoxExtension::DispatchThemeChange(
-        render_view()->GetWebView()->mainFrame());
-  }
-}
-
 void SearchBox::OnFontInformationReceived(const string16& omnibox_font,
                                           size_t omnibox_font_size) {
   omnibox_font_ = omnibox_font;
   omnibox_font_size_ = omnibox_font_size;
 }
 
-void SearchBox::OnPromoInformationReceived(bool is_app_launcher_enabled) {
-  app_launcher_enabled_ = is_app_launcher_enabled;
-}
-
-double SearchBox::GetZoom() const {
-  WebKit::WebView* web_view = render_view()->GetWebView();
-  if (web_view) {
-    double zoom = WebKit::WebView::zoomLevelToZoomFactor(web_view->zoomLevel());
-    if (zoom != 0)
-      return zoom;
+void SearchBox::OnMarginChange(int margin, int width) {
+  start_margin_ = margin;
+  width_ = width;
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchMarginChange(
+        render_view()->GetWebView()->mainFrame());
   }
-  return 1.0;
-}
-
-void SearchBox::Reset() {
-  query_.clear();
-  verbatim_ = false;
-  query_is_restricted_ = false;
-  selection_start_ = 0;
-  selection_end_ = 0;
-  popup_bounds_ = gfx::Rect();
-  start_margin_ = 0;
-  is_focused_ = false;
-  is_key_capture_enabled_ = false;
-  theme_info_ = ThemeBackgroundInfo();
-  // Don't reset display_instant_results_ to prevent clearing it on committed
-  // results pages in extended mode. Otherwise resetting it is a no-op because
-  // a new loader is created when it changes; see crbug.com/164662.
-  // Also don't reset omnibox_font_ or omnibox_font_size_ since it never
-  // changes.
-}
-
-void SearchBox::SetQuery(const string16& query, bool verbatim) {
-  query_ = query;
-  verbatim_ = verbatim;
-  query_is_restricted_ = false;
 }
 
 void SearchBox::OnMostVisitedChanged(
@@ -543,21 +364,48 @@ void SearchBox::OnMostVisitedChanged(
   }
 }
 
-void SearchBox::GetMostVisitedItems(
-    std::vector<InstantMostVisitedItemIDPair>* items) const {
-  return most_visited_items_cache_.GetCurrentItems(items);
+void SearchBox::OnPromoInformationReceived(bool is_app_launcher_enabled) {
+  app_launcher_enabled_ = is_app_launcher_enabled;
 }
 
-bool SearchBox::GetMostVisitedItemWithID(
-    InstantRestrictedID most_visited_item_id,
-    InstantMostVisitedItem* item) const {
-  return most_visited_items_cache_.GetItemWithRestrictedID(most_visited_item_id,
-                                                           item);
+void SearchBox::OnSetInputInProgress(bool is_input_in_progress) {
+  if (is_input_in_progress_ != is_input_in_progress) {
+    is_input_in_progress_ = is_input_in_progress;
+    DVLOG(1) << render_view() << " OnSetInputInProgress";
+    if (render_view()->GetWebView() &&
+        render_view()->GetWebView()->mainFrame()) {
+      if (is_input_in_progress_) {
+        extensions_v8::SearchBoxExtension::DispatchInputStart(
+            render_view()->GetWebView()->mainFrame());
+      } else {
+        extensions_v8::SearchBoxExtension::DispatchInputCancel(
+            render_view()->GetWebView()->mainFrame());
+      }
+    }
+  }
 }
 
-GURL SearchBox::GetURLForMostVisitedItem(InstantRestrictedID item_id) const {
-  InstantMostVisitedItem item;
-  return GetMostVisitedItemWithID(item_id, &item) ? item.url : GURL();
+void SearchBox::OnSubmit(const string16& query) {
+  query_ = query;
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    DVLOG(1) << render_view() << " OnSubmit";
+    extensions_v8::SearchBoxExtension::DispatchSubmit(
+        render_view()->GetWebView()->mainFrame());
+  }
+  if (!query.empty())
+    Reset();
+}
+
+void SearchBox::OnThemeChanged(const ThemeBackgroundInfo& theme_info) {
+  // Do not send duplicate notifications.
+  if (theme_info_ == theme_info)
+    return;
+
+  theme_info_ = theme_info;
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchThemeChange(
+        render_view()->GetWebView()->mainFrame());
+  }
 }
 
 void SearchBox::OnToggleVoiceSearch() {
@@ -565,4 +413,18 @@ void SearchBox::OnToggleVoiceSearch() {
     extensions_v8::SearchBoxExtension::DispatchToggleVoiceSearch(
         render_view()->GetWebView()->mainFrame());
   }
+}
+
+GURL SearchBox::GetURLForMostVisitedItem(InstantRestrictedID item_id) const {
+  InstantMostVisitedItem item;
+  return GetMostVisitedItemWithID(item_id, &item) ? item.url : GURL();
+}
+
+void SearchBox::Reset() {
+  query_.clear();
+  start_margin_ = 0;
+  width_ = 0;
+  is_focused_ = false;
+  is_key_capture_enabled_ = false;
+  theme_info_ = ThemeBackgroundInfo();
 }

@@ -3,6 +3,8 @@ include_rules = [
   "+chrome/installer/launcher_support",
   "+google_apis",
   "+grit",
+  "+jingle/notifier",
   "+net",
   "+printing",
+  "+url",
 ]

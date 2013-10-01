@@ -4,31 +4,30 @@
 
 #include "chrome/browser/ui/views/extensions/extension_dialog.h"
 
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/extensions/extension_dialog_observer.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "googleurl/src/gurl.h"
 #include "ui/base/base_window.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/background.h"
 #include "ui/views/widget/widget.h"
+#include "url/gurl.h"
 
 using content::WebContents;
 
 ExtensionDialog::ExtensionDialog(extensions::ExtensionHost* host,
                                  ExtensionDialogObserver* observer)
-    : window_(NULL),
-      extension_host_(host),
+    : extension_host_(host),
       observer_(observer) {
   AddRef();  // Balanced in DeleteDelegate();
 
@@ -58,11 +57,11 @@ ExtensionDialog* ExtensionDialog::Show(
     const string16& title,
     ExtensionDialogObserver* observer) {
   extensions::ExtensionHost* host = CreateExtensionHost(url, profile);
+  if (!host)
+    return NULL;
   // Preferred size must be set before views::Widget::CreateWindowWithParent
   // is called because CreateWindowWithParent refers the result of CanResize().
   host->view()->SetPreferredSize(gfx::Size(min_width, min_height));
-  if (!host)
-    return NULL;
   host->SetAssociatedWebContents(web_contents);
 
   CHECK(base_window);
@@ -99,7 +98,7 @@ void ExtensionDialog::InitWindow(ui::BaseWindow* base_window,
                                  int width,
                                  int height) {
   gfx::NativeWindow parent = base_window->GetNativeWindow();
-  window_ = CreateBrowserModalDialogViews(this, parent);
+  views::Widget* window = CreateBrowserModalDialogViews(this, parent);
 
   // Center the window over the browser.
   gfx::Point center = base_window->GetBounds().CenterPoint();
@@ -111,23 +110,15 @@ void ExtensionDialog::InitWindow(ui::BaseWindow* base_window,
       GetDisplayNearestPoint(center).bounds();
   gfx::Rect bounds_rect = gfx::Rect(x, y, width, height);
   bounds_rect.AdjustToFit(screen_rect);
-  window_->SetBounds(bounds_rect);
+  window->SetBounds(bounds_rect);
 
-  window_->Show();
+  window->Show();
   // TODO(jamescook): Remove redundant call to Activate()?
-  window_->Activate();
+  window->Activate();
 }
 
 void ExtensionDialog::ObserverDestroyed() {
   observer_ = NULL;
-}
-
-void ExtensionDialog::Close() {
-  if (!window_)
-    return;
-
-  window_->Close();
-  window_ = NULL;
 }
 
 void ExtensionDialog::MaybeFocusRenderView() {
@@ -225,7 +216,7 @@ void ExtensionDialog::Observe(int type,
       // If we aren't the host of the popup, then disregard the notification.
       if (content::Details<extensions::ExtensionHost>(host()) != details)
         return;
-      Close();
+      GetWidget()->Close();
       break;
     case chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED:
       if (content::Details<extensions::ExtensionHost>(host()) != details)

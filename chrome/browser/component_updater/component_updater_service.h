@@ -9,15 +9,15 @@
 #include <vector>
 
 #include "base/version.h"
-#include "googleurl/src/gurl.h"
-
-namespace net {
-class URLRequestContextGetter;
-}
+#include "url/gurl.h"
 
 namespace base {
 class DictionaryValue;
 class FilePath;
+}
+
+namespace net {
+class URLRequestContextGetter;
 }
 
 class ComponentPatcher;
@@ -50,29 +50,44 @@ class ComponentInstaller {
   virtual ~ComponentInstaller() {}
 };
 
+// Defines an interface to observe a CrxComponent.
+class ComponentObserver {
+ public:
+  enum Events {
+    // Sent when the component updater starts doing update checks.
+    COMPONENT_UPDATER_STARTED,
+
+    // Sent when the component updater is going to take a long nap.
+    COMPONENT_UPDATER_SLEEPING,
+
+    // Sent when there is a new version of a registered component. After
+    // the notification is sent the component will be downloaded.
+    COMPONENT_UPDATE_FOUND,
+
+    // Sent when the new component has been downloaded and an installation
+    // or upgrade is about to be attempted.
+    COMPONENT_UPDATE_READY,
+  };
+
+  virtual ~ComponentObserver() {}
+
+  // The component updater service will call this function when an interesting
+  // event happens for a specific component. |extra| is |event| dependent.
+  virtual void OnEvent(Events event, int extra) = 0;
+};
+
 // Describes a particular component that can be installed or updated. This
 // structure is required to register a component with the component updater.
 // |pk_hash| is the SHA256 hash of the component's public key. If the component
 // is to be installed then version should be "0" or "0.0", else it should be
-// the current version. |fingerprint| and |name| are optional.
-// |source| is by default pointing to BANDAID but if needed it can be made
-// to point to the webstore (CWS_PUBLIC) or to the webstore sandbox. It is
-// important to note that the BANDAID source if active throught the day
-// can pre-empt updates from the other sources down the list.
+// the current version. |observer|, |fingerprint|, and |name| are optional.
 struct CrxComponent {
-  // Specifies the source url for manifest check.
-  enum UrlSource {
-    BANDAID,
-    CWS_PUBLIC,
-    CWS_SANDBOX,
-  };
-
   std::vector<uint8> pk_hash;
   ComponentInstaller* installer;
+  ComponentObserver* observer;
   Version version;
   std::string fingerprint;
   std::string name;
-  UrlSource source;
   CrxComponent();
   ~CrxComponent();
 };
@@ -103,15 +118,6 @@ class ComponentUpdateService {
   // Controls the component updater behavior.
   class Configurator {
    public:
-    enum Events {
-      kManifestCheck,
-      kComponentUpdated,
-      kManifestError,
-      kNetworkError,
-      kUnpackError,
-      kInstallerError
-    };
-
     virtual ~Configurator() {}
     // Delay in seconds from calling Start() to the first update check.
     virtual int InitialDelay() = 0;
@@ -125,7 +131,10 @@ class ComponentUpdateService {
     // for the same component.
     virtual int OnDemandDelay() = 0;
     // The url that is going to be used update checks over Omaha protocol.
-    virtual GURL UpdateUrl(CrxComponent::UrlSource source) = 0;
+    virtual GURL UpdateUrl() = 0;
+    // The url where the completion pings are sent. Invalid if and only if
+    // pings are disabled.
+    virtual GURL PingUrl() = 0;
     // Parameters added to each url request. It can be null if none are needed.
     virtual const char* ExtraRequestParams() = 0;
     // How big each update request can be. Don't go above 2000.
@@ -134,10 +143,6 @@ class ComponentUpdateService {
     virtual net::URLRequestContextGetter* RequestContext() = 0;
     // True means that all ops are performed in this process.
     virtual bool InProcess() = 0;
-    // The component updater will call this function when an interesting event
-    // happens. It should be used mostly as a place to add application specific
-    // logging or telemetry. |extra| is |event| dependent.
-    virtual void OnEvent(Events event, int extra) = 0;
     // Creates a new ComponentPatcher in a platform-specific way. This is useful
     // for dependency injection.
     virtual ComponentPatcher* CreateComponentPatcher() = 0;

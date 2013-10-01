@@ -15,7 +15,7 @@
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_process_killer_win.h"
@@ -112,10 +112,10 @@ void TestScrubber::CleanUpFromTestRun() {
                           default_data_directory_ :
                           data_directory_override_);
 
-  VLOG_IF(1, file_util::PathExists(data_directory))
+  VLOG_IF(1, base::PathExists(data_directory))
       << __FUNCTION__ << " deleting user data directory "
       << data_directory.value();
-  bool deleted = file_util::Delete(data_directory, true);
+  bool deleted = base::DeleteFile(data_directory, true);
   LOG_IF(ERROR, !deleted)
       << "Failed to delete user data directory directory "
       << data_directory.value();

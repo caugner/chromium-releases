@@ -8,7 +8,8 @@
 #include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
-#include "base/process.h"
+#include "base/process/process.h"
+#include "ui/gfx/native_widget_types.h"
 
 class CommandLine;
 class GURL;
@@ -18,8 +19,6 @@ class FilePath;
 }
 
 namespace extensions {
-
-class NativeMessagingHostManifest;
 
 class NativeProcessLauncher {
  public:
@@ -38,7 +37,8 @@ class NativeProcessLauncher {
                                base::PlatformFile read_file,
                                base::PlatformFile write_file)> LaunchedCallback;
 
-  static scoped_ptr<NativeProcessLauncher> CreateDefault();
+  static scoped_ptr<NativeProcessLauncher> CreateDefault(
+      gfx::NativeView native_view);
 
   NativeProcessLauncher() {}
   virtual ~NativeProcessLauncher() {}
@@ -57,10 +57,9 @@ class NativeProcessLauncher {
   // The following two methods are platform specific and are implemented in
   // platform-specific .cc files.
 
-  // Loads manifest for the native messaging host |name|.
-  static scoped_ptr<NativeMessagingHostManifest> FindAndLoadManifest(
-      const std::string& native_host_name,
-      std::string* error_message);
+  // Finds manifest file for the native messaging host |native_host_name|.
+  static base::FilePath FindManifest(const std::string& native_host_name,
+                                     std::string* error_message);
 
   // Launches native messaging process.
   static bool LaunchNativeProcess(

@@ -4,15 +4,15 @@
 
 #include "chrome/browser/autocomplete/builtin_provider.h"
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 class BuiltinProviderTest : public testing::Test {
  protected:
@@ -53,8 +53,8 @@ void BuiltinProviderTest::RunTest(test_data<ResultType>* builtin_cases,
   ACMatches matches;
   for (int i = 0; i < num_cases; ++i) {
     AutocompleteInput input(builtin_cases[i].input, string16::npos, string16(),
-                            GURL(), true, false, true,
-                            AutocompleteInput::ALL_MATCHES);
+                            GURL(), AutocompleteInput::INVALID_SPEC, true,
+                            false, true, AutocompleteInput::ALL_MATCHES);
     builtin_provider_->Start(input, false);
     EXPECT_TRUE(builtin_provider_->done());
     matches = builtin_provider_->matches();
@@ -64,6 +64,7 @@ void BuiltinProviderTest::RunTest(test_data<ResultType>* builtin_cases,
       for (size_t j = 0; j < builtin_cases[i].num_results; ++j) {
         EXPECT_EQ(builtin_cases[i].output[j], matches[j].*member) <<
                 ASCIIToUTF16("Input was: ") << builtin_cases[i].input;
+        EXPECT_FALSE(matches[j].allowed_to_be_default_match);
       }
     }
   }
@@ -143,7 +144,7 @@ TEST_F(BuiltinProviderTest, ChromeURLs) {
   const string16 kSeparator3 = ASCIIToUTF16(content::kStandardSchemeSeparator);
 
   // This makes assumptions about the chrome URLs listed by the BuiltinProvider.
-  // Currently they are derived from ChromePaths() in browser_about_handler.cc.
+  // Currently they are derived from chrome::kChromeHostURLs[].
   const string16 kHostM1 = ASCIIToUTF16(content::kChromeUIMediaInternalsHost);
   const string16 kHostM2 = ASCIIToUTF16(chrome::kChromeUIMemoryHost);
   const string16 kHostM3 = ASCIIToUTF16(chrome::kChromeUIMemoryInternalsHost);
@@ -189,7 +190,7 @@ TEST_F(BuiltinProviderTest, ChromeURLs) {
 // Disabled on Android where we use native UI instead of chrome://settings.
 TEST_F(BuiltinProviderTest, ChromeSettingsSubpages) {
   // This makes assumptions about the chrome URLs listed by the BuiltinProvider.
-  // Currently they are derived from ChromePaths() in browser_about_handler.cc.
+  // Currently they are derived from chrome::kChromeHostURLs[].
   const string16 kSettings = ASCIIToUTF16(chrome::kChromeUISettingsURL);
   const string16 kDefaultPage1 = ASCIIToUTF16(chrome::kAutofillSubPage);
   const string16 kDefaultPage2 = ASCIIToUTF16(chrome::kClearBrowserDataSubPage);

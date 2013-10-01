@@ -12,10 +12,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "components/autofill/content/browser/autocheckout_steps.h"
+#include "components/autofill/core/browser/autocheckout_bubble_state.h"
 
 namespace content {
 struct PasswordForm;
-struct SSLStatus;
 }
 
 namespace gfx {
@@ -96,11 +96,12 @@ class AutofillManagerDelegate {
   // Causes the Autocheckout bubble UI to be displayed. |bounding_box| is the
   // anchor for the bubble. |is_google_user| is whether or not the user is
   // logged into or has been logged into accounts.google.com. |callback| is run
-  // if the bubble is accepted.
-  virtual void ShowAutocheckoutBubble(
+  // if the bubble is accepted. The returned boolean informs the caller whether
+  // or not the bubble is successfully shown.
+  virtual bool ShowAutocheckoutBubble(
       const gfx::RectF& bounding_box,
       bool is_google_user,
-      const base::Callback<void(bool)>& callback) = 0;
+      const base::Callback<void(AutocheckoutBubbleState)>& callback) = 0;
 
   // Causes the dialog for request autocomplete feature to be shown.
   virtual void ShowRequestAutocompleteDialog(
@@ -124,6 +125,11 @@ class AutofillManagerDelegate {
       const std::vector<base::string16>& icons,
       const std::vector<int>& identifiers,
       base::WeakPtr<AutofillPopupDelegate> delegate) = 0;
+
+  // Update the data list values shown by the Autofill popup, if visible.
+  virtual void UpdateAutofillPopupDataListValues(
+      const std::vector<base::string16>& values,
+      const std::vector<base::string16>& labels) = 0;
 
   // Hide the Autofill popup if one is currently showing.
   virtual void HideAutofillPopup() = 0;

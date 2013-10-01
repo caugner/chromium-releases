@@ -18,13 +18,13 @@
 #include "base/json/string_escape.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/process.h"
-#include "base/process_util.h"
+#include "base/process/process.h"
+#include "base/process/process_iterator.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -41,6 +41,7 @@
 #include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -61,8 +62,6 @@
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/importer/importer_host.h"
-#include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -75,10 +74,11 @@
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_window.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -111,7 +111,7 @@
 #include "chrome/common/automation_id.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
@@ -120,7 +120,6 @@
 #include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
-#include "components/breakpad/common/breakpad_paths.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/favicon_status.h"
@@ -136,8 +135,10 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/common_param_traits.h"
+#include "content/public/common/drop_data.h"
 #include "content/public/common/geoposition.h"
 #include "content/public/common/ssl_status.h"
+#include "content/public/common/webplugininfo.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
@@ -146,8 +147,6 @@
 #include "ui/base/events/event_constants.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/ui_base_types.h"
-#include "webkit/common/webdropdata.h"
-#include "webkit/plugins/webplugininfo.h"
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/policy_service.h"
@@ -165,6 +164,10 @@
 #if !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
 #include "third_party/tcmalloc/chromium/src/gperftools/heap-profiler.h"
 #endif  // !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
+
+#if defined(ENABLE_FULL_PRINTING)
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
+#endif
 
 using automation::Error;
 using automation::ErrorCode;
@@ -249,11 +252,7 @@ const int TestingAutomationProvider::kSynchronousCommands[] = {
 };
 
 TestingAutomationProvider::TestingAutomationProvider(Profile* profile)
-    : AutomationProvider(profile)
-#if defined(OS_CHROMEOS)
-      , power_manager_observer_(NULL)
-#endif
-      {
+    : AutomationProvider(profile) {
   BrowserList::AddObserver(this);
   registrar_.Add(this, chrome::NOTIFICATION_SESSION_END,
                  content::NotificationService::AllSources());
@@ -300,40 +299,6 @@ void TestingAutomationProvider::OnBrowserRemoved(Browser* browser) {
         base::Bind(&TestingAutomationProvider::OnRemoveProvider, this));
   }
 #endif  // !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
-}
-
-void TestingAutomationProvider::OnSourceProfilesLoaded() {
-  DCHECK_NE(static_cast<ImporterList*>(NULL), importer_list_.get());
-
-  // Get the correct profile based on the browser that the user provided.
-  importer::SourceProfile source_profile;
-  size_t i = 0;
-  size_t importers_count = importer_list_->count();
-  for ( ; i < importers_count; ++i) {
-    importer::SourceProfile profile = importer_list_->GetSourceProfileAt(i);
-    if (profile.importer_name == import_settings_data_.browser_name) {
-      source_profile = profile;
-      break;
-    }
-  }
-  // If we made it to the end of the loop, then the input was bad.
-  if (i == importers_count) {
-    AutomationJSONReply(this, import_settings_data_.reply_message)
-        .SendError("Invalid browser name string found.");
-    return;
-  }
-
-  // Deletes itself.
-  ImporterHost* importer_host = new ImporterHost;
-  importer_host->SetObserver(
-      new AutomationProviderImportSettingsObserver(
-          this, import_settings_data_.reply_message));
-
-  Profile* target_profile = import_settings_data_.browser->profile();
-  importer_host->StartImportSettings(source_profile,
-                                     target_profile,
-                                     import_settings_data_.import_items,
-                                     new ProfileWriter(target_profile));
 }
 
 void TestingAutomationProvider::Observe(
@@ -943,7 +908,7 @@ void TestingAutomationProvider::DragAndDropFilePaths(
   }
 
   // Emulate drag and drop to set the file paths to the file upload control.
-  WebDropData drop_data;
+  content::DropData drop_data;
   for (size_t path_index = 0; path_index < paths->GetSize(); ++path_index) {
     string16 path;
     if (!paths->GetString(path_index, &path)) {
@@ -953,7 +918,7 @@ void TestingAutomationProvider::DragAndDropFilePaths(
     }
 
     drop_data.filenames.push_back(
-        WebDropData::FileInfo(path, string16()));
+        content::DropData::FileInfo(path, string16()));
   }
 
   const gfx::Point client(x, y);
@@ -1086,7 +1051,7 @@ void TestingAutomationProvider::OpenNewBrowserWindowWithNewProfile(
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   new BrowserOpenedWithNewProfileNotificationObserver(this, reply_message);
   profile_manager->CreateMultiProfileAsync(
-      string16(), string16(), ProfileManager::CreateCallback(), false);
+      string16(), string16(), ProfileManager::CreateCallback(), std::string());
 }
 
 // Sample json input: { "command": "GetMultiProfileInfo" }
@@ -1097,8 +1062,7 @@ void TestingAutomationProvider::GetMultiProfileInfo(
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   const ProfileInfoCache& profile_info_cache =
       profile_manager->GetProfileInfoCache();
-  return_value->SetBoolean("enabled",
-      profile_manager->IsMultipleProfilesEnabled());
+  return_value->SetBoolean("enabled", profiles::IsMultipleProfilesEnabled());
 
   ListValue* profiles = new ListValue;
   for (size_t index = 0; index < profile_info_cache.GetNumberOfProfiles();
@@ -1192,7 +1156,7 @@ void TestingAutomationProvider::OpenProfileWindow(
   }
   new BrowserOpenedWithExistingProfileNotificationObserver(
       this, reply_message, num_loads);
-  ProfileManager::FindOrCreateNewWindowForProfile(
+  profiles::FindOrCreateNewWindowForProfile(
       profile,
       chrome::startup::IS_NOT_PROCESS_STARTUP,
       chrome::startup::IS_NOT_FIRST_RUN,
@@ -1320,7 +1284,7 @@ void TestingAutomationProvider::WaitForBookmarkModelToLoadJSON(
     DictionaryValue* args,
     IPC::Message* reply_message) {
   Browser* browser;
-  std::string error_msg, bookmarks_as_json;
+  std::string error_msg;
   if (!GetBrowserFromJSONArgs(args, &browser, &error_msg)) {
     AutomationJSONReply(this, reply_message).SendError(error_msg);
     return;
@@ -1828,10 +1792,7 @@ void TestingAutomationProvider::BuildJSONHandlerMaps() {
   handler_map_["GetTimeInfo"] = &TestingAutomationProvider::GetTimeInfo;
   handler_map_["SetTimezone"] = &TestingAutomationProvider::SetTimezone;
 
-  handler_map_["GetUpdateInfo"] = &TestingAutomationProvider::GetUpdateInfo;
   handler_map_["UpdateCheck"] = &TestingAutomationProvider::UpdateCheck;
-  handler_map_["SetReleaseTrack"] =
-      &TestingAutomationProvider::SetReleaseTrack;
 
   handler_map_["GetVolumeInfo"] = &TestingAutomationProvider::GetVolumeInfo;
   handler_map_["SetVolume"] = &TestingAutomationProvider::SetVolume;
@@ -1896,9 +1857,6 @@ void TestingAutomationProvider::BuildJSONHandlerMaps() {
 
   browser_handler_map_["SaveTabContents"] =
       &TestingAutomationProvider::SaveTabContents;
-
-  browser_handler_map_["ImportSettings"] =
-      &TestingAutomationProvider::ImportSettings;
 
   browser_handler_map_["AddSavedPassword"] =
       &TestingAutomationProvider::AddSavedPassword;
@@ -2151,6 +2109,7 @@ void TestingAutomationProvider::PerformActionOnInfobar(
     reply.SendError("Invalid or missing args");
     return;
   }
+  size_t infobar_index = static_cast<size_t>(infobar_index_int);
 
   WebContents* web_contents =
       browser->tab_strip_model()->GetWebContentsAt(tab_index);
@@ -2158,37 +2117,33 @@ void TestingAutomationProvider::PerformActionOnInfobar(
     reply.SendError(base::StringPrintf("No such tab at index %d", tab_index));
     return;
   }
+
   InfoBarService* infobar_service =
       InfoBarService::FromWebContents(web_contents);
-
-  InfoBarDelegate* infobar = NULL;
-  size_t infobar_index = static_cast<size_t>(infobar_index_int);
   if (infobar_index >= infobar_service->infobar_count()) {
     reply.SendError(base::StringPrintf("No such infobar at index %" PRIuS,
                                        infobar_index));
     return;
   }
-  infobar = infobar_service->infobar_at(infobar_index);
+  InfoBarDelegate* infobar_delegate =
+      infobar_service->infobar_at(infobar_index);
 
-  if ("dismiss" == action) {
-    infobar->InfoBarDismissed();
-    infobar_service->RemoveInfoBar(infobar);
+  if (action == "dismiss") {
+    infobar_delegate->InfoBarDismissed();
+    infobar_service->RemoveInfoBar(infobar_delegate);
     reply.SendSuccess(NULL);
     return;
   }
-  if ("accept" == action || "cancel" == action) {
-    ConfirmInfoBarDelegate* confirm_infobar;
-    if (!(confirm_infobar = infobar->AsConfirmInfoBarDelegate())) {
+  if ((action == "accept") || (action == "cancel")) {
+    ConfirmInfoBarDelegate* confirm_infobar_delegate =
+        infobar_delegate->AsConfirmInfoBarDelegate();
+    if (!confirm_infobar_delegate) {
       reply.SendError("Not a confirm infobar");
       return;
     }
-    if ("accept" == action) {
-      if (confirm_infobar->Accept())
-        infobar_service->RemoveInfoBar(infobar);
-    } else if ("cancel" == action) {
-      if (confirm_infobar->Cancel())
-        infobar_service->RemoveInfoBar(infobar);
-    }
+    if ((action == "accept") ?
+        confirm_infobar_delegate->Accept() : confirm_infobar_delegate->Cancel())
+      infobar_service->RemoveInfoBar(infobar_delegate);
     reply.SendSuccess(NULL);
     return;
   }
@@ -2238,7 +2193,7 @@ void TestingAutomationProvider::GetBrowserInfo(
   properties->SetString("command_line_string",
       CommandLine::ForCurrentProcess()->GetCommandLineString());
   base::FilePath dumps_path;
-  PathService::Get(breakpad::DIR_CRASH_DUMPS, &dumps_path);
+  PathService::Get(chrome::DIR_CRASH_DUMPS, &dumps_path);
   properties->SetString("DIR_CRASH_DUMPS", dumps_path.value());
 #if defined(USE_AURA)
   properties->SetBoolean("aura", true);
@@ -2536,7 +2491,7 @@ void TestingAutomationProvider::GetDownloadsInfo(Browser* browser,
   ListValue* list_of_downloads = new ListValue;
 
   DownloadService* download_service(
-      DownloadServiceFactory::GetForProfile(browser->profile()));
+      DownloadServiceFactory::GetForBrowserContext(browser->profile()));
 
   if (download_service->HasCreatedDownloadManager()) {
     std::vector<DownloadItem*> downloads;
@@ -2568,7 +2523,7 @@ void TestingAutomationProvider::WaitForAllDownloadsToComplete(
   }
 
   DownloadService* download_service =
-      DownloadServiceFactory::GetForProfile(browser->profile());
+      DownloadServiceFactory::GetForBrowserContext(browser->profile());
   if (!download_service->HasCreatedDownloadManager()) {
     // No download manager, so no downloads to wait for.
     AutomationJSONReply(this, reply_message).SendSuccess(NULL);
@@ -2592,7 +2547,7 @@ void TestingAutomationProvider::PerformActionOnDownload(
   std::string action;
 
   DownloadService* download_service =
-      DownloadServiceFactory::GetForProfile(browser->profile());
+      DownloadServiceFactory::GetForBrowserContext(browser->profile());
   if (!download_service->HasCreatedDownloadManager()) {
     AutomationJSONReply(this, reply_message).SendError("No download manager.");
     return;
@@ -3103,11 +3058,11 @@ void TestingAutomationProvider::GetPluginsInfoCallback(
     Browser* browser,
     DictionaryValue* args,
     IPC::Message* reply_message,
-    const std::vector<webkit::WebPluginInfo>& plugins) {
+    const std::vector<content::WebPluginInfo>& plugins) {
   PluginPrefs* plugin_prefs =
       PluginPrefs::GetForProfile(browser->profile()).get();
   ListValue* items = new ListValue;
-  for (std::vector<webkit::WebPluginInfo>::const_iterator it =
+  for (std::vector<content::WebPluginInfo>::const_iterator it =
            plugins.begin();
        it != plugins.end();
        ++it) {
@@ -3119,7 +3074,7 @@ void TestingAutomationProvider::GetPluginsInfoCallback(
     item->SetBoolean("enabled", plugin_prefs->IsPluginEnabled(*it));
     // Add info about mime types.
     ListValue* mime_types = new ListValue();
-    for (std::vector<webkit::WebPluginMimeType>::const_iterator type_it =
+    for (std::vector<content::WebPluginMimeType>::const_iterator type_it =
              it->mime_types.begin();
          type_it != it->mime_types.end();
          ++type_it) {
@@ -3235,51 +3190,6 @@ void TestingAutomationProvider::SaveTabContents(
   new SavePackageNotificationObserver(
       BrowserContext::GetDownloadManager(browser->profile()),
       this, reply_message);
-}
-
-// Refer to ImportSettings() in chrome/test/pyautolib/pyauto.py for sample
-// json input.
-// Sample json output: "{}"
-void TestingAutomationProvider::ImportSettings(Browser* browser,
-                                               DictionaryValue* args,
-                                               IPC::Message* reply_message) {
-  // Map from the json string passed over to the import item masks.
-  std::map<std::string, importer::ImportItem> string_to_import_item;
-  string_to_import_item["HISTORY"] = importer::HISTORY;
-  string_to_import_item["FAVORITES"] = importer::FAVORITES;
-  string_to_import_item["COOKIES"] = importer::COOKIES;
-  string_to_import_item["PASSWORDS"] = importer::PASSWORDS;
-  string_to_import_item["SEARCH_ENGINES"] = importer::SEARCH_ENGINES;
-  string_to_import_item["HOME_PAGE"] = importer::HOME_PAGE;
-  string_to_import_item["ALL"] = importer::ALL;
-
-  ListValue* import_items_list = NULL;
-  if (!args->GetString("import_from", &import_settings_data_.browser_name) ||
-      !args->GetList("import_items", &import_items_list)) {
-    AutomationJSONReply(this, reply_message)
-        .SendError("Incorrect type for one or more of the arguments.");
-    return;
-  }
-
-  import_settings_data_.import_items = 0;
-  int num_items = import_items_list->GetSize();
-  for (int i = 0; i < num_items; i++) {
-    std::string item;
-    // If the provided string is not part of the map, error out.
-    if (!import_items_list->GetString(i, &item) ||
-        !ContainsKey(string_to_import_item, item)) {
-      AutomationJSONReply(this, reply_message)
-          .SendError("Invalid item string found in import_items.");
-      return;
-    }
-    import_settings_data_.import_items |= string_to_import_item[item];
-  }
-
-  import_settings_data_.browser = browser;
-  import_settings_data_.reply_message = reply_message;
-
-  importer_list_ = new ImporterList(NULL);
-  importer_list_->DetectSourceProfiles("en-US", this);
 }
 
 namespace {
@@ -3593,11 +3503,10 @@ void TestingAutomationProvider::InstallExtension(
     // If the given path has a 'crx' extension, assume it is a packed extension
     // and install it. Otherwise load it as an unpacked extension.
     if (extension_path.MatchesExtension(FILE_PATH_LITERAL(".crx"))) {
-      ExtensionInstallPrompt* client = (with_ui ?
-          new ExtensionInstallPrompt(tab) :
-          NULL);
+      scoped_ptr<ExtensionInstallPrompt> client(
+          with_ui ? new ExtensionInstallPrompt(tab) : NULL);
       scoped_refptr<extensions::CrxInstaller> installer(
-          extensions::CrxInstaller::Create(service, client));
+          extensions::CrxInstaller::Create(service, client.Pass()));
       if (!with_ui)
         installer->set_allow_silent_install(true);
       installer->set_install_cause(extension_misc::INSTALL_CAUSE_AUTOMATION);
@@ -4248,7 +4157,8 @@ bool TestingAutomationProvider::BuildWebKeyEventFromArgs(
                   key_identifier.c_str(),
                   WebKit::WebKeyboardEvent::keyIdentifierLengthCap);
   } else {
-    event->setKeyIdentifierFromWindowsKeyCode();
+    *error = "'keyIdentifier' missing or invalid.";
+    return false;
   }
 
   if (type == automation::kRawKeyDownType) {
@@ -4287,35 +4197,6 @@ bool TestingAutomationProvider::BuildWebKeyEventFromArgs(
   event->timeStampSeconds = base::Time::Now().ToDoubleT();
   event->skip_in_browser = true;
   return true;
-}
-
-void TestingAutomationProvider::BuildSimpleWebKeyEvent(
-    WebKit::WebInputEvent::Type type,
-    int windows_key_code,
-    NativeWebKeyboardEvent* event) {
-  event->nativeKeyCode = 0;
-  event->windowsKeyCode = windows_key_code;
-  event->setKeyIdentifierFromWindowsKeyCode();
-  event->type = type;
-  event->modifiers = 0;
-  event->isSystemKey = false;
-  event->timeStampSeconds = base::Time::Now().ToDoubleT();
-  event->skip_in_browser = true;
-}
-
-void TestingAutomationProvider::SendWebKeyPressEventAsync(
-    int key_code,
-    WebContents* web_contents) {
-  // Create and send a "key down" event for the specified key code.
-  NativeWebKeyboardEvent event_down;
-  BuildSimpleWebKeyEvent(WebKit::WebInputEvent::RawKeyDown, key_code,
-                         &event_down);
-  web_contents->GetRenderViewHost()->ForwardKeyboardEvent(event_down);
-
-  // Create and send a corresponding "key up" event.
-  NativeWebKeyboardEvent event_up;
-  BuildSimpleWebKeyEvent(WebKit::WebInputEvent::KeyUp, key_code, &event_up);
-  web_contents->GetRenderViewHost()->ForwardKeyboardEvent(event_up);
 }
 
 void TestingAutomationProvider::SendWebkitKeyEvent(
@@ -4512,7 +4393,6 @@ void TestingAutomationProvider::GetV8HeapStats(
     IPC::Message* reply_message) {
   WebContents* web_contents;
   int tab_index;
-  std::string error;
 
   if (!args->GetInteger("tab_index", &tab_index)) {
     AutomationJSONReply(this, reply_message).SendError(
@@ -4546,7 +4426,6 @@ void TestingAutomationProvider::GetFPS(
     IPC::Message* reply_message) {
   WebContents* web_contents;
   int tab_index;
-  std::string error;
 
   if (!args->GetInteger("tab_index", &tab_index)) {
     AutomationJSONReply(this, reply_message).SendError(
@@ -4915,7 +4794,6 @@ void TestingAutomationProvider::ExecuteJavascriptInRenderView(
     DictionaryValue* args,
     IPC::Message* reply_message) {
   string16 frame_xpath, javascript, extension_id, url_text;
-  std::string error;
   int render_process_id, render_view_id;
   if (!args->GetString("frame_xpath", &frame_xpath)) {
     AutomationJSONReply(this, reply_message)
@@ -5286,7 +5164,7 @@ void TestingAutomationProvider::DeleteCookieInBrowserContext(
     IPC::Message* reply_message) {
   AutomationJSONReply reply(this, reply_message);
   WebContents* web_contents;
-  std::string cookie_name, error, url_string;
+  std::string cookie_name, url_string;
   int windex;
   bool success = false;
   if (!args->GetInteger("windex", &windex)) {
@@ -5326,7 +5204,7 @@ void TestingAutomationProvider::SetCookieInBrowserContext(
     IPC::Message* reply_message) {
   AutomationJSONReply reply(this, reply_message);
   WebContents* web_contents;
-  std::string value, error, url_string;
+  std::string value, url_string;
   int windex, response_value = -1;
   if (!args->GetInteger("windex", &windex)) {
     reply.SendError("'windex' missing or invalid.");
@@ -5378,8 +5256,10 @@ void TestingAutomationProvider::GetTabIds(
 void TestingAutomationProvider::GetViews(
     DictionaryValue* args, IPC::Message* reply_message) {
   ListValue* view_list = new ListValue();
+#if defined(ENABLE_FULL_PRINTING)
   printing::PrintPreviewDialogController* preview_controller =
       printing::PrintPreviewDialogController::GetInstance();
+#endif
   for (chrome::BrowserIterator it; !it.done(); it.Next()) {
     Browser* browser = *it;
     for (int i = 0; i < browser->tab_strip_model()->count(); ++i) {
@@ -5388,6 +5268,7 @@ void TestingAutomationProvider::GetViews(
       AutomationId id = automation_util::GetIdForTab(contents);
       dict->Set("auto_id", id.ToValue());
       view_list->Append(dict);
+#if defined(ENABLE_FULL_PRINTING)
       if (preview_controller) {
         WebContents* preview_dialog =
             preview_controller->GetPrintPreviewForContents(contents);
@@ -5398,6 +5279,7 @@ void TestingAutomationProvider::GetViews(
           view_list->Append(dict);
         }
       }
+#endif
     }
   }
 

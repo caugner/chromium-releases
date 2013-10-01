@@ -13,7 +13,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/performance_monitor/key_builder.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/browser_thread.h"
@@ -91,7 +91,7 @@ scoped_ptr<Database> Database::Create(base::FilePath path) {
     path = path.AppendASCII(kDbDir);
   }
   scoped_ptr<Database> database;
-  if (!file_util::DirectoryExists(path) && !file_util::CreateDirectory(path))
+  if (!base::DirectoryExists(path) && !file_util::CreateDirectory(path))
     return database.Pass();
   database.reset(new Database(path));
 
@@ -442,6 +442,7 @@ Database::~Database() {
 bool Database::InitDBs() {
   CHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   leveldb::Options open_options;
+  open_options.max_open_files = 64;  // Use minimum.
   open_options.create_if_missing = true;
 
   // TODO (rdevlin.cronin): This code is ugly. Fix it.

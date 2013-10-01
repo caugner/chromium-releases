@@ -89,6 +89,10 @@ class DiskCacheTestWithCache : public DiskCacheTest {
     new_eviction_ = true;
   }
 
+  void DisableSimpleCacheWaitForIndex() {
+    simple_cache_wait_for_index_ = false;
+  }
+
   void DisableFirstCleanup() {
     first_cleanup_ = false;
   }
@@ -142,7 +146,7 @@ class DiskCacheTestWithCache : public DiskCacheTest {
 
   // cache_ will always have a valid object, regardless of how the cache was
   // initialized. The implementation pointers can be NULL.
-  disk_cache::Backend* cache_;
+  scoped_ptr<disk_cache::Backend> cache_;
   disk_cache::BackendImpl* cache_impl_;
   disk_cache::SimpleBackendImpl* simple_cache_impl_;
   disk_cache::MemBackendImpl* mem_cache_;
@@ -152,6 +156,7 @@ class DiskCacheTestWithCache : public DiskCacheTest {
   net::CacheType type_;
   bool memory_only_;
   bool simple_cache_mode_;
+  bool simple_cache_wait_for_index_;
   bool force_creation_;
   bool new_eviction_;
   bool first_cleanup_;

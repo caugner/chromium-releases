@@ -21,7 +21,7 @@
 //  - The function grants permissions needed to read/write/create file under the
 //    selected path. To grant permissions to the caller, caller's extension ID
 //    has to be allowed to access the files virtual path (e.g. /Downloads/foo)
-//    in ExternalFileSystemMountPointProvider. Additionally, the callers render
+//    in ExternalFileSystemBackend. Additionally, the callers render
 //    process ID has to be granted read, write and create permissions for the
 //    selected file's full filesystem path (e.g.
 //    /home/chronos/user/Downloads/foo) in ChildProcessSecurityPolicy.
@@ -35,7 +35,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/platform_file.h"
-#include "chrome/browser/chromeos/extensions/file_manager/file_handler_util.h"
+#include "chrome/browser/chromeos/extensions/file_manager/file_tasks.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -48,14 +48,14 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
+#include "webkit/browser/fileapi/file_system_backend.h"
 #include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_mount_point_provider.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
 using extensions::api::file_browser_handler_internal::FileEntryInfo;
-using file_handler::FileSelector;
-using file_handler::FileSelectorFactory;
+using file_manager::FileSelector;
+using file_manager::FileSelectorFactory;
 
 namespace SelectFile =
     extensions::api::file_browser_handler_internal::SelectFile;
@@ -103,7 +103,7 @@ class FileSelectorImpl : public FileSelector,
   virtual ~FileSelectorImpl() OVERRIDE;
 
  protected:
-  // file_handler::FileSelectr overrides.
+  // file_manager::FileSelectr overrides.
   // Shows save as dialog with suggested name in window bound to |browser|.
   // |allowed_extensions| specifies the file extensions allowed to be shown,
   // and selected. Extensions should not include '.'.
@@ -142,7 +142,7 @@ class FileSelectorImpl : public FileSelector,
   // Reacts to the user action reported by the dialog and notifies |function_|
   // about file selection result (by calling |OnFilePathSelected()|).
   // The |this| object is self destruct after the function is notified.
-  // |success| indicates whether user has selectd the file.
+  // |success| indicates whether user has selected the file.
   // |selected_path| is path that was selected. It is empty if the file wasn't
   // selected.
   void SendResponse(bool success, const base::FilePath& selected_path);
@@ -367,24 +367,22 @@ void FileBrowserHandlerInternalSelectFileFunction::OnFileSystemOpened(
 
 void FileBrowserHandlerInternalSelectFileFunction::GrantPermissions() {
   content::SiteInstance* site_instance = render_view_host()->GetSiteInstance();
-  fileapi::ExternalFileSystemMountPointProvider* external_provider =
+  fileapi::ExternalFileSystemBackend* external_backend =
       BrowserContext::GetStoragePartition(profile_, site_instance)->
-      GetFileSystemContext()->external_provider();
-  DCHECK(external_provider);
+      GetFileSystemContext()->external_backend();
+  DCHECK(external_backend);
 
-  external_provider->GetVirtualPath(full_path_, &virtual_path_);
+  external_backend->GetVirtualPath(full_path_, &virtual_path_);
   DCHECK(!virtual_path_.empty());
 
   // Grant access to this particular file to target extension. This will
   // ensure that the target extension can access only this FS entry and
   // prevent from traversing FS hierarchy upward.
-  external_provider->GrantFileAccessToExtension(extension_id(), virtual_path_);
+  external_backend->GrantFileAccessToExtension(extension_id(), virtual_path_);
 
   // Grant access to the selected file to target extensions render view process.
-  content::ChildProcessSecurityPolicy::GetInstance()->GrantPermissionsForFile(
-      render_view_host()->GetProcess()->GetID(),
-      full_path_,
-      file_handler_util::GetReadWritePermissions());
+  content::ChildProcessSecurityPolicy::GetInstance()->GrantCreateReadWriteFile(
+      render_view_host()->GetProcess()->GetID(), full_path_);
 }
 
 void FileBrowserHandlerInternalSelectFileFunction::Respond(bool success) {

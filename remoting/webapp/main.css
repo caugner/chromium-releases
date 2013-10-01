@@ -27,6 +27,14 @@ body {
   direction: __MSG_@@bidi_dir__;
 }
 
+/*
+* The "app-v2" class is added to the <html> node by remoting.init if it's
+* running as a V2 app.
+*/
+body.apps-v2 .apps-v1-only {
+  display: none !important;
+}
+
 a {
   text-decoration: none;
   color: #15c;
@@ -39,11 +47,6 @@ a:active {
 
 strong, b {
   color: #000;
-}
-
-/* Override the default apps v2 overflow behaviour. */
-html, body {
-  overflow: scroll;
 }
 
 /*------------------------------------------------------------------
@@ -288,7 +291,7 @@ section {
 }
 
 .centered {
-  text-align: center;
+  margin: auto;
 }
 
 .button-row {
@@ -300,6 +303,10 @@ section {
 
 .button-row button {
   margin-left: 5px;
+}
+
+.button-row span:first-child {
+  width: 100%;
 }
 
 .clickable {
@@ -429,6 +436,10 @@ section {
   padding-__MSG_@@bidi_start_edge__: 2px;
 }
 
+#paired-clients-list table {
+  width: 100%;
+}
+
 .message {
   margin-bottom: 24px;
 }
@@ -443,6 +454,10 @@ section {
 
 td {
   vertical-align: middle;
+}
+
+thead {
+  font-weight: bold;
 }
 
 .host-online.clickable:hover,
@@ -515,12 +530,10 @@ button {
 .waiting {
   background-image: url('spinner.gif');
   background-repeat: no-repeat;
-  background-position: top __MSG_@@bidi_start_edge__;
+  background-position-y: 3px;
   padding-__MSG_@@bidi_start_edge__: 30px;
-  padding-top: 2px;
-  padding-bottom: 4px;
+  padding-top: 5px;
   color: rgb(180, 180, 180);
-  line-height: 27px; /* Same as line-height for buttons */
 }
 
 .prominent {
@@ -599,11 +612,20 @@ button {
   opacity: 0.75;
 }
 
-/* TODO(jamiewalch): crbug.com/252796: Remove this once crbug.com/240772
+/* TODO(jamiewalch): crbug.com/252796: Remove these once crbug.com/240772
  * is fixed. */
-.no-scroll {
-  overflow: hidden;
+.no-horizontal-scroll {
+  overflow-x: hidden !important;
 }
+
+.no-vertical-scroll {
+  overflow-y: hidden !important;
+}
+
+html.apps-v2.scrollable {
+  overflow: scroll;
+}
+
 
 /* TODO(jamiewalch): Reinstate this if we're able to get translations for
  *     "Why is this safe?" that don't overflow in any language.
@@ -622,6 +644,10 @@ button {
  * a style for the former and the 'hidden' property for the latter. */
 #nat-box.traversal-enabled {
   display: none;
+}
+
+#remember-pin {
+  width: 315px;
 }
 
 #session-mode {

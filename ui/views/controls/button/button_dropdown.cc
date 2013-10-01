@@ -6,12 +6,14 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "grit/ui_strings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
+#include "ui/gfx/display.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
@@ -172,6 +174,14 @@ void ButtonDropDown::ShowDropDownMenu(ui::MenuSourceType source_type) {
 
 #if defined(OS_WIN)
   int left_bound = GetSystemMetrics(SM_XVIRTUALSCREEN);
+#elif defined(OS_CHROMEOS)
+  // A window won't overlap between displays on ChromeOS.
+  // Use the left bound of the display on which
+  // the menu button exists.
+  gfx::NativeView view = GetWidget()->GetNativeView();
+  gfx::Display display = gfx::Screen::GetScreenFor(
+      view)->GetDisplayNearestWindow(view);
+  int left_bound = display.bounds().x();
 #else
   int left_bound = 0;
   NOTIMPLEMENTED();

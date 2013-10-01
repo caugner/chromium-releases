@@ -10,14 +10,14 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/pyautolib/pyautolib.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 // PyUITestSuiteBase
 PyUITestSuiteBase::PyUITestSuiteBase(int argc, char** argv)

@@ -4,9 +4,9 @@
 
 #include "chrome/browser/invalidation/invalidation_service_android.h"
 
-#include "chrome/browser/invalidation/invalidation_frontend_test_template.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/invalidation/invalidation_service_factory.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/browser/invalidation/invalidation_service_test_template.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -18,20 +18,20 @@ class InvalidationServiceAndroidTestDelegate {
   InvalidationServiceAndroidTestDelegate() { }
 
   ~InvalidationServiceAndroidTestDelegate() {
-    DestroyInvalidationFrontend();
+    DestroyInvalidationService();
   }
 
-  void CreateInvalidationFrontend() {
+  void CreateInvalidationService() {
     profile_.reset(new TestingProfile());
     invalidation_service_android_.reset(
         new InvalidationServiceAndroid(profile_.get()));
   }
 
-  InvalidationFrontend* GetInvalidationFrontend() {
+  InvalidationService* GetInvalidationService() {
     return invalidation_service_android_.get();
   }
 
-  void DestroyInvalidationFrontend() {
+  void DestroyInvalidationService() {
     invalidation_service_android_->Shutdown();
   }
 
@@ -41,13 +41,11 @@ class InvalidationServiceAndroidTestDelegate {
 
   void TriggerOnIncomingInvalidation(
       const syncer::ObjectIdInvalidationMap& invalidation_map) {
-    syncer::ModelTypeInvalidationMap model_invalidation_map =
-            ObjectIdInvalidationMapToModelTypeInvalidationMap(invalidation_map);
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_SYNC_REFRESH_REMOTE,
         content::Source<Profile>(profile_.get()),
-        content::Details<const syncer::ModelTypeInvalidationMap>(
-            &model_invalidation_map));
+        content::Details<const syncer::ObjectIdInvalidationMap>(
+            &invalidation_map));
   }
 
   scoped_ptr<TestingProfile> profile_;
@@ -55,7 +53,7 @@ class InvalidationServiceAndroidTestDelegate {
 };
 
 INSTANTIATE_TYPED_TEST_CASE_P(
-    AndroidInvalidationServiceTest, InvalidationFrontendTest,
+    AndroidInvalidationServiceTest, InvalidationServiceTest,
     InvalidationServiceAndroidTestDelegate);
 
 }  // namespace invalidation

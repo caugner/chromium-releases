@@ -4,13 +4,20 @@
 
 #include "chrome/browser/usb/usb_service.h"
 
+#include <set>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "chrome/browser/usb/usb_device.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/usb/usb_context.h"
+#include "chrome/browser/usb/usb_device_handle.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
 #include "third_party/libusb/src/libusb/libusb.h"
 
 #if defined(OS_CHROMEOS)
@@ -19,62 +26,68 @@
 #include "chromeos/dbus/permission_broker_client.h"
 #endif  // defined(OS_CHROMEOS)
 
+namespace content {
+
+class NotificationDetails;
+class NotificationSource;
+
+}  // namespace content
+
+using content::BrowserThread;
 using std::vector;
 
-// The UsbEventHandler works around a design flaw in the libusb interface. There
-// is currently no way to signal to libusb that any caller into one of the event
-// handler calls should return without handling any events.
-class UsbEventHandler : public base::PlatformThread::Delegate {
+namespace {
+
+class ExitObserver : public content::NotificationObserver {
  public:
-  explicit UsbEventHandler(PlatformUsbContext context)
-      : running_(true), context_(context) {
-    base::PlatformThread::CreateNonJoinable(0, this);
-  }
-
-  virtual ~UsbEventHandler() {}
-
-  virtual void ThreadMain() OVERRIDE {
-    base::PlatformThread::SetName("UsbEventHandler");
-
-    DLOG(INFO) << "UsbEventHandler started.";
-    while (running_) {
-      libusb_handle_events(context_);
-    }
-    DLOG(INFO) << "UsbEventHandler shutting down.";
-    libusb_exit(context_);
-
-    delete this;
-  }
-
-  void Stop() {
-    running_ = false;
+  explicit ExitObserver(UsbService* service) : service_(service) {
+    registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
+                   content::NotificationService::AllSources());
   }
 
  private:
-  bool running_;
-  PlatformUsbContext context_;
-
-  DISALLOW_EVIL_CONSTRUCTORS(UsbEventHandler);
+  // content::NotificationObserver
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE {
+    if (type == chrome::NOTIFICATION_APP_TERMINATING) {
+      registrar_.RemoveAll();
+      BrowserThread::DeleteSoon(BrowserThread::FILE, FROM_HERE, service_);
+    }
+  }
+  UsbService* service_;
+  content::NotificationRegistrar registrar_;
 };
 
-UsbService::UsbService() {
-  libusb_init(&context_);
-  event_handler_ = new UsbEventHandler(context_);
+}  // namespace
+
+using content::BrowserThread;
+
+UsbService::UsbService()
+    : context_(new UsbContext()) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 }
 
-UsbService::~UsbService() {}
-
-void UsbService::Cleanup() {
-  event_handler_->Stop();
-  event_handler_ = NULL;
+UsbService::~UsbService() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  for (DeviceMap::iterator it = devices_.begin();
+      it != devices_.end(); ++it) {
+    it->second->OnDisconnect();
+  }
 }
 
-void UsbService::FindDevices(const uint16 vendor_id,
-                             const uint16 product_id,
-                             int interface_id,
-                             vector<scoped_refptr<UsbDevice> >* devices,
-                             const base::Callback<void()>& callback) {
-  DCHECK(event_handler_) << "FindDevices called after event handler stopped.";
+UsbService* UsbService::GetInstance() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  // UsbService deletes itself upon APP_TERMINATING.
+  return Singleton<UsbService, LeakySingletonTraits<UsbService> >::get();
+}
+
+void UsbService::FindDevices(
+    const uint16 vendor_id,
+    const uint16 product_id,
+    int interface_id,
+    const base::Callback<void(ScopedDeviceVector vector)>& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 #if defined(OS_CHROMEOS)
   // ChromeOS builds on non-ChromeOS machines (dev) should not attempt to
   // use permission broker.
@@ -83,124 +96,132 @@ void UsbService::FindDevices(const uint16 vendor_id,
         chromeos::DBusThreadManager::Get()->GetPermissionBrokerClient();
     DCHECK(client) << "Could not get permission broker client.";
     if (!client) {
-      callback.Run();
+      callback.Run(ScopedDeviceVector());
       return;
     }
 
-    client->RequestUsbAccess(vendor_id,
-                             product_id,
-                             interface_id,
-                             base::Bind(&UsbService::FindDevicesImpl,
-                                        base::Unretained(this),
-                                        vendor_id,
-                                        product_id,
-                                        devices,
-                                        callback));
+    BrowserThread::PostTask(
+        BrowserThread::UI,
+        FROM_HERE,
+        base::Bind(&chromeos::PermissionBrokerClient::RequestUsbAccess,
+                   base::Unretained(client),
+                   vendor_id,
+                   product_id,
+                   interface_id,
+                   base::Bind(&UsbService::OnRequestUsbAccessReplied,
+                              base::Unretained(this),
+                              vendor_id,
+                              product_id,
+                              callback)));
   } else {
-    FindDevicesImpl(vendor_id, product_id, devices, callback, true);
+    FindDevicesImpl(vendor_id, product_id, callback, true);
   }
 #else
-  FindDevicesImpl(vendor_id, product_id, devices, callback, true);
+  FindDevicesImpl(vendor_id, product_id, callback, true);
 #endif  // defined(OS_CHROMEOS)
 }
 
-void UsbService::FindDevicesImpl(const uint16 vendor_id,
-                                 const uint16 product_id,
-                                 vector<scoped_refptr<UsbDevice> >* devices,
-                                 const base::Callback<void()>& callback,
-                                 bool success) {
-  base::ScopedClosureRunner run_callback(callback);
+void UsbService::GetDevices(std::vector<scoped_refptr<UsbDevice> >* devices) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  STLClearObject(devices);
+  RefreshDevices();
 
-  devices->clear();
+  for (DeviceMap::iterator it = devices_.begin();
+      it != devices_.end(); ++it) {
+    devices->push_back(it->second);
+  }
+}
+
+void UsbService::OnRequestUsbAccessReplied(
+    const uint16 vendor_id,
+    const uint16 product_id,
+    const base::Callback<void(ScopedDeviceVector vectors)>& callback,
+    bool success) {
+  BrowserThread::PostTask(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&UsbService::FindDevicesImpl,
+                 base::Unretained(this),
+                 vendor_id,
+                 product_id,
+                 callback,
+                 success));
+}
+
+void UsbService::FindDevicesImpl(
+    const uint16 vendor_id,
+    const uint16 product_id,
+    const base::Callback<void(ScopedDeviceVector vectors)>& callback,
+    bool success) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  ScopedDeviceVector devices(new vector<scoped_refptr<UsbDevice> >());
 
   // If the permission broker was unable to obtain permission for the specified
   // devices then there is no point in attempting to enumerate the devices. On
   // platforms without a permission broker, we assume permission is granted.
-  if (!success)
+  if (!success) {
+    callback.Run(devices.Pass());
     return;
+  }
 
-  DeviceVector enumerated_devices;
-  EnumerateDevices(&enumerated_devices);
-  if (enumerated_devices.empty())
-    return;
+  RefreshDevices();
 
-  for (unsigned int i = 0; i < enumerated_devices.size(); ++i) {
-    PlatformUsbDevice device = enumerated_devices[i].device();
-    if (DeviceMatches(device, vendor_id, product_id)) {
-      UsbDevice* const wrapper = LookupOrCreateDevice(device);
-      if (wrapper)
-        devices->push_back(wrapper);
+  for (DeviceMap::iterator it = devices_.begin();
+      it != devices_.end();   ++it) {
+    if (DeviceMatches(it->second, vendor_id, product_id))
+      devices->push_back(it->second);
+  }
+
+  callback.Run(devices.Pass());
+}
+
+void UsbService::RefreshDevices() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  libusb_device** platform_devices = NULL;
+  const ssize_t device_count =
+      libusb_get_device_list(context_->context(), &platform_devices);
+
+  std::set<UsbDevice*> connected_devices;
+  vector<PlatformUsbDevice> disconnected_devices;
+
+  // Populates new devices.
+  for (ssize_t i = 0; i < device_count; ++i) {
+    if (!ContainsKey(devices_, platform_devices[i])) {
+      libusb_device_descriptor descriptor;
+      // This test is needed. A valid vendor/produce pair is required.
+      if (0 != libusb_get_device_descriptor(platform_devices[i], &descriptor))
+        continue;
+      UsbDevice* new_device = new UsbDevice(context_,
+                                        platform_devices[i],
+                                        descriptor.idVendor,
+                                        descriptor.idProduct);
+      devices_[platform_devices[i]] = new_device;
+      connected_devices.insert(new_device);
+    } else {
+      connected_devices.insert(devices_[platform_devices[i]].get());
     }
   }
-}
 
-void UsbService::CloseDevice(scoped_refptr<UsbDevice> device) {
-  DCHECK(event_handler_) << "CloseDevice called after event handler stopped.";
-
-  PlatformUsbDevice platform_device = libusb_get_device(device->handle());
-  if (!ContainsKey(devices_, platform_device)) {
-    LOG(WARNING) << "CloseDevice called for device we're not tracking!";
-    return;
+  // Find disconnected devices.
+  for (DeviceMap::iterator it = devices_.begin(); it != devices_.end(); ++it) {
+    if (!ContainsKey(connected_devices, it->second)) {
+      disconnected_devices.push_back(it->first);
+    }
   }
 
-  devices_.erase(platform_device);
-  libusb_close(device->handle());
-}
-
-UsbService::RefCountedPlatformUsbDevice::RefCountedPlatformUsbDevice(
-    PlatformUsbDevice device) : device_(device) {
-  libusb_ref_device(device_);
-}
-
-UsbService::RefCountedPlatformUsbDevice::RefCountedPlatformUsbDevice(
-    const RefCountedPlatformUsbDevice& other) : device_(other.device_) {
-  libusb_ref_device(device_);
-}
-
-UsbService::RefCountedPlatformUsbDevice::~RefCountedPlatformUsbDevice() {
-  libusb_unref_device(device_);
-}
-
-PlatformUsbDevice UsbService::RefCountedPlatformUsbDevice::device() {
-  return device_;
-}
-
-void UsbService::EnumerateDevices(DeviceVector* output) {
-  STLClearObject(output);
-
-  libusb_device** devices = NULL;
-  const ssize_t device_count = libusb_get_device_list(context_, &devices);
-  if (device_count < 0)
-    return;
-
-  for (int i = 0; i < device_count; ++i) {
-    libusb_device* device = devices[i];
-    libusb_ref_device(device);
-    output->push_back(RefCountedPlatformUsbDevice(device));
+  // Remove disconnected devices from devices_.
+  for (size_t i = 0; i < disconnected_devices.size(); ++i) {
+    // UsbDevice will be destroyed after this. The corresponding
+    // PlatformUsbDevice will be unref'ed during this process.
+    devices_.erase(disconnected_devices[i]);
   }
 
-  libusb_free_device_list(devices, true);
+  libusb_free_device_list(platform_devices, true);
 }
 
-bool UsbService::DeviceMatches(PlatformUsbDevice device,
+bool UsbService::DeviceMatches(scoped_refptr<UsbDevice> device,
                                const uint16 vendor_id,
                                const uint16 product_id) {
-  libusb_device_descriptor descriptor;
-  if (libusb_get_device_descriptor(device, &descriptor))
-    return false;
-  return descriptor.idVendor == vendor_id && descriptor.idProduct == product_id;
-}
-
-UsbDevice* UsbService::LookupOrCreateDevice(PlatformUsbDevice device) {
-  if (!ContainsKey(devices_, device)) {
-    libusb_device_handle* handle = NULL;
-    if (libusb_open(device, &handle)) {
-      LOG(WARNING) << "Could not open device.";
-      return NULL;
-    }
-
-    UsbDevice* wrapper = new UsbDevice(this, handle);
-    devices_[device] = wrapper;
-  }
-  return devices_[device].get();
+  return device->vendor_id() == vendor_id && device->product_id() == product_id;
 }

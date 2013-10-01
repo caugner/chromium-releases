@@ -1,5 +1,5 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'pnacl', 'win'],
+  'TOOLS': ['newlib', 'glibc', 'pnacl'],
   'TARGETS': [
     {
       'NAME' : 'nacl_io',
@@ -12,7 +12,8 @@
         'queue.c',
         'queue.h',
       ],
-      'LIBS': ['nacl_io', 'ppapi', 'pthread']
+      'DEPS': ['nacl_io'],
+      'LIBS': ['ppapi', 'pthread']
     }
   ],
   'DATA': [
@@ -24,5 +25,8 @@
   'GROUP': 'Demo',
   'PERMISSIONS': [
     'unlimitedStorage'
+  ],
+  'SOCKET_PERMISSIONS': [
+    'resolve-host'
   ]
 }

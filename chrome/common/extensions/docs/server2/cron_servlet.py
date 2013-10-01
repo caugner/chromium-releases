@@ -10,23 +10,22 @@ from app_yaml_helper import AppYamlHelper
 from appengine_wrappers import (
     GetAppVersion, DeadlineExceededError, IsDevServer, logservice)
 from branch_utility import BranchUtility
-from caching_file_system import CachingFileSystem
 from compiled_file_system import CompiledFileSystem
 from empty_dir_file_system import EmptyDirFileSystem
+from file_system_util import CreateURLsFromPaths
 from github_file_system import GithubFileSystem
+from host_file_system_creator import HostFileSystemCreator
 from object_store_creator import ObjectStoreCreator
 from render_servlet import RenderServlet
 from server_instance import ServerInstance
 from servlet import Servlet, Request, Response
-from subversion_file_system import SubversionFileSystem
 import svn_constants
-from third_party.json_schema_compiler.memoize import memoize
 
 class _SingletonRenderServletDelegate(RenderServlet.Delegate):
   def __init__(self, server_instance):
     self._server_instance = server_instance
 
-  def CreateServerInstanceForChannel(self, channel):
+  def CreateServerInstance(self):
     return self._server_instance
 
 class CronServlet(Servlet):
@@ -34,7 +33,6 @@ class CronServlet(Servlet):
   '''
   def __init__(self, request, delegate_for_test=None):
     Servlet.__init__(self, request)
-    self._channel = request.path.strip('/')
     self._delegate = delegate_for_test or CronServlet.Delegate()
 
   class Delegate(object):
@@ -43,8 +41,8 @@ class CronServlet(Servlet):
     def CreateBranchUtility(self, object_store_creator):
       return BranchUtility.Create(object_store_creator)
 
-    def CreateHostFileSystemForBranchAndRevision(self, branch, revision):
-      return SubversionFileSystem.Create(branch, revision=revision)
+    def CreateHostFileSystemCreator(self, object_store_creator):
+      return HostFileSystemCreator(object_store_creator)
 
     def CreateAppSamplesFileSystem(self, object_store_creator):
       # TODO(kalman): CachingFileSystem wrapper for GithubFileSystem, but it's
@@ -71,47 +69,43 @@ class CronServlet(Servlet):
     # the time these won't have changed since the last cron run, so it's a
     # little wasteful, but hopefully rendering is really fast (if it isn't we
     # have a problem).
-    channel = self._channel
-    logging.info('cron/%s: starting' % channel)
+    logging.info('cron: starting')
 
     # This is returned every time RenderServlet wants to create a new
     # ServerInstance.
     server_instance = self._GetSafeServerInstance()
 
     def get_via_render_servlet(path):
-      return RenderServlet(
-          Request(path, self._request.host, self._request.headers),
-          _SingletonRenderServletDelegate(server_instance)).Get()
+      request = Request(path, self._request.host, self._request.headers)
+      delegate = _SingletonRenderServletDelegate(server_instance)
+      return RenderServlet(request, delegate).Get()
 
     def run_cron_for_dir(d, path_prefix=''):
       success = True
       start_time = time.time()
-      files = [f for f in server_instance.content_cache.GetFromFileListing(d)
-               if not f.endswith('/')]
-      logging.info('cron/%s: rendering %s files from %s...' % (
-          channel, len(files), d))
+      files = dict(
+          CreateURLsFromPaths(server_instance.host_file_system, d, path_prefix))
+      logging.info('cron: rendering %s files from %s...' % (len(files), d))
       try:
-        for i, f in enumerate(files):
+        for i, path in enumerate(files):
           error = None
-          path = '%s%s' % (path_prefix, f)
           try:
             response = get_via_render_servlet(path)
             if response.status != 200:
               error = 'Got %s response' % response.status
           except DeadlineExceededError:
             logging.error(
-                'cron/%s: deadline exceeded rendering %s (%s of %s): %s' % (
-                    channel, path, i + 1, len(files), traceback.format_exc()))
+                'cron: deadline exceeded rendering %s (%s of %s): %s' % (
+                    path, i + 1, len(files), traceback.format_exc()))
             raise
           except error:
             pass
           if error:
-            logging.error('cron/%s: error rendering %s: %s' % (
-                channel, path, error))
+            logging.error('cron: error rendering %s: %s' % (path, error))
             success = False
       finally:
-        logging.info('cron/%s: rendering %s files from %s took %s seconds' % (
-            channel, len(files), d, time.time() - start_time))
+        logging.info('cron: rendering %s files from %s took %s seconds' % (
+            len(files), d, time.time() - start_time))
       return success
 
     success = True
@@ -143,32 +137,29 @@ class CronServlet(Servlet):
       # Extension examples have zip files too. Well, so do apps, but the app
       # file system doesn't get the Offline treatment so they don't need cron.
       if not IsDevServer():
-        manifest_json = '/manifest.json'
-        example_zips = [
-            '%s.zip' % filename[:-len(manifest_json)]
-            for filename in server_instance.content_cache.GetFromFileListing(
-                svn_constants.EXAMPLES_PATH)
-            if filename.endswith(manifest_json)]
-        logging.info('cron/%s: rendering %s example zips...' % (
-            channel, len(example_zips)))
+        manifest_json = 'manifest.json'
+        example_zips = []
+        for root, _, files in server_instance.host_file_system.Walk(
+            svn_constants.EXAMPLES_PATH):
+          example_zips.extend(
+              root + '.zip' for name in files if name == manifest_json)
+        logging.info('cron: rendering %s example zips...' % len(example_zips))
         start_time = time.time()
         try:
           success = success and all(
               get_via_render_servlet('extensions/examples/%s' % z).status == 200
               for z in example_zips)
         finally:
-          logging.info('cron/%s: rendering %s example zips took %s seconds' % (
-              channel, len(example_zips), time.time() - start_time))
+          logging.info('cron: rendering %s example zips took %s seconds' % (
+              len(example_zips), time.time() - start_time))
 
-      # Also trigger a redirect so that PathCanonicalizer has an opportunity to
-      # cache file listings.
-      logging.info('cron/%s: triggering a redirect...' % channel)
-      redirect_response = get_via_render_servlet('storage.html')
-      success = success and redirect_response.status == 302
     except DeadlineExceededError:
       success = False
 
-    logging.info('cron/%s: finished' % channel)
+    logging.info('cron: running Redirector cron...')
+    server_instance.redirector.Cron()
+
+    logging.info('cron: finished (%s)' % ('success' if success else 'failure',))
 
     return (Response.Ok('Success') if success else
             Response.InternalError('Failure'))
@@ -178,23 +169,14 @@ class CronServlet(Servlet):
     meaning the last revision that the current running version of the server
     existed.
     '''
-    channel = self._channel
     delegate = self._delegate
-
-    server_instance_at_head = self._CreateServerInstance(channel, None)
-
-    get_branch_for_channel = self._GetBranchForChannel
-    class AppYamlHelperDelegate(AppYamlHelper.Delegate):
-      def GetHostFileSystemForRevision(self, revision):
-        return delegate.CreateHostFileSystemForBranchAndRevision(
-            get_branch_for_channel(channel),
-            revision)
+    server_instance_at_head = self._CreateServerInstance(None)
 
     app_yaml_handler = AppYamlHelper(
         svn_constants.APP_YAML_PATH,
         server_instance_at_head.host_file_system,
-        AppYamlHelperDelegate(),
-        server_instance_at_head.object_store_creator)
+        server_instance_at_head.object_store_creator,
+        server_instance_at_head.host_file_system_creator)
 
     if app_yaml_handler.IsUpToDate(delegate.GetAppVersion()):
       # TODO(kalman): return a new ServerInstance at an explicit revision in
@@ -206,34 +188,26 @@ class CronServlet(Servlet):
     safe_revision = app_yaml_handler.GetFirstRevisionGreaterThan(
         delegate.GetAppVersion()) - 1
 
-    logging.info('cron/%s: app version %s is out of date, safe is %s' % (
-        channel, delegate.GetAppVersion(), safe_revision))
+    logging.info('cron: app version %s is out of date, safe is %s' % (
+        delegate.GetAppVersion(), safe_revision))
 
-    return self._CreateServerInstance(channel, safe_revision)
+    return self._CreateServerInstance(safe_revision)
 
-  def _CreateObjectStoreCreator(self, channel):
-    return ObjectStoreCreator(channel, start_empty=True)
-
-  def _GetBranchForChannel(self, channel):
-    object_store_creator = self._CreateObjectStoreCreator(channel)
-    return (self._delegate.CreateBranchUtility(object_store_creator)
-        .GetChannelInfo(channel).branch)
-
-  def _CreateServerInstance(self, channel, revision):
-    object_store_creator = self._CreateObjectStoreCreator(channel)
-    host_file_system = CachingFileSystem(
-        self._delegate.CreateHostFileSystemForBranchAndRevision(
-            self._GetBranchForChannel(channel),
-            revision),
+  def _CreateServerInstance(self, revision):
+    object_store_creator = ObjectStoreCreator(start_empty=True)
+    branch_utility = self._delegate.CreateBranchUtility(object_store_creator)
+    host_file_system_creator = self._delegate.CreateHostFileSystemCreator(
         object_store_creator)
+    host_file_system = host_file_system_creator.Create(revision=revision)
     app_samples_file_system = self._delegate.CreateAppSamplesFileSystem(
         object_store_creator)
     compiled_host_fs_factory = CompiledFileSystem.Factory(
         host_file_system,
         object_store_creator)
-    return ServerInstance(channel,
-                          object_store_creator,
+    return ServerInstance(object_store_creator,
                           host_file_system,
                           app_samples_file_system,
-                          '' if channel == 'stable' else '/%s' % channel,
-                          compiled_host_fs_factory)
+                          '',
+                          compiled_host_fs_factory,
+                          branch_utility,
+                          host_file_system_creator)

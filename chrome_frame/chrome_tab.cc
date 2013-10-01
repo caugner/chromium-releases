@@ -18,6 +18,7 @@
 #include "base/logging.h"
 #include "base/logging_win.h"
 #include "base/path_service.h"
+#include "base/process/launch.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -42,8 +43,8 @@
 #include "chrome_frame/pin_module.h"
 #include "chrome_frame/resource.h"
 #include "chrome_frame/utils.h"
-#include "googleurl/src/url_util.h"
 #include "grit/chrome_frame_resources.h"
+#include "url/url_util.h"
 
 using base::win::RegKey;
 
@@ -344,12 +345,12 @@ HRESULT SetupUserLevelHelper() {
   if (PathService::Get(base::FILE_MODULE, &module_path)) {
     module_path = module_path.DirName();
     helper_path = module_path.Append(kChromeFrameHelperExe);
-    if (!file_util::PathExists(helper_path)) {
+    if (!base::PathExists(helper_path)) {
       // If we can't find the helper in the current directory, try looking
       // one up (this is the layout in the build output folder).
       module_path = module_path.DirName();
       helper_path = module_path.Append(kChromeFrameHelperExe);
-      DCHECK(file_util::PathExists(helper_path)) <<
+      DCHECK(base::PathExists(helper_path)) <<
           "Could not find chrome_frame_helper.exe.";
     }
 
@@ -357,7 +358,7 @@ HRESULT SetupUserLevelHelper() {
     HWND old_window = FindWindow(kChromeFrameHelperWindowClassName,
                                  kChromeFrameHelperWindowName);
 
-    if (file_util::PathExists(helper_path)) {
+    if (base::PathExists(helper_path)) {
       std::wstring helper_path_cmd(L"\"");
       helper_path_cmd += helper_path.value();
       helper_path_cmd += L"\" ";

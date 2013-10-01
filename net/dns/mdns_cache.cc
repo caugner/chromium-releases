@@ -4,6 +4,7 @@
 
 #include "net/dns/mdns_cache.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "base/stl_util.h"
@@ -44,11 +45,11 @@ MDnsCache::Key::~Key() {
 }
 
 bool MDnsCache::Key::operator<(const MDnsCache::Key& key) const {
-  if (type_ != key.type_)
-    return type_ < key.type_;
-
   if (name_ != key.name_)
     return name_ < key.name_;
+
+  if (type_ != key.type_)
+    return type_ < key.type_;
 
   if (optional_ != key.optional_)
     return optional_ < key.optional_;
@@ -89,31 +90,32 @@ const RecordParsed* MDnsCache::LookupKey(const Key& key) {
 
 MDnsCache::UpdateType MDnsCache::UpdateDnsRecord(
     scoped_ptr<const RecordParsed> record) {
-  UpdateType type = NoChange;
-
   Key cache_key = Key::CreateFor(record.get());
 
-  base::Time expiration = GetEffectiveExpiration(record.get());
-  if (next_expiration_ == base::Time() || expiration < next_expiration_) {
-    next_expiration_ = expiration;
-  }
+  // Ignore "goodbye" packets for records not in cache.
+  if (record->ttl() == 0 && mdns_cache_.find(cache_key) == mdns_cache_.end())
+    return NoChange;
+
+  base::Time new_expiration = GetEffectiveExpiration(record.get());
+  if (next_expiration_ != base::Time())
+    new_expiration = std::min(new_expiration, next_expiration_);
 
   std::pair<RecordMap::iterator, bool> insert_result =
       mdns_cache_.insert(std::make_pair(cache_key, (const RecordParsed*)NULL));
-
+  UpdateType type = NoChange;
   if (insert_result.second) {
     type = RecordAdded;
-    insert_result.first->second = record.release();
   } else {
     const RecordParsed* other_record = insert_result.first->second;
 
-    if (!record->IsEqual(other_record, true)) {
+    if (record->ttl() != 0 && !record->IsEqual(other_record, true)) {
       type = RecordChanged;
     }
     delete other_record;
-    insert_result.first->second = record.release();
   }
 
+  insert_result.first->second = record.release();
+  next_expiration_ = new_expiration;
   return type;
 }
 
@@ -154,8 +156,8 @@ void MDnsCache::FindDnsRecords(unsigned type,
 
   RecordMap::const_iterator i = mdns_cache_.lower_bound(Key(type, name, ""));
   for (; i != mdns_cache_.end(); ++i) {
-    if (i->first.type() != type ||
-        (!name.empty() && i->first.name() != name)) {
+    if (i->first.name() != name ||
+        (type != 0 && i->first.type() != type)) {
       break;
     }
 
@@ -166,6 +168,19 @@ void MDnsCache::FindDnsRecords(unsigned type,
 
     results->push_back(record);
   }
+}
+
+scoped_ptr<const RecordParsed> MDnsCache::RemoveRecord(
+    const RecordParsed* record) {
+  Key key = Key::CreateFor(record);
+  RecordMap::iterator found = mdns_cache_.find(key);
+
+  if (found != mdns_cache_.end() && found->second == record) {
+    mdns_cache_.erase(key);
+    return scoped_ptr<const RecordParsed>(record);
+  }
+
+  return scoped_ptr<const RecordParsed>();
 }
 
 // static

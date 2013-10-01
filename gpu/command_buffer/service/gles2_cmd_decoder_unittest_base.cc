@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
@@ -90,10 +91,18 @@ void GLES2DecoderTestBase::InitDecoder(
   Framebuffer::ClearFramebufferCompleteComboMap();
   gl_.reset(new StrictMock<MockGLInterface>());
   ::gfx::GLInterface::SetGLInterface(gl_.get());
+
+  // Only create stream texture manager if extension is requested.
+  std::vector<std::string> list;
+  base::SplitString(std::string(extensions), ' ', &list);
+  if (std::find(list.begin(), list.end(),
+                "GL_CHROMIUM_stream_texture") != list.end())
+      stream_texture_manager_.reset(new StrictMock<MockStreamTextureManager>);
   group_ = scoped_refptr<ContextGroup>(new ContextGroup(
       NULL,
       NULL,
       memory_tracker_,
+      stream_texture_manager_.get(),
       bind_generates_resource));
   // These two workarounds are always turned on.
   group_->feature_info(
@@ -225,10 +234,14 @@ void GLES2DecoderTestBase::InitDecoder(
       .Times(1)
       .RetiresOnSaturation();
 
+  // TODO(boliu): Remove OS_ANDROID once crbug.com/259023 is fixed and the
+  // workaround has been reverted.
+#if !defined(OS_ANDROID)
   EXPECT_CALL(*gl_, Clear(
       GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT))
       .Times(1)
       .RetiresOnSaturation();
+#endif
 
   engine_.reset(new StrictMock<MockCommandBufferEngine>());
   gpu::Buffer buffer = engine_->GetSharedMemoryBuffer(kSharedMemoryId);
@@ -1135,6 +1148,40 @@ void GLES2DecoderTestBase::SetupCubemapProgram() {
     };
     static UniformInfo uniforms[] = {
       { kUniform1Name, kUniform1Size, kUniformCubemapType,
+        kUniform1FakeLocation, kUniform1RealLocation,
+        kUniform1DesiredLocation, },
+      { kUniform2Name, kUniform2Size, kUniform2Type,
+        kUniform2FakeLocation, kUniform2RealLocation,
+        kUniform2DesiredLocation, },
+      { kUniform3Name, kUniform3Size, kUniform3Type,
+        kUniform3FakeLocation, kUniform3RealLocation,
+        kUniform3DesiredLocation, },
+    };
+    SetupShader(attribs, arraysize(attribs), uniforms, arraysize(uniforms),
+                client_program_id_, kServiceProgramId,
+                client_vertex_shader_id_, kServiceVertexShaderId,
+                client_fragment_shader_id_, kServiceFragmentShaderId);
+  }
+
+  {
+    EXPECT_CALL(*gl_, UseProgram(kServiceProgramId))
+        .Times(1)
+        .RetiresOnSaturation();
+    cmds::UseProgram cmd;
+    cmd.Init(client_program_id_);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+}
+
+void GLES2DecoderTestBase::SetupSamplerExternalProgram() {
+  {
+    static AttribInfo attribs[] = {
+      { kAttrib1Name, kAttrib1Size, kAttrib1Type, kAttrib1Location, },
+      { kAttrib2Name, kAttrib2Size, kAttrib2Type, kAttrib2Location, },
+      { kAttrib3Name, kAttrib3Size, kAttrib3Type, kAttrib3Location, },
+    };
+    static UniformInfo uniforms[] = {
+      { kUniform1Name, kUniform1Size, kUniformSamplerExternalType,
         kUniform1FakeLocation, kUniform1RealLocation,
         kUniform1DesiredLocation, },
       { kUniform2Name, kUniform2Size, kUniform2Type,

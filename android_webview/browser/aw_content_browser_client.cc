@@ -288,10 +288,19 @@ void AwContentBrowserClient::CancelDesktopNotification(
 
 bool AwContentBrowserClient::CanCreateWindow(
     const GURL& opener_url,
+    const GURL& opener_top_level_frame_url,
     const GURL& source_origin,
     WindowContainerType container_type,
+    const GURL& target_url,
+    const content::Referrer& referrer,
+    WindowOpenDisposition disposition,
+    const WebKit::WebWindowFeatures& features,
+    bool user_gesture,
+    bool opener_suppressed,
     content::ResourceContext* context,
     int render_process_id,
+    bool is_guest,
+    int opener_id,
     bool* no_javascript_access) {
   // We unconditionally allow popup windows at this stage and will give
   // the embedder the opporunity to handle displaying of the popup in

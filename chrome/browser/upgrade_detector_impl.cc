@@ -14,10 +14,11 @@
 #include "base/memory/singleton.h"
 #include "base/metrics/field_trial.h"
 #include "base/path_service.h"
+#include "base/process/launch.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
@@ -34,7 +35,7 @@
 #elif defined(OS_MACOSX)
 #include "chrome/browser/mac/keystone_glue.h"
 #elif defined(OS_POSIX)
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #endif
 
 using content::BrowserThread;

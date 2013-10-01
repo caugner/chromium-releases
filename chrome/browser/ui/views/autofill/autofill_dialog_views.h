@@ -7,12 +7,14 @@
 
 #include <map>
 
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
-#include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
+#include "chrome/browser/ui/autofill/autofill_dialog_types.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
+#include "chrome/browser/ui/autofill/autofill_dialog_view_delegate.h"
 #include "chrome/browser/ui/autofill/testable_autofill_dialog_view.h"
-#include "ui/base/accelerators/accelerator.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/combobox/combobox_listener.h"
@@ -20,7 +22,6 @@
 #include "ui/views/controls/progress_bar.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/styled_label_listener.h"
-#include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/widget_observer.h"
@@ -35,13 +36,14 @@ class Image;
 }
 
 namespace views {
+class BubbleBorder;
 class Checkbox;
 class Combobox;
-class FocusableBorder;
 class FocusManager;
 class ImageButton;
 class ImageView;
 class Label;
+class LabelButton;
 class Link;
 class MenuRunner;
 class StyledLabel;
@@ -52,27 +54,27 @@ class Widget;
 namespace ui {
 class ComboboxModel;
 class KeyEvent;
+class MultiAnimation;
 }
 
 namespace autofill {
 
 class AutofillDialogSignInDelegate;
-struct DetailInput;
+class DecoratedTextfield;
 
 // Views toolkit implementation of the Autofill dialog that handles the
 // imperative autocomplete API call.
 class AutofillDialogViews : public AutofillDialogView,
                             public TestableAutofillDialogView,
-                            public views::DialogDelegate,
+                            public views::DialogDelegateView,
                             public views::WidgetObserver,
                             public views::ButtonListener,
                             public views::TextfieldController,
                             public views::FocusChangeListener,
                             public views::ComboboxListener,
-                            public views::StyledLabelListener,
-                            public ui::AcceleratorTarget {
+                            public views::StyledLabelListener {
  public:
-  explicit AutofillDialogViews(AutofillDialogController* controller);
+  explicit AutofillDialogViews(AutofillDialogViewDelegate* delegate);
   virtual ~AutofillDialogViews();
 
   // AutofillDialogView implementation:
@@ -89,7 +91,7 @@ class AutofillDialogViews : public AutofillDialogView,
                            const DetailInput& originating_input) OVERRIDE;
   virtual void GetUserInput(DialogSection section,
                             DetailOutputMap* output) OVERRIDE;
-  virtual string16 GetCvc() OVERRIDE;
+  virtual base::string16 GetCvc() OVERRIDE;
   virtual bool SaveDetailsLocally() OVERRIDE;
   virtual const content::NavigationController* ShowSignIn() OVERRIDE;
   virtual void HideSignIn() OVERRIDE;
@@ -101,29 +103,30 @@ class AutofillDialogViews : public AutofillDialogView,
   // TestableAutofillDialogView implementation:
   virtual void SubmitForTesting() OVERRIDE;
   virtual void CancelForTesting() OVERRIDE;
-  virtual string16 GetTextContentsOfInput(const DetailInput& input) OVERRIDE;
+  virtual base::string16 GetTextContentsOfInput(
+      const DetailInput& input) OVERRIDE;
   virtual void SetTextContentsOfInput(const DetailInput& input,
-                                      const string16& contents) OVERRIDE;
+                                      const base::string16& contents) OVERRIDE;
   virtual void SetTextContentsOfSuggestionInput(
       DialogSection section,
       const base::string16& text) OVERRIDE;
   virtual void ActivateInput(const DetailInput& input) OVERRIDE;
   virtual gfx::Size GetSize() const OVERRIDE;
 
-  // ui::AcceleratorTarget implementation:
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual bool CanHandleAccelerators() const OVERRIDE;
+  // views::View implementation.
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void Layout() OVERRIDE;
+  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
   // views::DialogDelegate implementation:
-  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
   virtual views::View* CreateOverlayView() OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
+  virtual base::string16 GetDialogButtonLabel(ui::DialogButton button) const
+      OVERRIDE;
+  virtual bool ShouldDefaultButtonBeBlue() const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual views::View* CreateExtraView() OVERRIDE;
   virtual views::View* CreateTitlebarExtraView() OVERRIDE;
@@ -144,7 +147,7 @@ class AutofillDialogViews : public AutofillDialogView,
 
   // views::TextfieldController implementation:
   virtual void ContentsChanged(views::Textfield* sender,
-                               const string16& new_contents) OVERRIDE;
+                               const base::string16& new_contents) OVERRIDE;
   virtual bool HandleKeyEvent(views::Textfield* sender,
                               const ui::KeyEvent& key_event) OVERRIDE;
   virtual bool HandleMouseEvent(views::Textfield* sender,
@@ -164,30 +167,10 @@ class AutofillDialogViews : public AutofillDialogView,
       OVERRIDE;
 
  private:
-  // A view that contains a single child view, and adds a vertical scrollbar
-  // after a certain maximum height is reached.
-  class SizeLimitedScrollView : public views::ScrollView {
-   public:
-    explicit SizeLimitedScrollView(views::View* scroll_contents);
-    virtual ~SizeLimitedScrollView();
-
-    // views::View implementation.
-    virtual void Layout() OVERRIDE;
-    virtual gfx::Size GetPreferredSize() OVERRIDE;
-
-    // Sets the maximum height for the viewport.
-    void SetMaximumHeight(int max_height);
-
-   private:
-    int max_height_;
-
-    DISALLOW_COPY_AND_ASSIGN(SizeLimitedScrollView);
-  };
-
   // A class that creates and manages a widget for error messages.
   class ErrorBubble : public views::WidgetObserver {
    public:
-    ErrorBubble(views::View* anchor, const string16& message);
+    ErrorBubble(views::View* anchor, const base::string16& message);
     virtual ~ErrorBubble();
 
     bool IsShowing();
@@ -214,52 +197,16 @@ class AutofillDialogViews : public AutofillDialogView,
     DISALLOW_COPY_AND_ASSIGN(ErrorBubble);
   };
 
-  // A class which holds a textfield and draws extra stuff on top, like
-  // invalid content indications.
-  class DecoratedTextfield : public views::Textfield {
-   public:
-    DecoratedTextfield(const string16& default_value,
-                       const string16& placeholder,
-                       views::TextfieldController* controller);
-    virtual ~DecoratedTextfield();
-
-    // Sets whether to indicate the textfield has invalid content.
-    void SetInvalid(bool invalid);
-    bool invalid() const { return invalid_; }
-
-    // Sets the icon to be displayed inside the textfield at the end of the
-    // text.
-    void SetIcon(const gfx::Image& icon);
-
-    // views::View implementation.
-    virtual const char* GetClassName() const OVERRIDE;
-    virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
-    virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-
-   private:
-    // We draw the border.
-    views::FocusableBorder* border_;  // Weak.
-
-    // The icon that goes at the right side of the textfield.
-    gfx::Image icon_;
-
-    // Whether the text contents are "invalid" (i.e. should special markers be
-    // shown to indicate invalidness).
-    bool invalid_;
-
-    DISALLOW_COPY_AND_ASSIGN(DecoratedTextfield);
-  };
-
   // A View which displays the currently selected account and lets the user
   // switch accounts.
   class AccountChooser : public views::View,
                          public views::LinkListener,
                          public base::SupportsWeakPtr<AccountChooser> {
    public:
-    explicit AccountChooser(AutofillDialogController* controller);
+    explicit AccountChooser(AutofillDialogViewDelegate* delegate);
     virtual ~AccountChooser();
 
-    // Updates the view based on the state that |controller_| reports.
+    // Updates the view based on the state that |delegate_| reports.
     void Update();
 
     // views::View implementation.
@@ -282,8 +229,8 @@ class AutofillDialogViews : public AutofillDialogView,
     // The sign in link.
     views::Link* link_;
 
-    // The controller |this| queries for logic and state.
-    AutofillDialogController* controller_;
+    // The delegate |this| queries for logic and state.
+    AutofillDialogViewDelegate* delegate_;
 
     // Runs the suggestion menu (triggered by each section's |suggested_button|.
     scoped_ptr<views::MenuRunner> menu_runner_;
@@ -291,40 +238,65 @@ class AutofillDialogViews : public AutofillDialogView,
     DISALLOW_COPY_AND_ASSIGN(AccountChooser);
   };
 
-  // A view to contain the main contents of the dialog, including the
-  // notifications and account details.
-  class ShieldableContentsView : public views::View {
+  // A view which displays an image, optionally some messages and a button. Used
+  // for the splash page as well as the Wallet interstitial.
+  class OverlayView : public views::View,
+                      public ui::AnimationDelegate {
    public:
-    ShieldableContentsView();
-    virtual ~ShieldableContentsView();
+    // The listener is informed when |button_| is pressed.
+    explicit OverlayView(views::ButtonListener* listener);
+    virtual ~OverlayView();
 
-    // Adds |view| as a child of |contents_|.
-    void AddToContents(views::View* view);
+    // Returns a height which should be used when the contents view has width
+    // |w|. Note that the value returned should be used as the height of the
+    // dialog's contents.
+    int GetHeightForContentsForWidth(int width);
 
-    // Hides |contents_| behind a shield that displays |message|.
-    void ObscureContents(const base::string16& message);
+    // Sets properties that should be displayed.
+    void SetState(const DialogOverlayState& state,
+                  views::ButtonListener* listener);
 
-    // views::View implementation.
+    // Fades the view out after a delay.
+    void BeginFadeOut();
+
+    // ui::AnimationDelegate implementation:
+    virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+    virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+
+    // views::View implementation:
+    virtual gfx::Insets GetInsets() const OVERRIDE;
     virtual void Layout() OVERRIDE;
-    virtual gfx::Size GetPreferredSize() OVERRIDE;
+    virtual const char* GetClassName() const OVERRIDE;
+    virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+    virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
 
    private:
-    // The contents which can be shielded. This view sets the size of |this| and
-    // will always be sized to fill |this|.
-    views::View* contents_;
+    // Gets the border of the non-client frame view as a BubbleBorder.
+    views::BubbleBorder* GetBubbleBorder();
 
-    // Only visible when there's a message to display. Sits on top of
-    // |contents_|.
-    views::Label* contents_shield_;
+    // Gets the bounds of this view without the frame view's bubble border.
+    gfx::Rect ContentBoundsSansBubbleBorder();
 
-    DISALLOW_COPY_AND_ASSIGN(ShieldableContentsView);
+    // Child View. Front and center.
+    views::ImageView* image_view_;
+    // Child View. When visible, below |image_view_|.
+    views::View* message_stack_;
+    // Child View. When visible, below |message_stack_|.
+    views::LabelButton* button_;
+
+    // This MultiAnimation is used to first fade out the contents of the
+    // overlay, then fade out the background of the overlay (revealing the
+    // dialog behind the overlay). This avoids cross-fade.
+    scoped_ptr<ui::MultiAnimation> fade_out_;
+
+    DISALLOW_COPY_AND_ASSIGN(OverlayView);
   };
 
   // An area for notifications. Some notifications point at the account chooser.
   class NotificationArea : public views::View,
                            public views::ButtonListener {
    public:
-    explicit NotificationArea(AutofillDialogController* controller);
+    explicit NotificationArea(AutofillDialogViewDelegate* delegate);
     virtual ~NotificationArea();
 
     // Displays the given notifications.
@@ -333,6 +305,7 @@ class AutofillDialogViews : public AutofillDialogView,
     // views::View implementation.
     virtual gfx::Size GetPreferredSize() OVERRIDE;
     virtual const char* GetClassName() const OVERRIDE;
+    virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
     virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
     // views::ButtonListener implementation:
@@ -349,9 +322,9 @@ class AutofillDialogViews : public AutofillDialogView,
     // pointing at |arrow_centering_anchor_|.
     bool HasArrow();
 
-    // A reference to the controller than owns this view. Used to report when
-    // checkboxes change their values.
-    AutofillDialogController* controller_;  // weak
+    // A reference to the delegate/controller than owns this view.
+    // Used to report when checkboxes change their values.
+    AutofillDialogViewDelegate* delegate_;  // weak
 
     // The currently showing checkbox, or NULL if none exists.
     views::Checkbox* checkbox_;  // weak
@@ -371,7 +344,7 @@ class AutofillDialogViews : public AutofillDialogView,
   // on the right.
   class SectionContainer : public views::View {
    public:
-    SectionContainer(const string16& label,
+    SectionContainer(const base::string16& label,
                      views::View* controls,
                      views::Button* proxy_button);
     virtual ~SectionContainer();
@@ -407,32 +380,51 @@ class AutofillDialogViews : public AutofillDialogView,
   // edit the suggestion.
   class SuggestionView : public views::View {
    public:
-    SuggestionView(const string16& edit_label,
-                   AutofillDialogViews* autofill_dialog);
+    explicit SuggestionView(AutofillDialogViews* autofill_dialog);
     virtual ~SuggestionView();
 
-    // Sets the display text of the suggestion.
-    void SetSuggestionText(const string16& text, gfx::Font::FontStyle style);
+    void SetState(const SuggestionState& state);
 
-    // Sets the icon which should be displayed ahead of the text.
-    void SetSuggestionIcon(const gfx::Image& image);
-
-    // Shows an auxiliary textfield to the right of the suggestion icon and
-    // text. This is currently only used to show a CVC field for the CC section.
-    void ShowTextfield(const string16& placeholder_text,
-                       const gfx::Image& icon);
+    // views::View implementation.
+    virtual gfx::Size GetPreferredSize() OVERRIDE;
+    virtual int GetHeightForWidth(int width) OVERRIDE;
+    virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
     DecoratedTextfield* decorated_textfield() { return decorated_; }
 
    private:
+    // Returns whether there's room to display |state_.vertically_compact_text|
+    // without resorting to an ellipsis for a pixel width of |available_width|.
+    // Fills in |resulting_height| with the amount of space required to display
+    // |vertically_compact_text| or |horizontally_compact_text| as the case may
+    // be.
+    bool CanUseVerticallyCompactText(int available_width,
+                                     int* resulting_height);
+
+    // Sets the display text of the suggestion.
+    void SetLabelText(const base::string16& text);
+
+    // Sets the icon which should be displayed ahead of the text.
+    void SetIcon(const gfx::Image& image);
+
+    // Shows an auxiliary textfield to the right of the suggestion icon and
+    // text. This is currently only used to show a CVC field for the CC section.
+    void SetTextfield(const base::string16& placeholder_text,
+                      const gfx::Image& icon);
+
+    // The state of |this|.
+    SuggestionState state_;
+
+    // This caches preferred heights for given widths. The key is a preferred
+    // width, the value is a cached result of CanUseVerticallyCompactText.
+    std::map<int, std::pair<bool, int> > calculated_heights_;
+
     // The label that holds the suggestion description text.
     views::Label* label_;
     // The second (and greater) line of text that describes the suggestion.
     views::Label* label_line_2_;
     // The icon that comes just before |label_|.
     views::ImageView* icon_;
-    // A view to contain |label_| and |icon_|.
-    views::View* label_container_;
     // The input set by ShowTextfield.
     DecoratedTextfield* decorated_;
     // An "Edit" link that flips to editable inputs rather than suggestion text.
@@ -519,7 +511,7 @@ class AutofillDialogViews : public AutofillDialogView,
   // returned.
   views::View* InitInputsView(DialogSection section);
 
-  // Updates the given section to match the state provided by |controller_|. If
+  // Updates the given section to match the state provided by |delegate_|. If
   // |clobber_inputs| is true, the current state of the textfields will be
   // ignored, otherwise their contents will be preserved.
   void UpdateSectionImpl(DialogSection section, bool clobber_inputs);
@@ -539,7 +531,7 @@ class AutofillDialogViews : public AutofillDialogView,
   // should work on Comboboxes or DecoratedTextfields. If |message| is empty,
   // the input is valid.
   template<class T>
-  void SetValidityForInput(T* input, const string16& message);
+  void SetValidityForInput(T* input, const base::string16& message);
 
   // Shows an error bubble pointing at |view| if |view| has a message in
   // |validity_map_|.
@@ -558,13 +550,13 @@ class AutofillDialogViews : public AutofillDialogView,
   bool ValidateForm();
 
   // When an input textfield is edited (its contents change) or activated
-  // (clicked while focused), this function will inform the controller that it's
+  // (clicked while focused), this function will inform the delegate that it's
   // time to show a suggestion popup and possibly reset the validity state of
   // the input.
   void TextfieldEditedOrActivated(views::Textfield* textfield, bool was_edit);
 
-  // Updates the [X] Save in Chrome checkbox in the button strip.
-  void UpdateSaveInChromeCheckbox();
+  // Updates the views in the button strip.
+  void UpdateButtonStripExtraView();
 
   // Call this when the size of anything in |contents_| might've changed.
   void ContentsPreferredSizeChanged();
@@ -580,15 +572,12 @@ class AutofillDialogViews : public AutofillDialogView,
   // Called when the details container changes in size or position.
   void DetailsContainerBoundsChanged();
 
-  // The controller that drives this view. Weak pointer, always non-NULL.
-  AutofillDialogController* const controller_;
+  // The delegate that drives this view. Weak pointer, always non-NULL.
+  AutofillDialogViewDelegate* const delegate_;
 
   // The window that displays |contents_|. Weak pointer; may be NULL when the
   // dialog is closing.
   views::Widget* window_;
-
-  // The top-level View for the dialog. Owned by the constrained window.
-  views::View* contents_;
 
   // A DialogSection-keyed map of the DetailGroup structs.
   DetailGroupMap detail_groups_;
@@ -606,17 +595,17 @@ class AutofillDialogViews : public AutofillDialogView,
   // sign-in.
   views::WebView* sign_in_webview_;
 
-  // View to host everything that isn't related to sign-in.
-  ShieldableContentsView* main_container_;
-
   // View that wraps |details_container_| and makes it scroll vertically.
-  SizeLimitedScrollView* scrollable_area_;
+  views::ScrollView* scrollable_area_;
 
   // View to host details sections.
   views::View* details_container_;
 
+  // A view that overlays |this| (for "loading..." messages).
+  views::Label* loading_shield_;
+
   // The view that completely overlays the dialog (used for the splash page).
-  views::View* overlay_view_;
+  OverlayView* overlay_view_;
 
   // The "Extra view" is on the same row as the dialog buttons.
   views::View* button_strip_extra_view_;
@@ -624,6 +613,16 @@ class AutofillDialogViews : public AutofillDialogView,
   // This checkbox controls whether new details are saved to the Autofill
   // database. It lives in |extra_view_|.
   views::Checkbox* save_in_chrome_checkbox_;
+
+  // Holds the above checkbox and an associated tooltip icon.
+  views::View* save_in_chrome_checkbox_container_;
+
+  // Used to display an image in the button strip extra view.
+  views::ImageView* button_strip_image_;
+
+  // View that aren't in the hierarchy but are owned by |this|. Currently
+  // just holds the (hidden) country comboboxes.
+  ScopedVector<views::View> other_owned_views_;
 
   // View to host Autocheckout steps.
   AutocheckoutStepsArea* autocheckout_steps_area_;
@@ -648,7 +647,7 @@ class AutofillDialogViews : public AutofillDialogView,
   scoped_ptr<ErrorBubble> error_bubble_;
 
   // Map from input view (textfield or combobox) to error string.
-  std::map<views::View*, string16> validity_map_;
+  std::map<views::View*, base::string16> validity_map_;
 
   ScopedObserver<views::Widget, AutofillDialogViews> observer_;
 

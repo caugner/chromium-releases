@@ -4,22 +4,16 @@
 
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/notifications/notifications_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_switches.h"
 #include "ui/message_center/message_center_util.h"
-
-// TODO(kbr): remove: http://crbug.com/222296
-#if defined(OS_MACOSX)
-#import "base/mac/mac_util.h"
-#endif
 
 using extensions::Extension;
 
@@ -29,11 +23,6 @@ namespace {
 
 class NotificationsApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
-  }
-
   const extensions::Extension* LoadExtensionAndWait(
       const std::string& test_name) {
     base::FilePath extdir = test_data_dir_.AppendASCII(test_name);
@@ -51,12 +40,6 @@ class NotificationsApiTest : public ExtensionApiTest {
 }  // namespace
 
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestIdUsage) {
-#if defined(OS_MACOSX)
-  // TODO(kbr): re-enable: http://crbug.com/222296
-  if (base::mac::IsOSMountainLionOrLater())
-    return;
-#endif
-
   // Create a new notification. A lingering output of this block is the
   // notifications ID, which we'll use in later parts of this test.
   std::string notification_id;
@@ -191,43 +174,160 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestIdUsage) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestBaseFormatNotification) {
-  scoped_refptr<extensions::NotificationsCreateFunction>
-      notification_create_function(
-          new extensions::NotificationsCreateFunction());
   scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
 
-  notification_create_function->set_extension(empty_extension.get());
-  notification_create_function->set_has_callback(true);
+  // Create a new notification with the minimum required properties.
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
 
-  scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
-      notification_create_function.get(),
-      "[\"\", "
-      "{"
-      "\"type\": \"basic\","
-      "\"iconUrl\": \"an/image/that/does/not/exist.png\","
-      "\"title\": \"Attention!\","
-      "\"message\": \"Check out Cirque du Soleil\","
-      "\"priority\": 1,"
-      "\"eventTime\": 1234567890.12345678,"
-      "\"buttons\": ["
-      "  {"
-      "   \"title\": \"Up\","
-      "   \"iconUrl\":\"http://www.google.com/logos/2012/\""
-      "  },"
-      "  {"
-      "   \"title\": \"Down\""  // note: no iconUrl
-      "  }"
-      "],"
-      "\"expandedMessage\": \"This is a longer expanded message.\","
-      "\"imageUrl\": \"http://www.google.com/logos/2012/election12-hp.jpg\""
-      "}]",
-      browser(),
-      utils::NONE));
+    scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"type\": \"basic\","
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"title\": \"Attention!\","
+        "\"message\": \"Check out Cirque du Soleil\""
+        "}]",
+        browser(),
+        utils::NONE));
 
-  std::string notification_id;
-  ASSERT_EQ(base::Value::TYPE_STRING, result->GetType());
-  ASSERT_TRUE(result->GetAsString(&notification_id));
-  ASSERT_TRUE(notification_id.length() > 0);
+    std::string notification_id;
+    ASSERT_EQ(base::Value::TYPE_STRING, result->GetType());
+    ASSERT_TRUE(result->GetAsString(&notification_id));
+    ASSERT_TRUE(notification_id.length() > 0);
+  }
+
+  // Create another new notification with more than the required properties.
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
+
+    scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"type\": \"basic\","
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"title\": \"Attention!\","
+        "\"message\": \"Check out Cirque du Soleil\","
+        "\"priority\": 1,"
+        "\"eventTime\": 1234567890.12345678,"
+        "\"buttons\": ["
+        "  {"
+        "   \"title\": \"Up\","
+        "   \"iconUrl\":\"http://www.google.com/logos/2012/\""
+        "  },"
+        "  {"
+        "   \"title\": \"Down\""  // note: no iconUrl
+        "  }"
+        "],"
+        "\"expandedMessage\": \"This is a longer expanded message.\","
+        "\"imageUrl\": \"http://www.google.com/logos/2012/election12-hp.jpg\""
+        "}]",
+        browser(),
+        utils::NONE));
+
+    std::string notification_id;
+    ASSERT_EQ(base::Value::TYPE_STRING, result->GetType());
+    ASSERT_TRUE(result->GetAsString(&notification_id));
+    ASSERT_TRUE(notification_id.length() > 0);
+  }
+
+  // Error case: missing type property.
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
+
+    utils::RunFunction(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"title\": \"Attention!\","
+        "\"message\": \"Check out Cirque du Soleil\""
+        "}]",
+        browser(),
+        utils::NONE);
+
+    EXPECT_FALSE(notification_create_function->GetError().empty());
+  }
+
+  // Error case: missing iconUrl property.
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
+
+    utils::RunFunction(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"type\": \"basic\","
+        "\"title\": \"Attention!\","
+        "\"message\": \"Check out Cirque du Soleil\""
+        "}]",
+        browser(),
+        utils::NONE);
+
+    EXPECT_FALSE(notification_create_function->GetError().empty());
+  }
+
+  // Error case: missing title property.
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
+
+    utils::RunFunction(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"type\": \"basic\","
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"message\": \"Check out Cirque du Soleil\""
+        "}]",
+        browser(),
+        utils::NONE);
+
+    EXPECT_FALSE(notification_create_function->GetError().empty());
+  }
+
+  // Error case: missing message property.
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
+
+    utils::RunFunction(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"type\": \"basic\","
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"title\": \"Attention!\""
+        "}]",
+        browser(),
+        utils::NONE);
+
+    EXPECT_FALSE(notification_create_function->GetError().empty());
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestMultipleItemNotification) {
@@ -345,12 +445,6 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, MAYBE_TestGetAll) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestEvents) {
-#if defined(OS_MACOSX)
-  // TODO(kbr): re-enable: http://crbug.com/222296
-  if (base::mac::IsOSMountainLionOrLater())
-    return;
-#endif
-
   ASSERT_TRUE(RunExtensionTest("notifications/api/events")) << message_;
 }
 
@@ -386,5 +480,223 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, MAYBE_TestByUser) {
         extension->id() + "-BAR",
         true);
     EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+  }
+}
+
+
+#if defined(OS_LINUX)
+#define MAYBE_TestProgressNotification DISABLED_TestProgressNotification
+#else
+#define MAYBE_TestProgressNotification TestProgressNotification
+#endif
+
+IN_PROC_BROWSER_TEST_F(NotificationsApiTest, MAYBE_TestProgressNotification) {
+  scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
+
+  // Create a new progress notification.
+  std::string notification_id;
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
+
+    scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"type\": \"progress\","
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"title\": \"Test!\","
+        "\"message\": \"This is a progress notification.\","
+        "\"priority\": 1,"
+        "\"eventTime\": 1234567890.12345678,"
+        "\"progress\": 30"
+        "}]",
+        browser(),
+        utils::NONE));
+
+    EXPECT_EQ(base::Value::TYPE_STRING, result->GetType());
+    EXPECT_TRUE(result->GetAsString(&notification_id));
+    EXPECT_TRUE(notification_id.length() > 0);
+  }
+
+  // Update the progress property only.
+  {
+    scoped_refptr<extensions::NotificationsUpdateFunction>
+        notification_function(
+            new extensions::NotificationsUpdateFunction());
+    notification_function->set_extension(empty_extension.get());
+    notification_function->set_has_callback(true);
+
+    scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
+        notification_function.get(),
+        "[\"" + notification_id +
+            "\", "
+            "{"
+            "\"progress\": 60"
+            "}]",
+        browser(),
+        utils::NONE));
+
+    EXPECT_EQ(base::Value::TYPE_BOOLEAN, result->GetType());
+    bool copy_bool_value = false;
+    EXPECT_TRUE(result->GetAsBoolean(&copy_bool_value));
+    EXPECT_TRUE(copy_bool_value);
+  }
+
+  // Error case: progress value provided for non-progress type.
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
+
+    utils::RunFunction(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"type\": \"basic\","
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"title\": \"Test!\","
+        "\"message\": \"This is a progress notification.\","
+        "\"priority\": 1,"
+        "\"eventTime\": 1234567890.12345678,"
+        "\"progress\": 10"
+        "}]",
+        browser(),
+        utils::NONE);
+    EXPECT_FALSE(notification_create_function->GetError().empty());
+  }
+
+  // Error case: progress value less than lower bound.
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
+
+    utils::RunFunction(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"type\": \"progress\","
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"title\": \"Test!\","
+        "\"message\": \"This is a progress notification.\","
+        "\"priority\": 1,"
+        "\"eventTime\": 1234567890.12345678,"
+        "\"progress\": -10"
+        "}]",
+        browser(),
+        utils::NONE);
+    EXPECT_FALSE(notification_create_function->GetError().empty());
+  }
+
+  // Error case: progress value greater than upper bound.
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_create_function(
+            new extensions::NotificationsCreateFunction());
+    notification_create_function->set_extension(empty_extension.get());
+    notification_create_function->set_has_callback(true);
+
+    utils::RunFunction(
+        notification_create_function.get(),
+        "[\"\", "
+        "{"
+        "\"type\": \"progress\","
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"title\": \"Test!\","
+        "\"message\": \"This is a progress notification.\","
+        "\"priority\": 1,"
+        "\"eventTime\": 1234567890.12345678,"
+        "\"progress\": 101"
+        "}]",
+        browser(),
+        utils::NONE);
+    EXPECT_FALSE(notification_create_function->GetError().empty());
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestPartialUpdate) {
+  scoped_refptr<Extension> empty_extension(utils::CreateEmptyExtension());
+
+  // Create a new notification.
+  std::string notification_id;
+  {
+    scoped_refptr<extensions::NotificationsCreateFunction>
+        notification_function(
+            new extensions::NotificationsCreateFunction());
+    notification_function->set_extension(empty_extension.get());
+    notification_function->set_has_callback(true);
+
+    scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
+        notification_function.get(),
+        "[\"\", "  // Empty string: ask API to generate ID
+        "{"
+        "\"type\": \"basic\","
+        "\"iconUrl\": \"an/image/that/does/not/exist.png\","
+        "\"title\": \"Attention!\","
+        "\"message\": \"Check out Cirque du Soleil\""
+        "}]",
+        browser(),
+        utils::NONE));
+
+    ASSERT_EQ(base::Value::TYPE_STRING, result->GetType());
+    ASSERT_TRUE(result->GetAsString(&notification_id));
+    ASSERT_TRUE(notification_id.length() > 0);
+  }
+
+  // Update a few properties in the existing notification.
+  {
+    scoped_refptr<extensions::NotificationsUpdateFunction>
+        notification_function(
+            new extensions::NotificationsUpdateFunction());
+    notification_function->set_extension(empty_extension.get());
+    notification_function->set_has_callback(true);
+
+    scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
+        notification_function.get(),
+        "[\"" + notification_id +
+            "\", "
+            "{"
+            "\"title\": \"Changed!\","
+            "\"message\": \"Too late! The show ended yesterday\""
+            "}]",
+        browser(),
+        utils::NONE));
+
+    ASSERT_EQ(base::Value::TYPE_BOOLEAN, result->GetType());
+    bool copy_bool_value = false;
+    ASSERT_TRUE(result->GetAsBoolean(&copy_bool_value));
+    ASSERT_TRUE(copy_bool_value);
+  }
+
+  // Update another property in the existing notification.
+  {
+    scoped_refptr<extensions::NotificationsUpdateFunction>
+        notification_function(
+            new extensions::NotificationsUpdateFunction());
+    notification_function->set_extension(empty_extension.get());
+    notification_function->set_has_callback(true);
+
+    scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
+        notification_function.get(),
+        "[\"" + notification_id +
+            "\", "
+            "{"
+            "\"priority\": 2"
+            "}]",
+        browser(),
+        utils::NONE));
+
+    ASSERT_EQ(base::Value::TYPE_BOOLEAN, result->GetType());
+    bool copy_bool_value = false;
+    ASSERT_TRUE(result->GetAsBoolean(&copy_bool_value));
+    ASSERT_TRUE(copy_bool_value);
   }
 }

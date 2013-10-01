@@ -19,6 +19,12 @@ using WebKit::WebString;
 
 namespace autofill {
 
+typedef Tuple5<int,
+               autofill::FormData,
+               autofill::FormFieldData,
+               gfx::RectF,
+               bool> AutofillQueryParam;
+
 TEST_F(ChromeRenderViewTest, SendForms) {
   // Don't want any delay for form state sync changes. This will still post a
   // message so updates will get coalesced, but as soon as we spin the message
@@ -86,15 +92,14 @@ TEST_F(ChromeRenderViewTest, SendForms) {
   autofill_agent_->element_ = firstname;
   autofill_agent_->QueryAutofillSuggestions(firstname, false);
 
-  // Accept suggestion that contains a label.  Labeled items indicate Autofill
-  // as opposed to Autocomplete.  We're testing this distinction below with
-  // the |AutofillHostMsg_FillAutofillFormData::ID| message.
-  autofill_agent_->didAcceptAutofillSuggestion(
+  // Fill the form with a suggestion that contained a label.  Labeled items
+  // indicate Autofill as opposed to Autocomplete.  We're testing this
+  // distinction below with the |AutofillHostMsg_FillAutofillFormData::ID|
+  // message.
+  autofill_agent_->FillAutofillFormData(
       firstname,
-      WebKit::WebString::fromUTF8("Johnny"),
-      WebKit::WebString::fromUTF8("Home"),
       1,
-      -1);
+      AutofillAgent::AUTOFILL_PREVIEW);
 
   ProcessPendingMessages();
   const IPC::Message* message2 =
@@ -180,7 +185,7 @@ TEST_F(ChromeRenderViewTest, SendDynamicForms) {
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, forms[0].fields[4]);
 }
 
-TEST_F(ChromeRenderViewTest, FillFormElement) {
+TEST_F(ChromeRenderViewTest, EnsureNoFormSeenIfTooFewFields) {
   // Don't want any delay for form state sync changes. This will still post a
   // message so updates will get coalesced, but as soon as we spin the message
   // loop, it will generate an update.
@@ -199,37 +204,6 @@ TEST_F(ChromeRenderViewTest, FillFormElement) {
   AutofillHostMsg_FormsSeen::Read(message, &params);
   const std::vector<FormData>& forms = params.a;
   ASSERT_EQ(0UL, forms.size());
-
-  // Verify that |didAcceptAutofillSuggestion()| sets the value of the expected
-  // field.
-  WebFrame* web_frame = GetMainFrame();
-  WebDocument document = web_frame->document();
-  WebInputElement firstname =
-      document.getElementById("firstname").to<WebInputElement>();
-  WebInputElement middlename =
-      document.getElementById("middlename").to<WebInputElement>();
-  middlename.setAutofilled(true);
-
-  // Make sure to query for Autofill suggestions before selecting one.
-  autofill_agent_->element_ = firstname;
-  autofill_agent_->QueryAutofillSuggestions(firstname, false);
-
-  // Accept a suggestion in a form that has been auto-filled.  This triggers
-  // the direct filling of the firstname element with value parameter.
-  autofill_agent_->didAcceptAutofillSuggestion(firstname,
-                                               WebString::fromUTF8("David"),
-                                               WebString(),
-                                               0,
-                                               0);
-
-  ProcessPendingMessages();
-  const IPC::Message* message2 =
-      render_thread_->sink().GetUniqueMessageMatching(
-          AutofillHostMsg_FillAutofillFormData::ID);
-
-  // No message should be sent in this case.  |firstname| is filled directly.
-  ASSERT_EQ(static_cast<IPC::Message*>(NULL), message2);
-  EXPECT_EQ(firstname.value(), WebKit::WebString::fromUTF8("David"));
 }
 
 TEST_F(ChromeRenderViewTest, ShowAutofillWarning) {
@@ -258,24 +232,29 @@ TEST_F(ChromeRenderViewTest, ShowAutofillWarning) {
       document.getElementById("middlename").to<WebInputElement>();
 
   // Simulate attempting to Autofill the form from the first element, which
-  // specifies autocomplete="off".  This should still not trigger an IPC, as we
-  // don't show warnings for elements that have autocomplete="off".
+  // specifies autocomplete="off".  This should still trigger an IPC which
+  // shouldn't display warnings.
   autofill_agent_->InputElementClicked(firstname, true, true);
   const IPC::Message* message1 = render_thread_->sink().GetFirstMessageMatching(
       AutofillHostMsg_QueryFormFieldAutofill::ID);
-  EXPECT_EQ(static_cast<IPC::Message*>(NULL), message1);
+  EXPECT_NE(static_cast<IPC::Message*>(NULL), message1);
+
+  AutofillQueryParam query_param;
+  AutofillHostMsg_QueryFormFieldAutofill::Read(message1, &query_param);
+  EXPECT_FALSE(query_param.e);
+  render_thread_->sink().ClearMessages();
 
   // Simulate attempting to Autofill the form from the second element, which
-  // does not specify autocomplete="off".  This *should* trigger an IPC, as we
-  // *do* show warnings for elements that don't themselves set
-  // autocomplete="off", but for which the form does.
+  // does not specify autocomplete="off".  This should trigger an IPC that will
+  // show warnings, as we *do* show warnings for elements that don't themselves
+  // set autocomplete="off", but for which the form does.
   autofill_agent_->InputElementClicked(middlename, true, true);
   const IPC::Message* message2 = render_thread_->sink().GetFirstMessageMatching(
       AutofillHostMsg_QueryFormFieldAutofill::ID);
   ASSERT_NE(static_cast<IPC::Message*>(NULL), message2);
-  // TODO(isherman): It would be nice to verify here that the message includes
-  // the correct data.  I'm not sure how to extract that information from an
-  // IPC::Message though.
+
+  AutofillHostMsg_QueryFormFieldAutofill::Read(message2, &query_param);
+  EXPECT_TRUE(query_param.e);
 }
 
 }  // namespace autofill

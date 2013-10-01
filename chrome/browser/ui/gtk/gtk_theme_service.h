@@ -18,6 +18,7 @@
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/gfx/color_utils.h"
 
+class CustomThemeSupplier;
 class Profile;
 
 namespace content {
@@ -79,6 +80,9 @@ class GtkThemeService : public ThemeService {
   virtual void SetNativeTheme() OVERRIDE;
   virtual bool UsingDefaultTheme() const OVERRIDE;
   virtual bool UsingNativeTheme() const OVERRIDE;
+  virtual void SetCustomDefaultTheme(
+      scoped_refptr<CustomThemeSupplier> theme_supplier) OVERRIDE;
+  virtual bool ShouldInitWithNativeTheme() const OVERRIDE;
 
   // Creates a GtkChromeButton instance, registered with this theme provider,
   // with a "destroy" signal to remove it from our internal list when it goes
@@ -157,9 +161,6 @@ class GtkThemeService : public ThemeService {
   typedef std::map<int, SkColor> ColorMap;
   typedef std::map<int, color_utils::HSL> TintMap;
   typedef std::map<int, gfx::Image*> ImageCache;
-
-  // Clears all the GTK color overrides.
-  virtual void ClearAllThemeData() OVERRIDE;
 
   // Load theme data from preferences, possibly picking colors from GTK.
   virtual void LoadThemePrefs() OVERRIDE;

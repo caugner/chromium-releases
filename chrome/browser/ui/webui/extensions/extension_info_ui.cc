@@ -7,7 +7,7 @@
 #include "base/i18n/time_formatting.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -22,6 +22,8 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+
+namespace extensions {
 
 ExtensionInfoUI::ExtensionInfoUI(content::WebUI* web_ui, const GURL& url)
     : content::WebUIController(web_ui),
@@ -55,15 +57,15 @@ GURL ExtensionInfoUI::GetURL(const std::string& extension_id) {
 
 void ExtensionInfoUI::AddExtensionDataToSource(
     const std::string& extension_id) {
-  ExtensionService* extension_service = extensions::ExtensionSystem::Get(
+  ExtensionService* extension_service = ExtensionSystem::Get(
       Profile::FromWebUI(web_ui()))->extension_service();
-  const extensions::Extension* extension =
+  const Extension* extension =
       extension_service->extensions()->GetByID(extension_id);
   if (!extension)
     return;
 
   DictionaryValue extension_data;
-  extensions::GetExtensionBasicInfo(extension, true, &extension_data);
+  GetExtensionBasicInfo(extension, true, &extension_data);
   source_->AddLocalizedStrings(extension_data);
 
   // Set the icon URL.
@@ -78,3 +80,5 @@ void ExtensionInfoUI::AddExtensionDataToSource(
       GetInstallTime(extension_id);
   source_->AddString("installTime", base::TimeFormatShortDate(install_time));
 }
+
+}  // namespace extensions

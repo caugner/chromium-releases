@@ -1,7 +1,6 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 // The entire file is wrapped in this #if. We do this so this .cc file can be
 // compiled, even on a non-Windows build.
@@ -11,10 +10,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>  // This must be included before <sys/stat.h>.
 #include <sys/stat.h>
 #include "nacl_io/kernel_intercept.h"
+
+#include <windows.h>
 
 namespace {
 
@@ -99,32 +101,12 @@ int _fstat64i32(int fd, struct _stat64i32* buf) {
   return res;
 }
 
-int fsync(int fd) {
-  return ki_fsync(fd);
-}
-
-int ftruncate(int fd, off_t length) {
-  return ki_ftruncate(fd, length);
-}
-
 char* _getcwd(char* buf, int size) {
   return ki_getcwd(buf, size);
 }
 
-char* getwd(char* buf) {
-  return ki_getwd(buf);
-}
-
-int getdents(int fd, void* buf, unsigned int count) {
-  return ki_getdents(fd, buf, count);
-}
-
 int _isatty(int fd) {
   return ki_isatty(fd);
-}
-
-int link(const char* oldpath, const char* newpath) {
-  return ki_link(oldpath, newpath);
 }
 
 off_t _lseek(int fd, off_t offset, int whence) {
@@ -133,11 +115,6 @@ off_t _lseek(int fd, off_t offset, int whence) {
 
 int _mkdir(const char* path) {
   return ki_mkdir(path, 0777);
-}
-
-int mount(const char* source, const char* target, const char* filesystemtype,
-          unsigned long mountflags, const void *data) {
-  return ki_mount(source, target, filesystemtype, mountflags, data);
 }
 
 int _open(const char* path, int oflag, ...) {
@@ -178,12 +155,21 @@ int _read_nolock(int fd, void* buf, size_t nbyte) {
   return ki_read(fd, buf, nbyte);
 }
 
-int remove(const char* path) {
-  return ki_remove(path);
-}
-
 int _rmdir(const char* path) {
   return ki_rmdir(path);
+}
+
+int setenv(const char* name, const char* value, int overwrite) {
+  if (0 == overwrite && NULL != getenv(name)) {
+    return 0;
+  }
+  errno_t result = _putenv_s(name, value);
+  if (result != 0) {
+    errno = result;
+    return -1;
+  } else {
+    return 0;
+  }
 }
 
 int _stat32(const char* path, struct _stat32* buf) {
@@ -214,16 +200,12 @@ int _stat32i64(const char* path, struct _stat32i64* buf) {
   return res;
 }
 
-int symlink(const char* oldpath, const char* newpath) {
-  return ki_symlink(oldpath, newpath);
-}
-
-int umount(const char* path) {
-  return ki_umount(path);
-}
-
 int _unlink(const char* path) {
   return ki_unlink(path);
+}
+
+int _utime(const char* filename, const struct utimbuf* times) {
+  return ki_utime(filename, times);
 }
 
 int _write(int fd, const void* buf, size_t nbyte) {
@@ -288,9 +270,27 @@ int _real_write(int fd, const void *buf, size_t count, size_t *nwrote) {
   return 0;
 }
 
+#define USECS_FROM_WIN_TO_TO_UNIX_EPOCH 11644473600000LL
+uint64_t usec_since_epoch() {
+  FILETIME ft;
+  ULARGE_INTEGER ularge;
+  GetSystemTimeAsFileTime(&ft);
+
+  ularge.LowPart = ft.dwLowDateTime;
+  ularge.HighPart = ft.dwHighDateTime;
+
+  // Truncate to usec resolution.
+  return ularge.QuadPart / 10;
+}
+
 // Do nothing for Windows, we replace the library at link time.
 void kernel_wrap_init() {
 }
+
+void kernel_wrap_uninit() {
+}
+
 EXTERN_C_END
 
 #endif   // defined(WIN32)
+

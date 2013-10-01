@@ -7,11 +7,11 @@
 #include "base/bind.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_prefs_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -147,18 +147,26 @@ bool ShellWindowGeometryCache::GetGeometry(
     DCHECK(extension_data_it != cache_.end());
   }
 
-  ExtensionData::const_iterator window_data = extension_data_it->second.find(
+  ExtensionData::const_iterator window_data_it = extension_data_it->second.find(
       window_id);
 
-  if (window_data == extension_data_it->second.end())
+  if (window_data_it == extension_data_it->second.end())
+    return false;
+
+  const WindowData& window_data = window_data_it->second;
+
+  // Check for and do not return corrupt data.
+  if ((bounds && window_data.bounds.IsEmpty()) ||
+      (screen_bounds && window_data.screen_bounds.IsEmpty()) ||
+      (window_state && window_data.window_state == ui::SHOW_STATE_DEFAULT))
     return false;
 
   if (bounds)
-    *bounds = window_data->second.bounds;
+    *bounds = window_data.bounds;
   if (screen_bounds)
-    *screen_bounds = window_data->second.screen_bounds;
+    *screen_bounds = window_data.screen_bounds;
   if (window_state)
-    *window_state = window_data->second.window_state;
+    *window_state = window_data.window_state;
   return true;
 }
 

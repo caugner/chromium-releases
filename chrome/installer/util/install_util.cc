@@ -18,7 +18,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "base/values.h"
@@ -385,11 +385,11 @@ bool InstallUtil::GetSentinelFilePath(const base::FilePath::CharType* file,
 
   if (IsPerUserInstall(exe_path.value().c_str())) {
     const base::FilePath maybe_product_dir(exe_path.DirName().DirName());
-    if (file_util::PathExists(exe_path.Append(installer::kChromeExe))) {
+    if (base::PathExists(exe_path.Append(installer::kChromeExe))) {
       // DIR_EXE is most likely Chrome's directory in which case |exe_path| is
       // the user-level sentinel path.
       *path = exe_path;
-    } else if (file_util::PathExists(
+    } else if (base::PathExists(
                    maybe_product_dir.Append(installer::kChromeExe))) {
       // DIR_EXE can also be the Installer directory if this is called from a
       // setup.exe running from Application\<version>\Installer (see

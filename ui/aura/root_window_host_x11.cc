@@ -81,6 +81,15 @@ const char* kAtomsToCache[] = {
   return target;
 }
 
+#if defined(USE_XI2_MT)
+bool IsSideBezelsEnabled() {
+  static bool side_bezels_enabled =
+      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kTouchSideBezels) == "1";
+  return side_bezels_enabled;
+}
+#endif
+
 void SelectEventsForRootWindow() {
   Display* display = ui::GetXDisplay();
   ::Window root_window = ui::GetX11RootWindow();
@@ -202,6 +211,19 @@ class TouchEventCalibrate : public base::MessagePumpObserver {
   virtual ~TouchEventCalibrate() {
     base::MessageLoopForUI::current()->RemoveObserver(this);
   }
+
+#if defined(USE_XI2_MT)
+  bool IsEventOnSideBezels(
+      const base::NativeEvent& xev,
+      const gfx::Rect& bounds) {
+    if (!left_ && !right_)
+      return false;
+
+    gfx::Point location = ui::EventLocationFromNative(xev);
+    int x = location.x();
+    return x < left_ || x > bounds.width() - right_;
+  }
+#endif  // defined(USE_XI2_MT)
 
   // Modify the location of the |event|,
   // expanding it from |bounds| to (|bounds| + bezels).
@@ -437,8 +459,16 @@ bool RootWindowHostX11::Dispatch(const base::NativeEvent& event) {
 
   switch (xev->type) {
     case EnterNotify: {
-      ui::MouseEvent mouseenter_event(xev);
-      TranslateAndDispatchMouseEvent(&mouseenter_event);
+      ui::MouseEvent mouse_event(xev);
+      // EnterNotify creates ET_MOUSE_MOVE. Mark as synthesized as this is not
+      // real mouse move event.
+      mouse_event.set_flags(mouse_event.flags() | ui::EF_IS_SYNTHESIZED);
+      TranslateAndDispatchMouseEvent(&mouse_event);
+      break;
+    }
+    case LeaveNotify: {
+      ui::MouseEvent mouse_event(xev);
+      TranslateAndDispatchMouseEvent(&mouse_event);
       break;
     }
     case Expose: {
@@ -769,31 +799,7 @@ void RootWindowHostX11::UnConfineCursor() {
 }
 
 void RootWindowHostX11::OnCursorVisibilityChanged(bool show) {
-#if defined(OS_CHROMEOS)
-  // Temporarily pause tap-to-click when the cursor is hidden.
-  Atom prop = atom_cache_.GetAtom("Tap Paused");
-  unsigned char value = !show;
-  XIDeviceList dev_list =
-      ui::DeviceListCacheX::GetInstance()->GetXI2DeviceList(xdisplay_);
-
-  // Only slave pointer devices could possibly have tap-paused property.
-  for (int i = 0; i < dev_list.count; i++) {
-    if (dev_list[i].use == XISlavePointer) {
-      Atom old_type;
-      int old_format;
-      unsigned long old_nvalues, bytes;
-      unsigned char* data;
-      int result = XIGetProperty(xdisplay_, dev_list[i].deviceid, prop, 0, 0,
-                                 False, AnyPropertyType, &old_type, &old_format,
-                                 &old_nvalues, &bytes, &data);
-      if (result != Success)
-        continue;
-      XFree(data);
-      XIChangeProperty(xdisplay_, dev_list[i].deviceid, prop, XA_INTEGER, 8,
-                       PropModeReplace, &value, 1);
-    }
-  }
-#endif
+  SetCrOSTapPaused(!show);
 }
 
 void RootWindowHostX11::MoveCursorTo(const gfx::Point& location) {
@@ -816,12 +822,16 @@ void RootWindowHostX11::SetFocusWhenShown(bool focus_when_shown) {
 bool RootWindowHostX11::CopyAreaToSkCanvas(const gfx::Rect& source_bounds,
                                              const gfx::Point& dest_offset,
                                              SkCanvas* canvas) {
-  scoped_ptr<ui::XScopedImage> scoped_image(GetXImage(source_bounds));
-  if (!scoped_image)
+  ui::XScopedImage scoped_image(
+      XGetImage(xdisplay_, xwindow_,
+                source_bounds.x(), source_bounds.y(),
+                source_bounds.width(), source_bounds.height(),
+                AllPlanes, ZPixmap));
+  XImage* image = scoped_image.get();
+  if (!image) {
+    LOG(ERROR) << "XGetImage failed";
     return false;
-
-  XImage* image = scoped_image->get();
-  DCHECK(image);
+  }
 
   if (image->bits_per_pixel == 32) {
     if ((0xff << SK_R32_SHIFT) != image->red_mask ||
@@ -908,6 +918,10 @@ void RootWindowHostX11::OnRootWindowInitialized(RootWindow* root_window) {
   if (!delegate_ || root_window != GetRootWindow())
     return;
   UpdateIsInternalDisplay();
+
+  // We have to enable Tap-to-click by default because the cursor is set to
+  // visible in Shell::InitRootWindowController.
+  SetCrOSTapPaused(false);
 }
 
 bool RootWindowHostX11::DispatchEventForRootWindow(
@@ -947,6 +961,14 @@ void RootWindowHostX11::DispatchXI2Event(const base::NativeEvent& event) {
     case ui::ET_TOUCH_PRESSED:
     case ui::ET_TOUCH_CANCELLED:
     case ui::ET_TOUCH_RELEASED: {
+#if defined(USE_XI2_MT)
+      // Ignore events from the bezel when the side bezel flag is not explicitly
+      // enabled.
+      if (!IsSideBezelsEnabled() &&
+          touch_calibrate_->IsEventOnSideBezels(xev, bounds_)) {
+        break;
+      }
+#endif  // defined(USE_XI2_MT)
       ui::TouchEvent touchev(xev);
 #if defined(OS_CHROMEOS)
       if (base::chromeos::IsRunningOnChromeOS()) {
@@ -1067,25 +1089,39 @@ void RootWindowHostX11::TranslateAndDispatchMouseEvent(
   delegate_->OnHostMouseEvent(event);
 }
 
-scoped_ptr<ui::XScopedImage> RootWindowHostX11::GetXImage(
-    const gfx::Rect& snapshot_bounds) {
-  scoped_ptr<ui::XScopedImage> image(new ui::XScopedImage(
-      XGetImage(xdisplay_, xwindow_,
-                snapshot_bounds.x(), snapshot_bounds.y(),
-                snapshot_bounds.width(), snapshot_bounds.height(),
-                AllPlanes, ZPixmap)));
-  if (!image) {
-    LOG(ERROR) << "XGetImage failed";
-    image.reset();
-  }
-  return image.Pass();
-}
-
 void RootWindowHostX11::UpdateIsInternalDisplay() {
   RootWindow* root_window = GetRootWindow();
   gfx::Screen* screen = gfx::Screen::GetScreenFor(root_window);
   gfx::Display display = screen->GetDisplayNearestWindow(root_window);
   is_internal_display_ = display.IsInternal();
+}
+
+void RootWindowHostX11::SetCrOSTapPaused(bool state) {
+#if defined(OS_CHROMEOS)
+  // Temporarily pause tap-to-click when the cursor is hidden.
+  Atom prop = atom_cache_.GetAtom("Tap Paused");
+  unsigned char value = state;
+  XIDeviceList dev_list =
+      ui::DeviceListCacheX::GetInstance()->GetXI2DeviceList(xdisplay_);
+
+  // Only slave pointer devices could possibly have tap-paused property.
+  for (int i = 0; i < dev_list.count; i++) {
+    if (dev_list[i].use == XISlavePointer) {
+      Atom old_type;
+      int old_format;
+      unsigned long old_nvalues, bytes;
+      unsigned char* data;
+      int result = XIGetProperty(xdisplay_, dev_list[i].deviceid, prop, 0, 0,
+                                 False, AnyPropertyType, &old_type, &old_format,
+                                 &old_nvalues, &bytes, &data);
+      if (result != Success)
+        continue;
+      XFree(data);
+      XIChangeProperty(xdisplay_, dev_list[i].deviceid, prop, XA_INTEGER, 8,
+                       PropModeReplace, &value, 1);
+    }
+  }
+#endif
 }
 
 // static

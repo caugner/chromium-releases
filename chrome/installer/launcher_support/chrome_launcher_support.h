@@ -39,18 +39,19 @@ base::FilePath GetAppHostPathForInstallationLevel(InstallationLevel level);
 // Returns the path to an installed chrome.exe, or an empty path. Prefers a
 // system-level installation to a user-level installation. Uses Omaha client
 // state to identify a Chrome installation location.
-// In non-official builds, to ease development, this will first look for a
-// chrome.exe in the same directory as the current executable.
 // The file path returned (if any) is guaranteed to exist.
 base::FilePath GetAnyChromePath();
 
 // Returns the path to an installed app_host.exe, or an empty path. Prefers a
 // system-level installation to a user-level installation. Uses Omaha client
 // state to identify a App Host installation location.
-// In non-official builds, to ease development, this will first look for a
-// app_host.exe in the same directory as the current executable.
 // The file path returned (if any) is guaranteed to exist.
 base::FilePath GetAnyAppHostPath();
+
+// Uninstalls the legacy app launcher by launching setup.exe with the uninstall
+// arguments from the App Launcher ClientState registry key. The uninstall will
+// run asynchronously.
+void UninstallLegacyAppLauncher(InstallationLevel level);
 
 // Returns true if App Host is installed (system-level or user-level),
 // or in the same directory as the current executable.

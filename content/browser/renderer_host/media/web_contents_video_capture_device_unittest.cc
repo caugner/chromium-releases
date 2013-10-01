@@ -8,8 +8,8 @@
 #include "base/debug/debugger.h"
 #include "base/run_loop.h"
 #include "base/test/test_timeouts.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/media/video_capture_buffer_pool.h"
 #include "content/browser/renderer_host/media/video_capture_oracle.h"
@@ -292,8 +292,7 @@ class CaptureTestRenderViewHostFactory : public RenderViewHostFactory {
       RenderWidgetHostDelegate* widget_delegate,
       int routing_id,
       int main_frame_routing_id,
-      bool swapped_out,
-      SessionStorageNamespace* session_storage_namespace) OVERRIDE {
+      bool swapped_out) OVERRIDE {
     return new CaptureTestRenderViewHost(instance, delegate, widget_delegate,
                                          routing_id, main_frame_routing_id,
                                          swapped_out, controller_);
@@ -311,8 +310,8 @@ class StubConsumer : public media::VideoCaptureDevice::EventHandler {
   StubConsumer()
       : error_encountered_(false),
         wait_color_yuv_(0xcafe1950) {
-    buffer_pool_ = new VideoCaptureBufferPool(
-        gfx::Size(kTestWidth, kTestHeight), 2);
+    buffer_pool_ =
+        new VideoCaptureBufferPool(kTestWidth * kTestHeight * 3 / 2, 2);
     EXPECT_TRUE(buffer_pool_->Allocate());
   }
   virtual ~StubConsumer() {}
@@ -356,7 +355,9 @@ class StubConsumer : public media::VideoCaptureDevice::EventHandler {
   }
 
   virtual scoped_refptr<media::VideoFrame> ReserveOutputBuffer() OVERRIDE {
-    return buffer_pool_->ReserveForProducer(0);
+    return buffer_pool_->ReserveI420VideoFrame(gfx::Size(kTestWidth,
+                                                         kTestHeight),
+                                               0);
   }
 
   virtual void OnIncomingCapturedFrame(
@@ -373,8 +374,10 @@ class StubConsumer : public media::VideoCaptureDevice::EventHandler {
       const scoped_refptr<media::VideoFrame>& frame,
       base::Time timestamp) OVERRIDE {
     EXPECT_EQ(gfx::Size(kTestWidth, kTestHeight), frame->coded_size());
-    EXPECT_EQ(media::VideoFrame::YV12, frame->format());
-    EXPECT_NE(0, buffer_pool_->RecognizeReservedBuffer(frame));
+    EXPECT_EQ(media::VideoFrame::I420, frame->format());
+    EXPECT_LE(
+        0,
+        buffer_pool_->RecognizeReservedBuffer(frame->shared_memory_handle()));
     uint8 yuv[3];
     for (int plane = 0; plane < 3; ++plane) {
       yuv[plane] = frame->data(plane)[0];
@@ -538,7 +541,15 @@ TEST_F(WebContentsVideoCaptureDeviceTest, InvalidInitialWebContentsError) {
   // practice; we should be able to recover gracefully.
   ResetWebContents();
 
-  device()->Allocate(kTestWidth, kTestHeight, kTestFramesPerSecond, consumer());
+  media::VideoCaptureCapability capture_format(
+      kTestWidth,
+      kTestHeight,
+      kTestFramesPerSecond,
+      media::VideoCaptureCapability::kI420,
+      0,
+      false,
+      media::ConstantResolutionVideoCaptureDevice);
+  device()->Allocate(capture_format, consumer());
   device()->Start();
   ASSERT_NO_FATAL_FAILURE(consumer()->WaitForError());
   device()->DeAllocate();
@@ -547,7 +558,15 @@ TEST_F(WebContentsVideoCaptureDeviceTest, InvalidInitialWebContentsError) {
 TEST_F(WebContentsVideoCaptureDeviceTest, WebContentsDestroyed) {
   // We'll simulate the tab being closed after the capture pipeline is up and
   // running.
-  device()->Allocate(kTestWidth, kTestHeight, kTestFramesPerSecond, consumer());
+  media::VideoCaptureCapability capture_format(
+      kTestWidth,
+      kTestHeight,
+      kTestFramesPerSecond,
+      media::VideoCaptureCapability::kI420,
+      0,
+      false,
+      media::ConstantResolutionVideoCaptureDevice);
+  device()->Allocate(capture_format, consumer());
   device()->Start();
 
   // Do one capture to prove
@@ -568,7 +587,15 @@ TEST_F(WebContentsVideoCaptureDeviceTest, WebContentsDestroyed) {
 
 TEST_F(WebContentsVideoCaptureDeviceTest,
        StopDeviceBeforeCaptureMachineCreation) {
-  device()->Allocate(kTestWidth, kTestHeight, kTestFramesPerSecond, consumer());
+  media::VideoCaptureCapability capture_format(
+      kTestWidth,
+      kTestHeight,
+      kTestFramesPerSecond,
+      media::VideoCaptureCapability::kI420,
+      0,
+      false,
+      media::ConstantResolutionVideoCaptureDevice);
+  device()->Allocate(capture_format, consumer());
   device()->Start();
   // Make a point of not running the UI messageloop here.
   device()->Stop();
@@ -586,8 +613,16 @@ TEST_F(WebContentsVideoCaptureDeviceTest, StopWithRendererWorkToDo) {
   // Set up the test to use RGB copies and an normal
   source()->SetCanCopyToVideoFrame(false);
   source()->SetUseFrameSubscriber(false);
-  device()->Allocate(kTestWidth, kTestHeight, kTestFramesPerSecond,
-                     consumer());
+  media::VideoCaptureCapability capture_format(
+      kTestWidth,
+      kTestHeight,
+      kTestFramesPerSecond,
+      media::VideoCaptureCapability::kI420,
+      0,
+      false,
+      media::ConstantResolutionVideoCaptureDevice);
+  device()->Allocate(capture_format, consumer());
+
   device()->Start();
   // Make a point of not running the UI messageloop here.
   // TODO(ajwong): Why do we care?
@@ -608,7 +643,15 @@ TEST_F(WebContentsVideoCaptureDeviceTest, StopWithRendererWorkToDo) {
 }
 
 TEST_F(WebContentsVideoCaptureDeviceTest, DeviceRestart) {
-  device()->Allocate(kTestWidth, kTestHeight, kTestFramesPerSecond, consumer());
+  media::VideoCaptureCapability capture_format(
+      kTestWidth,
+      kTestHeight,
+      kTestFramesPerSecond,
+      media::VideoCaptureCapability::kI420,
+      0,
+      false,
+      media::ConstantResolutionVideoCaptureDevice);
+  device()->Allocate(capture_format, consumer());
   device()->Start();
   base::RunLoop().RunUntilIdle();
   source()->SetSolidColor(SK_ColorRED);
@@ -642,7 +685,15 @@ TEST_F(WebContentsVideoCaptureDeviceTest, DeviceRestart) {
 // consumer. The test will alternate between the three capture paths, simulating
 // falling in and out of accelerated compositing.
 TEST_F(WebContentsVideoCaptureDeviceTest, GoesThroughAllTheMotions) {
-  device()->Allocate(kTestWidth, kTestHeight, kTestFramesPerSecond, consumer());
+  media::VideoCaptureCapability capture_format(
+      kTestWidth,
+      kTestHeight,
+      kTestFramesPerSecond,
+      media::VideoCaptureCapability::kI420,
+      0,
+      false,
+      media::ConstantResolutionVideoCaptureDevice);
+  device()->Allocate(capture_format, consumer());
 
   device()->Start();
 
@@ -690,14 +741,33 @@ TEST_F(WebContentsVideoCaptureDeviceTest, GoesThroughAllTheMotions) {
 }
 
 TEST_F(WebContentsVideoCaptureDeviceTest, RejectsInvalidAllocateParams) {
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      base::Bind(&media::VideoCaptureDevice::Allocate,
-                 base::Unretained(device()), 1280, 720, -2, consumer()));
+  media::VideoCaptureCapability capture_format(
+      1280,
+      720,
+      -2,
+      media::VideoCaptureCapability::kI420,
+      0,
+      false,
+      media::ConstantResolutionVideoCaptureDevice);
+  BrowserThread::PostTask(BrowserThread::UI,
+                          FROM_HERE,
+                          base::Bind(&media::VideoCaptureDevice::Allocate,
+                                     base::Unretained(device()),
+                                     capture_format,
+                                     consumer()));
   ASSERT_NO_FATAL_FAILURE(consumer()->WaitForError());
 }
 
 TEST_F(WebContentsVideoCaptureDeviceTest, BadFramesGoodFrames) {
-  device()->Allocate(kTestWidth, kTestHeight, kTestFramesPerSecond, consumer());
+  media::VideoCaptureCapability capture_format(
+      kTestWidth,
+      kTestHeight,
+      kTestFramesPerSecond,
+      media::VideoCaptureCapability::kI420,
+      0,
+      false,
+      media::ConstantResolutionVideoCaptureDevice);
+  device()->Allocate(capture_format, consumer());
 
   // 1x1 is too small to process; we intend for this to result in an error.
   source()->SetCopyResultSize(1, 1);

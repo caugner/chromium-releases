@@ -8,8 +8,11 @@
 
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/common/metrics/metrics_util.h"
 #include "chrome/common/metrics/variations/variation_ids.h"
 #include "chrome/common/metrics/variations/variations_util.h"
@@ -17,12 +20,10 @@
 namespace {
 
 // Field trial names.
-const char kDisallowInlineHQPFieldTrialName[] = "OmniboxDisallowInlineHQP";
 const char kHUPCullRedirectsFieldTrialName[] = "OmniboxHUPCullRedirects";
 const char kHUPCreateShorterMatchFieldTrialName[] =
     "OmniboxHUPCreateShorterMatch";
 const char kStopTimerFieldTrialName[] = "OmniboxStopTimer";
-const char kShortcutsScoringFieldTrialName[] = "OmniboxShortcutsScoring";
 
 // The autocomplete dynamic field trial name prefix.  Each field trial is
 // configured dynamically and is retrieved automatically by Chrome during
@@ -32,12 +33,6 @@ const char kAutocompleteDynamicFieldTrialPrefix[] = "AutocompleteDynamicTrial_";
 const int kMaxAutocompleteDynamicFieldTrials = 5;
 
 // Field trial experiment probabilities.
-
-// For inline History Quick Provider field trial, put 0% ( = 0/100 )
-// of the users in the disallow-inline experiment group.
-const base::FieldTrial::Probability kDisallowInlineHQPFieldTrialDivisor = 100;
-const base::FieldTrial::Probability
-    kDisallowInlineHQPFieldTrialExperimentFraction = 0;
 
 // For HistoryURL provider cull redirects field trial, put 0% ( = 0/100 )
 // of the users in the don't-cull-redirects experiment group.
@@ -69,10 +64,6 @@ const char kStopTimerExperimentGroupName[] = "UseStopTimer";
 // ActivateStaticTrials() method.
 bool static_field_trials_initialized = false;
 
-// Field trial ID for the disallow-inline History Quick Provider
-// experiment group.
-int disallow_inline_hqp_experiment_group = 0;
-
 // Field trial ID for the HistoryURL provider cull redirects experiment group.
 int hup_dont_cull_redirects_experiment_group = 0;
 
@@ -93,29 +84,12 @@ std::string DynamicFieldTrialName(int id) {
 void OmniboxFieldTrial::ActivateStaticTrials() {
   DCHECK(!static_field_trials_initialized);
 
-  // Create inline History Quick Provider field trial.
-  // Make it expire on November 8, 2012.
-  scoped_refptr<base::FieldTrial> trial(
-      base::FieldTrialList::FactoryGetFieldTrial(
-      kDisallowInlineHQPFieldTrialName, kDisallowInlineHQPFieldTrialDivisor,
-      "Standard", 2012, 11, 8, NULL));
-  // Because users tend to use omnibox without attention to it--habits
-  // get ingrained, users tend to learn that a particular suggestion is
-  // at a particular spot in the drop-down--we're going to make these
-  // field trials sticky.  We want users to stay in them once assigned
-  // so they have a better experience and also so we don't get weird
-  // effects as omnibox ranking keeps changing and users learn they can't
-  // trust the omnibox.
-  trial->UseOneTimeRandomization();
-  disallow_inline_hqp_experiment_group = trial->AppendGroup("DisallowInline",
-      kDisallowInlineHQPFieldTrialExperimentFraction);
-
   // Create the HistoryURL provider cull redirects field trial.
   // Make it expire on March 1, 2013.
-  trial = base::FieldTrialList::FactoryGetFieldTrial(
-      kHUPCullRedirectsFieldTrialName, kHUPCullRedirectsFieldTrialDivisor,
-      "Standard", 2013, 3, 1, NULL);
-  trial->UseOneTimeRandomization();
+  scoped_refptr<base::FieldTrial> trial(
+      base::FieldTrialList::FactoryGetFieldTrial(
+          kHUPCullRedirectsFieldTrialName, kHUPCullRedirectsFieldTrialDivisor,
+          "Standard", 2013, 3, 1, base::FieldTrial::ONE_TIME_RANDOMIZED, NULL));
   hup_dont_cull_redirects_experiment_group =
       trial->AppendGroup("DontCullRedirects",
                          kHUPCullRedirectsFieldTrialExperimentFraction);
@@ -124,8 +98,8 @@ void OmniboxFieldTrial::ActivateStaticTrials() {
   // Make it expire on March 1, 2013.
   trial = base::FieldTrialList::FactoryGetFieldTrial(
       kHUPCreateShorterMatchFieldTrialName,
-      kHUPCreateShorterMatchFieldTrialDivisor, "Standard", 2013, 3, 1, NULL);
-  trial->UseOneTimeRandomization();
+      kHUPCreateShorterMatchFieldTrialDivisor, "Standard", 2013, 3, 1,
+      base::FieldTrial::ONE_TIME_RANDOMIZED, NULL);
   hup_dont_create_shorter_match_experiment_group =
       trial->AppendGroup("DontCreateShorterMatch",
                          kHUPCreateShorterMatchFieldTrialExperimentFraction);
@@ -156,30 +130,11 @@ int OmniboxFieldTrial::GetDisabledProviderTypes() {
       continue;
     int types = 0;
     if (!base::StringToInt(base::StringPiece(
-            group_name.substr(strlen(kDisabledProviders))), &types)) {
-      LOG(WARNING) << "Malformed DisabledProviders string: " << group_name;
+            group_name.substr(strlen(kDisabledProviders))), &types))
       continue;
-    }
-    if (types == 0)
-      LOG(WARNING) << "Expecting a non-zero bitmap; group = " << group_name;
-    else
-      provider_types |= types;
+    provider_types |= types;
   }
   return provider_types;
-}
-
-bool OmniboxFieldTrial::InDisallowInlineHQPFieldTrial() {
-  return base::FieldTrialList::TrialExists(kDisallowInlineHQPFieldTrialName);
-}
-
-bool OmniboxFieldTrial::InDisallowInlineHQPFieldTrialExperimentGroup() {
-  if (!base::FieldTrialList::TrialExists(kDisallowInlineHQPFieldTrialName))
-    return false;
-
-  // Return true if we're in the experiment group.
-  const int group = base::FieldTrialList::FindValue(
-      kDisallowInlineHQPFieldTrialName);
-  return group == disallow_inline_hqp_experiment_group;
 }
 
 void OmniboxFieldTrial::GetActiveSuggestFieldTrialHashes(
@@ -242,19 +197,139 @@ bool OmniboxFieldTrial::InZeroSuggestFieldTrial() {
   return false;
 }
 
-// If the active group name starts with "MaxRelevance_", extract the
-// int that immediately following that, returning true on success.
-bool OmniboxFieldTrial::ShortcutsScoringMaxRelevance(int* max_relevance) {
-  std::string group_name =
-      base::FieldTrialList::FindFullName(kShortcutsScoringFieldTrialName);
-  const char kMaxRelevanceGroupPrefix[] = "MaxRelevance_";
-  if (!StartsWithASCII(group_name, kMaxRelevanceGroupPrefix, true))
+bool OmniboxFieldTrial::ShortcutsScoringMaxRelevance(
+    AutocompleteInput::PageClassification current_page_classification,
+    int* max_relevance) {
+  // The value of the rule is a string that encodes an integer containing
+  // the max relevance.
+  const std::string& max_relevance_str =
+      OmniboxFieldTrial::GetValueForRuleInContext(
+          kShortcutsScoringMaxRelevanceRule, current_page_classification);
+  if (max_relevance_str.empty())
     return false;
-  if (!base::StringToInt(base::StringPiece(
-          group_name.substr(strlen(kMaxRelevanceGroupPrefix))),
-                         max_relevance)) {
-    LOG(WARNING) << "Malformed MaxRelevance string: " << group_name;
+  if (!base::StringToInt(max_relevance_str, max_relevance))
     return false;
-  }
   return true;
+}
+
+bool OmniboxFieldTrial::SearchHistoryPreventInlining(
+    AutocompleteInput::PageClassification current_page_classification) {
+  return OmniboxFieldTrial::GetValueForRuleInContext(
+      kSearchHistoryRule, current_page_classification) == "PreventInlining";
+}
+
+bool OmniboxFieldTrial::SearchHistoryDisable(
+    AutocompleteInput::PageClassification current_page_classification) {
+  return OmniboxFieldTrial::GetValueForRuleInContext(
+      kSearchHistoryRule, current_page_classification) == "Disable";
+}
+
+void OmniboxFieldTrial::GetDemotionsByType(
+    AutocompleteInput::PageClassification current_page_classification,
+    DemotionMultipliers* demotions_by_type) {
+  demotions_by_type->clear();
+  const std::string demotion_rule =
+      OmniboxFieldTrial::GetValueForRuleInContext(
+          kDemoteByTypeRule,
+          current_page_classification);
+  // The value of the DemoteByType rule is a comma-separated list of
+  // {ResultType + ":" + Number} where ResultType is an AutocompleteMatchType::
+  // Type enum represented as an integer and Number is an integer number
+  // between 0 and 100 inclusive.   Relevance scores of matches of that result
+  // type are multiplied by Number / 100.  100 means no change.
+  base::StringPairs kv_pairs;
+  if (base::SplitStringIntoKeyValuePairs(demotion_rule, ':', ',', &kv_pairs)) {
+    for (base::StringPairs::const_iterator it = kv_pairs.begin();
+         it != kv_pairs.end(); ++it) {
+      // This is a best-effort conversion; we trust the hand-crafted parameters
+      // downloaded from the server to be perfect.  There's no need for handle
+      // errors smartly.
+      int k, v;
+      base::StringToInt(it->first, &k);
+      base::StringToInt(it->second, &v);
+      (*demotions_by_type)[static_cast<AutocompleteMatchType::Type>(k)] =
+          static_cast<float>(v) / 100.0f;
+    }
+  }
+}
+
+bool OmniboxFieldTrial::ReorderForLegalDefaultMatch(
+    AutocompleteInput::PageClassification current_page_classification) {
+  return OmniboxFieldTrial::GetValueForRuleInContext(
+      kReorderForLegalDefaultMatchRule, current_page_classification) ==
+      kReorderForLegalDefaultMatchRuleEnabled;
+}
+
+const char OmniboxFieldTrial::kBundledExperimentFieldTrialName[] =
+    "OmniboxBundledExperimentV1";
+const char OmniboxFieldTrial::kShortcutsScoringMaxRelevanceRule[] =
+    "ShortcutsScoringMaxRelevance";
+const char OmniboxFieldTrial::kSearchHistoryRule[] = "SearchHistory";
+const char OmniboxFieldTrial::kDemoteByTypeRule[] = "DemoteByType";
+const char OmniboxFieldTrial::kReorderForLegalDefaultMatchRule[] =
+    "ReorderForLegalDefaultMatch";
+const char OmniboxFieldTrial::kReorderForLegalDefaultMatchRuleEnabled[] =
+    "ReorderForLegalDefaultMatch";
+
+// Background and implementation details:
+//
+// Each experiment group in any field trial can come with an optional set of
+// parameters (key-value pairs).  In the bundled omnibox experiment
+// (kBundledExperimentFieldTrialName), each experiment group comes with a
+// list of parameters in the form:
+//   key=<Rule>:
+//       <AutocompleteInput::PageClassification (as an int)>:
+//       <whether Instant Extended is enabled (as a 1 or 0)>
+//     (note that there are no linebreaks in keys; this format is for
+//      presentation only>
+//   value=<arbitrary string>
+// Both the AutocompleteInput::PageClassification and the Instant Extended
+// entries can be "*", which means this rule applies for all values of the
+// matching portion of the context.
+// One example parameter is
+//   key=SearchHistory:6:1
+//   value=PreventInlining
+// This means in page classification context 6 (a search result page doing
+// search term replacement) with Instant Extended enabled, the SearchHistory
+// experiment should PreventInlining.
+//
+// When an exact match to the rule in the current context is missing, we
+// give preference to a wildcard rule that matches the instant extended
+// context over a wildcard rule that matches the page classification
+// context.  Hopefully, though, users will write their field trial configs
+// so as not to rely on this fall back order.
+//
+// In short, this function tries to find the value associated with key
+// |rule|:|page_classification|:|instant_extended|, failing that it looks up
+// |rule|:*:|instant_extended|, failing that it looks up
+// |rule|:|page_classification|:*, failing that it looks up |rule|:*:*,
+// and failing that it returns the empty string.
+std::string OmniboxFieldTrial::GetValueForRuleInContext(
+    const std::string& rule,
+    AutocompleteInput::PageClassification page_classification) {
+  std::map<std::string, std::string> params;
+  if (!chrome_variations::GetVariationParams(kBundledExperimentFieldTrialName,
+                                             &params)) {
+    return std::string();
+  }
+  const std::string page_classification_str =
+      base::IntToString(static_cast<int>(page_classification));
+  const std::string instant_extended =
+      chrome::IsInstantExtendedAPIEnabled() ? "1" : "0";
+  // Look up rule in this exact context.
+  std::map<std::string, std::string>::iterator it = params.find(
+      rule + ":" + page_classification_str + ":" + instant_extended);
+  if (it != params.end())
+    return it->second;
+  // Fall back to the global page classification context.
+  it = params.find(rule + ":*:" + instant_extended);
+  if (it != params.end())
+    return it->second;
+  // Fall back to the global instant extended context.
+  it = params.find(rule + ":" + page_classification_str + ":*");
+  if (it != params.end())
+    return it->second;
+  // Look up rule in the global context.
+  it = params.find(rule + ":*:*");
+  return (it != params.end()) ? it->second : std::string();
 }

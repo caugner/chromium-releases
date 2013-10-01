@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "chromeos/dbus/cryptohome_client.h"
 
@@ -91,6 +91,11 @@ void FakeSessionManagerClient::RetrievePolicyForUser(
     const RetrievePolicyCallback& callback) {
   base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(callback, user_policies_[username]));
+}
+
+std::string FakeSessionManagerClient::BlockingRetrievePolicyForUser(
+    const std::string& username) {
+  return user_policies_[username];
 }
 
 void FakeSessionManagerClient::RetrieveDeviceLocalAccountPolicy(

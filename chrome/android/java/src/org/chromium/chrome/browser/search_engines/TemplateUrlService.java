@@ -115,14 +115,49 @@ public class TemplateUrlService {
         }
     }
 
-    public int getSearchEngine() {
+    /**
+     * @return The default search engine index (e.g., 0, 1, 2,...).
+     */
+    public int getDefaultSearchEngineIndex() {
         ThreadUtils.assertOnUiThread();
         return nativeGetDefaultSearchProvider(mNativeTemplateUrlServiceAndroid);
+    }
+
+    /**
+     * @return {@link TemplateUrlService.TemplateUrl} for the default search engine.
+     */
+    public TemplateUrl getDefaultSearchEngineTemplateUrl() {
+        if (!isLoaded()) return null;
+
+        int defaultSearchEngineIndex = getDefaultSearchEngineIndex();
+        assert defaultSearchEngineIndex >= 0;
+
+        return nativeGetPrepopulatedTemplateUrlAt(
+                mNativeTemplateUrlServiceAndroid, defaultSearchEngineIndex);
     }
 
     public void setSearchEngine(int selectedIndex) {
         ThreadUtils.assertOnUiThread();
         nativeSetDefaultSearchProvider(mNativeTemplateUrlServiceAndroid, selectedIndex);
+    }
+
+    public boolean isSearchProviderManaged() {
+        return nativeIsSearchProviderManaged(mNativeTemplateUrlServiceAndroid);
+    }
+
+    /**
+     * @return Whether or not the default search engine has search by image support.
+     */
+    public boolean isSearchByImageAvailable() {
+        ThreadUtils.assertOnUiThread();
+        return nativeIsSearchByImageAvailable(mNativeTemplateUrlServiceAndroid);
+    }
+
+    /**
+     * @return Whether the default configured search engine is for a Google property.
+     */
+    public boolean isDefaultSearchEngineGoogle() {
+        return nativeIsDefaultSearchEngineGoogle(mNativeTemplateUrlServiceAndroid);
     }
 
     /**
@@ -152,4 +187,7 @@ public class TemplateUrlService {
     private native void nativeSetDefaultSearchProvider(int nativeTemplateUrlServiceAndroid,
             int selectedIndex);
     private native int nativeGetDefaultSearchProvider(int nativeTemplateUrlServiceAndroid);
+    private native boolean nativeIsSearchProviderManaged(int nativeTemplateUrlServiceAndroid);
+    private native boolean nativeIsSearchByImageAvailable(int nativeTemplateUrlServiceAndroid);
+    private native boolean nativeIsDefaultSearchEngineGoogle(int nativeTemplateUrlServiceAndroid);
 }

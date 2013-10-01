@@ -14,7 +14,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/rect.h"
 
 using content::WebContents;
 
@@ -63,8 +62,10 @@ class TestingOmniboxView : public OmniboxView {
   virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE {
     return NULL;
   }
-  virtual void SetInstantSuggestion(const string16& input) OVERRIDE {}
-  virtual string16 GetInstantSuggestion() const OVERRIDE { return string16(); }
+  virtual void SetGrayTextAutocompletion(const string16& input) OVERRIDE {}
+  virtual string16 GetGrayTextAutocompletion() const OVERRIDE {
+    return string16();
+  }
   virtual int TextWidth() const OVERRIDE { return 0; }
   virtual bool IsImeComposing() const OVERRIDE { return false; }
 
@@ -103,7 +104,6 @@ class TestingOmniboxEditController : public OmniboxEditController {
   virtual WebContents* GetWebContents() const OVERRIDE {
     return NULL;
   }
-  virtual gfx::Rect GetOmniboxBounds() const OVERRIDE { return gfx::Rect(); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestingOmniboxEditController);

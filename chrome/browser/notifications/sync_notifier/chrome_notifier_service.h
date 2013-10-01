@@ -17,6 +17,10 @@
 class NotificationUIManager;
 class Profile;
 
+namespace message_center {
+struct Notifier;
+}
+
 namespace notifier {
 
 // The ChromeNotifierService holds notifications which represent the state of
@@ -53,16 +57,27 @@ class ChromeNotifierService : public syncer::SyncableService,
       const syncer::SyncData& sync_data);
 
   // Get a pointer to a notification.  ChromeNotifierService owns this pointer.
-  // The caller must not free it.
-  notifier::SyncedNotification* FindNotificationByKey(const std::string& key);
+  virtual notifier::SyncedNotification* FindNotificationById(
+      const std::string& notification_id);
 
-  // Called when we dismiss a notification.
-  void MarkNotificationAsDismissed(const std::string& id);
+  // Get the list of synced notification services and fill their meta data to
+  // |notifiers|.
+  void GetSyncedNotificationServices(
+      std::vector<message_center::Notifier*>* notifiers);
 
-  // functions for test
-  void AddForTest(scoped_ptr<notifier::SyncedNotification> notification) {
-    Add(notification.Pass());
-  }
+  // Called when we dismiss a notification.  This is virtual so that test
+  // subclasses can override it.
+  virtual void MarkNotificationAsRead(const std::string& id);
+
+  // Called when a notier is enabled or disabled.
+  void OnSyncedNotificationServiceEnabled(
+      const std::string& notifier_id,
+      bool enabled);
+
+  Profile* profile() const { return profile_; }
+
+  // Functions for test.
+  void AddForTest(scoped_ptr<notifier::SyncedNotification> notification);
 
   // If we allow the tests to do bitmap fetching, they will attempt to fetch
   // a URL from the web, which will fail.  We can already test the majority
@@ -76,16 +91,23 @@ class ChromeNotifierService : public syncer::SyncableService,
   // Add a notification to our list.  This takes ownership of the pointer.
   void Add(scoped_ptr<notifier::SyncedNotification> notification);
 
-  // Display a notification in the notification center.
-  void Show(notifier::SyncedNotification* notification);
+  // Display this notification in the notification center, or remove it.
+  void UpdateInMessageCenter(notifier::SyncedNotification* notification);
+
+  // Display a notification in the notification center (eventually).
+  void Display(notifier::SyncedNotification* notification);
+
+  // Remove a notification from our store.
+  void FreeNotificationById(const std::string& notification_id);
 
   // Back pointer to the owning profile.
   Profile* const profile_;
   NotificationUIManager* const notification_manager_;
   scoped_ptr<syncer::SyncChangeProcessor> sync_processor_;
+  std::vector<std::string> enabled_sending_services_;
   static bool avoid_bitmap_fetching_for_test_;
 
-  // TODO(petewil): consider whether a map would better suit our data.
+  // TODO(petewil): Consider whether a map would better suit our data.
   // If there are many entries, lookup time may trump locality of reference.
   ScopedVector<notifier::SyncedNotification> notification_data_;
 

@@ -5,7 +5,8 @@
 #include "content/browser/android/in_process/synchronous_compositor_impl.h"
 
 #include "base/lazy_instance.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
+#include "base/synchronization/lock.h"
 #include "cc/input/input_handler.h"
 #include "cc/input/layer_scroll_offset_delegate.h"
 #include "content/browser/android/in_process/synchronous_input_event_filter.h"
@@ -15,6 +16,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/renderer/android/synchronous_compositor_factory.h"
+#include "ui/gl/gl_surface.h"
 #include "webkit/common/gpu/context_provider_in_process.h"
 
 namespace content {
@@ -64,14 +66,27 @@ class SynchronousCompositorFactoryImpl : public SynchronousCompositorFactory {
   }
 
   virtual scoped_refptr<cc::ContextProvider>
-      GetOffscreenContextProviderForMainThread() OVERRIDE {
-    NOTIMPLEMENTED()
-        << "Synchronous compositor does not support main thread context yet.";
-    return scoped_refptr<cc::ContextProvider>();
+  GetOffscreenContextProviderForMainThread() OVERRIDE {
+    if (!offscreen_context_for_main_thread_.get() ||
+        offscreen_context_for_main_thread_->DestroyedOnMainThread()) {
+      offscreen_context_for_main_thread_ =
+          webkit::gpu::ContextProviderInProcess::Create();
+      if (offscreen_context_for_main_thread_.get() &&
+          !offscreen_context_for_main_thread_->BindToCurrentThread())
+        offscreen_context_for_main_thread_ = NULL;
+    }
+    return offscreen_context_for_main_thread_;
   }
 
+  // This is called on both renderer main thread (offscreen context creation
+  // path shared between cross-process and in-process platforms) and renderer
+  // compositor impl thread (InitializeHwDraw) in order to support Android
+  // WebView synchronously enable and disable hardware mode multiple times in
+  // the same task. This is ok because in-process WGC3D creation may happen on
+  // any thread and is lightweight.
   virtual scoped_refptr<cc::ContextProvider>
       GetOffscreenContextProviderForCompositorThread() OVERRIDE {
+    base::AutoLock lock(offscreen_context_for_compositor_thread_creation_lock_);
     if (!offscreen_context_for_compositor_thread_.get() ||
         offscreen_context_for_compositor_thread_->DestroyedOnMainThread()) {
       offscreen_context_for_compositor_thread_ =
@@ -82,6 +97,11 @@ class SynchronousCompositorFactoryImpl : public SynchronousCompositorFactory {
 
  private:
   SynchronousInputEventFilter synchronous_input_event_filter_;
+
+  // Only guards construction of |offscreen_context_for_compositor_thread_|,
+  // not usage.
+  base::Lock offscreen_context_for_compositor_thread_creation_lock_;
+  scoped_refptr<cc::ContextProvider> offscreen_context_for_main_thread_;
   scoped_refptr<cc::ContextProvider> offscreen_context_for_compositor_thread_;
 };
 
@@ -131,20 +151,31 @@ void SynchronousCompositorImpl::SetClient(
   compositor_client_ = compositor_client;
 }
 
-bool SynchronousCompositorImpl::InitializeHwDraw() {
+bool SynchronousCompositorImpl::InitializeHwDraw(
+    scoped_refptr<gfx::GLSurface> surface) {
   DCHECK(CalledOnValidThread());
   DCHECK(output_surface_);
-  return output_surface_->InitializeHwDraw();
+  return output_surface_->InitializeHwDraw(
+      surface,
+      g_factory.Get().GetOffscreenContextProviderForCompositorThread());
+}
+
+void SynchronousCompositorImpl::ReleaseHwDraw() {
+  DCHECK(CalledOnValidThread());
+  DCHECK(output_surface_);
+  return output_surface_->ReleaseHwDraw();
 }
 
 bool SynchronousCompositorImpl::DemandDrawHw(
       gfx::Size view_size,
       const gfx::Transform& transform,
-      gfx::Rect damage_area) {
+      gfx::Rect damage_area,
+      bool stencil_enabled) {
   DCHECK(CalledOnValidThread());
   DCHECK(output_surface_);
 
-  return output_surface_->DemandDrawHw(view_size, transform, damage_area);
+  return output_surface_->DemandDrawHw(
+      view_size, transform, damage_area, stencil_enabled);
 }
 
 bool SynchronousCompositorImpl::DemandDrawSw(SkCanvas* canvas) {
@@ -194,6 +225,15 @@ void SynchronousCompositorImpl::SetInputHandler(
     input_handler_->SetRootLayerScrollOffsetDelegate(this);
 }
 
+void SynchronousCompositorImpl::DidOverscroll(
+    const cc::DidOverscrollParams& params) {
+  if (compositor_client_) {
+    compositor_client_->DidOverscroll(params.accumulated_overscroll,
+                                      params.latest_overscroll_delta,
+                                      params.current_fling_velocity);
+  }
+}
+
 void SynchronousCompositorImpl::SetContinuousInvalidate(bool enable) {
   DCHECK(CalledOnValidThread());
   if (compositor_client_)
@@ -213,6 +253,11 @@ void SynchronousCompositorImpl::UpdateFrameMetaData(
       contents_->GetRenderWidgetHostView());
   if (rwhv)
     rwhv->SynchronousFrameMetadata(frame_metadata);
+}
+
+void SynchronousCompositorImpl::DidActivatePendingTree() {
+  if (compositor_client_)
+    compositor_client_->DidUpdateContent();
 }
 
 void SynchronousCompositorImpl::SetTotalScrollOffset(gfx::Vector2dF new_value) {

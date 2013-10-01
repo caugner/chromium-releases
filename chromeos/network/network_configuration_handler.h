@@ -5,6 +5,8 @@
 #ifndef CHROMEOS_NETWORK_NETWORK_CONFIGURATION_HANDLER_H_
 #define CHROMEOS_NETWORK_NETWORK_CONFIGURATION_HANDLER_H_
 
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -13,11 +15,13 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "chromeos/chromeos_export.h"
+#include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_handler_callbacks.h"
 
 namespace base {
 class DictionaryValue;
+class ListValue;
 }
 
 namespace dbus {
@@ -65,7 +69,7 @@ class CHROMEOS_EXPORT NetworkConfigurationHandler
       const std::string& service_path,
       const base::DictionaryValue& properties,
       const base::Closure& callback,
-      const network_handler::ErrorCallback& error_callback) const;
+      const network_handler::ErrorCallback& error_callback);
 
   // Removes the properties with the given property paths. If any of them are
   // unable to be cleared, the |error_callback| will only be run once with
@@ -88,14 +92,19 @@ class CHROMEOS_EXPORT NetworkConfigurationHandler
       const network_handler::StringResultCallback& callback,
       const network_handler::ErrorCallback& error_callback);
 
-  // Removes the network |service_path| from the remembered network list in the
-  // active Shill profile. The network may still show up in the visible networks
-  // after this, but no profile configuration will remain. See note on
-  // |callback| and |error_callback|, in class description above.
+  // Removes the network |service_path| from any profiles that include it.
+  // See note on |callback| and |error_callback| in class description above.
   void RemoveConfiguration(
       const std::string& service_path,
       const base::Closure& callback,
-      const network_handler::ErrorCallback& error_callback) const;
+      const network_handler::ErrorCallback& error_callback);
+
+  // Changes the profile for the network |service_path| to |profile_path|.
+  // See note on |callback| and |error_callback| in class description above.
+  void SetNetworkProfile(const std::string& service_path,
+                         const std::string& profile_path,
+                         const base::Closure& callback,
+                         const network_handler::ErrorCallback& error_callback);
 
   // Construct and initialize an instance for testing.
   static NetworkConfigurationHandler* InitializeForTest(
@@ -104,6 +113,8 @@ class CHROMEOS_EXPORT NetworkConfigurationHandler
  protected:
   friend class NetworkHandler;
   friend class NetworkConfigurationHandlerTest;
+  friend class NetworkConfigurationHandlerStubTest;
+  class ProfileEntryDeleter;
 
   NetworkConfigurationHandler();
   void Init(NetworkStateHandler* network_state_handler);
@@ -112,7 +123,42 @@ class CHROMEOS_EXPORT NetworkConfigurationHandler
       const network_handler::StringResultCallback& callback,
       const dbus::ObjectPath& service_path);
 
+  // Called from ProfileEntryDeleter instances when they complete causing
+  // this class to delete the instance.
+  void ProfileEntryDeleterCompleted(const std::string& service_path);
+  bool PendingProfileEntryDeleterForTest(const std::string& service_path) {
+    return profile_entry_deleters_.count(service_path);
+  }
+
+  // Invoke the callback and inform NetworkStateHandler to request an update
+  // for the service after setting properties.
+  void SetPropertiesSuccessCallback(const std::string& service_path,
+                                    const base::Closure& callback);
+  void SetPropertiesErrorCallback(
+      const std::string& service_path,
+      const network_handler::ErrorCallback& error_callback,
+      const std::string& dbus_error_name,
+      const std::string& dbus_error_message);
+
+  // Invoke the callback and inform NetworkStateHandler to request an update
+  // for the service after clearing properties.
+  void ClearPropertiesSuccessCallback(
+      const std::string& service_path,
+      const std::vector<std::string>& names,
+      const base::Closure& callback,
+      const network_handler::ErrorCallback& error_callback,
+      const base::ListValue& result);
+  void ClearPropertiesErrorCallback(
+      const std::string& service_path,
+      const network_handler::ErrorCallback& error_callback,
+      const std::string& dbus_error_name,
+      const std::string& dbus_error_message);
+
+  // Unowned associated NetworkStateHandler* (global or test instance).
   NetworkStateHandler* network_state_handler_;
+
+  // Map of in-progress deleter instances. Owned by this class.
+  std::map<std::string, ProfileEntryDeleter*> profile_entry_deleters_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkConfigurationHandler);
 };

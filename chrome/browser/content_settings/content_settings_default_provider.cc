@@ -12,10 +12,10 @@
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
@@ -24,7 +24,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using content::UserMetricsAction;
@@ -49,6 +49,8 @@ const ContentSetting kDefaultSettings[] = {
   CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA
   CONTENT_SETTING_DEFAULT,  // CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS
   CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_PPAPI_BROKER
+  CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS
+  CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_MIDI_SYSEX
 #if defined(OS_WIN)
   CONTENT_SETTING_ASK,      // CONTENT_SETTINGS_TYPE_METRO_SWITCH_TO_DESKTOP
 #endif
@@ -87,7 +89,7 @@ class DefaultRuleIterator : public RuleIterator {
 }  // namespace
 
 // static
-void DefaultProvider::RegisterUserPrefs(
+void DefaultProvider::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   // The registration of the preference prefs::kDefaultContentSettings should
   // also include the default values for default content settings. This allows
@@ -155,6 +157,11 @@ DefaultProvider::DefaultProvider(PrefService* prefs, bool incognito)
       "ContentSettings.DefaultMediaStreamSetting",
       ValueToContentSetting(
           default_settings_[CONTENT_SETTINGS_TYPE_MEDIASTREAM].get()),
+      CONTENT_SETTING_NUM_SETTINGS);
+  UMA_HISTOGRAM_ENUMERATION(
+      "ContentSettings.DefaultMIDISysExSetting",
+      ValueToContentSetting(
+          default_settings_[CONTENT_SETTINGS_TYPE_MIDI_SYSEX].get()),
       CONTENT_SETTING_NUM_SETTINGS);
 
   pref_change_registrar_.Init(prefs_);

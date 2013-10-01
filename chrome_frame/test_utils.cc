@@ -15,7 +15,8 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
@@ -36,12 +37,12 @@ base::FilePath GetChromeFrameBuildPath() {
 
   base::FilePath dll_path = build_path.Append(kChromeFrameDllName);
 
-  if (!file_util::PathExists(dll_path)) {
+  if (!base::PathExists(dll_path)) {
     // Well, dang.. try looking in the current directory.
     dll_path = build_path.Append(kChromeFrameDllName);
   }
 
-  if (!file_util::PathExists(dll_path)) {
+  if (!base::PathExists(dll_path)) {
     // No luck, return something empty.
     dll_path = base::FilePath();
   }

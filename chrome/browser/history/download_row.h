@@ -8,11 +8,11 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/public/browser/download_danger_type.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace history {
 
@@ -28,13 +28,17 @@ struct DownloadRow {
       const GURL& referrer,
       const base::Time& start,
       const base::Time& end,
+      const std::string& etag,
+      const std::string& last_modified,
       int64 received,
       int64 total,
       content::DownloadItem::DownloadState download_state,
       content::DownloadDangerType danger_type,
       content::DownloadInterruptReason interrupt_reason,
-      int64 handle,
-      bool download_opened);
+      uint32 id,
+      bool download_opened,
+      const std::string& ext_id,
+      const std::string& ext_name);
   ~DownloadRow();
 
   // The current path to the download (potentially different from final if
@@ -59,6 +63,12 @@ struct DownloadRow {
   // The time when the download completed.
   base::Time end_time;
 
+  // Contents of most recently seen ETag header.
+  std::string etag;
+
+  // Contents of most recently seen Last-Modified header.
+  std::string last_modified;
+
   // The number of bytes received (so far).
   int64 received_bytes;
 
@@ -76,12 +86,15 @@ struct DownloadRow {
   // state == DownloadItem::INTERRUPTED
   content::DownloadInterruptReason interrupt_reason;
 
-  // The handle of the download in the database. Is not changed by
-  // UpdateDownload().
-  int64 db_handle;
+  // The id of the download in the database. Is not changed by UpdateDownload().
+  uint32 id;
 
   // Whether this download has ever been opened from the browser.
   bool opened;
+
+  // The id and name of the extension that created this download.
+  std::string by_ext_id;
+  std::string by_ext_name;
 };
 
 }  // namespace history

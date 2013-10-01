@@ -8,8 +8,8 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/process_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
@@ -17,7 +17,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -27,6 +26,11 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/test/net/url_request_mock_http_job.h"
 #include "net/url_request/url_request_test_util.h"
+
+#if defined(OS_WIN)
+// For version specific disabled tests below (http://crbug.com/267597).
+#include "base/win/windows_version.h"
+#endif
 
 using base::TimeDelta;
 using content::BrowserThread;
@@ -409,6 +413,230 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseTabWhenOtherTabHasListener) {
   tab_close_observer.Wait();
 
   CheckTitle("only_one_unload");
+}
+
+class FastUnloadTest : public UnloadTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    UnloadTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnableFastUnload);
+  }
+
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+    ASSERT_TRUE(test_server()->Start());
+  }
+
+  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
+    test_server()->Stop();
+  }
+
+  GURL GetUrl(const std::string& name) {
+    return GURL(test_server()->GetURL(
+        "files/fast_tab_close/" + name + ".html"));
+  }
+
+  void NavigateToPage(const char* name) {
+    ui_test_utils::NavigateToURL(browser(), GetUrl(name));
+    CheckTitle(name);
+  }
+
+  void NavigateToPageInNewTab(const char* name) {
+    ui_test_utils::NavigateToURLWithDisposition(
+        browser(), GetUrl(name), NEW_FOREGROUND_TAB,
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+    CheckTitle(name);
+  }
+
+  std::string GetCookies(const char* name) {
+    content::WebContents* contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+    return content::GetCookies(contents->GetBrowserContext(), GetUrl(name));
+  }
+};
+
+class FastTabCloseTabStripModelObserver : public TabStripModelObserver {
+ public:
+  FastTabCloseTabStripModelObserver(TabStripModel* model,
+                                    base::RunLoop* run_loop)
+      : model_(model),
+        run_loop_(run_loop) {
+    model_->AddObserver(this);
+  }
+
+  virtual ~FastTabCloseTabStripModelObserver() {
+    model_->RemoveObserver(this);
+  }
+
+  // TabStripModelObserver:
+  virtual void TabDetachedAt(content::WebContents* contents,
+                             int index) OVERRIDE {
+    run_loop_->Quit();
+  }
+
+ private:
+  TabStripModel* const model_;
+  base::RunLoop* const run_loop_;
+};
+
+
+// Test that fast-tab-close works when closing a tab with an unload handler
+// (http://crbug.com/142458).
+IN_PROC_BROWSER_TEST_F(FastUnloadTest, UnloadHidden) {
+#if defined(OS_WIN)
+  // Flaky on Win7+ bots (http://crbug.com/267597).
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
+    return;
+#endif
+  NavigateToPage("no_listeners");
+  NavigateToPageInNewTab("unload_sets_cookie");
+  EXPECT_EQ("", GetCookies("no_listeners"));
+
+  {
+    base::RunLoop run_loop;
+    FastTabCloseTabStripModelObserver observer(
+        browser()->tab_strip_model(), &run_loop);
+    chrome::CloseTab(browser());
+    run_loop.Run();
+  }
+
+  // Check that the browser only has the original tab.
+  CheckTitle("no_listeners");
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
+
+  // Show that the web contents to go away after the was removed.
+  // Without unload-detached, this times-out because it happens earlier.
+  content::WindowedNotificationObserver contents_destroyed_observer(
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+      content::NotificationService::AllSources());
+  contents_destroyed_observer.Wait();
+
+  // Browser still has the same tab.
+  CheckTitle("no_listeners");
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
+  EXPECT_EQ("unloaded=ohyeah", GetCookies("no_listeners"));
+}
+
+// Test that fast-tab-close does not break a solo tab.
+IN_PROC_BROWSER_TEST_F(FastUnloadTest, PRE_ClosingLastTabFinishesUnload) {
+  // The unload handler sleeps before setting the cookie to catch cases when
+  // unload handlers are not allowed to run to completion. (For example,
+  // using the detached handler for the tab and then closing the browser.)
+  NavigateToPage("unload_sleep_before_cookie");
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
+  EXPECT_EQ("", GetCookies("unload_sleep_before_cookie"));
+
+  content::WindowedNotificationObserver window_observer(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::NotificationService::AllSources());
+  chrome::CloseTab(browser());
+  window_observer.Wait();
+}
+IN_PROC_BROWSER_TEST_F(FastUnloadTest, ClosingLastTabFinishesUnload) {
+#if defined(OS_WIN)
+  // Flaky on Win7+ bots (http://crbug.com/267597).
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
+    return;
+#endif
+  // Check for cookie set in unload handler of PRE_ test.
+  NavigateToPage("no_listeners");
+  EXPECT_EQ("unloaded=ohyeah", GetCookies("no_listeners"));
+}
+
+// Test that fast-tab-close does not break window close.
+IN_PROC_BROWSER_TEST_F(FastUnloadTest, PRE_WindowCloseFinishesUnload) {
+  NavigateToPage("no_listeners");
+
+  // The unload handler sleeps before setting the cookie to catch cases when
+  // unload handlers are not allowed to run to completion. Without the sleep,
+  // the cookie can get set even if the browser does not wait for
+  // the unload handler to finish.
+  NavigateToPageInNewTab("unload_sleep_before_cookie");
+  EXPECT_EQ(2, browser()->tab_strip_model()->count());
+  EXPECT_EQ("", GetCookies("no_listeners"));
+
+  content::WindowedNotificationObserver window_observer(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::NotificationService::AllSources());
+  chrome::CloseWindow(browser());
+  window_observer.Wait();
+}
+IN_PROC_BROWSER_TEST_F(FastUnloadTest, WindowCloseFinishesUnload) {
+#if defined(OS_WIN)
+  // Flaky on Win7+ bots (http://crbug.com/267597).
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
+    return;
+#endif
+  // Check for cookie set in unload during PRE_ test.
+  NavigateToPage("no_listeners");
+  EXPECT_EQ("unloaded=ohyeah", GetCookies("no_listeners"));
+}
+
+// Test that a tab crash during unload does not break window close.
+//
+// Hits assertion on Linux and Mac:
+//     [FATAL:profile_destroyer.cc(46)] Check failed:
+//         hosts.empty() ||
+//         profile->IsOffTheRecord() ||
+//         content::RenderProcessHost::run_renderer_in_process().
+//     More details: The renderer process host matches the closed, crashed tab.
+//     The |UnloadController| receives |NOTIFICATION_WEB_CONTENTS_DISCONNECTED|
+//     and proceeds with the close.
+IN_PROC_BROWSER_TEST_F(FastUnloadTest, DISABLED_WindowCloseAfterUnloadCrash) {
+  NavigateToPage("no_listeners");
+  NavigateToPageInNewTab("unload_sets_cookie");
+  content::WebContents* unload_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_EQ("", GetCookies("no_listeners"));
+
+  {
+    base::RunLoop run_loop;
+    FastTabCloseTabStripModelObserver observer(
+        browser()->tab_strip_model(), &run_loop);
+    chrome::CloseTab(browser());
+    run_loop.Run();
+  }
+
+  // Check that the browser only has the original tab.
+  CheckTitle("no_listeners");
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
+
+  CrashTab(unload_contents);
+
+  // Check that the browser only has the original tab.
+  CheckTitle("no_listeners");
+  EXPECT_EQ(1, browser()->tab_strip_model()->count());
+
+  content::WindowedNotificationObserver window_observer(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::NotificationService::AllSources());
+  chrome::CloseWindow(browser());
+  window_observer.Wait();
+}
+
+// Times out on Windows and Linux.
+#if defined(OS_WIN) || defined(OS_LINUX)
+#define MAYBE_WindowCloseAfterBeforeUnloadCrash \
+    DISABLED_WindowCloseAfterBeforeUnloadCrash
+#else
+#define MAYBE_WindowCloseAfterBeforeUnloadCrash \
+    WindowCloseAfterBeforeUnloadCrash
+#endif
+IN_PROC_BROWSER_TEST_F(FastUnloadTest,
+                       MAYBE_WindowCloseAfterBeforeUnloadCrash) {
+  // Tests makes no sense in single-process mode since the renderer is hung.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
+    return;
+
+  NavigateToDataURL(BEFORE_UNLOAD_HTML, "beforeunload");
+  content::WebContents* beforeunload_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  content::WindowedNotificationObserver window_observer(
+        chrome::NOTIFICATION_BROWSER_CLOSED,
+        content::NotificationService::AllSources());
+  chrome::CloseWindow(browser());
+  CrashTab(beforeunload_contents);
+  window_observer.Wait();
 }
 
 // TODO(ojan): Add tests for unload/beforeunload that have multiple tabs

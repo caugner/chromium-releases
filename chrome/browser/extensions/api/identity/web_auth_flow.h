@@ -7,12 +7,12 @@
 
 #include <string>
 
-#include "chrome/browser/extensions/shell_window_registry.h"
+#include "apps/shell_window_registry.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 class Profile;
 class WebAuthFlowTest;
@@ -45,7 +45,7 @@ namespace extensions {
 // a window. If a window would be required, the flow fails.
 class WebAuthFlow : public content::NotificationObserver,
                     public content::WebContentsObserver,
-                    public ShellWindowRegistry::Observer {
+                    public apps::ShellWindowRegistry::Observer {
  public:
   enum Mode {
     INTERACTIVE,  // Show UI to the user if necessary.
@@ -91,10 +91,11 @@ class WebAuthFlow : public content::NotificationObserver,
  private:
   friend class ::WebAuthFlowTest;
 
-  // ShellWindowRegistry::Observer implementation.
-  virtual void OnShellWindowAdded(ShellWindow* shell_window) OVERRIDE;
-  virtual void OnShellWindowIconChanged(ShellWindow* shell_window) OVERRIDE {}
-  virtual void OnShellWindowRemoved(ShellWindow* shell_window) OVERRIDE;
+  // ::ShellWindowRegistry::Observer implementation.
+  virtual void OnShellWindowAdded(apps::ShellWindow* shell_window) OVERRIDE;
+  virtual void OnShellWindowIconChanged(apps::ShellWindow* shell_window)
+      OVERRIDE;
+  virtual void OnShellWindowRemoved(apps::ShellWindow* shell_window) OVERRIDE;
 
   // NotificationObserver implementation.
   virtual void Observe(int type,
@@ -107,7 +108,7 @@ class WebAuthFlow : public content::NotificationObserver,
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
+  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
       int64 parent_frame_id,
@@ -132,7 +133,7 @@ class WebAuthFlow : public content::NotificationObserver,
   GURL provider_url_;
   Mode mode_;
 
-  ShellWindow* shell_window_;
+  apps::ShellWindow* shell_window_;
   std::string shell_window_key_;
   bool embedded_window_created_;
 

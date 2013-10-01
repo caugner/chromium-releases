@@ -28,7 +28,6 @@ ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() {
 
 void ChromeBrowserMainPartsAndroid::PreProfileInit() {
   TRACE_EVENT0("startup", "ChromeBrowserMainPartsAndroid::PreProfileInit")
-#if defined(USE_LINUX_BREAKPAD)
 #if defined(GOOGLE_CHROME_BUILD)
   // TODO(jcivelli): we should not initialize the crash-reporter when it was not
   // enabled. Right now if it is disabled we still generate the minidumps but we
@@ -47,7 +46,6 @@ void ChromeBrowserMainPartsAndroid::PreProfileInit() {
     InitCrashReporter();
     crash_dump_manager_.reset(new CrashDumpManager());
   }
-#endif
 
   ChromeBrowserMainParts::PreProfileInit();
 }
@@ -84,29 +82,6 @@ void ChromeBrowserMainPartsAndroid::PreEarlyInitialization() {
   ChromeBrowserMainParts::PreEarlyInitialization();
 }
 
-int ChromeBrowserMainPartsAndroid::PreCreateThreads() {
-  TRACE_EVENT0("startup", "ChromeBrowserMainPartsAndroid::PreCreateThreads")
-  // PreCreateThreads initializes ResourceBundle instance.
-  const int result = ChromeBrowserMainParts::PreCreateThreads();
-
-  // Add devtools_resources.pak which is used in Chromium TestShell.
-  base::FilePath paks_path;
-  PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &paks_path);
-  ResourceBundle::GetSharedInstance().AddOptionalDataPackFromPath(
-      paks_path.Append(FILE_PATH_LITERAL("devtools_resources.pak")),
-      ui::SCALE_FACTOR_NONE);
-
-  return result;
-}
-
 void ChromeBrowserMainPartsAndroid::ShowMissingLocaleMessageBox() {
   NOTREACHED();
-}
-
-void RecordBreakpadStatusUMA(MetricsService* metrics) {
-  // TODO: crbug.com/139023
-  NOTIMPLEMENTED();
-}
-
-void WarnAboutMinimumSystemRequirements() {
 }

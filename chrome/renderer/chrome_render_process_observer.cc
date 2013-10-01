@@ -11,42 +11,44 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/message_loop.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/extension_localization_peer.h"
 #include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/net/net_resource_provider.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/renderer/content_settings_observer.h"
+#include "chrome/renderer/extensions/extension_localization_peer.h"
 #include "chrome/renderer/security_filter_peer.h"
-#include "content/public/common/resource_dispatcher_delegate.h"
+#include "content/public/child/resource_dispatcher_delegate.h"
 #include "content/public/renderer/render_thread.h"
-#include "content/public/renderer/render_view_visitor.h"
 #include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_view_visitor.h"
 #include "crypto/nss_util.h"
 #include "media/base/media_switches.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_module.h"
-#include "third_party/sqlite/sqlite3.h"
 #include "third_party/WebKit/public/web/WebCache.h"
 #include "third_party/WebKit/public/web/WebCrossOriginPreflightResultCache.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFontCache.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
+#include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/sqlite/sqlite3.h"
 #include "v8/include/v8.h"
 
 #if defined(OS_WIN)
@@ -57,6 +59,8 @@ using WebKit::WebCache;
 using WebKit::WebCrossOriginPreflightResultCache;
 using WebKit::WebFontCache;
 using WebKit::WebRuntimeFeatures;
+using WebKit::WebSecurityPolicy;
+using WebKit::WebString;
 using content::RenderThread;
 
 namespace {
@@ -262,9 +266,9 @@ ChromeRenderProcessObserver::ChromeRenderProcessObserver(
 
 #if defined(ENABLE_AUTOFILL_DIALOG)
   WebRuntimeFeatures::enableRequestAutocomplete(
-      command_line.HasSwitch(switches::kEnableExperimentalWebKitFeatures) ||
       command_line.HasSwitch(
-           autofill::switches::kEnableInteractiveAutocomplete));
+          autofill::switches::kEnableInteractiveAutocomplete) ||
+      command_line.HasSwitch(switches::kEnableExperimentalWebPlatformFeatures));
 #endif
 
   RenderThread* thread = RenderThread::Get();
@@ -278,7 +282,7 @@ ChromeRenderProcessObserver::ChromeRenderProcessObserver(
   // Need to patch a few functions for font loading to work correctly.
   base::FilePath pdf;
   if (PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf) &&
-      file_util::PathExists(pdf)) {
+      base::PathExists(pdf)) {
     g_iat_patch_createdca.Patch(
         pdf.value().c_str(), "gdi32.dll", "CreateDCA", CreateDCAPatch);
     g_iat_patch_get_font_data.Patch(
@@ -325,6 +329,21 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
+}
+
+void ChromeRenderProcessObserver::WebKitInitialized() {
+  // chrome-native: is a scheme used for placeholder navigations that allow
+  // UIs to be drawn with platform native widgets instead of HTML.  These pages
+  // should not be accessible, and should also be treated as empty documents
+  // that can commit synchronously.  No code should be runnable in these pages,
+  // so it should not need to access anything nor should it allow javascript
+  // URLs since it should never be visible to the user.
+  WebString native_scheme(ASCIIToUTF16(chrome::kChromeNativeScheme));
+  WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(native_scheme);
+  WebSecurityPolicy::registerURLSchemeAsEmptyDocument(native_scheme);
+  WebSecurityPolicy::registerURLSchemeAsNoAccess(native_scheme);
+  WebSecurityPolicy::registerURLSchemeAsNotAllowingJavascriptURLs(
+      native_scheme);
 }
 
 void ChromeRenderProcessObserver::OnSetIsIncognitoProcess(

@@ -2,311 +2,156 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import glob
 import logging
 import os
+import re
 
 from pylib import android_commands
 from pylib import constants
-from pylib import perf_tests_helper
-from pylib.android_commands import errors
+from pylib import pexpect
 from pylib.base import base_test_result
 from pylib.base import base_test_runner
-from pylib.utils import run_tests_helper
-
-import test_package_apk
-import test_package_executable
 
 
-def _GetDataFilesForTestSuite(test_suite_basename):
-  """Returns a list of data files/dirs needed by the test suite.
-
-  Args:
-    test_suite_basename: The test suite basename for which to return file paths.
-
-  Returns:
-    A list of test file and directory paths.
-  """
-  # Ideally, we'd just push all test data. However, it has >100MB, and a lot
-  # of the files are not relevant (some are used for browser_tests, others for
-  # features not supported, etc..).
-  if test_suite_basename == 'base_unittests':
-    return [
-        'base/test/data/',
-    ]
-  elif test_suite_basename == 'unit_tests':
-    test_files = [
-        'base/test/data/',
-        'chrome/test/data/download-test1.lib',
-        'chrome/test/data/extensions/bad_magic.crx',
-        'chrome/test/data/extensions/good.crx',
-        'chrome/test/data/extensions/icon1.png',
-        'chrome/test/data/extensions/icon2.png',
-        'chrome/test/data/extensions/icon3.png',
-        'chrome/test/data/extensions/allow_silent_upgrade/',
-        'chrome/test/data/extensions/app/',
-        'chrome/test/data/extensions/bad/',
-        'chrome/test/data/extensions/effective_host_permissions/',
-        'chrome/test/data/extensions/empty_manifest/',
-        'chrome/test/data/extensions/good/Extensions/',
-        'chrome/test/data/extensions/manifest_tests/',
-        'chrome/test/data/extensions/page_action/',
-        'chrome/test/data/extensions/permissions/',
-        'chrome/test/data/extensions/script_and_capture/',
-        'chrome/test/data/extensions/unpacker/',
-        'chrome/test/data/bookmarks/',
-        'chrome/test/data/components/',
-        'chrome/test/data/extensions/json_schema_test.js',
-        'chrome/test/data/History/',
-        'chrome/test/data/json_schema_validator/',
-        'chrome/test/data/pref_service/',
-        'chrome/test/data/simple_open_search.xml',
-        'chrome/test/data/top_sites/',
-        'chrome/test/data/web_app_info/',
-        'chrome/test/data/web_database',
-        'chrome/test/data/webui/',
-        'chrome/third_party/mock4js/',
-        'net/data/ssl/certificates',
-        'third_party/accessibility-developer-tools/gen/axs_testing.js',
-        'third_party/zlib/google/test/data',
-    ]
-    # The following are spell check data. Now only list the data under
-    # third_party/hunspell_dictionaries which are used by unit tests.
-    old_cwd = os.getcwd()
-    os.chdir(constants.DIR_SOURCE_ROOT)
-    test_files += glob.glob('third_party/hunspell_dictionaries/*.bdic')
-    os.chdir(old_cwd)
-    return test_files
-  elif test_suite_basename == 'media_unittests':
-    return [
-        'media/test/data',
-    ]
-  elif test_suite_basename == 'net_unittests':
-    return [
-        'chrome/test/data/animate1.gif',
-        'chrome/test/data/simple.html',
-        'net/data/cache_tests',
-        'net/data/filter_unittests',
-        'net/data/ftp',
-        'net/data/proxy_resolver_v8_tracing_unittest',
-        'net/data/proxy_resolver_v8_unittest',
-        'net/data/proxy_script_fetcher_unittest',
-        'net/data/ssl/certificates',
-        'net/data/test.html',
-        'net/data/url_request_unittest/',
-        ]
-  elif test_suite_basename == 'ui_tests':
-    return [
-        'chrome/test/data/dromaeo',
-        'chrome/test/data/json2.js',
-        'chrome/test/data/sunspider',
-        ]
-  elif test_suite_basename == 'ui_unittests':
-    return [
-        'ui/base/test/data/data_pack_unittest/truncated-header.pak',
-    ]
-  elif test_suite_basename == 'content_unittests':
-    return [
-        'content/test/data/gpu/webgl_conformance_test_expectations.txt',
-        'net/data/ssl/certificates/',
-        'third_party/hyphen/hyph_en_US.dic',
-        'webkit/data/dom_storage/webcore_test_database.localstorage',
-        ]
-  elif test_suite_basename == 'cc_perftests':
-    return [
-      'cc/test/data',
-    ]
-  elif test_suite_basename == 'perf_tests':
-    return [
-      'base/test/data',
-    ]
-  elif test_suite_basename == 'content_browsertests':
-    return [
-        'content/test/data/content-disposition-inline.html',
-        'content/test/data/title1.html',
-        'content/test/data/post_message2.html',
-        'content/test/data/content-sniffer-test0.html.mock-http-headers',
-        'content/test/data/content-sniffer-test1.html.mock-http-headers',
-        'content/test/data/speech',
-        'content/test/data/page404.html.mock-http-headers',
-        'content/test/data/content-sniffer-test3.html',
-        'content/test/data/post_message.html',
-        'content/test/data/remove_frame_on_unload.html',
-        'content/test/data/cross-origin-redirect-blocked.html',
-        'content/test/data/prerender',
-        'content/test/data/device_orientation',
-        'content/test/data/content-disposition-empty.html',
-        'content/test/data/workers',
-        'content/test/data/content-sniffer-test3.html.mock-http-headers',
-        'content/test/data/content-sniffer-test0.html',
-        'content/test/data/browser_plugin_title_change.html',
-        'content/test/data/android',
-        'content/test/data/page404.html',
-        'content/test/data/dynamic2.html',
-        'content/test/data/browser_plugin_embedder.html',
-        'content/test/data/indexeddb',
-        'content/test/data/content-disposition-inline.html.mock-http-headers',
-        'content/test/data/nosniff-test.html',
-        'content/test/data/title3.html',
-        'content/test/data/browser_plugin_post_message_guest.html',
-        'content/test/data/content-disposition-empty.html.mock-http-headers',
-        'content/test/data/session_history',
-        'content/test/data/browser_plugin_naming_guest.html',
-        'content/test/data/overscroll_navigation.html',
-        'content/test/data/simple_database.html',
-        'content/test/data/gtk_key_bindings_test_gtkrc',
-        'content/test/data/browser_plugin_embedder_guest_unresponsive.html',
-        'content/test/data/sync_xmlhttprequest.html',
-        'content/test/data/content-sniffer-test3-frame.txt.mock-http-headers',
-        'content/test/data/frame_tree',
-        'content/test/data/browser_plugin_naming_embedder.html',
-        'content/test/data/content-sniffer-test2.html.mock-http-headers',
-        'content/test/data/sync_xmlhttprequest_disallowed.html',
-        'content/test/data/rwh_simple.html',
-        'content/test/data/title2.html',
-        'content/test/data/webkit',
-        'content/test/data/content-sniffer-test1.html',
-        'content/test/data/download',
-        'content/test/data/content-sniffer-test2.html',
-        'content/test/data/simple_page.html',
-        'content/test/data/google.mht',
-        'content/test/data/site_per_process_main.html',
-        'content/test/data/gpu',
-        'content/test/data/onunload_cookie.html',
-        'content/test/data/textinput',
-        'content/test/data/navigate_opener.html',
-        'content/test/data/dom_storage',
-        'content/test/data/sync_xmlhttprequest_during_unload.html',
-        'content/test/data/browser_plugin_dragging.html',
-        'content/test/data/fileapi',
-        'content/test/data/npapi',
-        'content/test/data/nosniff-test.html.mock-http-headers',
-        'content/test/data/accessibility',
-        'content/test/data/dynamic1.html',
-        'content/test/data/browser_plugin_focus_child.html',
-        'content/test/data/rwhv_compositing_animation.html',
-        'content/test/data/click-noreferrer-links.html',
-        'content/test/data/browser_plugin_focus.html',
-        'content/test/data/media',
-        'third_party/webgl_conformance',
-    ]
-  return []
-
-
-def _TestSuiteRequiresMockTestServer(test_suite_basename):
+def _TestSuiteRequiresMockTestServer(suite_name):
   """Returns True if the test suite requires mock test server."""
   tests_require_net_test_server = ['unit_tests', 'net_unittests',
                                    'content_unittests',
                                    'content_browsertests']
-  return (test_suite_basename in
+  return (suite_name in
           tests_require_net_test_server)
 
 
 class TestRunner(base_test_runner.BaseTestRunner):
-  """Single test suite attached to a single device.
+  def __init__(self, test_options, device, test_package):
+    """Single test suite attached to a single device.
 
-  Args:
-    device: Device to run the tests.
-    test_suite: A specific test suite to run, empty to run all.
-    test_arguments: Additional arguments to pass to the test binary.
-    timeout: Timeout for each test.
-    cleanup_test_files: Whether or not to cleanup test files on device.
-    tool_name: Name of the Valgrind tool.
-    build_type: 'Release' or 'Debug'.
-    in_webkit_checkout: Whether the suite is being run from a WebKit checkout.
-    push_deps: If True, push all dependencies to the device.
-    test_apk_package_name: Apk package name for tests running in APKs.
-    test_activity_name: Test activity to invoke for APK tests.
-    command_line_file: Filename to use to pass arguments to tests.
-  """
+    Args:
+      test_options: A GTestOptions object.
+      device: Device to run the tests.
+      test_package: An instance of TestPackage class.
+    """
 
-  def __init__(self, device, test_suite, test_arguments, timeout,
-               cleanup_test_files, tool_name, build_type,
-               in_webkit_checkout, push_deps, test_apk_package_name=None,
-               test_activity_name=None, command_line_file=None):
-    super(TestRunner, self).__init__(device, tool_name, build_type, push_deps)
-    self._running_on_emulator = self.device.startswith('emulator')
-    self._test_arguments = test_arguments
-    self.in_webkit_checkout = in_webkit_checkout
-    self._cleanup_test_files = cleanup_test_files
+    super(TestRunner, self).__init__(device, test_options.tool,
+                                     test_options.build_type,
+                                     test_options.push_deps,
+                                     test_options.cleanup_test_files)
 
-    logging.warning('Test suite: ' + test_suite)
-    if os.path.splitext(test_suite)[1] == '.apk':
-      self.test_package = test_package_apk.TestPackageApk(
-          self.adb,
-          device,
-          test_suite,
-          timeout,
-          self._cleanup_test_files,
-          self.tool,
-          test_apk_package_name,
-          test_activity_name,
-          command_line_file)
-    else:
-      # Put a copy into the android out/target directory, to allow stack trace
-      # generation.
-      symbols_dir = os.path.join(constants.DIR_SOURCE_ROOT, 'out', build_type,
-                                 'lib.target')
-      self.test_package = test_package_executable.TestPackageExecutable(
-          self.adb,
-          device,
-          test_suite,
-          timeout,
-          self._cleanup_test_files,
-          self.tool,
-          symbols_dir)
+    self.test_package = test_package
+    self.test_package.tool = self.tool
+    self._test_arguments = test_options.test_arguments
+
+    timeout = test_options.timeout
+    if timeout == 0:
+      timeout = 60
+    # On a VM (e.g. chromium buildbots), this timeout is way too small.
+    if os.environ.get('BUILDBOT_SLAVENAME'):
+      timeout = timeout * 2
+
+    self._timeout = timeout * self.tool.GetTimeoutScale()
 
   #override
   def InstallTestPackage(self):
-    self.test_package.StripAndCopyExecutable()
+    self.test_package.Install(self.adb)
+
+  def GetAllTests(self):
+    """Install test package and get a list of all tests."""
+    self.test_package.Install(self.adb)
+    return self.test_package.GetAllTests(self.adb)
 
   #override
   def PushDataDeps(self):
-    self.test_package.PushDataAndPakFiles()
+    self.adb.WaitForSdCardReady(20)
     self.tool.CopyFiles()
-    test_data = _GetDataFilesForTestSuite(self.test_package.test_suite_basename)
-    if test_data:
-      # Make sure SD card is ready.
-      self.adb.WaitForSdCardReady(20)
-      self.CopyTestData(test_data, self.adb.GetExternalStorage())
-    if self.test_package.test_suite_basename == 'webkit_unit_tests':
-      self.PushWebKitUnitTestsData()
+    if os.path.exists(constants.ISOLATE_DEPS_DIR):
+      device_dir = self.adb.GetExternalStorage()
+      # TODO(frankf): linux_dumper_unittest_helper needs to be in the same dir
+      # as breakpad_unittests exe. Find a better way to do this.
+      if self.test_package.suite_name == 'breakpad_unittests':
+        device_dir = constants.TEST_EXECUTABLE_DIR
+      for p in os.listdir(constants.ISOLATE_DEPS_DIR):
+        self.adb.PushIfNeeded(
+            os.path.join(constants.ISOLATE_DEPS_DIR, p),
+            os.path.join(device_dir, p))
 
-  def PushWebKitUnitTestsData(self):
-    """Pushes the webkit_unit_tests data files to the device.
+  def _ParseTestOutput(self, p):
+    """Process the test output.
 
-    The path of this directory is different when the suite is being run as
-    part of a WebKit check-out.
-    """
-    webkit_src = os.path.join(constants.DIR_SOURCE_ROOT, 'third_party',
-                              'WebKit')
-    if self.in_webkit_checkout:
-      webkit_src = os.path.join(constants.DIR_SOURCE_ROOT, '..', '..', '..')
-
-    self.adb.PushIfNeeded(
-        os.path.join(webkit_src, 'Source/WebKit/chromium/tests/data'),
-        os.path.join(
-            self.adb.GetExternalStorage(),
-            'third_party/WebKit/Source/WebKit/chromium/tests/data'))
-
-  # TODO(craigdh): There is no reason for this to be part of TestRunner.
-  def GetDisabledTests(self):
-    """Returns a list of disabled tests.
+    Args:
+      p: An instance of pexpect spawn class.
 
     Returns:
-      A list of disabled tests obtained from 'filter' subdirectory.
+      A TestRunResults object.
     """
-    gtest_filter_base_path = os.path.join(
-        os.path.abspath(os.path.dirname(__file__)),
-        'filter',
-        self.test_package.test_suite_basename)
-    disabled_tests = run_tests_helper.GetExpectations(
-       gtest_filter_base_path + '_disabled')
-    if self._running_on_emulator:
-      # Append emulator's filter file.
-      disabled_tests.extend(run_tests_helper.GetExpectations(
-          gtest_filter_base_path + '_emulator_additional_disabled'))
-    return disabled_tests
+    results = base_test_result.TestRunResults()
+
+    # Test case statuses.
+    re_run = re.compile('\[ RUN      \] ?(.*)\r\n')
+    re_fail = re.compile('\[  FAILED  \] ?(.*)\r\n')
+    re_ok = re.compile('\[       OK \] ?(.*?) .*\r\n')
+
+    # Test run statuses.
+    re_passed = re.compile('\[  PASSED  \] ?(.*)\r\n')
+    re_runner_fail = re.compile('\[ RUNNER_FAILED \] ?(.*)\r\n')
+    # Signal handlers are installed before starting tests
+    # to output the CRASHED marker when a crash happens.
+    re_crash = re.compile('\[ CRASHED      \](.*)\r\n')
+
+    log = ''
+    try:
+      while True:
+        full_test_name = None
+        found = p.expect([re_run, re_passed, re_runner_fail],
+                         timeout=self._timeout)
+        if found == 1:  # re_passed
+          break
+        elif found == 2:  # re_runner_fail
+          break
+        else:  # re_run
+          full_test_name = p.match.group(1).replace('\r', '')
+          found = p.expect([re_ok, re_fail, re_crash], timeout=self._timeout)
+          log = p.before.replace('\r', '')
+          if found == 0:  # re_ok
+            if full_test_name == p.match.group(1).replace('\r', ''):
+              results.AddResult(base_test_result.BaseTestResult(
+                  full_test_name, base_test_result.ResultType.PASS,
+                  log=log))
+          elif found == 2:  # re_crash
+            results.AddResult(base_test_result.BaseTestResult(
+                full_test_name, base_test_result.ResultType.CRASH,
+                log=log))
+            break
+          else:  # re_fail
+            results.AddResult(base_test_result.BaseTestResult(
+                full_test_name, base_test_result.ResultType.FAIL, log=log))
+    except pexpect.EOF:
+      logging.error('Test terminated - EOF')
+      # We're here because either the device went offline, or the test harness
+      # crashed without outputting the CRASHED marker (crbug.com/175538).
+      if not self.adb.IsOnline():
+        raise android_commands.errors.DeviceUnresponsiveError(
+            'Device %s went offline.' % self.device)
+      if full_test_name:
+        results.AddResult(base_test_result.BaseTestResult(
+            full_test_name, base_test_result.ResultType.CRASH,
+            log=p.before.replace('\r', '')))
+    except pexpect.TIMEOUT:
+      logging.error('Test terminated after %d second timeout.',
+                    self._timeout)
+      if full_test_name:
+        results.AddResult(base_test_result.BaseTestResult(
+            full_test_name, base_test_result.ResultType.TIMEOUT,
+            log=p.before.replace('\r', '')))
+    finally:
+      p.close()
+
+    ret_code = self.test_package.GetGTestReturnCode(self.adb)
+    if ret_code:
+      logging.critical(
+          'gtest exit code: %d\npexpect.before: %s\npexpect.after: %s',
+          ret_code, p.before, p.after)
+
+    return results
 
   #override
   def RunTest(self, test):
@@ -315,14 +160,11 @@ class TestRunner(base_test_runner.BaseTestRunner):
       return test_results, None
 
     try:
-      self.test_package.ClearApplicationState()
-      self.test_package.CreateTestRunnerScript(test, self._test_arguments)
-      test_results = self.test_package.RunTestsAndListResults()
-    except errors.DeviceUnresponsiveError as e:
-      # Make sure this device is not attached
-      logging.warning(e)
-      if android_commands.IsDeviceAttached(self.device):
-        raise
+      self.test_package.ClearApplicationState(self.adb)
+      self.test_package.CreateCommandLineFileOnDevice(
+          self.adb, test, self._test_arguments)
+      test_results = self._ParseTestOutput(
+          self.test_package.SpawnTestProcess(self.adb))
     finally:
       self.CleanupSpawningServerState()
     # Calculate unknown test results.
@@ -339,14 +181,13 @@ class TestRunner(base_test_runner.BaseTestRunner):
   def SetUp(self):
     """Sets up necessary test enviroment for the test suite."""
     super(TestRunner, self).SetUp()
-    if _TestSuiteRequiresMockTestServer(self.test_package.test_suite_basename):
+    if _TestSuiteRequiresMockTestServer(self.test_package.suite_name):
       self.LaunchChromeTestServerSpawner()
     self.tool.SetupEnvironment()
 
   #override
   def TearDown(self):
     """Cleans up the test enviroment for the test suite."""
+    self.test_package.ClearApplicationState(self.adb)
     self.tool.CleanUpEnvironment()
-    if self._cleanup_test_files:
-      self.adb.RemovePushedFiles()
     super(TestRunner, self).TearDown()

@@ -56,10 +56,8 @@ string16 GetSyncedStateStatusLabel(ProfileSyncService* service,
                                         user_name);
     } else if (service->IsStartSuppressed()) {
       // User is signed in, but sync has been stopped.
-      return l10n_util::GetStringFUTF16(
-          IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED,
-          user_name,
-          ASCIIToUTF16(chrome::kSyncGoogleDashboardURL));
+      return l10n_util::GetStringFUTF16(IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED,
+                                        user_name);
     }
   }
 
@@ -152,21 +150,22 @@ MessageType GetStatusInfo(ProfileSyncService* service,
       return PRE_SYNCED;
     }
 
-    // No auth in progress check for an auth error.
-    AuthError auth_error = signin.signin_global_error()->GetLastAuthError();
-    if (auth_error.state() != AuthError::NONE) {
-      if (status_label && link_label)
-        signin_ui_util::GetStatusLabelsForAuthError(
-            signin, status_label, link_label);
-      return SYNC_ERROR;
-    }
-
-    // We dont have an auth error. Check for sync errors if the sync service
-    // is enabled.
+    // Check for sync errors if the sync service is enabled.
     if (service) {
+      // Since there is no auth in progress, check for an auth error first.
+      AuthError auth_error =
+          SigninGlobalError::GetForProfile(service->profile())->
+              GetLastAuthError();
+      if (auth_error.state() != AuthError::NONE) {
+        if (status_label && link_label)
+          signin_ui_util::GetStatusLabelsForAuthError(
+              service->profile(), signin, status_label, link_label);
+        return SYNC_ERROR;
+      }
+
+      // We don't have an auth error. Check for an actionable error.
       ProfileSyncService::Status status;
       service->QueryDetailedSyncStatus(&status);
-
       if (ShouldShowActionOnUI(status.sync_protocol_error)) {
         if (status_label) {
           GetStatusForActionableError(status.sync_protocol_error,
@@ -217,7 +216,9 @@ MessageType GetStatusInfo(ProfileSyncService* service,
       result_type = PRE_SYNCED;
       ProfileSyncService::Status status;
       service->QueryDetailedSyncStatus(&status);
-      AuthError auth_error = signin.signin_global_error()->GetLastAuthError();
+      AuthError auth_error =
+          SigninGlobalError::GetForProfile(
+              service->profile())->GetLastAuthError();
       if (status_label) {
         status_label->assign(
             l10n_util::GetStringUTF16(IDS_SYNC_NTP_SETUP_IN_PROGRESS));
@@ -232,7 +233,7 @@ MessageType GetStatusInfo(ProfileSyncService* service,
         if (status_label && link_label) {
           status_label->clear();
           signin_ui_util::GetStatusLabelsForAuthError(
-              signin, status_label, link_label);
+              service->profile(), signin, status_label, link_label);
         }
         result_type = SYNC_ERROR;
       }
@@ -253,8 +254,7 @@ MessageType GetStatusInfo(ProfileSyncService* service,
       if (status_label) {
         string16 label = l10n_util::GetStringFUTF16(
                              IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED,
-                             UTF8ToUTF16(signin.GetAuthenticatedUsername()),
-                             ASCIIToUTF16(chrome::kSyncGoogleDashboardURL));
+                             UTF8ToUTF16(signin.GetAuthenticatedUsername()));
         status_label->assign(label);
         result_type = PRE_SYNCED;
       }

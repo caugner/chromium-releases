@@ -19,11 +19,12 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/bookmarks/bookmark_html_writer.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/bookmarks/bookmark_api_constants.h"
 #include "chrome/browser/extensions/api/bookmarks/bookmark_api_helpers.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -31,18 +32,25 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
 #include "chrome/browser/importer/external_process_importer_host.h"
-#include "chrome/browser/importer/importer_data_types.h"
-#include "chrome/browser/importer/importer_type.h"
+#include "chrome/browser/importer/importer_uma.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/bookmarks.h"
+#include "chrome/common/importer/importer_data_types.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_WIN) && defined(USE_AURA)
+#include "ui/aura/remote_root_window_host_win.h"
+#endif
 
 namespace extensions {
 
@@ -319,13 +327,13 @@ bool BookmarksGetFunction::RunImpl() {
 
   std::vector<linked_ptr<BookmarkTreeNode> > nodes;
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
-  if (params->id_or_id_list.as_array) {
-    std::vector<std::string>* ids = params->id_or_id_list.as_array.get();
-    size_t count = ids->size();
+  if (params->id_or_id_list.as_strings) {
+    std::vector<std::string>& ids = *params->id_or_id_list.as_strings;
+    size_t count = ids.size();
     EXTENSION_FUNCTION_VALIDATE(count > 0);
     for (size_t i = 0; i < count; ++i) {
       int64 id;
-      if (!GetBookmarkIdAsInt64(ids->at(i), &id))
+      if (!GetBookmarkIdAsInt64(ids[i], &id))
         return false;
       const BookmarkNode* node = model->GetNodeByID(id);
       if (!node) {
@@ -937,10 +945,14 @@ void BookmarksIOFunction::ShowSelectFileDialog(
   ui::SelectFileDialog::FileTypeInfo file_type_info;
   file_type_info.extensions.resize(1);
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("html"));
-  // TODO(kinaba): http://crbug.com/140425. Turn file_type_info.support_drive
-  // on for saving once Google Drive client on ChromeOS supports it.
-  if (type == ui::SelectFileDialog::SELECT_OPEN_FILE)
-    file_type_info.support_drive = true;
+  gfx::NativeWindow owning_window = web_contents ?
+      platform_util::GetTopLevel(web_contents->GetView()->GetNativeView())
+          : NULL;
+#if defined(OS_WIN) && defined(USE_AURA)
+  if (!owning_window &&
+      chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH)
+    owning_window = aura::RemoteRootWindowHostWin::Instance()->GetAshWindow();
+#endif
   // |web_contents| can be NULL (for background pages), which is fine. In such
   // a case if file-selection dialogs are forbidden by policy, we will not
   // show an InfoBar, which is better than letting one appear out of the blue.
@@ -950,7 +962,7 @@ void BookmarksIOFunction::ShowSelectFileDialog(
                                   &file_type_info,
                                   0,
                                   base::FilePath::StringType(),
-                                  NULL,
+                                  owning_window,
                                   NULL);
 }
 
@@ -979,7 +991,7 @@ void BookmarksImportFunction::FileSelected(const base::FilePath& path,
   // TODO(jgreenwald): remove ifdef once extensions are no longer built on
   // Android.
   // Deletes itself.
-  ImporterHost* importer_host = new ExternalProcessImporterHost;
+  ExternalProcessImporterHost* importer_host = new ExternalProcessImporterHost;
   importer::SourceProfile source_profile;
   source_profile.importer_type = importer::TYPE_BOOKMARKS_FILE;
   source_profile.source_path = path;

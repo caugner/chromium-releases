@@ -58,10 +58,12 @@ void ContentsView::ChildPreferredSizeChanged(View* child) {
 // MessageCenterBubble /////////////////////////////////////////////////////////
 
 MessageCenterBubble::MessageCenterBubble(MessageCenter* message_center,
-                                         MessageCenterTray* tray)
+                                         MessageCenterTray* tray,
+                                         bool first_item_has_no_margin)
     : MessageBubbleBase(message_center, tray),
       message_center_view_(NULL),
-      initially_settings_visible_(false) {
+      initially_settings_visible_(false),
+      first_item_has_no_margin_(first_item_has_no_margin) {
 }
 
 MessageCenterBubble::~MessageCenterBubble() {
@@ -78,20 +80,25 @@ views::TrayBubbleView::InitParams MessageCenterBubble::GetInitParams(
     views::TrayBubbleView::AnchorAlignment anchor_alignment) {
   views::TrayBubbleView::InitParams init_params =
       GetDefaultInitParams(anchor_alignment);
-  if (IsRichNotificationEnabled()) {
-    init_params.min_width += kMarginBetweenItems * 2;
-    init_params.max_width += kMarginBetweenItems * 2;
-  }
+  init_params.min_width += kMarginBetweenItems * 2;
+  init_params.max_width += kMarginBetweenItems * 2;
   init_params.max_height = max_height();
   init_params.can_activate = true;
+  init_params.first_item_has_no_margin = first_item_has_no_margin_;
   return init_params;
 }
 
 void MessageCenterBubble::InitializeContents(
     views::TrayBubbleView* new_bubble_view) {
   set_bubble_view(new_bubble_view);
+  bubble_view()->GetWidget()->AddObserver(this);
   message_center_view_ = new MessageCenterView(
-      message_center(), tray(), max_height(), initially_settings_visible_);
+      message_center(),
+      tray(),
+      max_height(),
+      initially_settings_visible_,
+      false /* MessageCenterBubble should be used only on ChromeOS.
+               Message center is never shown top down in ChromeOS. */);
   bubble_view()->AddChildView(new ContentsView(this, message_center_view_));
   // Resize the content of the bubble view to the given bubble size. This is
   // necessary in case of the bubble border forcing a bigger size then the
@@ -112,6 +119,12 @@ void MessageCenterBubble::UpdateBubbleView() {
   message_center_view_->SetNotifications(notifications);
   bubble_view()->GetWidget()->Show();
   bubble_view()->UpdateBubble();
+}
+
+void MessageCenterBubble::OnWidgetClosing(views::Widget* widget) {
+  bubble_view()->GetWidget()->RemoveObserver(this);
+  if (message_center_view_)
+    message_center_view_->SetIsClosing(true);
 }
 
 void MessageCenterBubble::OnMouseEnteredView() {

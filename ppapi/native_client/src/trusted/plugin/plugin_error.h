@@ -98,6 +98,7 @@ enum PluginErrorCode {
   ERROR_PNACL_NOT_ENABLED = 68,
   ERROR_MANIFEST_NOACCESS_URL = 69,
   ERROR_NEXE_NOACCESS_URL = 70,
+  ERROR_PNACL_CRASH_THROTTLED = 71,
   // If you add a code, read the enum comment above on how to update histograms.
   ERROR_MAX
 };
@@ -115,6 +116,20 @@ class ErrorInfo {
   void SetReport(PluginErrorCode error_code, const std::string& message) {
     error_code_ = error_code;
     message_ = message;
+    console_message_ = message;
+  }
+
+  // console_message is a part of the error that is logged to
+  // the JavaScript console but is not reported to JavaScript via
+  // the lastError property.  This is used to report internal errors which
+  // may easily change in new versions of the browser and we don't want apps
+  // to come to depend on the details of these errors.
+  void SetReportWithConsoleOnlyError(PluginErrorCode error_code,
+                                     const std::string& message,
+                                     const std::string& console_message) {
+    error_code_ = error_code;
+    message_ = message;
+    console_message_ = message + "; " + console_message;
   }
 
   PluginErrorCode error_code() const {
@@ -123,15 +138,21 @@ class ErrorInfo {
 
   void PrependMessage(const std::string& prefix) {
     message_ = prefix + message_;
+    console_message_ = prefix + console_message_;
   }
 
   const std::string& message() const {
     return message_;
   }
 
+  const std::string& console_message() const {
+    return console_message_;
+  }
+
  private:
   PluginErrorCode error_code_;
   std::string message_;
+  std::string console_message_;
   NACL_DISALLOW_COPY_AND_ASSIGN(ErrorInfo);
 };
 

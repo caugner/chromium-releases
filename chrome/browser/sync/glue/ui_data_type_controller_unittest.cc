@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/tracked_objects.h"
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/fake_generic_change_processor.h"
@@ -166,7 +166,10 @@ TEST_F(SyncUIDataTypeControllerTest, StartAssociationFailed) {
   EXPECT_CALL(start_callback_,
               Run(DataTypeController::ASSOCIATION_FAILED, _, _));
   syncable_service_.set_merge_data_and_start_syncing_error(
-      syncer::SyncError(FROM_HERE, "Error", type_));
+      syncer::SyncError(FROM_HERE,
+                        syncer::SyncError::DATATYPE_ERROR,
+                        "Error",
+                        type_));
 
   EXPECT_EQ(DataTypeController::NOT_RUNNING, preference_dtc_->state());
   EXPECT_FALSE(syncable_service_.syncing());

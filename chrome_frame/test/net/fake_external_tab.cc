@@ -39,6 +39,7 @@
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_content_client.h"
@@ -72,6 +73,11 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/resource/resource_bundle_win.h"
 #include "ui/base/ui_base_paths.h"
+
+#if defined(USE_AURA)
+#include "ui/gfx/screen.h"
+#include "ui/views/widget/desktop_aura/desktop_screen.h"
+#endif
 
 using content::BrowserThread;
 
@@ -257,9 +263,11 @@ void FilterDisabledTests() {
     // certs. So these tests time out waiting for user input. The
     // functionality they test (HTTP Strict Transport Security and
     // HTTP-based Public Key Pinning) does not work in Chrome Frame anyway.
+    "URLRequestTestHTTP.ProcessPKP",
     "URLRequestTestHTTP.ProcessSTS",
     "URLRequestTestHTTP.ProcessSTSOnce",
     "URLRequestTestHTTP.ProcessSTSAndPKP",
+    "URLRequestTestHTTP.ProcessSTSAndPKP2",
 
     // These tests have been disabled as the Chrome cookie policies don't make
     // sense or have not been implemented for the host network stack.
@@ -317,6 +325,7 @@ void FilterDisabledTests() {
     "HTTPSRequestTest.SSLSessionCacheShardTest",
     "HTTPSRequestTest.SSLv3Fallback",
     "HTTPSRequestTest.TLSv1Fallback",
+    "HTTPSHardFailTest.*",
     "HTTPSOCSPTest.*",
     "HTTPSEVCRLSetTest.*",
     "HTTPSCRLSetTest.*",
@@ -473,10 +482,10 @@ BOOL SupplyProxyCredentials::EnumChildren(HWND hwnd, LPARAM param) {
 FakeExternalTab::FakeExternalTab() {
   user_data_dir_ = chrome_frame_test::GetProfilePathForIE();
 
-  if (file_util::PathExists(user_data_dir_)) {
+  if (base::PathExists(user_data_dir_)) {
     VLOG(1) << __FUNCTION__ << " deleting IE Profile user data directory "
             << user_data_dir_.value();
-    bool deleted = file_util::Delete(user_data_dir_, true);
+    bool deleted = base::DeleteFile(user_data_dir_, true);
     LOG_IF(ERROR, !deleted) << "Failed to delete user data directory directory "
                             << user_data_dir_.value();
   }
@@ -537,8 +546,12 @@ void FakeExternalTab::Initialize() {
 }
 
 void FakeExternalTab::InitializePostThreadsCreated() {
+#if defined(USE_AURA)
+  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE,
+                                 views::CreateDesktopScreen());
+#endif
   base::FilePath profile_path(
-      ProfileManager::GetDefaultProfileDir(user_data()));
+      profiles::GetDefaultProfileDir(user_data()));
   Profile* profile =
       g_browser_process->profile_manager()->GetProfile(profile_path);
 }
@@ -890,7 +903,7 @@ void CFUrlRequestUnittestRunner::StopFileLogger(bool print) {
     }
   }
 
-  if (!log_file_.empty() && !file_util::Delete(log_file_, false))
+  if (!log_file_.empty() && !base::DeleteFile(log_file_, false))
     LOG(ERROR) << "Failed to delete log file " << log_file_.value();
 
   log_file_.clear();

@@ -13,9 +13,11 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -118,7 +120,7 @@ bool CreateTargetFolder(const base::FilePath& path, RankCrashes action,
 
   *full_path = path.AppendASCII(folders[action]);
 
-  if (file_util::PathExists(*full_path))
+  if (base::PathExists(*full_path))
     return false;
 
   return file_util::CreateDirectory(*full_path);

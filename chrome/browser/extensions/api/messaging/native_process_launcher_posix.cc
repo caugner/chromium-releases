@@ -8,8 +8,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/process_util.h"
-#include "chrome/browser/extensions/api/messaging/native_messaging_host_manifest.h"
+#include "base/process/launch.h"
 
 namespace extensions {
 
@@ -29,14 +28,11 @@ const char kNativeMessagingDirectory[] =
 }  // namespace
 
 // static
-scoped_ptr<NativeMessagingHostManifest>
-NativeProcessLauncher::FindAndLoadManifest(
+base::FilePath NativeProcessLauncher::FindManifest(
     const std::string& native_host_name,
     std::string* error_message) {
-  base::FilePath manifest_path =
-      base::FilePath(kNativeMessagingDirectory).Append(
-          native_host_name + ".json");
-  return NativeMessagingHostManifest::Load(manifest_path, error_message);
+  return base::FilePath(kNativeMessagingDirectory).Append(
+      native_host_name + ".json");
 }
 
 // static

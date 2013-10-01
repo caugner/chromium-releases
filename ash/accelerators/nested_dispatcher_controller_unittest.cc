@@ -9,7 +9,7 @@
 #include "ash/test/ash_test_base.h"
 #include "base/bind.h"
 #include "base/event_types.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ui/aura/client/dispatcher_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/test_windows.h"
@@ -35,7 +35,7 @@ class MockDispatcher : public base::MessageLoop::Dispatcher {
 
   int num_key_events_dispatched() { return num_key_events_dispatched_; }
 
-#if defined(OS_WIN) || defined(USE_X11) || defined(USE_MESSAGEPUMP_LINUX)
+#if defined(OS_WIN) || defined(USE_X11) || defined(USE_OZONE)
   virtual bool Dispatch(const base::NativeEvent& event) OVERRIDE {
     if (ui::EventTypeFromNative(event) == ui::ET_KEY_RELEASED)
       num_key_events_dispatched_++;

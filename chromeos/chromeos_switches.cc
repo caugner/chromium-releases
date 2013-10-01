@@ -24,8 +24,8 @@ const char kChromeOSReleaseBoard[] = "chromeos-release-board";
 // Forces the stub implementation of dbus clients.
 const char kDbusStub[] = "dbus-stub";
 
-// Disables Kiosk app mode for ChromeOS.
-const char kDisableAppMode[]                = "disable-app-mode";
+// All stub networks are idle by default.
+const char kDefaultStubNetworkStateIdle[] = "default-stub-network-state-idle";
 
 // Disables wallpaper boot animation (except of OOBE case).
 const char kDisableBootAnimation[]          = "disable-boot-animation";
@@ -43,6 +43,9 @@ const char kDisableLocalAccounts[]          = "disable-local-accounts";
 
 // Avoid doing expensive animations upon login.
 const char kDisableLoginAnimations[]        = "disable-login-animations";
+
+// Disable new channel switcher UI.
+const char kDisableNewChannelSwitcherUI[]   = "disable-new-channel-switcher-ui";
 
 // Disable Quickoffice component app thus handlers won't be registered so
 // it will be possible to install another version as normal app for testing.
@@ -82,23 +85,18 @@ const char kEnableChromeAudioSwitching[] = "enable-chrome-audio-switching";
 const char kEnableChromeCaptivePortalDetector[] =
     "enable-chrome-captive-portal-detector";
 
-// Disables the new NetworkChangeNotifier which uses NetworkStateHandler.
-const char kDisableNewNetworkChangeNotifier[] =
-    "disable-new-network-change-notifier";
-
 // Enables screensaver extensions.
 const char kEnableScreensaverExtensions[] = "enable-screensaver-extensions";
 
 // Enable "interactive" mode for stub implemenations (e.g. NetworkStateHandler)
 const char kEnableStubInteractive[] = "enable-stub-interactive";
 
+// Enable stub portalled wifi network for testing.
+const char kEnableStubPortalledWifi[] = "enable-stub-portalled-wifi";
+
 // Enables touchpad three-finger-click as middle button.
 const char kEnableTouchpadThreeFingerClick[]
     = "enable-touchpad-three-finger-click";
-
-// Enables touchpad three-finger swipe.
-const char kEnableTouchpadThreeFingerSwipe[]
-    = "enable-touchpad-three-finger-swipe";
 
 // Enable Kiosk mode for ChromeOS. Note this switch refers to retail mode rather
 // than the kiosk app mode.
@@ -124,11 +122,13 @@ const char kEnterpriseEnrollmentModulusLimit[] =
 // Shows the selecting checkboxes in the Files.app.
 const char kFileManagerShowCheckboxes[]     = "file-manager-show-checkboxes";
 
-// Enables the sharing feature in the Files.app.
-const char kFileManagerEnableSharing[]      = "file-manager-enable-sharing";
+// Enables the webstore integration feature in the Files.app.
+const char kFileManagerEnableWebstoreIntegration[] =
+    "file-manager-enable-webstore-integration";
 
-// Passed to Chrome on first boot. Not passed on restart after sign out.
-const char kFirstBoot[]                     = "first-boot";
+// Passed to Chrome the first time that it's run after the system boots.
+// Not passed on restart after sign out.
+const char kFirstExecAfterBoot[]            = "first-exec-after-boot";
 
 // Usually in browser tests the usual login manager bringup is skipped so that
 // tests can change how it's brought up. This flag disables that.
@@ -171,10 +171,12 @@ const char kNaturalScrollDefault[]          = "enable-natural-scroll-default";
 // out-of-memory process killer.
 const char kNoDiscardTabs[]                 = "no-discard-tabs";
 
-#ifndef NDEBUG
+// Disables recording of swap and CPU utilization metrics logging after tab
+// switch and scroll events.
+const char kNoSwapMetrics[]                 = "no-swap-metrics";
+
 // Skips all other OOBE pages after user login.
 const char kOobeSkipPostLogin[]             = "oobe-skip-postlogin";
-#endif  // NDEBUG
 
 // Skips the machine hwid check. Useful for running in VMs because they have no
 // hwid.
@@ -192,9 +194,6 @@ const char kStubCrosSettings[]              = "stub-cros-settings";
 // NetworkConfigurationHandler singletons.
 const char kUseNewNetworkConfigurationHandlers[] =
     "use-new-network-configuration-handlers";
-
-const char kUseNewNetworkConnectionHandler[] =
-    "use-new-network-connection-handler";
 
 }  // namespace switches
 }  // namespace chromeos

@@ -98,8 +98,10 @@ class StoragePartitionShaderClearTest : public testing::Test {
 void ClearData(content::StoragePartitionImpl* sp,
                const base::Closure& cb) {
   base::Time time;
-  sp->AsyncClearDataBetween(content::StoragePartition::kShaderStorage,
-                           time, time, cb);
+  sp->ClearDataForRange(
+      StoragePartition::REMOVE_DATA_MASK_SHADER_CACHE,
+      StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL,
+      time, time, cb);
 }
 
 TEST_F(StoragePartitionShaderClearTest, ClearShaderCache) {
@@ -107,10 +109,10 @@ TEST_F(StoragePartitionShaderClearTest, ClearShaderCache) {
   EXPECT_EQ(1u, Size());
 
   TestClosureCallback clear_cb;
-  StoragePartitionImpl sp(cache_path(), NULL, NULL, NULL, NULL, NULL, NULL);
+  StoragePartitionImpl sp(
+      cache_path(), NULL, NULL, NULL, NULL, NULL, NULL, NULL);
   base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&ClearData, &sp, clear_cb.callback()));
+      FROM_HERE, base::Bind(&ClearData, &sp, clear_cb.callback()));
   clear_cb.WaitForResult();
   EXPECT_EQ(0u, Size());
 }

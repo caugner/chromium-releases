@@ -102,7 +102,6 @@ bool Socket::InitSocketInternal() {
   int reuse_addr = 1;
   setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
              &reuse_addr, sizeof(reuse_addr));
-  tools::DeferAccept(socket_);
   return true;
 }
 
@@ -154,7 +153,7 @@ bool Socket::InitTcpSocket(const std::string& host, int port) {
 bool Socket::BindAndListen() {
   errno = 0;
   if (HANDLE_EINTR(bind(socket_, addr_ptr_, addr_len_)) < 0 ||
-      HANDLE_EINTR(listen(socket_, 5)) < 0) {
+      HANDLE_EINTR(listen(socket_, SOMAXCONN)) < 0) {
     SetSocketError();
     return false;
   }
@@ -222,7 +221,7 @@ bool Socket::Connect() {
   }
   int socket_errno;
   socklen_t opt_len = sizeof(socket_errno);
-  if (!getsockopt(socket_, SOL_SOCKET, SO_ERROR, &socket_errno, &opt_len) < 0) {
+  if (getsockopt(socket_, SOL_SOCKET, SO_ERROR, &socket_errno, &opt_len) < 0) {
     LOG(ERROR) << "getsockopt(): " << safe_strerror(errno);
     SetSocketError();
     PRESERVE_ERRNO_HANDLE_EINTR(fcntl(socket_, F_SETFL, kFlags));
@@ -249,6 +248,7 @@ bool Socket::Resolve(const std::string& host) {
   int errcode = getaddrinfo(host.c_str(), NULL, &hints, &res);
   if (errcode != 0) {
     SetSocketError();
+    freeaddrinfo(res);
     return false;
   }
   family_ = res->ai_family;
@@ -264,6 +264,7 @@ bool Socket::Resolve(const std::string& host) {
              sizeof(sockaddr_in6));
       break;
   }
+  freeaddrinfo(res);
   return true;
 }
 

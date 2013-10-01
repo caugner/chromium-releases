@@ -12,7 +12,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
-#include "base/time.h"
+#include "base/time/time.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/invalidation/invalidation_service_factory.h"
 #include "chrome/browser/password_manager/mock_password_store.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
@@ -29,7 +31,6 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/profile_mock.h"
 #include "content/public/browser/notification_source.h"
@@ -153,8 +154,9 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
 
   virtual void SetUp() {
     AbstractProfileSyncServiceTest::SetUp();
-    profile_.reset(new ProfileMock);
-    profile_->CreateRequestContext();
+    profile_.reset(new ProfileMock());
+    invalidation::InvalidationServiceFactory::GetInstance()->
+        SetBuildOnlyFakeInvalidatorsForTest(true);
     password_store_ = static_cast<MockPasswordStore*>(
         PasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
             profile_.get(), MockPasswordStore::Build).get());
@@ -165,7 +167,6 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
       password_store_->ShutdownOnUIThread();
       ProfileSyncServiceFactory::GetInstance()->SetTestingFactory(
           profile_.get(), NULL);
-      profile_->ResetRequestContext();
       profile_.reset();
       AbstractProfileSyncServiceTest::TearDown();
   }
@@ -187,7 +188,7 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
     if (!sync_service_) {
       SigninManagerBase* signin =
           SigninManagerFactory::GetForProfile(profile_.get());
-      signin->SetAuthenticatedUsername("test_user");
+      signin->SetAuthenticatedUsername("test_user@gmail.com");
       token_service_ = static_cast<TokenService*>(
           TokenServiceFactory::GetInstance()->SetTestingFactoryAndUse(
               profile_.get(), BuildTokenService));

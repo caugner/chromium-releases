@@ -9,35 +9,63 @@
 #include "cc/output/begin_frame_args.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/context_provider.h"
+#include "cc/output/managed_memory_policy.h"
 #include "cc/output/output_surface_client.h"
 #include "cc/output/software_output_device.h"
 #include "content/browser/android/in_process/synchronous_compositor_impl.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/public/browser/browser_thread.h"
+#include "gpu/command_buffer/client/gl_in_process_context.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkDevice.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/transform.h"
-#include "ui/gl/gl_context.h"
+#include "ui/gl/gl_surface.h"
 #include "webkit/common/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 
-using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
 
 namespace content {
 
 namespace {
 
-// TODO(boliu): RenderThreadImpl should create in process contexts as well.
-scoped_ptr<WebKit::WebGraphicsContext3D> CreateWebGraphicsContext3D() {
+scoped_ptr<WebKit::WebGraphicsContext3D> CreateWebGraphicsContext3D(
+    scoped_refptr<gfx::GLSurface> surface) {
+  using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
+  if (!gfx::GLSurface::InitializeOneOff())
+    return scoped_ptr<WebKit::WebGraphicsContext3D>();
+
+  const char* allowed_extensions = "*";
+  const gfx::GpuPreference gpu_preference = gfx::PreferDiscreteGpu;
+
   WebKit::WebGraphicsContext3D::Attributes attributes;
   attributes.antialias = false;
   attributes.shareResources = true;
   attributes.noAutomaticFlushes = true;
 
+  gpu::GLInProcessContextAttribs in_process_attribs;
+  WebGraphicsContext3DInProcessCommandBufferImpl::ConvertAttributes(
+      attributes, &in_process_attribs);
+  scoped_ptr<gpu::GLInProcessContext> context(
+      gpu::GLInProcessContext::CreateWithSurface(surface,
+                                                 attributes.shareResources,
+                                                 allowed_extensions,
+                                                 in_process_attribs,
+                                                 gpu_preference));
+
+  if (!context.get())
+    return scoped_ptr<WebKit::WebGraphicsContext3D>();
+
   return scoped_ptr<WebKit::WebGraphicsContext3D>(
-      WebGraphicsContext3DInProcessCommandBufferImpl
-          ::CreateViewContext(attributes, NULL));
+      WebGraphicsContext3DInProcessCommandBufferImpl::WrapContext(
+          context.Pass(), attributes));
+}
+
+void DidActivatePendingTree(int routing_id) {
+  SynchronousCompositorOutputSurfaceDelegate* delegate =
+      SynchronousCompositorImpl::FromRoutingID(routing_id);
+  if (delegate)
+    delegate->DidActivatePendingTree();
 }
 
 } // namespace
@@ -86,6 +114,7 @@ SynchronousCompositorOutputSurface::SynchronousCompositorOutputSurface(
       did_swap_buffer_(false),
       current_sw_canvas_(NULL) {
   capabilities_.deferred_gl_initialization = true;
+  capabilities_.draw_and_swap_full_viewport_every_frame = true;
   capabilities_.adjust_deadline_for_parent = false;
   // Cannot call out to GetDelegate() here as the output surface is not
   // constructed on the correct thread.
@@ -111,9 +140,21 @@ bool SynchronousCompositorOutputSurface::BindToClient(
   DCHECK(CalledOnValidThread());
   if (!cc::OutputSurface::BindToClient(surface_client))
     return false;
+  surface_client->SetTreeActivationCallback(
+      base::Bind(&DidActivatePendingTree, routing_id_));
   SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
   if (delegate)
     delegate->DidBindOutputSurface(this);
+
+  const int bytes_limit = 64 * 1024 * 1024;
+  const int num_resources_limit = 100;
+  surface_client->SetMemoryPolicy(
+      cc::ManagedMemoryPolicy(bytes_limit,
+                              cc::ManagedMemoryPolicy::CUTOFF_ALLOW_EVERYTHING,
+                              0,
+                              cc::ManagedMemoryPolicy::CUTOFF_ALLOW_NOTHING,
+                              num_resources_limit));
+
   return true;
 }
 
@@ -154,39 +195,37 @@ void AdjustTransformForClip(gfx::Transform* transform, gfx::Rect clip) {
 }
 } // namespace
 
-bool SynchronousCompositorOutputSurface::InitializeHwDraw() {
+bool SynchronousCompositorOutputSurface::InitializeHwDraw(
+    scoped_refptr<gfx::GLSurface> surface,
+    scoped_refptr<cc::ContextProvider> offscreen_context) {
   DCHECK(CalledOnValidThread());
   DCHECK(HasClient());
   DCHECK(!context3d_);
+  DCHECK(surface);
 
-  // TODO(boliu): Get a context provider in constructor and pass here.
-  return InitializeAndSetContext3D(CreateWebGraphicsContext3D().Pass(),
-                                   scoped_refptr<cc::ContextProvider>());
+  return InitializeAndSetContext3D(
+      CreateWebGraphicsContext3D(surface).Pass(), offscreen_context);
+}
+
+void SynchronousCompositorOutputSurface::ReleaseHwDraw() {
+  cc::OutputSurface::ReleaseGL();
 }
 
 bool SynchronousCompositorOutputSurface::DemandDrawHw(
     gfx::Size surface_size,
     const gfx::Transform& transform,
-    gfx::Rect clip) {
+    gfx::Rect clip,
+    bool stencil_enabled) {
   DCHECK(CalledOnValidThread());
   DCHECK(HasClient());
   DCHECK(context3d());
-
-  // Force a GL state restore next time a GLContextVirtual is made current.
-  // TODO(boliu): Move this to the end of this function after we have fixed
-  // all cases of MakeCurrent calls outside of draws. Tracked in
-  // crbug.com/239856.
-  gfx::GLContext* current_context = gfx::GLContext::GetCurrent();
-  if (current_context)
-    current_context->ReleaseCurrent(NULL);
 
   gfx::Transform adjusted_transform = transform;
   AdjustTransformForClip(&adjusted_transform, clip);
   surface_size_ = surface_size;
   SetExternalDrawConstraints(adjusted_transform, clip);
+  SetExternalStencilTest(stencil_enabled);
   InvokeComposite(clip.size());
-
-  // TODO(boliu): Check if context is lost here.
 
   return did_swap_buffer_;
 }
@@ -208,6 +247,7 @@ bool SynchronousCompositorOutputSurface::DemandDrawSw(SkCanvas* canvas) {
   surface_size_ = gfx::Size(canvas->getDeviceSize().width(),
                             canvas->getDeviceSize().height());
   SetExternalDrawConstraints(transform, clip);
+  SetExternalStencilTest(false);
 
   InvokeComposite(clip.size());
 

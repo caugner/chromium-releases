@@ -7,7 +7,7 @@
 #include "base/stl_util.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/notification.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 BalloonCollectionBase::BalloonCollectionBase() {
 }
@@ -35,13 +35,15 @@ void BalloonCollectionBase::Remove(Balloon* balloon) {
   }
 }
 
-bool BalloonCollectionBase::DoesIdExist(const std::string& id) {
-  Balloons::iterator iter;
+const Notification* BalloonCollectionBase::FindById(
+    const std::string& id) const {
+  Balloons::const_iterator iter;
   for (iter = balloons_.begin(); iter != balloons_.end(); ++iter) {
-    if ((*iter)->notification().notification_id() == id)
-      return true;
+    if ((*iter)->notification().notification_id() == id) {
+      return &((*iter)->notification());
+    }
   }
-  return false;
+  return NULL;
 }
 
 bool BalloonCollectionBase::CloseById(const std::string& id) {

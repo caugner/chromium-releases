@@ -4,7 +4,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "jingle/glue/channel_socket_adapter.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -37,7 +37,7 @@ class MockTransportChannel : public cricket::TransportChannel {
   MOCK_METHOD3(SendPacket, int(const char* data, size_t len, int flags));
   MOCK_METHOD2(SetOption, int(talk_base::Socket::Option opt, int value));
   MOCK_METHOD0(GetError, int());
-  MOCK_CONST_METHOD0(GetRole, cricket::TransportRole());
+  MOCK_CONST_METHOD0(GetIceRole, cricket::IceRole());
 };
 
 class TransportChannelSocketAdapterTest : public testing::Test {

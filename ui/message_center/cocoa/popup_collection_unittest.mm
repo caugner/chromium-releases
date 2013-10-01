@@ -6,7 +6,7 @@
 
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -16,12 +16,6 @@
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/notification.h"
-
-@implementation MCNotificationController (TestingInterface)
-- (NSImageView*)iconView {
-  return icon_.get();
-}
-@end
 
 class PopupCollectionTest : public ui::CocoaTest {
  public:

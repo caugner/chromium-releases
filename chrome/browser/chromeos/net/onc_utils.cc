@@ -6,13 +6,15 @@
 
 #include "base/logging.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/login/user.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/ui_proxy_config.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chromeos/network/onc/onc_utils.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/host_port_pair.h"
 #include "net/proxy/proxy_bypass_rules.h"
 #include "net/proxy/proxy_server.h"
+#include "url/gurl.h"
 
 namespace chromeos {
 namespace onc {
@@ -123,6 +125,58 @@ scoped_ptr<base::DictionaryValue> ConvertOncProxySettingsToProxyConfig(
     NOTREACHED();
   }
   return proxy_dict.Pass();
+}
+
+namespace {
+
+// This class defines which string placeholders of ONC are replaced by which
+// user attribute.
+class UserStringSubstitution : public chromeos::onc::StringSubstitution {
+ public:
+  explicit UserStringSubstitution(const chromeos::User* user) : user_(user) {}
+  virtual ~UserStringSubstitution() {}
+
+  virtual bool GetSubstitute(const std::string& placeholder,
+                             std::string* substitute) const OVERRIDE {
+    if (placeholder == chromeos::onc::substitutes::kLoginIDField)
+      *substitute = user_->GetAccountName(false);
+    else if (placeholder == chromeos::onc::substitutes::kEmailField)
+      *substitute = user_->email();
+    else
+      return false;
+    return true;
+  }
+
+ private:
+  const chromeos::User* user_;
+
+  DISALLOW_COPY_AND_ASSIGN(UserStringSubstitution);
+};
+
+const chromeos::User* GetLoggedInUserByHash(const std::string& userhash) {
+  const chromeos::UserList& users =
+      chromeos::UserManager::Get()->GetLoggedInUsers();
+  for (chromeos::UserList::const_iterator it = users.begin(); it != users.end();
+       ++it) {
+    if ((*it)->username_hash() == userhash)
+      return *it;
+  }
+  return NULL;
+}
+
+}  // namespace
+
+void ExpandStringPlaceholdersInNetworksForUser(
+    const std::string& hashed_username,
+    base::ListValue* network_configs) {
+  const chromeos::User* user = GetLoggedInUserByHash(hashed_username);
+  if (!user) {
+    // In tests no user may be logged in. It's not harmful if we just don't
+    // expand the strings.
+    return;
+  }
+  UserStringSubstitution substitution(user);
+  chromeos::onc::ExpandStringsInNetworks(substitution, network_configs);
 }
 
 }  // namespace onc

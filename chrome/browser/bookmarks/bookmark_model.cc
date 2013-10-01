@@ -15,21 +15,20 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_index.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/bookmarks/bookmark_title_match.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_changed_details.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/favicon/favicon_types.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/favicon/favicon_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
@@ -262,8 +261,8 @@ void BookmarkModel::Load(
     return;
   }
 
-  expanded_state_tracker_.reset(new BookmarkExpandedStateTracker(
-      profile_, this));
+  expanded_state_tracker_.reset(
+      new BookmarkExpandedStateTracker(this, profile_->GetPrefs()));
 
   // Listen for changes to favicons so that we can update the favicon of the
   // node appropriately.
@@ -676,7 +675,7 @@ void BookmarkModel::SortChildren(const BookmarkNode* parent) {
 
 void BookmarkModel::ReorderChildren(
     const BookmarkNode* parent,
-    const std::vector<BookmarkNode*>& ordered_nodes) {
+    const std::vector<const BookmarkNode*>& ordered_nodes) {
   // Ensure that all children in |parent| are in |ordered_nodes|.
   DCHECK_EQ(static_cast<size_t>(parent->child_count()), ordered_nodes.size());
   for (size_t i = 0; i < ordered_nodes.size(); ++i)
@@ -685,7 +684,8 @@ void BookmarkModel::ReorderChildren(
   FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
                     OnWillReorderBookmarkNode(this, parent));
 
-  AsMutable(parent)->SetChildren(ordered_nodes);
+  AsMutable(parent)->SetChildren(
+      *(reinterpret_cast<const std::vector<BookmarkNode*>*>(&ordered_nodes)));
 
   if (store_.get())
     store_->ScheduleSave();

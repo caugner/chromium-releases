@@ -98,6 +98,10 @@ class CalloutWidgetBackground : public views::Background {
     canvas->DrawPath(path, paint);
   }
 
+  ShelfAlignment alignment() {
+    return alignment_;
+  }
+
   void set_alignment(ShelfAlignment alignment) {
     alignment_ = alignment;
   }
@@ -216,14 +220,17 @@ class PanelCalloutWidget : public views::Widget {
       callout_bounds.set_height(kArrowWidth);
     }
     GetNativeWindow()->SetBounds(callout_bounds);
-    background_->set_alignment(alignment);
+    if (background_->alignment() != alignment) {
+      background_->set_alignment(alignment);
+      SchedulePaintInRect(gfx::Rect(gfx::Point(), callout_bounds.size()));
+    }
   }
 
  private:
   void InitWidget(aura::Window* parent) {
     views::Widget::InitParams params;
     params.type = views::Widget::InitParams::TYPE_POPUP;
-    params.transparent = true;
+    params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
     params.can_activate = false;
     params.keep_on_top = true;
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
@@ -263,21 +270,18 @@ PanelLayoutManager::PanelLayoutManager(aura::Window* panel_container)
   DCHECK(panel_container);
   aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
       AddObserver(this);
+  Shell::GetInstance()->display_controller()->AddObserver(this);
   Shell::GetInstance()->AddShellObserver(this);
 }
 
 PanelLayoutManager::~PanelLayoutManager() {
-  if (launcher_)
-    launcher_->RemoveIconObserver(this);
-  if (shelf_layout_manager_)
-    shelf_layout_manager_->RemoveObserver(this);
   Shutdown();
-  aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
-      RemoveObserver(this);
-  Shell::GetInstance()->RemoveShellObserver(this);
 }
 
 void PanelLayoutManager::Shutdown() {
+  if (shelf_layout_manager_)
+    shelf_layout_manager_->RemoveObserver(this);
+  shelf_layout_manager_ = NULL;
   for (PanelList::iterator iter = panel_windows_.begin();
        iter != panel_windows_.end(); ++iter) {
     delete iter->callout_widget;
@@ -286,6 +290,10 @@ void PanelLayoutManager::Shutdown() {
   if (launcher_)
     launcher_->RemoveIconObserver(this);
   launcher_ = NULL;
+  aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
+      RemoveObserver(this);
+  Shell::GetInstance()->display_controller()->RemoveObserver(this);
+  Shell::GetInstance()->RemoveShellObserver(this);
 }
 
 void PanelLayoutManager::StartDragging(aura::Window* panel) {
@@ -480,6 +488,13 @@ void PanelLayoutManager::OnWindowActivated(aura::Window* gained_active,
     UpdateStacking(gained_active);
     UpdateCallouts();
   }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// PanelLayoutManager, DisplayController::Observer implementation:
+
+void PanelLayoutManager::OnDisplayConfigurationChanged() {
+  Relayout();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -704,6 +719,10 @@ void PanelLayoutManager::UpdateStacking(aura::Window* active_panel) {
     active_panel = last_active_panel_;
   }
 
+  ShelfAlignment alignment = launcher_->alignment();
+  bool horizontal = alignment == SHELF_ALIGNMENT_TOP ||
+                    alignment == SHELF_ALIGNMENT_BOTTOM;
+
   // We want to to stack the panels like a deck of cards:
   // ,--,--,--,-------.--.--.
   // |  |  |  |       |  |  |
@@ -717,7 +736,9 @@ void PanelLayoutManager::UpdateStacking(aura::Window* active_panel) {
   for (PanelList::const_iterator it = panel_windows_.begin();
        it != panel_windows_.end(); ++it) {
     gfx::Rect bounds = it->window->bounds();
-    window_ordering.insert(std::make_pair(bounds.x() + bounds.width() / 2,
+    window_ordering.insert(std::make_pair(horizontal ?
+                                              bounds.x() + bounds.width() / 2 :
+                                              bounds.y() + bounds.height() / 2,
                                           it->window));
   }
 

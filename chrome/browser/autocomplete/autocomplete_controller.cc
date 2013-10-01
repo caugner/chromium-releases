@@ -13,7 +13,7 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "chrome/browser/autocomplete/bookmark_provider.h"
 #include "chrome/browser/autocomplete/builtin_provider.h"
@@ -24,11 +24,11 @@
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/autocomplete/shortcuts_provider.h"
 #include "chrome/browser/autocomplete/zero_suggest_provider.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
@@ -151,12 +151,6 @@ AutocompleteController::AutocompleteController(
   bool use_hqp = !!(provider_types & AutocompleteProvider::TYPE_HISTORY_QUICK);
   // TODO(mrossetti): Permanently modify the HistoryURLProvider to not search
   // titles once HQP is turned on permanently.
-  // History quick provider can be used on all platforms other than Android.
-  // TODO(jcivelli): Enable the History Quick Provider and figure out why it
-  // reports the wrong results for some pages.
-#if defined(OS_ANDROID)
-  use_hqp = false;
-#endif
 
   if (provider_types & AutocompleteProvider::TYPE_BUILTIN)
     providers_.push_back(new BuiltinProvider(this, profile));
@@ -309,12 +303,15 @@ void AutocompleteController::Stop(bool clear_result) {
   }
 }
 
-void AutocompleteController::StartZeroSuggest(const GURL& url,
-                                              const string16& permanent_text) {
+void AutocompleteController::StartZeroSuggest(
+    const GURL& url,
+    AutocompleteInput::PageClassification page_classification,
+    const string16& permanent_text) {
   if (zero_suggest_provider_ != NULL) {
     DCHECK(!in_start_);  // We should not be already running a query.
     in_zero_suggest_ = true;
-    zero_suggest_provider_->StartZeroSuggest(url, permanent_text);
+    zero_suggest_provider_->StartZeroSuggest(
+        url, page_classification, permanent_text);
   }
 }
 
@@ -349,6 +346,7 @@ void AutocompleteController::OnProviderUpdate(bool updated_matches) {
     result_.Reset();
     result_.AppendMatches(zero_suggest_provider_->matches());
     result_.SortAndCull(input_, profile_);
+    UpdateAssistedQueryStats(&result_);
     NotifyChanged(true);
   } else {
     CheckIfDone();
@@ -464,23 +462,23 @@ void AutocompleteController::UpdateAssociatedKeywords(
     string16 keyword(match->GetSubstitutingExplicitlyInvokedKeyword(profile_));
     if (!keyword.empty()) {
       keywords.insert(keyword);
+      continue;
+    }
+
+    // Only add the keyword if the match does not have a duplicate keyword with
+    // a more relevant match.
+    keyword = match->associated_keyword.get() ?
+        match->associated_keyword->keyword :
+        keyword_provider_->GetKeywordForText(match->fill_into_edit);
+    if (!keyword.empty() && !keywords.count(keyword)) {
+      keywords.insert(keyword);
+
+      if (!match->associated_keyword.get())
+        match->associated_keyword.reset(new AutocompleteMatch(
+            keyword_provider_->CreateVerbatimMatch(match->fill_into_edit,
+                                                   keyword, input_)));
     } else {
-      string16 keyword = match->associated_keyword.get() ?
-          match->associated_keyword->keyword :
-          keyword_provider_->GetKeywordForText(match->fill_into_edit);
-
-      // Only add the keyword if the match does not have a duplicate keyword
-      // with a more relevant match.
-      if (!keyword.empty() && !keywords.count(keyword)) {
-        keywords.insert(keyword);
-
-        if (!match->associated_keyword.get())
-          match->associated_keyword.reset(new AutocompleteMatch(
-              keyword_provider_->CreateAutocompleteMatch(match->fill_into_edit,
-                  keyword, input_)));
-      } else {
-        match->associated_keyword.reset();
-      }
+      match->associated_keyword.reset();
     }
   }
 }
@@ -546,10 +544,13 @@ GURL AutocompleteController::GetDestinationURL(
       !match.search_terms_args->assisted_query_stats.empty()) {
     TemplateURLRef::SearchTermsArgs search_terms_args(*match.search_terms_args);
     search_terms_args.assisted_query_stats += base::StringPrintf(
-        ".%" PRId64 "j%d",
+        ".%" PRId64 "j%dj%d",
         query_formulation_time.InMilliseconds(),
-        search_provider_ &&
-        search_provider_->field_trial_triggered_in_session());
+        (search_provider_ &&
+         search_provider_->field_trial_triggered_in_session()) ||
+        (zero_suggest_provider_ &&
+         zero_suggest_provider_->field_trial_triggered_in_session()),
+        input_.current_page_classification());
     destination_url = GURL(template_url->url_ref().
                            ReplaceSearchTerms(search_terms_args));
   }
@@ -635,21 +636,9 @@ void AutocompleteController::StartStopTimer() {
   // come after the user has had to time to read the whole dropdown
   // and doesn't expect it to change.
   const int kStopTimeMS = 1500;
-
-  // Only use the timer if Instant/InstantExtended is disabled.
-  // InstantExtended has its own logic for when to stop updating the
-  // dropdown.  Furthermore, both Instant and InstantExtended expect
-  // all results they inject (regardless of how long they took) to make
-  // it to the edit model / dropdown display code.
-#if defined(HTML_INSTANT_EXTENDED_POPUP)
-  if (!chrome::IsInstantExtendedAPIEnabled() &&
-      !chrome::IsInstantEnabled(profile_))
-#endif
-  {
-    stop_timer_.Start(FROM_HERE,
-                      base::TimeDelta::FromMilliseconds(kStopTimeMS),
-                      base::Bind(&AutocompleteController::Stop,
-                                 base::Unretained(this),
-                                 false));
-  }
+  stop_timer_.Start(FROM_HERE,
+                    base::TimeDelta::FromMilliseconds(kStopTimeMS),
+                    base::Bind(&AutocompleteController::Stop,
+                               base::Unretained(this),
+                               false));
 }

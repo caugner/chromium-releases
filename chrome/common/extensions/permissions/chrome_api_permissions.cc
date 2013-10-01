@@ -6,7 +6,7 @@
 
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/api_permission_set.h"
-#include "chrome/common/extensions/permissions/bluetooth_device_permission.h"
+#include "chrome/common/extensions/permissions/bluetooth_permission.h"
 #include "chrome/common/extensions/permissions/media_galleries_permission.h"
 #include "chrome/common/extensions/permissions/permission_message.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
@@ -50,6 +50,11 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
     { APIPermission::kDownloads, "downloads", APIPermissionInfo::kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_DOWNLOADS,
       PermissionMessage::kDownloads },
+    { APIPermission::kDownloadsOpen, "downloads.open",
+      APIPermissionInfo::kFlagNone,
+      IDS_EXTENSION_PROMPT_WARNING_DOWNLOADS_OPEN,
+      PermissionMessage::kDownloadsOpen },
+    { APIPermission::kDownloadsShelf, "downloads.shelf" },
     { APIPermission::kIdentity, "identity" },
     { APIPermission::kExperimental, "experimental",
       APIPermissionInfo::kFlagCannotBeOptional },
@@ -57,7 +62,8 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       // appear in the install permission dialogue, so we need a fake
       // permission for it. See http://crbug.com/247857.
     { APIPermission::kWebConnectable, "webConnectable",
-      APIPermissionInfo::kFlagCannotBeOptional,
+      APIPermissionInfo::kFlagCannotBeOptional |
+      APIPermissionInfo::kFlagInternal,
       IDS_EXTENSION_PROMPT_WARNING_WEB_CONNECTABLE,
       PermissionMessage::kWebConnectable},
     { APIPermission::kGeolocation, "geolocation",
@@ -91,6 +97,7 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       IDS_EXTENSION_PROMPT_WARNING_BROWSING_HISTORY,
       PermissionMessage::kBrowsingHistory },
     { APIPermission::kIdle, "idle" },
+    { APIPermission::kInfobars, "infobars" },
     { APIPermission::kInput, "input", APIPermissionInfo::kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_INPUT,
       PermissionMessage::kInput },
@@ -159,10 +166,11 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       APIPermissionInfo::kFlagCannotBeOptional },
     { APIPermission::kIdentityPrivate, "identityPrivate",
       APIPermissionInfo::kFlagCannotBeOptional },
+    { APIPermission::kLogPrivate, "logPrivate"},
     { APIPermission::kNetworkingPrivate, "networkingPrivate",
-      APIPermissionInfo::kFlagCannotBeOptional },
-    { APIPermission::kManagedModePrivate, "managedModePrivate",
-      APIPermissionInfo::kFlagCannotBeOptional },
+      APIPermissionInfo::kFlagCannotBeOptional,
+      IDS_EXTENSION_PROMPT_WARNING_NETWORKING_PRIVATE,
+      PermissionMessage::kNetworkingPrivate },
     { APIPermission::kMediaPlayerPrivate, "mediaPlayerPrivate",
       APIPermissionInfo::kFlagCannotBeOptional },
     { APIPermission::kMetricsPrivate, "metricsPrivate",
@@ -183,6 +191,8 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       APIPermissionInfo::kFlagCannotBeOptional },
     { APIPermission::kFeedbackPrivate, "feedbackPrivate",
       APIPermissionInfo::kFlagCannotBeOptional },
+    { APIPermission::kRecoveryPrivate, "recoveryPrivate",
+      APIPermissionInfo::kFlagCannotBeOptional },
     { APIPermission::kRtcPrivate, "rtcPrivate",
       APIPermissionInfo::kFlagCannotBeOptional },
     { APIPermission::kTerminalPrivate, "terminalPrivate",
@@ -190,8 +200,6 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
     { APIPermission::kWallpaperPrivate, "wallpaperPrivate",
       APIPermissionInfo::kFlagCannotBeOptional },
     { APIPermission::kWebRequestInternal, "webRequestInternal" },
-    { APIPermission::kWebSocketProxyPrivate, "webSocketProxyPrivate",
-      APIPermissionInfo::kFlagCannotBeOptional },
     { APIPermission::kWebstorePrivate, "webstorePrivate",
       APIPermissionInfo::kFlagCannotBeOptional },
     { APIPermission::kMediaGalleriesPrivate, "mediaGalleriesPrivate",
@@ -210,15 +218,17 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       PermissionMessage::kDebugger },
     { APIPermission::kDevtools, "devtools",
       APIPermissionInfo::kFlagImpliesFullURLAccess |
-      APIPermissionInfo::kFlagCannotBeOptional },
+      APIPermissionInfo::kFlagCannotBeOptional |
+      APIPermissionInfo::kFlagInternal },
     { APIPermission::kPageCapture, "pageCapture",
       APIPermissionInfo::kFlagImpliesFullURLAccess },
     { APIPermission::kTabCapture, "tabCapture",
       APIPermissionInfo::kFlagImpliesFullURLAccess },
     { APIPermission::kPlugin, "plugin",
       APIPermissionInfo::kFlagImpliesFullURLAccess |
-          APIPermissionInfo::kFlagImpliesFullAccess |
-          APIPermissionInfo::kFlagCannotBeOptional,
+      APIPermissionInfo::kFlagImpliesFullAccess |
+      APIPermissionInfo::kFlagCannotBeOptional |
+      APIPermissionInfo::kFlagInternal,
       IDS_EXTENSION_PROMPT_WARNING_FULL_ACCESS,
       PermissionMessage::kFullAccess },
     { APIPermission::kProxy, "proxy",
@@ -252,7 +262,7 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
     // a file chooser dialog and selected a file. Selecting the file is
     // considered consent to read it.
     { APIPermission::kFileSystem, "fileSystem" },
-    { APIPermission::kFileSystemRetainFiles, "fileSystem.retainFiles" },
+    { APIPermission::kFileSystemRetainEntries, "fileSystem.retainEntries" },
     { APIPermission::kFileSystemWrite, "fileSystem.write",
       APIPermissionInfo::kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_FILE_SYSTEM_WRITE,
@@ -268,12 +278,13 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       &CreateAPIPermission<MediaGalleriesPermission> },
     { APIPermission::kPushMessaging, "pushMessaging",
       APIPermissionInfo::kFlagCannotBeOptional },
+    // Because warning messages for the "bluetooth" permission vary based on
+    // the permissions parameters, no message ID or message text is specified
+    // here. The message ID and text used will be determined at run-time in the
+    // |BluetoothPermission| class.
     { APIPermission::kBluetooth, "bluetooth", APIPermissionInfo::kFlagNone,
-      IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH,
-      PermissionMessage::kBluetooth },
-    { APIPermission::kBluetoothDevice, "bluetoothDevices",
-      APIPermissionInfo::kFlagNone, 0, PermissionMessage::kNone,
-      &CreateAPIPermission<BluetoothDevicePermission> },
+      0, PermissionMessage::kNone,
+      &CreateAPIPermission<BluetoothPermission> },
     { APIPermission::kUsb, "usb", APIPermissionInfo::kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_USB,
       PermissionMessage::kUsb },
@@ -284,9 +295,10 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       APIPermissionInfo::kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_SYSTEM_INDICATOR,
       PermissionMessage::kSystemIndicator },
-    { APIPermission::kSystemInfoCpu, "systemInfo.cpu" },
-    { APIPermission::kSystemInfoMemory, "systemInfo.memory" },
-    { APIPermission::kSystemInfoDisplay, "systemInfo.display" },
+    { APIPermission::kSystemCpu, "system.cpu" },
+    { APIPermission::kSystemMemory, "system.memory" },
+    { APIPermission::kSystemDisplay, "system.display" },
+    { APIPermission::kSystemStorage, "system.storage" },
     { APIPermission::kPointerLock, "pointerLock" },
     { APIPermission::kFullscreen, "fullscreen" },
     { APIPermission::kAudio, "audio" },
@@ -305,13 +317,13 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
   return permissions;
 }
 
-std::vector<PermissionsInfo::AliasInfo> ChromeAPIPermissions::GetAllAliases()
-    const {
+std::vector<PermissionsProvider::AliasInfo>
+ChromeAPIPermissions::GetAllAliases() const {
   // Register aliases.
-  std::vector<PermissionsInfo::AliasInfo> aliases;
-  aliases.push_back(PermissionsInfo::AliasInfo(
+  std::vector<PermissionsProvider::AliasInfo> aliases;
+  aliases.push_back(PermissionsProvider::AliasInfo(
       "unlimitedStorage", kOldUnlimitedStoragePermission));
-  aliases.push_back(PermissionsInfo::AliasInfo(
+  aliases.push_back(PermissionsProvider::AliasInfo(
       "tabs", kWindowsPermission));
   return aliases;
 }

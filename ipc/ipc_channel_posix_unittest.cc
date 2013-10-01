@@ -15,9 +15,10 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/process/kill.h"
 #include "base/test/multiprocess_test.h"
 #include "base/test/test_timeouts.h"
 #include "ipc/ipc_listener.h"
@@ -375,7 +376,7 @@ TEST_F(IPCChannelPosixTest, IsNamedServerInitialized) {
   const std::string& connection_socket_name = GetConnectionSocketName();
   IPCChannelPosixTestListener listener(false);
   IPC::ChannelHandle chan_handle(connection_socket_name);
-  ASSERT_TRUE(file_util::Delete(base::FilePath(connection_socket_name), false));
+  ASSERT_TRUE(base::DeleteFile(base::FilePath(connection_socket_name), false));
   ASSERT_FALSE(IPC::Channel::IsNamedServerInitialized(
       connection_socket_name));
   IPC::Channel channel(chan_handle, IPC::Channel::MODE_NAMED_SERVER, &listener);

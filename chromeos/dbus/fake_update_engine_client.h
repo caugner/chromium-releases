@@ -27,10 +27,11 @@ class FakeUpdateEngineClient : public UpdateEngineClient {
   virtual bool HasObserver(Observer* observer) OVERRIDE;
   virtual void RequestUpdateCheck(const UpdateCheckCallback& callback) OVERRIDE;
   virtual void RebootAfterUpdate() OVERRIDE;
-  virtual void SetReleaseTrack(const std::string& track) OVERRIDE;
-  virtual void GetReleaseTrack(const GetReleaseTrackCallback& callback)
-      OVERRIDE;
   virtual Status GetLastStatus() OVERRIDE;
+  virtual void SetChannel(const std::string& target_channel,
+                          bool is_powerwash_allowed) OVERRIDE;
+  virtual void GetChannel(bool get_current_channel,
+                          const GetChannelCallback& callback) OVERRIDE;
 
   // Pushes UpdateEngineClient::Status in the queue to test changing status.
   // GetLastStatus() returns the status set by this method in FIFO order.

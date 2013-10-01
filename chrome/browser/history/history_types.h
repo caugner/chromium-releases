@@ -16,16 +16,16 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
-#include "chrome/browser/favicon/favicon_types.h"
+#include "base/time/time.h"
 #include "chrome/browser/history/snippet.h"
 #include "chrome/browser/search_engines/template_url_id.h"
+#include "chrome/common/favicon/favicon_types.h"
 #include "chrome/common/ref_counted_util.h"
 #include "chrome/common/thumbnail_score.h"
 #include "content/public/common/page_transition_types.h"
-#include "googleurl/src/gurl.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/size.h"
+#include "url/gurl.h"
 
 class PageUsageData;
 
@@ -42,7 +42,6 @@ typedef std::map<GURL, scoped_refptr<RefCountedVector<GURL> > > RedirectMap;
 // Container for a list of URLs.
 typedef std::vector<GURL> RedirectList;
 
-typedef int64 DownloadID;   // Identifier for a download.
 typedef int64 FaviconBitmapID; // Identifier for a bitmap in a favicon.
 typedef int64 SegmentID;  // URL segments for the most visited view.
 typedef int64 SegmentDurationID;  // Unique identifier for segment_duration.
@@ -246,13 +245,6 @@ class VisitRow {
   // The segment id (see visitsegment_database.*).
   // If 0, the segment id is null in the table.
   SegmentID segment_id;
-
-  // True when this visit has indexed data for it. We try to keep this in sync
-  // with the full text index: when we add or remove things from there, we will
-  // update the visit table as well. However, that file could get deleted, or
-  // out of sync in various ways, so this flag should be false when things
-  // change.
-  bool is_indexed;
 
   // Record how much time a user has this visit starting from the user
   // opened this visit to the user closed or ended this visit.
@@ -460,10 +452,6 @@ struct QueryOptions {
   // the most recent first, so older results may not be returned if there is not
   // enough room. When 0, this will return everything (the default).
   int max_count;
-
-  // Only search within the page body if true, otherwise search all columns
-  // including url and time. Defaults to false.
-  bool body_only;
 
   enum DuplicateHandling {
     // Omit visits for which there is a more recent visit to the same URL.
@@ -697,19 +685,6 @@ struct IconMapping {
   // The type of icon.
   chrome::IconType icon_type;
 };
-
-// FaviconSizes represents the sizes that the thumbnail database knows a
-// favicon is available from the web. FaviconSizes has several entries
-// only if FaviconSizes is for an .ico file. FaviconSizes can be different
-// from the pixel sizes of the entries in the |favicon_bitmaps| table. For
-// instance, if a web page has a .ico favicon with bitmaps of pixel sizes
-// (16x16, 32x32), FaviconSizes will have both sizes regardless of whether
-// either of these bitmaps is cached in the favicon_bitmaps database table.
-typedef std::vector<gfx::Size> FaviconSizes;
-
-// Returns the default FaviconSizes to use if the favicon sizes for a FaviconID
-// are unknown.
-const FaviconSizes& GetDefaultFaviconSizes();
 
 // Defines a favicon bitmap and its associated pixel size.
 struct FaviconBitmapIDSize {

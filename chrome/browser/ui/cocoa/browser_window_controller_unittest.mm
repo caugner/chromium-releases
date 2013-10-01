@@ -10,6 +10,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/signin/fake_auth_status_provider.h"
 #include "chrome/browser/signin/fake_signin_manager.h"
 #include "chrome/browser/signin/signin_global_error.h"
@@ -26,7 +27,6 @@
 #include "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
@@ -140,7 +140,7 @@ TEST_F(BrowserWindowControllerTest, TestNormal) {
   // popup_browser will be owned by its window.
   Browser* popup_browser(new Browser(
       Browser::CreateParams(Browser::TYPE_POPUP, profile(),
-                            chrome::HOST_DESKTOP_TYPE_NATIVE)));
+                            chrome::GetActiveDesktop())));
   NSWindow *cocoaWindow = popup_browser->window()->GetNativeWindow();
   BrowserWindowController* controller =
       static_cast<BrowserWindowController*>([cocoaWindow windowController]);
@@ -155,7 +155,7 @@ TEST_F(BrowserWindowControllerTest, TestNormal) {
 TEST_F(BrowserWindowControllerTest, TestSetBounds) {
   // Create a normal browser with bounds smaller than the minimum.
   Browser::CreateParams params(Browser::TYPE_TABBED, profile(),
-                               chrome::HOST_DESKTOP_TYPE_NATIVE);
+                               chrome::GetActiveDesktop());
   params.initial_bounds = gfx::Rect(0, 0, 50, 50);
   Browser* browser = new Browser(params);
   NSWindow *cocoaWindow = browser->window()->GetNativeWindow();
@@ -181,7 +181,7 @@ TEST_F(BrowserWindowControllerTest, TestSetBounds) {
 TEST_F(BrowserWindowControllerTest, TestSetBoundsPopup) {
   // Create a popup with bounds smaller than the minimum.
   Browser::CreateParams params(Browser::TYPE_POPUP, profile(),
-                               chrome::HOST_DESKTOP_TYPE_NATIVE);
+                               chrome::GetActiveDesktop());
   params.initial_bounds = gfx::Rect(0, 0, 50, 50);
   Browser* browser = new Browser(params);
   NSWindow *cocoaWindow = browser->window()->GetNativeWindow();
@@ -228,7 +228,7 @@ TEST_F(BrowserWindowControllerTest, TestIncognitoWidthSpace) {
   incognito_profile->set_off_the_record(true);
   scoped_ptr<Browser> browser(
       new Browser(Browser::CreateParams(incognito_profile.get(),
-                                        chrome::HOST_DESKTOP_TYPE_NATIVE));
+                                        chrome::GetActiveDesktop()));
   controller_.reset([[BrowserWindowController alloc]
                               initWithBrowser:browser.get()
                                 takeOwnership:NO]);
@@ -243,6 +243,7 @@ TEST_F(BrowserWindowControllerTest, TestIncognitoWidthSpace) {
 #endif
 
 namespace {
+
 // Verifies that the toolbar, infobar, tab content area, and download shelf
 // completely fill the area under the tabstrip.
 void CheckViewPositions(BrowserWindowController* controller) {
@@ -255,10 +256,7 @@ void CheckViewPositions(BrowserWindowController* controller) {
 
   EXPECT_EQ(NSMinY(contentView), NSMinY(download));
   EXPECT_EQ(NSMaxY(download), NSMinY(contentArea));
-
-  CGFloat min_toolbar_height = [[controller toolbarController]
-      desiredHeightForCompression:1];
-  EXPECT_EQ(NSMaxY(contentArea), NSMaxY(toolbar) - min_toolbar_height);
+  EXPECT_EQ(NSMaxY(contentArea), NSMinY(infobar));
 
   // Bookmark bar frame is random memory when hidden.
   if ([controller bookmarkBarVisible]) {
@@ -275,6 +273,7 @@ void CheckViewPositions(BrowserWindowController* controller) {
   // not necessarily fixed with respect to the content view.
   EXPECT_EQ(NSMinY(tabstrip), NSMaxY(toolbar));
 }
+
 }  // end namespace
 
 TEST_F(BrowserWindowControllerTest, TestAdjustWindowHeight) {
@@ -708,10 +707,10 @@ TEST_F(BrowserWindowControllerTest, TestSigninMenuItemAuthError) {
   SigninManager* signin = SigninManagerFactory::GetForProfile(profile());
   signin->SetAuthenticatedUsername(username);
   ProfileSyncService* sync =
-    ProfileSyncServiceFactory::GetForProfile(profile());
+      ProfileSyncServiceFactory::GetForProfile(profile());
   sync->SetSyncSetupCompleted();
   // Force an auth error.
-  FakeAuthStatusProvider provider(signin->signin_global_error());
+  FakeAuthStatusProvider provider(SigninGlobalError::GetForProfile(profile()));
   GoogleServiceAuthError error(
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
   provider.SetAuthError(error);

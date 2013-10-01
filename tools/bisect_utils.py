@@ -22,13 +22,33 @@ GCLIENT_SPEC_DATA = [
                               "chrome/data/page_cycler/.git",
       "src/data/dom_perf": "https://chrome-internal.googlesource.com/"
                            "chrome/data/dom_perf/.git",
+      "src/data/mach_ports": "https://chrome-internal.googlesource.com/"
+                           "chrome/data/mach_ports/.git",
       "src/tools/perf/data": "https://chrome-internal.googlesource.com/"
                              "chrome/tools/perf/data/.git",
+      "src/third_party/adobe/flash/binaries/ppapi/linux":
+          "https://chrome-internal.googlesource.com/"
+          "chrome/deps/adobe/flash/binaries/ppapi/linux/.git",
+      "src/third_party/adobe/flash/binaries/ppapi/linux_x64":
+          "https://chrome-internal.googlesource.com/"
+          "chrome/deps/adobe/flash/binaries/ppapi/linux_x64/.git",
+      "src/third_party/adobe/flash/binaries/ppapi/mac":
+          "https://chrome-internal.googlesource.com/"
+          "chrome/deps/adobe/flash/binaries/ppapi/mac/.git",
+      "src/third_party/adobe/flash/binaries/ppapi/mac_64":
+          "https://chrome-internal.googlesource.com/"
+          "chrome/deps/adobe/flash/binaries/ppapi/mac_64/.git",
+      "src/third_party/adobe/flash/binaries/ppapi/win":
+          "https://chrome-internal.googlesource.com/"
+          "chrome/deps/adobe/flash/binaries/ppapi/win/.git",
+      "src/third_party/adobe/flash/binaries/ppapi/win_x64":
+          "https://chrome-internal.googlesource.com/"
+          "chrome/deps/adobe/flash/binaries/ppapi/win_x64/.git",
     },
     "safesync_url": "",
   },
 ]
-GCLIENT_ANDROID = "\ntarget_os = ['android']"
+GCLIENT_SPEC_ANDROID = "\ntarget_os = ['android']"
 GCLIENT_CUSTOM_DEPS_V8 = {"src/v8_bleeding_edge": "git://github.com/v8/v8.git"}
 FILE_DEPS_GIT = '.DEPS.git'
 
@@ -40,6 +60,8 @@ REPO_PARAMS = [
 
 REPO_SYNC_COMMAND = 'git checkout -f $(git rev-list --max-count=1 '\
                     '--before=%d remotes/m/master)'
+
+ORIGINAL_ENV = {}
 
 def OutputAnnotationStepStart(name):
   """Outputs appropriate annotation to signal the start of a step to
@@ -53,6 +75,7 @@ def OutputAnnotationStepStart(name):
   print '@@@STEP_CURSOR %s@@@' % name
   print '@@@STEP_STARTED@@@'
   print
+  sys.stdout.flush()
 
 
 def OutputAnnotationStepClosed():
@@ -61,6 +84,7 @@ def OutputAnnotationStepClosed():
   print
   print '@@@STEP_CLOSED@@@'
   print
+  sys.stdout.flush()
 
 
 def CreateAndChangeToSourceDirectory(working_directory):
@@ -201,29 +225,25 @@ def RemoveThirdPartyWebkitDirectory():
   return True
 
 
-def RunGClientAndSync(reset, cwd=None):
+def RunGClientAndSync(cwd=None):
   """Runs gclient and does a normal sync.
 
   Args:
-    reset: Whether to reset any changes to the depot.
     cwd: Working directory to run from.
 
   Returns:
     The return code of the call.
   """
-  params = ['sync', '--verbose', '--nohooks']
-  if reset:
-    params.extend(['--reset', '--force', '--delete_unversioned_trees'])
+  params = ['sync', '--verbose', '--nohooks', '--reset', '--force']
   return RunGClient(params, cwd=cwd)
 
 
-def SetupGitDepot(opts, reset):
+def SetupGitDepot(opts):
   """Sets up the depot for the bisection. The depot will be located in a
   subdirectory called 'bisect'.
 
   Args:
     opts: The options parsed from the command line through parse_args().
-    reset: Whether to reset any changes to the depot.
 
   Returns:
     True if gclient successfully created the config file and did a sync, False
@@ -247,8 +267,10 @@ def SetupGitDepot(opts, reset):
         passed_deps_check = True
       os.chdir(cwd)
 
-    if passed_deps_check and not RunGClientAndSync(reset):
-      passed = True
+    if passed_deps_check:
+      RunGClient(['revert'])
+      if not RunGClientAndSync():
+        passed = True
 
   if opts.output_buildbot_annotations:
     print
@@ -283,6 +305,28 @@ def SetupCrosRepo():
   return passed
 
 
+def CopyAndSaveOriginalEnvironmentVars():
+  """Makes a copy of the current environment variables."""
+  # TODO: Waiting on crbug.com/255689, will remove this after.
+  vars_to_remove = []
+  for k, v in os.environ.iteritems():
+    if 'ANDROID' in k:
+      vars_to_remove.append(k)
+  vars_to_remove.append('CHROME_SRC')
+  vars_to_remove.append('CHROMIUM_GYP_FILE')
+  vars_to_remove.append('GYP_CROSSCOMPILE')
+  vars_to_remove.append('GYP_DEFINES')
+  vars_to_remove.append('GYP_GENERATORS')
+  vars_to_remove.append('GYP_GENERATOR_FLAGS')
+  vars_to_remove.append('OBJCOPY')
+  for k in vars_to_remove:
+    if os.environ.has_key(k):
+      del os.environ[k]
+
+  global ORIGINAL_ENV
+  ORIGINAL_ENV = os.environ.copy()
+
+
 def SetupAndroidBuildEnvironment(opts):
   """Sets up the android build environment.
 
@@ -293,6 +337,15 @@ def SetupAndroidBuildEnvironment(opts):
   Returns:
     True if successful.
   """
+
+  # Revert the environment variables back to default before setting them up
+  # with envsetup.sh.
+  env_vars = os.environ.copy()
+  for k, _ in env_vars.iteritems():
+    del os.environ[k]
+  for k, v in ORIGINAL_ENV.iteritems():
+    os.environ[k] = v
+
   path_to_file = os.path.join('build', 'android', 'envsetup.sh')
   proc = subprocess.Popen(['bash', '-c', 'source %s && env' % path_to_file],
                            stdout=subprocess.PIPE,
@@ -317,6 +370,7 @@ def SetupPlatformBuildEnvironment(opts):
     True if successful.
   """
   if opts.target_platform == 'android':
+    CopyAndSaveOriginalEnvironmentVars()
     return SetupAndroidBuildEnvironment(opts)
   elif opts.target_platform == 'cros':
     return SetupCrosRepo()
@@ -324,7 +378,7 @@ def SetupPlatformBuildEnvironment(opts):
   return True
 
 
-def CreateBisectDirectoryAndSetupDepot(opts, reset=False):
+def CreateBisectDirectoryAndSetupDepot(opts):
   """Sets up a subdirectory 'bisect' and then retrieves a copy of the depot
   there using gclient.
 
@@ -340,7 +394,7 @@ def CreateBisectDirectoryAndSetupDepot(opts, reset=False):
     print
     return 1
 
-  if not SetupGitDepot(opts, reset):
+  if not SetupGitDepot(opts):
     print 'Error: Failed to grab source.'
     print
     return 1

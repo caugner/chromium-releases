@@ -26,6 +26,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/defaults.h"
@@ -36,7 +37,6 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/net/predictor.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/performance_monitor/startup_timer.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -48,6 +48,7 @@
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -63,20 +64,18 @@
 #include "chrome/browser/ui/startup/default_browser_prompt.h"
 #include "chrome/browser/ui/startup/google_api_keys_infobar_delegate.h"
 #include "chrome/browser/ui/startup/obsolete_os_infobar_delegate.h"
-#include "chrome/browser/ui/startup/session_crashed_prompt.h"
+#include "chrome/browser/ui/startup/session_crashed_infobar_delegate.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
-#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
-#include "chrome/browser/ui/webui/sync_promo/sync_promo_trial.h"
+#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -105,11 +104,6 @@
 #if defined(OS_WIN)
 #include "apps/app_launch_for_metro_restart_win.h"
 #include "base/win/windows_version.h"
-#endif
-
-#if defined(ENABLE_MANAGED_USERS)
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #endif
 
 using content::ChildProcessSecurityPolicy;
@@ -236,7 +230,7 @@ bool ParseCommaSeparatedIntegers(const std::string& str,
 }
 
 void RecordCmdLineAppHistogram(extensions::Manifest::Type app_type) {
-  AppLauncherHandler::RecordAppLaunchType(
+  CoreAppLauncherHandler::RecordAppLaunchType(
       extension_misc::APP_LAUNCH_CMD_LINE_APP,
       app_type);
 }
@@ -250,7 +244,7 @@ void RecordAppLaunches(Profile* profile,
     const extensions::Extension* extension =
         extension_service->GetInstalledApp(cmd_line_urls.at(i));
     if (extension) {
-      AppLauncherHandler::RecordAppLaunchType(
+      CoreAppLauncherHandler::RecordAppLaunchType(
           extension_misc::APP_LAUNCH_CMD_LINE_URL,
           extension->GetType());
     }
@@ -259,7 +253,7 @@ void RecordAppLaunches(Profile* profile,
     const extensions::Extension* extension =
         extension_service->GetInstalledApp(autolaunch_tabs.at(i).url);
     if (extension) {
-      AppLauncherHandler::RecordAppLaunchType(
+      CoreAppLauncherHandler::RecordAppLaunchType(
           extension_misc::APP_LAUNCH_AUTOLAUNCH,
           extension->GetType());
     }
@@ -357,7 +351,7 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   AppListService::InitAll(profile);
   if (command_line_.HasSwitch(switches::kShowAppList)) {
     AppListService::RecordShowTimings(command_line_);
-    AppListService::Get()->ShowAppList(profile);
+    AppListService::Get()->ShowForProfile(profile);
     return true;
   }
 
@@ -522,7 +516,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
       if (extension) {
         RecordCmdLineAppHistogram(extension->GetType());
       } else {
-        AppLauncherHandler::RecordAppLaunchType(
+        CoreAppLauncherHandler::RecordAppLaunchType(
             extension_misc::APP_LAUNCH_CMD_LINE_APP_LEGACY,
             extensions::Manifest::TYPE_HOSTED_APP);
       }
@@ -830,8 +824,7 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
     params.extension_app_id = tabs[i].app_id;
 
 #if defined(ENABLE_RLZ)
-    if (process_startup &&
-        google_util::IsGoogleHomePageUrl(tabs[i].url.spec())) {
+    if (process_startup && google_util::IsGoogleHomePageUrl(tabs[i].url)) {
       params.extra_headers = RLZTracker::GetAccessPointHttpHeader(
           RLZTracker::CHROME_HOME_PAGE);
     }
@@ -874,15 +867,13 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
   if (is_process_startup == chrome::startup::IS_PROCESS_STARTUP) {
     chrome::ShowBadFlagsPrompt(browser);
     if (!command_line_.HasSwitch(switches::kTestType)) {
-      GoogleApiKeysInfoBarDelegate::Create(
-          InfoBarService::FromWebContents(
-              browser->tab_strip_model()->GetActiveWebContents()));
+      GoogleApiKeysInfoBarDelegate::Create(InfoBarService::FromWebContents(
+          browser->tab_strip_model()->GetActiveWebContents()));
 
       // TODO(phajdan.jr): Always enable after migrating bots:
       // http://crbug.com/170262 .
-      chrome::ObsoleteOSInfoBarDelegate::Create(
-          InfoBarService::FromWebContents(
-              browser->tab_strip_model()->GetActiveWebContents()));
+      ObsoleteOSInfoBarDelegate::Create(InfoBarService::FromWebContents(
+          browser->tab_strip_model()->GetActiveWebContents()));
     }
 
     if (browser_defaults::kOSSupportsOtherBrowsers &&
@@ -936,11 +927,11 @@ void StartupBrowserCreatorImpl::AddStartupURLs(
       startup_urls->push_back(internals::GetWelcomePageURL());
   }
 
-  if (SyncPromoUI::ShouldShowSyncPromoAtStartup(profile_, is_first_run_)) {
-    SyncPromoUI::DidShowSyncPromoAtStartup(profile_);
+  if (signin::ShouldShowPromoAtStartup(profile_, is_first_run_)) {
+    signin::DidShowPromoAtStartup(profile_);
 
-    const GURL sync_promo_url = SyncPromoUI::GetSyncPromoURL(
-        SyncPromoUI::SOURCE_START_PAGE, false);
+    const GURL sync_promo_url = signin::GetPromoURL(signin::SOURCE_START_PAGE,
+                                                    false);
 
     // No need to add if the sync promo is already in the startup list.
     bool add_promo = true;

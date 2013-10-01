@@ -7,7 +7,7 @@
 #include <map>
 
 #include "base/command_line.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -17,8 +17,8 @@
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/token_service.h"
-#include "chrome/browser/signin/token_service_factory.h"
+#include "chrome/browser/signin/profile_oauth2_token_service.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_switches.h"
@@ -191,7 +191,8 @@ ExtensionInstallPrompt::Prompt::Prompt(PromptType type)
       extension_(NULL),
       bundle_(NULL),
       average_rating_(0.0),
-      rating_count_(0) {
+      rating_count_(0),
+      show_user_count_(false) {
 }
 
 ExtensionInstallPrompt::Prompt::~Prompt() {
@@ -200,6 +201,11 @@ ExtensionInstallPrompt::Prompt::~Prompt() {
 void ExtensionInstallPrompt::Prompt::SetPermissions(
     const std::vector<string16>& permissions) {
   permissions_ = permissions;
+}
+
+void ExtensionInstallPrompt::Prompt::SetPermissionsDetails(
+    const std::vector<string16>& details) {
+  details_ = details;
 }
 
 void ExtensionInstallPrompt::Prompt::SetOAuthIssueAdvice(
@@ -219,10 +225,12 @@ void ExtensionInstallPrompt::Prompt::SetUserNameFromProfile(Profile* profile) {
 
 void ExtensionInstallPrompt::Prompt::SetInlineInstallWebstoreData(
     const std::string& localized_user_count,
+    bool show_user_count,
     double average_rating,
     int rating_count) {
   CHECK_EQ(INLINE_INSTALL_PROMPT, type_);
   localized_user_count_ = localized_user_count;
+  show_user_count_ = show_user_count;
   average_rating_ = average_rating;
   rating_count_ = rating_count;
 }
@@ -316,7 +324,16 @@ string16 ExtensionInstallPrompt::Prompt::GetOAuthHeading() const {
 }
 
 string16 ExtensionInstallPrompt::Prompt::GetRetainedFilesHeading() const {
+  // TODO(finnur): Remove this once all platforms are using
+  // GetRetainedFilesHeadingWithCount().
   return l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_RETAINED_FILES);
+}
+
+string16
+ExtensionInstallPrompt::Prompt::GetRetainedFilesHeadingWithCount() const {
+  return l10n_util::GetStringFUTF16(
+      IDS_EXTENSION_PROMPT_RETAINED_FILES_WITH_COUNT,
+      base::IntToString16(GetRetainedFileCount()));
 }
 
 bool ExtensionInstallPrompt::Prompt::ShouldShowPermissions() const {
@@ -361,18 +378,33 @@ string16 ExtensionInstallPrompt::Prompt::GetRatingCount() const {
 
 string16 ExtensionInstallPrompt::Prompt::GetUserCount() const {
   CHECK_EQ(INLINE_INSTALL_PROMPT, type_);
-  return l10n_util::GetStringFUTF16(
-      IDS_EXTENSION_USER_COUNT,
-      UTF8ToUTF16(localized_user_count_));
+
+  if (show_user_count_) {
+    return l10n_util::GetStringFUTF16(
+        IDS_EXTENSION_USER_COUNT,
+        UTF8ToUTF16(localized_user_count_));
+  } else {
+    return string16();
+  }
 }
 
 size_t ExtensionInstallPrompt::Prompt::GetPermissionCount() const {
   return permissions_.size();
 }
 
+size_t ExtensionInstallPrompt::Prompt::GetPermissionsDetailsCount() const {
+  return details_.size();
+}
+
 string16 ExtensionInstallPrompt::Prompt::GetPermission(size_t index) const {
   CHECK_LT(index, permissions_.size());
   return permissions_[index];
+}
+
+string16 ExtensionInstallPrompt::Prompt::GetPermissionsDetails(
+    size_t index) const {
+  CHECK_LT(index, details_.size());
+  return details_[index];
 }
 
 size_t ExtensionInstallPrompt::Prompt::GetOAuthIssueCount() const {
@@ -680,24 +712,46 @@ void ExtensionInstallPrompt::FetchOAuthIssueAdviceIfNeeded() {
     return;
   }
 
-  Profile* profile = install_ui_->profile();
-  // The token service can be NULL for incognito profiles.
-  TokenService* token_service = TokenServiceFactory::GetForProfile(profile);
-  if (!token_service) {
+  ProfileOAuth2TokenService* token_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(install_ui_->profile());
+  if (!token_service || !token_service->RefreshTokenIsAvailable()) {
     ShowConfirmation();
     return;
   }
 
+  // Get an access token from the token service.
+  login_token_request_ = token_service->StartRequest(
+      OAuth2TokenService::ScopeSet(), this);
+}
+
+void ExtensionInstallPrompt::OnGetTokenSuccess(
+    const OAuth2TokenService::Request* request,
+    const std::string& access_token,
+    const base::Time& expiration_time) {
+  DCHECK_EQ(login_token_request_.get(), request);
+  login_token_request_.reset();
+
+  const extensions::OAuth2Info& oauth2_info =
+      extensions::OAuth2Info::GetOAuth2Info(extension_);
+
   token_flow_.reset(new OAuth2MintTokenFlow(
-      profile->GetRequestContext(),
+      install_ui_->profile()->GetRequestContext(),
       this,
       OAuth2MintTokenFlow::Parameters(
-          token_service->GetOAuth2LoginRefreshToken(),
+          access_token,
           extension_->id(),
           oauth2_info.client_id,
           oauth2_info.scopes,
           OAuth2MintTokenFlow::MODE_ISSUE_ADVICE)));
   token_flow_->Start();
+}
+
+void ExtensionInstallPrompt::OnGetTokenFailure(
+    const OAuth2TokenService::Request* request,
+    const GoogleServiceAuthError& error) {
+  DCHECK_EQ(login_token_request_.get(), request);
+  login_token_request_.reset();
+  ShowConfirmation();
 }
 
 void ExtensionInstallPrompt::OnIssueAdviceSuccess(
@@ -719,7 +773,10 @@ void ExtensionInstallPrompt::ShowConfirmation() {
            extension_))) {
     Manifest::Type extension_type = extension_ ?
         extension_->GetType() : Manifest::TYPE_UNKNOWN;
-    prompt_.SetPermissions(permissions_->GetWarningMessages(extension_type));
+    prompt_.SetPermissions(
+        permissions_->GetWarningMessages(extension_type));
+    prompt_.SetPermissionsDetails(
+        permissions_->GetWarningMessagesDetails(extension_type));
   }
 
   switch (prompt_.type()) {

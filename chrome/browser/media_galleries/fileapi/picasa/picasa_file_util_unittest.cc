@@ -4,7 +4,9 @@
 
 #include <set>
 #include <string>
+#include <vector>
 
+#include "base/bind_helpers.h"
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_vector.h"
@@ -12,14 +14,14 @@
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/time.h"
-#include "chrome/browser/media_galleries/fileapi/media_file_system_mount_point_provider.h"
+#include "base/time/time.h"
+#include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "chrome/browser/media_galleries/fileapi/media_path_filter.h"
-#include "chrome/browser/media_galleries/fileapi/picasa/picasa_album_table_reader.h"
 #include "chrome/browser/media_galleries/fileapi/picasa/picasa_data_provider.h"
 #include "chrome/browser/media_galleries/fileapi/picasa/picasa_file_util.h"
-#include "chrome/browser/media_galleries/fileapi/picasa/pmp_constants.h"
-#include "chrome/browser/media_galleries/fileapi/picasa/pmp_test_helper.h"
+#include "chrome/common/media_galleries/picasa_types.h"
+#include "chrome/common/media_galleries/pmp_constants.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/browser/fileapi/async_file_util_adapter.h"
@@ -28,7 +30,6 @@
 #include "webkit/browser/fileapi/file_system_file_util.h"
 #include "webkit/browser/fileapi/file_system_operation_context.h"
 #include "webkit/browser/fileapi/file_system_operation_runner.h"
-#include "webkit/browser/fileapi/file_system_task_runners.h"
 #include "webkit/browser/fileapi/isolated_context.h"
 #include "webkit/browser/fileapi/mock_file_system_options.h"
 #include "webkit/browser/quota/mock_special_storage_policy.h"
@@ -87,7 +88,7 @@ class TestFolder {
   double GetVariantTimestamp() const {
     DCHECK(!folder_dir_.path().empty());
     base::Time variant_epoch = base::Time::FromLocalExploded(
-        picasa::kPicasaVariantTimeEpoch);
+        picasa::kPmpVariantTimeEpoch);
 
     int64 microseconds_since_epoch =
         (folder_info_.timestamp - variant_epoch).InMicroseconds();
@@ -106,6 +107,10 @@ class TestFolder {
     return folder_info_;
   }
 
+  const base::Time& timestamp() const {
+    return timestamp_;
+  }
+
  private:
   const std::string name_;
   const base::Time timestamp_;
@@ -119,43 +124,82 @@ class TestFolder {
   AlbumInfo folder_info_;
 };
 
+void ReadDirectoryTestHelperCallback(
+    base::RunLoop* run_loop,
+    FileSystemOperation::FileEntryList* contents,
+    bool* completed, base::PlatformFileError error,
+    const FileSystemOperation::FileEntryList& file_list,
+    bool has_more) {
+  DCHECK(!*completed);
+  *completed = !has_more && error == base::PLATFORM_FILE_OK;
+  *contents = file_list;
+  run_loop->Quit();
+}
+
+void ReadDirectoryTestHelper(fileapi::FileSystemOperationRunner* runner,
+                             const FileSystemURL& url,
+                             FileSystemOperation::FileEntryList* contents,
+                             bool* completed) {
+  DCHECK(contents);
+  DCHECK(completed);
+  base::RunLoop run_loop;
+  runner->ReadDirectory(
+      url, base::Bind(&ReadDirectoryTestHelperCallback, &run_loop, contents,
+                      completed));
+  run_loop.Run();
+}
+
+}  // namespace
+
 class TestPicasaDataProvider : public PicasaDataProvider {
  public:
-  TestPicasaDataProvider(const std::vector<AlbumInfo>& albums,
-                         const std::vector<AlbumInfo>& folders)
-      : PicasaDataProvider(base::FilePath(FILE_PATH_LITERAL("Fake"))) {
-    InitializeWith(albums, folders);
+  TestPicasaDataProvider()
+      : PicasaDataProvider(base::FilePath(FILE_PATH_LITERAL("Fake"))),
+        initialized_(false) {
+  }
+
+  virtual ~TestPicasaDataProvider() {}
+
+  virtual void RefreshData(const base::Closure& ready_callback) OVERRIDE {
+    DCHECK(initialized_);
+    ready_callback.Run();
+  }
+
+  void Init(const std::vector<AlbumInfo>& albums,
+            const std::vector<AlbumInfo>& folders) {
+    UniquifyNames(albums, &album_map_);
+    UniquifyNames(folders, &folder_map_);
+    initialized_ = true;
   }
 
  private:
-  virtual bool ReadData() OVERRIDE {
-    return true;
-  }
-  virtual ~TestPicasaDataProvider() {}
+  bool initialized_;
 };
 
 class TestPicasaFileUtil : public PicasaFileUtil {
  public:
-  explicit TestPicasaFileUtil(PicasaDataProvider* data_provider)
-      : data_provider_(data_provider) {
+  TestPicasaFileUtil(chrome::MediaPathFilter* media_path_filter,
+                     PicasaDataProvider* data_provider)
+      : PicasaFileUtil(media_path_filter),
+        data_provider_(data_provider) {
   }
   virtual ~TestPicasaFileUtil() {}
  private:
   virtual PicasaDataProvider* GetDataProvider() OVERRIDE {
-    return data_provider_.get();
+    return data_provider_;
   }
 
-  scoped_ptr<PicasaDataProvider> data_provider_;
+  PicasaDataProvider* data_provider_;
 };
 
-class TestMediaFileSystemMountPointProvider
-    : public chrome::MediaFileSystemMountPointProvider {
+class TestMediaFileSystemBackend
+    : public chrome::MediaFileSystemBackend {
  public:
-  TestMediaFileSystemMountPointProvider(const base::FilePath& profile_path,
-                                        PicasaFileUtil* picasa_file_util)
-      : chrome::MediaFileSystemMountPointProvider(
+  TestMediaFileSystemBackend(const base::FilePath& profile_path,
+                             PicasaFileUtil* picasa_file_util)
+      : chrome::MediaFileSystemBackend(
             profile_path,
-            base::MessageLoopProxy::current().get()),
+            chrome::MediaFileSystemBackend::MediaTaskRunner().get()),
         test_file_util_(picasa_file_util) {}
 
   virtual fileapi::AsyncFileUtil*
@@ -170,46 +214,6 @@ class TestMediaFileSystemMountPointProvider
   scoped_ptr<fileapi::AsyncFileUtil> test_file_util_;
 };
 
-void DidReadDirectory(FileSystemOperation::FileEntryList* contents,
-                      bool* completed, base::PlatformFileError error,
-                      const FileSystemOperation::FileEntryList& file_list,
-                      bool has_more) {
-  DCHECK(!*completed);
-  *completed = !has_more && error == base::PLATFORM_FILE_OK;
-  *contents = file_list;
-}
-
-void ReadDirectoryTestCallback(
-    base::RunLoop* run_loop,
-    base::PlatformFileError* error_result,
-    fileapi::AsyncFileUtil::EntryList* file_list_result,
-    base::PlatformFileError error,
-    const fileapi::AsyncFileUtil::EntryList& file_list,
-    bool /*has_more*/) {
-  DCHECK(error_result);
-  DCHECK(file_list_result);
-  *error_result = error;
-  *file_list_result = file_list;
-  run_loop->Quit();
-}
-
-base::PlatformFileError ReadDirectoryTestHelper(
-    fileapi::AsyncFileUtil* file_util,
-    scoped_ptr<FileSystemOperationContext> operation_context,
-    FileSystemURL url,
-    fileapi::AsyncFileUtil::EntryList* file_list) {
-  base::RunLoop run_loop;
-  base::PlatformFileError result;
-  file_util->ReadDirectory(
-      operation_context.Pass(),
-      url,
-      base::Bind(&ReadDirectoryTestCallback, &run_loop, &result, file_list));
-  run_loop.Run();
-  return result;
-}
-
-}  // namespace
-
 class PicasaFileUtilTest : public testing::Test {
  public:
   PicasaFileUtilTest()
@@ -218,22 +222,23 @@ class PicasaFileUtilTest : public testing::Test {
   virtual ~PicasaFileUtilTest() {}
 
   virtual void SetUp() OVERRIDE {
-    test_helper_.reset(new PmpTestHelper(kPicasaAlbumTableName));
-    ASSERT_TRUE(test_helper_->Init());
-
     ASSERT_TRUE(profile_dir_.CreateUniqueTempDir());
 
     scoped_refptr<quota::SpecialStoragePolicy> storage_policy =
         new quota::MockSpecialStoragePolicy();
 
-    ScopedVector<fileapi::FileSystemMountPointProvider> additional_providers;
-    additional_providers.push_back(new TestMediaFileSystemMountPointProvider(
+    media_path_filter_.reset(new chrome::MediaPathFilter());
+    picasa_data_provider_.reset(new TestPicasaDataProvider());
+
+    ScopedVector<fileapi::FileSystemBackend> additional_providers;
+    additional_providers.push_back(new TestMediaFileSystemBackend(
         profile_dir_.path(),
-        new TestPicasaFileUtil(
-            new PicasaDataProvider(test_helper_->GetTempDirPath()))));
+        new TestPicasaFileUtil(media_path_filter_.get(),
+                               picasa_data_provider_.get())));
 
     file_system_context_ = new fileapi::FileSystemContext(
-        fileapi::FileSystemTaskRunners::CreateMockTaskRunners(),
+        base::MessageLoopProxy::current().get(),
+        base::MessageLoopProxy::current().get(),
         fileapi::ExternalMountPoints::CreateRefCounted().get(),
         storage_policy.get(),
         NULL,
@@ -245,47 +250,21 @@ class PicasaFileUtilTest : public testing::Test {
  protected:
   // |test_folders| must be in alphabetical order for easy verification
   void SetupFolders(ScopedVector<TestFolder>* test_folders) {
-    // Build up pmp files.
-    std::vector<uint32> category_column;
-    std::vector<double> date_column;
-    std::vector<std::string> filename_column;
-    std::vector<std::string> name_column;
-    std::vector<std::string> uid_column;
-    std::vector<std::string> token_column;
-
+    std::vector<AlbumInfo> folders;
     for (ScopedVector<TestFolder>::iterator it = test_folders->begin();
         it != test_folders->end(); ++it) {
       TestFolder* test_folder = *it;
       ASSERT_TRUE(test_folder->Init());
-      category_column.push_back(picasa::kAlbumCategoryFolder);
-      date_column.push_back(test_folder->GetVariantTimestamp());
-      filename_column.push_back(test_folder->folder_info().path.AsUTF8Unsafe());
-      name_column.push_back(test_folder->folder_info().name);
-      uid_column.push_back(test_folder->folder_info().uid);
-      token_column.push_back("]album:" + test_folder->folder_info().uid);
+      folders.push_back(test_folder->folder_info());
     }
-
-    ASSERT_TRUE(test_helper_->WriteColumnFileFromVector(
-        "category", picasa::PMP_TYPE_UINT32, category_column));
-    ASSERT_TRUE(test_helper_->WriteColumnFileFromVector(
-        "date", picasa::PMP_TYPE_DOUBLE64, date_column));
-    ASSERT_TRUE(test_helper_->WriteColumnFileFromVector(
-        "filename", picasa::PMP_TYPE_STRING, filename_column));
-    ASSERT_TRUE(test_helper_->WriteColumnFileFromVector(
-        "name", picasa::PMP_TYPE_STRING, name_column));
-    ASSERT_TRUE(test_helper_->WriteColumnFileFromVector(
-        "uid", picasa::PMP_TYPE_STRING, uid_column));
-    ASSERT_TRUE(test_helper_->WriteColumnFileFromVector(
-        "token", picasa::PMP_TYPE_STRING, token_column));
+    picasa_data_provider_->Init(std::vector<AlbumInfo>(), folders);
   }
 
   void VerifyFolderDirectoryList(const ScopedVector<TestFolder>& test_folders) {
     FileSystemOperation::FileEntryList contents;
     FileSystemURL url = CreateURL(kPicasaDirFolders);
     bool completed = false;
-    operation_runner()->ReadDirectory(
-        url, base::Bind(&DidReadDirectory, &contents, &completed));
-    base::MessageLoop::current()->RunUntilIdle();
+    ReadDirectoryTestHelper(operation_runner(), url, &contents, &completed);
 
     ASSERT_TRUE(completed);
     ASSERT_EQ(test_folders.size(), contents.size());
@@ -304,11 +283,8 @@ class PicasaFileUtilTest : public testing::Test {
           std::string(kPicasaDirFolders) + "/" +
           base::FilePath(contents[i].name).AsUTF8Unsafe());
       bool folder_read_completed = false;
-      operation_runner()->ReadDirectory(
-          folder_url,
-          base::Bind(&DidReadDirectory, &folder_contents,
-                     &folder_read_completed));
-      base::MessageLoop::current()->RunUntilIdle();
+      ReadDirectoryTestHelper(operation_runner(), folder_url, &folder_contents,
+                              &folder_read_completed);
 
       EXPECT_TRUE(folder_read_completed);
 
@@ -335,24 +311,22 @@ class PicasaFileUtilTest : public testing::Test {
     FileSystemURL url = CreateURL(
         std::string(kPicasaDirFolders) + path_append);
     bool completed = false;
-    operation_runner()->ReadDirectory(
-        url, base::Bind(&DidReadDirectory, &contents, &completed));
-    base::MessageLoop::current()->RunUntilIdle();
+    ReadDirectoryTestHelper(operation_runner(), url, &contents, &completed);
 
     ASSERT_FALSE(completed);
   }
 
-  FileSystemURL CreateURL(const std::string& virtual_path) {
+  FileSystemURL CreateURL(const std::string& virtual_path) const {
     return file_system_context_->CreateCrackedFileSystemURL(
         GURL("http://www.example.com"), fileapi::kFileSystemTypePicasa,
         base::FilePath::FromUTF8Unsafe(virtual_path));
   }
 
-  fileapi::FileSystemOperationRunner* operation_runner() {
+  fileapi::FileSystemOperationRunner* operation_runner() const {
     return file_system_context_->operation_runner();
   }
 
-  scoped_refptr<fileapi::FileSystemContext> file_system_context() {
+  scoped_refptr<fileapi::FileSystemContext> file_system_context() const {
     return file_system_context_;
   }
 
@@ -363,7 +337,8 @@ class PicasaFileUtilTest : public testing::Test {
   base::ScopedTempDir profile_dir_;
 
   scoped_refptr<fileapi::FileSystemContext> file_system_context_;
-  scoped_ptr<PmpTestHelper> test_helper_;
+  scoped_ptr<chrome::MediaPathFilter> media_path_filter_;
+  scoped_ptr<TestPicasaDataProvider> picasa_data_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(PicasaFileUtilTest);
 };
@@ -380,7 +355,7 @@ TEST_F(PicasaFileUtilTest, DateFormat) {
 }
 
 TEST_F(PicasaFileUtilTest, NameDeduplication) {
-  std::vector<AlbumInfo> folders;
+  ScopedVector<TestFolder> test_folders;
   std::vector<std::string> expected_names;
 
   base::Time test_date = base::Time::FromLocalExploded(test_date_exploded);
@@ -389,61 +364,51 @@ TEST_F(PicasaFileUtilTest, NameDeduplication) {
   std::string test_date_string = DateToPathString(test_date);
   std::string test_date_2_string = DateToPathString(test_date_2);
 
-  folders.push_back(
-      AlbumInfo("diff_date", test_date_2, "uuid3", base::FilePath()));
+  test_folders.push_back(
+      new TestFolder("diff_date", test_date_2, "uuid3", 0, 0));
   expected_names.push_back("diff_date " + test_date_2_string);
 
-  folders.push_back(
-      AlbumInfo("diff_date", test_date, "uuid2", base::FilePath()));
+  test_folders.push_back(
+      new TestFolder("diff_date", test_date, "uuid2", 0, 0));
   expected_names.push_back("diff_date " + test_date_string);
 
-  folders.push_back(
-      AlbumInfo("duplicate", test_date, "uuid4", base::FilePath()));
+  test_folders.push_back(
+      new TestFolder("duplicate", test_date, "uuid4", 0, 0));
   expected_names.push_back("duplicate " + test_date_string + " (1)");
 
-  folders.push_back(
-      AlbumInfo("duplicate", test_date, "uuid5", base::FilePath()));
+  test_folders.push_back(
+      new TestFolder("duplicate", test_date, "uuid5", 0, 0));
   expected_names.push_back("duplicate " + test_date_string + " (2)");
 
-  folders.push_back(
-      AlbumInfo("unique_name", test_date, "uuid1", base::FilePath()));
+  test_folders.push_back(
+      new TestFolder("unique_name", test_date, "uuid1", 0, 0));
   expected_names.push_back("unique_name " + test_date_string);
 
-  scoped_ptr<FileSystemOperationContext> operation_context(
-      new FileSystemOperationContext(file_system_context().get()));
+  SetupFolders(&test_folders);
 
-  scoped_ptr<chrome::MediaPathFilter> media_path_filter(
-      new chrome::MediaPathFilter());
+  FileSystemOperation::FileEntryList contents;
+  FileSystemURL url = CreateURL(kPicasaDirFolders);
+  bool completed = false;
+  ReadDirectoryTestHelper(operation_runner(), url, &contents, &completed);
 
-  operation_context->SetUserValue(
-      chrome::MediaFileSystemMountPointProvider::kMediaPathFilterKey,
-      media_path_filter.get());
-
-  TestPicasaFileUtil test_file_util(
-      new TestPicasaDataProvider(std::vector<AlbumInfo>(), folders));
-
-  fileapi::AsyncFileUtil::EntryList file_list;
-  ASSERT_EQ(base::PLATFORM_FILE_OK,
-            ReadDirectoryTestHelper(&test_file_util, operation_context.Pass(),
-                                    CreateURL(kPicasaDirFolders),
-                                    &file_list));
-
-  ASSERT_EQ(expected_names.size(), file_list.size());
-  for (size_t i = 0; i < file_list.size(); ++i) {
+  ASSERT_TRUE(completed);
+  ASSERT_EQ(expected_names.size(), contents.size());
+  for (size_t i = 0; i < contents.size(); ++i) {
     EXPECT_EQ(expected_names[i],
-              base::FilePath(file_list[i].name).AsUTF8Unsafe());
-    EXPECT_EQ(folders[i].timestamp, file_list[i].last_modified_time);
-    EXPECT_TRUE(file_list[i].is_directory);
+              base::FilePath(contents[i].name).AsUTF8Unsafe());
+    EXPECT_EQ(test_folders[i]->timestamp(), contents[i].last_modified_time);
+    EXPECT_TRUE(contents[i].is_directory);
   }
 }
 
 TEST_F(PicasaFileUtilTest, RootFolders) {
+  ScopedVector<TestFolder> empty_folders_list;
+  SetupFolders(&empty_folders_list);
+
   FileSystemOperation::FileEntryList contents;
   FileSystemURL url = CreateURL("");
   bool completed = false;
-  operation_runner()->ReadDirectory(
-      url, base::Bind(&DidReadDirectory, &contents, &completed));
-  base::MessageLoop::current()->RunUntilIdle();
+  ReadDirectoryTestHelper(operation_runner(), url, &contents, &completed);
 
   ASSERT_TRUE(completed);
   ASSERT_EQ(2u, contents.size());

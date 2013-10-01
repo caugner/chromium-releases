@@ -1,19 +1,19 @@
 // Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+//
+// Unit tests for |FeedbackSender| object.
 
-#include <string>
-#include <vector>
+#include "chrome/browser/spellchecker/feedback_sender.h"
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/spellchecker/feedback_sender.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/metrics/entropy_provider.h"
 #include "chrome/common/spellcheck_common.h"
@@ -28,27 +28,40 @@ namespace spellcheck {
 
 namespace {
 
-static const int kMisspellingLength = 6;
-static const int kMisspellingStart = 0;
-static const int kRendererProcessId = 0;
-static const int kUrlFetcherId = 0;
-static const std::string kCountry = "USA";
-static const std::string kLanguage = "en";
-static const string16 kText = ASCIIToUTF16("Helllo world.");
+const char kCountry[] = "USA";
+const char kLanguage[] = "en";
+const char kText[] = "Helllo world.";
+const int kMisspellingLength = 6;
+const int kMisspellingStart = 0;
+const int kRendererProcessId = 0;
+const int kUrlFetcherId = 0;
 
+// Builds a simple spellcheck result.
 SpellCheckResult BuildSpellCheckResult() {
   return SpellCheckResult(SpellCheckResult::SPELLING,
                           kMisspellingStart,
                           kMisspellingLength,
-                          ASCIIToUTF16("Hello"));
+                          UTF8ToUTF16("Hello"));
+}
+
+// Returns the number of times that |needle| appears in |haystack| without
+// overlaps. For example, CountOccurences("bananana", "nana") returns 1.
+int CountOccurences(const std::string& haystack, const std::string& needle) {
+  int number_of_occurrences = 0;
+  for (size_t pos = haystack.find(needle);
+       pos != std::string::npos;
+       pos = haystack.find(needle, pos + needle.length())) {
+    ++number_of_occurrences;
+  }
+  return number_of_occurrences;
 }
 
 }  // namespace
 
+// A test fixture to help keep tests simple.
 class FeedbackSenderTest : public testing::Test {
  public:
   FeedbackSenderTest() : ui_thread_(content::BrowserThread::UI, &loop_) {
-
     // The command-line switch and the field trial are temporary.
     // TODO(rouslan): Remove the command-line switch and the field trial.
     // http://crbug.com/247726
@@ -59,23 +72,17 @@ class FeedbackSenderTest : public testing::Test {
     field_trial_ = base::FieldTrialList::CreateFieldTrial(
         kFeedbackFieldTrialName, kFeedbackFieldTrialEnabledGroupName);
     field_trial_->group();
-
     feedback_.reset(new FeedbackSender(NULL, kLanguage, kCountry));
   }
   virtual ~FeedbackSenderTest() {}
 
- private:
-  TestingProfile profile_;
-  base::MessageLoop loop_;
-  content::TestBrowserThread ui_thread_;
-  scoped_ptr<base::FieldTrialList> field_trial_list_;
-  scoped_refptr<base::FieldTrial> field_trial_;
-
  protected:
   uint32 AddPendingFeedback() {
     std::vector<SpellCheckResult> results(1, BuildSpellCheckResult());
-    feedback_->OnSpellcheckResults(
-        &results, kRendererProcessId, kText, std::vector<SpellCheckMarker>());
+    feedback_->OnSpellcheckResults(kRendererProcessId,
+                                   UTF8ToUTF16(kText),
+                                   std::vector<SpellCheckMarker>(),
+                                   &results);
     return results[0].hash;
   }
 
@@ -85,30 +92,63 @@ class FeedbackSenderTest : public testing::Test {
         base::TimeDelta::FromHours(chrome::spellcheck_common::kSessionHours);
   }
 
-  net::TestURLFetcher* GetFetcher() {
-    return fetchers_.GetFetcherByID(kUrlFetcherId);
+  bool UploadDataContains(const std::string& data) const {
+    const net::TestURLFetcher* fetcher =
+        fetchers_.GetFetcherByID(kUrlFetcherId);
+    return fetcher && CountOccurences(fetcher->upload_data(), data) > 0;
   }
 
-  net::TestURLFetcherFactory fetchers_;
+  bool UploadDataContains(const std::string& data,
+                          int number_of_occurrences) const {
+    const net::TestURLFetcher* fetcher =
+        fetchers_.GetFetcherByID(kUrlFetcherId);
+    return fetcher && CountOccurences(fetcher->upload_data(), data) ==
+                          number_of_occurrences;
+  }
+
+  // Returns true if the feedback sender would be uploading data now. The test
+  // does not open network connections.
+  bool IsUploadingData() const {
+    return !!fetchers_.GetFetcherByID(kUrlFetcherId);
+  }
+
+  void ClearUploadData() {
+    fetchers_.RemoveFetcherFromMap(kUrlFetcherId);
+  }
+
+  std::string GetUploadData() const {
+    const net::TestURLFetcher* fetcher =
+        fetchers_.GetFetcherByID(kUrlFetcherId);
+    return fetcher ? fetcher->upload_data() : std::string();
+  }
+
   scoped_ptr<spellcheck::FeedbackSender> feedback_;
+
+ private:
+  TestingProfile profile_;
+  base::MessageLoop loop_;
+  content::TestBrowserThread ui_thread_;
+  scoped_ptr<base::FieldTrialList> field_trial_list_;
+  scoped_refptr<base::FieldTrial> field_trial_;
+  net::TestURLFetcherFactory fetchers_;
 };
 
 // Do not send data if there's no feedback.
 TEST_F(FeedbackSenderTest, NoFeedback) {
-  EXPECT_EQ(NULL, GetFetcher());
+  EXPECT_FALSE(IsUploadingData());
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  EXPECT_EQ(NULL, GetFetcher());
+  EXPECT_FALSE(IsUploadingData());
 }
 
 // Do not send data if not aware of which markers are still in the document.
 TEST_F(FeedbackSenderTest, NoDocumentMarkersReceived) {
-  EXPECT_EQ(NULL, GetFetcher());
+  EXPECT_FALSE(IsUploadingData());
   uint32 hash = AddPendingFeedback();
-  EXPECT_EQ(NULL, GetFetcher());
+  EXPECT_FALSE(IsUploadingData());
   static const int kSuggestionIndex = 1;
   feedback_->SelectedSuggestion(hash, kSuggestionIndex);
-  EXPECT_EQ(NULL, GetFetcher());
+  EXPECT_FALSE(IsUploadingData());
 }
 
 // Send PENDING feedback message if the marker is still in the document, and the
@@ -117,10 +157,7 @@ TEST_F(FeedbackSenderTest, PendingFeedback) {
   uint32 hash = AddPendingFeedback();
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>(1, hash));
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"PENDING\""))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"PENDING\""));
 }
 
 // Send NO_ACTION feedback message if the marker has been removed from the
@@ -129,26 +166,18 @@ TEST_F(FeedbackSenderTest, NoActionFeedback) {
   AddPendingFeedback();
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"NO_ACTION\""))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"NO_ACTION\""));
 }
 
 // Send SELECT feedback message if the user has selected a spelling suggestion.
 TEST_F(FeedbackSenderTest, SelectFeedback) {
   uint32 hash = AddPendingFeedback();
-  static const int kSuggestion = 0;
-  feedback_->SelectedSuggestion(hash, kSuggestion);
+  static const int kSuggestionIndex = 0;
+  feedback_->SelectedSuggestion(hash, kSuggestionIndex);
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"SELECT\""))
-      << fetcher->upload_data();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionTargetIndex\":" + kSuggestion))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"SELECT\""));
+  EXPECT_TRUE(UploadDataContains("\"actionTargetIndex\":" + kSuggestionIndex));
 }
 
 // Send ADD_TO_DICT feedback message if the user has added the misspelled word
@@ -158,10 +187,17 @@ TEST_F(FeedbackSenderTest, AddToDictFeedback) {
   feedback_->AddedToDictionary(hash);
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"ADD_TO_DICT\""))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"ADD_TO_DICT\""));
+}
+
+// Send IN_DICTIONARY feedback message if the user has the misspelled word in
+// the custom dictionary.
+TEST_F(FeedbackSenderTest, InDictionaryFeedback) {
+  uint32 hash = AddPendingFeedback();
+  feedback_->RecordInDictionary(hash);
+  feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
+                                      std::vector<uint32>());
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"IN_DICTIONARY\""));
 }
 
 // Send PENDING feedback message if the user saw the spelling suggestion, but
@@ -171,10 +207,7 @@ TEST_F(FeedbackSenderTest, IgnoreFeedbackMarkerInDocument) {
   feedback_->IgnoredSuggestions(hash);
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>(1, hash));
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"PENDING\""))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"PENDING\""));
 }
 
 // Send IGNORE feedback message if the user saw the spelling suggestion, but
@@ -184,10 +217,7 @@ TEST_F(FeedbackSenderTest, IgnoreFeedbackMarkerNotInDocument) {
   feedback_->IgnoredSuggestions(hash);
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"IGNORE\""))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"IGNORE\""));
 }
 
 // Send MANUALLY_CORRECTED feedback message if the user manually corrected the
@@ -198,15 +228,9 @@ TEST_F(FeedbackSenderTest, ManuallyCorrectedFeedback) {
   feedback_->ManuallyCorrected(hash, ASCIIToUTF16(kManualCorrection));
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(
-      std::string::npos,
-      fetcher->upload_data().find("\"actionType\":\"MANUALLY_CORRECTED\""))
-      << fetcher->upload_data();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionTargetValue\":\"" +
-                                        kManualCorrection + "\""))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"MANUALLY_CORRECTED\""));
+  EXPECT_TRUE(UploadDataContains("\"actionTargetValue\":\"" +
+                                 kManualCorrection + "\""));
 }
 
 // Send feedback messages in batch.
@@ -222,15 +246,13 @@ TEST_F(FeedbackSenderTest, BatchFeedback) {
                                      kSecondMisspellingStart,
                                      kSecondMisspellingLength,
                                      ASCIIToUTF16("world")));
-  feedback_->OnSpellcheckResults(
-      &results, kRendererProcessId, kText, std::vector<SpellCheckMarker>());
+  feedback_->OnSpellcheckResults(kRendererProcessId,
+                                 UTF8ToUTF16(kText),
+                                 std::vector<SpellCheckMarker>(),
+                                 &results);
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  net::TestURLFetcher* fetcher = GetFetcher();
-  size_t pos = fetcher->upload_data().find("\"actionType\":\"NO_ACTION\"");
-  EXPECT_NE(std::string::npos, pos) << fetcher->upload_data();
-  pos = fetcher->upload_data().find("\"actionType\":\"NO_ACTION\"", pos + 1);
-  EXPECT_NE(std::string::npos, pos) << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"NO_ACTION\"", 2));
 }
 
 // Send a series of PENDING feedback messages and one final NO_ACTION feedback
@@ -240,37 +262,25 @@ TEST_F(FeedbackSenderTest, SameHashFeedback) {
   std::vector<uint32> remaining_markers(1, hash);
 
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId, remaining_markers);
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"PENDING\""))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"PENDING\""));
   std::string hash_string = base::StringPrintf("\"suggestionId\":\"%u\"", hash);
-  EXPECT_NE(std::string::npos, fetcher->upload_data().find(hash_string))
-      << fetcher->upload_data();
-  fetchers_.RemoveFetcherFromMap(kUrlFetcherId);
+  EXPECT_TRUE(UploadDataContains(hash_string));
+  ClearUploadData();
 
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId, remaining_markers);
-  fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"PENDING\""))
-      << fetcher->upload_data();
-  EXPECT_NE(std::string::npos, fetcher->upload_data().find(hash_string))
-      << fetcher->upload_data();
-  fetchers_.RemoveFetcherFromMap(kUrlFetcherId);
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"PENDING\""));
+  EXPECT_TRUE(UploadDataContains(hash_string));
+  ClearUploadData();
 
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"NO_ACTION\""))
-      << fetcher->upload_data();
-  EXPECT_NE(std::string::npos, fetcher->upload_data().find(hash_string))
-      << fetcher->upload_data();
-  fetchers_.RemoveFetcherFromMap(kUrlFetcherId);
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"NO_ACTION\""));
+  EXPECT_TRUE(UploadDataContains(hash_string));
+  ClearUploadData();
 
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  EXPECT_EQ(NULL, GetFetcher());
+  EXPECT_FALSE(IsUploadingData());
 }
 
 // When a session expires:
@@ -285,46 +295,34 @@ TEST_F(FeedbackSenderTest, SessionExpirationFeedback) {
                        kMisspellingStart,
                        kMisspellingLength,
                        ASCIIToUTF16("Hello")));
-  feedback_->OnSpellcheckResults(
-      &results, kRendererProcessId, kText, std::vector<SpellCheckMarker>());
+  feedback_->OnSpellcheckResults(kRendererProcessId,
+                                 UTF8ToUTF16(kText),
+                                 std::vector<SpellCheckMarker>(),
+                                 &results);
   uint32 original_hash = results[0].hash;
   std::vector<uint32> remaining_markers(1, original_hash);
 
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId, remaining_markers);
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_EQ(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"NO_ACTION\""))
-      << fetcher->upload_data();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"PENDING\""))
-      << fetcher->upload_data();
+  EXPECT_FALSE(UploadDataContains("\"actionType\":\"NO_ACTION\""));
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"PENDING\""));
   std::string original_hash_string =
       base::StringPrintf("\"suggestionId\":\"%u\"", original_hash);
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find(original_hash_string))
-      << fetcher->upload_data();
-  fetchers_.RemoveFetcherFromMap(kUrlFetcherId);
+  EXPECT_TRUE(UploadDataContains(original_hash_string));
+  ClearUploadData();
 
   ExpireSession();
 
   // Last message batch in the current session has only finalized messages.
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId, remaining_markers);
-  fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"NO_ACTION\""))
-      << fetcher->upload_data();
-  EXPECT_EQ(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"PENDING\""))
-      << fetcher->upload_data();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find(original_hash_string))
-      << fetcher->upload_data();
-  fetchers_.RemoveFetcherFromMap(kUrlFetcherId);
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"NO_ACTION\""));
+  EXPECT_FALSE(UploadDataContains("\"actionType\":\"PENDING\""));
+  EXPECT_TRUE(UploadDataContains(original_hash_string));
+  ClearUploadData();
 
   // The next session starts on the next spellchecker request. Until then,
   // there's no more feedback sent.
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId, remaining_markers);
-  EXPECT_EQ(NULL, GetFetcher());
+  EXPECT_FALSE(IsUploadingData());
 
   // The first spellcheck request after session expiration creates different
   // document marker hash identifiers.
@@ -335,7 +333,7 @@ TEST_F(FeedbackSenderTest, SessionExpirationFeedback) {
                                 kMisspellingLength,
                                 ASCIIToUTF16("Hello"));
   feedback_->OnSpellcheckResults(
-      &results, kRendererProcessId, kText, original_markers);
+      kRendererProcessId, UTF8ToUTF16(kText), original_markers, &results);
   uint32 updated_hash = results[0].hash;
   EXPECT_NE(updated_hash, original_hash);
   remaining_markers[0] = updated_hash;
@@ -343,20 +341,12 @@ TEST_F(FeedbackSenderTest, SessionExpirationFeedback) {
   // The first feedback message batch in session |i + 1| has the new document
   // marker hash identifiers.
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId, remaining_markers);
-  fetcher = GetFetcher();
-  EXPECT_EQ(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"NO_ACTION\""))
-      << fetcher->upload_data();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"actionType\":\"PENDING\""))
-      << fetcher->upload_data();
-  EXPECT_EQ(std::string::npos,
-            fetcher->upload_data().find(original_hash_string))
-      << fetcher->upload_data();
+  EXPECT_FALSE(UploadDataContains("\"actionType\":\"NO_ACTION\""));
+  EXPECT_TRUE(UploadDataContains("\"actionType\":\"PENDING\""));
+  EXPECT_FALSE(UploadDataContains(original_hash_string));
   std::string updated_hash_string =
       base::StringPrintf("\"suggestionId\":\"%u\"", updated_hash);
-  EXPECT_NE(std::string::npos, fetcher->upload_data().find(updated_hash_string))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains(updated_hash_string));
 }
 
 // First message in session has an indicator.
@@ -365,19 +355,13 @@ TEST_F(FeedbackSenderTest, FirstMessageInSessionIndicator) {
   AddPendingFeedback();
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"isFirstInSession\":true"))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"isFirstInSession\":true"));
 
   // Session 1, message 2
   AddPendingFeedback();
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"isFirstInSession\":false"))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"isFirstInSession\":false"));
 
   ExpireSession();
 
@@ -385,45 +369,29 @@ TEST_F(FeedbackSenderTest, FirstMessageInSessionIndicator) {
   AddPendingFeedback();
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"isFirstInSession\":false"))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"isFirstInSession\":false"));
 
   // Session 2, message 1
   AddPendingFeedback();
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"isFirstInSession\":true"))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"isFirstInSession\":true"));
 
   // Session 2, message 2
   AddPendingFeedback();
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"isFirstInSession\":false"))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"isFirstInSession\":false"));
 }
 
 // Flush all feedback when the spellcheck language and country change.
 TEST_F(FeedbackSenderTest, OnLanguageCountryChange) {
   AddPendingFeedback();
   feedback_->OnLanguageCountryChange("pt", "BR");
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"language\":\"en\""))
-      << fetcher->upload_data();
-
+  EXPECT_TRUE(UploadDataContains("\"language\":\"en\""));
   AddPendingFeedback();
   feedback_->OnLanguageCountryChange("en", "US");
-  fetcher = GetFetcher();
-  EXPECT_NE(std::string::npos,
-            fetcher->upload_data().find("\"language\":\"pt\""))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("\"language\":\"pt\""));
 }
 
 // The field names and types should correspond to the API.
@@ -431,7 +399,7 @@ TEST_F(FeedbackSenderTest, FeedbackAPI) {
   AddPendingFeedback();
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  std::string actual_data = GetFetcher()->upload_data();
+  std::string actual_data = GetUploadData();
   scoped_ptr<base::DictionaryValue> actual(
       static_cast<base::DictionaryValue*>(base::JSONReader::Read(actual_data)));
   actual->SetString("params.key", "TestDummyKey");
@@ -471,31 +439,16 @@ TEST_F(FeedbackSenderTest, MatchDupliateResultsWithExistingMarkers) {
   std::vector<SpellCheckResult> results(
       1,
       SpellCheckResult(SpellCheckResult::SPELLING,
-                       kMisspellingStart + 10,
+                       kMisspellingStart,
                        kMisspellingLength,
                        ASCIIToUTF16("Hello")));
   std::vector<SpellCheckMarker> markers(
       1, SpellCheckMarker(hash, results[0].location));
   EXPECT_EQ(static_cast<uint32>(0), results[0].hash);
-  feedback_->OnSpellcheckResults(&results, kRendererProcessId, kText, markers);
+  feedback_->OnSpellcheckResults(
+      kRendererProcessId, UTF8ToUTF16(kText), markers, &results);
   EXPECT_EQ(hash, results[0].hash);
 }
-
-namespace {
-
-// Returns the number of times that |needle| appears in |haystack| without
-// overlaps. For example, CountOccurences("bananana", "nana") returns 1.
-int CountOccurences(const std::string& haystack, const std::string& needle) {
-  int number_of_occurences = 0;
-  size_t pos = haystack.find(needle);
-  while (pos != std::string::npos) {
-    ++number_of_occurences;
-    pos = haystack.find(needle, pos + needle.length());
-  }
-  return number_of_occurences;
-}
-
-}  // namespace
 
 // Adding a word to dictionary should trigger ADD_TO_DICT feedback for every
 // occurrence of that word.
@@ -514,10 +467,10 @@ TEST_F(FeedbackSenderTest, MultipleAddToDictFeedback) {
   static const int kNumberOfRenderers = 2;
   int last_renderer_process_id = -1;
   for (int i = 0; i < kNumberOfRenderers; ++i) {
-    feedback_->OnSpellcheckResults(&results,
-                                   kRendererProcessId + i,
+    feedback_->OnSpellcheckResults(kRendererProcessId + i,
                                    kTextWithDuplicates,
-                                   std::vector<SpellCheckMarker>());
+                                   std::vector<SpellCheckMarker>(),
+                                   &results);
     last_renderer_process_id = kRendererProcessId + i;
   }
   std::vector<uint32> remaining_markers;
@@ -525,20 +478,14 @@ TEST_F(FeedbackSenderTest, MultipleAddToDictFeedback) {
     remaining_markers.push_back(results[i].hash);
   feedback_->OnReceiveDocumentMarkers(last_renderer_process_id,
                                       remaining_markers);
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_EQ(2, CountOccurences(fetcher->upload_data(), "PENDING"))
-      << fetcher->upload_data();
-  EXPECT_EQ(0, CountOccurences(fetcher->upload_data(), "ADD_TO_DICT"))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("PENDING", 2));
+  EXPECT_FALSE(UploadDataContains("ADD_TO_DICT"));
 
   feedback_->AddedToDictionary(results[0].hash);
   feedback_->OnReceiveDocumentMarkers(last_renderer_process_id,
                                       remaining_markers);
-  fetcher = GetFetcher();
-  EXPECT_EQ(0, CountOccurences(fetcher->upload_data(), "PENDING"))
-      << fetcher->upload_data();
-  EXPECT_EQ(2, CountOccurences(fetcher->upload_data(), "ADD_TO_DICT"))
-      << fetcher->upload_data();
+  EXPECT_FALSE(UploadDataContains("PENDING"));
+  EXPECT_TRUE(UploadDataContains("ADD_TO_DICT", 2));
 }
 
 // ADD_TO_DICT feedback for multiple occurrences of a word should trigger only
@@ -551,11 +498,30 @@ TEST_F(FeedbackSenderTest, AddToDictOnlyPending) {
   feedback_->AddedToDictionary(add_to_dict_hash);
   feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
                                       std::vector<uint32>());
-  net::TestURLFetcher* fetcher = GetFetcher();
-  EXPECT_EQ(1, CountOccurences(fetcher->upload_data(), "SELECT"))
-      << fetcher->upload_data();
-  EXPECT_EQ(2, CountOccurences(fetcher->upload_data(), "ADD_TO_DICT"))
-      << fetcher->upload_data();
+  EXPECT_TRUE(UploadDataContains("SELECT", 1));
+  EXPECT_TRUE(UploadDataContains("ADD_TO_DICT", 2));
+}
+
+// Spellcheck results that are out-of-bounds are not added to feedback.
+TEST_F(FeedbackSenderTest, IgnoreOutOfBounds) {
+  std::vector<SpellCheckResult> results;
+  results.push_back(SpellCheckResult(
+      SpellCheckResult::SPELLING, 0, 100, UTF8ToUTF16("Hello")));
+  results.push_back(SpellCheckResult(
+      SpellCheckResult::SPELLING, 100, 3, UTF8ToUTF16("world")));
+  results.push_back(
+      SpellCheckResult(SpellCheckResult::SPELLING, -1, 3, UTF8ToUTF16("how")));
+  results.push_back(
+      SpellCheckResult(SpellCheckResult::SPELLING, 0, 0, UTF8ToUTF16("are")));
+  results.push_back(
+      SpellCheckResult(SpellCheckResult::SPELLING, 2, -1, UTF8ToUTF16("you")));
+  feedback_->OnSpellcheckResults(kRendererProcessId,
+                                 UTF8ToUTF16(kText),
+                                 std::vector<SpellCheckMarker>(),
+                                 &results);
+  feedback_->OnReceiveDocumentMarkers(kRendererProcessId,
+                                      std::vector<uint32>());
+  EXPECT_FALSE(IsUploadingData());
 }
 
 }  // namespace spellcheck

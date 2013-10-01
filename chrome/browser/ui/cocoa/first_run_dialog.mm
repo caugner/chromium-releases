@@ -9,7 +9,7 @@
 #include "base/mac/mac_util.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/first_run/first_run_dialog.h"
@@ -19,10 +19,10 @@
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
-#include "googleurl/src/gurl.h"
 #include "grit/locale_settings.h"
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "url/gurl.h"
 
 #if defined(GOOGLE_CHROME_BUILD)
 #include "base/prefs/pref_service.h"
@@ -120,8 +120,6 @@ bool ShowFirstRun(Profile* profile) {
 #else  // GOOGLE_CHROME_BUILD
   // We don't show the dialog in Chromium.
 #endif  // GOOGLE_CHROME_BUILD
-
-  first_run::CreateSentinel();
 
   // Set preference to show first run bubble and welcome page.
   // Only display the bubble if there is a default search provider.

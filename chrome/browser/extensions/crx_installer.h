@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/version.h"
+#include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_installer.h"
 #include "chrome/browser/extensions/sandboxed_unpacker.h"
@@ -75,18 +76,21 @@ class CrxInstaller
     NumOffStoreInstallAllowReasons
   };
 
-  // Extensions will be installed into service->install_directory(),
-  // then registered with |service|. Any install UI will be displayed
-  // using |client|. Pass NULL for |client| for silent install
+  // Extensions will be installed into service->install_directory(), then
+  // registered with |service|. This does a silent install - see below for
+  // other options.
+  static scoped_refptr<CrxInstaller> CreateSilent(ExtensionService* service);
+
+  // Same as above, but use |client| to generate a confirmation prompt.
   static scoped_refptr<CrxInstaller> Create(
       ExtensionService* service,
-      ExtensionInstallPrompt* client);
+      scoped_ptr<ExtensionInstallPrompt> client);
 
   // Same as the previous method, except use the |approval| to bypass the
   // prompt. Note that the caller retains ownership of |approval|.
   static scoped_refptr<CrxInstaller> Create(
       ExtensionService* service,
-      ExtensionInstallPrompt* client,
+      scoped_ptr<ExtensionInstallPrompt> client,
       const WebstoreInstaller::Approval* approval);
 
   // Install the crx in |source_file|.
@@ -130,10 +134,6 @@ class CrxInstaller
 
   bool allow_silent_install() const { return allow_silent_install_; }
   void set_allow_silent_install(bool val) { allow_silent_install_ = val; }
-
-  void set_bypass_blacklist_for_test(bool val) {
-    bypass_blacklist_for_test_ = val;
-  }
 
   bool is_gallery_install() const {
     return (creation_flags_ & Extension::FROM_WEBSTORE) > 0;
@@ -202,7 +202,7 @@ class CrxInstaller
   friend class ExtensionCrxInstallerTest;
 
   CrxInstaller(base::WeakPtr<ExtensionService> service_weak,
-               ExtensionInstallPrompt* client,
+               scoped_ptr<ExtensionInstallPrompt> client,
                const WebstoreInstaller::Approval* approval);
   virtual ~CrxInstaller();
 
@@ -222,13 +222,18 @@ class CrxInstaller
   virtual void OnUnpackSuccess(const base::FilePath& temp_dir,
                                const base::FilePath& extension_dir,
                                const base::DictionaryValue* original_manifest,
-                               const Extension* extension) OVERRIDE;
+                               const Extension* extension,
+                               const SkBitmap& install_icon) OVERRIDE;
 
   // Called on the UI thread to start the requirements check on the extension.
   void CheckImportsAndRequirements();
 
   // Runs on the UI thread. Callback from RequirementsChecker.
   void OnRequirementsChecked(std::vector<std::string> requirement_errors);
+
+  // Runs on the UI thread. Callback from Blacklist.
+  void OnBlacklistChecked(
+      extensions::Blacklist::BlacklistState blacklist_state);
 
   // Runs on the UI thread. Confirms the installation to the ExtensionService.
   void ConfirmInstall();
@@ -242,8 +247,6 @@ class CrxInstaller
   void ReportFailureFromUIThread(const CrxInstallerError& error);
   void ReportSuccessFromFileThread();
   void ReportSuccessFromUIThread();
-  void HandleIsBlacklistedResponse(const base::Closure& on_success,
-                                   bool success);
   void NotifyCrxInstallComplete(bool success);
 
   // Deletes temporary directory and crx file if needed.
@@ -348,9 +351,6 @@ class CrxInstaller
   // dialog.
   bool allow_silent_install_;
 
-  // Allows for bypassing the blacklist check. Only use for tests.
-  bool bypass_blacklist_for_test_;
-
   // The value of the content type header sent with the CRX.
   // Ignorred unless |require_extension_mime_type_| is true.
   std::string original_mime_type_;
@@ -379,6 +379,8 @@ class CrxInstaller
   bool error_on_unsupported_requirements_;
 
   bool has_requirement_errors_;
+
+  extensions::Blacklist::BlacklistState blacklist_state_;
 
   bool install_wait_for_idle_;
 

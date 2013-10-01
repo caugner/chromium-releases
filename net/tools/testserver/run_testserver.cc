@@ -8,7 +8,7 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
@@ -111,7 +111,7 @@ int main(int argc, const char* argv[]) {
     return -1;
   }
 
-  if (!file_util::DirectoryExists(test_server->document_root())) {
+  if (!base::DirectoryExists(test_server->document_root())) {
     printf("Error: invalid doc root: \"%s\" does not exist!\n",
         UTF16ToUTF8(test_server->document_root().LossyDisplayName()).c_str());
     return -1;

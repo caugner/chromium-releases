@@ -26,23 +26,16 @@ class CompiledFileSystem(object):
       """
       assert isinstance(cls, type)
       assert not cls.__name__[0].islower()  # guard against non-class types
-      full_name = cls.__name__
+      full_name = [cls.__name__, self._file_system.GetIdentity()]
       if category is not None:
-        full_name = '%s/%s' % (full_name, category)
-      def create_object_store(category):
+        full_name.append(category)
+      def create_object_store(my_category):
         return self._object_store_creator.Create(
-            CompiledFileSystem, category='%s/%s' % (full_name, category))
+            CompiledFileSystem, category='/'.join(full_name + [my_category]))
       return CompiledFileSystem(self._file_system,
                                 populate_function,
                                 create_object_store('file'),
                                 create_object_store('list'))
-
-    def CreateIdentity(self, cls):
-      '''Handy helper to get or create the identity compiled file system.
-      GetFromFile will return the file's contents.
-      GetFromFileListing will return the directory list.
-      '''
-      return self.Create(lambda _, x: x, cls)
 
   def __init__(self,
                file_system,

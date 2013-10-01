@@ -124,6 +124,10 @@ string16 WebsiteSettingsUI::PermissionTypeToUIString(
       return l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TYPE_MOUSELOCK);
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
       return l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TYPE_MEDIASTREAM);
+    case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
+      return l10n_util::GetStringUTF16(IDS_AUTOMATIC_DOWNLOADS_TAB_LABEL);
+    case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
+      return l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TYPE_MIDI_SYSEX);
     default:
       NOTREACHED();
       return string16();
@@ -217,6 +221,14 @@ int WebsiteSettingsUI::GetPermissionIconID(ContentSettingsType type,
       break;
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
       resource_id = use_blocked ? IDR_BLOCKED_MEDIA : IDR_ASK_MEDIA;
+      break;
+    case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
+      resource_id = use_blocked ? IDR_BLOCKED_DOWNLOADS
+                                : IDR_ALLOWED_DOWNLOADS;
+      break;
+    case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
+      resource_id = use_blocked ? IDR_BLOCKED_MIDI_SYSEX
+                                : IDR_ALLOWED_MIDI_SYSEX;
       break;
     default:
       NOTREACHED();

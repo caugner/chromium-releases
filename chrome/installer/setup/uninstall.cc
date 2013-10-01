@@ -13,7 +13,7 @@
 #include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -45,6 +45,7 @@
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "content/public/common/result_codes.h"
+#include "extensions/common/constants.h"
 #include "rlz/lib/rlz_lib.h"
 
 // Build-time generated include file.
@@ -64,7 +65,7 @@ namespace {
 void DeleteInstallTempDir(const base::FilePath& target_path) {
   base::FilePath temp_path(target_path.DirName().Append(
       installer::kInstallTempDir));
-  if (file_util::DirectoryExists(temp_path)) {
+  if (base::DirectoryExists(temp_path)) {
     installer::SelfCleaningTempDir temp_dir;
     if (!temp_dir.Initialize(target_path.DirName(),
                              installer::kInstallTempDir) ||
@@ -270,7 +271,7 @@ bool RemoveInstallerFiles(const base::FilePath& installer_directory,
       continue;
 
     VLOG(1) << "Deleting installer path " << to_delete.value();
-    if (!file_util::Delete(to_delete, true)) {
+    if (!base::DeleteFile(to_delete, true)) {
       LOG(ERROR) << "Failed to delete path: " << to_delete.value();
       success = false;
     }
@@ -402,7 +403,7 @@ DeleteResult DeleteEmptyDir(const base::FilePath& path) {
   if (!file_util::IsDirectoryEmpty(path))
     return DELETE_NOT_EMPTY;
 
-  if (file_util::Delete(path, true))
+  if (base::DeleteFile(path, true))
     return DELETE_SUCCEEDED;
 
   LOG(ERROR) << "Failed to delete folder: " << path.value();
@@ -427,12 +428,12 @@ base::FilePath BackupLocalStateFile(
     const base::FilePath& local_state_folder = local_state_folders[i];
     base::FilePath state_file(
         local_state_folder.Append(chrome::kLocalStateFilename));
-    if (!file_util::PathExists(state_file))
+    if (!base::PathExists(state_file))
       continue;
     if (!file_util::CreateTemporaryFile(&backup))
       LOG(ERROR) << "Failed to create temporary file for Local State.";
     else
-      file_util::CopyFile(state_file, backup);
+      base::CopyFile(state_file, backup);
     break;
   }
   return backup;
@@ -449,7 +450,7 @@ DeleteResult DeleteLocalState(
   for (size_t i = 0; i < local_state_folders.size(); ++i) {
     const base::FilePath& user_local_state = local_state_folders[i];
     VLOG(1) << "Deleting user profile " << user_local_state.value();
-    if (!file_util::Delete(user_local_state, true)) {
+    if (!base::DeleteFile(user_local_state, true)) {
       LOG(ERROR) << "Failed to delete user profile dir: "
                  << user_local_state.value();
       if (schedule_on_failure) {
@@ -495,12 +496,12 @@ bool MoveSetupOutOfInstallFolder(const InstallerState& installer_state,
       PLOG(ERROR) << "Failed to change the current directory.";
 
     VLOG(1) << "Attempting to move setup to: " << temp_file.value();
-    ret = file_util::Move(setup_exe, temp_file);
+    ret = base::Move(setup_exe, temp_file);
     PLOG_IF(ERROR, !ret) << "Failed to move setup to " << temp_file.value();
 
     // We cannot delete the file right away, but try to delete it some other
     // way. Either with the help of a different process or the system.
-    if (ret && !file_util::DeleteAfterReboot(temp_file)) {
+    if (ret && !base::DeleteFileAfterReboot(temp_file)) {
       static const uint32 kDeleteAfterMs = 10 * 1000;
       installer::DeleteFileFromTempProcess(temp_file, kDeleteAfterMs);
     }
@@ -543,7 +544,7 @@ DeleteResult DeleteAppHostFilesAndFolders(const InstallerState& installer_state,
   DeleteResult result = DELETE_SUCCEEDED;
 
   base::FilePath app_host_exe(target_path.Append(installer::kChromeAppHostExe));
-  if (!file_util::Delete(app_host_exe, false)) {
+  if (!base::DeleteFile(app_host_exe, false)) {
     result = DELETE_FAILED;
     LOG(ERROR) << "Failed to delete path: " << app_host_exe.value();
   }
@@ -589,7 +590,7 @@ DeleteResult DeleteChromeFilesAndFolders(const InstallerState& installer_state,
     }
 
     VLOG(1) << "Deleting install path " << to_delete.value();
-    if (!file_util::Delete(to_delete, true)) {
+    if (!base::DeleteFile(to_delete, true)) {
       LOG(ERROR) << "Failed to delete path (1st try): " << to_delete.value();
       if (installer_state.FindProduct(BrowserDistribution::CHROME_FRAME)) {
         // We don't try killing Chrome processes for Chrome Frame builds since
@@ -605,7 +606,7 @@ DeleteResult DeleteChromeFilesAndFolders(const InstallerState& installer_state,
         // Try closing any running Chrome processes and deleting files once
         // again.
         CloseAllChromeProcesses();
-        if (!file_util::Delete(to_delete, true)) {
+        if (!base::DeleteFile(to_delete, true)) {
           LOG(ERROR) << "Failed to delete path (2nd try): "
                      << to_delete.value();
           result = DELETE_FAILED;
@@ -908,7 +909,7 @@ const wchar_t kChromeExtProgId[] = L"ChromiumExt";
     // Delete Software\Classes\.crx,
     string16 ext_association(ShellUtil::kRegClasses);
     ext_association.append(L"\\");
-    ext_association.append(chrome::kExtensionFileExtension);
+    ext_association.append(extensions::kExtensionFileExtension);
     InstallUtil::DeleteRegistryKey(roots[i], ext_association);
   }
 }
@@ -1351,7 +1352,7 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
   // Try and delete the preserved local state once the post-install
   // operations are complete.
   if (!backup_state_file.empty())
-    file_util::Delete(backup_state_file, false);
+    base::DeleteFile(backup_state_file, false);
 
   return ret;
 }

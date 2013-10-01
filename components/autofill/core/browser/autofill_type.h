@@ -5,11 +5,8 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_TYPE_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_TYPE_H_
 
-#include <map>
-#include <set>
 #include <string>
 
-#include "base/strings/string16.h"
 #include "components/autofill/core/browser/field_types.h"
 
 namespace autofill {
@@ -18,46 +15,44 @@ namespace autofill {
 // and for associating form fields with form values in the Web Database.
 class AutofillType {
  public:
-  enum FieldTypeGroup {
-    NO_GROUP,
-    NAME,
-    EMAIL,
-    COMPANY,
-    ADDRESS_HOME,
-    ADDRESS_BILLING,
-    PHONE_HOME,
-    PHONE_BILLING,
-    CREDIT_CARD,
-  };
-
-  explicit AutofillType(AutofillFieldType field_type);
+  explicit AutofillType(ServerFieldType field_type);
+  AutofillType(HtmlFieldType field_type, HtmlFieldMode mode);
   AutofillType(const AutofillType& autofill_type);
   AutofillType& operator=(const AutofillType& autofill_type);
 
-  AutofillFieldType field_type() const;
+  HtmlFieldType html_type() const { return html_type_; }
+
   FieldTypeGroup group() const;
 
-  // Maps |field_type| to a field type that can be directly stored in a profile
-  // (in the sense that it makes sense to call |AutofillProfile::SetInfo()| with
-  // the returned field type as the first parameter).
-  static AutofillFieldType GetEquivalentFieldType(AutofillFieldType field_type);
+  // Returns true if both the |server_type_| and the |html_type_| are set to
+  // their respective enum's unknown value.
+  bool IsUnknown() const;
 
-  // Maps |field_type| to a field type from ADDRESS_BILLING FieldTypeGroup if
-  // field type is an Address type.
-  static AutofillFieldType GetEquivalentBillingFieldType(
-      AutofillFieldType field_type);
+  // Maps |this| type to a field type that can be directly stored in an Autofill
+  // data model (in the sense that it makes sense to call
+  // |AutofillDataModel::SetRawInfo()| with the returned field type as the first
+  // parameter).  Note that the returned type might not be exactly equivalent to
+  // |this| type.  For example, there is no exact analogue to the
+  // 'street-address' HTML type hint among the storable field types.
+  ServerFieldType GetStorableType() const;
 
-  // Utilities for serializing and deserializing an |AutofillFieldType|.
-  static std::string FieldTypeToString(AutofillFieldType field_type);
-  static AutofillFieldType StringToFieldType(const std::string& str);
+  // Serializes |this| type to a string.
+  std::string ToString() const;
+
+  // Maps |field_type| to the corresponding billing field type if the field type
+  // is an address, name, or phone number type.
+  static ServerFieldType GetEquivalentBillingFieldType(
+      ServerFieldType field_type);
 
  private:
-  AutofillFieldType field_type_;
-};
+  // The server-native field type, or UNKNOWN_TYPE if unset.
+  ServerFieldType server_type_;
 
-typedef AutofillType::FieldTypeGroup FieldTypeGroup;
-typedef std::set<AutofillFieldType> FieldTypeSet;
-typedef std::map<base::string16, AutofillFieldType> FieldTypeMap;
+  // The HTML autocomplete field type and mode hints, or HTML_TYPE_UNKNOWN and
+  // HTML_MODE_NONE if unset.
+  HtmlFieldType html_type_;
+  HtmlFieldMode html_mode_;
+};
 
 }  // namespace autofill
 

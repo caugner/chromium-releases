@@ -11,7 +11,7 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_notifier_impl.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/testing_pref_service.h"
@@ -34,7 +34,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/user_prefs/pref_registry_syncable.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -116,8 +116,7 @@ static scoped_refptr<extensions::Extension> CreateExtension(
 class ProfileSigninConfirmationHelperTest : public testing::Test {
  public:
   ProfileSigninConfirmationHelperTest()
-      : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        user_prefs_(NULL),
+      : user_prefs_(NULL),
         model_(NULL) {
   }
 
@@ -131,7 +130,7 @@ class ProfileSigninConfirmationHelperTest : public testing::Test {
         new TestingPrefStore(),
         new user_prefs::PrefRegistrySyncable(),
         new PrefNotifierImpl());
-    chrome::RegisterUserPrefs(pref_service->registry());
+    chrome::RegisterUserProfilePrefs(pref_service->registry());
     builder.SetPrefService(make_scoped_ptr<PrefServiceSyncable>(pref_service));
     profile_ = builder.Build();
 
@@ -139,7 +138,7 @@ class ProfileSigninConfirmationHelperTest : public testing::Test {
     profile_->CreateBookmarkModel(true);
     model_ = BookmarkModelFactory::GetForProfile(profile_.get());
     ui_test_utils::WaitForBookmarkModelToLoad(model_);
-    profile_->CreateHistoryService(true, false);
+    ASSERT_TRUE(profile_->CreateHistoryService(true, false));
     extensions::TestExtensionSystem* system =
         static_cast<extensions::TestExtensionSystem*>(
             extensions::ExtensionSystem::Get(profile_.get()));
@@ -153,12 +152,11 @@ class ProfileSigninConfirmationHelperTest : public testing::Test {
     // TestExtensionSystem uses DeleteSoon, so we need to delete the profile
     // and then run the message queue to clean up.
     profile_.reset();
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
  protected:
-  base::MessageLoopForUI message_loop_;
-  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   scoped_ptr<TestingProfile> profile_;
   TestingPrefStoreWithCustomReadError* user_prefs_;
   BookmarkModel* model_;

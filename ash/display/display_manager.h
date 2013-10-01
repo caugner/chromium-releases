@@ -9,12 +9,11 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/display/display_controller.h"
 #include "ash/display/display_info.h"
+#include "ash/display/display_layout.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "ui/aura/root_window_observer.h"
-#include "ui/aura/window.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/display.h"
 
 #if defined(OS_CHROMEOS)
@@ -29,25 +28,40 @@ class Rect;
 
 namespace ash {
 class AcceleratorControllerTest;
+class DisplayController;
+
 namespace test {
 class DisplayManagerTestApi;
 class SystemGestureEventFilterTest;
 }
 namespace internal {
+class DisplayLayoutStore;
 
 // DisplayManager maintains the current display configurations,
 // and notifies observers when configuration changes.
-// This is exported for unittest.
 //
 // TODO(oshima): Make this non internal.
-class ASH_EXPORT DisplayManager :
+class ASH_EXPORT DisplayManager
 #if defined(OS_CHROMEOS)
-      public chromeos::OutputConfigurator::SoftwareMirroringController,
+    : public chromeos::OutputConfigurator::SoftwareMirroringController
 #endif
-      public aura::RootWindowObserver {
+      {
  public:
-  DisplayManager();
-  virtual ~DisplayManager();
+  class ASH_EXPORT Delegate {
+   public:
+    virtual ~Delegate() {}
+
+    // Create or updates the mirror window with |display_info|.
+    virtual void CreateOrUpdateMirrorWindow(
+        const DisplayInfo& display_info) = 0;
+
+    // Closes the mirror window if exists.
+    virtual void CloseMirrorWindow() = 0;
+
+    // Called before and after the display configuration changes.
+    virtual void PreDisplayConfigurationChange() = 0;
+    virtual void PostDisplayConfigurationChange() = 0;
+  };
 
   // Returns the list of possible UI scales for the display.
   static std::vector<float> GetScalesForDisplay(const DisplayInfo& info);
@@ -55,11 +69,21 @@ class ASH_EXPORT DisplayManager :
   // Returns next valid UI scale.
   static float GetNextUIScale(const DisplayInfo& info, bool up);
 
-  // Updates the bounds of |secondary_display| according to |layout|.
-  static void UpdateDisplayBoundsForLayout(
+  // Updates the bounds of the display given by |secondary_display_id|
+  // according to |layout|.
+  static void UpdateDisplayBoundsForLayoutById(
       const DisplayLayout& layout,
       const gfx::Display& primary_display,
-      gfx::Display* secondary_display);
+      int64 secondary_display_id);
+
+  DisplayManager();
+  virtual ~DisplayManager();
+
+  DisplayLayoutStore* layout_store() {
+    return layout_store_.get();
+  }
+
+  void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
   // When set to true, the MonitorManager calls OnDisplayBoundsChanged
   // even if the display's bounds didn't change. Used to swap primary
@@ -71,6 +95,10 @@ class ASH_EXPORT DisplayManager :
   // Returns the display id of the first display in the outupt list.
   int64 first_display_id() const { return first_display_id_; }
 
+  // Initializes displays using command line flag, or uses
+  // defualt if no options are specified.
+  void InitFromCommandLine();
+
   // True if the given |display| is currently connected.
   bool IsActiveDisplay(const gfx::Display& display) const;
 
@@ -78,9 +106,6 @@ class ASH_EXPORT DisplayManager :
   bool HasInternalDisplay() const;
 
   bool IsInternalDisplayId(int64 id) const;
-
-  bool UpdateWorkAreaOfDisplayNearestWindow(const aura::Window* window,
-                                            const gfx::Insets& insets);
 
   // Returns display for given |id|;
   const gfx::Display& GetDisplayForId(int64 id) const;
@@ -91,13 +116,13 @@ class ASH_EXPORT DisplayManager :
   const gfx::Display& FindDisplayContainingPoint(
       const gfx::Point& point_in_screen) const;
 
+  // Sets the work area's |insets| to the display given by |display_id|.
+  bool UpdateWorkAreaOfDisplay(int64 display_id, const gfx::Insets& insets);
+
   // Registers the overscan insets for the display of the specified ID. Note
   // that the insets size should be specified in DIP size. It also triggers the
   // display's bounds change.
   void SetOverscanInsets(int64 display_id, const gfx::Insets& insets_in_dip);
-
-  // Clears the overscan insets
-  void ClearCustomOverscanInsets(int64 display_id);
 
   // Sets the display's rotation.
   void SetDisplayRotation(int64 display_id, gfx::Display::Rotation rotation);
@@ -105,12 +130,20 @@ class ASH_EXPORT DisplayManager :
   // Sets the display's ui scale.
   void SetDisplayUIScale(int64 display_id, float ui_scale);
 
+  // Sets the display's resolution.
+  void SetDisplayResolution(int64 display_id, const gfx::Size& resolution);
+
   // Register per display properties. |overscan_insets| is NULL if
   // the display has no custom overscan insets.
   void RegisterDisplayProperty(int64 display_id,
                                gfx::Display::Rotation rotation,
                                float ui_scale,
-                               const gfx::Insets* overscan_insets);
+                               const gfx::Insets* overscan_insets,
+                               const gfx::Size& resolution_in_pixels);
+
+  // Returns the display's selected resolution.
+  bool GetSelectedResolutionForDisplayId(int64 display_id,
+                                         gfx::Size* resolution_out) const;
 
   // Tells if display rotation/ui scaling features are enabled.
   bool IsDisplayRotationEnabled() const;
@@ -133,10 +166,9 @@ class ASH_EXPORT DisplayManager :
   // Updates current displays using current |display_info_|.
   void UpdateDisplays();
 
-  // Obsoleted: Do not use in new code.
   // Returns the display at |index|. The display at 0 is
   // no longer considered "primary".
-  gfx::Display* GetDisplayAt(size_t index);
+  const gfx::Display& GetDisplayAt(size_t index) const;
 
   const gfx::Display* GetPrimaryDisplayCandidate() const;
 
@@ -151,18 +183,6 @@ class ASH_EXPORT DisplayManager :
   // Returns the mirroring status.
   bool IsMirrored() const;
   const gfx::Display& mirrored_display() const { return mirrored_display_; }
-
-  // Returns the display object nearest given |window|.
-  const gfx::Display& GetDisplayNearestPoint(
-      const gfx::Point& point) const;
-
-  // Returns the display object nearest given |point|.
-  const gfx::Display& GetDisplayNearestWindow(
-      const aura::Window* window) const;
-
-  // Returns the display that most closely intersects |match_rect|.
-  const gfx::Display& GetDisplayMatching(
-      const gfx::Rect& match_rect)const;
 
   // Retuns the display info associated with |display_id|.
   const DisplayInfo& GetDisplayInfo(int64 display_id) const;
@@ -184,9 +204,6 @@ class ASH_EXPORT DisplayManager :
   void AddRemoveDisplay();
   void ToggleDisplayScaleFactor();
 
-  // RootWindowObserver overrides:
-  virtual void OnRootWindowHostResized(const aura::RootWindow* root) OVERRIDE;
-
   // SoftwareMirroringController override:
 #if defined(OS_CHROMEOS)
   virtual void SetSoftwareMirroring(bool enabled) OVERRIDE;
@@ -194,6 +211,9 @@ class ASH_EXPORT DisplayManager :
   void SetSoftwareMirroring(bool enabled);
 #endif
 
+  // Update the bounds of the display given by |display_id|.
+  bool UpdateDisplayBounds(int64 display_id,
+                           const gfx::Rect& new_bounds);
 private:
   FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, ConvertPoint);
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, TestNativeDisplaysChanged);
@@ -202,8 +222,8 @@ private:
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, AutomaticOverscanInsets);
   friend class ash::AcceleratorControllerTest;
   friend class test::DisplayManagerTestApi;
-  friend class DisplayManagerTest;
   friend class test::SystemGestureEventFilterTest;
+  friend class DisplayManagerTest;
 
   typedef std::vector<gfx::Display> DisplayList;
 
@@ -211,17 +231,11 @@ private:
     change_display_upon_host_resize_ = value;
   }
 
-  void Init();
-
-  gfx::Display& FindDisplayForRootWindow(const aura::RootWindow* root);
-  gfx::Display& FindDisplayForId(int64 id);
+  gfx::Display* FindDisplayForId(int64 id);
 
   // Add the mirror display's display info if the software based
   // mirroring is in use.
   void AddMirrorDisplayInfoIfAny(std::vector<DisplayInfo>* display_info_list);
-
-  // Refer to |CreateDisplayFromSpec| API for the format of |spec|.
-  void AddDisplayFromSpec(const std::string& spec);
 
   // Inserts and update the DisplayInfo according to the overscan
   // state. Note that The DisplayInfo stored in the |internal_display_info_|
@@ -241,6 +255,15 @@ private:
   bool UpdateSecondaryDisplayBoundsForLayout(DisplayList* display_list,
                                              size_t* updated_index) const;
 
+  static void UpdateDisplayBoundsForLayout(
+      const DisplayLayout& layout,
+      const gfx::Display& primary_display,
+      gfx::Display* secondary_display);
+
+  Delegate* delegate_;  // not owned.
+
+  scoped_ptr<DisplayLayoutStore> layout_store_;
+
   int64 first_display_id_;
 
   gfx::Display mirrored_display_;
@@ -255,6 +278,9 @@ private:
   // The mapping from the display ID to its internal data.
   std::map<int64, DisplayInfo> display_info_;
 
+  // Selected resolutions for displays. Key is the displays' ID.
+  std::map<int64, gfx::Size> resolutions_;
+
   // When set to true, the host window's resize event updates
   // the display's size. This is set to true when running on
   // desktop environment (for debugging) so that resizing the host
@@ -266,8 +292,6 @@ private:
 
   DISALLOW_COPY_AND_ASSIGN(DisplayManager);
 };
-
-extern const aura::WindowProperty<int64>* const kDisplayIdKey;
 
 }  // namespace internal
 }  // namespace ash

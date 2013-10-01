@@ -10,7 +10,6 @@
 #include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/test/mini_installer_test/installer_test_util.h"
@@ -110,7 +109,7 @@ bool InstallerPathProvider::GetMiniInstaller(base::FilePath* path) {
   // Use local copy of installer, else fall back to filer.
   base::FilePath mini_installer = PathFromExeDir(
       mini_installer_constants::kChromeMiniInstallerExecutable);
-  if (file_util::PathExists(mini_installer)) {
+  if (base::PathExists(mini_installer)) {
     *path = mini_installer;
     return true;
   }
@@ -166,7 +165,7 @@ bool InstallerPathProvider::GetStandaloneInstaller(base::FilePath* path) {
       .Append(mini_installer_constants::kWinFolder)
       .AppendASCII(standalone_installer_filename);
   *path = standalone_installer;
-  return file_util::PathExists(standalone_installer);
+  return base::PathExists(standalone_installer);
 }
 
 bool InstallerPathProvider::GetSignedStandaloneInstaller(base::FilePath* path) {

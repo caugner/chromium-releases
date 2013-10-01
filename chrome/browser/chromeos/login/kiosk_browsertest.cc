@@ -9,6 +9,7 @@
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_launch_error.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -115,7 +115,7 @@ class KioskAppLaunchScenarioHandler : public TestBrowserMainExtraParts {
  private:
   // ChromeBrowserMainExtraParts implementation.
   virtual void PreEarlyInitialization() OVERRIDE {
-    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
                    content::NotificationService::AllSources());
     registrar_.Add(this, chrome::NOTIFICATION_KIOSK_APPS_LOADED,
                    content::NotificationService::AllSources());
@@ -127,8 +127,8 @@ class KioskAppLaunchScenarioHandler : public TestBrowserMainExtraParts {
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
-    if (type == chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE) {
-      LOG(INFO) << "NOTIFICATION_LOGIN_WEBUI_VISIBLE";
+    if (type == chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE) {
+      LOG(INFO) << "NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE";
       SetupSigninScreen();
     } else if (type == chrome::NOTIFICATION_KIOSK_APPS_LOADED) {
       LOG(INFO) << "chrome::NOTIFICATION_KIOSK_APPS_LOADED";
@@ -282,7 +282,7 @@ class KioskEnableScenarioHandler
  private:
   // ChromeBrowserMainExtraParts implementation.
   virtual void PreEarlyInitialization() OVERRIDE {
-    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
                    content::NotificationService::AllSources());
     registrar_.Add(this, chrome::NOTIFICATION_KIOSK_ENABLE_WARNING_VISIBLE,
                    content::NotificationService::AllSources());
@@ -298,8 +298,8 @@ class KioskEnableScenarioHandler
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
-      case chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE: {
-        LOG(INFO) << "NOTIFICATION_LOGIN_WEBUI_VISIBLE";
+      case chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE: {
+        LOG(INFO) << "NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE";
         SetupSigninScreen();
         content::WebUI* web_ui = static_cast<chromeos::LoginDisplayHostImpl*>(
             chromeos::LoginDisplayHostImpl::default_host())->
@@ -443,7 +443,7 @@ class KioskTest : public chromeos::CrosInProcessBrowserTest,
 
     scoped_ptr<BasicHttpResponse> http_response(new BasicHttpResponse());
     if (url.path() == "/ServiceLogin") {
-      http_response->set_code(net::test_server::SUCCESS);
+      http_response->set_code(net::HTTP_OK);
       http_response->set_content(service_login_response_);
       http_response->set_content_type("text/html");
     } else if (url.path() == "/ServiceLoginAuth") {
@@ -454,7 +454,7 @@ class KioskTest : public chromeos::CrosInProcessBrowserTest,
       int continue_arg_end = request.content.find("&", continue_arg_begin);
       const std::string continue_url = request.content.substr(
           continue_arg_begin, continue_arg_end - continue_arg_begin);
-      http_response->set_code(net::test_server::SUCCESS);
+      http_response->set_code(net::HTTP_OK);
       const std::string redirect_js =
           "document.location.href = unescape('" + continue_url + "');";
       http_response->set_content(

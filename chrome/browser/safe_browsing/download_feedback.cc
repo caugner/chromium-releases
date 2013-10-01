@@ -108,8 +108,10 @@ DownloadFeedbackImpl::~DownloadFeedbackImpl() {
     uploader_.reset();
   }
 
-  base::FileUtilProxy::Delete(file_task_runner_, file_path_, false,
-                              base::FileUtilProxy::StatusCallback());
+  base::FileUtilProxy::DeleteFile(file_task_runner_.get(),
+                                  file_path_,
+                                  false,
+                                  base::FileUtilProxy::StatusCallback());
 }
 
 void DownloadFeedbackImpl::Start(const base::Closure& finish_callback) {
@@ -135,15 +137,16 @@ void DownloadFeedbackImpl::Start(const base::Closure& finish_callback) {
   std::string metadata_string;
   bool ok = report_metadata.SerializeToString(&metadata_string);
   DCHECK(ok);
-  uploader_.reset(TwoPhaseUploader::Create(
-      request_context_getter_,
-      file_task_runner_,
-      url,
-      metadata_string,
-      file_path_,
-      TwoPhaseUploader::ProgressCallback(),
-      base::Bind(&DownloadFeedbackImpl::FinishedUpload, base::Unretained(this),
-                 finish_callback)));
+  uploader_.reset(
+      TwoPhaseUploader::Create(request_context_getter_.get(),
+                               file_task_runner_.get(),
+                               url,
+                               metadata_string,
+                               file_path_,
+                               TwoPhaseUploader::ProgressCallback(),
+                               base::Bind(&DownloadFeedbackImpl::FinishedUpload,
+                                          base::Unretained(this),
+                                          finish_callback)));
   uploader_->Start();
 }
 

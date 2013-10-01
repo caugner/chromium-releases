@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/phone_number_i18n.h"
@@ -324,13 +324,13 @@ TEST(PhoneNumberI18NTest, ConstructPhoneNumber) {
                                    ASCIIToUTF16("2345678901"),
                                    "DE",
                                    &number));
-  EXPECT_EQ(number, ASCIIToUTF16("+49 2423/45678901"));
+  EXPECT_EQ(number, ASCIIToUTF16("+49 2423 45678901"));
   EXPECT_TRUE(ConstructPhoneNumber(base::string16(),
                                    ASCIIToUTF16("024"),
                                    ASCIIToUTF16("2345678901"),
                                    "DE",
                                    &number));
-  EXPECT_EQ(number, ASCIIToUTF16("02423/45678901"));
+  EXPECT_EQ(number, ASCIIToUTF16("02423 45678901"));
 }
 
 TEST(PhoneNumberI18NTest, PhoneNumbersMatch) {

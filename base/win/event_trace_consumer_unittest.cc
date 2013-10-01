@@ -14,7 +14,7 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
-#include "base/process.h"
+#include "base/process/process.h"
 #include "base/strings/stringprintf.h"
 #include "base/win/event_trace_controller.h"
 #include "base/win/event_trace_provider.h"
@@ -291,7 +291,7 @@ class EtwTraceConsumerDataTest: public EtwTraceConsumerBaseTest {
   }
 
   virtual void TearDown() {
-    EXPECT_TRUE(file_util::Delete(temp_file_, false));
+    EXPECT_TRUE(base::DeleteFile(temp_file_, false));
 
     EtwTraceConsumerBaseTest::TearDown();
   }
@@ -335,7 +335,7 @@ class EtwTraceConsumerDataTest: public EtwTraceConsumerBaseTest {
   }
 
   HRESULT RoundTripEvent(PEVENT_TRACE_HEADER header, PEVENT_TRACE* trace) {
-    file_util::Delete(temp_file_, false);
+    base::DeleteFile(temp_file_, false);
 
     HRESULT hr = LogEventToTempSession(header);
     if (SUCCEEDED(hr))

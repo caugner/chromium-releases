@@ -7,14 +7,12 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread.h"
+#include "cc/animation/animation_delegate.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/WebAnimationDelegate.h"
 
-namespace Webkit {
-class WebGraphicsContext3D;
-}
+namespace Webkit { class WebGraphicsContext3D; }
 
 namespace cc {
 class FakeContextProvider;
@@ -26,7 +24,7 @@ class LayerTreeHostImpl;
 class FakeOutputSurface;
 
 // Used by test stubs to notify the test when something interesting happens.
-class TestHooks : public WebKit::WebAnimationDelegate {
+class TestHooks : public AnimationDelegate {
  public:
   TestHooks();
   virtual ~TestHooks();
@@ -54,26 +52,30 @@ class TestHooks : public WebKit::WebAnimationDelegate {
   virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
                                    float scale) {}
   virtual void Animate(base::TimeTicks monotonic_time) {}
+  virtual void WillBeginFrame() {}
+  virtual void DidBeginFrame() {}
   virtual void Layout() {}
   virtual void DidInitializeOutputSurface(bool succeeded) {}
   virtual void DidFailToInitializeOutputSurface() {}
   virtual void DidAddAnimation() {}
+  virtual void WillCommit() {}
   virtual void DidCommit() {}
   virtual void DidCommitAndDrawFrame() {}
   virtual void DidCompleteSwapBuffers() {}
   virtual void ScheduleComposite() {}
   virtual void DidDeferCommit() {}
   virtual bool CanActivatePendingTree(LayerTreeHostImpl* host_impl);
+  virtual bool CanActivatePendingTreeIfNeeded(LayerTreeHostImpl* host_impl);
   virtual void DidSetVisibleOnImplTree(LayerTreeHostImpl* host_impl,
                                        bool visible) {}
 
-  // Implementation of WebAnimationDelegate
-  virtual void notifyAnimationStarted(double time) OVERRIDE {}
-  virtual void notifyAnimationFinished(double time) OVERRIDE {}
+  // Implementation of AnimationDelegate:
+  virtual void NotifyAnimationStarted(double time) OVERRIDE {}
+  virtual void NotifyAnimationFinished(double time) OVERRIDE {}
 
-  virtual scoped_ptr<OutputSurface> CreateOutputSurface() = 0;
+  virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback) = 0;
   virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForMainThread() = 0;
+  OffscreenContextProviderForMainThread() = 0;
   virtual scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForCompositorThread() = 0;
 };
@@ -103,7 +105,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   virtual void BeginTest() = 0;
   virtual void SetupTree();
 
-  void EndTest();
+  virtual void EndTest();
   void EndTestAfterDelay(int delay_milliseconds);
 
   void PostAddAnimationToMainThread(Layer* layer_to_receive_animation);
@@ -152,10 +154,11 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   LayerTreeHost* layer_tree_host() { return layer_tree_host_.get(); }
   bool delegating_renderer() const { return delegating_renderer_; }
+  FakeOutputSurface* output_surface() { return output_surface_; }
 
-  virtual scoped_ptr<OutputSurface> CreateOutputSurface() OVERRIDE;
+  virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback) OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForMainThread() OVERRIDE;
+  OffscreenContextProviderForMainThread() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForCompositorThread() OVERRIDE;
 

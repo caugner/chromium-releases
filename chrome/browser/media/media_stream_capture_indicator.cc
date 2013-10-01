@@ -17,7 +17,6 @@
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/ui/screen_capture_notification_ui.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -55,7 +54,7 @@ const extensions::Extension* GetExtension(WebContents* web_contents) {
     return NULL;
 
   return extension_service->extensions()->GetExtensionOrAppByURL(
-      ExtensionURLInfo(web_contents->GetURL()));
+      web_contents->GetURL());
 }
 
 // Gets the security originator of the tab. It returns a string with no '/'
@@ -124,24 +123,18 @@ class MediaStreamCaptureIndicator::WebContentsDeviceUsage
         audio_ref_count_(0),
         video_ref_count_(0),
         mirroring_ref_count_(0),
-        screen_capture_ref_count_(0),
         weak_factory_(this) {
   }
 
   bool IsCapturingAudio() const { return audio_ref_count_ > 0; }
   bool IsCapturingVideo() const { return video_ref_count_ > 0; }
   bool IsMirroring() const { return mirroring_ref_count_ > 0; }
-  bool IsCapturingScreen() const { return screen_capture_ref_count_ > 0; }
-  const base::Closure& StopScreenCaptureCallback() const {
-    return stop_screen_capture_callback_;
-  }
 
   scoped_ptr<content::MediaStreamUI> RegisterMediaStream(
       const content::MediaStreamDevices& devices);
 
   // Increment ref-counts up based on the type of each device provided.
-  void AddDevices(const content::MediaStreamDevices& devices,
-                  const base::Closure& close_callback);
+  void AddDevices(const content::MediaStreamDevices& devices);
 
   // Decrement ref-counts up based on the type of each device provided.
   void RemoveDevices(const content::MediaStreamDevices& devices);
@@ -157,8 +150,6 @@ class MediaStreamCaptureIndicator::WebContentsDeviceUsage
   int audio_ref_count_;
   int video_ref_count_;
   int mirroring_ref_count_;
-  int screen_capture_ref_count_;
-  base::Closure stop_screen_capture_callback_;
 
   base::WeakPtrFactory<WebContentsDeviceUsage> weak_factory_;
 
@@ -192,7 +183,7 @@ class MediaStreamCaptureIndicator::UIDelegate
     DCHECK(!started_);
     started_ = true;
     if (device_usage_.get())
-      device_usage_->AddDevices(devices_, close_callback);
+      device_usage_->AddDevices(devices_);
   }
 
   base::WeakPtr<WebContentsDeviceUsage> device_usage_;
@@ -211,16 +202,12 @@ MediaStreamCaptureIndicator::WebContentsDeviceUsage::RegisterMediaStream(
 }
 
 void MediaStreamCaptureIndicator::WebContentsDeviceUsage::AddDevices(
-    const content::MediaStreamDevices& devices,
-    const base::Closure& close_callback) {
+    const content::MediaStreamDevices& devices) {
   for (content::MediaStreamDevices::const_iterator it = devices.begin();
        it != devices.end(); ++it) {
     if (it->type == content::MEDIA_TAB_AUDIO_CAPTURE ||
         it->type == content::MEDIA_TAB_VIDEO_CAPTURE) {
       ++mirroring_ref_count_;
-    } else if (it->type == content::MEDIA_SCREEN_VIDEO_CAPTURE) {
-      ++screen_capture_ref_count_;
-      stop_screen_capture_callback_ = close_callback;
     } else if (content::IsAudioMediaType(it->type)) {
       ++audio_ref_count_;
     } else if (content::IsVideoMediaType(it->type)) {
@@ -243,8 +230,6 @@ void MediaStreamCaptureIndicator::WebContentsDeviceUsage::RemoveDevices(
     if (it->type == content::MEDIA_TAB_AUDIO_CAPTURE ||
         it->type == content::MEDIA_TAB_VIDEO_CAPTURE) {
       --mirroring_ref_count_;
-    } else if (it->type == content::MEDIA_SCREEN_VIDEO_CAPTURE) {
-      --screen_capture_ref_count_;
     } else if (content::IsAudioMediaType(it->type)) {
       --audio_ref_count_;
     } else if (content::IsVideoMediaType(it->type)) {
@@ -257,7 +242,6 @@ void MediaStreamCaptureIndicator::WebContentsDeviceUsage::RemoveDevices(
   DCHECK_GE(audio_ref_count_, 0);
   DCHECK_GE(video_ref_count_, 0);
   DCHECK_GE(mirroring_ref_count_, 0);
-  DCHECK_GE(screen_capture_ref_count_, 0);
 
   web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
   indicator_->UpdateNotificationUserInterface();
@@ -366,7 +350,8 @@ void MediaStreamCaptureIndicator::UnregisterWebContents(
   UpdateNotificationUserInterface();
 }
 
-void MediaStreamCaptureIndicator::MaybeCreateStatusTrayIcon() {
+void MediaStreamCaptureIndicator::MaybeCreateStatusTrayIcon(bool audio,
+                                                            bool video) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (status_icon_)
     return;
@@ -379,9 +364,16 @@ void MediaStreamCaptureIndicator::MaybeCreateStatusTrayIcon() {
   if (!status_tray)
     return;
 
-  status_icon_ = status_tray->CreateStatusIcon();
-
   EnsureStatusTrayIconResources();
+
+  gfx::ImageSkia image;
+  string16 tool_tip;
+  GetStatusTrayIconInfo(audio, video, &image, &tool_tip);
+  DCHECK(!image.isNull());
+  DCHECK(!tool_tip.empty());
+
+  status_icon_ = status_tray->CreateStatusIcon(
+      StatusTray::MEDIA_STREAM_CAPTURE_ICON, image, tool_tip);
 }
 
 void MediaStreamCaptureIndicator::EnsureStatusTrayIconResources() {
@@ -424,20 +416,11 @@ void MediaStreamCaptureIndicator::UpdateNotificationUserInterface() {
   int command_id = IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_FIRST;
   command_targets_.clear();
 
-  WebContents* screen_capturer = NULL;
-  base::Closure close_callback;
-
   for (UsageMap::const_iterator iter = usage_map_.begin();
        iter != usage_map_.end(); ++iter) {
     // Check if any audio and video devices have been used.
     const WebContentsDeviceUsage& usage = *iter->second;
     WebContents* const web_contents = iter->first;
-
-    if (usage.IsCapturingScreen()) {
-      DCHECK(!screen_capturer);
-      screen_capturer = web_contents;
-      close_callback = usage.StopScreenCaptureCallback();
-    }
 
     // Audio/video icon is shown only for extensions or on Android.
     // For regular tabs on desktop, we show an indicator in the tab icon.
@@ -459,57 +442,36 @@ void MediaStreamCaptureIndicator::UpdateNotificationUserInterface() {
     }
   }
 
-  if (screen_capturer) {
-    if (!screen_capture_notification_) {
-      screen_capture_notification_ = ScreenCaptureNotificationUI::Create();
-      if (!screen_capture_notification_->Show(
-              base::Bind(&MediaStreamCaptureIndicator::OnStopScreenCapture,
-                         this, close_callback),
-              GetTitle(screen_capturer))) {
-        OnStopScreenCapture(close_callback);
-        screen_capture_notification_.reset();
-      }
-    }
-  } else {
-    screen_capture_notification_.reset();
-  }
-
   if (command_targets_.empty()) {
     MaybeDestroyStatusTrayIcon();
     return;
   }
 
   // The icon will take the ownership of the passed context menu.
-  MaybeCreateStatusTrayIcon();
+  MaybeCreateStatusTrayIcon(audio, video);
   if (status_icon_) {
     status_icon_->SetContextMenu(menu.release());
-    UpdateStatusTrayIconDisplay(audio, video);
   }
 }
 
-void MediaStreamCaptureIndicator::UpdateStatusTrayIconDisplay(
-    bool audio, bool video) {
+void MediaStreamCaptureIndicator::GetStatusTrayIconInfo(bool audio,
+                                                        bool video,
+                                                        gfx::ImageSkia* image,
+                                                        string16* tool_tip) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(audio || video);
-  DCHECK(status_icon_);
+
   int message_id = 0;
   if (audio && video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_AND_VIDEO;
-    status_icon_->SetImage(*camera_image_);
+    *image = *camera_image_;
   } else if (audio && !video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_ONLY;
-    status_icon_->SetImage(*mic_image_);
+    *image = *mic_image_;
   } else if (!audio && video) {
     message_id = IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_VIDEO_ONLY;
-    status_icon_->SetImage(*camera_image_);
+    *image = *camera_image_;
   }
 
-  status_icon_->SetToolTip(l10n_util::GetStringFUTF16(
-      message_id, l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
-}
-
-void MediaStreamCaptureIndicator::OnStopScreenCapture(
-    const base::Closure& stop) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  stop.Run();
+  *tool_tip = l10n_util::GetStringUTF16(message_id);
 }

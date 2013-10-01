@@ -14,6 +14,7 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.JavascriptAppModalDialog;
@@ -33,7 +34,7 @@ import java.util.concurrent.TimeoutException;
  * Test suite for displaying and functioning of modal dialogs.
  */
 public class ModalDialogTest extends ChromiumTestShellTestBase {
-    private final static String TAG = ModalDialogTest.class.getSimpleName();
+    private final static String TAG = "ModalDialogTest";
     private final static String EMPTY_PAGE = UrlUtils.encodeHtmlDataUri(
             "<html><title>Modal Dialog Test</title><p>Testcase.</p></title></html>");
     private final static String BEFORE_UNLOAD_URL = UrlUtils.encodeHtmlDataUri(
@@ -170,8 +171,9 @@ public class ModalDialogTest extends ChromiumTestShellTestBase {
      * Verifies beforeunload dialogs are shown and they block/allow navigation
      * as appropriate.
      */
-    @MediumTest
-    @Feature({"Browser", "Main"})
+    //@MediumTest
+    //@Feature({"Browser", "Main"})
+    @DisabledTest //crbug/270593
     public void testBeforeUnloadDialog()
             throws InterruptedException, TimeoutException, ExecutionException {
         loadUrlWithSanitization(BEFORE_UNLOAD_URL);

@@ -9,10 +9,9 @@
 
 /**
  * Controls rendering the new tab page for InstantExtended.
- * @param {Object} location window.location or a mock.
  * @return {Object} A limited interface for testing the local NTP.
  */
-function LocalNTP(location) {
+function LocalNTP() {
 <include src="../../../../ui/webui/resources/js/assert.js">
 
 
@@ -23,12 +22,14 @@ function LocalNTP(location) {
  * @const
  */
 var CLASSES = {
+  ALTERNATE_LOGO: 'alternate-logo', // Shows white logo if required by theme
   BLACKLIST: 'mv-blacklist', // triggers tile blacklist animation
   BLACKLIST_BUTTON: 'mv-x',
-  CUSTOM_THEME: 'custom-theme',
   DELAYED_HIDE_NOTIFICATION: 'mv-notice-delayed-hide',
   FAKEBOX_DISABLE: 'fakebox-disable', // Makes fakebox non-interactive
   FAKEBOX_FOCUS: 'fakebox-focused', // Applies focus styles to the fakebox
+  // Applies drag focus style to the fakebox
+  FAKEBOX_DRAG_FOCUS: 'fakebox-drag-focused',
   FAVICON: 'mv-favicon',
   HIDE_BLACKLIST_BUTTON: 'mv-x-hide', // hides blacklist button during animation
   HIDE_FAKEBOX_AND_LOGO: 'hide-fakebox-logo',
@@ -53,12 +54,16 @@ var CLASSES = {
  */
 var IDS = {
   ATTRIBUTION: 'attribution',
+  ATTRIBUTION_TEXT: 'attribution-text',
+  CUSTOM_THEME_STYLE: 'ct-style',
   FAKEBOX: 'fakebox',
+  FAKEBOX_INPUT: 'fakebox-input',
   LOGO: 'logo',
   NOTIFICATION: 'mv-notice',
   NOTIFICATION_CLOSE_BUTTON: 'mv-notice-x',
   NOTIFICATION_MESSAGE: 'mv-msg',
   NTP_CONTENTS: 'ntp-contents',
+  RECENT_TABS: 'recent-tabs',
   RESTORE_ALL_LINK: 'mv-restore',
   TILES: 'mv-tiles',
   UNDO_LINK: 'mv-undo'
@@ -85,6 +90,24 @@ var NTP_DISPOSE_STATE = {
   NONE: 0,  // Preserve the NTP appearance and functionality
   DISABLE_FAKEBOX: 1,
   HIDE_FAKEBOX_AND_LOGO: 2
+};
+
+
+/**
+ * The JavaScript button event value for a middle click.
+ * @type {number}
+ * @const
+ */
+var MIDDLE_MOUSE_BUTTON = 1;
+
+
+/**
+ * Possible behaviors for navigateContentWindow.
+ * @enum {number}
+ */
+var WindowOpenDisposition = {
+  CURRENT_TAB: 1,
+  NEW_BACKGROUND_TAB: 2
 };
 
 
@@ -192,15 +215,6 @@ var fakeboxInputBehavior = NTP_DISPOSE_STATE.HIDE_FAKEBOX_AND_LOGO;
 
 
 /**
- * Possible background-colors of a non-custom theme. Used to determine whether
- * the homepage should be updated to support custom or non-custom themes.
- * @type {!Array.<string>}
- * @const
- */
-var WHITE = ['rgba(255,255,255,1)', 'rgba(0,0,0,0)'];
-
-
-/**
  * Total tile width. Should be equal to mv-tile's width + 2 * border-width.
  * @private {number}
  * @const
@@ -266,14 +280,6 @@ var MOST_VISITED_COLOR = '777777';
 
 
 /**
- * The hex color for most visited tile titles when using a custom theme.
- * @type {string}
- * @const
- */
-var MOST_VISITED_THEME_TITLE_COLOR = 'ffffff';
-
-
-/**
  * The font family for most visited tile elements.
  * @type {string}
  * @const
@@ -323,41 +329,112 @@ function onThemeChange() {
   var info = ntpApiHandle.themeBackgroundInfo;
   if (!info)
     return;
-  var background = [info.colorRgba,
+
+  var background = [convertToRGBAColor(info.backgroundColorRgba),
                     info.imageUrl,
                     info.imageTiling,
                     info.imageHorizontalAlignment,
                     info.imageVerticalAlignment].join(' ').trim();
   document.body.style.background = background;
-  var isCustom = !!background && WHITE.indexOf(background) == -1;
-  document.body.classList.toggle(CLASSES.CUSTOM_THEME, isCustom);
-  updateAttribution(info.attributionUrl);
+  document.body.classList.toggle(CLASSES.ALTERNATE_LOGO, info.alternateLogo);
+  updateThemeAttribution(info.attributionUrl);
+  setCustomThemeStyle(info);
+  renderTiles();
 }
 
 
 /**
- * Renders the attribution if the image is present and loadable.  Otherwise
- * hides it.
+ * Updates the NTP style according to theme.
+ * @param {Object=} opt_themeInfo The information about the theme. If it is
+ * omitted the style will be reverted to the default.
+ * @private
+ */
+function setCustomThemeStyle(opt_themeInfo) {
+  var customStyleElement = $(IDS.CUSTOM_THEME_STYLE);
+  var head = document.head;
+
+  if (opt_themeInfo && !opt_themeInfo.usingDefaultTheme) {
+    var themeStyle =
+      '#attribution {' +
+      '  color: ' + convertToRGBAColor(opt_themeInfo.textColorLightRgba) + ';' +
+      '}' +
+      '#mv-msg {' +
+      '  color: ' + convertToRGBAColor(opt_themeInfo.textColorRgba) + ';' +
+      '}' +
+      '#mv-notice-links span {' +
+      '  color: ' + convertToRGBAColor(opt_themeInfo.textColorLightRgba) + ';' +
+      '}' +
+      '#mv-notice-x {' +
+      '  -webkit-filter: drop-shadow(0 0 0 ' +
+          convertToRGBAColor(opt_themeInfo.textColorRgba) + ');' +
+      '}' +
+      '.mv-page-ready {' +
+      '  border: 1px solid ' +
+        convertToRGBAColor(opt_themeInfo.sectionBorderColorRgba) + ';' +
+      '}' +
+      '.mv-page-ready:hover, .mv-page-ready:focus {' +
+      '  border-color: ' +
+          convertToRGBAColor(opt_themeInfo.headerColorRgba) + ';' +
+      '}';
+
+    if (customStyleElement) {
+      customStyleElement.textContent = themeStyle;
+    } else {
+      customStyleElement = document.createElement('style');
+      customStyleElement.type = 'text/css';
+      customStyleElement.id = IDS.CUSTOM_THEME_STYLE;
+      customStyleElement.textContent = themeStyle;
+      head.appendChild(customStyleElement);
+    }
+
+  } else if (customStyleElement) {
+    head.removeChild(customStyleElement);
+  }
+}
+
+
+/**
+ * Renders the attribution if the URL is present, otherwise hides it.
  * @param {string} url The URL of the attribution image, if any.
  * @private
  */
-function updateAttribution(url) {
+function updateThemeAttribution(url) {
   if (!url) {
-    attribution.hidden = true;
+    setAttributionVisibility_(false);
     return;
   }
-  var attributionImage = new Image();
-  attributionImage.onload = function() {
-    var oldAttributionImage = attribution.querySelector('img');
-    if (oldAttributionImage)
-      removeNode(oldAttributionImage);
+
+  var attributionImage = attribution.querySelector('img');
+  if (!attributionImage) {
+    attributionImage = new Image();
     attribution.appendChild(attributionImage);
-    attribution.hidden = false;
-  };
-  attributionImage.onerror = function() {
-    attribution.hidden = true;
-  };
-  attributionImage.src = url;
+  }
+  attributionImage.style.content = url;
+  setAttributionVisibility_(true);
+}
+
+
+/**
+ * Sets the visibility of the theme attribution.
+ * @param {boolean} show True to show the attribution.
+ * @private
+ */
+function setAttributionVisibility_(show) {
+  if (attribution) {
+    attribution.style.display = show ? '' : 'none';
+  }
+}
+
+
+ /**
+ * Converts an Array of color components into RGBA format "rgba(R,G,B,A)".
+ * @param {Array.<number>} color Array of rgba color components.
+ * @return {string} CSS color in RGBA format.
+ * @private
+ */
+function convertToRGBAColor(color) {
+  return 'rgba(' + color[0] + ',' + color[1] + ',' + color[2] + ',' +
+                    color[3] / 255 + ')';
 }
 
 
@@ -437,18 +514,16 @@ function updateMostVisitedVisibility() {
  * @param {string} color The text color for text in the iframe.
  * @param {string} fontFamily The font family for text in the iframe.
  * @param {number} fontSize The font size for text in the iframe.
- * @param {boolean} textShadow True if text should be drawn with a shadow.
  * @param {number} position The position of the iframe in the UI.
  * @return {string} An URL to display the most visited component in an iframe.
  */
 function getMostVisitedIframeUrl(filename, rid, color, fontFamily, fontSize,
-    textShadow, position) {
+    position) {
   return 'chrome-search://most-visited/' + encodeURIComponent(filename) + '?' +
       ['rid=' + encodeURIComponent(rid),
        'c=' + encodeURIComponent(color),
        'f=' + encodeURIComponent(fontFamily),
        'fs=' + encodeURIComponent(fontSize),
-       'ts=' + (textShadow ? '1' : ''),
        'pos=' + encodeURIComponent(position)].join('&');
 }
 
@@ -482,8 +557,6 @@ function createTile(page, position) {
     // The iframe which renders the page title.
     var titleElement = document.createElement('iframe');
     titleElement.tabIndex = '-1';
-    var usingCustomTheme = document.body.classList.contains(
-        CLASSES.CUSTOM_THEME);
 
     // Why iframes have IDs:
     //
@@ -500,10 +573,9 @@ function createTile(page, position) {
     // TODO(jered): Find and fix the root (probably Blink) bug.
 
     titleElement.src = getMostVisitedIframeUrl(
-        MOST_VISITED_TITLE_IFRAME, rid,
-        usingCustomTheme ? MOST_VISITED_THEME_TITLE_COLOR : MOST_VISITED_COLOR,
-        MOST_VISITED_FONT_FAMILY, MOST_VISITED_FONT_SIZE, usingCustomTheme,
-        position);
+        MOST_VISITED_TITLE_IFRAME, rid, MOST_VISITED_COLOR,
+        MOST_VISITED_FONT_FAMILY, MOST_VISITED_FONT_SIZE, position);
+
     // Keep this id here. See comment above.
     titleElement.id = 'title-' + rid;
     titleElement.hidden = true;
@@ -519,7 +591,8 @@ function createTile(page, position) {
     thumbnailElement.tabIndex = '-1';
     thumbnailElement.src = getMostVisitedIframeUrl(
         MOST_VISITED_THUMBNAIL_IFRAME, rid, MOST_VISITED_COLOR,
-        MOST_VISITED_FONT_FAMILY, MOST_VISITED_FONT_SIZE, false, position);
+        MOST_VISITED_FONT_FAMILY, MOST_VISITED_FONT_SIZE, position);
+
     // Keep this id here. See comment above.
     thumbnailElement.id = 'thumb-' + rid;
     thumbnailElement.hidden = true;
@@ -540,7 +613,7 @@ function createTile(page, position) {
         tileElement, 'div', CLASSES.BLACKLIST_BUTTON);
     var blacklistFunction = generateBlacklistFunction(rid);
     blacklistButton.addEventListener('click', blacklistFunction);
-    blacklistButton.title = templateData.removeThumbnailTooltip;
+    blacklistButton.title = configData.translatedStrings.removeThumbnailTooltip;
 
     // When a tile is focused, have delete also blacklist the page.
     registerKeyHandler(tileElement, KEYCODE.DELETE, blacklistFunction);
@@ -700,6 +773,7 @@ function getTileByRid(rid) {
 function onInputStart() {
   if (fakebox && isFakeboxFocused()) {
     setFakeboxFocus(false);
+    setFakeboxDragFocus(false);
     disposeNtp(true);
   } else if (!isFakeboxFocused()) {
     disposeNtp(false);
@@ -721,23 +795,11 @@ function disposeNtp(wasFakeboxInput) {
 
 
 /**
- * Restores the NTP (reloads the custom theme, shows the top visible bars,
- * re-enables the fakebox and unhides all NTP elements.)
+ * Restores the NTP (re-enables the fakebox and unhides the logo.)
  */
 function restoreNtp() {
-  searchboxApiHandle.showBars();
   setFakeboxActive(true);
   setFakeboxAndLogoVisibility(true);
-  onThemeChange();
-}
-
-
-/**
- * Clears the custom theme (if any).
- */
-function clearCustomTheme() {
-  document.body.style.background = '';
-  document.body.classList.remove(CLASSES.CUSTOM_THEME);
 }
 
 
@@ -748,12 +810,19 @@ function setFakeboxFocus(focus) {
   document.body.classList.toggle(CLASSES.FAKEBOX_FOCUS, focus);
 }
 
+/**
+ * @param {boolean} focus True to show a dragging focus to the fakebox.
+ */
+function setFakeboxDragFocus(focus) {
+  document.body.classList.toggle(CLASSES.FAKEBOX_DRAG_FOCUS, focus);
+}
 
 /**
  * @return {boolean} True if the fakebox has focus.
  */
 function isFakeboxFocused() {
-  return document.body.classList.contains(CLASSES.FAKEBOX_FOCUS);
+  return document.body.classList.contains(CLASSES.FAKEBOX_FOCUS) ||
+      document.body.classList.contains(CLASSES.FAKEBOX_DRAG_FOCUS);
 }
 
 
@@ -852,13 +921,16 @@ function getEmbeddedSearchApiHandle() {
   return null;
 }
 
-
 /**
- * @return {boolean} True if this is a Google page and not some other search
- *     provider. Used to determine whether to show the logo and fakebox.
+ * Extract the desired navigation behavior from a click button.
+ * @param {number} button The Event#button property of a click event.
+ * @return {WindowOpenDisposition} The desired behavior for
+ *     navigateContentWindow.
  */
-function isGooglePage() {
-  return location.href.indexOf('isGoogle') != -1;
+function getDispositionFromClickButton(button) {
+  if (button == MIDDLE_MOUSE_BUTTON)
+    return WindowOpenDisposition.NEW_BACKGROUND_TAB;
+  return WindowOpenDisposition.CURRENT_TAB;
 }
 
 
@@ -879,14 +951,15 @@ function init() {
     tilesContainer.appendChild(row);
   }
 
-  if (isGooglePage()) {
+  if (configData.isGooglePage) {
     var logo = document.createElement('div');
     logo.id = IDS.LOGO;
 
     fakebox = document.createElement('div');
     fakebox.id = IDS.FAKEBOX;
     fakebox.innerHTML =
-        '<input autocomplete="off" tabindex="-1" aria-hidden="true">' +
+        '<input id="' + IDS.FAKEBOX_INPUT +
+            '" autocomplete="off" tabindex="-1" aria-hidden="true">' +
         '<div id=cursor></div>';
 
     ntpContents.insertBefore(fakebox, ntpContents.firstChild);
@@ -895,18 +968,34 @@ function init() {
     document.body.classList.add(CLASSES.NON_GOOGLE_PAGE);
   }
 
+  var recentTabsText = configData.translatedStrings.recentTabs;
+  if (recentTabsText) {
+    var recentTabsLink = document.createElement('span');
+    recentTabsLink.id = IDS.RECENT_TABS;
+    recentTabsLink.addEventListener('click', function(event) {
+      ntpApiHandle.navigateContentWindow(
+          'chrome://history', getDispositionFromClickButton(event.button));
+    });
+    recentTabsLink.textContent = recentTabsText;
+    ntpContents.appendChild(recentTabsLink);
+    // Move the attribution up to prevent it from overlapping.
+    attribution.style.bottom = '28px';
+  }
 
   var notificationMessage = $(IDS.NOTIFICATION_MESSAGE);
-  notificationMessage.textContent = templateData.thumbnailRemovedNotification;
+  notificationMessage.textContent =
+      configData.translatedStrings.thumbnailRemovedNotification;
   var undoLink = $(IDS.UNDO_LINK);
   undoLink.addEventListener('click', onUndo);
   registerKeyHandler(undoLink, KEYCODE.ENTER, onUndo);
-  undoLink.textContent = templateData.undoThumbnailRemove;
+  undoLink.textContent = configData.translatedStrings.undoThumbnailRemove;
   var restoreAllLink = $(IDS.RESTORE_ALL_LINK);
   restoreAllLink.addEventListener('click', onRestoreAll);
   registerKeyHandler(restoreAllLink, KEYCODE.ENTER, onUndo);
-  restoreAllLink.textContent = templateData.restoreThumbnailsShort;
-  attribution.textContent = templateData.attributionIntro;
+  restoreAllLink.textContent =
+      configData.translatedStrings.restoreThumbnailsShort;
+  $(IDS.ATTRIBUTION_TEXT).textContent =
+      configData.translatedStrings.attributionIntro;
 
   var notificationCloseButton = $(IDS.NOTIFICATION_CLOSE_BUTTON);
   notificationCloseButton.addEventListener('click', hideNotification);
@@ -934,7 +1023,7 @@ function init() {
 
   if (fakebox) {
     // Listener for updating the key capture state.
-    document.body.onclick = function(event) {
+    document.body.onmousedown = function(event) {
       if (isFakeboxClick(event))
         searchboxApiHandle.startCapturingKeyStrokes();
       else if (isFakeboxFocused())
@@ -943,6 +1032,26 @@ function init() {
     searchboxApiHandle.onkeycapturechange = function() {
       setFakeboxFocus(searchboxApiHandle.isKeyCaptureEnabled);
     };
+    var inputbox = $(IDS.FAKEBOX_INPUT);
+    if (inputbox) {
+      inputbox.onpaste = function(event) {
+        event.preventDefault();
+        searchboxApiHandle.paste();
+      };
+      inputbox.ondrop = function(event) {
+        event.preventDefault();
+        var text = event.dataTransfer.getData('text/plain');
+        if (text) {
+          searchboxApiHandle.paste(text);
+        }
+      };
+      inputbox.ondragenter = function() {
+        setFakeboxDragFocus(true);
+      };
+      inputbox.ondragleave = function() {
+        setFakeboxDragFocus(false);
+      };
+    }
   }
 
   if (searchboxApiHandle.rtl) {
@@ -968,5 +1077,5 @@ return {
 }
 
 if (!window.localNTPUnitTest) {
-  LocalNTP(location).listen();
+  LocalNTP().listen();
 }

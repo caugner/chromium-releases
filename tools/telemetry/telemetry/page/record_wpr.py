@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 
+from telemetry import test
 from telemetry.core import browser_options
 from telemetry.core import discover
 from telemetry.core import wpr_modes
@@ -15,6 +16,7 @@ from telemetry.page import page_measurement
 from telemetry.page import page_runner
 from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry.page import test_expectations
 
 
 class RecordPage(page_test.PageTest):
@@ -28,7 +30,7 @@ class RecordPage(page_test.PageTest):
          if measurement().action_name_to_run])
 
   def CanRunForPage(self, page):
-    return bool(self._CompoundActionsForPage(page))
+    return page.url.startswith('http')
 
   def CustomizeBrowserOptionsForPage(self, page, options):
     for compound_action in self._CompoundActionsForPage(page):
@@ -62,8 +64,10 @@ class RecordPage(page_test.PageTest):
 def Main(base_dir):
   measurements = discover.DiscoverClasses(base_dir, base_dir,
                                           page_measurement.PageMeasurement)
+  tests = discover.DiscoverClasses(base_dir, base_dir, test.Test,
+                                   index_by_class_name=True)
   options = browser_options.BrowserOptions()
-  parser = options.CreateParser('%prog <page_set>')
+  parser = options.CreateParser('%prog <PageSet|Measurement|Test>')
   page_runner.AddCommandLineOptions(parser)
 
   recorder = RecordPage(measurements)
@@ -76,7 +80,17 @@ def Main(base_dir):
     parser.print_usage()
     sys.exit(1)
 
-  ps = page_set.PageSet.FromFile(args[0])
+  if args[0].endswith('.json'):
+    ps = page_set.PageSet.FromFile(args[0])
+  elif args[0] in tests:
+    ps = tests[args[0]]().CreatePageSet(options)
+  elif args[0] in measurements:
+    ps = measurements[args[0]]().CreatePageSet(args, options)
+  else:
+    parser.print_usage()
+    sys.exit(1)
+
+  expectations = test_expectations.TestExpectations()
 
   # Set the archive path to something temporary.
   temp_target_wpr_file_path = tempfile.mkstemp()[1]
@@ -86,7 +100,7 @@ def Main(base_dir):
   options.wpr_mode = wpr_modes.WPR_RECORD
   options.no_proxy_server = True
   recorder.CustomizeBrowserOptions(options)
-  results = page_runner.Run(recorder, ps, options)
+  results = page_runner.Run(recorder, ps, expectations, options)
 
   if results.errors or results.failures:
     logging.warning('Some pages failed. The recording has not been updated for '

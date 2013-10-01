@@ -8,7 +8,7 @@
 
 #include "base/event_types.h"
 #include "base/logging.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "ui/base/events/event_utils.h"
 #import "ui/base/keycodes/keyboard_code_conversion_mac.h"
 #include "ui/gfx/point.h"
@@ -155,6 +155,10 @@ gfx::Vector2d GetMouseWheelOffset(const base::NativeEvent& native_event) {
   // TODO(dhollowa): Come back to this once comparisons can be made with other
   // platforms.
   return gfx::Vector2d([native_event deltaX], [native_event deltaY]);
+}
+
+void ClearTouchIdIfReleased(const base::NativeEvent& xev) {
+  // Touch is currently unsupported.
 }
 
 int GetTouchId(const base::NativeEvent& native_event) {

@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/strings/string16.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "ui/gfx/font.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/text_button.h"
@@ -27,6 +27,10 @@ class MenuButtonListener;
 class VIEWS_EXPORT MenuButton : public TextButton {
  public:
   static const char kViewClassName[];
+
+  // The amount of time, in milliseconds, we wait before allowing another mouse
+  // pressed event to show the menu.
+  static const int64 kMinimumTimeBetweenButtonClicks;
 
   // How much padding to put on the left and right of the menu marker.
   static const int kMenuMarkerPaddingLeft;

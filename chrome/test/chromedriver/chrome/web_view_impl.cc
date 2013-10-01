@@ -11,7 +11,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/devtools_client_impl.h"
 #include "chrome/test/chromedriver/chrome/dom_tracker.h"
@@ -52,6 +52,32 @@ const char* GetAsString(MouseEventType type) {
   }
 }
 
+const char* GetAsString(TouchEventType type) {
+  switch (type) {
+    case kTouchStart:
+      return "touchStart";
+    case kTouchEnd:
+      return "touchEnd";
+    case kTouchMove:
+      return "touchMove";
+    default:
+      return "";
+  }
+}
+
+const char* GetPointStateString(TouchEventType type) {
+  switch (type) {
+    case kTouchStart:
+      return "touchPressed";
+    case kTouchEnd:
+      return "touchReleased";
+    case kTouchMove:
+      return "touchMoved";
+    default:
+      return "";
+  }
+}
+
 const char* GetAsString(MouseButton button) {
   switch (button) {
     case kLeftMouseButton:
@@ -85,9 +111,11 @@ const char* GetAsString(KeyEventType type) {
 }  // namespace
 
 WebViewImpl::WebViewImpl(const std::string& id,
+                         int build_no,
                          scoped_ptr<DevToolsClient> client,
                          Log* log)
     : id_(id),
+      build_no_(build_no),
       dom_tracker_(new DomTracker(client.get())),
       frame_tracker_(new FrameTracker(client.get())),
       navigation_tracker_(new NavigationTracker(client.get())),
@@ -145,8 +173,9 @@ Status WebViewImpl::CallFunction(const std::string& frame,
                                  scoped_ptr<base::Value>* result) {
   std::string json;
   base::JSONWriter::Write(&args, &json);
+  // TODO(zachconrad): Second null should be array of shadow host ids.
   std::string expression = base::StringPrintf(
-      "(%s).apply(null, [%s, %s])",
+      "(%s).apply(null, [null, %s, %s])",
       kCallFunctionScript,
       function.c_str(),
       json.c_str());
@@ -196,7 +225,8 @@ Status WebViewImpl::GetFrameByFunction(const std::string& frame,
   return dom_tracker_->GetFrameIdForNode(node_id, out_frame);
 }
 
-Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events) {
+Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events,
+                                        const std::string& frame) {
   for (std::list<MouseEvent>::const_iterator it = events.begin();
        it != events.end(); ++it) {
     base::DictionaryValue params;
@@ -207,6 +237,37 @@ Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events) {
     params.SetString("button", GetAsString(it->button));
     params.SetInteger("clickCount", it->click_count);
     Status status = client_->SendCommand("Input.dispatchMouseEvent", params);
+    if (status.IsError())
+      return status;
+    if (build_no_ < 1569 && it->button == kRightMouseButton &&
+        it->type == kReleasedMouseEventType) {
+      base::ListValue args;
+      args.AppendInteger(it->x);
+      args.AppendInteger(it->y);
+      args.AppendInteger(it->modifiers);
+      scoped_ptr<base::Value> result;
+      status = CallFunction(
+          frame, kDispatchContextMenuEventScript, args, &result);
+      if (status.IsError())
+        return status;
+    }
+  }
+  return Status(kOk);
+}
+
+Status WebViewImpl::DispatchTouchEvents(const std::list<TouchEvent>& events) {
+  for (std::list<TouchEvent>::const_iterator it = events.begin();
+       it != events.end(); ++it) {
+    base::DictionaryValue params;
+    params.SetString("type", GetAsString(it->type));
+    scoped_ptr<base::ListValue> point_list(new base::ListValue);
+    scoped_ptr<base::DictionaryValue> point(new base::DictionaryValue);
+    point->SetString("state", GetPointStateString(it->type));
+    point->SetInteger("x", it->x);
+    point->SetInteger("y", it->y);
+    point_list->Set(0, point.release());
+    params.Set("touchPoints", point_list.release());
+    Status status = client_->SendCommand("Input.dispatchTouchEvent", params);
     if (status.IsError())
       return status;
   }
@@ -535,8 +596,9 @@ Status GetNodeIdFromFunction(DevToolsClient* client,
                              int* node_id) {
   std::string json;
   base::JSONWriter::Write(&args, &json);
+  // TODO(zachconrad): Second null should be array of shadow host ids.
   std::string expression = base::StringPrintf(
-      "(%s).apply(null, [%s, %s, true])",
+      "(%s).apply(null, [null, %s, %s, true])",
       kCallFunctionScript,
       function.c_str(),
       json.c_str());

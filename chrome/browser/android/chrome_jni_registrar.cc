@@ -10,17 +10,25 @@
 #include "chrome/browser/android/chrome_web_contents_delegate_android.h"
 #include "chrome/browser/android/content_view_util.h"
 #include "chrome/browser/android/dev_tools_server.h"
+#include "chrome/browser/android/favicon_helper.h"
+#include "chrome/browser/android/field_trial_helper.h"
+#include "chrome/browser/android/foreign_session_helper.h"
 #include "chrome/browser/android/intent_helper.h"
+#include "chrome/browser/android/most_visited_sites.h"
+#include "chrome/browser/android/omnibox/omnibox_prerender.h"
 #include "chrome/browser/android/provider/chrome_browser_provider.h"
+#include "chrome/browser/android/signin/signin_manager_android.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/autofill/android/personal_data_manager_android.h"
 #include "chrome/browser/history/android/sqlite_cursor.h"
 #include "chrome/browser/lifetime/application_lifetime_android.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/search_engines/template_url_service_android.h"
+#include "chrome/browser/signin/android_profile_oauth2_token_service.h"
 #include "chrome/browser/speech/tts_android.h"
 #include "chrome/browser/sync/profile_sync_service_android.h"
-#include "chrome/browser/ui/android/autofill/autofill_dialog_view_android.h"
+#include "chrome/browser/ui/android/autofill/autofill_dialog_controller_android.h"
+#include "chrome/browser/ui/android/autofill/autofill_dialog_result.h"
 #include "chrome/browser/ui/android/autofill/autofill_popup_view_android.h"
 #include "chrome/browser/ui/android/chrome_http_auth_handler.h"
 #include "chrome/browser/ui/android/javascript_app_modal_dialog_android.h"
@@ -45,9 +53,14 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     web_contents_delegate_android::RegisterWebContentsDelegateAndroidJni },
   { "RegisterAuxiliaryProfileLoader", autofill::RegisterAutofillAndroidJni },
   // Register JNI for chrome classes.
+  { "AndroidProfileOAuth2TokenService",
+    AndroidProfileOAuth2TokenService::Register },
   { "ApplicationLifetime", RegisterApplicationLifetimeAndroid },
-  { "AutofillDialog",
-    autofill::AutofillDialogViewAndroid::RegisterAutofillDialogViewAndroid },
+  { "AutofillDialogControllerAndroid",
+    autofill::AutofillDialogControllerAndroid::
+        RegisterAutofillDialogControllerAndroid },
+  { "AutofillDialogResult",
+    autofill::AutofillDialogResult::RegisterAutofillDialogResult },
   { "AutofillPopup",
     autofill::AutofillPopupViewAndroid::RegisterAutofillPopupViewAndroid },
   { "CertificateViewer", RegisterCertificateViewer },
@@ -59,14 +72,21 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     RegisterChromeWebContentsDelegateAndroid },
   { "ContentViewUtil", RegisterContentViewUtil },
   { "DevToolsServer", RegisterDevToolsServer },
+  { "FaviconHelper", FaviconHelper::RegisterFaviconHelper },
+  { "FieldTrialHelper", RegisterFieldTrialHelper },
+  { "ForeignSessionHelper",
+    ForeignSessionHelper::RegisterForeignSessionHelper },
   { "IntentHelper", RegisterIntentHelper },
   { "JavascriptAppModalDialog",
     JavascriptAppModalDialogAndroid::RegisterJavascriptAppModalDialog },
+  { "MostVisitedSites", RegisterMostVisitedSites },
   { "NavigationPopup", NavigationPopup::RegisterNavigationPopup },
+  { "OmniboxPrerender", RegisterOmniboxPrerender },
   { "PersonalDataManagerAndroid",
     autofill::PersonalDataManagerAndroid::Register },
   { "ProfileAndroid", ProfileAndroid::RegisterProfileAndroid },
   { "ProfileSyncService", ProfileSyncServiceAndroid::Register },
+  { "SigninManager", SigninManagerAndroid::Register },
   { "SqliteCursor", SQLiteCursor::RegisterSqliteCursor },
   { "SSLClientCertificateRequest", RegisterSSLClientCertificateRequestAndroid },
   { "TabAndroid", TabAndroid::RegisterTabAndroid },
@@ -84,5 +104,5 @@ bool RegisterJni(JNIEnv* env) {
                                arraysize(kChromeRegisteredMethods));
 }
 
-} // namespace android
-} // namespace chrome
+}  // namespace android
+}  // namespace chrome

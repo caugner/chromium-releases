@@ -4,322 +4,508 @@
 
 #include "chrome/test/chromedriver/server/http_handler.h"
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/logging.h"  // For CHECK macros.
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/sys_info.h"
 #include "base/values.h"
+#include "chrome/test/chromedriver/alert_commands.h"
+#include "chrome/test/chromedriver/chrome/adb_impl.h"
+#include "chrome/test/chromedriver/chrome/device_manager.h"
 #include "chrome/test/chromedriver/chrome/log.h"
 #include "chrome/test/chromedriver/chrome/status.h"
-#include "chrome/test/chromedriver/command_executor.h"
-#include "chrome/test/chromedriver/command_names.h"
-#include "chrome/test/chromedriver/server/http_response.h"
+#include "chrome/test/chromedriver/chrome/version.h"
+#include "chrome/test/chromedriver/net/url_request_context_getter.h"
+#include "chrome/test/chromedriver/session.h"
+#include "chrome/test/chromedriver/session_thread_map.h"
 #include "chrome/test/chromedriver/util.h"
+#include "net/server/http_server_request_info.h"
+#include "net/server/http_server_response_info.h"
+
+#if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
+#endif
 
 namespace {
 
+const char kLocalStorage[] = "localStorage";
+const char kSessionStorage[] = "sessionStorage";
 const char kShutdownPath[] = "shutdown";
+
+void UnimplementedCommand(
+    const base::DictionaryValue& params,
+    const std::string& session_id,
+    const CommandCallback& callback) {
+  callback.Run(Status(kUnknownCommand), scoped_ptr<base::Value>(), session_id);
+}
 
 }  // namespace
 
-HttpRequest::HttpRequest(HttpMethod method,
-                         const std::string& path,
-                         const std::string& body)
-    : method(method), path(path), body(body) {}
-
-HttpRequest::~HttpRequest() {}
-
 CommandMapping::CommandMapping(HttpMethod method,
                                const std::string& path_pattern,
-                               const std::string& name)
-    : method(method), path_pattern(path_pattern), name(name) {}
+                               const Command& command)
+    : method(method), path_pattern(path_pattern), command(command) {}
 
 CommandMapping::~CommandMapping() {}
 
-// static
-scoped_ptr<HttpHandler::CommandMap> HttpHandler::CreateCommandMap() {
+HttpHandler::HttpHandler(Log* log, const std::string& url_base)
+    : log_(log),
+      url_base_(url_base),
+      received_shutdown_(false),
+      command_map_(new CommandMap()),
+      weak_ptr_factory_(this) {}
+
+HttpHandler::HttpHandler(
+    const base::Closure& quit_func,
+    const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+    Log* log,
+    const std::string& url_base)
+    : quit_func_(quit_func),
+      log_(log),
+      url_base_(url_base),
+      received_shutdown_(false),
+      weak_ptr_factory_(this) {
+#if defined(OS_MACOSX)
+  base::mac::ScopedNSAutoreleasePool autorelease_pool;
+#endif
+  context_getter_ = new URLRequestContextGetter(io_task_runner);
+  socket_factory_ = CreateSyncWebSocketFactory(context_getter_.get());
+  adb_.reset(new AdbImpl(io_task_runner, log_));
+  device_manager_.reset(new DeviceManager(adb_.get()));
+
   CommandMapping commands[] = {
-      CommandMapping(kPost, "session", CommandNames::kNewSession),
-      CommandMapping(kGet, "session/:sessionId",
-                     CommandNames::kGetSessionCapabilities),
-      CommandMapping(kDelete, "session/:sessionId", CommandNames::kQuit),
-      CommandMapping(kGet, "session/:sessionId/window_handle",
-                     CommandNames::kGetCurrentWindowHandle),
-      CommandMapping(kGet, "session/:sessionId/window_handles",
-                     CommandNames::kGetWindowHandles),
-      CommandMapping(kPost, "session/:sessionId/url", CommandNames::kGet),
-      CommandMapping(kGet, "session/:sessionId/alert", CommandNames::kGetAlert),
-      CommandMapping(kPost, "session/:sessionId/dismiss_alert",
-                     CommandNames::kDismissAlert),
-      CommandMapping(kPost, "session/:sessionId/accept_alert",
-                     CommandNames::kAcceptAlert),
-      CommandMapping(kGet, "session/:sessionId/alert_text",
-                     CommandNames::kGetAlertText),
-      CommandMapping(kPost, "session/:sessionId/alert_text",
-                     CommandNames::kSetAlertValue),
-      CommandMapping(kPost, "session/:sessionId/forward",
-                     CommandNames::kGoForward),
-      CommandMapping(kPost, "session/:sessionId/back", CommandNames::kGoBack),
-      CommandMapping(kPost, "session/:sessionId/refresh",
-                     CommandNames::kRefresh),
-      CommandMapping(kPost, "session/:sessionId/execute",
-                     CommandNames::kExecuteScript),
-      CommandMapping(kPost, "session/:sessionId/execute_async",
-                     CommandNames::kExecuteAsyncScript),
-      CommandMapping(kGet, "session/:sessionId/url",
-                     CommandNames::kGetCurrentUrl),
-      CommandMapping(kGet, "session/:sessionId/title", CommandNames::kGetTitle),
-      CommandMapping(kGet, "session/:sessionId/source",
-                     CommandNames::kGetPageSource),
-      CommandMapping(kGet, "session/:sessionId/screenshot",
-                     CommandNames::kScreenshot),
-      CommandMapping(kPost, "session/:sessionId/visible",
-                     CommandNames::kSetBrowserVisible),
-      CommandMapping(kGet, "session/:sessionId/visible",
-                     CommandNames::kIsBrowserVisible),
-      CommandMapping(kPost, "session/:sessionId/element",
-                     CommandNames::kFindElement),
-      CommandMapping(kPost, "session/:sessionId/elements",
-                     CommandNames::kFindElements),
-      CommandMapping(kPost, "session/:sessionId/element/active",
-                     CommandNames::kGetActiveElement),
-      CommandMapping(kPost, "session/:sessionId/element/:id/element",
-                     CommandNames::kFindChildElement),
-      CommandMapping(kPost, "session/:sessionId/element/:id/elements",
-                     CommandNames::kFindChildElements),
-      CommandMapping(kPost, "session/:sessionId/element/:id/click",
-                     CommandNames::kClickElement),
-      CommandMapping(kPost, "session/:sessionId/element/:id/clear",
-                     CommandNames::kClearElement),
-      CommandMapping(kPost, "session/:sessionId/element/:id/submit",
-                     CommandNames::kSubmitElement),
-      CommandMapping(kGet, "session/:sessionId/element/:id/text",
-                     CommandNames::kGetElementText),
-      CommandMapping(kPost, "session/:sessionId/element/:id/value",
-                     CommandNames::kSendKeysToElement),
-      CommandMapping(kPost, "session/:sessionId/file",
-                     CommandNames::kUploadFile),
-      CommandMapping(kGet, "session/:sessionId/element/:id/value",
-                     CommandNames::kGetElementValue),
-      CommandMapping(kGet, "session/:sessionId/element/:id/name",
-                     CommandNames::kGetElementTagName),
-      CommandMapping(kGet, "session/:sessionId/element/:id/selected",
-                     CommandNames::kIsElementSelected),
-      CommandMapping(kGet, "session/:sessionId/element/:id/enabled",
-                     CommandNames::kIsElementEnabled),
-      CommandMapping(kGet, "session/:sessionId/element/:id/displayed",
-                     CommandNames::kIsElementDisplayed),
-      CommandMapping(kPost, "session/:sessionId/element/:id/hover",
-                     CommandNames::kHoverOverElement),
-      CommandMapping(kGet, "session/:sessionId/element/:id/location",
-                     CommandNames::kGetElementLocation),
-      CommandMapping(kGet, "session/:sessionId/element/:id/location_in_view",
-                     CommandNames::kGetElementLocationOnceScrolledIntoView),
-      CommandMapping(kGet, "session/:sessionId/element/:id/size",
-                     CommandNames::kGetElementSize),
-      CommandMapping(kGet, "session/:sessionId/element/:id/attribute/:name",
-                     CommandNames::kGetElementAttribute),
-      CommandMapping(kGet, "session/:sessionId/element/:id/equals/:other",
-                     CommandNames::kElementEquals),
-      CommandMapping(kGet, "session/:sessionId/cookie",
-                     CommandNames::kGetCookies),
-      CommandMapping(kPost, "session/:sessionId/cookie",
-                     CommandNames::kAddCookie),
-      CommandMapping(kDelete, "session/:sessionId/cookie",
-                     CommandNames::kDeleteAllCookies),
-      CommandMapping(kDelete, "session/:sessionId/cookie/:name",
-                     CommandNames::kDeleteCookie),
-      CommandMapping(kPost, "session/:sessionId/frame",
-                     CommandNames::kSwitchToFrame),
-      CommandMapping(kPost, "session/:sessionId/window",
-                     CommandNames::kSwitchToWindow),
-      CommandMapping(kGet, "session/:sessionId/window/:windowHandle/size",
-                     CommandNames::kGetWindowSize),
-      CommandMapping(kGet, "session/:sessionId/window/:windowHandle/position",
-                     CommandNames::kGetWindowPosition),
-      CommandMapping(kPost, "session/:sessionId/window/:windowHandle/size",
-                     CommandNames::kSetWindowSize),
-      CommandMapping(kPost, "session/:sessionId/window/:windowHandle/position",
-                     CommandNames::kSetWindowPosition),
-      CommandMapping(kPost, "session/:sessionId/window/:windowHandle/maximize",
-                     CommandNames::kMaximizeWindow),
-      CommandMapping(kDelete, "session/:sessionId/window",
-                     CommandNames::kClose),
-      CommandMapping(kPost, "session/:sessionId/element/:id/drag",
-                     CommandNames::kDragElement),
-      CommandMapping(kGet, "session/:sessionId/element/:id/css/:propertyName",
-                     CommandNames::kGetElementValueOfCssProperty),
-      CommandMapping(kPost, "session/:sessionId/timeouts/implicit_wait",
-                     CommandNames::kImplicitlyWait),
-      CommandMapping(kPost, "session/:sessionId/timeouts/async_script",
-                     CommandNames::kSetScriptTimeout),
-      CommandMapping(kPost, "session/:sessionId/timeouts",
-                     CommandNames::kSetTimeout),
-      CommandMapping(kPost, "session/:sessionId/execute_sql",
-                     CommandNames::kExecuteSQL),
-      CommandMapping(kGet, "session/:sessionId/location",
-                     CommandNames::kGetLocation),
-      CommandMapping(kPost, "session/:sessionId/location",
-                     CommandNames::kSetLocation),
-      CommandMapping(kGet, "session/:sessionId/application_cache/status",
-                     CommandNames::kGetStatus),
-      CommandMapping(kGet, "session/:sessionId/browser_connection",
-                     CommandNames::kIsBrowserOnline),
-      CommandMapping(kPost, "session/:sessionId/browser_connection",
-                     CommandNames::kSetBrowserOnline),
-      CommandMapping(kGet, "session/:sessionId/local_storage/key/:key",
-                     CommandNames::kGetLocalStorageItem),
-      CommandMapping(kDelete, "session/:sessionId/local_storage/key/:key",
-                     CommandNames::kRemoveLocalStorageItem),
-      CommandMapping(kGet, "session/:sessionId/local_storage",
-                     CommandNames::kGetLocalStorageKeys),
-      CommandMapping(kPost, "session/:sessionId/local_storage",
-                     CommandNames::kSetLocalStorageItem),
-      CommandMapping(kDelete, "session/:sessionId/local_storage",
-                     CommandNames::kClearLocalStorage),
-      CommandMapping(kGet, "session/:sessionId/local_storage/size",
-                     CommandNames::kGetLocalStorageSize),
-      CommandMapping(kGet, "session/:sessionId/session_storage/key/:key",
-                     CommandNames::kGetSessionStorageItem),
-      CommandMapping(kDelete, "session/:sessionId/session_storage/key/:key",
-                     CommandNames::kRemoveSessionStorageItem),
-      CommandMapping(kGet, "session/:sessionId/session_storage",
-                     CommandNames::kGetSessionStorageKey),
-      CommandMapping(kPost, "session/:sessionId/session_storage",
-                     CommandNames::kSetSessionStorageItem),
-      CommandMapping(kDelete, "session/:sessionId/session_storage",
-                     CommandNames::kClearSessionStorage),
-      CommandMapping(kGet, "session/:sessionId/session_storage/size",
-                     CommandNames::kGetSessionStorageSize),
-      CommandMapping(kGet, "session/:sessionId/orientation",
-                     CommandNames::kGetScreenOrientation),
-      CommandMapping(kPost, "session/:sessionId/orientation",
-                     CommandNames::kSetScreenOrientation),
-      CommandMapping(kPost, "session/:sessionId/click",
-                     CommandNames::kMouseClick),
-      CommandMapping(kPost, "session/:sessionId/doubleclick",
-                     CommandNames::kMouseDoubleClick),
-      CommandMapping(kPost, "session/:sessionId/buttondown",
-                     CommandNames::kMouseButtonDown),
-      CommandMapping(kPost, "session/:sessionId/buttonup",
-                     CommandNames::kMouseButtonUp),
-      CommandMapping(kPost, "session/:sessionId/moveto",
-                     CommandNames::kMouseMoveTo),
-      CommandMapping(kPost, "session/:sessionId/keys",
-                     CommandNames::kSendKeysToActiveElement),
-      CommandMapping(kGet, "session/:sessionId/ime/available_engines",
-                     CommandNames::kImeGetAvailableEngines),
-      CommandMapping(kGet, "session/:sessionId/ime/active_engine",
-                     CommandNames::kImeGetActiveEngine),
-      CommandMapping(kGet, "session/:sessionId/ime/activated",
-                     CommandNames::kImeIsActivated),
-      CommandMapping(kPost, "session/:sessionId/ime/deactivate",
-                     CommandNames::kImeDeactivate),
-      CommandMapping(kPost, "session/:sessionId/ime/activate",
-                     CommandNames::kImeActivateEngine),
-      CommandMapping(kPost, "session/:sessionId/touch/click",
-                     CommandNames::kTouchSingleTap),
-      CommandMapping(kPost, "session/:sessionId/touch/down",
-                     CommandNames::kTouchDown),
-      CommandMapping(kPost, "session/:sessionId/touch/up",
-                     CommandNames::kTouchUp),
-      CommandMapping(kPost, "session/:sessionId/touch/move",
-                     CommandNames::kTouchMove),
-      CommandMapping(kPost, "session/:sessionId/touch/scroll",
-                     CommandNames::kTouchScroll),
-      CommandMapping(kPost, "session/:sessionId/touch/doubleclick",
-                     CommandNames::kTouchDoubleTap),
-      CommandMapping(kPost, "session/:sessionId/touch/longclick",
-                     CommandNames::kTouchLongPress),
-      CommandMapping(kPost, "session/:sessionId/touch/flick",
-                     CommandNames::kTouchFlick),
-      CommandMapping(kPost, "session/:sessionId/log", CommandNames::kGetLog),
-      CommandMapping(kGet, "session/:sessionId/log/types",
-                     CommandNames::kGetAvailableLogTypes),
-      CommandMapping(kPost, "logs", CommandNames::kGetSessionLogs),
-      CommandMapping(kGet, "status", CommandNames::kStatus),
+      CommandMapping(kPost,
+                     internal::kNewSessionPathPattern,
+                     base::Bind(&ExecuteNewSession,
+                                NewSessionParams(log_,
+                                                 &session_thread_map_,
+                                                 context_getter_,
+                                                 socket_factory_,
+                                                 device_manager_.get()))),
+      CommandMapping(kGet,
+                     "session/:sessionId",
+                     WrapToCommand(base::Bind(&ExecuteGetSessionCapabilities))),
+      CommandMapping(kDelete,
+                     "session/:sessionId",
+                     base::Bind(&ExecuteSessionCommand,
+                                &session_thread_map_,
+                                base::Bind(&ExecuteQuit, false),
+                                true)),
+      CommandMapping(kGet,
+                     "session/:sessionId/window_handle",
+                     WrapToCommand(base::Bind(&ExecuteGetCurrentWindowHandle))),
+      CommandMapping(kGet,
+                     "session/:sessionId/window_handles",
+                     WrapToCommand(base::Bind(&ExecuteGetWindowHandles))),
+      CommandMapping(kPost,
+                     "session/:sessionId/url",
+                     WrapToCommand(base::Bind(&ExecuteGet))),
+      CommandMapping(kGet,
+                     "session/:sessionId/alert",
+                     WrapToCommand(base::Bind(&ExecuteAlertCommand,
+                                              base::Bind(&ExecuteGetAlert)))),
+      CommandMapping(
+          kPost,
+          "session/:sessionId/dismiss_alert",
+          WrapToCommand(base::Bind(&ExecuteAlertCommand,
+                                   base::Bind(&ExecuteDismissAlert)))),
+      CommandMapping(
+          kPost,
+          "session/:sessionId/accept_alert",
+          WrapToCommand(base::Bind(&ExecuteAlertCommand,
+                                   base::Bind(&ExecuteAcceptAlert)))),
+      CommandMapping(
+          kGet,
+          "session/:sessionId/alert_text",
+          WrapToCommand(base::Bind(&ExecuteAlertCommand,
+                                   base::Bind(&ExecuteGetAlertText)))),
+      CommandMapping(
+          kPost,
+          "session/:sessionId/alert_text",
+          WrapToCommand(base::Bind(&ExecuteAlertCommand,
+                                   base::Bind(&ExecuteSetAlertValue)))),
+      CommandMapping(kPost,
+                     "session/:sessionId/forward",
+                     WrapToCommand(base::Bind(&ExecuteGoForward))),
+      CommandMapping(kPost,
+                     "session/:sessionId/back",
+                     WrapToCommand(base::Bind(&ExecuteGoBack))),
+      CommandMapping(kPost,
+                     "session/:sessionId/refresh",
+                     WrapToCommand(base::Bind(&ExecuteRefresh))),
+      CommandMapping(kPost,
+                     "session/:sessionId/execute",
+                     WrapToCommand(base::Bind(&ExecuteExecuteScript))),
+      CommandMapping(kPost,
+                     "session/:sessionId/execute_async",
+                     WrapToCommand(base::Bind(&ExecuteExecuteAsyncScript))),
+      CommandMapping(kGet,
+                     "session/:sessionId/url",
+                     WrapToCommand(base::Bind(&ExecuteGetCurrentUrl))),
+      CommandMapping(kGet,
+                     "session/:sessionId/title",
+                     WrapToCommand(base::Bind(&ExecuteGetTitle))),
+      CommandMapping(kGet,
+                     "session/:sessionId/source",
+                     WrapToCommand(base::Bind(&ExecuteGetPageSource))),
+      CommandMapping(kGet,
+                     "session/:sessionId/screenshot",
+                     WrapToCommand(base::Bind(&ExecuteScreenshot))),
+      CommandMapping(kPost,
+                     "session/:sessionId/visible",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kGet,
+                     "session/:sessionId/visible",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/element",
+                     WrapToCommand(base::Bind(&ExecuteFindElement, 50))),
+      CommandMapping(kPost,
+                     "session/:sessionId/elements",
+                     WrapToCommand(base::Bind(&ExecuteFindElements, 50))),
+      CommandMapping(kPost,
+                     "session/:sessionId/element/active",
+                     WrapToCommand(base::Bind(&ExecuteGetActiveElement))),
+      CommandMapping(kPost,
+                     "session/:sessionId/element/:id/element",
+                     WrapToCommand(base::Bind(&ExecuteFindChildElement, 50))),
+      CommandMapping(kPost,
+                     "session/:sessionId/element/:id/elements",
+                     WrapToCommand(base::Bind(&ExecuteFindChildElements, 50))),
+      CommandMapping(kPost,
+                     "session/:sessionId/element/:id/click",
+                     WrapToCommand(base::Bind(&ExecuteClickElement))),
+      CommandMapping(kPost,
+                     "session/:sessionId/element/:id/clear",
+                     WrapToCommand(base::Bind(&ExecuteClearElement))),
+      CommandMapping(kPost,
+                     "session/:sessionId/element/:id/submit",
+                     WrapToCommand(base::Bind(&ExecuteSubmitElement))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/text",
+                     WrapToCommand(base::Bind(&ExecuteGetElementText))),
+      CommandMapping(kPost,
+                     "session/:sessionId/element/:id/value",
+                     WrapToCommand(base::Bind(&ExecuteSendKeysToElement))),
+      CommandMapping(kPost,
+                     "session/:sessionId/file",
+                     WrapToCommand(base::Bind(&ExecuteUploadFile))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/value",
+                     WrapToCommand(base::Bind(&ExecuteGetElementValue))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/name",
+                     WrapToCommand(base::Bind(&ExecuteGetElementTagName))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/selected",
+                     WrapToCommand(base::Bind(&ExecuteIsElementSelected))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/enabled",
+                     WrapToCommand(base::Bind(&ExecuteIsElementEnabled))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/displayed",
+                     WrapToCommand(base::Bind(&ExecuteIsElementDisplayed))),
+      CommandMapping(kPost,
+                     "session/:sessionId/element/:id/hover",
+                     WrapToCommand(base::Bind(&ExecuteHoverOverElement))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/location",
+                     WrapToCommand(base::Bind(&ExecuteGetElementLocation))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/location_in_view",
+                     WrapToCommand(base::Bind(
+                         &ExecuteGetElementLocationOnceScrolledIntoView))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/size",
+                     WrapToCommand(base::Bind(&ExecuteGetElementSize))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/attribute/:name",
+                     WrapToCommand(base::Bind(&ExecuteGetElementAttribute))),
+      CommandMapping(kGet,
+                     "session/:sessionId/element/:id/equals/:other",
+                     WrapToCommand(base::Bind(&ExecuteElementEquals))),
+      CommandMapping(kGet,
+                     "session/:sessionId/cookie",
+                     WrapToCommand(base::Bind(&ExecuteGetCookies))),
+      CommandMapping(kPost,
+                     "session/:sessionId/cookie",
+                     WrapToCommand(base::Bind(&ExecuteAddCookie))),
+      CommandMapping(kDelete,
+                     "session/:sessionId/cookie",
+                     WrapToCommand(base::Bind(&ExecuteDeleteAllCookies))),
+      CommandMapping(kDelete,
+                     "session/:sessionId/cookie/:name",
+                     WrapToCommand(base::Bind(&ExecuteDeleteCookie))),
+      CommandMapping(kPost,
+                     "session/:sessionId/frame",
+                     WrapToCommand(base::Bind(&ExecuteSwitchToFrame))),
+      CommandMapping(kPost,
+                     "session/:sessionId/window",
+                     WrapToCommand(base::Bind(&ExecuteSwitchToWindow))),
+      CommandMapping(kGet,
+                     "session/:sessionId/window/:windowHandle/size",
+                     WrapToCommand(base::Bind(&ExecuteGetWindowSize))),
+      CommandMapping(kGet,
+                     "session/:sessionId/window/:windowHandle/position",
+                     WrapToCommand(base::Bind(&ExecuteGetWindowPosition))),
+      CommandMapping(kPost,
+                     "session/:sessionId/window/:windowHandle/size",
+                     WrapToCommand(base::Bind(&ExecuteSetWindowSize))),
+      CommandMapping(kPost,
+                     "session/:sessionId/window/:windowHandle/position",
+                     WrapToCommand(base::Bind(&ExecuteSetWindowPosition))),
+      CommandMapping(kPost,
+                     "session/:sessionId/window/:windowHandle/maximize",
+                     WrapToCommand(base::Bind(&ExecuteMaximizeWindow))),
+      CommandMapping(kDelete,
+                     "session/:sessionId/window",
+                     WrapToCommand(base::Bind(&ExecuteClose))),
+      CommandMapping(kPost,
+                     "session/:sessionId/element/:id/drag",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(
+          kGet,
+          "session/:sessionId/element/:id/css/:propertyName",
+          WrapToCommand(base::Bind(&ExecuteGetElementValueOfCSSProperty))),
+      CommandMapping(kPost,
+                     "session/:sessionId/timeouts/implicit_wait",
+                     WrapToCommand(base::Bind(&ExecuteImplicitlyWait))),
+      CommandMapping(kPost,
+                     "session/:sessionId/timeouts/async_script",
+                     WrapToCommand(base::Bind(&ExecuteSetScriptTimeout))),
+      CommandMapping(kPost,
+                     "session/:sessionId/timeouts",
+                     WrapToCommand(base::Bind(&ExecuteSetTimeout))),
+      CommandMapping(kPost,
+                     "session/:sessionId/execute_sql",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kGet,
+                     "session/:sessionId/location",
+                     WrapToCommand(base::Bind(&ExecuteGetLocation))),
+      CommandMapping(kPost,
+                     "session/:sessionId/location",
+                     WrapToCommand(base::Bind(&ExecuteSetLocation))),
+      CommandMapping(kGet,
+                     "session/:sessionId/application_cache/status",
+                     base::Bind(&ExecuteGetStatus)),
+      CommandMapping(kGet,
+                     "session/:sessionId/browser_connection",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/browser_connection",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(
+          kGet,
+          "session/:sessionId/local_storage/key/:key",
+          WrapToCommand(base::Bind(&ExecuteGetStorageItem, kLocalStorage))),
+      CommandMapping(
+          kDelete,
+          "session/:sessionId/local_storage/key/:key",
+          WrapToCommand(base::Bind(&ExecuteRemoveStorageItem, kLocalStorage))),
+      CommandMapping(
+          kGet,
+          "session/:sessionId/local_storage",
+          WrapToCommand(base::Bind(&ExecuteGetStorageKeys, kLocalStorage))),
+      CommandMapping(
+          kPost,
+          "session/:sessionId/local_storage",
+          WrapToCommand(base::Bind(&ExecuteSetStorageItem, kLocalStorage))),
+      CommandMapping(
+          kDelete,
+          "session/:sessionId/local_storage",
+          WrapToCommand(base::Bind(&ExecuteClearStorage, kLocalStorage))),
+      CommandMapping(
+          kGet,
+          "session/:sessionId/local_storage/size",
+          WrapToCommand(base::Bind(&ExecuteGetStorageSize, kLocalStorage))),
+      CommandMapping(
+          kGet,
+          "session/:sessionId/session_storage/key/:key",
+          WrapToCommand(base::Bind(&ExecuteGetStorageItem, kSessionStorage))),
+      CommandMapping(kDelete,
+                     "session/:sessionId/session_storage/key/:key",
+                     WrapToCommand(base::Bind(&ExecuteRemoveStorageItem,
+                                              kSessionStorage))),
+      CommandMapping(
+          kGet,
+          "session/:sessionId/session_storage",
+          WrapToCommand(base::Bind(&ExecuteGetStorageKeys, kSessionStorage))),
+      CommandMapping(
+          kPost,
+          "session/:sessionId/session_storage",
+          WrapToCommand(base::Bind(&ExecuteSetStorageItem, kSessionStorage))),
+      CommandMapping(
+          kDelete,
+          "session/:sessionId/session_storage",
+          WrapToCommand(base::Bind(&ExecuteClearStorage, kSessionStorage))),
+      CommandMapping(
+          kGet,
+          "session/:sessionId/session_storage/size",
+          WrapToCommand(base::Bind(&ExecuteGetStorageSize, kSessionStorage))),
+      CommandMapping(kGet,
+                     "session/:sessionId/orientation",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/orientation",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/click",
+                     WrapToCommand(base::Bind(&ExecuteMouseClick))),
+      CommandMapping(kPost,
+                     "session/:sessionId/doubleclick",
+                     WrapToCommand(base::Bind(&ExecuteMouseDoubleClick))),
+      CommandMapping(kPost,
+                     "session/:sessionId/buttondown",
+                     WrapToCommand(base::Bind(&ExecuteMouseButtonDown))),
+      CommandMapping(kPost,
+                     "session/:sessionId/buttonup",
+                     WrapToCommand(base::Bind(&ExecuteMouseButtonUp))),
+      CommandMapping(kPost,
+                     "session/:sessionId/moveto",
+                     WrapToCommand(base::Bind(&ExecuteMouseMoveTo))),
+      CommandMapping(
+          kPost,
+          "session/:sessionId/keys",
+          WrapToCommand(base::Bind(&ExecuteSendKeysToActiveElement))),
+      CommandMapping(kGet,
+                     "session/:sessionId/ime/available_engines",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kGet,
+                     "session/:sessionId/ime/active_engine",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kGet,
+                     "session/:sessionId/ime/activated",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/ime/deactivate",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/ime/activate",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/touch/click",
+                     WrapToCommand(base::Bind(&ExecuteTouchSingleTap))),
+      CommandMapping(kPost,
+                     "session/:sessionId/touch/down",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/touch/up",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/touch/move",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/touch/scroll",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/touch/doubleclick",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/touch/longclick",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/touch/flick",
+                     base::Bind(&UnimplementedCommand)),
+      CommandMapping(kPost,
+                     "session/:sessionId/log",
+                     WrapToCommand(base::Bind(&ExecuteGetLog))),
+      CommandMapping(kGet,
+                     "session/:sessionId/log/types",
+                     WrapToCommand(base::Bind(&ExecuteGetAvailableLogTypes))),
+      CommandMapping(kPost, "logs", base::Bind(&UnimplementedCommand)),
+      CommandMapping(kGet, "status", base::Bind(&ExecuteGetStatus)),
 
       // Custom Chrome commands:
       // Allow quit all to be called with GET or POST.
-      CommandMapping(kGet, kShutdownPath, CommandNames::kQuitAll),
-      CommandMapping(kPost, kShutdownPath, CommandNames::kQuitAll),
-      CommandMapping(kGet, "session/:sessionId/is_loading",
-                     CommandNames::kIsLoading),
-  };
-  return scoped_ptr<CommandMap>(
+      CommandMapping(kGet,
+                     kShutdownPath,
+                     base::Bind(&ExecuteQuitAll,
+                                WrapToCommand(base::Bind(&ExecuteQuit, true)),
+                                &session_thread_map_)),
+      CommandMapping(kPost,
+                     kShutdownPath,
+                     base::Bind(&ExecuteQuitAll,
+                                WrapToCommand(base::Bind(&ExecuteQuit, true)),
+                                &session_thread_map_)),
+      CommandMapping(kGet,
+                     "session/:sessionId/is_loading",
+                     WrapToCommand(base::Bind(&ExecuteIsLoading))), };
+  command_map_.reset(
       new CommandMap(commands, commands + arraysize(commands)));
-}
-
-HttpHandler::HttpHandler(Log* log,
-                         scoped_ptr<CommandExecutor> executor,
-                         scoped_ptr<CommandMap> command_map,
-                         const std::string& url_base)
-    : log_(log),
-      executor_(executor.Pass()),
-      command_map_(command_map.Pass()),
-      url_base_(url_base) {
-  executor_->Init();
 }
 
 HttpHandler::~HttpHandler() {}
 
-void HttpHandler::Handle(const HttpRequest& request,
-                         HttpResponse* response) {
-  const char* method = "GET";
-  if (request.method == kPost)
-    method = "POST";
-  else if (request.method == kDelete)
-    method = "DELETE";
-  log_->AddEntry(
-      Log::kLog,
-      base::StringPrintf("received WebDriver request: %s %s %s",
-                         method,
-                         request.path.c_str(),
-                         request.body.c_str()));
+void HttpHandler::Handle(const net::HttpServerRequestInfo& request,
+                         const HttpResponseSenderFunc& send_response_func) {
+  CHECK(thread_checker_.CalledOnValidThread());
 
-  HandleInternal(request, response);
+  if (received_shutdown_)
+    return;
 
-  log_->AddEntry(
-      Log::kLog,
-      base::StringPrintf("sending WebDriver response: %d %s",
-                         response->status(),
-                         response->body().c_str()));
-}
-
-bool HttpHandler::ShouldShutdown(const HttpRequest& request) {
-  return request.path == url_base_ + kShutdownPath;
-}
-
-void HttpHandler::HandleInternal(const HttpRequest& request,
-                                 HttpResponse* response) {
   std::string path = request.path;
   if (!StartsWithASCII(path, url_base_, true)) {
-    *response = HttpResponse(HttpResponse::kBadRequest);
-    response->set_body("unhandled request");
+    scoped_ptr<net::HttpServerResponseInfo> response(
+        new net::HttpServerResponseInfo(net::HTTP_BAD_REQUEST));
+    response->SetBody("unhandled request", "text/plain");
+    send_response_func.Run(response.Pass());
     return;
   }
 
   path.erase(0, url_base_.length());
 
-  if (!HandleWebDriverCommand(request, path, response)) {
-    *response = HttpResponse(HttpResponse::kNotFound);
-    response->set_body("unknown command: " + path);
-    return;
-  }
+  HandleCommand(request, path, send_response_func);
+
+  if (path == kShutdownPath)
+    received_shutdown_ = true;
 }
 
-bool HttpHandler::HandleWebDriverCommand(
-    const HttpRequest& request,
+Command HttpHandler::WrapToCommand(
+    const SessionCommand& session_command) {
+  return base::Bind(
+      &ExecuteSessionCommand, &session_thread_map_, session_command, false);
+}
+
+Command HttpHandler::WrapToCommand(
+    const WindowCommand& window_command) {
+  return WrapToCommand(
+      base::Bind(&ExecuteWindowCommand, window_command));
+}
+
+Command HttpHandler::WrapToCommand(
+    const ElementCommand& element_command) {
+  return WrapToCommand(
+      base::Bind(&ExecuteElementCommand, element_command));
+}
+
+void HttpHandler::HandleCommand(
+    const net::HttpServerRequestInfo& request,
     const std::string& trimmed_path,
-    HttpResponse* response) {
+    const HttpResponseSenderFunc& send_response_func) {
+  log_->AddEntry(Log::kLog,
+                 base::StringPrintf("handling command: %s %s %s",
+                                    request.method.c_str(),
+                                    trimmed_path.c_str(),
+                                    request.data.c_str()));
+
   base::DictionaryValue params;
   std::string session_id;
   CommandMap::const_iterator iter = command_map_->begin();
   while (true) {
     if (iter == command_map_->end()) {
-      return false;
+      scoped_ptr<net::HttpServerResponseInfo> response(
+          new net::HttpServerResponseInfo(net::HTTP_NOT_FOUND));
+      response->SetBody("unknown command: " + trimmed_path, "text/plain");
+      send_response_func.Run(response.Pass());
+      return;
     }
     if (internal::MatchesCommand(
             request.method, trimmed_path, *iter, &session_id, &params)) {
@@ -328,60 +514,117 @@ bool HttpHandler::HandleWebDriverCommand(
     ++iter;
   }
 
-  if (request.method == kPost && request.body.length()) {
+  if (request.data.length()) {
     base::DictionaryValue* body_params;
-    scoped_ptr<base::Value> parsed_body(base::JSONReader::Read(request.body));
+    scoped_ptr<base::Value> parsed_body(base::JSONReader::Read(request.data));
     if (!parsed_body || !parsed_body->GetAsDictionary(&body_params)) {
-      *response = HttpResponse(HttpResponse::kBadRequest);
-      response->set_body("missing command parameters");
-      return true;
+      scoped_ptr<net::HttpServerResponseInfo> response(
+          new net::HttpServerResponseInfo(net::HTTP_BAD_REQUEST));
+      response->SetBody("missing command parameters", "test/plain");
+      send_response_func.Run(response.Pass());
+      return;
     }
     params.MergeDictionary(body_params);
   }
 
-  StatusCode status = kOk;
-  scoped_ptr<base::Value> value;
-  std::string out_session_id;
-  executor_->ExecuteCommand(
-      iter->name, params, session_id, &status, &value, &out_session_id);
+  iter->command.Run(params,
+                    session_id,
+                    base::Bind(&HttpHandler::PrepareResponse,
+                               weak_ptr_factory_.GetWeakPtr(),
+                               trimmed_path,
+                               send_response_func));
+}
 
-  if (status == kUnknownCommand) {
-    *response = HttpResponse(HttpResponse::kNotImplemented);
-    response->set_body("unimplemented command: " + iter->name);
-    return true;
+void HttpHandler::PrepareResponse(
+    const std::string& trimmed_path,
+    const HttpResponseSenderFunc& send_response_func,
+    const Status& status,
+    scoped_ptr<base::Value> value,
+    const std::string& session_id) {
+  CHECK(thread_checker_.CalledOnValidThread());
+  scoped_ptr<net::HttpServerResponseInfo> response =
+      PrepareResponseHelper(trimmed_path, status, value.Pass(), session_id);
+  log_->AddEntry(Log::kLog,
+                 base::StringPrintf("sending response: %d %s",
+                                    response->status_code(),
+                                    response->body().c_str()));
+  send_response_func.Run(response.Pass());
+  if (trimmed_path == kShutdownPath)
+    quit_func_.Run();
+}
+
+scoped_ptr<net::HttpServerResponseInfo> HttpHandler::PrepareResponseHelper(
+    const std::string& trimmed_path,
+    const Status& status,
+    scoped_ptr<base::Value> value,
+    const std::string& session_id) {
+  if (status.code() == kUnknownCommand) {
+    scoped_ptr<net::HttpServerResponseInfo> response(
+        new net::HttpServerResponseInfo(net::HTTP_NOT_IMPLEMENTED));
+    response->SetBody("unimplemented command: " + trimmed_path, "text/plain");
+    return response.Pass();
   }
 
-  if (iter->name == CommandNames::kNewSession && status == kOk) {
+  if (trimmed_path == internal::kNewSessionPathPattern && status.IsOk()) {
     // Creating a session involves a HTTP request to /session, which is
     // supposed to redirect to /session/:sessionId, which returns the
     // session info.
-    *response = HttpResponse(HttpResponse::kSeeOther);
-    response->AddHeader("Location", url_base_ + "session/" + out_session_id);
-    return true;
+    scoped_ptr<net::HttpServerResponseInfo> response(
+        new net::HttpServerResponseInfo(net::HTTP_SEE_OTHER));
+    response->AddHeader("Location", url_base_ + "session/" + session_id);
+    return response.Pass();
+  } else if (status.IsError()) {
+    Status full_status(status);
+    full_status.AddDetails(base::StringPrintf(
+        "Driver info: chromedriver=%s,platform=%s %s %s",
+        kChromeDriverVersion,
+        base::SysInfo::OperatingSystemName().c_str(),
+        base::SysInfo::OperatingSystemVersion().c_str(),
+        base::SysInfo::OperatingSystemArchitecture().c_str()));
+    scoped_ptr<base::DictionaryValue> error(new base::DictionaryValue());
+    error->SetString("message", full_status.message());
+    value.reset(error.release());
   }
+  if (!value)
+    value.reset(base::Value::CreateNullValue());
 
   base::DictionaryValue body_params;
-  body_params.SetInteger("status", status);
+  body_params.SetInteger("status", status.code());
   body_params.Set("value", value.release());
-  body_params.SetString("sessionId", out_session_id);
+  body_params.SetString("sessionId", session_id);
   std::string body;
   base::JSONWriter::WriteWithOptions(
       &body_params, base::JSONWriter::OPTIONS_OMIT_DOUBLE_TYPE_PRESERVATION,
       &body);
-  *response = HttpResponse(HttpResponse::kOk);
-  response->SetMimeType("application/json; charset=utf-8");
-  response->set_body(body);
-  return true;
+  scoped_ptr<net::HttpServerResponseInfo> response(
+      new net::HttpServerResponseInfo(net::HTTP_OK));
+  response->SetBody(body, "application/json; charset=utf-8");
+  return response.Pass();
 }
 
 namespace internal {
 
-bool MatchesCommand(HttpMethod method,
+const char kNewSessionPathPattern[] = "session";
+
+bool MatchesMethod(HttpMethod command_method, const std::string& method) {
+  std::string lower_method = StringToLowerASCII(method);
+  switch (command_method) {
+  case kGet:
+    return lower_method == "get";
+  case kPost:
+    return lower_method == "post" || lower_method == "put";
+  case kDelete:
+    return lower_method == "delete";
+  }
+  return false;
+}
+
+bool MatchesCommand(const std::string& method,
                     const std::string& path,
                     const CommandMapping& command,
                     std::string* session_id,
                     base::DictionaryValue* out_params) {
-  if (method != command.method)
+  if (!MatchesMethod(command.method, method))
     return false;
 
   std::vector<std::string> path_parts;
@@ -410,4 +653,4 @@ bool MatchesCommand(HttpMethod method,
   return true;
 }
 
-}  // namespace
+}  // namespace internal

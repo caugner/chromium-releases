@@ -7,7 +7,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/strings/sys_string_conversions.h"
@@ -74,12 +74,12 @@ class LocalFileUtilTest : public testing::Test {
   }
 
   bool FileExists(const char *file_name) {
-    return file_util::PathExists(LocalPath(file_name)) &&
-        !file_util::DirectoryExists(LocalPath(file_name));
+    return base::PathExists(LocalPath(file_name)) &&
+        !base::DirectoryExists(LocalPath(file_name));
   }
 
   bool DirectoryExists(const char *file_name) {
-    return file_util::DirectoryExists(LocalPath(file_name));
+    return base::DirectoryExists(LocalPath(file_name));
   }
 
   int64 GetSize(const char *file_name) {

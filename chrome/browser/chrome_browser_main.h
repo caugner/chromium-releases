@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/common/main_function_params.h"
 
 class ActiveTabTracker;
 class BrowserProcessImpl;
@@ -39,10 +40,6 @@ extern const char kMissingLocaleDataMessage[];
 
 namespace chrome_browser_metrics {
 class TrackingSynchronizer;
-}
-
-namespace content {
-struct MainFunctionParams;
 }
 
 namespace performance_monitor {
@@ -119,6 +116,14 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Returns true if the user opted in to sending metric reports.
   bool IsMetricsReportingEnabled();
 
+  // Record time from process startup to present time in an UMA histogram.
+  void RecordBrowserStartupTime();
+
+  // Records a time value to an UMA histogram in the context of the
+  // PreReadExperiment field-trial. This also reports to the appropriate
+  // sub-histogram (_PreRead(Enabled|Disabled)).
+  void RecordPreReadExperimentTime(const char* name, base::TimeDelta time);
+
   // Methods for Main Message Loop -------------------------------------------
 
   int PreCreateThreadsImpl();
@@ -126,7 +131,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // Members initialized on construction ---------------------------------------
 
-  const content::MainFunctionParams& parameters_;
+  const content::MainFunctionParams parameters_;
   const CommandLine& parsed_command_line_;
   int result_code_;
 
@@ -172,9 +177,10 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Android doesn't support multiple browser processes, so it doesn't implement
   // ProcessSingleton.
   scoped_ptr<ChromeProcessSingleton> process_singleton_;
-#endif
+
+  // Android's first run is done in Java instead of native.
   scoped_ptr<first_run::MasterPrefs> master_prefs_;
-  bool record_search_engine_;
+#endif
   TranslateManager* translate_manager_;
   Profile* profile_;
   bool run_message_loop_;
@@ -186,7 +192,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // Members initialized in PreMainMessageLoopRun, needed in
   // PreMainMessageLoopRunThreadsCreated.
-  bool do_first_run_tasks_;
   PrefService* local_state_;
   base::FilePath user_data_dir_;
 
@@ -203,24 +208,5 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainParts);
 };
-
-// Records the conditions that can prevent Breakpad from generating and
-// sending crash reports.  The presence of a Breakpad handler (after
-// attempting to initialize crash reporting) and the presence of a debugger
-// are registered with the UMA metrics service.
-void RecordBreakpadStatusUMA(MetricsService* metrics);
-
-// Displays a warning message if some minimum level of OS support is not
-// present on the current platform.
-void WarnAboutMinimumSystemRequirements();
-
-// Record time from process startup to present time in an UMA histogram.
-// |is_first_run| - is the current launch part of a first run.
-void RecordBrowserStartupTime(bool is_first_run);
-
-// Records a time value to an UMA histogram in the context of the
-// PreReadExperiment field-trial. This also reports to the appropriate
-// sub-histogram (_PreRead(Enabled|Disabled)).
-void RecordPreReadExperimentTime(const char* name, base::TimeDelta time);
 
 #endif  // CHROME_BROWSER_CHROME_BROWSER_MAIN_H_

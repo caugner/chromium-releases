@@ -15,14 +15,22 @@ import sys
 
 import bb_utils
 
-BotConfig = collections.namedtuple(
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from pylib import constants
+
+
+_BotConfig = collections.namedtuple(
     'BotConfig', ['bot_id', 'host_obj', 'test_obj'])
 
 HostConfig = collections.namedtuple(
     'HostConfig',
-    ['host_steps', 'extra_args', 'extra_gyp_defines', 'target_arch'])
+    ['script', 'host_steps', 'extra_args', 'extra_gyp_defines', 'target_arch'])
 
-TestConfig = collections.namedtuple('Tests', ['tests', 'extra_args'])
+TestConfig = collections.namedtuple('Tests', ['script', 'tests', 'extra_args'])
+
+
+def BotConfig(bot_id, host_object, test_object=None):
+  return _BotConfig(bot_id, host_object, test_object)
 
 
 def DictDiff(d1, d2):
@@ -41,7 +49,7 @@ def GetEnvironment(host_obj, testing):
   init_env['GOMA_DIR'] = bb_utils.GOMA_DIR
   envsetup_cmd = '. build/android/envsetup.sh'
   if host_obj.target_arch:
-    envsetup_cmd += ' --target_arch=%s' % host_obj.target_arch
+    envsetup_cmd += ' --target-arch=%s' % host_obj.target_arch
   if testing:
     # Skip envsetup to avoid presubmit dependence on android deps.
     print 'Testing mode - skipping "%s"' % envsetup_cmd
@@ -80,18 +88,19 @@ def GetCommands(options, bot_config):
   Args:
     options: Options object.
     bot_config: A BotConfig named tuple.
+    host_step_script: Host step script.
+    device_step_script: Device step script.
   Returns:
     list of Command objects.
   """
   property_args = bb_utils.EncodeProperties(options)
-  commands = [['build/android/buildbot/bb_host_steps.py'] +
-              ['--steps=%s' % ','.join(bot_config.host_obj.host_steps)] +
+  commands = [[bot_config.host_obj.script,
+               '--steps=%s' % ','.join(bot_config.host_obj.host_steps)] +
               property_args + (bot_config.host_obj.extra_args or [])]
 
   test_obj = bot_config.test_obj
   if test_obj:
-    run_test_cmd = [
-        'build/android/buildbot/bb_device_steps.py', '--reboot'] + property_args
+    run_test_cmd = [test_obj.script, '--reboot'] + property_args
     for test in test_obj.tests:
       run_test_cmd.extend(['-f', test])
     if test_obj.extra_args:
@@ -106,16 +115,17 @@ def GetBotStepMap():
   std_build_steps = ['compile', 'zip_build']
   std_test_steps = ['extract_build']
   std_tests = ['ui', 'unit']
-  flakiness_server = '--upload-to-flakiness-server'
+  flakiness_server = (
+      '--flakiness-server=%s' % constants.UPSTREAM_FLAKINESS_SERVER)
+  experimental = ['--experimental']
 
-  def B(bot_id, host_object, test_object=None):
-    return BotConfig(bot_id, host_object, test_object)
-
-  def T(tests, extra_args=None):
-    return TestConfig(tests, extra_args)
-
-  def H(host_steps, extra_args=None, extra_gyp=None, target_arch=None):
-    return HostConfig(host_steps, extra_args, extra_gyp, target_arch)
+  B = BotConfig
+  H = (lambda steps, extra_args=None, extra_gyp=None, target_arch=None :
+       HostConfig('build/android/buildbot/bb_host_steps.py', steps, extra_args,
+                  extra_gyp, target_arch))
+  T = (lambda tests, extra_args=None :
+       TestConfig('build/android/buildbot/bb_device_steps.py', tests,
+                  extra_args))
 
   bot_configs = [
       # Main builders
@@ -131,11 +141,13 @@ def GetBotStepMap():
         T(std_tests, ['--asan'])),
       B('chromedriver-fyi-tests-dbg', H(std_test_steps),
         T(['chromedriver'], ['--install=ChromiumTestShell'])),
+      B('fyi-x86-builder-dbg',
+        H(compile_step + std_host_tests, experimental, target_arch='x86')),
       B('fyi-builder-dbg',
-        H(std_build_steps + std_host_tests, ['--experimental'])),
-      B('fyi-builder-rel', H(std_build_steps,  ['--experimental'])),
-      B('fyi-tests-dbg-ics-gn', H(compile_step, [ '--experimental']),
-        T(std_tests, ['--experimental', flakiness_server])),
+        H(std_build_steps + std_host_tests, experimental)),
+      B('x86-builder-dbg',
+        H(compile_step + std_host_tests, target_arch='x86')),
+      B('fyi-builder-rel', H(std_build_steps,  experimental)),
       B('fyi-tests', H(std_test_steps),
         T(std_tests, ['--experimental', flakiness_server])),
       B('fyi-component-builder-tests-dbg',
@@ -145,9 +157,11 @@ def GetBotStepMap():
       B('perf-tests-rel', H(std_test_steps),
         T([], ['--install=ChromiumTestShell'])),
       B('webkit-latest-webkit-tests', H(std_test_steps),
-        T(['webkit_layout', 'webkit'])),
-      B('webkit-latest-contentshell', H(compile_step), T(['webkit_layout'])),
+        T(['webkit_layout', 'webkit'], ['--auto-reconnect'])),
+      B('webkit-latest-contentshell', H(compile_step),
+        T(['webkit_layout'], ['--auto-reconnect'])),
       B('builder-unit-tests', H(compile_step), T(['unit'])),
+      B('webrtc-tests', H(std_test_steps), T(['webrtc'], [flakiness_server])),
 
       # Generic builder config (for substring match).
       B('builder', H(std_build_steps)),
@@ -162,9 +176,11 @@ def GetBotStepMap():
       ('try-builder-rel', 'main-builder-rel'),
       ('try-clang-builder', 'main-clang-builder'),
       ('try-fyi-builder-dbg', 'fyi-builder-dbg'),
+      ('try-x86-builder-dbg', 'x86-builder-dbg'),
       ('try-tests', 'main-tests'),
       ('try-fyi-tests', 'fyi-tests'),
       ('webkit-latest-tests', 'main-tests'),
+      ('webrtc-builder', 'main-builder-rel'),
   ]
   for to_id, from_id in copy_map:
     assert to_id not in bot_map
@@ -181,43 +197,44 @@ def GetBotStepMap():
   return bot_map
 
 
-def main(argv):
+# Return an object from the map, looking first for an exact id match.
+# If this fails, look for an id which is a substring of the specified id.
+# Choose the longest of all substring matches.
+# pylint: disable=W0622
+def GetBestMatch(id_map, id):
+  config = id_map.get(id)
+  if not config:
+    substring_matches = filter(lambda x: x in id, id_map.iterkeys())
+    if substring_matches:
+      max_id = max(substring_matches, key=len)
+      print 'Using config from id="%s" (substring match).' % max_id
+      config = id_map[max_id]
+  return config
+
+
+def GetRunBotOptParser():
   parser = bb_utils.GetParser()
   parser.add_option('--bot-id', help='Specify bot id directly.')
   parser.add_option('--testing', action='store_true',
                     help='For testing: print, but do not run commands')
-  options, args = parser.parse_args(argv[1:])
-  if args:
-    parser.error('Unused args: %s' % args)
 
+  return parser
+
+
+def GetBotConfig(options, bot_step_map):
   bot_id = options.bot_id or options.factory_properties.get('android_bot_id')
   if not bot_id:
-    parser.error('A bot id must be specified through option or factory_props.')
+    print (sys.stderr,
+           'A bot id must be specified through option or factory_props.')
+    return
 
-  # Get a BotConfig object looking first for an exact bot-id match. If no exact
-  # match, look for a bot-id which is a substring of the specified id.
-  # This allows similar bots to have unique IDs, but to share config.
-  # If multiple substring matches exist, pick the longest one.
-  bot_map = GetBotStepMap()
-  bot_config = bot_map.get(bot_id)
-  if not bot_config:
-    substring_matches = filter(lambda x: x in bot_id, bot_map.iterkeys())
-    if substring_matches:
-      max_id = max(substring_matches, key=len)
-      print 'Using config from id="%s" (substring match).' % max_id
-      bot_config = bot_map[max_id]
+  bot_config = GetBestMatch(bot_step_map, bot_id)
   if not bot_config:
     print 'Error: config for id="%s" cannot be inferred.' % bot_id
-    return 1
+  return bot_config
 
-  print 'Using config:', bot_config
 
-  commands = GetCommands(options, bot_config)
-  for command in commands:
-    print 'Will run: ', bb_utils.CommandToString(command)
-  print
-
-  env = GetEnvironment(bot_config.host_obj, options.testing)
+def RunBotCommands(options, commands, env):
   print 'Environment changes:'
   print DictDiff(dict(os.environ), env)
 
@@ -229,6 +246,27 @@ def main(argv):
     return_code = subprocess.call(command, cwd=bb_utils.CHROME_SRC, env=env)
     if return_code != 0:
       return return_code
+
+
+def main(argv):
+  parser = GetRunBotOptParser()
+  options, args = parser.parse_args(argv[1:])
+  if args:
+    parser.error('Unused args: %s' % args)
+
+  bot_config = GetBotConfig(options, GetBotStepMap())
+  if not bot_config:
+    sys.exit(1)
+
+  print 'Using config:', bot_config
+
+  commands = GetCommands(options, bot_config)
+  for command in commands:
+    print 'Will run: ', bb_utils.CommandToString(command)
+  print
+
+  env = GetEnvironment(bot_config.host_obj, options.testing)
+  return RunBotCommands(options, commands, env)
 
 
 if __name__ == '__main__':

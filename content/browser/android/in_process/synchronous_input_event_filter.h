@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_BROWSER_ANDOIRD_IN_PROCESS_SYNCHRONOUS_INPUT_EVENT_FILTER_H_
+#ifndef CONTENT_BROWSER_ANDROID_IN_PROCESS_SYNCHRONOUS_INPUT_EVENT_FILTER_H_
 #define CONTENT_BROWSER_ANDROID_IN_PROCESS_SYNCHRONOUS_INPUT_EVENT_FILTER_H_
 
 #include "base/basictypes.h"
@@ -37,8 +37,7 @@ class SynchronousInputEventFilter : public InputHandlerManagerClient {
                                   cc::InputHandler* input_handler) OVERRIDE;
   virtual void DidRemoveInputHandler(int routing_id) OVERRIDE;
   virtual void DidOverscroll(int routing_id,
-                             gfx::Vector2dF accumulated_overscroll,
-                             gfx::Vector2dF current_fling_velocity) OVERRIDE {}
+                             const cc::DidOverscrollParams& params) OVERRIDE;
 
  private:
   void SetBoundHandlerOnUIThread(const Handler& handler);
@@ -48,4 +47,4 @@ class SynchronousInputEventFilter : public InputHandlerManagerClient {
 
 }  // namespace content
 
-#endif  // CONTENT_RENDERER_ANDROID_SYNCHRONOUS_INPUT_EVENT_FILTER_H_
+#endif  // CONTENT_BROWSER_ANDROID_IN_PROCESS_SYNCHRONOUS_INPUT_EVENT_FILTER_H_

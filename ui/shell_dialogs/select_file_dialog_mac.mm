@@ -178,6 +178,7 @@ void SelectFileDialogImpl::SelectFileImpl(
     gfx::NativeWindow owning_window,
     void* params) {
   DCHECK(type == SELECT_FOLDER ||
+         type == SELECT_UPLOAD_FOLDER ||
          type == SELECT_OPEN_FILE ||
          type == SELECT_OPEN_MULTI_FILE ||
          type == SELECT_SAVEAS_FILE);
@@ -200,7 +201,7 @@ void SelectFileDialogImpl::SelectFileImpl(
     // The file dialog is going to do a ton of stats anyway. Not much
     // point in eliminating this one.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    if (file_util::DirectoryExists(default_path)) {
+    if (base::DirectoryExists(default_path)) {
       default_dir = base::SysUTF8ToNSString(default_path.value());
     } else {
       default_dir = base::SysUTF8ToNSString(default_path.DirName().value());
@@ -274,11 +275,13 @@ void SelectFileDialogImpl::SelectFileImpl(
     else
       [open_dialog setAllowsMultipleSelection:NO];
 
-    if (type == SELECT_FOLDER) {
+    if (type == SELECT_FOLDER || type == SELECT_UPLOAD_FOLDER) {
       [open_dialog setCanChooseFiles:NO];
       [open_dialog setCanChooseDirectories:YES];
       [open_dialog setCanCreateDirectories:YES];
-      NSString *prompt = l10n_util::GetNSString(IDS_SELECT_FOLDER_BUTTON_TITLE);
+      NSString *prompt = (type == SELECT_UPLOAD_FOLDER)
+          ? l10n_util::GetNSString(IDS_SELECT_UPLOAD_FOLDER_BUTTON_TITLE)
+          : l10n_util::GetNSString(IDS_SELECT_FOLDER_BUTTON_TITLE);
       [open_dialog setPrompt:prompt];
     } else {
       [open_dialog setCanChooseFiles:YES];

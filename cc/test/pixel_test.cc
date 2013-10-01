@@ -28,7 +28,7 @@ class PixelTest::PixelTestRendererClient
     : public RendererClient, public OutputSurfaceClient {
  public:
   explicit PixelTestRendererClient(gfx::Rect device_viewport)
-      : device_viewport_(device_viewport) {}
+      : device_viewport_(device_viewport), stencil_enabled_(false) {}
 
   // RendererClient implementation.
   virtual gfx::Rect DeviceViewport() const OVERRIDE {
@@ -41,10 +41,6 @@ class PixelTest::PixelTestRendererClient
     return settings_;
   }
   virtual void SetFullRootLayerDamage() OVERRIDE {}
-  virtual void SetManagedMemoryPolicy(
-      const ManagedMemoryPolicy& policy) OVERRIDE {}
-  virtual void EnforceManagedMemoryPolicy(
-      const ManagedMemoryPolicy& policy) OVERRIDE {}
   virtual bool HasImplThread() const OVERRIDE { return false; }
   virtual bool ShouldClearRootRenderPass() const OVERRIDE { return true; }
   virtual CompositorFrameMetadata MakeCompositorFrameMetadata() const
@@ -54,12 +50,16 @@ class PixelTest::PixelTestRendererClient
   virtual bool AllowPartialSwap() const OVERRIDE {
     return true;
   }
+  virtual bool ExternalStencilTestEnabled() const OVERRIDE {
+    return stencil_enabled_;
+  }
 
   // OutputSurfaceClient implementation.
   virtual bool DeferredInitialize(
       scoped_refptr<ContextProvider> offscreen_context_provider) OVERRIDE {
     return false;
   }
+  virtual void ReleaseGL() OVERRIDE {}
   virtual void SetNeedsRedrawRect(gfx::Rect damage_rect) OVERRIDE {}
   virtual void BeginFrame(const BeginFrameArgs& args) OVERRIDE {}
   virtual void OnSwapBuffersComplete(const CompositorFrameAck* ack) OVERRIDE {}
@@ -68,9 +68,16 @@ class PixelTest::PixelTestRendererClient
                                           gfx::Rect viewport) OVERRIDE {
     device_viewport_ = viewport;
   }
+  virtual void SetExternalStencilTest(bool enable) OVERRIDE {
+    stencil_enabled_ = enable;
+  }
+  virtual void SetMemoryPolicy(const ManagedMemoryPolicy& policy) OVERRIDE {}
+  virtual void SetDiscardBackBufferWhenNotVisible(bool discard) OVERRIDE {}
+  virtual void SetTreeActivationCallback(const base::Closure&) OVERRIDE {}
 
  private:
   gfx::Rect device_viewport_;
+  bool stencil_enabled_;
   LayerTreeSettings settings_;
 };
 
@@ -173,6 +180,10 @@ void PixelTest::ForceExpandedViewport(gfx::Size surface_expansion,
     static_cast<PixelTestSoftwareOutputDevice*>(device)
         ->set_surface_expansion_size(surface_expansion);
   }
+}
+
+void PixelTest::EnableExternalStencilTest() {
+  fake_client_->SetExternalStencilTest(true);
 }
 
 void PixelTest::SetUpSoftwareRenderer() {

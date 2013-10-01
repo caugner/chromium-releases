@@ -12,15 +12,17 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier.h"
+#include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/autocomplete/url_prefix.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/metrics/variations/variations_http_header_provider.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
@@ -28,9 +30,9 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_util.h"
@@ -38,6 +40,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -149,8 +152,10 @@ void ZeroSuggestProvider::OnURLFetchComplete(const net::URLFetcher* source) {
   }
 }
 
-void ZeroSuggestProvider::StartZeroSuggest(const GURL& url,
-                                           const string16& permanent_text) {
+void ZeroSuggestProvider::StartZeroSuggest(
+    const GURL& url,
+    AutocompleteInput::PageClassification page_classification,
+    const string16& permanent_text) {
   Stop(true);
   field_trial_triggered_ = false;
   field_trial_triggered_in_session_ = false;
@@ -160,6 +165,7 @@ void ZeroSuggestProvider::StartZeroSuggest(const GURL& url,
   done_ = false;
   permanent_text_ = permanent_text;
   current_query_ = url.spec();
+  current_page_classification_ = page_classification;
   current_url_match_ = MatchForCurrentURL();
   // TODO(jered): Consider adding locally-sourced zero-suggestions here too.
   // These may be useful on the NTP or more relevant to the user than server
@@ -183,16 +189,7 @@ ZeroSuggestProvider::~ZeroSuggestProvider() {
 }
 
 bool ZeroSuggestProvider::ShouldRunZeroSuggest(const GURL& url) const {
-  if (!url.is_valid())
-    return false;
-
-  // Do not query non-http URLs. There will be no useful suggestions for https
-  // or chrome URLs.
-  if (url.scheme() != chrome::kHttpScheme)
-    return false;
-
-  // Don't enable ZeroSuggest until InstantExtended works with ZeroSuggest.
-  if (chrome::IsInstantExtendedAPIEnabled())
+  if (!ShouldSendURL(url))
     return false;
 
   // Don't run if there's no profile or in incognito mode.
@@ -216,6 +213,18 @@ bool ZeroSuggestProvider::ShouldRunZeroSuggest(const GURL& url) const {
     return false;
   }
   return true;
+}
+
+bool ZeroSuggestProvider::ShouldSendURL(const GURL& url) const {
+  if (!url.is_valid())
+    return false;
+
+  // Only allow HTTP URLs or Google HTTPS URLs (including Google search
+  // result pages).  For the latter case, Google was already sent the HTTPS
+  // URLs when requesting the page, so the information is just re-sent.
+  return (url.scheme() == chrome::kHttpScheme) ||
+      google_util::IsGoogleDomainUrl(url, google_util::ALLOW_SUBDOMAIN,
+                                     google_util::ALLOW_NON_STANDARD_PORTS);
 }
 
 void ZeroSuggestProvider::FillResults(
@@ -285,40 +294,37 @@ void ZeroSuggestProvider::FillResults(
         if (descriptions != NULL)
           descriptions->GetString(index, &title);
         navigation_results->push_back(SearchProvider::NavigationResult(
-            *this, url, title, false, relevance));
+            *this, url, title, false, relevance, relevances != NULL));
       }
     } else {
       suggest_results->push_back(SearchProvider::SuggestResult(
-          result, false, relevance));
+          result, false, relevance, relevances != NULL));
     }
   }
 }
 
 void ZeroSuggestProvider::AddSuggestResultsToMap(
     const SearchProvider::SuggestResults& results,
-    const string16& provider_keyword,
+    const TemplateURL* template_url,
     SearchProvider::MatchMap* map) {
   for (size_t i = 0; i < results.size(); ++i) {
-    AddMatchToMap(results[i].suggestion(),
-                  provider_keyword,
-                  results[i].relevance(),
-                  AutocompleteMatchType::SEARCH_SUGGEST, i, map);
+    AddMatchToMap(results[i].relevance(), AutocompleteMatchType::SEARCH_SUGGEST,
+                  template_url, results[i].suggestion(), i, map);
   }
 }
 
-void ZeroSuggestProvider::AddMatchToMap(const string16& query_string,
-                                        const string16& provider_keyword,
-                                        int relevance,
+void ZeroSuggestProvider::AddMatchToMap(int relevance,
                                         AutocompleteMatch::Type type,
+                                        const TemplateURL* template_url,
+                                        const string16& query_string,
                                         int accepted_suggestion,
                                         SearchProvider::MatchMap* map) {
   // Pass in query_string as the input_text since we don't want any bolding.
   // TODO(samarth|melevin): use the actual omnibox margin here as well instead
   // of passing in -1.
   AutocompleteMatch match = SearchProvider::CreateSearchSuggestion(
-      profile_, this, AutocompleteInput(),
-      query_string, query_string, relevance, type, accepted_suggestion,
-      false, provider_keyword, -1);
+      this, relevance, type, template_url, query_string, query_string,
+      AutocompleteInput(), false, accepted_suggestion, -1, true);
   if (!match.destination_url.is_valid())
     return;
 
@@ -352,7 +358,6 @@ AutocompleteMatch ZeroSuggestProvider::NavigationToMatch(
   match.fill_into_edit +=
       AutocompleteInput::FormattedStringWithEquivalentMeaning(navigation.url(),
           match.contents);
-  match.inline_autocomplete_offset = string16::npos;
 
   AutocompleteMatch::ClassifyLocationInString(string16::npos, 0,
       match.contents.length(), ACMatchClassification::URL,
@@ -415,9 +420,8 @@ void ZeroSuggestProvider::ParseSuggestResults(const Value& root_val) {
               &suggest_results, &navigation_results_);
 
   query_matches_map_.clear();
-  const TemplateURL* default_provider =
-     template_url_service_->GetDefaultSearchProvider();
-  AddSuggestResultsToMap(suggest_results, default_provider->keyword(),
+  AddSuggestResultsToMap(suggest_results,
+                         template_url_service_->GetDefaultSearchProvider(),
                          &query_matches_map_);
 }
 
@@ -454,15 +458,15 @@ void ZeroSuggestProvider::ConvertResultsToAutocompleteMatches() {
 }
 
 AutocompleteMatch ZeroSuggestProvider::MatchForCurrentURL() {
-  AutocompleteInput input(permanent_text_, string16::npos,
-                          string16(), GURL(current_query_),
+  AutocompleteInput input(permanent_text_, string16::npos, string16(),
+                          GURL(current_query_), current_page_classification_,
                           false, false, true, AutocompleteInput::ALL_MATCHES);
 
-  AutocompleteMatch match(
-      HistoryURLProvider::SuggestExactInput(this, input,
-                                            !HasHTTPScheme(input.text())));
+  AutocompleteMatch match;
+  AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(
+      permanent_text_, false, true, &match, NULL);
   match.is_history_what_you_typed_match = false;
-  match.inline_autocomplete_offset = string16::npos;
+  match.allowed_to_be_default_match = true;
 
   // The placeholder suggestion for the current URL has high relevance so
   // that it is in the first suggestion slot and inline autocompleted. It

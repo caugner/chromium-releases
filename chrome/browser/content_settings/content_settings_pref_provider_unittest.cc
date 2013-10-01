@@ -7,7 +7,7 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/default_pref_store.h"
 #include "base/prefs/overlay_user_pref_store.h"
 #include "base/prefs/pref_change_registrar.h"
@@ -28,8 +28,8 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/test/test_browser_thread.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using ::testing::_;
 using content::BrowserThread;
@@ -140,14 +140,14 @@ TEST_F(PrefProviderTest, Incognito) {
       new user_prefs::PrefRegistrySyncable);
   PrefServiceSyncable* regular_prefs = builder.CreateSyncable(registry.get());
 
-  chrome::RegisterUserPrefs(registry.get());
+  chrome::RegisterUserProfilePrefs(registry.get());
 
   builder.WithUserPrefs(otr_user_prefs);
   scoped_refptr<user_prefs::PrefRegistrySyncable> otr_registry(
       new user_prefs::PrefRegistrySyncable);
   PrefServiceSyncable* otr_prefs = builder.CreateSyncable(otr_registry.get());
 
-  chrome::RegisterUserPrefs(otr_registry.get());
+  chrome::RegisterUserProfilePrefs(otr_registry.get());
 
   TestingProfile::Builder profile_builder;
   profile_builder.SetPrefService(make_scoped_ptr(regular_prefs));
@@ -420,7 +420,7 @@ TEST_F(PrefProviderTest, AutoSubmitCertificateContentSetting) {
 // http://crosbug.com/17760
 TEST_F(PrefProviderTest, Deadlock) {
   TestingPrefServiceSyncable prefs;
-  PrefProvider::RegisterUserPrefs(prefs.registry());
+  PrefProvider::RegisterProfilePrefs(prefs.registry());
 
   // Chain of events: a preference changes, |PrefProvider| notices it, and reads
   // and writes the preference. When the preference is written, a notification

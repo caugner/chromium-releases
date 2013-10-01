@@ -18,10 +18,10 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "sync/engine/get_commit_ids_command.h"
 #include "sync/engine/net/server_connection_manager.h"
@@ -49,9 +49,9 @@
 #include "sync/test/engine/test_id_factory.h"
 #include "sync/test/engine/test_syncable_utils.h"
 #include "sync/test/fake_encryptor.h"
-#include "sync/test/fake_extensions_activity_monitor.h"
 #include "sync/test/fake_sync_encryption_handler.h"
 #include "sync/util/cryptographer.h"
+#include "sync/util/extensions_activity.h"
 #include "sync/util/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -113,7 +113,8 @@ class SyncerTest : public testing::Test,
                    public SyncEngineEventListener {
  protected:
   SyncerTest()
-      : syncer_(NULL),
+      : extensions_activity_(new ExtensionsActivity),
+        syncer_(NULL),
         saw_syncer_event_(false),
         last_client_invalidation_hint_buffer_size_(10),
         traffic_recorder_(0, 0) {
@@ -181,38 +182,24 @@ class SyncerTest : public testing::Test,
   }
 
   void SyncShareNudge() {
-    ModelSafeRoutingInfo info;
-    GetModelSafeRoutingInfo(&info);
-    ModelTypeInvalidationMap invalidation_map =
-        ModelSafeRoutingInfoToInvalidationMap(info, std::string());
-    sessions::SyncSourceInfo source_info(
-        sync_pb::GetUpdatesCallerInfo::LOCAL,
-        invalidation_map);
-    // Use our dummy nudge tracker.  These tests won't notice that it hasn't
-    // been tracking anything because the server is mocked out and ignores most
-    // of the content of requests sent by the client.
-    session_.reset(
-        SyncSession::BuildForNudge(context_.get(),
-                                   this,
-                                   source_info,
-                                   &nudge_tracker_));
+    session_.reset(SyncSession::Build(context_.get(), this));
 
-    EXPECT_TRUE(syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END));
+    // Pretend we've seen a local change, to make the nudge_tracker look normal.
+    nudge_tracker_.RecordLocalChange(ModelTypeSet(BOOKMARKS));
+
+    EXPECT_TRUE(
+        syncer_->NormalSyncShare(
+            GetRoutingInfoTypes(context_->routing_info()),
+            nudge_tracker_,
+            session_.get()));
   }
 
   void SyncShareConfigure() {
-    ModelSafeRoutingInfo info;
-    GetModelSafeRoutingInfo(&info);
-    ModelTypeInvalidationMap invalidation_map =
-        ModelSafeRoutingInfoToInvalidationMap(info, std::string());
-    sessions::SyncSourceInfo source_info(
-        sync_pb::GetUpdatesCallerInfo::RECONFIGURATION,
-        invalidation_map);
-    session_.reset(SyncSession::Build(context_.get(),
-                                      this,
-                                      source_info));
-    EXPECT_TRUE(
-        syncer_->SyncShare(session_.get(), DOWNLOAD_UPDATES, APPLY_UPDATES));
+    session_.reset(SyncSession::Build(context_.get(), this));
+    EXPECT_TRUE(syncer_->ConfigureSyncShare(
+            GetRoutingInfoTypes(context_->routing_info()),
+            sync_pb::GetUpdatesCallerInfo::RECONFIGURATION,
+            session_.get()));
   }
 
   virtual void SetUp() {
@@ -235,9 +222,10 @@ class SyncerTest : public testing::Test,
     context_.reset(
         new SyncSessionContext(
             mock_server_.get(), directory(), workers,
-            &extensions_activity_monitor_,
+            extensions_activity_,
             listeners, NULL, &traffic_recorder_,
             true,  // enable keystore encryption
+            false,  // force enable pre-commit GU avoidance experiment
             "fake_invalidator_client_id"));
     context_->set_routing_info(routing_info);
     syncer_ = new Syncer();
@@ -304,17 +292,6 @@ class SyncerTest : public testing::Test,
     EXPECT_FALSE(client_status.has_hierarchy_conflict_detected());
   }
 
-  void SyncRepeatedlyToTriggerConflictResolution(SyncSession* session) {
-    // We should trigger after less than 6 syncs, but extra does no harm.
-    for (int i = 0 ; i < 6 ; ++i)
-      syncer_->SyncShare(session, SYNCER_BEGIN, SYNCER_END);
-  }
-  void SyncRepeatedlyToTriggerStuckSignal(SyncSession* session) {
-    // We should trigger after less than 10 syncs, but we want to avoid brittle
-    // tests.
-    for (int i = 0 ; i < 12 ; ++i)
-      syncer_->SyncShare(session, SYNCER_BEGIN, SYNCER_END);
-  }
   sync_pb::EntitySpecifics DefaultBookmarkSpecifics() {
     sync_pb::EntitySpecifics result;
     AddDefaultFieldValue(BOOKMARKS, &result);
@@ -422,10 +399,11 @@ class SyncerTest : public testing::Test,
 
       ModelSafeRoutingInfo routes;
       GetModelSafeRoutingInfo(&routes);
+      ModelTypeSet types = GetRoutingInfoTypes(routes);
       sessions::OrderedCommitSet output_set(routes);
-      GetCommitIdsCommand command(&wtrans, limit, &output_set);
+      GetCommitIdsCommand command(&wtrans, types, limit, &output_set);
       std::set<int64> ready_unsynced_set;
-      command.FilterUnreadyEntries(&wtrans, ModelTypeSet(),
+      command.FilterUnreadyEntries(&wtrans, types,
                                    ModelTypeSet(), false,
                                    unsynced_handle_view, &ready_unsynced_set);
       command.BuildCommitIds(&wtrans, routes, ready_unsynced_set);
@@ -571,7 +549,7 @@ class SyncerTest : public testing::Test,
 
   TestDirectorySetterUpper dir_maker_;
   FakeEncryptor encryptor_;
-  FakeExtensionsActivityMonitor extensions_activity_monitor_;
+  scoped_refptr<ExtensionsActivity> extensions_activity_;
   scoped_ptr<MockConnectionManager> mock_server_;
 
   Syncer* syncer_;
@@ -663,8 +641,7 @@ TEST_F(SyncerTest, GetCommitIdsCommandTruncates) {
   DoTruncationTest(unsynced_handle_view, expected_order);
 }
 
-// TODO(rlarocque): re-enable this test.
-TEST_F(SyncerTest, DISABLED_GetCommitIdsFiltersThrottledEntries) {
+TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
   const ModelTypeSet throttled_types(BOOKMARKS);
   sync_pb::EntitySpecifics bookmark_data;
   AddDefaultFieldValue(BOOKMARKS, &bookmark_data);
@@ -682,11 +659,12 @@ TEST_F(SyncerTest, DISABLED_GetCommitIdsFiltersThrottledEntries) {
     A.Put(NON_UNIQUE_NAME, "bookmark");
   }
 
-  // Now set the throttled types.
-  // context_->throttled_data_type_tracker()->SetUnthrottleTime(
-  //     throttled_types,
-  //     base::TimeTicks::Now() + base::TimeDelta::FromSeconds(1200));
-  SyncShareNudge();
+  // Now sync without enabling bookmarks.
+  syncer_->NormalSyncShare(
+      Difference(GetRoutingInfoTypes(context_->routing_info()),
+                 ModelTypeSet(BOOKMARKS)),
+      nudge_tracker_,
+      session_.get());
 
   {
     // Nothing should have been committed as bookmarks is throttled.
@@ -696,10 +674,11 @@ TEST_F(SyncerTest, DISABLED_GetCommitIdsFiltersThrottledEntries) {
     EXPECT_TRUE(entryA.Get(IS_UNSYNCED));
   }
 
-  // Now unthrottle.
-  // context_->throttled_data_type_tracker()->SetUnthrottleTime(
-  //    throttled_types,
-  //    base::TimeTicks::Now() - base::TimeDelta::FromSeconds(1200));
+  // Sync again with bookmarks enabled.
+  syncer_->NormalSyncShare(
+      GetRoutingInfoTypes(context_->routing_info()),
+      nudge_tracker_,
+      session_.get());
   SyncShareNudge();
   {
     // It should have been committed.
@@ -3213,7 +3192,7 @@ TEST_F(SyncerTest, MergingExistingItems) {
   }
   mock_server_->AddUpdateBookmark(1, 0, "Copy of base", 50, 50,
                                   local_cache_guid(), "-1");
-  SyncRepeatedlyToTriggerConflictResolution(session_.get());
+  SyncShareNudge();
 }
 
 // In this test a long changelog contains a child at the start of the changelog
@@ -3241,7 +3220,7 @@ TEST_F(SyncerTest, LongChangelistWithApplicationConflict) {
     mock_server_->SetChangesRemaining(depth - i);
   }
 
-  syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
+  SyncShareNudge();
 
   // Ensure our folder hasn't somehow applied.
   {
@@ -3288,7 +3267,7 @@ TEST_F(SyncerTest, DontMergeTwoExistingItems) {
   }
   mock_server_->AddUpdateBookmark(1, 0, "Copy of base", 50, 50,
                                   foreign_cache_guid(), "-1");
-  SyncRepeatedlyToTriggerConflictResolution(session_.get());
+  SyncShareNudge();
   {
     syncable::ReadTransaction trans(FROM_HERE, directory());
     Entry entry1(&trans, GET_BY_ID, ids_.FromNumber(1));
@@ -4807,18 +4786,18 @@ TEST_P(MixedResult, ExtensionsActivity) {
 
   // Put some extenions activity records into the monitor.
   {
-    ExtensionsActivityMonitor::Records records;
+    ExtensionsActivity::Records records;
     records["ABC"].extension_id = "ABC";
     records["ABC"].bookmark_write_count = 2049U;
     records["xyz"].extension_id = "xyz";
     records["xyz"].bookmark_write_count = 4U;
-    context_->extensions_monitor()->PutRecords(records);
+    context_->extensions_activity()->PutRecords(records);
   }
 
   SyncShareNudge();
 
-  ExtensionsActivityMonitor::Records final_monitor_records;
-  context_->extensions_monitor()->GetAndClearRecords(&final_monitor_records);
+  ExtensionsActivity::Records final_monitor_records;
+  context_->extensions_activity()->GetAndClearRecords(&final_monitor_records);
   if (ShouldFailBookmarkCommit()) {
     ASSERT_EQ(2U, final_monitor_records.size())
         << "Should restore records after unsuccessful bookmark commit.";

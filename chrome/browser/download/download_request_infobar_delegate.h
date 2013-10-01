@@ -23,14 +23,12 @@ class DownloadRequestInfoBarDelegate : public ConfirmInfoBarDelegate {
       base::WeakPtr<DownloadRequestLimiter::TabDownloadState> host)>
     FakeCreateCallback;
 
+  virtual ~DownloadRequestInfoBarDelegate();
+
   // Creates a download request delegate and adds it to |infobar_service|.
   static void Create(
       InfoBarService* infobar_service,
       base::WeakPtr<DownloadRequestLimiter::TabDownloadState> host);
-
-  static void SetCallbackForTesting(FakeCreateCallback* callback);
-
-  virtual ~DownloadRequestInfoBarDelegate();
 
 #if defined(UNIT_TEST)
   static scoped_ptr<DownloadRequestInfoBarDelegate> Create(
@@ -39,6 +37,8 @@ class DownloadRequestInfoBarDelegate : public ConfirmInfoBarDelegate {
         new DownloadRequestInfoBarDelegate(NULL, host));
   }
 #endif
+
+  static void SetCallbackForTesting(FakeCreateCallback* callback);
 
  private:
   static FakeCreateCallback* callback_;
@@ -52,7 +52,9 @@ class DownloadRequestInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual string16 GetMessageText() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
+  virtual bool Cancel() OVERRIDE;
 
+  bool responded_;
   base::WeakPtr<DownloadRequestLimiter::TabDownloadState> host_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadRequestInfoBarDelegate);

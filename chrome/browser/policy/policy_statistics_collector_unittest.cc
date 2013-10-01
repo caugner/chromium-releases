@@ -5,13 +5,15 @@
 #include <cstring>
 #include <string>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/mock_policy_service.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/policy_statistics_collector.h"
@@ -32,7 +34,7 @@ using testing::Return;
 using testing::ReturnRef;
 
 // Arbitrary policy names used for testing.
-const char* const kTestPolicy1 = key::kHomepageIsNewTabPage;
+const char* const kTestPolicy1 = key::kAlternateErrorPagesEnabled;
 const char* const kTestPolicy2 = key::kSearchSuggestEnabled;
 
 class TestPolicyStatisticsCollector : public PolicyStatisticsCollector {
@@ -92,7 +94,7 @@ class PolicyStatisticsCollectorTest : public testing::Test {
 
   void SetPolicy(const std::string& name) {
     policy_map_.Set(name, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                    base::Value::CreateBooleanValue(true));
+                    base::Value::CreateBooleanValue(true), NULL);
   }
 
   base::TimeDelta GetFirstDelay() const {

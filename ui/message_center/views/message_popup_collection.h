@@ -11,8 +11,9 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
-//#include "base/run_loop.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
+#include "ui/gfx/display.h"
+#include "ui/gfx/display_observer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/message_center/message_center_export.h"
@@ -28,18 +29,25 @@ class Widget;
 }
 
 namespace ash {
+class WebNotificationTrayTest;
 FORWARD_DECLARE_TEST(WebNotificationTrayTest, ManyPopupNotifications);
 }
 
 namespace message_center {
 namespace test {
 class MessagePopupCollectionTest;
-class MessagePopupCollectionWidgetsTest;
 }
 
 class MessageCenter;
 class MessageCenterTray;
 class ToastContentsView;
+
+enum PopupAlignment {
+  POPUP_ALIGNMENT_TOP = 1 << 0,
+  POPUP_ALIGNMENT_LEFT = 1 << 1,
+  POPUP_ALIGNMENT_BOTTOM = 1 << 2,
+  POPUP_ALIGNMENT_RIGHT = 1 << 3,
+};
 
 // Container for popup toasts. Because each toast is a frameless window rather
 // than a view in a bubble, now the container just manages all of those toasts.
@@ -48,13 +56,17 @@ class ToastContentsView;
 // be slightly different.
 class MESSAGE_CENTER_EXPORT MessagePopupCollection
     : public MessageCenterObserver,
+      public gfx::DisplayObserver,
       public base::SupportsWeakPtr<MessagePopupCollection> {
  public:
   // |parent| specifies the parent widget of the toast windows. The default
-  // parent will be used for NULL.
+  // parent will be used for NULL. Usually each icon is spacing against its
+  // predecessor. If |first_item_has_no_margin| is set however the first item
+  // does not space against the tray.
   MessagePopupCollection(gfx::NativeView parent,
                          MessageCenter* message_center,
-                         MessageCenterTray* tray);
+                         MessageCenterTray* tray,
+                         bool first_item_has_no_margin);
   virtual ~MessagePopupCollection();
 
   // Called by ToastContentsView when its window is closed.
@@ -77,17 +89,32 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
   // zero. Otherwise, simply waits when it becomes zero.
   void DoUpdateIfPossible();
 
+  // Updates |work_area_| and re-calculates the alignment of notification toasts
+  // rearranging them if necessary.
+  // This is separated from methods from OnDisplayBoundsChanged(), since
+  // sometimes the display info has to be specified directly. One example is
+  // shelf's auto-hide change. When the shelf in ChromeOS is temporarily shown
+  // from auto hide status, it doesn't change the display's work area but the
+  // actual work area for toasts should be resized.
+  void SetDisplayInfo(const gfx::Rect& work_area,
+                      const gfx::Rect& screen_bounds);
+
+  // Overridden from gfx::DislayObserver:
+  virtual void OnDisplayBoundsChanged(const gfx::Display& display) OVERRIDE;
+  virtual void OnDisplayAdded(const gfx::Display& new_display) OVERRIDE;
+  virtual void OnDisplayRemoved(const gfx::Display& old_display) OVERRIDE;
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ash::WebNotificationTrayTest,
                            ManyPopupNotifications);
   friend class test::MessagePopupCollectionTest;
-  friend class test::MessagePopupCollectionWidgetsTest;
+  friend class ash::WebNotificationTrayTest;
   typedef std::list<ToastContentsView*> Toasts;
 
   void CloseAllWidgets();
 
-  // Returns the bottom-right position of the current work area.
-  gfx::Point GetWorkAreaBottomRight();
+  // Returns the x-origin for the given toast bounds in the current work area.
+  int GetToastOriginX(const gfx::Rect& toast_bounds);
 
   // Iterates toasts and starts closing the expired ones.
   void CloseToasts();
@@ -103,6 +130,12 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
   // just removed, so that the user can click close button without mouse moves.
   // See crbug.com/224089
   void RepositionWidgetsWithTarget();
+
+  void ComputePopupAlignment(gfx::Rect work_area, gfx::Rect screen_bounds);
+
+  // The base line is an (imaginary) line that would touch the bottom of the
+  // next created notification if bottom-aligned or its top if top-aligned.
+  int GetBaseLine(ToastContentsView* last_toast);
 
   // Overridden from MessageCenterObserver:
   virtual void OnNotificationAdded(const std::string& notification_id) OVERRIDE;
@@ -121,7 +154,6 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
   void OnDeferTimerExpired();
 
   // "ForTest" methods.
-  void SetWorkAreaForTest(const gfx::Rect& work_area);
   views::Widget* GetWidgetForTest(const std::string& id);
   void RunLoopForTest();
   gfx::Rect GetToastRectAt(size_t index);
@@ -131,6 +163,11 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
   MessageCenterTray* tray_;
   Toasts toasts_;
   gfx::Rect work_area_;
+  int64 display_id_;
+
+  // Specifies which corner of the screen popups should show up. This should
+  // ideally be the same corner the notification area (systray) is at.
+  PopupAlignment alignment_;
 
   int defer_counter_;
 
@@ -151,6 +188,9 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
 
   // Weak, only exists temporarily in tests.
   scoped_ptr<base::RunLoop> run_loop_for_test_;
+
+  // True if the first item should not have spacing against the tray.
+  bool first_item_has_no_margin_;
 
   DISALLOW_COPY_AND_ASSIGN(MessagePopupCollection);
 };

@@ -8,14 +8,14 @@
 #include "base/compiler_specific.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class InfoBarService;
 
 // An infobar that is run with a string and a "Learn More" link.
 class GoogleApiKeysInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  // If Google API keys are missing, creates a missing Google API Keys info bar
+  // If Google API keys are missing, creates a missing Google API Keys infobar
   // delegate and adds it to |infobar_service|.
   static void Create(InfoBarService* infobar_service);
 

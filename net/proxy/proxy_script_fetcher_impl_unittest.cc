@@ -56,7 +56,8 @@ class RequestContext : public URLRequestContext {
     storage_.set_transport_security_state(new TransportSecurityState);
     storage_.set_proxy_service(ProxyService::CreateFixed(no_proxy));
     storage_.set_ssl_config_service(new SSLConfigServiceDefaults);
-    storage_.set_http_server_properties(new HttpServerPropertiesImpl);
+    storage_.set_http_server_properties(
+        scoped_ptr<HttpServerProperties>(new HttpServerPropertiesImpl()));
 
     HttpNetworkSession::Params params;
     params.host_resolver = host_resolver();
@@ -328,15 +329,8 @@ TEST_F(ProxyScriptFetcherImplTest, NoCache) {
     int result = pac_fetcher.Fetch(url, &text, callback.callback());
     EXPECT_EQ(ERR_IO_PENDING, result);
 
-#if defined(OS_ANDROID)
-    // On Android platform, the tests are run on the device while the server
-    // runs on the host machine. After killing the server, port forwarder
-    // running on the device is still active, which produces error message
-    // "Connection reset by peer" rather than "Connection refused".
-    EXPECT_EQ(ERR_CONNECTION_RESET, callback.WaitForResult());
-#else
-    EXPECT_EQ(ERR_CONNECTION_REFUSED, callback.WaitForResult());
-#endif
+    // Expect any error. The exact error varies by platform.
+    EXPECT_NE(OK, callback.WaitForResult());
   }
 }
 

@@ -5,10 +5,13 @@
 #include "chrome/browser/ui/ash/session_state_delegate_chromeos.h"
 
 #include "ash/session_state_observer.h"
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user.h"
+#include "chrome/browser/chromeos/login/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 
@@ -44,8 +47,7 @@ void SessionStateDelegateChromeos::LockScreen() {
   if (!CanLockScreen())
     return;
 
-  // TODO(antrim): Additional logging for http://crbug.com/173178.
-  LOG(WARNING) << "Requesting screen lock from SessionStateDelegate";
+  VLOG(1) << "Requesting screen lock from SessionStateDelegate";
   chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
       RequestLockScreen();
 }
@@ -53,6 +55,14 @@ void SessionStateDelegateChromeos::LockScreen() {
 void SessionStateDelegateChromeos::UnlockScreen() {
   // This is used only for testing thus far.
   NOTIMPLEMENTED();
+}
+
+bool SessionStateDelegateChromeos::IsUserSessionBlocked() const {
+  bool has_login_manager = CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kLoginManager);
+  return (has_login_manager && !IsActiveUserSessionStarted()) ||
+         IsScreenLocked() ||
+         chromeos::UserAddingScreen::Get()->IsRunning();
 }
 
 const base::string16 SessionStateDelegateChromeos::GetUserDisplayName(

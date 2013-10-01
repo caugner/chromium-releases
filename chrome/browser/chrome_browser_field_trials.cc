@@ -10,7 +10,8 @@
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
-#include "base/time.h"
+#include "base/time/time.h"
+#include "chrome/browser/metrics/gzipped_protobufs_field_trial.h"
 #include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -38,6 +39,7 @@ void ChromeBrowserFieldTrials::SetupFieldTrials(PrefService* local_state) {
 
   // Field trials that are shared by all platforms.
   chrome_variations::SetupUniformityFieldTrials(install_time);
+  metrics::CreateGzippedProtobufsFieldTrial();
   InstantiateDynamicTrials();
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
@@ -57,6 +59,9 @@ void ChromeBrowserFieldTrials::InstantiateDynamicTrials() {
   base::FieldTrialList::FindValue("InstantDummy");
   base::FieldTrialList::FindValue("InstantChannel");
   base::FieldTrialList::FindValue("Test0PercentDefault");
+  // MouseEventPreconnect trial is used from renderer process.
+  // Mark here so it will be sync-ed.
+  base::FieldTrialList::FindValue("MouseEventPreconnect");
   // Activate the autocomplete dynamic field trials.
   OmniboxFieldTrial::ActivateDynamicTrials();
 }

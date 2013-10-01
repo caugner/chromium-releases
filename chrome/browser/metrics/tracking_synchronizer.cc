@@ -6,13 +6,12 @@
 
 #include "base/bind.h"
 #include "base/metrics/histogram.h"
-#include "base/process_util.h"
 #include "base/threading/thread.h"
 #include "base/tracked_objects.h"
 #include "chrome/browser/metrics/tracking_synchronizer_observer.h"
-#include "chrome/common/chrome_process_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/profiler_controller.h"
+#include "content/public/common/process_type.h"
 
 using base::TimeTicks;
 using content::BrowserThread;

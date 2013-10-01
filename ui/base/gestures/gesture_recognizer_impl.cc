@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/base/events/event_utils.h"
@@ -216,10 +216,7 @@ void GestureRecognizerImpl::SetupTargets(const TouchEvent& event,
   if (event.type() == ui::ET_TOUCH_RELEASED) {
     touch_id_target_.erase(event.touch_id());
   } else if (event.type() == ui::ET_TOUCH_CANCELLED) {
-    if (event.flags() & ui::EF_IS_SYNTHESIZED)
-      touch_id_target_[event.touch_id()] = gesture_consumer_ignorer_.get();
-    else
-      touch_id_target_.erase(event.touch_id());
+    touch_id_target_[event.touch_id()] = gesture_consumer_ignorer_.get();
   } else {
     touch_id_target_[event.touch_id()] = target;
     if (target)

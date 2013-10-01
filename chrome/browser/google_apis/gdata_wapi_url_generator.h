@@ -9,7 +9,7 @@
 
 #include <string>
 
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace google_apis {
 
@@ -17,11 +17,15 @@ namespace google_apis {
 // for production, and the local server for testing.
 class GDataWapiUrlGenerator {
  public:
-  explicit GDataWapiUrlGenerator(const GURL& base_url);
+  // The
+  GDataWapiUrlGenerator(const GURL& base_url, const GURL& base_download_url);
   ~GDataWapiUrlGenerator();
 
   // The base URL for communicating with the WAPI server for production.
   static const char kBaseUrlForProduction[];
+
+  // The base URL for the file download server for production.
+  static const char kBaseDownloadUrlForProduction[];
 
   // Adds additional parameters for API version, output content type and to
   // show folders in the feed are added to document feed URLs.
@@ -42,9 +46,6 @@ class GDataWapiUrlGenerator {
   // If |override_url| is non-empty, other parameters are ignored. Or if
   // |override_url| is empty, others are not used. Besides, |search_string|
   // cannot be set together with |start_changestamp|.
-  //
-  // TODO(kinaba,haruki): http://crbug.com/160932
-  // This is really hard to follow. We should split to multiple functions.
   //
   // override_url:
   //   By default, a hard-coded base URL of the WAPI server is used.
@@ -90,6 +91,13 @@ class GDataWapiUrlGenerator {
   // edit urls.
   GURL GenerateEditUrlWithoutParams(const std::string& resource_id) const;
 
+  // Generates a URL for getting or editing the resource entry of the given
+  // resource ID with additionally passed embed origin. This is used to fetch
+  // share urls for the sharing dialog to be embedded with the |embed_origin|
+  // origin.
+  GURL GenerateEditUrlWithEmbedOrigin(const std::string& resource_id,
+                                      const GURL& embed_origin) const;
+
   // Generates a URL for editing the contents in the directory specified
   // by the given resource ID.
   GURL GenerateContentUrl(const std::string& resource_id) const;
@@ -119,8 +127,12 @@ class GDataWapiUrlGenerator {
   // list of installed third party applications.
   GURL GenerateAccountMetadataUrl(bool include_installed_apps) const;
 
+  // Generates a URL for downloading a file.
+  GURL GenerateDownloadFileUrl(const std::string& resource_id) const;
+
  private:
   const GURL base_url_;
+  const GURL base_download_url_;
 };
 
 }  // namespace google_apis

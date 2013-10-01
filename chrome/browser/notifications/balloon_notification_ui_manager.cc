@@ -9,12 +9,12 @@
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/fullscreen.h"
 #include "chrome/browser/idle.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 
@@ -44,10 +44,12 @@ void BalloonNotificationUIManager::SetBalloonCollection(
   balloon_collection_->set_space_change_listener(this);
 }
 
-bool BalloonNotificationUIManager::DoesIdExist(const std::string& id) {
-  if (NotificationUIManagerImpl::DoesIdExist(id))
-    return true;
-  return balloon_collection_->DoesIdExist(id);
+const Notification* BalloonNotificationUIManager::FindById(
+    const std::string& id) const {
+  const Notification* notification = NotificationUIManagerImpl::FindById(id);
+  if (notification)
+    return notification;
+  return balloon_collection_->FindById(id);
 }
 
 bool BalloonNotificationUIManager::CancelById(const std::string& id) {

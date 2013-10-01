@@ -6,14 +6,26 @@
 #define NET_SPDY_SPDY_WEBSOCKET_TEST_UTIL_H_
 
 #include "net/base/request_priority.h"
+#include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_test_util_common.h"
 
 namespace net {
 
-class SpdyWebSocketTestUtil : public SpdyTestUtil {
+class SpdyWebSocketTestUtil {
  public:
   explicit SpdyWebSocketTestUtil(NextProto protocol);
+
+  // Returns the value corresponding to the given key (passed through
+  // GetHeaderKey()), or the empty string if none exists.
+  std::string GetHeader(const SpdyHeaderBlock& headers,
+                        const std::string& key) const;
+
+  // Adds the given key/value pair to |headers|, passing the key
+  // through GetHeaderKey().
+  void SetHeader(const std::string& key,
+                 const std::string& value,
+                 SpdyHeaderBlock* headers) const;
 
   // Constructs a standard SPDY SYN_STREAM frame for WebSocket over
   // SPDY opening handshake.
@@ -28,15 +40,13 @@ class SpdyWebSocketTestUtil : public SpdyTestUtil {
 
   // Constructs a WebSocket over SPDY handshake request packet.
   SpdyFrame* ConstructSpdyWebSocketHandshakeRequestFrame(
-      const char* const headers[],
-      int header_count,
+      scoped_ptr<SpdyHeaderBlock> headers,
       SpdyStreamId stream_id,
       RequestPriority request_priority);
 
   // Constructs a WebSocket over SPDY handshake response packet.
   SpdyFrame* ConstructSpdyWebSocketHandshakeResponseFrame(
-      const char* const headers[],
-      int header_count,
+      scoped_ptr<SpdyHeaderBlock> headers,
       SpdyStreamId stream_id,
       RequestPriority request_priority);
 
@@ -51,11 +61,15 @@ class SpdyWebSocketTestUtil : public SpdyTestUtil {
                                              SpdyStreamId stream_id,
                                              bool fin);
 
-  const char* GetWebSocketPathKey() const;
-  const char* GetOriginKey() const;
-  const char* GetOpcodeKey() const;
-  const char* GetLengthKey() const;
-  const char* GetFinKey() const;
+  // Forwards to |spdy_util_|.
+  SpdyFrame* ConstructSpdySettings(const SettingsMap& settings) const;
+  SpdyMajorVersion spdy_version() const;
+
+ private:
+  // Modify the header key based on the SPDY version and return it.
+  std::string GetHeaderKey(const std::string& key) const;
+
+  SpdyTestUtil spdy_util_;
 };
 
 }  // namespace net

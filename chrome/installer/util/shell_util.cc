@@ -516,16 +516,16 @@ class RegistryEntry {
   // Generate work_item tasks required to create current registry entry and
   // add them to the given work item list.
   void AddToWorkItemList(HKEY root, WorkItemList *items) const {
-    items->AddCreateRegKeyWorkItem(root, _key_path);
-    if (_is_string) {
-      items->AddSetRegValueWorkItem(root, _key_path, _name, _value, true);
+    items->AddCreateRegKeyWorkItem(root, key_path_);
+    if (is_string_) {
+      items->AddSetRegValueWorkItem(root, key_path_, name_, value_, true);
     } else {
-      items->AddSetRegValueWorkItem(root, _key_path, _name, _int_value, true);
+      items->AddSetRegValueWorkItem(root, key_path_, name_, int_value_, true);
     }
   }
 
-  // Checks if the current registry entry exists in HKCU\|_key_path|\|_name|
-  // and value is |_value|. If the key does NOT exist in HKCU, checks for
+  // Checks if the current registry entry exists in HKCU\|key_path_|\|name_|
+  // and value is |value_|. If the key does NOT exist in HKCU, checks for
   // the correct name and value in HKLM.
   // |look_for_in| specifies roots (HKCU and/or HKLM) in which to look for the
   // key, unspecified roots are not looked into (i.e. the the key is assumed not
@@ -550,57 +550,57 @@ class RegistryEntry {
  private:
   // States this RegistryKey can be in compared to the registry.
   enum RegistryStatus {
-    // |_name| does not exist in the registry
+    // |name_| does not exist in the registry
     DOES_NOT_EXIST,
-    // |_name| exists, but its value != |_value|
+    // |name_| exists, but its value != |value_|
     DIFFERENT_VALUE,
-    // |_name| exists and its value is |_value|
+    // |name_| exists and its value is |value_|
     SAME_VALUE,
   };
 
   // Create a object that represent default value of a key
   RegistryEntry(const string16& key_path, const string16& value)
-      : _key_path(key_path), _name(),
-        _is_string(true), _value(value), _int_value(0) {
+      : key_path_(key_path), name_(),
+        is_string_(true), value_(value), int_value_(0) {
   }
 
   // Create a object that represent a key of type REG_SZ
   RegistryEntry(const string16& key_path, const string16& name,
                 const string16& value)
-      : _key_path(key_path), _name(name),
-        _is_string(true), _value(value), _int_value(0) {
+      : key_path_(key_path), name_(name),
+        is_string_(true), value_(value), int_value_(0) {
   }
 
   // Create a object that represent a key of integer type
   RegistryEntry(const string16& key_path, const string16& name,
                 DWORD value)
-      : _key_path(key_path), _name(name),
-        _is_string(false), _value(), _int_value(value) {
+      : key_path_(key_path), name_(name),
+        is_string_(false), value_(), int_value_(value) {
   }
 
-  string16 _key_path;  // key path for the registry entry
-  string16 _name;      // name of the registry entry
-  bool _is_string;     // true if current registry entry is of type REG_SZ
-  string16 _value;     // string value (useful if _is_string = true)
-  DWORD _int_value;    // integer value (useful if _is_string = false)
+  string16 key_path_;  // key path for the registry entry
+  string16 name_;      // name of the registry entry
+  bool is_string_;     // true if current registry entry is of type REG_SZ
+  string16 value_;     // string value (useful if is_string_ = true)
+  DWORD int_value_;    // integer value (useful if is_string_ = false)
 
   // Helper function for ExistsInRegistry().
   // Returns the RegistryStatus of the current registry entry in
-  // |root|\|_key_path|\|_name|.
+  // |root|\|key_path_|\|name_|.
   RegistryStatus StatusInRegistryUnderRoot(HKEY root) const {
-    RegKey key(root, _key_path.c_str(), KEY_QUERY_VALUE);
+    RegKey key(root, key_path_.c_str(), KEY_QUERY_VALUE);
     bool found = false;
     bool correct_value = false;
-    if (_is_string) {
+    if (is_string_) {
       string16 read_value;
-      found = key.ReadValue(_name.c_str(), &read_value) == ERROR_SUCCESS;
-      correct_value = read_value.size() == _value.size() &&
-          std::equal(_value.begin(), _value.end(), read_value.begin(),
+      found = key.ReadValue(name_.c_str(), &read_value) == ERROR_SUCCESS;
+      correct_value = read_value.size() == value_.size() &&
+          std::equal(value_.begin(), value_.end(), read_value.begin(),
                      base::CaseInsensitiveCompare<wchar_t>());
     } else {
       DWORD read_value;
-      found = key.ReadValueDW(_name.c_str(), &read_value) == ERROR_SUCCESS;
-      correct_value = read_value == _int_value;
+      found = key.ReadValueDW(name_.c_str(), &read_value) == ERROR_SUCCESS;
+      correct_value = read_value == int_value_;
     }
     return found ?
         (correct_value ? SAME_VALUE : DIFFERENT_VALUE) : DOES_NOT_EXIST;
@@ -692,7 +692,7 @@ bool ElevateAndRegisterChrome(BrowserDistribution* dist,
   base::FilePath exe_path =
       base::FilePath::FromWStringHack(chrome_exe).DirName()
           .Append(installer::kSetupExe);
-  if (!file_util::PathExists(exe_path)) {
+  if (!base::PathExists(exe_path)) {
     HKEY reg_root = InstallUtil::IsPerUserInstall(chrome_exe.c_str()) ?
         HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
     RegKey key(reg_root, dist->GetUninstallRegPath().c_str(), KEY_READ);
@@ -702,7 +702,7 @@ bool ElevateAndRegisterChrome(BrowserDistribution* dist,
     exe_path = command_line.GetProgram();
   }
 
-  if (file_util::PathExists(exe_path)) {
+  if (base::PathExists(exe_path)) {
     CommandLine cmd(exe_path);
     cmd.AppendSwitchNative(installer::switches::kRegisterChromeBrowser,
                            chrome_exe);
@@ -1177,7 +1177,7 @@ bool GetAppShortcutsFolder(BrowserDistribution* dist,
 
   folder = folder.Append(
       ShellUtil::GetBrowserModelId(dist, level == ShellUtil::CURRENT_USER));
-  if (!file_util::DirectoryExists(folder)) {
+  if (!base::DirectoryExists(folder)) {
     VLOG(1) << "No start screen shortcuts.";
     return false;
   }
@@ -1186,9 +1186,47 @@ bool GetAppShortcutsFolder(BrowserDistribution* dist,
   return true;
 }
 
-typedef base::Callback<bool(const base::FilePath&)> FileOperationCallback;
+// Shortcut filters for BatchShortcutAction().
+
+typedef base::Callback<bool(const base::FilePath& /*shortcut_path*/,
+                            const string16& /*args*/)>
+    ShortcutFilterCallback;
+
+// FilterTargetEq is a shortcut filter that matches only shortcuts that have a
+// specific target.
+class FilterTargetEq {
+ public:
+  explicit FilterTargetEq(const base::FilePath& desired_target_exe);
+
+  // Returns true if filter rules are satisfied, i.e.:
+  // - |target_path| matches |desired_target_compare_|.
+  bool Match(const base::FilePath& target_path, const string16& args) const;
+
+  // A convenience routine to create a callback to call Match().
+  // The callback is only valid during the lifetime of the FilterTargetEq
+  // instance.
+  ShortcutFilterCallback AsShortcutFilterCallback();
+
+ private:
+  InstallUtil::ProgramCompare desired_target_compare_;
+};
+
+FilterTargetEq::FilterTargetEq(const base::FilePath& desired_target_exe)
+    : desired_target_compare_(desired_target_exe) {}
+
+bool FilterTargetEq::Match(const base::FilePath& target_path,
+                           const string16& args) const {
+  return desired_target_compare_.EvaluatePath(target_path);
+}
+
+ShortcutFilterCallback FilterTargetEq::AsShortcutFilterCallback() {
+  return base::Bind(&FilterTargetEq::Match, base::Unretained(this));
+}
 
 // Shortcut operations for BatchShortcutAction().
+
+typedef base::Callback<bool(const base::FilePath& /*shortcut_path*/)>
+    ShortcutOperationCallback;
 
 bool ShortcutOpUnpin(const base::FilePath& shortcut_path) {
   VLOG(1) << "Trying to unpin " << shortcut_path.value();
@@ -1200,7 +1238,7 @@ bool ShortcutOpUnpin(const base::FilePath& shortcut_path) {
 }
 
 bool ShortcutOpDelete(const base::FilePath& shortcut_path) {
-  bool ret = file_util::Delete(shortcut_path, false);
+  bool ret = base::DeleteFile(shortcut_path, false);
   LOG_IF(ERROR, !ret) << "Failed to remove " << shortcut_path.value();
   return ret;
 }
@@ -1208,21 +1246,20 @@ bool ShortcutOpDelete(const base::FilePath& shortcut_path) {
 bool ShortcutOpUpdate(const base::win::ShortcutProperties& shortcut_properties,
                       const base::FilePath& shortcut_path) {
   bool ret = base::win::CreateOrUpdateShortcutLink(
-      shortcut_path, shortcut_properties, base::win::SHORTCUT_REPLACE_EXISTING);
+      shortcut_path, shortcut_properties, base::win::SHORTCUT_UPDATE_EXISTING);
   LOG_IF(ERROR, !ret) << "Failed to update " << shortcut_path.value();
   return ret;
 }
 
 // {|location|, |dist|, |level|} determine |shortcut_folder|.
-// Applies |shortcut_operation| to each shortcut in |shortcut_folder| that
-// targets |target_exe|.
-// Returns true if all operations are successful. All intended operations are
-// attempted even if failures occur.
-bool BatchShortcutAction(const FileOperationCallback& shortcut_operation,
+// For each shortcut in |shortcut_folder| that match |shortcut_filter|, apply
+// |shortcut_operation|. Returns true if all operations are successful.
+// All intended operations are attempted, even if failures occur.
+bool BatchShortcutAction(const ShortcutFilterCallback& shortcut_filter,
+                         const ShortcutOperationCallback& shortcut_operation,
                          ShellUtil::ShortcutLocation location,
                          BrowserDistribution* dist,
-                         ShellUtil::ShellChange level,
-                         const base::FilePath& target_exe) {
+                         ShellUtil::ShellChange level) {
   DCHECK(!shortcut_operation.is_null());
   base::FilePath shortcut_folder;
   if (!ShellUtil::GetShortcutPath(location, dist, level, &shortcut_folder)) {
@@ -1231,16 +1268,16 @@ bool BatchShortcutAction(const FileOperationCallback& shortcut_operation,
   }
 
   bool success = true;
-  InstallUtil::ProgramCompare target_compare(target_exe);
   base::FileEnumerator enumerator(
       shortcut_folder, false, base::FileEnumerator::FILES,
       string16(L"*") + installer::kLnkExt);
   base::FilePath target_path;
+  string16 args;
   for (base::FilePath shortcut_path = enumerator.Next();
        !shortcut_path.empty();
        shortcut_path = enumerator.Next()) {
-    if (base::win::ResolveShortcut(shortcut_path, &target_path, NULL)) {
-      if (target_compare.EvaluatePath(target_path) &&
+    if (base::win::ResolveShortcut(shortcut_path, &target_path, &args)) {
+      if (shortcut_filter.Run(target_path, args) &&
           !shortcut_operation.Run(shortcut_path)) {
         success = false;
       }
@@ -1269,7 +1306,7 @@ bool RemoveShortcutFolder(ShellUtil::ShortcutLocation location,
     LOG(WARNING) << "Cannot find path at location " << location;
     return false;
   }
-  if (!file_util::Delete(shortcut_folder, true)) {
+  if (!base::DeleteFile(shortcut_folder, true)) {
     LOG(ERROR) << "Cannot remove folder " << shortcut_folder.value();
     return false;
   }
@@ -1438,7 +1475,7 @@ bool ShellUtil::CreateOrUpdateShortcut(
     // Install the system-level shortcut if requested.
     chosen_path = &system_shortcut_path;
   } else if (operation != SHELL_SHORTCUT_CREATE_IF_NO_SYSTEM_LEVEL ||
-             !file_util::PathExists(system_shortcut_path)) {
+             !base::PathExists(system_shortcut_path)) {
     // Otherwise install the user-level shortcut, unless the system-level
     // variant of this shortcut is present on the machine and |operation| states
     // not to create a user-level shortcut in that case.
@@ -1996,12 +2033,20 @@ bool ShellUtil::RemoveShortcuts(ShellUtil::ShortcutLocation location,
       return RemoveShortcutFolder(location, dist, level);
 
     case SHORTCUT_LOCATION_TASKBAR_PINS:
-      return BatchShortcutAction(base::Bind(&ShortcutOpUnpin), location, dist,
-                                 level, target_exe);
+      return BatchShortcutAction(FilterTargetEq(target_exe).
+                                     AsShortcutFilterCallback(),
+                                 base::Bind(&ShortcutOpUnpin),
+                                 location,
+                                 dist,
+                                 level);
 
     default:
-      return BatchShortcutAction(base::Bind(&ShortcutOpDelete), location, dist,
-                                 level, target_exe);
+      return BatchShortcutAction(FilterTargetEq(target_exe).
+                                     AsShortcutFilterCallback(),
+                                 base::Bind(&ShortcutOpDelete),
+                                 location,
+                                 dist,
+                                 level);
   }
 }
 
@@ -2017,8 +2062,12 @@ bool ShellUtil::UpdateShortcuts(
 
   base::win::ShortcutProperties shortcut_properties(
       TranslateShortcutProperties(properties));
-  return BatchShortcutAction(base::Bind(&ShortcutOpUpdate, shortcut_properties),
-                             location, dist, level, target_exe);
+  return BatchShortcutAction(FilterTargetEq(target_exe).
+                                 AsShortcutFilterCallback(),
+                             base::Bind(&ShortcutOpUpdate, shortcut_properties),
+                             location,
+                             dist,
+                             level);
 }
 
 bool ShellUtil::GetUserSpecificRegistrySuffix(string16* suffix) {

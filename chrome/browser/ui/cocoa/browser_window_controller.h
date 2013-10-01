@@ -29,7 +29,6 @@
 class Browser;
 class BrowserWindow;
 class BrowserWindowCocoa;
-@class ChromeToMobileBubbleController;
 @class DevToolsController;
 @class DownloadShelfController;
 class ExtensionKeybindingRegistryCocoa;
@@ -84,8 +83,6 @@ class WebContents;
   BookmarkBubbleController* bookmarkBubbleController_;  // Weak.
   BOOL initializing_;  // YES while we are currently in initWithBrowser:
   BOOL ownsBrowser_;  // Only ever NO when testing
-
-  ChromeToMobileBubbleController* chromeToMobileBubbleController_;  // Weak.
 
   // The total amount by which we've grown the window up or down (to display a
   // bookmark bar and/or download shelf), respectively; reset to 0 when moved
@@ -160,12 +157,8 @@ class WebContents;
   // handle.
   scoped_ptr<ExtensionKeybindingRegistryCocoa> extension_keybinding_registry_;
 
-  // The offset between the bottom of the toolbar and web contents. This is used
-  // to push the web contents below the bookmark bar.
-  CGFloat toolbarToWebContentsOffset_;
-
-  // The number of history overlay views being shown.
-  NSUInteger historyOverlayCount_;
+  // The number of overlapped views being shown.
+  NSUInteger overlappedViewCount_;
 }
 
 // A convenience class method which gets the |BrowserWindowController| for a
@@ -309,13 +302,6 @@ class WebContents;
 - (void)showBookmarkBubbleForURL:(const GURL&)url
                alreadyBookmarked:(BOOL)alreadyBookmarked;
 
-// Show the Chrome To Mobile bubble (e.g. user just clicked on the icon)
-- (void)showChromeToMobileBubble;
-
-// Nil out the weak Chrome To Mobile bubble controller reference.
-// This should be called by the ChromeToMobileBubbleController on close.
-- (void)chromeToMobileBubbleWindowWillClose;
-
 // Shows or hides the docked web inspector depending on |contents|'s state.
 - (void)updateDevToolsForContents:(content::WebContents*)contents;
 
@@ -325,40 +311,32 @@ class WebContents;
 // Gets the window style.
 - (ThemedWindowStyle)themedWindowStyle;
 
-// Gets the pattern phase for the window.
-- (NSPoint)themePatternPhase;
+// Returns the pattern phase for |alignment|. If the window does not have a tab
+// strip, the phase for THEME_PATTERN_ALIGN_WITH_FRAME is always returned.
+- (NSPoint)themePatternPhaseForAlignment:(ThemePatternAlignment)alignment;
 
 // Return the point to which a bubble window's arrow should point, in window
 // coordinates.
 - (NSPoint)bookmarkBubblePoint;
-
-// Shows or hides the Instant overlay contents.
-- (void)commitInstant;
-
-// Returns the frame, in Cocoa (unflipped) screen coordinates, of the area where
-// Instant results are.  If Instant is not showing, returns the frame of where
-// it would be.
-- (NSRect)instantFrame;
 
 // Called when the Add Search Engine dialog is closed.
 - (void)sheetDidEnd:(NSWindow*)sheet
          returnCode:(NSInteger)code
             context:(void*)context;
 
-// Updates the bookmark bar visibility based on the instant overlay state.
-- (void)updateBookmarkBarStateForInstantOverlay;
-
 // Called when the find bar visibility changes. This is used to update the
 // allowOverlappingViews state.
 - (void)onFindBarVisibilityChanged;
 
-// Called when a history overlay is shown. This is used to update the
-// allowOverlappingViews state.
-- (void)onHistoryOverlayShown;
+// Called when an overlapped view is shown. This is used to update the
+// allowOverlappingViews state. Currently used for history overlay and
+// confirm bubble.
+- (void)onOverlappedViewShown;
 
 // Called when a history overlay is hidden. This is used to update the
-// allowOverlappingViews state.
-- (void)onHistoryOverlayHidden;
+// allowOverlappingViews state. Currently used for history overlay and
+// confirm bubble.
+- (void)onOverlappedViewHidden;
 
 @end  // @interface BrowserWindowController
 
@@ -426,6 +404,12 @@ class WebContents;
 - (void)enterPresentationModeForURL:(const GURL&)url
                          bubbleType:(FullscreenExitBubbleType)bubbleType;
 - (void)exitPresentationMode;
+
+// For simplified fullscreen: Enters fullscreen for a tab at a URL. The |url|
+// is guaranteed to be non-empty; see -enterFullscreen for the user-initiated
+// fullscreen mode. Called on Snow Leopard and Lion+.
+- (void)enterFullscreenForURL:(const GURL&)url
+                   bubbleType:(FullscreenExitBubbleType)bubbleType;
 
 // Returns presentation mode state.  This method is safe to call on all OS
 // versions.

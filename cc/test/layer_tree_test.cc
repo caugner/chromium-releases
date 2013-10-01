@@ -41,6 +41,10 @@ bool TestHooks::CanActivatePendingTree(LayerTreeHostImpl* host_impl) {
   return true;
 }
 
+bool TestHooks::CanActivatePendingTreeIfNeeded(LayerTreeHostImpl* host_impl) {
+  return true;
+}
+
 // Adapts LayerTreeHostImpl for test. Runs real code, then invokes test hooks.
 class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
  public:
@@ -114,7 +118,7 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     if (!pending_tree())
       return;
 
-    if (!test_hooks_->CanActivatePendingTree(this))
+    if (!test_hooks_->CanActivatePendingTreeIfNeeded(this))
       return;
 
     LayerTreeHostImpl::ActivatePendingTreeIfNeeded();
@@ -229,9 +233,9 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient {
   }
   virtual ~LayerTreeHostClientForTesting() {}
 
-  virtual void WillBeginFrame() OVERRIDE {}
+  virtual void WillBeginFrame() OVERRIDE { test_hooks_->WillBeginFrame(); }
 
-  virtual void DidBeginFrame() OVERRIDE {}
+  virtual void DidBeginFrame() OVERRIDE { test_hooks_->DidBeginFrame(); }
 
   virtual void Animate(double monotonic_time) OVERRIDE {
     test_hooks_->Animate(base::TimeTicks::FromInternalValue(
@@ -247,8 +251,9 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient {
     test_hooks_->ApplyScrollAndScale(scroll_delta, scale);
   }
 
-  virtual scoped_ptr<OutputSurface> CreateOutputSurface() OVERRIDE {
-    return test_hooks_->CreateOutputSurface();
+  virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback)
+      OVERRIDE {
+    return test_hooks_->CreateOutputSurface(fallback);
   }
 
   virtual void DidInitializeOutputSurface(bool succeeded) OVERRIDE {
@@ -259,7 +264,7 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient {
     test_hooks_->DidFailToInitializeOutputSurface();
   }
 
-  virtual void WillCommit() OVERRIDE {}
+  virtual void WillCommit() OVERRIDE { test_hooks_->WillCommit(); }
 
   virtual void DidCommit() OVERRIDE {
     test_hooks_->DidCommit();
@@ -319,6 +324,8 @@ LayerTreeTest::~LayerTreeTest() {}
 void LayerTreeTest::EndTest() {
   // For the case where we EndTest during BeginTest(), set a flag to indicate
   // that the test should end the second BeginTest regains control.
+  ended_ = true;
+
   if (beginning_) {
     end_when_begin_returns_ = true;
   } else if (proxy()) {
@@ -393,7 +400,7 @@ void LayerTreeTest::PostSetVisibleToMainThread(bool visible) {
 void LayerTreeTest::DoBeginTest() {
   client_ = LayerTreeHostClientForTesting::Create(this);
 
-  DCHECK(!impl_thread_ || impl_thread_->message_loop_proxy());
+  DCHECK(!impl_thread_ || impl_thread_->message_loop_proxy().get());
   layer_tree_host_ = LayerTreeHostForTesting::Create(
       this,
       client_.get(),
@@ -424,8 +431,6 @@ void LayerTreeTest::SetupTree() {
     root_layer->SetAnchorPoint(gfx::PointF());
     root_layer->SetBounds(gfx::Size(1, 1));
     root_layer->SetIsDrawable(true);
-    // Need at least one scrollable layer for tests with non-unit page-scales.
-    root_layer->SetScrollable(true);
     layer_tree_host_->SetRootLayer(root_layer);
   }
 
@@ -450,8 +455,6 @@ void LayerTreeTest::ScheduleComposite() {
 }
 
 void LayerTreeTest::RealEndTest() {
-  ended_ = true;
-
   if (layer_tree_host_ && proxy()->CommitPendingForTesting()) {
     proxy()->MainThreadTaskRunner()->PostTask(
         FROM_HERE,
@@ -598,7 +601,7 @@ void LayerTreeTest::RunTest(bool threaded,
   AfterTest();
 }
 
-scoped_ptr<OutputSurface> LayerTreeTest::CreateOutputSurface() {
+scoped_ptr<OutputSurface> LayerTreeTest::CreateOutputSurface(bool fallback) {
   scoped_ptr<FakeOutputSurface> output_surface;
   if (delegating_renderer_)
     output_surface = FakeOutputSurface::CreateDelegating3d();

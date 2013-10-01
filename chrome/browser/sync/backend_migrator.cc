@@ -4,11 +4,11 @@
 
 #include "chrome/browser/sync/backend_migrator.h"
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/tracked_objects.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "sync/internal_api/public/configure_reason.h"

@@ -9,13 +9,14 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "ui/gfx/font.h"
+#include "ui/gfx/font_list.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/text_constants.h"
 #include "ui/views/controls/textfield/native_textfield_wrapper.h"
@@ -138,8 +139,10 @@ class VIEWS_EXPORT Textfield : public View {
   bool GetCursorEnabled() const;
   void SetCursorEnabled(bool enabled);
 
-  // Gets/Sets the font used when rendering the text within the Textfield.
-  const gfx::Font& font() const { return font_; }
+  // Gets/Sets the fonts used when rendering the text within the Textfield.
+  const gfx::FontList& font_list() const { return font_list_; }
+  void SetFontList(const gfx::FontList& font_list);
+  const gfx::Font& GetPrimaryFont() const;
   void SetFont(const gfx::Font& font);
 
   // Sets the left and right margin (in pixels) within the text box. On Windows
@@ -286,14 +289,19 @@ class VIEWS_EXPORT Textfield : public View {
   // Returns the insets to the rectangle where text is actually painted.
   gfx::Insets GetTextInsets() const;
 
+  // Handles a request to change the value of this text field from software
+  // using an accessibility API (typically automation software, screen readers
+  // don't normally use this). Sets the value and clears the selection.
+  void AccessibilitySetValue(const string16& new_value);
+
   // This is the current listener for events from this Textfield.
   TextfieldController* controller_;
 
   // The mask of style options for this Textfield.
   StyleFlags style_;
 
-  // The font used to render the text in the Textfield.
-  gfx::Font font_;
+  // The fonts used to render the text in the Textfield.
+  gfx::FontList font_list_;
 
   // The text displayed in the Textfield.
   string16 text_;
@@ -344,6 +352,9 @@ class VIEWS_EXPORT Textfield : public View {
 
   // The duration to reveal the last typed char for obscured textfields.
   base::TimeDelta obscured_reveal_duration_;
+
+  // Used to bind callback functions to this object.
+  base::WeakPtrFactory<Textfield> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Textfield);
 };

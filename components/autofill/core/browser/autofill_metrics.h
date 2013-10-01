@@ -93,6 +93,8 @@ class AutofillMetrics {
     DIALOG_CANCELED_NO_INVALID_FIELDS,
     // The user canceled with at least one invalid field.
     DIALOG_CANCELED_WITH_INVALID_FIELDS,
+    // The user canceled while the sign-in form was showing.
+    DIALOG_CANCELED_DURING_SIGNIN,
     NUM_DIALOG_DISMISSAL_STATES
   };
 
@@ -294,12 +296,8 @@ class AutofillMetrics {
     AUTHENTICATE_INSTRUMENT,
     GET_FULL_WALLET,
     GET_WALLET_ITEMS,
-    SAVE_ADDRESS,
-    SAVE_INSTRUMENT,
-    SAVE_INSTRUMENT_AND_ADDRESS,
     SEND_STATUS,
-    UPDATE_ADDRESS,
-    UPDATE_INSTRUMENT,
+    SAVE_TO_WALLET,
   };
 
   // For measuring the frequency of errors while communicating with the Wallet
@@ -331,6 +329,13 @@ class AutofillMetrics {
     WALLET_UNSUPPORTED_API_VERSION,
     // Catch all error type.
     WALLET_UNKNOWN_ERROR,
+    // The merchant has been blacklisted for Online Wallet due to some manner
+    // of compliance violation.
+    WALLET_UNSUPPORTED_MERCHANT,
+    // Buyer Legal Address has a country which is unsupported by Wallet.
+    WALLET_BUYER_LEGAL_ADDRESS_NOT_SUPPORTED,
+    // Wallet's Know Your Customer(KYC) action is pending/failed for this user.
+    WALLET_UNVERIFIED_KNOW_YOUR_CUSTOMER_STATUS,
     NUM_WALLET_ERROR_METRICS
   };
 
@@ -380,14 +385,14 @@ class AutofillMetrics {
 
   virtual void LogHeuristicTypePrediction(
       FieldTypeQualityMetric metric,
-      AutofillFieldType field_type,
+      ServerFieldType field_type,
       const std::string& experiment_id) const;
   virtual void LogOverallTypePrediction(
       FieldTypeQualityMetric metric,
-      AutofillFieldType field_type,
+      ServerFieldType field_type,
       const std::string& experiment_id) const;
   virtual void LogServerTypePrediction(FieldTypeQualityMetric metric,
-                                       AutofillFieldType field_type,
+                                       ServerFieldType field_type,
                                        const std::string& experiment_id) const;
 
   virtual void LogQualityMetric(QualityMetric metric,

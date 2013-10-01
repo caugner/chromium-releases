@@ -6,14 +6,16 @@
 
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_browser_main_parts.h"
-#include "android_webview/browser/gpu_memory_buffer_impl.h"
+#include "android_webview/browser/gpu_memory_buffer_factory_impl.h"
 #include "android_webview/browser/in_process_view_renderer.h"
 #include "android_webview/browser/net_disk_cache_remover.h"
 #include "android_webview/browser/renderer_host/aw_resource_dispatcher_host_delegate.h"
 #include "android_webview/common/aw_hit_test_data.h"
+#include "android_webview/native/aw_autofill_manager_delegate.h"
 #include "android_webview/native/aw_browser_dependency_factory.h"
 #include "android_webview/native/aw_contents_client_bridge.h"
 #include "android_webview/native/aw_contents_io_thread_client_impl.h"
+#include "android_webview/native/aw_picture.h"
 #include "android_webview/native/aw_web_contents_delegate.h"
 #include "android_webview/native/java_browser_view_renderer_helper.h"
 #include "android_webview/native/state_serializer.h"
@@ -25,7 +27,8 @@
 #include "base/atomicops.h"
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/message_loop.h"
+#include "base/memory/memory_pressure_listener.h"
+#include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
 #include "base/strings/string16.h"
 #include "base/supports_user_data.h"
@@ -36,15 +39,19 @@
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cert_store.h"
+#include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/renderer_preferences.h"
 #include "content/public/common/ssl_status.h"
 #include "jni/AwContents_jni.h"
 #include "net/cert/x509_certificate.h"
+#include "third_party/skia/include/core/SkPicture.h"
 #include "ui/base/l10n/l10n_util_android.h"
 #include "ui/gfx/android/java_bitmap.h"
+#include "ui/gfx/image/image.h"
 
 struct AwDrawSWFunctionTable;
 struct AwDrawGLFunctionTable;
@@ -81,9 +88,7 @@ namespace android_webview {
 namespace {
 
 JavaBrowserViewRendererHelper* java_renderer_helper() {
-  static JavaBrowserViewRendererHelper* g_instance
-      = new JavaBrowserViewRendererHelper;
-  return g_instance;
+  return JavaBrowserViewRendererHelper::GetInstance();
 }
 
 const void* kAwContentsUserDataKey = &kAwContentsUserDataKey;
@@ -142,6 +147,8 @@ AwContents::AwContents(scoped_ptr<WebContents> web_contents)
       AwAutofillManagerDelegate::FromWebContents(web_contents_.get());
   if (autofill_manager_delegate)
     InitAutofillIfNecessary(autofill_manager_delegate->GetSaveFormData());
+
+  SetAndroidWebViewRendererPrefs();
 }
 
 void AwContents::SetJavaPeers(JNIEnv* env,
@@ -192,7 +199,7 @@ void AwContents::InitAutofillIfNecessary(bool enabled) {
   // Do not initialize if the feature is not enabled.
   if (!enabled)
     return;
-  // Check if the autofill manager already exists.
+  // Check if the autofill driver already exists.
   content::WebContents* web_contents = web_contents_.get();
   if (AutofillDriverImpl::FromWebContents(web_contents))
     return;
@@ -205,6 +212,26 @@ void AwContents::InitAutofillIfNecessary(bool enabled) {
       AwAutofillManagerDelegate::FromWebContents(web_contents),
       l10n_util::GetDefaultLocale(),
       AutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
+}
+
+void AwContents::SetAndroidWebViewRendererPrefs() {
+  content::RendererPreferences* prefs =
+      web_contents_->GetMutableRendererPrefs();
+  prefs->hinting = content::RENDERER_PREFERENCES_HINTING_SLIGHT;
+  prefs->tap_multiple_targets_strategy =
+      content::TAP_MULTIPLE_TARGETS_STRATEGY_NONE;
+  prefs->use_subpixel_positioning = true;
+  content::RenderViewHost* host = web_contents_->GetRenderViewHost();
+  if (host)
+    host->SyncRendererPrefs();
+}
+
+void AwContents::SetAwAutofillManagerDelegate(jobject delegate) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  Java_AwContents_setAwAutofillManagerDelegate(env, obj.obj(), delegate);
 }
 
 AwContents::~AwContents() {
@@ -224,6 +251,14 @@ jint AwContents::GetWebContents(JNIEnv* env, jobject obj) {
 
 void AwContents::Destroy(JNIEnv* env, jobject obj) {
   delete this;
+
+  // When the last WebView is destroyed free all discardable memory allocated by
+  // Chromium, because the app process may continue to run for a long time
+  // without ever using another WebView.
+  if (base::subtle::NoBarrier_Load(&g_instance_count) == 0) {
+    base::MemoryPressureListener::NotifyMemoryPressure(
+        base::MemoryPressureListener::MEMORY_PRESSURE_CRITICAL);
+  }
 }
 
 static jint Init(JNIEnv* env, jclass, jobject browser_context) {
@@ -242,7 +277,7 @@ static void SetAwDrawSWFunctionTable(JNIEnv* env, jclass, jint function_table) {
 }
 
 static void SetAwDrawGLFunctionTable(JNIEnv* env, jclass, jint function_table) {
-  GpuMemoryBufferImpl::SetAwDrawGLFunctionTable(
+  GpuMemoryBufferFactoryImpl::SetAwDrawGLFunctionTable(
       reinterpret_cast<AwDrawGLFunctionTable*>(function_table));
 }
 
@@ -294,15 +329,6 @@ void AwContents::GenerateMHTML(JNIEnv* env, jobject obj,
   web_contents_->GenerateMHTML(
       base::FilePath(ConvertJavaStringToUTF8(env, jpath)),
       base::Bind(&GenerateMHTMLCallback, base::Owned(j_callback)));
-}
-
-void AwContents::PerformLongClick() {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null())
-    return;
-
-  Java_AwContents_performLongClick(env, obj.obj());
 }
 
 bool AwContents::OnReceivedHttpAuthRequest(const JavaRef<jobject>& handler,
@@ -472,23 +498,23 @@ void AwContents::OnFindResultReceived(int active_ordinal,
       env, obj.obj(), active_ordinal, match_count, finished);
 }
 
-void AwContents::OnReceivedIcon(const SkBitmap& bitmap) {
+void AwContents::OnReceivedIcon(const GURL& icon_url, const SkBitmap& bitmap) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
 
-  Java_AwContents_onReceivedIcon(
-      env, obj.obj(), gfx::ConvertToJavaBitmap(&bitmap).obj());
-
   content::NavigationEntry* entry =
       web_contents_->GetController().GetActiveEntry();
 
-  if (!entry || entry->GetURL().is_empty())
-    return;
+  if (entry) {
+    entry->GetFavicon().valid = true;
+    entry->GetFavicon().url = icon_url;
+    entry->GetFavicon().image = gfx::Image::CreateFrom1xBitmap(bitmap);
+  }
 
-  // TODO(acleung): Get the last history entry and set
-  // the icon.
+  Java_AwContents_onReceivedIcon(
+      env, obj.obj(), gfx::ConvertToJavaBitmap(&bitmap).obj());
 }
 
 void AwContents::OnReceivedTouchIconUrl(const std::string& url,
@@ -515,6 +541,13 @@ void AwContents::PostInvalidate() {
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (!obj.is_null())
     Java_AwContents_postInvalidateOnAnimation(env, obj.obj());
+}
+
+void AwContents::UpdateGlobalVisibleRect() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (!obj.is_null())
+    Java_AwContents_updateGlobalVisibleRect(env, obj.obj());
 }
 
 void AwContents::OnNewPicture() {
@@ -588,8 +621,16 @@ void AwContents::OnSizeChanged(JNIEnv* env, jobject obj,
   browser_view_renderer_->OnSizeChanged(w, h);
 }
 
-void AwContents::SetVisibility(JNIEnv* env, jobject obj, bool visible) {
-  browser_view_renderer_->OnVisibilityChanged(visible);
+void AwContents::SetViewVisibility(JNIEnv* env, jobject obj, bool visible) {
+  browser_view_renderer_->SetViewVisibility(visible);
+}
+
+void AwContents::SetWindowVisibility(JNIEnv* env, jobject obj, bool visible) {
+  browser_view_renderer_->SetWindowVisibility(visible);
+}
+
+void AwContents::SetIsPaused(JNIEnv* env, jobject obj, bool paused) {
+  browser_view_renderer_->SetIsPaused(paused);
 }
 
 void AwContents::OnAttachedToWindow(JNIEnv* env, jobject obj, int w, int h) {
@@ -640,13 +681,25 @@ bool AwContents::OnDraw(JNIEnv* env,
                         jint clip_top,
                         jint clip_right,
                         jint clip_bottom) {
-  return browser_view_renderer_->OnDraw(canvas,
-                                        is_hardware_accelerated,
-                                        gfx::Vector2d(scroll_x, scroll_y),
-                                        gfx::Rect(clip_left,
-                                                  clip_top,
-                                                  clip_right - clip_left,
-                                                  clip_bottom - clip_top));
+  return browser_view_renderer_->OnDraw(
+      canvas,
+      is_hardware_accelerated,
+      gfx::Vector2d(scroll_x, scroll_y),
+      gfx::Rect(
+          clip_left, clip_top, clip_right - clip_left, clip_bottom - clip_top));
+}
+
+void AwContents::SetGlobalVisibleRect(JNIEnv* env,
+                                      jobject obj,
+                                      jint visible_left,
+                                      jint visible_top,
+                                      jint visible_right,
+                                      jint visible_bottom) {
+  browser_view_renderer_->SetGlobalVisibleRect(
+      gfx::Rect(visible_left,
+                visible_top,
+                visible_right - visible_left,
+                visible_bottom - visible_top));
 }
 
 void AwContents::SetPendingWebContentsForPopup(
@@ -663,6 +716,10 @@ void AwContents::SetPendingWebContentsForPopup(
 
 void AwContents::FocusFirstNode(JNIEnv* env, jobject obj) {
   web_contents_->FocusThroughTabTraversal(false);
+}
+
+void AwContents::SetBackgroundColor(JNIEnv* env, jobject obj, jint color) {
+  render_view_host_ext_->SetBackgroundColor(color);
 }
 
 jint AwContents::ReleasePopupAwContents(JNIEnv* env, jobject obj) {
@@ -692,31 +749,56 @@ void AwContents::ScrollContainerViewTo(gfx::Vector2d new_value) {
 }
 
 
+void AwContents::DidOverscroll(gfx::Vector2d overscroll_delta) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  Java_AwContents_didOverscroll(
+      env, obj.obj(), overscroll_delta.x(), overscroll_delta.y());
+}
+
 void AwContents::SetDipScale(JNIEnv* env, jobject obj, jfloat dipScale) {
   browser_view_renderer_->SetDipScale(dipScale);
+}
+
+void AwContents::SetDisplayedPageScaleFactor(JNIEnv* env,
+                                             jobject obj,
+                                             jfloat pageScaleFactor) {
+  browser_view_renderer_->SetPageScaleFactor(pageScaleFactor);
 }
 
 void AwContents::ScrollTo(JNIEnv* env, jobject obj, jint xPix, jint yPix) {
   browser_view_renderer_->ScrollTo(gfx::Vector2d(xPix, yPix));
 }
 
-void AwContents::OnPageScaleFactorChanged(float page_scale_factor) {
+void AwContents::OnWebLayoutPageScaleFactorChanged(float page_scale_factor) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_AwContents_onPageScaleFactorChanged(env, obj.obj(), page_scale_factor);
+  Java_AwContents_onWebLayoutPageScaleFactorChanged(env, obj.obj(),
+                                                         page_scale_factor);
 }
 
-ScopedJavaLocalRef<jobject> AwContents::CapturePicture(JNIEnv* env,
-                                                       jobject obj) {
-  return browser_view_renderer_->CapturePicture();
+jint AwContents::CapturePicture(JNIEnv* env,
+                                jobject obj,
+                                int width,
+                                int height) {
+  return reinterpret_cast<jint>(new AwPicture(
+      browser_view_renderer_->CapturePicture(width, height)));
 }
 
 void AwContents::EnableOnNewPicture(JNIEnv* env,
                                     jobject obj,
                                     jboolean enabled) {
   browser_view_renderer_->EnableOnNewPicture(enabled);
+}
+
+void AwContents::SetJsOnlineProperty(JNIEnv* env,
+                                     jobject obj,
+                                     jboolean network_up) {
+  render_view_host_ext_->SetJsOnlineProperty(network_up);
 }
 
 }  // namespace android_webview

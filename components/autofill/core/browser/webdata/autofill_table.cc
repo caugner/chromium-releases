@@ -15,7 +15,7 @@
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/tuple.h"
 #include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_profile.h"
@@ -27,10 +27,10 @@
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/webdata/common/web_database.h"
 #include "components/webdata/encryptor/encryptor.h"
-#include "googleurl/src/gurl.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 using base::Time;
 
@@ -72,7 +72,7 @@ void BindAutofillProfileToStatement(const AutofillProfile& profile,
   s->BindString16(5, LimitDataSize(text));
   text = profile.GetRawInfo(ADDRESS_HOME_ZIP);
   s->BindString16(6, LimitDataSize(text));
-  text = profile.GetInfo(ADDRESS_HOME_COUNTRY, app_locale);
+  text = profile.GetInfo(AutofillType(ADDRESS_HOME_COUNTRY), app_locale);
   s->BindString16(7, LimitDataSize(text));
   text = profile.GetRawInfo(ADDRESS_HOME_COUNTRY);
   s->BindString16(8, LimitDataSize(text));
@@ -1928,7 +1928,8 @@ bool AutofillTable::MigrateToVersion33ProfilesBasedOnFirstName() {
       profile.SetRawInfo(ADDRESS_HOME_CITY, s.ColumnString16(8));
       profile.SetRawInfo(ADDRESS_HOME_STATE, s.ColumnString16(9));
       profile.SetRawInfo(ADDRESS_HOME_ZIP, s.ColumnString16(10));
-      profile.SetInfo(ADDRESS_HOME_COUNTRY, s.ColumnString16(11), app_locale_);
+      profile.SetInfo(AutofillType(ADDRESS_HOME_COUNTRY), s.ColumnString16(11),
+                      app_locale_);
       profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, s.ColumnString16(12));
       int64 date_modified = s.ColumnInt64(13);
 
@@ -2151,7 +2152,7 @@ bool AutofillTable::MigrateToVersion37MergeAndCullOlderProfiles() {
     s.BindString16(5, LimitDataSize(text));
     text = iter->GetRawInfo(ADDRESS_HOME_ZIP);
     s.BindString16(6, LimitDataSize(text));
-    text = iter->GetInfo(ADDRESS_HOME_COUNTRY, app_locale_);
+    text = iter->GetInfo(AutofillType(ADDRESS_HOME_COUNTRY), app_locale_);
     s.BindString16(7, LimitDataSize(text));
     text = iter->GetRawInfo(ADDRESS_HOME_COUNTRY);
     s.BindString16(8, LimitDataSize(text));

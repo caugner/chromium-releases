@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -15,6 +16,8 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/shell.h"
+#include "content/shell/shell_content_browser_client.h"
+#include "content/shell/shell_network_delegate.h"
 #include "content/test/content_browser_test.h"
 #include "content/test/content_browser_test_utils.h"
 #include "content/test/net/url_request_failed_job.h"
@@ -191,9 +194,15 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
 // Test for bug #1159553 -- A synchronous xhr (whose content-type is
 // downloadable) would trigger download and hang the renderer process,
 // if executed while navigating to a new page.
-// If this flakes, use http://crbug.com/56264.
+// Disabled on Mac: see http://crbug.com/56264
+#if defined(OS_MACOSX)
+#define MAYBE_SyncXMLHttpRequest_DuringUnload \
+  DISABLED_SyncXMLHttpRequest_DuringUnload
+#else
+#define MAYBE_SyncXMLHttpRequest_DuringUnload SyncXMLHttpRequest_DuringUnload
+#endif
 IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
-                       SyncXMLHttpRequest_DuringUnload) {
+                       MAYBE_SyncXMLHttpRequest_DuringUnload) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   BrowserContext::GetDownloadManager(
       shell()->web_contents()->GetBrowserContext())->AddObserver(this);
@@ -239,7 +248,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
 
   // Navigate to a cross-site page that loads immediately without making a
   // network request.  The unload event should still be run.
-  NavigateToURL(shell(), GURL("about:blank"));
+  NavigateToURL(shell(), GURL(kAboutBlankURL));
 
   // Check that the cookie was set.
   EXPECT_EQ("onunloadCookie=foo", GetCookies(url));
@@ -256,7 +265,7 @@ scoped_ptr<net::test_server::HttpResponse> NoContentResponseHandler(
 
   scoped_ptr<net::test_server::BasicHttpResponse> http_response(
       new net::test_server::BasicHttpResponse);
-  http_response->set_code(net::test_server::NO_CONTENT);
+  http_response->set_code(net::HTTP_NO_CONTENT);
   return http_response.PassAs<net::test_server::HttpResponse>();
 }
 
@@ -418,6 +427,41 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
   // Visit a URL that fails without calling ResourceDispatcherHost::Read.
   GURL broken_url("chrome://theme");
   NavigateToURL(shell(), broken_url);
+}
+
+namespace {
+
+scoped_ptr<net::test_server::HttpResponse> HandleRedirectRequest(
+    const std::string& request_path,
+    const net::test_server::HttpRequest& request) {
+  if (!StartsWithASCII(request.relative_url, request_path, true))
+    return scoped_ptr<net::test_server::HttpResponse>();
+
+  scoped_ptr<net::test_server::BasicHttpResponse> http_response(
+      new net::test_server::BasicHttpResponse);
+  http_response->set_code(net::HTTP_FOUND);
+  http_response->AddCustomHeader(
+      "Location", request.relative_url.substr(request_path.length()));
+  return http_response.PassAs<net::test_server::HttpResponse>();
+}
+
+}  // namespace
+
+// Test that we update the cookie policy URLs correctly when transferring
+// navigations.
+IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest, CookiePolicy) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  embedded_test_server()->RegisterRequestHandler(
+      base::Bind(&HandleRedirectRequest, "/redirect?"));
+
+  std::string set_cookie_url(base::StringPrintf(
+      "http://localhost:%d/set_cookie.html", embedded_test_server()->port()));
+  GURL url(embedded_test_server()->GetURL("/redirect?" + set_cookie_url));
+
+  ShellContentBrowserClient::SetSwapProcessesForRedirect(true);
+  ShellNetworkDelegate::SetAcceptAllCookies(false);
+
+  CheckTitleTest(url, "cookie set");
 }
 
 }  // namespace content

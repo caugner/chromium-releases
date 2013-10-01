@@ -66,6 +66,7 @@
 #include "ppapi/c/ppb_net_address.h"
 #include "ppapi/c/ppb_network_proxy.h"
 #include "ppapi/c/ppb_tcp_socket.h"
+#include "ppapi/c/ppb_text_input_controller.h"
 #include "ppapi/c/ppb_udp_socket.h"
 #include "ppapi/c/ppb_url_loader.h"
 #include "ppapi/c/ppb_url_request_info.h"
@@ -149,12 +150,14 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_MouseInputEvent_1_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_WheelInputEvent_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_KeyboardInputEvent_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TouchInputEvent_1_0;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_MessageLoop_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Messaging_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_MouseLock_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_NetAddress_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_NetworkProxy_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPSocket_1_0;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TextInputController_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UDPSocket_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_URLLoader_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_URLRequestInfo_1_0;
@@ -168,6 +171,7 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_WebSocket_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Messaging_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_3;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DeviceRef_Dev_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_5;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_6;
@@ -859,6 +863,45 @@ static void Pnacl_M13_PPB_TouchInputEvent_GetTouchById(struct PP_TouchPoint* _st
 
 /* End wrapper methods for PPB_TouchInputEvent_1_0 */
 
+/* Begin wrapper methods for PPB_IMEInputEvent_1_0 */
+
+static PP_Resource Pnacl_M13_PPB_IMEInputEvent_Create(PP_Instance instance, PP_InputEvent_Type type, PP_TimeTicks time_stamp, struct PP_Var* text, uint32_t segment_number, const uint32_t segment_offsets[], int32_t target_segment, uint32_t selection_start, uint32_t selection_end) {
+  const struct PPB_IMEInputEvent_1_0 *iface = Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0.real_iface;
+  return iface->Create(instance, type, time_stamp, *text, segment_number, segment_offsets, target_segment, selection_start, selection_end);
+}
+
+static PP_Bool Pnacl_M13_PPB_IMEInputEvent_IsIMEInputEvent(PP_Resource resource) {
+  const struct PPB_IMEInputEvent_1_0 *iface = Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0.real_iface;
+  return iface->IsIMEInputEvent(resource);
+}
+
+static void Pnacl_M13_PPB_IMEInputEvent_GetText(struct PP_Var* _struct_result, PP_Resource ime_event) {
+  const struct PPB_IMEInputEvent_1_0 *iface = Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0.real_iface;
+  *_struct_result = iface->GetText(ime_event);
+}
+
+static uint32_t Pnacl_M13_PPB_IMEInputEvent_GetSegmentNumber(PP_Resource ime_event) {
+  const struct PPB_IMEInputEvent_1_0 *iface = Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0.real_iface;
+  return iface->GetSegmentNumber(ime_event);
+}
+
+static uint32_t Pnacl_M13_PPB_IMEInputEvent_GetSegmentOffset(PP_Resource ime_event, uint32_t index) {
+  const struct PPB_IMEInputEvent_1_0 *iface = Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0.real_iface;
+  return iface->GetSegmentOffset(ime_event, index);
+}
+
+static int32_t Pnacl_M13_PPB_IMEInputEvent_GetTargetSegment(PP_Resource ime_event) {
+  const struct PPB_IMEInputEvent_1_0 *iface = Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0.real_iface;
+  return iface->GetTargetSegment(ime_event);
+}
+
+static void Pnacl_M13_PPB_IMEInputEvent_GetSelection(PP_Resource ime_event, uint32_t* start, uint32_t* end) {
+  const struct PPB_IMEInputEvent_1_0 *iface = Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0.real_iface;
+  iface->GetSelection(ime_event, start, end);
+}
+
+/* End wrapper methods for PPB_IMEInputEvent_1_0 */
+
 /* Not generating wrapper methods for PPB_Instance_1_0 */
 
 /* Begin wrapper methods for PPB_MessageLoop_1_0 */
@@ -1021,6 +1064,30 @@ static int32_t Pnacl_M29_PPB_TCPSocket_SetOption(PP_Resource tcp_socket, PP_TCPS
 }
 
 /* End wrapper methods for PPB_TCPSocket_1_0 */
+
+/* Begin wrapper methods for PPB_TextInputController_1_0 */
+
+static void Pnacl_M30_PPB_TextInputController_SetTextInputType(PP_Instance instance, PP_TextInput_Type type) {
+  const struct PPB_TextInputController_1_0 *iface = Pnacl_WrapperInfo_PPB_TextInputController_1_0.real_iface;
+  iface->SetTextInputType(instance, type);
+}
+
+static void Pnacl_M30_PPB_TextInputController_UpdateCaretPosition(PP_Instance instance, const struct PP_Rect* caret) {
+  const struct PPB_TextInputController_1_0 *iface = Pnacl_WrapperInfo_PPB_TextInputController_1_0.real_iface;
+  iface->UpdateCaretPosition(instance, caret);
+}
+
+static void Pnacl_M30_PPB_TextInputController_CancelCompositionText(PP_Instance instance) {
+  const struct PPB_TextInputController_1_0 *iface = Pnacl_WrapperInfo_PPB_TextInputController_1_0.real_iface;
+  iface->CancelCompositionText(instance);
+}
+
+static void Pnacl_M30_PPB_TextInputController_UpdateSurroundingText(PP_Instance instance, struct PP_Var* text, uint32_t caret, uint32_t anchor) {
+  const struct PPB_TextInputController_1_0 *iface = Pnacl_WrapperInfo_PPB_TextInputController_1_0.real_iface;
+  iface->UpdateSurroundingText(instance, *text, caret, anchor);
+}
+
+/* End wrapper methods for PPB_TextInputController_1_0 */
 
 /* Begin wrapper methods for PPB_UDPSocket_1_0 */
 
@@ -1435,7 +1502,7 @@ static int32_t Pnacl_M19_PPB_AudioInput_Dev_EnumerateDevices(PP_Resource audio_i
   return iface->EnumerateDevices(audio_input, devices, *callback);
 }
 
-static int32_t Pnacl_M19_PPB_AudioInput_Dev_Open(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback audio_input_callback, void* user_data, struct PP_CompletionCallback* callback) {
+static int32_t Pnacl_M19_PPB_AudioInput_Dev_Open(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback_0_2 audio_input_callback, void* user_data, struct PP_CompletionCallback* callback) {
   const struct PPB_AudioInput_Dev_0_2 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_2.real_iface;
   return iface->Open(audio_input, device_ref, config, audio_input_callback, user_data, *callback);
 }
@@ -1484,7 +1551,7 @@ static int32_t Pnacl_M25_PPB_AudioInput_Dev_MonitorDeviceChange(PP_Resource audi
   return iface->MonitorDeviceChange(audio_input, callback, user_data);
 }
 
-static int32_t Pnacl_M25_PPB_AudioInput_Dev_Open(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback audio_input_callback, void* user_data, struct PP_CompletionCallback* callback) {
+static int32_t Pnacl_M25_PPB_AudioInput_Dev_Open(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback_0_2 audio_input_callback, void* user_data, struct PP_CompletionCallback* callback) {
   const struct PPB_AudioInput_Dev_0_3 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_3.real_iface;
   return iface->Open(audio_input, device_ref, config, audio_input_callback, user_data, *callback);
 }
@@ -1510,6 +1577,55 @@ static void Pnacl_M25_PPB_AudioInput_Dev_Close(PP_Resource audio_input) {
 }
 
 /* End wrapper methods for PPB_AudioInput_Dev_0_3 */
+
+/* Begin wrapper methods for PPB_AudioInput_Dev_0_4 */
+
+static PP_Resource Pnacl_M30_PPB_AudioInput_Dev_Create(PP_Instance instance) {
+  const struct PPB_AudioInput_Dev_0_4 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4.real_iface;
+  return iface->Create(instance);
+}
+
+static PP_Bool Pnacl_M30_PPB_AudioInput_Dev_IsAudioInput(PP_Resource resource) {
+  const struct PPB_AudioInput_Dev_0_4 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4.real_iface;
+  return iface->IsAudioInput(resource);
+}
+
+static int32_t Pnacl_M30_PPB_AudioInput_Dev_EnumerateDevices(PP_Resource audio_input, struct PP_ArrayOutput* output, struct PP_CompletionCallback* callback) {
+  const struct PPB_AudioInput_Dev_0_4 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4.real_iface;
+  return iface->EnumerateDevices(audio_input, *output, *callback);
+}
+
+static int32_t Pnacl_M30_PPB_AudioInput_Dev_MonitorDeviceChange(PP_Resource audio_input, PP_MonitorDeviceChangeCallback callback, void* user_data) {
+  const struct PPB_AudioInput_Dev_0_4 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4.real_iface;
+  return iface->MonitorDeviceChange(audio_input, callback, user_data);
+}
+
+static int32_t Pnacl_M30_PPB_AudioInput_Dev_Open(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback audio_input_callback, void* user_data, struct PP_CompletionCallback* callback) {
+  const struct PPB_AudioInput_Dev_0_4 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4.real_iface;
+  return iface->Open(audio_input, device_ref, config, audio_input_callback, user_data, *callback);
+}
+
+static PP_Resource Pnacl_M30_PPB_AudioInput_Dev_GetCurrentConfig(PP_Resource audio_input) {
+  const struct PPB_AudioInput_Dev_0_4 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4.real_iface;
+  return iface->GetCurrentConfig(audio_input);
+}
+
+static PP_Bool Pnacl_M30_PPB_AudioInput_Dev_StartCapture(PP_Resource audio_input) {
+  const struct PPB_AudioInput_Dev_0_4 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4.real_iface;
+  return iface->StartCapture(audio_input);
+}
+
+static PP_Bool Pnacl_M30_PPB_AudioInput_Dev_StopCapture(PP_Resource audio_input) {
+  const struct PPB_AudioInput_Dev_0_4 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4.real_iface;
+  return iface->StopCapture(audio_input);
+}
+
+static void Pnacl_M30_PPB_AudioInput_Dev_Close(PP_Resource audio_input) {
+  const struct PPB_AudioInput_Dev_0_4 *iface = Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4.real_iface;
+  iface->Close(audio_input);
+}
+
+/* End wrapper methods for PPB_AudioInput_Dev_0_4 */
 
 /* Not generating wrapper methods for PPB_Buffer_Dev_0_4 */
 
@@ -1863,6 +1979,8 @@ static void Pnacl_M28_PPB_Testing_Dev_SetMinimumArrayBufferSizeForShmem(PP_Insta
 /* Not generating wrapper methods for PPB_TextInput_Dev_0_2 */
 
 /* Not generating wrapper methods for PPB_Trace_Event_Dev_0_1 */
+
+/* Not generating wrapper methods for PPB_Trace_Event_Dev_0_2 */
 
 /* Begin wrapper methods for PPB_TrueTypeFont_Dev_0_1 */
 
@@ -2691,12 +2809,12 @@ static void Pnacl_M13_PPB_Instance_Private_ExecuteScript(struct PP_Var* _struct_
 
 /* Begin wrapper methods for PPB_NaCl_Private_1_0 */
 
-static PP_NaClResult Pnacl_M13_PPB_NaCl_Private_LaunchSelLdr(PP_Instance instance, const char* alleged_url, PP_Bool uses_irt, PP_Bool uses_ppapi, PP_Bool enable_ppapi_dev, PP_Bool enable_dyncode_syscalls, PP_Bool enable_exception_handling, void* imc_handle) {
+static PP_ExternalPluginResult Pnacl_M13_PPB_NaCl_Private_LaunchSelLdr(PP_Instance instance, const char* alleged_url, PP_Bool uses_irt, PP_Bool uses_ppapi, PP_Bool enable_ppapi_dev, PP_Bool enable_dyncode_syscalls, PP_Bool enable_exception_handling, void* imc_handle, struct PP_Var* error_message) {
   const struct PPB_NaCl_Private_1_0 *iface = Pnacl_WrapperInfo_PPB_NaCl_Private_1_0.real_iface;
-  return iface->LaunchSelLdr(instance, alleged_url, uses_irt, uses_ppapi, enable_ppapi_dev, enable_dyncode_syscalls, enable_exception_handling, imc_handle);
+  return iface->LaunchSelLdr(instance, alleged_url, uses_irt, uses_ppapi, enable_ppapi_dev, enable_dyncode_syscalls, enable_exception_handling, imc_handle, error_message);
 }
 
-static PP_NaClResult Pnacl_M13_PPB_NaCl_Private_StartPpapiProxy(PP_Instance instance) {
+static PP_ExternalPluginResult Pnacl_M13_PPB_NaCl_Private_StartPpapiProxy(PP_Instance instance) {
   const struct PPB_NaCl_Private_1_0 *iface = Pnacl_WrapperInfo_PPB_NaCl_Private_1_0.real_iface;
   return iface->StartPpapiProxy(instance);
 }
@@ -2711,14 +2829,14 @@ static PP_Bool Pnacl_M13_PPB_NaCl_Private_Are3DInterfacesDisabled(void) {
   return iface->Are3DInterfacesDisabled();
 }
 
-static void Pnacl_M13_PPB_NaCl_Private_EnableBackgroundSelLdrLaunch(void) {
-  const struct PPB_NaCl_Private_1_0 *iface = Pnacl_WrapperInfo_PPB_NaCl_Private_1_0.real_iface;
-  iface->EnableBackgroundSelLdrLaunch();
-}
-
 static int32_t Pnacl_M13_PPB_NaCl_Private_BrokerDuplicateHandle(PP_FileHandle source_handle, uint32_t process_id, PP_FileHandle* target_handle, uint32_t desired_access, uint32_t options) {
   const struct PPB_NaCl_Private_1_0 *iface = Pnacl_WrapperInfo_PPB_NaCl_Private_1_0.real_iface;
   return iface->BrokerDuplicateHandle(source_handle, process_id, target_handle, desired_access, options);
+}
+
+static int32_t Pnacl_M13_PPB_NaCl_Private_EnsurePnaclInstalled(PP_Instance instance, struct PP_CompletionCallback* callback) {
+  const struct PPB_NaCl_Private_1_0 *iface = Pnacl_WrapperInfo_PPB_NaCl_Private_1_0.real_iface;
+  return iface->EnsurePnaclInstalled(instance, *callback);
 }
 
 static PP_FileHandle Pnacl_M13_PPB_NaCl_Private_GetReadonlyPnaclFd(const char* filename) {
@@ -2731,9 +2849,14 @@ static PP_FileHandle Pnacl_M13_PPB_NaCl_Private_CreateTemporaryFile(PP_Instance 
   return iface->CreateTemporaryFile(instance);
 }
 
-static int32_t Pnacl_M13_PPB_NaCl_Private_GetNexeFd(PP_Instance instance, const char* cache_key, PP_Bool* is_hit, PP_FileHandle* nexe_handle, struct PP_CompletionCallback* callback) {
+static int32_t Pnacl_M13_PPB_NaCl_Private_GetNexeFd(PP_Instance instance, const char* pexe_url, uint32_t abi_version, uint32_t opt_level, const char* last_modified, const char* etag, PP_Bool* is_hit, PP_FileHandle* nexe_handle, struct PP_CompletionCallback* callback) {
   const struct PPB_NaCl_Private_1_0 *iface = Pnacl_WrapperInfo_PPB_NaCl_Private_1_0.real_iface;
-  return iface->GetNexeFd(instance, cache_key, is_hit, nexe_handle, *callback);
+  return iface->GetNexeFd(instance, pexe_url, abi_version, opt_level, last_modified, etag, is_hit, nexe_handle, *callback);
+}
+
+static void Pnacl_M13_PPB_NaCl_Private_ReportTranslationFinished(PP_Instance instance, PP_Bool success) {
+  const struct PPB_NaCl_Private_1_0 *iface = Pnacl_WrapperInfo_PPB_NaCl_Private_1_0.real_iface;
+  iface->ReportTranslationFinished(instance, success);
 }
 
 static PP_Bool Pnacl_M13_PPB_NaCl_Private_IsOffTheRecord(void) {
@@ -2746,7 +2869,7 @@ static PP_Bool Pnacl_M13_PPB_NaCl_Private_IsPnaclEnabled(void) {
   return iface->IsPnaclEnabled();
 }
 
-static PP_NaClResult Pnacl_M13_PPB_NaCl_Private_ReportNaClError(PP_Instance instance, PP_NaClError message_id) {
+static PP_ExternalPluginResult Pnacl_M13_PPB_NaCl_Private_ReportNaClError(PP_Instance instance, PP_NaClError message_id) {
   const struct PPB_NaCl_Private_1_0 *iface = Pnacl_WrapperInfo_PPB_NaCl_Private_1_0.real_iface;
   return iface->ReportNaClError(instance, message_id);
 }
@@ -3942,6 +4065,16 @@ struct PPB_TouchInputEvent_1_0 Pnacl_Wrappers_PPB_TouchInputEvent_1_0 = {
     .GetTouchById = (struct PP_TouchPoint (*)(PP_Resource resource, PP_TouchListType list, uint32_t touch_id))&Pnacl_M13_PPB_TouchInputEvent_GetTouchById
 };
 
+struct PPB_IMEInputEvent_1_0 Pnacl_Wrappers_PPB_IMEInputEvent_1_0 = {
+    .Create = (PP_Resource (*)(PP_Instance instance, PP_InputEvent_Type type, PP_TimeTicks time_stamp, struct PP_Var text, uint32_t segment_number, const uint32_t segment_offsets[], int32_t target_segment, uint32_t selection_start, uint32_t selection_end))&Pnacl_M13_PPB_IMEInputEvent_Create,
+    .IsIMEInputEvent = (PP_Bool (*)(PP_Resource resource))&Pnacl_M13_PPB_IMEInputEvent_IsIMEInputEvent,
+    .GetText = (struct PP_Var (*)(PP_Resource ime_event))&Pnacl_M13_PPB_IMEInputEvent_GetText,
+    .GetSegmentNumber = (uint32_t (*)(PP_Resource ime_event))&Pnacl_M13_PPB_IMEInputEvent_GetSegmentNumber,
+    .GetSegmentOffset = (uint32_t (*)(PP_Resource ime_event, uint32_t index))&Pnacl_M13_PPB_IMEInputEvent_GetSegmentOffset,
+    .GetTargetSegment = (int32_t (*)(PP_Resource ime_event))&Pnacl_M13_PPB_IMEInputEvent_GetTargetSegment,
+    .GetSelection = (void (*)(PP_Resource ime_event, uint32_t* start, uint32_t* end))&Pnacl_M13_PPB_IMEInputEvent_GetSelection
+};
+
 /* Not generating wrapper interface for PPB_Instance_1_0 */
 
 struct PPB_MessageLoop_1_0 Pnacl_Wrappers_PPB_MessageLoop_1_0 = {
@@ -3989,6 +4122,13 @@ struct PPB_TCPSocket_1_0 Pnacl_Wrappers_PPB_TCPSocket_1_0 = {
     .Write = (int32_t (*)(PP_Resource tcp_socket, const char* buffer, int32_t bytes_to_write, struct PP_CompletionCallback callback))&Pnacl_M29_PPB_TCPSocket_Write,
     .Close = (void (*)(PP_Resource tcp_socket))&Pnacl_M29_PPB_TCPSocket_Close,
     .SetOption = (int32_t (*)(PP_Resource tcp_socket, PP_TCPSocket_Option name, struct PP_Var value, struct PP_CompletionCallback callback))&Pnacl_M29_PPB_TCPSocket_SetOption
+};
+
+struct PPB_TextInputController_1_0 Pnacl_Wrappers_PPB_TextInputController_1_0 = {
+    .SetTextInputType = (void (*)(PP_Instance instance, PP_TextInput_Type type))&Pnacl_M30_PPB_TextInputController_SetTextInputType,
+    .UpdateCaretPosition = (void (*)(PP_Instance instance, const struct PP_Rect* caret))&Pnacl_M30_PPB_TextInputController_UpdateCaretPosition,
+    .CancelCompositionText = (void (*)(PP_Instance instance))&Pnacl_M30_PPB_TextInputController_CancelCompositionText,
+    .UpdateSurroundingText = (void (*)(PP_Instance instance, struct PP_Var text, uint32_t caret, uint32_t anchor))&Pnacl_M30_PPB_TextInputController_UpdateSurroundingText
 };
 
 struct PPB_UDPSocket_1_0 Pnacl_Wrappers_PPB_UDPSocket_1_0 = {
@@ -4122,7 +4262,7 @@ struct PPB_AudioInput_Dev_0_2 Pnacl_Wrappers_PPB_AudioInput_Dev_0_2 = {
     .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M19_PPB_AudioInput_Dev_Create,
     .IsAudioInput = (PP_Bool (*)(PP_Resource resource))&Pnacl_M19_PPB_AudioInput_Dev_IsAudioInput,
     .EnumerateDevices = (int32_t (*)(PP_Resource audio_input, PP_Resource* devices, struct PP_CompletionCallback callback))&Pnacl_M19_PPB_AudioInput_Dev_EnumerateDevices,
-    .Open = (int32_t (*)(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback audio_input_callback, void* user_data, struct PP_CompletionCallback callback))&Pnacl_M19_PPB_AudioInput_Dev_Open,
+    .Open = (int32_t (*)(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback_0_2 audio_input_callback, void* user_data, struct PP_CompletionCallback callback))&Pnacl_M19_PPB_AudioInput_Dev_Open,
     .GetCurrentConfig = (PP_Resource (*)(PP_Resource audio_input))&Pnacl_M19_PPB_AudioInput_Dev_GetCurrentConfig,
     .StartCapture = (PP_Bool (*)(PP_Resource audio_input))&Pnacl_M19_PPB_AudioInput_Dev_StartCapture,
     .StopCapture = (PP_Bool (*)(PP_Resource audio_input))&Pnacl_M19_PPB_AudioInput_Dev_StopCapture,
@@ -4134,11 +4274,23 @@ struct PPB_AudioInput_Dev_0_3 Pnacl_Wrappers_PPB_AudioInput_Dev_0_3 = {
     .IsAudioInput = (PP_Bool (*)(PP_Resource resource))&Pnacl_M25_PPB_AudioInput_Dev_IsAudioInput,
     .EnumerateDevices = (int32_t (*)(PP_Resource audio_input, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M25_PPB_AudioInput_Dev_EnumerateDevices,
     .MonitorDeviceChange = (int32_t (*)(PP_Resource audio_input, PP_MonitorDeviceChangeCallback callback, void* user_data))&Pnacl_M25_PPB_AudioInput_Dev_MonitorDeviceChange,
-    .Open = (int32_t (*)(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback audio_input_callback, void* user_data, struct PP_CompletionCallback callback))&Pnacl_M25_PPB_AudioInput_Dev_Open,
+    .Open = (int32_t (*)(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback_0_2 audio_input_callback, void* user_data, struct PP_CompletionCallback callback))&Pnacl_M25_PPB_AudioInput_Dev_Open,
     .GetCurrentConfig = (PP_Resource (*)(PP_Resource audio_input))&Pnacl_M25_PPB_AudioInput_Dev_GetCurrentConfig,
     .StartCapture = (PP_Bool (*)(PP_Resource audio_input))&Pnacl_M25_PPB_AudioInput_Dev_StartCapture,
     .StopCapture = (PP_Bool (*)(PP_Resource audio_input))&Pnacl_M25_PPB_AudioInput_Dev_StopCapture,
     .Close = (void (*)(PP_Resource audio_input))&Pnacl_M25_PPB_AudioInput_Dev_Close
+};
+
+struct PPB_AudioInput_Dev_0_4 Pnacl_Wrappers_PPB_AudioInput_Dev_0_4 = {
+    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M30_PPB_AudioInput_Dev_Create,
+    .IsAudioInput = (PP_Bool (*)(PP_Resource resource))&Pnacl_M30_PPB_AudioInput_Dev_IsAudioInput,
+    .EnumerateDevices = (int32_t (*)(PP_Resource audio_input, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M30_PPB_AudioInput_Dev_EnumerateDevices,
+    .MonitorDeviceChange = (int32_t (*)(PP_Resource audio_input, PP_MonitorDeviceChangeCallback callback, void* user_data))&Pnacl_M30_PPB_AudioInput_Dev_MonitorDeviceChange,
+    .Open = (int32_t (*)(PP_Resource audio_input, PP_Resource device_ref, PP_Resource config, PPB_AudioInput_Callback audio_input_callback, void* user_data, struct PP_CompletionCallback callback))&Pnacl_M30_PPB_AudioInput_Dev_Open,
+    .GetCurrentConfig = (PP_Resource (*)(PP_Resource audio_input))&Pnacl_M30_PPB_AudioInput_Dev_GetCurrentConfig,
+    .StartCapture = (PP_Bool (*)(PP_Resource audio_input))&Pnacl_M30_PPB_AudioInput_Dev_StartCapture,
+    .StopCapture = (PP_Bool (*)(PP_Resource audio_input))&Pnacl_M30_PPB_AudioInput_Dev_StopCapture,
+    .Close = (void (*)(PP_Resource audio_input))&Pnacl_M30_PPB_AudioInput_Dev_Close
 };
 
 /* Not generating wrapper interface for PPB_Buffer_Dev_0_4 */
@@ -4255,6 +4407,8 @@ struct PPB_Testing_Dev_0_92 Pnacl_Wrappers_PPB_Testing_Dev_0_92 = {
 /* Not generating wrapper interface for PPB_TextInput_Dev_0_2 */
 
 /* Not generating wrapper interface for PPB_Trace_Event_Dev_0_1 */
+
+/* Not generating wrapper interface for PPB_Trace_Event_Dev_0_2 */
 
 struct PPB_TrueTypeFont_Dev_0_1 Pnacl_Wrappers_PPB_TrueTypeFont_Dev_0_1 = {
     .GetFontFamilies = (int32_t (*)(PP_Instance instance, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M26_PPB_TrueTypeFont_Dev_GetFontFamilies,
@@ -4501,18 +4655,19 @@ struct PPB_Instance_Private_0_1 Pnacl_Wrappers_PPB_Instance_Private_0_1 = {
 };
 
 struct PPB_NaCl_Private_1_0 Pnacl_Wrappers_PPB_NaCl_Private_1_0 = {
-    .LaunchSelLdr = (PP_NaClResult (*)(PP_Instance instance, const char* alleged_url, PP_Bool uses_irt, PP_Bool uses_ppapi, PP_Bool enable_ppapi_dev, PP_Bool enable_dyncode_syscalls, PP_Bool enable_exception_handling, void* imc_handle))&Pnacl_M13_PPB_NaCl_Private_LaunchSelLdr,
-    .StartPpapiProxy = (PP_NaClResult (*)(PP_Instance instance))&Pnacl_M13_PPB_NaCl_Private_StartPpapiProxy,
+    .LaunchSelLdr = (PP_ExternalPluginResult (*)(PP_Instance instance, const char* alleged_url, PP_Bool uses_irt, PP_Bool uses_ppapi, PP_Bool enable_ppapi_dev, PP_Bool enable_dyncode_syscalls, PP_Bool enable_exception_handling, void* imc_handle, struct PP_Var* error_message))&Pnacl_M13_PPB_NaCl_Private_LaunchSelLdr,
+    .StartPpapiProxy = (PP_ExternalPluginResult (*)(PP_Instance instance))&Pnacl_M13_PPB_NaCl_Private_StartPpapiProxy,
     .UrandomFD = (int32_t (*)(void))&Pnacl_M13_PPB_NaCl_Private_UrandomFD,
     .Are3DInterfacesDisabled = (PP_Bool (*)(void))&Pnacl_M13_PPB_NaCl_Private_Are3DInterfacesDisabled,
-    .EnableBackgroundSelLdrLaunch = (void (*)(void))&Pnacl_M13_PPB_NaCl_Private_EnableBackgroundSelLdrLaunch,
     .BrokerDuplicateHandle = (int32_t (*)(PP_FileHandle source_handle, uint32_t process_id, PP_FileHandle* target_handle, uint32_t desired_access, uint32_t options))&Pnacl_M13_PPB_NaCl_Private_BrokerDuplicateHandle,
+    .EnsurePnaclInstalled = (int32_t (*)(PP_Instance instance, struct PP_CompletionCallback callback))&Pnacl_M13_PPB_NaCl_Private_EnsurePnaclInstalled,
     .GetReadonlyPnaclFd = (PP_FileHandle (*)(const char* filename))&Pnacl_M13_PPB_NaCl_Private_GetReadonlyPnaclFd,
     .CreateTemporaryFile = (PP_FileHandle (*)(PP_Instance instance))&Pnacl_M13_PPB_NaCl_Private_CreateTemporaryFile,
-    .GetNexeFd = (int32_t (*)(PP_Instance instance, const char* cache_key, PP_Bool* is_hit, PP_FileHandle* nexe_handle, struct PP_CompletionCallback callback))&Pnacl_M13_PPB_NaCl_Private_GetNexeFd,
+    .GetNexeFd = (int32_t (*)(PP_Instance instance, const char* pexe_url, uint32_t abi_version, uint32_t opt_level, const char* last_modified, const char* etag, PP_Bool* is_hit, PP_FileHandle* nexe_handle, struct PP_CompletionCallback callback))&Pnacl_M13_PPB_NaCl_Private_GetNexeFd,
+    .ReportTranslationFinished = (void (*)(PP_Instance instance, PP_Bool success))&Pnacl_M13_PPB_NaCl_Private_ReportTranslationFinished,
     .IsOffTheRecord = (PP_Bool (*)(void))&Pnacl_M13_PPB_NaCl_Private_IsOffTheRecord,
     .IsPnaclEnabled = (PP_Bool (*)(void))&Pnacl_M13_PPB_NaCl_Private_IsPnaclEnabled,
-    .ReportNaClError = (PP_NaClResult (*)(PP_Instance instance, PP_NaClError message_id))&Pnacl_M13_PPB_NaCl_Private_ReportNaClError,
+    .ReportNaClError = (PP_ExternalPluginResult (*)(PP_Instance instance, PP_NaClError message_id))&Pnacl_M13_PPB_NaCl_Private_ReportNaClError,
     .OpenNaClExecutable = (PP_FileHandle (*)(PP_Instance instance, const char* file_url, uint64_t* file_token_lo, uint64_t* file_token_hi))&Pnacl_M13_PPB_NaCl_Private_OpenNaClExecutable
 };
 
@@ -4869,6 +5024,12 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TouchInputEvent_1_0 = {
   .real_iface = NULL
 };
 
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0 = {
+  .iface_macro = PPB_IME_INPUT_EVENT_INTERFACE_1_0,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_IMEInputEvent_1_0,
+  .real_iface = NULL
+};
+
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_MessageLoop_1_0 = {
   .iface_macro = PPB_MESSAGELOOP_INTERFACE_1_0,
   .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_MessageLoop_1_0,
@@ -4902,6 +5063,12 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_NetworkProxy_1_0 = {
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPSocket_1_0 = {
   .iface_macro = PPB_TCPSOCKET_INTERFACE_1_0,
   .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_TCPSocket_1_0,
+  .real_iface = NULL
+};
+
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TextInputController_1_0 = {
+  .iface_macro = PPB_TEXTINPUTCONTROLLER_INTERFACE_1_0,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_TextInputController_1_0,
   .real_iface = NULL
 };
 
@@ -4980,6 +5147,12 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_2 = {
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_3 = {
   .iface_macro = PPB_AUDIO_INPUT_DEV_INTERFACE_0_3,
   .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_AudioInput_Dev_0_3,
+  .real_iface = NULL
+};
+
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4 = {
+  .iface_macro = PPB_AUDIO_INPUT_DEV_INTERFACE_0_4,
+  .wrapped_iface = (void *) &Pnacl_Wrappers_PPB_AudioInput_Dev_0_4,
   .real_iface = NULL
 };
 
@@ -5336,12 +5509,14 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_WheelInputEvent_1_0,
   &Pnacl_WrapperInfo_PPB_KeyboardInputEvent_1_0,
   &Pnacl_WrapperInfo_PPB_TouchInputEvent_1_0,
+  &Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0,
   &Pnacl_WrapperInfo_PPB_MessageLoop_1_0,
   &Pnacl_WrapperInfo_PPB_Messaging_1_0,
   &Pnacl_WrapperInfo_PPB_MouseLock_1_0,
   &Pnacl_WrapperInfo_PPB_NetAddress_1_0,
   &Pnacl_WrapperInfo_PPB_NetworkProxy_1_0,
   &Pnacl_WrapperInfo_PPB_TCPSocket_1_0,
+  &Pnacl_WrapperInfo_PPB_TextInputController_1_0,
   &Pnacl_WrapperInfo_PPB_UDPSocket_1_0,
   &Pnacl_WrapperInfo_PPB_URLLoader_1_0,
   &Pnacl_WrapperInfo_PPB_URLRequestInfo_1_0,
@@ -5354,6 +5529,7 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_WebSocket_1_0,
   &Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_2,
   &Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_3,
+  &Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4,
   &Pnacl_WrapperInfo_PPB_DeviceRef_Dev_0_1,
   &Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_5,
   &Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_6,

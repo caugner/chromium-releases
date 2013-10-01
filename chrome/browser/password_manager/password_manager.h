@@ -35,7 +35,7 @@ class PasswordManager : public LoginModel,
                         public content::WebContentsObserver,
                         public content::WebContentsUserData<PasswordManager> {
  public:
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   static void CreateForWebContentsAndDelegate(
       content::WebContents* contents,
@@ -133,9 +133,6 @@ class PasswordManager : public LoginModel,
   // Our delegate for carrying out external operations.  This is typically the
   // containing WebContents.
   PasswordManagerDelegate* const delegate_;
-
-  // The LoginModelObserver (i.e LoginView) requiring autofill.
-  LoginModelObserver* observer_;
 
   // Set to false to disable the password manager (will no longer ask if you
   // want to save passwords but will continue to fill passwords).

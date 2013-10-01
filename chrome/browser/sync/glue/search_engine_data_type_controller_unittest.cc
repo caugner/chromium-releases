@@ -6,7 +6,9 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/run_loop.h"
 #include "base/tracked_objects.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
@@ -14,7 +16,6 @@
 #include "chrome/browser/sync/glue/search_engine_data_type_controller.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/profile_mock.h"
 #include "content/public/browser/notification_service.h"
 #include "sync/api/fake_syncable_service.h"
@@ -143,7 +144,7 @@ TEST_F(SyncSearchEngineDataTypeControllerTest, StartURLServiceNotReady) {
   EXPECT_EQ(DataTypeController::MODEL_LOADED, search_engine_dtc_->state());
 
   // Wait until WebDB is loaded before we shut it down.
-  test_util_.BlockTillServiceProcessesRequests();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(SyncSearchEngineDataTypeControllerTest, StartFirstRun) {
@@ -164,7 +165,10 @@ TEST_F(SyncSearchEngineDataTypeControllerTest, StartAssociationFailed) {
   EXPECT_CALL(start_callback_,
               Run(DataTypeController::ASSOCIATION_FAILED, _, _));
   syncable_service_.set_merge_data_and_start_syncing_error(
-      syncer::SyncError(FROM_HERE, "Error", syncer::SEARCH_ENGINES));
+      syncer::SyncError(FROM_HERE,
+                        syncer::SyncError::DATATYPE_ERROR,
+                        "Error",
+                        syncer::SEARCH_ENGINES));
 
   Start();
   EXPECT_EQ(DataTypeController::DISABLED, search_engine_dtc_->state());
@@ -219,7 +223,7 @@ TEST_F(SyncSearchEngineDataTypeControllerTest,
   Start();
   // This should cause search_engine_dtc_->Stop() to be called.
   search_engine_dtc_->OnSingleDatatypeUnrecoverableError(FROM_HERE, "Test");
-  test_util_.PumpLoop();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(DataTypeController::NOT_RUNNING, search_engine_dtc_->state());
   EXPECT_FALSE(syncable_service_.syncing());
 }

@@ -40,8 +40,6 @@ namespace pref_keys = extensions::preference_api_constants;
 
 namespace {
 
-const std::vector<webkit::WebPluginInfo>* g_testing_plugins_;
-
 bool RemoveContentType(base::ListValue* args,
                        ContentSettingsType* content_type) {
   std::string content_type_str;
@@ -187,7 +185,6 @@ bool ContentSettingsContentSettingSetFunction::RunImpl() {
   }
 
   ContentSettingsPattern secondary_pattern = ContentSettingsPattern::Wildcard();
-  std::string secondary_pattern_str;
   if (params->details.secondary_pattern.get()) {
     std::string secondary_error;
     secondary_pattern =
@@ -260,23 +257,19 @@ bool ContentSettingsContentSettingGetResourceIdentifiersFunction::RunImpl() {
     return true;
   }
 
-  if (!g_testing_plugins_) {
-    PluginService::GetInstance()->GetPlugins(
-        base::Bind(&ContentSettingsContentSettingGetResourceIdentifiersFunction::
-                   OnGotPlugins,
-                   this));
-  } else {
-    OnGotPlugins(*g_testing_plugins_);
-  }
+  PluginService::GetInstance()->GetPlugins(
+      base::Bind(&ContentSettingsContentSettingGetResourceIdentifiersFunction::
+                 OnGotPlugins,
+                 this));
   return true;
 }
 
 void ContentSettingsContentSettingGetResourceIdentifiersFunction::OnGotPlugins(
-    const std::vector<webkit::WebPluginInfo>& plugins) {
+    const std::vector<content::WebPluginInfo>& plugins) {
   PluginFinder* finder = PluginFinder::GetInstance();
   std::set<std::string> group_identifiers;
   base::ListValue* list = new base::ListValue();
-  for (std::vector<webkit::WebPluginInfo>::const_iterator it = plugins.begin();
+  for (std::vector<content::WebPluginInfo>::const_iterator it = plugins.begin();
        it != plugins.end(); ++it) {
     scoped_ptr<PluginMetadata> plugin_metadata(finder->GetPluginMetadata(*it));
     const std::string& group_identifier = plugin_metadata->identifier();
@@ -296,12 +289,6 @@ void ContentSettingsContentSettingGetResourceIdentifiersFunction::OnGotPlugins(
           SendResponse,
           this,
           true));
-}
-
-// static
-void ContentSettingsContentSettingGetResourceIdentifiersFunction::
-    SetPluginsForTesting(const std::vector<webkit::WebPluginInfo>* plugins) {
-  g_testing_plugins_ = plugins;
 }
 
 }  // namespace extensions

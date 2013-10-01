@@ -11,7 +11,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_test_util.h"
-#include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
@@ -592,6 +592,14 @@ TEST(PermissionsTest, HasLessPrivilegesThan) {
 #endif
     { "storage", false },  // none -> storage
     { "notifications", false },  // none -> notifications
+    { "platformapp1", false },  // host permissions for platform apps
+    { "platformapp2", true },  // API permissions for platform apps
+    { "media_galleries1", true },  // read|all -> copyTo|all
+    { "media_galleries2", true },  // read|all -> read|copyTo|all
+    { "media_galleries3", true },  // all -> copyTo|all
+    { "media_galleries4", false },  // read|all -> all
+    { "media_galleries5", false },  // read|copyTo|all -> read|all
+    { "media_galleries6", false },  // read|all -> read|all
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
@@ -610,9 +618,11 @@ TEST(PermissionsTest, HasLessPrivilegesThan) {
         old_extension->GetActivePermissions());
     scoped_refptr<const PermissionSet> new_p(
         new_extension->GetActivePermissions());
+    Manifest::Type extension_type = old_extension->GetType();
 
     EXPECT_EQ(kTests[i].expect_increase,
-              old_p->HasLessPrivilegesThan(new_p.get())) << kTests[i].base_name;
+              old_p->HasLessPrivilegesThan(new_p.get(), extension_type))
+        << kTests[i].base_name;
   }
 }
 
@@ -633,19 +643,22 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kBrowsingData);
   skip.insert(APIPermission::kContextMenus);
   skip.insert(APIPermission::kDiagnostics);
+  skip.insert(APIPermission::kDownloadsShelf);
   skip.insert(APIPermission::kFontSettings);
   skip.insert(APIPermission::kFullscreen);
   skip.insert(APIPermission::kIdle);
+  skip.insert(APIPermission::kLogPrivate);
   skip.insert(APIPermission::kNotification);
   skip.insert(APIPermission::kPointerLock);
   skip.insert(APIPermission::kPower);
   skip.insert(APIPermission::kPushMessaging);
-  skip.insert(APIPermission::kSessionRestore);
   skip.insert(APIPermission::kScreensaver);
+  skip.insert(APIPermission::kSessionRestore);
   skip.insert(APIPermission::kStorage);
-  skip.insert(APIPermission::kSystemInfoCpu);
-  skip.insert(APIPermission::kSystemInfoMemory);
-  skip.insert(APIPermission::kSystemInfoDisplay);
+  skip.insert(APIPermission::kSystemCpu);
+  skip.insert(APIPermission::kSystemDisplay);
+  skip.insert(APIPermission::kSystemMemory);
+  skip.insert(APIPermission::kSystemStorage);
   skip.insert(APIPermission::kTts);
   skip.insert(APIPermission::kUnlimitedStorage);
   skip.insert(APIPermission::kWebView);
@@ -698,28 +711,28 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kFileBrowserHandlerInternal);
   skip.insert(APIPermission::kFileBrowserPrivate);
   skip.insert(APIPermission::kIdentityPrivate);
+  skip.insert(APIPermission::kInfobars);
   skip.insert(APIPermission::kInputMethodPrivate);
-  skip.insert(APIPermission::kManagedModePrivate);
   skip.insert(APIPermission::kMediaGalleriesPrivate);
   skip.insert(APIPermission::kMediaPlayerPrivate);
   skip.insert(APIPermission::kMetricsPrivate);
-  skip.insert(APIPermission::kNetworkingPrivate);
   skip.insert(APIPermission::kPreferencesPrivate);
+  skip.insert(APIPermission::kRecoveryPrivate);
   skip.insert(APIPermission::kRtcPrivate);
   skip.insert(APIPermission::kStreamsPrivate);
   skip.insert(APIPermission::kSystemPrivate);
   skip.insert(APIPermission::kTerminalPrivate);
   skip.insert(APIPermission::kWallpaperPrivate);
   skip.insert(APIPermission::kWebRequestInternal);
-  skip.insert(APIPermission::kWebSocketProxyPrivate);
   skip.insert(APIPermission::kWebstorePrivate);
 
   // Warned as part of host permissions.
   skip.insert(APIPermission::kDevtools);
 
   // Platform apps.
+  skip.insert(APIPermission::kBluetooth);
   skip.insert(APIPermission::kFileSystem);
-  skip.insert(APIPermission::kFileSystemRetainFiles);
+  skip.insert(APIPermission::kFileSystemRetainEntries);
   skip.insert(APIPermission::kSocket);
   skip.insert(APIPermission::kUsbDevice);
 
@@ -743,77 +756,6 @@ TEST(PermissionsTest, PermissionMessages) {
       EXPECT_NE(PermissionMessage::kNone, permission_info->message_id())
           << "missing message_id for " << permission_info->name();
     }
-  }
-}
-
-// Tests the default permissions (empty API permission set).
-TEST(PermissionsTest, DefaultFunctionAccess) {
-  const struct {
-    const char* permission_name;
-    bool expect_success;
-  } kTests[] = {
-    // Negative test.
-    { "non_existing_permission", false },
-    // Test default module/package permission.
-    { "browserAction",  true },
-    { "devtools",       true },
-    { "extension",      true },
-    { "i18n",           true },
-    { "pageAction",     true },
-    { "pageActions",    true },
-    { "test",           true },
-    // Some negative tests.
-    { "bookmarks",      false },
-    { "cookies",        false },
-    { "history",        false },
-    // Make sure we find the module name after stripping '.' and '/'.
-    { "browserAction/abcd/onClick",  true },
-    { "browserAction.abcd.onClick",  true },
-    // Test Tabs functions.
-    { "tabs.create",      true},
-    { "tabs.duplicate",   true},
-    { "tabs.update",      true},
-    { "tabs.getSelected", true},
-    { "tabs.onUpdated",   true },
-  };
-
-  scoped_refptr<PermissionSet> empty = new PermissionSet();
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
-    EXPECT_EQ(kTests[i].expect_success,
-              empty->HasAccessToFunction(kTests[i].permission_name, true))
-                  << "Permission being tested: " << kTests[i].permission_name;
-  }
-}
-
-// Tests the default permissions (empty API permission set).
-TEST(PermissionsTest, DefaultAnyAPIAccess) {
-  const struct {
-    const char* api_name;
-    bool expect_success;
-  } kTests[] = {
-    // Negative test.
-    { "non_existing_permission", false },
-    // Test default module/package permission.
-    { "browserAction",  true },
-    { "devtools",       true },
-    { "extension",      true },
-    { "i18n",           true },
-    { "pageAction",     true },
-    { "pageActions",    true },
-    { "test",           true },
-    // Some negative tests.
-    { "bookmarks",      false },
-    { "cookies",        false },
-    { "history",        false },
-    // Negative APIs that have positive individual functions.
-    { "management",     true},
-    { "tabs",           true},
-  };
-
-  scoped_refptr<PermissionSet> empty = new PermissionSet();
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
-    EXPECT_EQ(kTests[i].expect_success,
-              empty->HasAnyAccessToAPI(kTests[i].api_name));
   }
 }
 
@@ -893,7 +835,7 @@ TEST(PermissionsTest, GetWarningMessages_Serial) {
 }
 
 TEST(PermissionsTest, GetWarningMessages_Socket_AnyHost) {
-  Feature::ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
+  ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
 
   scoped_refptr<Extension> extension =
       LoadManifest("permissions", "socket_any_host.json");
@@ -907,7 +849,7 @@ TEST(PermissionsTest, GetWarningMessages_Socket_AnyHost) {
 }
 
 TEST(PermissionsTest, GetWarningMessages_Socket_OneDomainTwoHostnames) {
-  Feature::ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
+  ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
 
   scoped_refptr<Extension> extension =
       LoadManifest("permissions", "socket_one_domain_two_hostnames.json");
@@ -933,7 +875,7 @@ TEST(PermissionsTest, GetWarningMessages_Socket_OneDomainTwoHostnames) {
 }
 
 TEST(PermissionsTest, GetWarningMessages_Socket_TwoDomainsOneHostname) {
-  Feature::ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
+  ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
 
   scoped_refptr<Extension> extension =
       LoadManifest("permissions", "socket_two_domains_one_hostname.json");
@@ -1224,6 +1166,7 @@ TEST(PermissionsTest,
 }
 
 TEST(PermissionsTest, HasLessHostPrivilegesThan) {
+  Manifest::Type extension_type = Manifest::TYPE_EXTENSION;
   URLPatternSet elist1;
   URLPatternSet elist2;
   URLPatternSet slist1;
@@ -1245,31 +1188,31 @@ TEST(PermissionsTest, HasLessHostPrivilegesThan) {
   set1 = new PermissionSet(empty_perms, elist1, slist1);
   set2 = new PermissionSet(empty_perms, elist2, slist2);
 
-  EXPECT_FALSE(set1->HasLessHostPrivilegesThan(set2.get()));
-  EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get()));
+  EXPECT_FALSE(set1->HasLessHostPrivilegesThan(set2.get(), extension_type));
+  EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get(), extension_type));
 
   // Test that paths are ignored.
   elist2.ClearPatterns();
   elist2.AddPattern(
       URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com/*"));
   set2 = new PermissionSet(empty_perms, elist2, slist2);
-  EXPECT_FALSE(set1->HasLessHostPrivilegesThan(set2.get()));
-  EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get()));
+  EXPECT_FALSE(set1->HasLessHostPrivilegesThan(set2.get(), extension_type));
+  EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get(), extension_type));
 
   // Test that RCDs are ignored.
   elist2.ClearPatterns();
   elist2.AddPattern(
       URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com.hk/*"));
   set2 = new PermissionSet(empty_perms, elist2, slist2);
-  EXPECT_FALSE(set1->HasLessHostPrivilegesThan(set2.get()));
-  EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get()));
+  EXPECT_FALSE(set1->HasLessHostPrivilegesThan(set2.get(), extension_type));
+  EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get(), extension_type));
 
   // Test that subdomain wildcards are handled properly.
   elist2.ClearPatterns();
   elist2.AddPattern(
       URLPattern(URLPattern::SCHEME_HTTP, "http://*.google.com.hk/*"));
   set2 = new PermissionSet(empty_perms, elist2, slist2);
-  EXPECT_TRUE(set1->HasLessHostPrivilegesThan(set2.get()));
+  EXPECT_TRUE(set1->HasLessHostPrivilegesThan(set2.get(), extension_type));
   // TODO(jstritar): Does not match subdomains properly. http://crbug.com/65337
   // EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get()));
 
@@ -1280,16 +1223,21 @@ TEST(PermissionsTest, HasLessHostPrivilegesThan) {
   elist2.AddPattern(
       URLPattern(URLPattern::SCHEME_HTTP, "http://www.example.org/path"));
   set2 = new PermissionSet(empty_perms, elist2, slist2);
-  EXPECT_TRUE(set1->HasLessHostPrivilegesThan(set2.get()));
-  EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get()));
+  EXPECT_TRUE(set1->HasLessHostPrivilegesThan(set2.get(), extension_type));
+  EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get(), extension_type));
 
   // Test that different subdomains count as different hosts.
   elist2.ClearPatterns();
   elist2.AddPattern(
       URLPattern(URLPattern::SCHEME_HTTP, "http://mail.google.com/*"));
   set2 = new PermissionSet(empty_perms, elist2, slist2);
-  EXPECT_TRUE(set1->HasLessHostPrivilegesThan(set2.get()));
-  EXPECT_TRUE(set2->HasLessHostPrivilegesThan(set1.get()));
+  EXPECT_TRUE(set1->HasLessHostPrivilegesThan(set2.get(), extension_type));
+  EXPECT_TRUE(set2->HasLessHostPrivilegesThan(set1.get(), extension_type));
+
+  // Test that platform apps do not have host permissions increases.
+  extension_type = Manifest::TYPE_PLATFORM_APP;
+  EXPECT_FALSE(set1->HasLessHostPrivilegesThan(set2.get(), extension_type));
+  EXPECT_FALSE(set2->HasLessHostPrivilegesThan(set1.get(), extension_type));
 }
 
 TEST(PermissionsTest, GetAPIsAsStrings) {

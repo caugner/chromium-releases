@@ -23,7 +23,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/constants.h"
-#include "googleurl/src/gurl.h"
 #include "grit/app_locale_settings.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_strings.h"
@@ -40,7 +39,7 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/font.h"
+#include "ui/gfx/font_list.h"
 #include "ui/gfx/selection_model.h"
 #include "ui/views/border.h"
 #include "ui/views/button_drag_utils.h"
@@ -49,6 +48,7 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
+#include "url/gurl.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/focus_manager.h"
@@ -88,6 +88,11 @@ void DoCopyURL(const GURL& url, const string16& text) {
   data.WriteToClipboard();
 }
 
+bool IsOmniboxAutoCompletionForImeEnabled() {
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableOmniboxAutoCompletionForIme);
+}
+
 }  // namespace
 
 // static
@@ -99,7 +104,7 @@ OmniboxViewViews::OmniboxViewViews(OmniboxEditController* controller,
                                    CommandUpdater* command_updater,
                                    bool popup_window_mode,
                                    LocationBarView* location_bar,
-                                   const gfx::Font& font,
+                                   const gfx::FontList& font_list,
                                    int font_y_offset)
     : OmniboxView(profile, controller, toolbar_model, command_updater),
       popup_window_mode_(popup_window_mode),
@@ -112,7 +117,7 @@ OmniboxViewViews::OmniboxViewViews(OmniboxEditController* controller,
       select_all_on_gesture_tap_(false) {
   RemoveBorder();
   set_id(VIEW_ID_OMNIBOX);
-  SetFont(font);
+  SetFontList(font_list);
   SetVerticalMargins(font_y_offset, 0);
   SetVerticalAlignment(gfx::ALIGN_TOP);
 }
@@ -142,7 +147,7 @@ void OmniboxViewViews::Init() {
 
   // Initialize the popup view using the same font.
   popup_view_.reset(OmniboxPopupContentsView::Create(
-      font(), this, model(), location_bar_view_));
+      font_list(), this, model(), location_bar_view_));
 
 #if defined(OS_CHROMEOS)
   chromeos::input_method::InputMethodManager::Get()->
@@ -360,11 +365,10 @@ void OmniboxViewViews::Update(const content::WebContents* contents) {
   bool visibly_changed_permanent_text =
       model()->UpdatePermanentText(toolbar_model()->GetText(true));
   ToolbarModel::SecurityLevel security_level =
-        toolbar_model()->GetSecurityLevel();
+        toolbar_model()->GetSecurityLevel(false);
   bool changed_security_level = (security_level != security_level_);
   security_level_ = security_level;
 
-  // TODO(msw|oshima): Copied from GTK, determine correct Win/CrOS behavior.
   if (contents) {
     RevertAll();
     const OmniboxState* state = static_cast<OmniboxState*>(
@@ -377,7 +381,30 @@ void OmniboxViewViews::Update(const content::WebContents* contents) {
       ClearEditHistory();
     }
   } else if (visibly_changed_permanent_text) {
+    // Not switching tabs, just updating the permanent text.  (In the case where
+    // we _were_ switching tabs, the RevertAll() above already drew the new
+    // permanent text.)
+
+    // Tweak: if the user had all the text selected, select all the new text.
+    // This makes one particular case better: the user clicks in the box to
+    // change it right before the permanent URL is changed.  Since the new URL
+    // is still fully selected, the user's typing will replace the edit contents
+    // as they'd intended.
+    const ui::Range range(GetSelectedRange());
+    const bool was_select_all = (range.length() == text().length());
+
     RevertAll();
+
+    // Only select all when we have focus.  If we don't have focus, selecting
+    // all is unnecessary since the selection will change on regaining focus,
+    // and can in fact cause artifacts, e.g. if the user is on the NTP and
+    // clicks a link to navigate, causing |was_select_all| to be vacuously true
+    // for the empty omnibox, and we then select all here, leading to the
+    // trailing portion of a long URL being scrolled into view.  We could try
+    // and address cases like this, but it seems better to just not muck with
+    // things when the omnibox isn't focused to begin with.
+    if (was_select_all && model()->has_focus())
+      SelectAll(range.is_reversed());
   } else if (changed_security_level) {
     EmphasizeURLComponents();
   }
@@ -446,8 +473,7 @@ void OmniboxViewViews::UpdatePopup() {
   model()->StartAutocomplete(
       !sel.is_empty(),
       sel.GetMax() < text().length() ||
-      (IsIMEComposing() && !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableOmniboxAutoCompletionForIme)));
+      (IsIMEComposing() && !IsOmniboxAutoCompletionForImeEnabled()));
 }
 
 void OmniboxViewViews::SetFocus() {
@@ -495,16 +521,9 @@ bool OmniboxViewViews::OnInlineAutocompleteTextMaybeChanged(
 void OmniboxViewViews::OnRevertTemporaryText() {
   SelectRange(saved_temporary_selection_);
   // We got here because the user hit the Escape key. We explicitly don't call
-  // TextChanged(), since calling it breaks Instant-Extended, and isn't needed
-  // otherwise (in regular non-Instant or Instant-but-not-Extended modes).
-  //
-  // Why it breaks Instant-Extended: Instant handles the Escape key separately
-  // (cf: OmniboxEditModel::RevertTemporaryText). Calling TextChanged() makes
-  // the page think the user additionally typed some text, causing it to update
-  // its suggestions dropdown with new suggestions, which is wrong.
-  //
-  // Why it isn't needed: OmniboxPopupModel::ResetToDefaultMatch() has already
-  // been called by now; it would've called TextChanged() if it was warranted.
+  // TextChanged(), since OmniboxPopupModel::ResetToDefaultMatch() has already
+  // been called by now, and it would've called TextChanged() if it was
+  // warranted.
 }
 
 void OmniboxViewViews::OnBeforePossibleChange() {
@@ -559,15 +578,15 @@ gfx::NativeView OmniboxViewViews::GetRelativeWindowForPopup() const {
   return GetWidget()->GetTopLevelWidget()->GetNativeView();
 }
 
-void OmniboxViewViews::SetInstantSuggestion(const string16& input) {
+void OmniboxViewViews::SetGrayTextAutocompletion(const string16& input) {
 #if defined(OS_WIN) || defined(USE_AURA)
-  location_bar_view_->SetInstantSuggestion(input);
+  location_bar_view_->SetGrayTextAutocompletion(input);
 #endif
 }
 
-string16 OmniboxViewViews::GetInstantSuggestion() const {
+string16 OmniboxViewViews::GetGrayTextAutocompletion() const {
 #if defined(OS_WIN) || defined(USE_AURA)
-  return location_bar_view_->GetInstantSuggestion();
+  return location_bar_view_->GetGrayTextAutocompletion();
 #else
   return string16();
 #endif
@@ -585,15 +604,7 @@ bool OmniboxViewViews::IsImeShowingPopup() const {
 #if defined(OS_CHROMEOS)
   return ime_candidate_window_open_;
 #else
-  // We need const_cast here because there is no const version of
-  // View::GetInputMethod().  It's because Widget::GetInputMethod(), called from
-  // View::GetInputMethod(), creates a new views::InputMethod at the first-time
-  // call.  Except for this point, none of this method, View::GetInputMethod()
-  // or Widget::GetInputMethod() modifies the state of their instances.
-  // TODO(yukishiino): Make {View,Widget}::GetInputMethod() const and make the
-  // underlying input method object mutable.
-  const views::InputMethod* input_method =
-      const_cast<OmniboxViewViews*>(this)->GetInputMethod();
+  const views::InputMethod* input_method = this->GetInputMethod();
   return input_method && input_method->IsCandidatePopupOpen();
 #endif
 }
@@ -639,7 +650,7 @@ bool OmniboxViewViews::HandleKeyEvent(views::Textfield* textfield,
   }
 
   // Handle the right-arrow key for LTR text and the left-arrow key for RTL text
-  // if there is an Instant suggestion (gray text) that needs to be committed.
+  // if there is gray text that needs to be committed.
   if (GetCursorPosition() == text().length()) {
     base::i18n::TextDirection direction = GetTextDirection();
     if ((direction == base::i18n::LEFT_TO_RIGHT &&
@@ -764,7 +775,7 @@ bool OmniboxViewViews::IsCommandIdEnabled(int command_id) const {
   if (command_id == IDS_PASTE_AND_GO)
     return model()->CanPasteAndGo(GetClipboardText());
   if (command_id == IDC_COPY_URL) {
-    return toolbar_model()->WouldReplaceSearchURLWithSearchTerms() &&
+    return toolbar_model()->WouldReplaceSearchURLWithSearchTerms(false) &&
       !model()->user_input_in_progress();
   }
   return command_updater()->IsCommandEnabled(command_id);
@@ -831,7 +842,7 @@ void OmniboxViewViews::CandidateWindowClosed(
 // OmniboxViewViews, private:
 
 int OmniboxViewViews::GetOmniboxTextLength() const {
-  // TODO(oshima): Support instant, IME.
+  // TODO(oshima): Support IME.
   return static_cast<int>(text().length());
 }
 
@@ -881,7 +892,7 @@ void OmniboxViewViews::SetTextAndSelectedRange(const string16& text,
 }
 
 string16 OmniboxViewViews::GetSelectedText() const {
-  // TODO(oshima): Support instant, IME.
+  // TODO(oshima): Support IME.
   return views::Textfield::GetSelectedText();
 }
 

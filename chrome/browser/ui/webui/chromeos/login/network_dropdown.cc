@@ -8,7 +8,7 @@
 
 #include "ash/system/chromeos/network/network_icon.h"
 #include "ash/system/chromeos/network/network_icon_animation.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
@@ -109,10 +109,13 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
 
 // NetworkDropdown -------------------------------------------------------------
 
-NetworkDropdown::NetworkDropdown(content::WebUI* web_ui,
+NetworkDropdown::NetworkDropdown(Actor* actor,
+                                 content::WebUI* web_ui,
                                  bool oobe)
-    : web_ui_(web_ui),
+    : actor_(actor),
+      web_ui_(web_ui),
       oobe_(oobe) {
+  DCHECK(actor_);
   network_menu_.reset(new NetworkMenuWebUI(this, web_ui));
   DCHECK(NetworkHandler::IsInitialized());
   NetworkStateHandler* handler = NetworkHandler::Get()->network_state_handler();
@@ -147,6 +150,11 @@ void NetworkDropdown::OpenButtonOptions() {
 
 bool NetworkDropdown::ShouldOpenButtonOptions() const {
   return !oobe_;
+}
+
+void NetworkDropdown::OnConnectToNetworkRequested(
+    const std::string& service_path) {
+  actor_->OnConnectToNetworkRequested(service_path);
 }
 
 void NetworkDropdown::DefaultNetworkChanged(const NetworkState* network) {

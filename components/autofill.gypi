@@ -33,7 +33,7 @@
             '../base/base.gyp:base',
             '../content/content.gyp:content_common',
             '../ipc/ipc.gyp:ipc',
-            '../third_party/WebKit/public/blink.gyp:blink',
+            '../third_party/WebKit/public/blink.gyp:blink_minimal',
             '../ui/ui.gyp:ui',
             '../url/url.gyp:url_lib',
           ],
@@ -110,7 +110,7 @@
             '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber',
             '../ui/ui.gyp:ui',
             '../url/url.gyp:url_lib',
-            '../webkit/support/webkit_support.gyp:webkit_resources',
+            '../webkit/webkit_resources.gyp:webkit_resources',
 
             'component_strings.gyp:component_strings',
           ],
@@ -215,6 +215,32 @@
         },
 
         {
+          'target_name': 'autofill_core_test_support',
+          'type': 'static_library',
+          'dependencies': [
+            'autofill_core_common',
+            'autofill_core_browser',
+            '../testing/gtest.gyp:gtest',
+          ],
+          'sources': [
+            'autofill/core/browser/android/test_auxiliary_profile_loader_android.cc',
+            'autofill/core/browser/android/test_auxiliary_profile_loader_android.h',
+            'autofill/core/browser/autofill_common_test.cc',
+            'autofill/core/browser/autofill_common_test.h',
+            'autofill/core/browser/data_driven_test.cc',
+            'autofill/core/browser/data_driven_test.h',
+            'autofill/core/browser/test_autofill_driver.cc',
+            'autofill/core/browser/test_autofill_driver.h',
+            'autofill/core/browser/test_autofill_external_delegate.cc',
+            'autofill/core/browser/test_autofill_external_delegate.h',
+            'autofill/core/browser/test_autofill_manager_delegate.cc',
+            'autofill/core/browser/test_autofill_manager_delegate.h',
+            'autofill/core/browser/test_personal_data_manager.cc',
+            'autofill/core/browser/test_personal_data_manager.h',
+          ],
+        },
+
+        {
           # Protobuf compiler / generate rule for Autofill's risk integration.
           'target_name': 'autofill_content_risk_proto',
           'type': 'static_library',
@@ -228,9 +254,14 @@
           'includes': [ '../build/protoc.gypi' ]
         },
        {
-         'target_name': 'autofill_content_test_util',
+         'target_name': 'autofill_content_test_support',
          'type': 'static_library',
+         'dependencies': [
+            '../testing/gmock.gyp:gmock',
+         ],
          'sources': [
+           'autofill/content/browser/wallet/mock_wallet_client.cc',
+           'autofill/content/browser/wallet/mock_wallet_client.h',
            'autofill/content/browser/wallet/wallet_test_util.cc',
            'autofill/content/browser/wallet/wallet_test_util.h',
          ],
@@ -265,7 +296,7 @@
             '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber',
             '../ui/ui.gyp:ui',
             '../url/url.gyp:url_lib',
-            '../webkit/support/webkit_support.gyp:webkit_resources',
+            '../webkit/webkit_resources.gyp:webkit_resources',
 
             'component_strings.gyp:component_strings',
           ],
@@ -278,13 +309,13 @@
             'autofill/content/browser/autocheckout_page_meta_data.h',
             'autofill/content/browser/autocheckout_request_manager.cc',
             'autofill/content/browser/autocheckout_request_manager.h',
+            'autofill/content/browser/autocheckout_statistic.cc',
+            'autofill/content/browser/autocheckout_statistic.h',
+            'autofill/content/browser/autocheckout_steps.h',
             'autofill/content/browser/autofill_driver_impl.cc',
             'autofill/content/browser/autofill_driver_impl.h',
             'autofill/content/browser/risk/fingerprint.cc',
             'autofill/content/browser/risk/fingerprint.h',
-            'autofill/content/browser/wallet/encryption_escrow_client.cc',
-            'autofill/content/browser/wallet/encryption_escrow_client.h',
-            'autofill/content/browser/wallet/encryption_escrow_client_observer.h',
             'autofill/content/browser/wallet/form_field_error.cc',
             'autofill/content/browser/wallet/form_field_error.h',
             'autofill/content/browser/wallet/full_wallet.cc',

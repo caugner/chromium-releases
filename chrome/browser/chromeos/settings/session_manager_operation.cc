@@ -7,11 +7,11 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/settings/owner_key_util.h"
 #include "chrome/browser/policy/cloud/cloud_policy_constants.h"
 #include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
@@ -236,7 +236,7 @@ void SignAndStoreSettingsOperation::Run() {
 }
 
 void SignAndStoreSettingsOperation::StartSigning() {
-  if (!owner_key() || !owner_key()->private_key() || username_.empty()) {
+  if (!owner_key().get() || !owner_key()->private_key() || username_.empty()) {
     ReportResult(DeviceSettingsService::STORE_KEY_UNAVAILABLE);
     return;
   }

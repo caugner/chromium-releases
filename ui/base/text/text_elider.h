@@ -12,8 +12,8 @@
 
 #include "base/basictypes.h"
 #include "base/strings/string16.h"
-#include "third_party/icu/public/common/unicode/uchar.h"
-#include "third_party/icu/public/i18n/unicode/coll.h"
+#include "third_party/icu/source/common/unicode/uchar.h"
+#include "third_party/icu/source/i18n/unicode/coll.h"
 #include "ui/base/ui_export.h"
 #include "ui/gfx/font.h"
 
@@ -26,6 +26,7 @@ class FilePath;
 namespace ui {
 
 UI_EXPORT extern const char kEllipsis[];
+UI_EXPORT extern const char16 kEllipsisUTF16[];
 
 // Elides a well-formed email address (e.g. username@domain.com) to fit into
 // |available_pixel_width| using the specified |font|.

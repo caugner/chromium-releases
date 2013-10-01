@@ -51,21 +51,13 @@ PluginPrefsFactory::BuildServiceInstanceFor(
   return plugin_prefs;
 }
 
-void PluginPrefsFactory::RegisterUserPrefs(
+void PluginPrefsFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   base::FilePath internal_dir;
   PathService::Get(chrome::DIR_INTERNAL_PLUGINS, &internal_dir);
   registry->RegisterFilePathPref(
       prefs::kPluginsLastInternalDirectory,
       internal_dir,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kPluginsEnabledInternalPDF,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kPluginsEnabledNaCl,
-      false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kPluginsMigratedToPepperFlash,

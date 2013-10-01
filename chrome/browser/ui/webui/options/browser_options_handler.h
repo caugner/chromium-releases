@@ -10,26 +10,27 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_member.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "ui/base/models/table_model_observer.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/system/pointer_device_observer.h"
-#else
-#include "base/prefs/pref_change_registrar.h"
 #endif  // defined(OS_CHROMEOS)
 
 class AutocompleteController;
 class CloudPrintSetupHandler;
 class CustomHomePagesTableModel;
+class ManagedUserRegistrationUtility;
 class TemplateURLService;
 
 namespace options {
@@ -58,13 +59,6 @@ class BrowserOptionsHandler
   // ProfileSyncServiceObserver implementation.
   virtual void OnStateChanged() OVERRIDE;
 
-  // Will be called when the kSigninAllowed pref has changed.
-  void OnSigninAllowedPrefChange();
-
-  // Called whenever prefs::kSearchSuggestEnabled or the default search engine
-  // changes, so that we can update the state of the Instant pref checkbox.
-  void UpdateInstantCheckboxState();
-
   // ShellIntegration::DefaultWebClientObserver implementation.
   virtual void SetDefaultWebClientUIState(
       ShellIntegration::DefaultWebClientUIState state) OVERRIDE;
@@ -79,7 +73,9 @@ class BrowserOptionsHandler
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+#if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
   void OnCloudPrintPrefsChanged();
+#endif
 
   // SelectFileDialog::Listener implementation
   virtual void FileSelected(const base::FilePath& path,
@@ -91,6 +87,11 @@ class BrowserOptionsHandler
   virtual void TouchpadExists(bool exists) OVERRIDE;
   virtual void MouseExists(bool exists) OVERRIDE;
 #endif
+
+  void UpdateSyncState();
+
+  // Will be called when the kSigninAllowed pref has changed.
+  void OnSigninAllowedPrefChange();
 
   // Makes this the default browser. Called from WebUI.
   void BecomeDefaultBrowser(const base::ListValue* args);
@@ -153,13 +154,11 @@ class BrowserOptionsHandler
   void CreateProfile(const base::ListValue* args);
 
   // After a new managed-user profile has been created, registers the user with
-  // the management server. This is a class method to ensure that the
-  // registration service (on the custodian's profile, along with this WebUI
-  // class) still exists after the new managed profile has been created
-  // asynchronously.
-  void RegisterNewManagedUser(const ProfileManager::CreateCallback& callback,
-                              Profile* new_profile,
-                              Profile::CreateStatus status);
+  // the management server.
+  void RegisterManagedUser(const ProfileManager::CreateCallback& callback,
+                           const std::string& managed_user_id,
+                           Profile* new_profile,
+                           Profile::CreateStatus status);
 
   // Records UMA histograms relevant to profile creation.
   void RecordProfileCreationMetrics(Profile::CreateStatus status);
@@ -231,6 +230,9 @@ class BrowserOptionsHandler
   // Callback for the "restartBrowser" message. Restores all tabs on restart.
   void HandleRestartBrowser(const ListValue* args);
 
+  // Callback for "requestProfilesInfo" message.
+  void HandleRequestProfilesInfo(const ListValue* args);
+
 #if !defined(OS_CHROMEOS)
   // Callback for the "showNetworkProxySettings" message. This will invoke
   // an appropriate dialog for configuring proxy settings.
@@ -243,6 +245,7 @@ class BrowserOptionsHandler
   void ShowManageSSLCertificates(const ListValue* args);
 #endif
 
+#if defined(ENABLE_FULL_PRINTING)
   // Callback for the Cloud Print manage button. This will open a new
   // tab pointed at the management URL.
   void ShowCloudPrintManagePage(const ListValue* args);
@@ -269,7 +272,8 @@ class BrowserOptionsHandler
   // Remove cloud print connector section if cloud print connector management
   //  UI is disabled.
   void RemoveCloudPrintConnectorSection();
-#endif
+#endif  // defined(OS_CHROMEOS)
+#endif  // defined(ENABLE_FULL_PRINTING)
 
 #if defined(OS_CHROMEOS)
   // Opens the wallpaper manager component extension.
@@ -308,6 +312,9 @@ class BrowserOptionsHandler
   void SetupAccessibilityFeatures();
 #endif
 
+  bool IsValidExistingManagedUserId(
+      const std::string& existing_managed_user_id) const;
+
   // Returns a newly created dictionary with a number of properties that
   // correspond to the status of sync.
   scoped_ptr<DictionaryValue> GetSyncStateDictionary();
@@ -334,7 +341,7 @@ class BrowserOptionsHandler
 
   scoped_refptr<ui::SelectFileDialog> select_folder_dialog_;
 
-#if !defined(OS_CHROMEOS)
+#if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
   StringPrefMember cloud_print_connector_email_;
   BooleanPrefMember cloud_print_connector_enabled_;
   bool cloud_print_connector_ui_enabled_;
@@ -344,6 +351,8 @@ class BrowserOptionsHandler
   DoublePrefMember default_zoom_level_;
 
   PrefChangeRegistrar profile_pref_registrar_;
+
+  scoped_ptr<ManagedUserRegistrationUtility> managed_user_registration_utility_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserOptionsHandler);
 };

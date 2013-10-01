@@ -8,24 +8,11 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/google_apis/auth_service_observer.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/token_service.h"
-#include "chrome/browser/signin/token_service_factory.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
-#include "google_apis/gaia/gaia_constants.h"
-#include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "google_apis/gaia/oauth2_access_token_fetcher.h"
-
-#if defined(OS_CHROMEOS)
-#include "chromeos/login/login_state.h"
-#endif  // OS_CHROMEOS
 
 namespace google_apis {
 
@@ -39,62 +26,50 @@ const int kSuccessRatioHistogramNoConnection = 2;
 const int kSuccessRatioHistogramTemporaryFailure = 3;
 const int kSuccessRatioHistogramMaxValue = 4;  // The max value is exclusive.
 
-}  // namespace
-
 // OAuth2 authorization token retrieval request.
-class AuthRequest : public OAuth2AccessTokenConsumer {
+class AuthRequest : public OAuth2TokenService::Consumer {
  public:
-  AuthRequest(net::URLRequestContextGetter* url_request_context_getter,
+  AuthRequest(OAuth2TokenService* oauth2_token_service,
+              net::URLRequestContextGetter* url_request_context_getter,
               const AuthStatusCallback& callback,
-              const std::vector<std::string>& scopes,
-              const std::string& refresh_token);
+              const std::vector<std::string>& scopes);
   virtual ~AuthRequest();
-  void Start();
-
-  // Overridden from OAuth2AccessTokenConsumer:
-  virtual void OnGetTokenSuccess(const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const GoogleServiceAuthError& error) OVERRIDE;
 
  private:
-  net::URLRequestContextGetter* url_request_context_getter_;
-  std::string refresh_token_;
+  // Overridden from OAuth2TokenService::Consumer:
+  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                                 const std::string& access_token,
+                                 const base::Time& expiration_time) OVERRIDE;
+  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                                 const GoogleServiceAuthError& error) OVERRIDE;
+
   AuthStatusCallback callback_;
-  std::vector<std::string> scopes_;
-  scoped_ptr<OAuth2AccessTokenFetcher> oauth2_access_token_fetcher_;
+  scoped_ptr<OAuth2TokenService::Request> request_;
   base::ThreadChecker thread_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(AuthRequest);
 };
 
 AuthRequest::AuthRequest(
+    OAuth2TokenService* oauth2_token_service,
     net::URLRequestContextGetter* url_request_context_getter,
     const AuthStatusCallback& callback,
-    const std::vector<std::string>& scopes,
-    const std::string& refresh_token)
-    : url_request_context_getter_(url_request_context_getter),
-      refresh_token_(refresh_token),
-      callback_(callback),
-      scopes_(scopes) {
+    const std::vector<std::string>& scopes)
+    : callback_(callback) {
   DCHECK(!callback_.is_null());
+  request_ = oauth2_token_service->
+      StartRequestWithContext(
+          url_request_context_getter,
+          OAuth2TokenService::ScopeSet(scopes.begin(), scopes.end()),
+          this);
 }
 
 AuthRequest::~AuthRequest() {}
 
-void AuthRequest::Start() {
-  DCHECK(!refresh_token_.empty());
-  oauth2_access_token_fetcher_.reset(new OAuth2AccessTokenFetcher(
-      this, url_request_context_getter_));
-  oauth2_access_token_fetcher_->Start(
-      GaiaUrls::GetInstance()->oauth2_chrome_client_id(),
-      GaiaUrls::GetInstance()->oauth2_chrome_client_secret(),
-      refresh_token_,
-      scopes_);
-}
-
 // Callback for OAuth2AccessTokenFetcher on success. |access_token| is the token
 // used to start fetching user data.
-void AuthRequest::OnGetTokenSuccess(const std::string& access_token,
+void AuthRequest::OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                                    const std::string& access_token,
                                     const base::Time& expiration_time) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -107,7 +82,8 @@ void AuthRequest::OnGetTokenSuccess(const std::string& access_token,
 }
 
 // Callback for OAuth2AccessTokenFetcher on failure.
-void AuthRequest::OnGetTokenFailure(const GoogleServiceAuthError& error) {
+void AuthRequest::OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                                    const GoogleServiceAuthError& error) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   LOG(WARNING) << "AuthRequest: token request using refresh token failed: "
@@ -137,35 +113,25 @@ void AuthRequest::OnGetTokenFailure(const GoogleServiceAuthError& error) {
   delete this;
 }
 
-void AuthService::Initialize(Profile* profile) {
-  profile_ = profile;
-  // Get OAuth2 refresh token (if we have any) and register for its updates.
-  TokenService* service = TokenServiceFactory::GetForProfile(profile_);
-  refresh_token_ = service->GetOAuth2LoginRefreshToken();
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_TOKEN_AVAILABLE,
-                 content::Source<TokenService>(service));
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_TOKEN_REQUEST_FAILED,
-                 content::Source<TokenService>(service));
-
-  if (!refresh_token_.empty())
-    FOR_EACH_OBSERVER(AuthServiceObserver,
-                      observers_,
-                      OnOAuth2RefreshTokenChanged());
-}
+}  // namespace
 
 AuthService::AuthService(
+    OAuth2TokenService* oauth2_token_service,
     net::URLRequestContextGetter* url_request_context_getter,
     const std::vector<std::string>& scopes)
-    : profile_(NULL),
+    : oauth2_token_service_(oauth2_token_service),
       url_request_context_getter_(url_request_context_getter),
       scopes_(scopes),
       weak_ptr_factory_(this) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(oauth2_token_service);
+
+  // Get OAuth2 refresh token (if we have any) and register for its updates.
+  oauth2_token_service_->AddObserver(this);
+  has_refresh_token_ = oauth2_token_service_->RefreshTokenIsAvailable();
 }
 
 AuthService::~AuthService() {
+  oauth2_token_service_->RemoveObserver(this);
 }
 
 void AuthService::StartAuthentication(const AuthStatusCallback& callback) {
@@ -179,12 +145,12 @@ void AuthService::StartAuthentication(const AuthStatusCallback& callback) {
                           base::Bind(callback, HTTP_SUCCESS, access_token_));
   } else if (HasRefreshToken()) {
     // We have refresh token, let's get an access token.
-    (new AuthRequest(url_request_context_getter_,
-                     base::Bind(&AuthService::OnAuthCompleted,
-                                weak_ptr_factory_.GetWeakPtr(),
-                                callback),
-                     scopes_,
-                     refresh_token_))->Start();
+    new AuthRequest(oauth2_token_service_,
+                    url_request_context_getter_,
+                    base::Bind(&AuthService::OnAuthCompleted,
+                               weak_ptr_factory_.GetWeakPtr(),
+                               callback),
+                    scopes_);
   } else {
     relay_proxy->PostTask(FROM_HERE,
                           base::Bind(callback, GDATA_NOT_READY, std::string()));
@@ -196,7 +162,7 @@ bool AuthService::HasAccessToken() const {
 }
 
 bool AuthService::HasRefreshToken() const {
-  return !refresh_token_.empty();
+  return has_refresh_token_;
 }
 
 const std::string& AuthService::access_token() const {
@@ -208,7 +174,7 @@ void AuthService::ClearAccessToken() {
 }
 
 void AuthService::ClearRefreshToken() {
-  refresh_token_.clear();
+  has_refresh_token_ = false;
 
   FOR_EACH_OBSERVER(AuthServiceObserver,
                     observers_,
@@ -246,43 +212,22 @@ void AuthService::RemoveObserver(AuthServiceObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void AuthService::Observe(int type,
-                          const content::NotificationSource& source,
-                          const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_TOKEN_AVAILABLE ||
-         type == chrome::NOTIFICATION_TOKEN_REQUEST_FAILED);
+void AuthService::OnRefreshTokenAvailable(const std::string& account_id) {
+  OnHandleRefreshToken(true);
+}
 
-  TokenService::TokenAvailableDetails* token_details =
-      content::Details<TokenService::TokenAvailableDetails>(details).ptr();
-  if (token_details->service() != GaiaConstants::kGaiaOAuth2LoginRefreshToken)
-    return;
+void AuthService::OnRefreshTokenRevoked(const std::string& account_id,
+                                        const GoogleServiceAuthError& error) {
+  OnHandleRefreshToken(false);
+}
 
+void AuthService::OnHandleRefreshToken(bool has_refresh_token) {
   access_token_.clear();
-  if (type == chrome::NOTIFICATION_TOKEN_AVAILABLE) {
-    TokenService* service = TokenServiceFactory::GetForProfile(profile_);
-    refresh_token_ = service->GetOAuth2LoginRefreshToken();
-  } else {
-    refresh_token_.clear();
-  }
+  has_refresh_token_ = has_refresh_token;
+
   FOR_EACH_OBSERVER(AuthServiceObserver,
                     observers_,
                     OnOAuth2RefreshTokenChanged());
-}
-
-// static
-bool AuthService::CanAuthenticate(Profile* profile) {
-#if defined(OS_CHROMEOS)
-  if (!chromeos::LoginState::IsInitialized())
-    return false;
-  if (!chromeos::LoginState::Get()->IsUserGaiaAuthenticated())
-    return false;
-#endif  // OS_CHROMEOS
-
-  // Authentication cannot be done with the incognito mode profile.
-  if (profile->IsOffTheRecord())
-    return false;
-
-  return true;
 }
 
 }  // namespace google_apis

@@ -12,26 +12,23 @@
 #include "base/i18n/rtl.h"
 #include "base/i18n/time_formatting.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/web_history_service.h"
 #include "chrome/browser/history/web_history_service_factory.h"
-#include "chrome/browser/managed_mode/managed_mode_navigation_observer.h"
-#include "chrome/browser/managed_mode/managed_mode_url_filter.h"
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sync/glue/device_info.h"
@@ -40,10 +37,9 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -56,7 +52,15 @@
 #include "net/base/escape.h"
 #include "sync/protocol/history_delete_directive_specifics.pb.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/time_format.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/managed_mode/managed_mode_navigation_observer.h"
+#include "chrome/browser/managed_mode/managed_mode_url_filter.h"
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/managed_mode/managed_user_service_factory.h"
+#endif
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
@@ -169,7 +173,9 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kHistoryEnableGroupByDomain));
   source->AddBoolean("allowDeletingHistory",
-      prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory));
+                     prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory));
+  source->AddBoolean("isInstantExtendedApiEnabled",
+                     chrome::IsInstantExtendedAPIEnabled());
 
   source->SetJsonPath(kStringsJsFile);
   source->AddResourcePath(kHistoryJsFile, IDR_HISTORY_JS);
@@ -177,13 +183,8 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->SetDefaultResource(IDR_HISTORY_HTML);
   source->SetUseJsonJSFormatV2();
   source->DisableDenyXFrameOptions();
-
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  source->AddBoolean("isManagedProfile", false);
-#else
-  source->AddBoolean("isManagedProfile",
-      ManagedUserServiceFactory::GetForProfile(profile)->ProfileIsManaged());
-#endif
+  source->AddBoolean("isManagedProfile", profile->IsManaged());
+  source->AddBoolean("showDeleteVisitUI", !profile->IsManaged());
 
   return source;
 }
@@ -192,7 +193,7 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
 // indicator (e.g. today, yesterday).
 string16 getRelativeDateLocalized(const base::Time& visit_time) {
   base::Time midnight = base::Time::Now().LocalMidnight();
-  string16 date_str = TimeFormat::RelativeDate(visit_time, &midnight);
+  string16 date_str = ui::TimeFormat::RelativeDate(visit_time, &midnight);
   if (date_str.empty()) {
     date_str = base::TimeFormatFriendlyDate(visit_time);
   } else {
@@ -345,7 +346,7 @@ scoped_ptr<DictionaryValue> BrowsingHistoryHandler::HistoryEntry::ToValue(
     result->SetString("snippet", snippet);
   } else {
     base::Time midnight = base::Time::Now().LocalMidnight();
-    string16 date_str = TimeFormat::RelativeDate(time, &midnight);
+    string16 date_str = ui::TimeFormat::RelativeDate(time, &midnight);
     if (date_str.empty()) {
       date_str = base::TimeFormatFriendlyDate(time);
     } else {
@@ -367,8 +368,7 @@ scoped_ptr<DictionaryValue> BrowsingHistoryHandler::HistoryEntry::ToValue(
   result->SetString("deviceType", device_type);
 
 #if defined(ENABLE_MANAGED_USERS)
-  DCHECK(managed_user_service);
-  if (managed_user_service->ProfileIsManaged()) {
+  if (managed_user_service) {
     const ManagedModeURLFilter* url_filter =
         managed_user_service->GetURLFilterForUIThread();
     int filtering_behavior =
@@ -694,7 +694,8 @@ void BrowsingHistoryHandler::ReturnResultsToFrontEnd() {
   BookmarkModel* bookmark_model = BookmarkModelFactory::GetForProfile(profile);
   ManagedUserService* managed_user_service = NULL;
 #if defined(ENABLE_MANAGED_USERS)
-  managed_user_service = ManagedUserServiceFactory::GetForProfile(profile);
+  if (profile->IsManaged())
+    managed_user_service = ManagedUserServiceFactory::GetForProfile(profile);
 #endif
   ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
@@ -962,6 +963,7 @@ void BrowsingHistoryHandler::Observe(
 
 HistoryUI::HistoryUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   web_ui->AddMessageHandler(new BrowsingHistoryHandler());
+  web_ui->AddMessageHandler(new MetricsHandler());
 
 // On mobile we deal with foreign sessions differently.
 #if !defined(OS_ANDROID) && !defined(OS_IOS)

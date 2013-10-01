@@ -18,17 +18,20 @@
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
@@ -36,8 +39,8 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
 #include "content/public/browser/browser_thread.h"
-#include "googleurl/src/gurl.h"
 #include "ui/gfx/image/image_family.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -170,7 +173,7 @@ bool CreateShortcutOnDesktop(const base::FilePath& shortcut_filename,
 void DeleteShortcutOnDesktop(const base::FilePath& shortcut_filename) {
   base::FilePath desktop_path;
   if (PathService::Get(base::DIR_USER_DESKTOP, &desktop_path))
-    file_util::Delete(desktop_path.Append(shortcut_filename), false);
+    base::DeleteFile(desktop_path.Append(shortcut_filename), false);
 }
 
 // Creates a shortcut with |shortcut_filename| and |contents| in the system
@@ -438,6 +441,22 @@ bool GetNoDisplayFromDesktopFile(const std::string& shortcut_contents) {
   return nodisplay;
 }
 
+// Gets the path to the Chrome executable or wrapper script.
+// Returns an empty path if the executable path could not be found.
+base::FilePath GetChromeExePath() {
+  // Try to get the name of the wrapper script that launched Chrome.
+  scoped_ptr<base::Environment> environment(base::Environment::Create());
+  std::string wrapper_script;
+  if (environment->GetVar("CHROME_WRAPPER", &wrapper_script)) {
+    return base::FilePath(wrapper_script);
+  }
+
+  // Just return the name of the executable path for Chrome.
+  base::FilePath chrome_exe_path;
+  PathService::Get(base::FILE_EXE, &chrome_exe_path);
+  return chrome_exe_path;
+}
+
 } // namespace
 
 // static
@@ -487,6 +506,45 @@ bool ShellIntegration::IsFirefoxDefaultBrowser() {
 
 namespace ShellIntegrationLinux {
 
+bool GetDataWriteLocation(base::Environment* env, base::FilePath* search_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  std::string xdg_data_home;
+  std::string home;
+  if (env->GetVar("XDG_DATA_HOME", &xdg_data_home) && !xdg_data_home.empty()) {
+    *search_path = base::FilePath(xdg_data_home);
+    return true;
+  } else if (env->GetVar("HOME", &home) && !home.empty()) {
+    *search_path = base::FilePath(home).Append(".local").Append("share");
+    return true;
+  }
+  return false;
+}
+
+std::vector<base::FilePath> GetDataSearchLocations(base::Environment* env) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  std::vector<base::FilePath> search_paths;
+
+  base::FilePath write_location;
+  if (GetDataWriteLocation(env, &write_location))
+    search_paths.push_back(write_location);
+
+  std::string xdg_data_dirs;
+  if (env->GetVar("XDG_DATA_DIRS", &xdg_data_dirs) && !xdg_data_dirs.empty()) {
+    base::StringTokenizer tokenizer(xdg_data_dirs, ":");
+    while (tokenizer.GetNext()) {
+      base::FilePath data_dir(tokenizer.token());
+      search_paths.push_back(data_dir);
+    }
+  } else {
+    search_paths.push_back(base::FilePath("/usr/local/share"));
+    search_paths.push_back(base::FilePath("/usr/share"));
+  }
+
+  return search_paths;
+}
+
 std::string GetDesktopName(base::Environment* env) {
 #if defined(GOOGLE_CHROME_BUILD)
   return "google-chrome.desktop";
@@ -535,7 +593,7 @@ ShellIntegration::ShortcutLocations GetExistingShortcutLocations(
   // Determine whether there is a shortcut on desktop.
   if (!desktop_path.empty()) {
     locations.on_desktop =
-        file_util::PathExists(desktop_path.Append(shortcut_filename));
+        base::PathExists(desktop_path.Append(shortcut_filename));
   }
 
   // Determine whether there is a shortcut in the applications directory.
@@ -557,38 +615,13 @@ bool GetExistingShortcutContents(base::Environment* env,
                                  std::string* output) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  std::vector<base::FilePath> search_paths;
-
-  // Search paths as specified in the XDG Base Directory Specification.
-  // http://standards.freedesktop.org/basedir-spec/latest/
-  std::string xdg_data_home;
-  std::string home;
-  if (env->GetVar("XDG_DATA_HOME", &xdg_data_home) &&
-      !xdg_data_home.empty()) {
-    search_paths.push_back(base::FilePath(xdg_data_home));
-  } else if (env->GetVar("HOME", &home) && !home.empty()) {
-    search_paths.push_back(base::FilePath(home).Append(".local").Append(
-        "share"));
-  }
-
-  std::string xdg_data_dirs;
-  if (env->GetVar("XDG_DATA_DIRS", &xdg_data_dirs) &&
-      !xdg_data_dirs.empty()) {
-    base::StringTokenizer tokenizer(xdg_data_dirs, ":");
-    while (tokenizer.GetNext()) {
-      base::FilePath data_dir(tokenizer.token());
-      search_paths.push_back(data_dir);
-    }
-  } else {
-    search_paths.push_back(base::FilePath("/usr/local/share"));
-    search_paths.push_back(base::FilePath("/usr/share"));
-  }
+  std::vector<base::FilePath> search_paths = GetDataSearchLocations(env);
 
   for (std::vector<base::FilePath>::const_iterator i = search_paths.begin();
        i != search_paths.end(); ++i) {
     base::FilePath path = i->Append("applications").Append(desktop_filename);
     VLOG(1) << "Looking for desktop file in " << path.value();
-    if (file_util::PathExists(path)) {
+    if (base::PathExists(path)) {
       VLOG(1) << "Found desktop file at " << path.value();
       return file_util::ReadFileToString(path, output);
     }
@@ -610,7 +643,7 @@ base::FilePath GetWebShortcutFilename(const GURL& url) {
   base::FilePath filepath = desktop_path.Append(filename);
   base::FilePath alternative_filepath(filepath.value() + ".desktop");
   for (size_t i = 1; i < 100; ++i) {
-    if (file_util::PathExists(base::FilePath(alternative_filepath))) {
+    if (base::PathExists(base::FilePath(alternative_filepath))) {
       alternative_filepath = base::FilePath(
           filepath.value() + "_" + base::IntToString(i) + ".desktop");
     } else {
@@ -632,7 +665,36 @@ base::FilePath GetExtensionShortcutFilename(const base::FilePath& profile_path,
       .append("-")
       .append(profile_path.BaseName().value());
   file_util::ReplaceIllegalCharactersInPath(&filename, '_');
+  // Spaces in filenames break xdg-desktop-menu
+  // (see https://bugs.freedesktop.org/show_bug.cgi?id=66605).
+  ReplaceChars(filename, " ", "_", &filename);
   return base::FilePath(filename.append(".desktop"));
+}
+
+std::vector<base::FilePath> GetExistingProfileShortcutFilenames(
+    const base::FilePath& profile_path,
+    const base::FilePath& directory) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  // Use a prefix, because xdg-desktop-menu requires it.
+  std::string prefix(chrome::kBrowserProcessExecutableName);
+  prefix.append("-");
+  std::string suffix("-");
+  suffix.append(profile_path.BaseName().value());
+  file_util::ReplaceIllegalCharactersInPath(&suffix, '_');
+  // Spaces in filenames break xdg-desktop-menu
+  // (see https://bugs.freedesktop.org/show_bug.cgi?id=66605).
+  ReplaceChars(suffix, " ", "_", &suffix);
+  std::string glob = prefix + "*" + suffix + ".desktop";
+
+  base::FileEnumerator files(directory, false, base::FileEnumerator::FILES,
+                             glob);
+  base::FilePath shortcut_file = files.Next();
+  std::vector<base::FilePath> shortcut_paths;
+  while (!shortcut_file.empty()) {
+    shortcut_paths.push_back(shortcut_file.BaseName());
+    shortcut_file = files.Next();
+  }
+  return shortcut_paths;
 }
 
 std::string GetDesktopFileContents(
@@ -786,9 +848,8 @@ bool CreateDesktopShortcut(
 
   bool success = true;
 
-  // Get the path to the Chrome executable.
-  base::FilePath chrome_exe_path;
-  if (!PathService::Get(base::FILE_EXE, &chrome_exe_path)) {
+  base::FilePath chrome_exe_path = GetChromeExePath();
+  if (chrome_exe_path.empty()) {
     LOG(WARNING) << "Could not get executable path.";
     return false;
   }
@@ -853,6 +914,38 @@ void DeleteDesktopShortcuts(const base::FilePath& profile_path,
   // if it isn't in the directory.
   DeleteShortcutInApplicationsMenu(shortcut_filename,
                                    base::FilePath(kDirectoryFilename));
+}
+
+void DeleteAllDesktopShortcuts(const base::FilePath& profile_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+
+  // Delete shortcuts from Desktop.
+  base::FilePath desktop_path;
+  if (PathService::Get(base::DIR_USER_DESKTOP, &desktop_path)) {
+    std::vector<base::FilePath> shortcut_filenames_desktop =
+        GetExistingProfileShortcutFilenames(profile_path, desktop_path);
+    for (std::vector<base::FilePath>::const_iterator it =
+         shortcut_filenames_desktop.begin();
+         it != shortcut_filenames_desktop.end(); ++it) {
+      DeleteShortcutOnDesktop(*it);
+    }
+  }
+
+  // Delete shortcuts from |kDirectoryFilename|.
+  base::FilePath applications_menu;
+  if (GetDataWriteLocation(env.get(), &applications_menu)) {
+    applications_menu = applications_menu.AppendASCII("applications");
+    std::vector<base::FilePath> shortcut_filenames_app_menu =
+        GetExistingProfileShortcutFilenames(profile_path, applications_menu);
+    for (std::vector<base::FilePath>::const_iterator it =
+         shortcut_filenames_app_menu.begin();
+         it != shortcut_filenames_app_menu.end(); ++it) {
+      DeleteShortcutInApplicationsMenu(*it,
+                                       base::FilePath(kDirectoryFilename));
+    }
+  }
 }
 
 }  // namespace ShellIntegrationLinux

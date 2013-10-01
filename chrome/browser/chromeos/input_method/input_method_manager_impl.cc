@@ -10,8 +10,10 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/input_method/candidate_window_controller.h"
 #include "chrome/browser/chromeos/input_method/component_extension_ime_manager_impl.h"
 #include "chrome/browser/chromeos/input_method/input_method_engine_ibus.h"
@@ -23,7 +25,7 @@
 #include "chromeos/ime/extension_ime_util.h"
 #include "chromeos/ime/input_method_delegate.h"
 #include "chromeos/ime/xkeyboard.h"
-#include "third_party/icu/public/common/unicode/uloc.h"
+#include "third_party/icu/source/common/unicode/uloc.h"
 #include "ui/base/accelerators/accelerator.h"
 
 namespace chromeos {
@@ -55,6 +57,8 @@ const struct MigrationInputMethodList {
     "_comp_ime_ekbifjdfhkmdeeajnolmgdlmkllopefizh-hant-t-i0-und "},
   { "m17n:zh:cangjie",
     "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-hant-t-i0-cangjie-1987" },
+  { "_comp_ime_jcffnbbngddhenhcnebafkbdomehdhpdzh-t-i0-wubi-1986",
+    "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-t-i0-wubi-1986" },
   // TODO(nona): Remove following migration map in M31.
   { "m17n:ta:itrans",
     "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_ta_itrans" },
@@ -75,6 +79,8 @@ const struct MigrationInputMethodList {
   { "m17n:vi:viqr", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_vi_viqr" },
   { "m17n:vi:telex",
     "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_vi_telex" },
+  { "m17n:vi:vni",
+    "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_vi_vni" },
   { "m17n:am:sera",
     "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_ethi" },
   { "m17n:bn:itrans",
@@ -88,13 +94,34 @@ const struct MigrationInputMethodList {
   { "m17n:ml:itrans",
     "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_ml_phone" },
   { "m17n:mr:itrans",
-    "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_deva_phone-" },
+    "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_deva_phone" },
   { "m17n:te:itrans",
     "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_te_phone" },
   { "m17n:fa:isiri", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_fa" },
+  { "m17n:ar:kbd", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_ar" },
+  // TODO(nona): Remove following migration map in M32
+  { "m17n:zh:quick",
+    "_comp_ime_ekbifjdfhkmdeeajnolmgdlmkllopefizh-hant-t-i0-und" },
+};
+
+const struct MigrationHangulKeyboardToInputMethodID {
+  const char* keyboard_id;
+  const char* ime_id;
+} kMigrationHangulKeyboardToInputMethodID[] = {
+  { "2", "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_2set" },
+  { "3f", "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_3setfinal" },
+  { "39", "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_3set390" },
+  { "3s", "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_3setnoshift" },
+  { "ro", "_comp_ime_bdgdidmhaijohebebipajioienkglgfohangul_romaja" },
 };
 
 }  // namespace
+
+bool InputMethodManagerImpl::IsFullLatinKeyboard(
+    const std::string& layout) const {
+  const std::string& lang = util_.GetLanguageCodeFromInputMethodId(layout);
+  return full_latin_keyboard_checker.IsFullLatinKeyboard(layout, lang);
+}
 
 InputMethodManagerImpl::InputMethodManagerImpl(
     scoped_ptr<InputMethodDelegate> delegate)
@@ -193,6 +220,11 @@ InputMethodManagerImpl::GetActiveInputMethods() const {
   return result.Pass();
 }
 
+const std::vector<std::string>&
+InputMethodManagerImpl::GetActiveInputMethodIds() const {
+  return active_input_method_ids_;
+}
+
 size_t InputMethodManagerImpl::GetNumActiveInputMethods() const {
   return active_input_method_ids_.size();
 }
@@ -236,6 +268,46 @@ void InputMethodManagerImpl::EnableLayouts(const std::string& language_code,
   ChangeInputMethod(initial_layout);  // you can pass empty |initial_layout|.
 }
 
+// Adds new input method to given list.
+bool InputMethodManagerImpl::EnableInputMethodImpl(
+    const std::string& input_method_id,
+    std::vector<std::string>& new_active_input_method_ids) const {
+  if (!util_.IsValidInputMethodId(input_method_id)) {
+    DVLOG(1) << "EnableInputMethod: Invalid ID: " << input_method_id;
+    return false;
+  }
+
+  if (!Contains(new_active_input_method_ids, input_method_id))
+    new_active_input_method_ids.push_back(input_method_id);
+
+  return true;
+}
+
+// Starts or stops the system input method framework as needed.
+void InputMethodManagerImpl::ReconfigureIMFramework() {
+  if (component_extension_ime_manager_->IsInitialized())
+    LoadNecessaryComponentExtensions();
+
+  if (ContainsOnlyKeyboardLayout(active_input_method_ids_)) {
+    // Do NOT call ibus_controller_->Stop(); here to work around a crash issue
+    // at crbug.com/27051.
+    // TODO(yusukes): We can safely call Stop(); here once crbug.com/26443
+    // is implemented.
+  } else {
+    MaybeInitializeCandidateWindowController();
+    IBusDaemonController::GetInstance()->Start();
+  }
+}
+
+bool InputMethodManagerImpl::EnableInputMethod(
+    const std::string& input_method_id) {
+  if (!EnableInputMethodImpl(input_method_id, active_input_method_ids_))
+    return false;
+
+  ReconfigureIMFramework();
+  return true;
+}
+
 bool InputMethodManagerImpl::EnableInputMethods(
     const std::vector<std::string>& new_active_input_method_ids) {
   if (state_ == STATE_TERMINATING)
@@ -244,13 +316,9 @@ bool InputMethodManagerImpl::EnableInputMethods(
   // Filter unknown or obsolete IDs.
   std::vector<std::string> new_active_input_method_ids_filtered;
 
-  for (size_t i = 0; i < new_active_input_method_ids.size(); ++i) {
-    const std::string& input_method_id = new_active_input_method_ids[i];
-    if (util_.IsValidInputMethodId(input_method_id))
-      new_active_input_method_ids_filtered.push_back(input_method_id);
-    else
-      DVLOG(1) << "EnableInputMethods: Invalid ID: " << input_method_id;
-  }
+  for (size_t i = 0; i < new_active_input_method_ids.size(); ++i)
+    EnableInputMethodImpl(new_active_input_method_ids[i],
+                          new_active_input_method_ids_filtered);
 
   if (new_active_input_method_ids_filtered.empty()) {
     DVLOG(1) << "EnableInputMethods: No valid input method ID";
@@ -266,18 +334,7 @@ bool InputMethodManagerImpl::EnableInputMethods(
   }
   active_input_method_ids_.swap(new_active_input_method_ids_filtered);
 
-  if (component_extension_ime_manager_->IsInitialized())
-    LoadNecessaryComponentExtensions();
-
-  if (ContainOnlyKeyboardLayout(active_input_method_ids_)) {
-    // Do NOT call ibus_controller_->Stop(); here to work around a crash issue
-    // at crosbug.com/27051.
-    // TODO(yusukes): We can safely call Stop(); here once crosbug.com/26443
-    // is implemented.
-  } else {
-    MaybeInitializeCandidateWindowController();
-    IBusDaemonController::GetInstance()->Start();
-  }
+  ReconfigureIMFramework();
 
   // If |current_input_method| is no longer in |active_input_method_ids_|,
   // ChangeInputMethod() picks the first one in |active_input_method_ids_|.
@@ -304,6 +361,28 @@ bool InputMethodManagerImpl::MigrateOldInputMethods(
   return rewritten;
 }
 
+bool InputMethodManagerImpl::MigrateKoreanKeyboard(
+    const std::string& keyboard_id,
+    std::vector<std::string>* input_method_ids) {
+  std::vector<std::string>::iterator it =
+      std::find(active_input_method_ids_.begin(),
+                active_input_method_ids_.end(),
+                "mozc-hangul");
+  if (it == active_input_method_ids_.end())
+    return false;
+
+  for (size_t i = 0;
+       i < ARRAYSIZE_UNSAFE(kMigrationHangulKeyboardToInputMethodID); ++i) {
+    if (kMigrationHangulKeyboardToInputMethodID[i].keyboard_id == keyboard_id) {
+      *it = kMigrationHangulKeyboardToInputMethodID[i].ime_id;
+      input_method_ids->assign(active_input_method_ids_.begin(),
+                               active_input_method_ids_.end());
+      return true;
+    }
+  }
+  return false;
+}
+
 bool InputMethodManagerImpl::SetInputMethodConfig(
     const std::string& section,
     const std::string& config_name,
@@ -313,6 +392,7 @@ bool InputMethodManagerImpl::SetInputMethodConfig(
 
   if (state_ == STATE_TERMINATING)
     return false;
+
   return ibus_controller_->SetInputMethodConfig(section, config_name, value);
 }
 
@@ -527,7 +607,7 @@ void InputMethodManagerImpl::RemoveInputMethodExtension(const std::string& id) {
     active_input_method_ids_.erase(i);
   extra_input_methods_.erase(id);
 
-  if (ContainOnlyKeyboardLayout(active_input_method_ids_)) {
+  if (ContainsOnlyKeyboardLayout(active_input_method_ids_)) {
     // Do NOT call ibus_controller_->Stop(); here to work around a crash issue
     // at crosbug.com/27051.
     // TODO(yusukes): We can safely call Stop(); here once crosbug.com/26443
@@ -603,6 +683,24 @@ void InputMethodManagerImpl::SetEnabledExtensionImes(
   }
 }
 
+void InputMethodManagerImpl::SetInputMethodDefault() {
+  // Set up keyboards. For example, when |locale| is "en-US", enable US qwerty
+  // and US dvorak keyboard layouts.
+  if (g_browser_process && g_browser_process->local_state()) {
+    const std::string locale = g_browser_process->GetApplicationLocale();
+    // If the preferred keyboard for the login screen has been saved, use it.
+    PrefService* prefs = g_browser_process->local_state();
+    std::string initial_input_method_id =
+        prefs->GetString(chromeos::language_prefs::kPreferredKeyboardLayout);
+    if (initial_input_method_id.empty()) {
+      // If kPreferredKeyboardLayout is not specified, use the hardware layout.
+      initial_input_method_id =
+          GetInputMethodUtil()->GetHardwareInputMethodId();
+    }
+    EnableLayouts(locale, initial_input_method_id);
+  }
+}
+
 bool InputMethodManagerImpl::SwitchToNextInputMethod() {
   // Sanity checks.
   if (active_input_method_ids_.empty()) {
@@ -625,7 +723,8 @@ bool InputMethodManagerImpl::SwitchToNextInputMethod() {
   return true;
 }
 
-bool InputMethodManagerImpl::SwitchToPreviousInputMethod() {
+bool InputMethodManagerImpl::SwitchToPreviousInputMethod(
+    const ui::Accelerator& accelerator) {
   // Sanity check.
   if (active_input_method_ids_.empty()) {
     DVLOG(1) << "active input method is empty";
@@ -636,6 +735,9 @@ bool InputMethodManagerImpl::SwitchToPreviousInputMethod() {
   // Ctrl+Space or Alt+Shift may be used by other application.
   if (active_input_method_ids_.size() == 1)
     return false;
+
+  if (accelerator.type() == ui::ET_KEY_RELEASED)
+    return true;
 
   if (previous_input_method_.id().empty() ||
       previous_input_method_.id() == current_input_method_.id()) {
@@ -676,10 +778,6 @@ bool InputMethodManagerImpl::SwitchInputMethod(
     case ui::VKEY_DBE_DBCSCHAR:
       input_method_ids_to_switch.push_back(nacl_mozc_jp_id);
       input_method_ids_to_switch.push_back("xkb:jp::jpn");
-      break;
-    case ui::VKEY_HANGUL:  // Hangul (or right Alt) key on Korean keyboard
-      input_method_ids_to_switch.push_back("mozc-hangul");
-      input_method_ids_to_switch.push_back("xkb:kr:kr104:kor");
       break;
     default:
       NOTREACHED();
@@ -885,7 +983,7 @@ bool InputMethodManagerImpl::InputMethodIsActivated(
   return Contains(active_input_method_ids_, input_method_id);
 }
 
-bool InputMethodManagerImpl::ContainOnlyKeyboardLayout(
+bool InputMethodManagerImpl::ContainsOnlyKeyboardLayout(
     const std::vector<std::string>& value) {
   for (size_t i = 0; i < value.size(); ++i) {
     if (!InputMethodUtil::IsKeyboardLayout(value[i]))

@@ -13,10 +13,12 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/extensions/activity_log/activity_action_constants.h"
+#include "chrome/browser/extensions/activity_log/activity_actions.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/activity_log/web_request_constants.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/request_stage.h"
@@ -53,7 +55,6 @@
 #include "extensions/common/error_utils.h"
 #include "extensions/common/event_filtering_info.h"
 #include "extensions/common/url_pattern.h"
-#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/auth.h"
 #include "net/base/net_errors.h"
@@ -61,6 +62,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 using base::DictionaryValue;
 using base::ListValue;
@@ -419,6 +421,9 @@ struct ExtensionWebRequestEventRouter::BlockedRequest {
   // The request that is being blocked.
   net::URLRequest* request;
 
+  // Whether the request originates from an incognito tab.
+  bool is_incognito;
+
   // The event that we're currently blocked on.
   EventTypes event;
 
@@ -469,6 +474,7 @@ struct ExtensionWebRequestEventRouter::BlockedRequest {
 
   BlockedRequest()
       : request(NULL),
+        is_incognito(false),
         event(kInvalidEvent),
         num_handlers_blocking(0),
         net_log(NULL),
@@ -650,6 +656,8 @@ int ExtensionWebRequestEventRouter::OnBeforeRequest(
     return net::OK;  // Nobody saw a reason for modifying the request.
 
   blocked_requests_[request->identifier()].event = kOnBeforeRequest;
+  blocked_requests_[request->identifier()].is_incognito |=
+      IsIncognitoProfile(profile);
   blocked_requests_[request->identifier()].request = request;
   blocked_requests_[request->identifier()].callback = callback;
   blocked_requests_[request->identifier()].new_url = new_url;
@@ -705,6 +713,8 @@ int ExtensionWebRequestEventRouter::OnBeforeSendHeaders(
     return net::OK;  // Nobody saw a reason for modifying the request.
 
   blocked_requests_[request->identifier()].event = kOnBeforeSendHeaders;
+  blocked_requests_[request->identifier()].is_incognito |=
+      IsIncognitoProfile(profile);
   blocked_requests_[request->identifier()].request = request;
   blocked_requests_[request->identifier()].callback = callback;
   blocked_requests_[request->identifier()].request_headers = headers;
@@ -800,6 +810,8 @@ int ExtensionWebRequestEventRouter::OnHeadersReceived(
     return net::OK;  // Nobody saw a reason for modifying the request.
 
   blocked_requests_[request->identifier()].event = kOnHeadersReceived;
+  blocked_requests_[request->identifier()].is_incognito |=
+      IsIncognitoProfile(profile);
   blocked_requests_[request->identifier()].request = request;
   blocked_requests_[request->identifier()].callback = callback;
   blocked_requests_[request->identifier()].net_log = &request->net_log();
@@ -861,6 +873,8 @@ ExtensionWebRequestEventRouter::OnAuthRequired(
 
   if (DispatchEvent(profile, request, listeners, args)) {
     blocked_requests_[request->identifier()].event = kOnAuthRequired;
+    blocked_requests_[request->identifier()].is_incognito |=
+        IsIncognitoProfile(profile);
     blocked_requests_[request->identifier()].request = request;
     blocked_requests_[request->identifier()].auth_callback = callback;
     blocked_requests_[request->identifier()].auth_credentials = credentials;
@@ -1117,6 +1131,8 @@ bool ExtensionWebRequestEventRouter::DispatchEvent(
 
   if (num_handlers_blocking > 0) {
     blocked_requests_[request->identifier()].request = request;
+    blocked_requests_[request->identifier()].is_incognito |=
+        IsIncognitoProfile(profile_id);
     blocked_requests_[request->identifier()].num_handlers_blocking +=
         num_handlers_blocking;
     blocked_requests_[request->identifier()].blocking_time = base::Time::Now();
@@ -1256,8 +1272,8 @@ void ExtensionWebRequestEventRouter::RemoveWebViewEventListeners(
 
 void ExtensionWebRequestEventRouter::OnOTRProfileCreated(
     void* original_profile, void* otr_profile) {
-  cross_profile_map_[original_profile] = otr_profile;
-  cross_profile_map_[otr_profile] = original_profile;
+  cross_profile_map_[original_profile] = std::make_pair(false, otr_profile);
+  cross_profile_map_[otr_profile] = std::make_pair(true, original_profile);
 }
 
 void ExtensionWebRequestEventRouter::OnOTRProfileDestroyed(
@@ -1305,7 +1321,15 @@ void* ExtensionWebRequestEventRouter::GetCrossProfile(void* profile) const {
       cross_profile_map_.find(profile);
   if (cross_profile == cross_profile_map_.end())
     return NULL;
-  return cross_profile->second;
+  return cross_profile->second.second;
+}
+
+bool ExtensionWebRequestEventRouter::IsIncognitoProfile(void* profile) const {
+  CrossProfileMap::const_iterator cross_profile =
+      cross_profile_map_.find(profile);
+  if (cross_profile == cross_profile_map_.end())
+    return false;
+  return cross_profile->second.first;
 }
 
 bool ExtensionWebRequestEventRouter::WasSignaled(
@@ -1541,9 +1565,8 @@ ListValue* SummarizeCookieModifications(
 }
 
 // Converts an EventResponseDelta object to a dictionary value suitable for the
-// activity log.  The caller takes ownership of the returned DictionaryValue
-// object.
-DictionaryValue* SummarizeResponseDelta(
+// activity log.
+scoped_ptr<DictionaryValue> SummarizeResponseDelta(
     const std::string& event_name,
     const helpers::EventResponseDelta& delta) {
   scoped_ptr<DictionaryValue> details(new DictionaryValue());
@@ -1590,31 +1613,39 @@ DictionaryValue* SummarizeResponseDelta(
         SummarizeCookieModifications(delta.response_cookie_modifications));
   }
 
-  return details.release();
+  return details.Pass();
 }
 
-void LogExtensionActivity(Profile* profile,
+void LogExtensionActivity(void* profile_id,
+                          bool is_incognito,
                           const std::string& extension_id,
                           const GURL& url,
                           const std::string& api_call,
-                          DictionaryValue* details_raw) {
-  scoped_ptr<DictionaryValue> details(details_raw);
+                          scoped_ptr<DictionaryValue> details) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(BrowserThread::UI,
                             FROM_HERE,
                             base::Bind(&LogExtensionActivity,
-                                       profile,
+                                       profile_id,
+                                       is_incognito,
                                        extension_id,
                                        url,
                                        api_call,
-                                       details.release()));
+                                       base::Passed(&details)));
   } else {
-    extensions::ActivityLog::GetInstance(profile)->LogWebRequestAction(
-        extension_id,
-        url,
-        api_call,
-        details.Pass(),
-        "");
+    Profile* profile = static_cast<Profile*>(profile_id);
+    if (!g_browser_process->profile_manager()->IsValidProfile(profile))
+      return;
+    scoped_refptr<extensions::Action> action =
+        new extensions::Action(extension_id,
+                               base::Time::Now(),
+                               extensions::Action::ACTION_WEB_REQUEST,
+                               api_call);
+    action->set_page_url(url);
+    action->set_page_incognito(is_incognito);
+    action->mutable_other()->Set(activity_log_constants::kActionWebRequest,
+                                 details.release());
+    extensions::ActivityLog::GetInstance(profile)->LogAction(action);
   }
 }
 
@@ -1642,7 +1673,8 @@ void ExtensionWebRequestEventRouter::DecrementBlockCount(
         CalculateDelta(&blocked_request, response);
 
     if (extensions::ActivityLog::IsLogEnabledOnAnyProfile()) {
-      LogExtensionActivity(static_cast<Profile*>(profile),
+      LogExtensionActivity(profile,
+                           blocked_request.is_incognito,
                            extension_id,
                            blocked_request.request->url(),
                            event_name,
@@ -1862,6 +1894,8 @@ bool ExtensionWebRequestEventRouter::ProcessDeclarativeRules(
                      request_stage));
       blocked_requests_[request->identifier()].num_handlers_blocking++;
       blocked_requests_[request->identifier()].request = request;
+      blocked_requests_[request->identifier()].is_incognito |=
+          IsIncognitoProfile(profile);
       blocked_requests_[request->identifier()].blocking_time =
           base::Time::Now();
       blocked_requests_[request->identifier()].original_response_headers =

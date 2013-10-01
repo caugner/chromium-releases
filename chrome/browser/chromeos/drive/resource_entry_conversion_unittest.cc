@@ -5,27 +5,27 @@
 #include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
 
 #include "base/files/file_path.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/test_util.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace drive {
 
 TEST(ResourceEntryConversionTest, ConvertToResourceEntry_File) {
   scoped_ptr<base::Value> value =
-      google_apis::test_util::LoadJSONFile("chromeos/gdata/file_entry.json");
+      google_apis::test_util::LoadJSONFile("gdata/file_entry.json");
   ASSERT_TRUE(value.get());
 
   scoped_ptr<google_apis::ResourceEntry> gdata_resource_entry(
       google_apis::ResourceEntry::ExtractAndParse(*value));
   ASSERT_TRUE(gdata_resource_entry.get());
 
-  ResourceEntry entry =
-      ConvertToResourceEntry(*gdata_resource_entry);
+  ResourceEntry entry;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
 
   EXPECT_EQ("File 1.mp3",  entry.title());
   EXPECT_EQ("File 1.mp3",  entry.base_name());
@@ -93,15 +93,15 @@ TEST(ResourceEntryConversionTest,
      ConvertToResourceEntry_HostedDocument) {
   scoped_ptr<base::Value> value =
       google_apis::test_util::LoadJSONFile(
-          "chromeos/gdata/hosted_document_entry.json");
+          "gdata/hosted_document_entry.json");
   ASSERT_TRUE(value.get());
 
   scoped_ptr<google_apis::ResourceEntry> gdata_resource_entry(
       google_apis::ResourceEntry::ExtractAndParse(*value));
   ASSERT_TRUE(gdata_resource_entry.get());
 
-  ResourceEntry entry =
-      ConvertToResourceEntry(*gdata_resource_entry);
+  ResourceEntry entry;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
 
   EXPECT_EQ("Document 1",  entry.title());
   EXPECT_EQ("Document 1.gdoc",  entry.base_name());  // The suffix added.
@@ -174,15 +174,15 @@ TEST(ResourceEntryConversionTest,
      ConvertToResourceEntry_Directory) {
   scoped_ptr<base::Value> value =
       google_apis::test_util::LoadJSONFile(
-          "chromeos/gdata/directory_entry.json");
+          "gdata/directory_entry.json");
   ASSERT_TRUE(value.get());
 
   scoped_ptr<google_apis::ResourceEntry> gdata_resource_entry(
       google_apis::ResourceEntry::ExtractAndParse(*value));
   ASSERT_TRUE(gdata_resource_entry.get());
 
-  ResourceEntry entry =
-      ConvertToResourceEntry(*gdata_resource_entry);
+  ResourceEntry entry;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
 
   EXPECT_EQ("Sub Directory Folder",  entry.title());
   EXPECT_EQ("Sub Directory Folder",  entry.base_name());
@@ -245,15 +245,15 @@ TEST(ResourceEntryConversionTest,
      ConvertToResourceEntry_DeletedHostedDocument) {
   scoped_ptr<base::Value> value =
       google_apis::test_util::LoadJSONFile(
-          "chromeos/gdata/deleted_hosted_document_entry.json");
+          "gdata/deleted_hosted_document_entry.json");
   ASSERT_TRUE(value.get());
 
   scoped_ptr<google_apis::ResourceEntry> gdata_resource_entry(
       google_apis::ResourceEntry::ExtractAndParse(*value));
   ASSERT_TRUE(gdata_resource_entry.get());
 
-  ResourceEntry entry =
-      ConvertToResourceEntry(*gdata_resource_entry);
+  ResourceEntry entry;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
 
   EXPECT_EQ("Deleted document",  entry.title());
   EXPECT_EQ("Deleted document.gdoc",  entry.base_name());
@@ -323,17 +323,65 @@ TEST(ResourceEntryConversionTest,
 TEST(ResourceEntryConversionTest,
      ConvertToResourceEntry_SharedWithMeEntry) {
   scoped_ptr<base::Value> value = google_apis::test_util::LoadJSONFile(
-      "chromeos/gdata/shared_with_me_entry.json");
+      "gdata/shared_with_me_entry.json");
   ASSERT_TRUE(value.get());
 
   scoped_ptr<google_apis::ResourceEntry> gdata_resource_entry(
       google_apis::ResourceEntry::ExtractAndParse(*value));
   ASSERT_TRUE(gdata_resource_entry.get());
 
-  ResourceEntry entry =
-      ConvertToResourceEntry(*gdata_resource_entry);
+  ResourceEntry entry;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
 
   EXPECT_TRUE(entry.shared_with_me());
+}
+
+TEST(ResourceEntryConversionTest, ToPlatformFileInfo) {
+  ResourceEntry entry;
+  entry.mutable_file_info()->set_size(12345);
+  entry.mutable_file_info()->set_is_directory(true);
+  entry.mutable_file_info()->set_is_symbolic_link(true);
+  entry.mutable_file_info()->set_creation_time(999);
+  entry.mutable_file_info()->set_last_modified(123456789);
+  entry.mutable_file_info()->set_last_accessed(987654321);
+
+  base::PlatformFileInfo file_info;
+  ConvertResourceEntryToPlatformFileInfo(entry, &file_info);
+  EXPECT_EQ(entry.file_info().size(), file_info.size);
+  EXPECT_EQ(entry.file_info().is_directory(), file_info.is_directory);
+  EXPECT_EQ(entry.file_info().is_symbolic_link(), file_info.is_symbolic_link);
+  EXPECT_EQ(base::Time::FromInternalValue(entry.file_info().creation_time()),
+            file_info.creation_time);
+  EXPECT_EQ(base::Time::FromInternalValue(entry.file_info().last_modified()),
+            file_info.last_modified);
+  EXPECT_EQ(base::Time::FromInternalValue(entry.file_info().last_accessed()),
+            file_info.last_accessed);
+}
+
+TEST(ResourceEntryConversionTest, FromPlatformFileInfo) {
+  base::PlatformFileInfo file_info;
+  file_info.size = 12345;
+  file_info.is_directory = true;
+  file_info.is_symbolic_link = true;
+  file_info.last_modified =
+      base::Time::UnixEpoch() + base::TimeDelta::FromDays(999);
+  file_info.last_accessed =
+      base::Time::UnixEpoch() + base::TimeDelta::FromDays(12345);
+  file_info.creation_time =
+      base::Time::UnixEpoch() + base::TimeDelta::FromDays(54321);
+
+  ResourceEntry entry;
+  SetPlatformFileInfoToResourceEntry(file_info, &entry);
+
+  EXPECT_EQ(file_info.size, entry.file_info().size());
+  EXPECT_EQ(file_info.is_directory, entry.file_info().is_directory());
+  EXPECT_EQ(file_info.is_symbolic_link, entry.file_info().is_symbolic_link());
+  EXPECT_EQ(file_info.creation_time,
+            base::Time::FromInternalValue(entry.file_info().creation_time()));
+  EXPECT_EQ(file_info.last_modified,
+            base::Time::FromInternalValue(entry.file_info().last_modified()));
+  EXPECT_EQ(file_info.last_accessed,
+            base::Time::FromInternalValue(entry.file_info().last_accessed()));
 }
 
 }  // namespace drive

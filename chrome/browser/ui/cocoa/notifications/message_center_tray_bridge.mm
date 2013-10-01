@@ -6,15 +6,17 @@
 
 #include "base/bind.h"
 #include "base/i18n/number_formatting.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
 #include "grit/ui_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #import "ui/base/l10n/l10n_util_mac.h"
 #import "ui/message_center/cocoa/popup_collection.h"
 #import "ui/message_center/cocoa/status_item_view.h"
 #import "ui/message_center/cocoa/tray_controller.h"
+#import "ui/message_center/cocoa/tray_view_controller.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_tray.h"
 
@@ -57,23 +59,11 @@ void MessageCenterTrayBridge::HidePopups() {
   popup_collection_.reset();
 }
 
-void MessageCenterTrayBridge::UpdatePopups() {
-  // Nothing to do since the popup collection observes the MessageCenter
-  // directly.
-}
-
 bool MessageCenterTrayBridge::ShowMessageCenter() {
   if (tray_controller_)
     return false;
 
-  // Post a task to open the window, because in
-  // MessageCenterTray::ShowMessageCenterBubble, the unread count gets set to
-  // 0 after it calls this delegate. In order show the window at the correct
-  // position after the unread count is updated, opening the window must be
-  // performed after the return of this method.
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-      base::Bind(&MessageCenterTrayBridge::OpenTrayWindow,
-                 weak_ptr_factory_.GetWeakPtr()));
+  OpenTrayWindow();
   return true;
 }
 
@@ -81,6 +71,7 @@ void MessageCenterTrayBridge::HideMessageCenter() {
   [status_item_view_ setHighlight:NO];
   [tray_controller_ close];
   tray_controller_.autorelease();
+  UpdateStatusItem();
 }
 
 bool MessageCenterTrayBridge::ShowNotifierSettings() {
@@ -89,31 +80,33 @@ bool MessageCenterTrayBridge::ShowNotifierSettings() {
   return false;
 }
 
-void MessageCenterTrayBridge::UpdateStatusItem() {
-  // Only show the status item if there are notifications.
-  if (message_center_->NotificationCount() == 0) {
-    [status_item_view_ removeItem];
-    status_item_view_.reset();
-    return;
-  }
+message_center::MessageCenterTray*
+MessageCenterTrayBridge::GetMessageCenterTray() {
+  return tray_.get();
+}
 
+void MessageCenterTrayBridge::UpdateStatusItem() {
   if (!status_item_view_) {
     status_item_view_.reset([[MCStatusItemView alloc] init]);
     [status_item_view_ setCallback:^{ tray_->ToggleMessageCenterBubble(); }];
   }
 
-  size_t unread_count = message_center_->UnreadNotificationCount();
-  [status_item_view_ setUnreadCount:unread_count];
+  // We want a static message center icon while it's visible.
+  if (message_center()->IsMessageCenterVisible())
+    return;
 
-  string16 product_name = l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
+  size_t unread_count = message_center_->UnreadNotificationCount();
+  bool quiet_mode = message_center_->IsQuietMode();
+  [status_item_view_ setUnreadCount:unread_count withQuietMode:quiet_mode];
+
   if (unread_count > 0) {
     string16 unread_count_string = base::FormatNumber(unread_count);
     [status_item_view_ setToolTip:
         l10n_util::GetNSStringF(IDS_MESSAGE_CENTER_TOOLTIP_UNREAD,
-            product_name, unread_count_string)];
+            unread_count_string)];
   } else {
     [status_item_view_ setToolTip:
-        l10n_util::GetNSStringF(IDS_MESSAGE_CENTER_TOOLTIP, product_name)];
+        l10n_util::GetNSString(IDS_MESSAGE_CENTER_TOOLTIP)];
   }
 }
 
@@ -121,6 +114,9 @@ void MessageCenterTrayBridge::OpenTrayWindow() {
   DCHECK(!tray_controller_);
   tray_controller_.reset(
       [[MCTrayController alloc] initWithMessageCenterTray:tray_.get()]);
+  [[tray_controller_ viewController] setTrayTitle:
+      l10n_util::GetNSStringF(IDS_MESSAGE_CENTER_FOOTER_WITH_PRODUCT_TITLE,
+          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME))];
 
   UpdateStatusItem();
 

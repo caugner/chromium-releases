@@ -8,13 +8,16 @@
 import build_server
 build_server.main()
 
-import logging
 import optparse
 import os
+import posixpath
 import sys
 import time
 import unittest
 
+from branch_utility import BranchUtility
+from link_error_detector import LinkErrorDetector, StringifyBrokenLinks
+from local_file_system import LocalFileSystem
 from local_renderer import LocalRenderer
 from fake_fetchers import ConfigureFakeFetchers
 from handler import Handler
@@ -61,12 +64,41 @@ class IntegrationTest(unittest.TestCase):
     finally:
       print('Took %s seconds' % (time.time() - start_time))
 
+    print("Checking for broken links...")
+    start_time = time.time()
+    link_error_detector = LinkErrorDetector(
+        LocalFileSystem(os.path.join(sys.path[0], os.pardir, os.pardir)),
+        lambda path: Handler(Request.ForTest(path)).Get(),
+        'templates/public',
+        ('extensions/index.html', 'apps/about_apps.html'))
+
+    broken_links = link_error_detector.GetBrokenLinks()
+    if broken_links:
+      # TODO(jshumway): Test should fail when broken links are detected.
+      print('Warning: Found %d broken links:' % (
+        len(broken_links)))
+      print(StringifyBrokenLinks(broken_links))
+
+    print('Took %s seconds.' % (time.time() - start_time))
+
+    print('Searching for orphaned pages...')
+    start_time = time.time()
+    orphaned_pages = link_error_detector.GetOrphanedPages()
+    if orphaned_pages:
+      # TODO(jshumway): Test should fail when orphaned pages are detected.
+      print('Warning: Found %d orphaned pages:' % len(orphaned_pages))
+      for page in orphaned_pages:
+        print(page)
+    print('Took %s seconds.' % (time.time() - start_time))
+
     public_files = _GetPublicFiles()
 
     print('Rendering %s public files...' % len(public_files.keys()))
     start_time = time.time()
     try:
       for path, content in public_files.iteritems():
+        if path.endswith('redirects.json'):
+          continue
         def check_result(response):
           self.assertEqual(200, response.status,
               'Got %s when rendering %s' % (response.status, path))
@@ -74,7 +106,23 @@ class IntegrationTest(unittest.TestCase):
           # that render large files. At least it'll catch zero-length responses.
           self.assertTrue(len(response.content) >= len(content),
               'Content was "%s" when rendering %s' % (response.content, path))
+
         check_result(Handler(Request.ForTest(path)).Get())
+
+        # Make sure that leaving out the .html will temporarily redirect to the
+        # path with the .html.
+        if path != '/404.html':
+          redirect_result = Handler(
+              Request.ForTest(posixpath.splitext(path)[0])).Get()
+          self.assertEqual((path, False), redirect_result.GetRedirect())
+
+        # Make sure including a channel will permanently redirect to the same
+        # path without a channel.
+        for channel in BranchUtility.GetAllChannelNames():
+          redirect_result = Handler(
+              Request.ForTest('%s/%s' % (channel, path))).Get()
+          self.assertEqual((path, True), redirect_result.GetRedirect())
+
         # Samples are internationalized, test some locales.
         if path.endswith('/samples.html'):
           for lang in ['en-US', 'es', 'ar']:
@@ -100,6 +148,9 @@ class IntegrationTest(unittest.TestCase):
         self.assertTrue(response.content != '')
       finally:
         print('Took %s seconds' % (time.time() - start_time))
+
+    # TODO(jshumway): Check page for broken links (currently prohibited by the
+    # time it takes to render the pages).
 
   @DisableLogging('warning')
   def testFileNotFound(self):

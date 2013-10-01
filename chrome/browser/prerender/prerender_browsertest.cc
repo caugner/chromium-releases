@@ -15,6 +15,7 @@
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -36,11 +37,11 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -54,7 +55,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
-#include "googleurl/src/gurl.h"
+#include "extensions/common/switches.h"
 #include "grit/generated_resources.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/url_request/url_request_context.h"
@@ -62,6 +63,7 @@
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_job.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using content::DevToolsAgentHost;
@@ -126,6 +128,7 @@ bool ShouldRenderPrerenderedPageCorrectly(FinalStatus status) {
     case FINAL_STATUS_RENDERER_CRASHED:
     case FINAL_STATUS_CANCELLED:
     case FINAL_STATUS_DEVTOOLS_ATTACHED:
+    case FINAL_STATUS_PAGE_BEING_CAPTURED:
       return true;
     default:
       return false;
@@ -271,7 +274,7 @@ class TestPrerenderContents : public PrerenderContents {
     }
   }
 
-  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE {
+  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE {
     // On quit, it's possible to end up here when render processes are closed
     // before the PrerenderManager is destroyed.  As a result, it's possible to
     // get either FINAL_STATUS_APP_TERMINATING or FINAL_STATUS_RENDERER_CRASHED
@@ -285,7 +288,7 @@ class TestPrerenderContents : public PrerenderContents {
       expected_final_status_ = FINAL_STATUS_RENDERER_CRASHED;
     }
 
-    PrerenderContents::RenderViewGone(status);
+    PrerenderContents::RenderProcessGone(status);
   }
 
   virtual bool AddAliasURL(const GURL& url) OVERRIDE {
@@ -640,6 +643,14 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
     if (!web_contents)
       return NULL;
     return web_contents->GetController().GetDefaultSessionStorageNamespace();
+  }
+
+  virtual void SetUp() OVERRIDE {
+    // TODO(danakj): The GPU Video Decoder needs real GL bindings.
+    // crbug.com/269087
+    UseRealGLBindings();
+
+    InProcessBrowserTest::SetUp();
   }
 
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
@@ -1157,10 +1168,6 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
     ui_test_utils::NavigateToURLWithDisposition(
         current_browser(), dest_url, disposition,
         ui_test_utils::BROWSER_TEST_NONE);
-
-    // Make sure the PrerenderContents found earlier was used or removed,
-    // unless we expect the swap in to fail.
-    EXPECT_EQ(expect_swap_to_succeed, !GetPrerenderContents());
 
     if (call_javascript_ && web_contents && expect_swap_to_succeed) {
       if (page_load_observer.get())
@@ -2476,7 +2483,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderClearHistory) {
 
 // Checks that when the cache is cleared, prerenders are cancelled but
 // prerendering history is not cleared.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderClearCache) {
+// Flaky/times out on linux_aura, win, mac - http://crbug.com/270948
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, DISABLED_PrerenderClearCache) {
   PrerenderTestURL("files/prerender/prerender_page.html",
                    FINAL_STATUS_CACHE_OR_HISTORY_CLEARED,
                    1);
@@ -2697,6 +2705,12 @@ class PrerenderBrowserTestWithNaCl : public PrerenderBrowserTest {
 // Check that NaCl plugins work when enabled, with prerendering.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithNaCl,
                        PrerenderNaClPluginEnabled) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   PrerenderTestURL("files/prerender/prerender_plugin_nacl_enabled.html",
                    FINAL_STATUS_USED,
                    1);
@@ -2737,10 +2751,9 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 class PrerenderBrowserTestWithExtensions : public PrerenderBrowserTest,
                                            public ExtensionApiTest {
  public:
-  PrerenderBrowserTestWithExtensions() {
-    autostart_test_server_ = false;
+  virtual void SetUp() OVERRIDE {
+    PrerenderBrowserTest::SetUp();
   }
-  virtual ~PrerenderBrowserTestWithExtensions() {}
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     PrerenderBrowserTest::SetUpCommandLine(command_line);
@@ -2765,11 +2778,11 @@ class PrerenderBrowserTestWithExtensions : public PrerenderBrowserTest,
 // http://crbug.com/177163
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithExtensions,
                        DISABLED_WebNavigation) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   extensions::FrameNavigationState::set_allow_extension_scheme(true);
 
   CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kAllowLegacyExtensionManifests);
+      extensions::switches::kAllowLegacyExtensionManifests);
 
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(
@@ -2796,7 +2809,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithExtensions,
 #define MAYBE_TabsApi TabsApi
 #endif  // defined(OS_WIN)
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithExtensions, MAYBE_TabsApi) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   extensions::FrameNavigationState::set_allow_extension_scheme(true);
 
   // Wait for the extension to set itself up and return control to us.
@@ -2831,6 +2844,22 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
       replacement_text,
       &replacement_path));
   PrerenderTestURL(replacement_path, FINAL_STATUS_UNSUPPORTED_SCHEME, 1);
+  NavigateToDestURL();
+}
+
+// Ensure that about:blank is permitted for any subresource.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       PrerenderAllowAboutBlankSubresource) {
+  GURL image_url = GURL("about:blank");
+  std::vector<net::SpawnedTestServer::StringPair> replacement_text;
+  replacement_text.push_back(
+      std::make_pair("REPLACE_WITH_IMAGE_URL", image_url.spec()));
+  std::string replacement_path;
+  ASSERT_TRUE(net::SpawnedTestServer::GetFilePathWithReplacements(
+      "files/prerender/prerender_with_image.html",
+      replacement_text,
+      &replacement_path));
+  PrerenderTestURL(replacement_path, FINAL_STATUS_USED, 1);
   NavigateToDestURL();
 }
 
@@ -2902,6 +2931,25 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderHTML5MediaSourceVideo) {
                    FINAL_STATUS_USED,
                    1);
   NavigateToDestUrlAndWaitForPassTitle();
+}
+
+// Checks that a prerender that creates an audio stream (via a WebAudioDevice)
+// is cancelled.
+// http://crbug.com/261489
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, DISABLED_PrerenderWebAudioDevice) {
+  PrerenderTestURL("files/prerender/prerender_web_audio_device.html",
+                   FINAL_STATUS_CREATING_AUDIO_STREAM, 1);
+}
+
+// Checks that prerenders do not swap in to WebContents being captured.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderCapturedWebContents) {
+  PrerenderTestURL("files/prerender/prerender_page.html",
+                   FINAL_STATUS_PAGE_BEING_CAPTURED, 1);
+  WebContents* web_contents =
+      current_browser()->tab_strip_model()->GetActiveWebContents();
+  web_contents->IncrementCapturerCount();
+  NavigateToDestURLWithDisposition(CURRENT_TAB, false);
+  web_contents->DecrementCapturerCount();
 }
 
 }  // namespace prerender

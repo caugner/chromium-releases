@@ -14,6 +14,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -21,12 +22,8 @@
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/printing/print_preview_dialog_controller.h"
-#include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/sessions/session_service_factory.h"
@@ -49,13 +46,14 @@
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/status_bubble.h"
+#include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
+#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/chrome_content_client.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
+#include "chrome/common/content_restriction.h"
 #include "chrome/common/pref_names.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -67,7 +65,6 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
-#include "content/public/common/content_restriction.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
@@ -82,6 +79,15 @@
 #include "chrome/browser/ui/metro_pin_tab_helper_win.h"
 #include "win8/util/win8_util.h"
 #endif
+
+#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
+#include "chrome/browser/printing/print_view_manager.h"
+#else
+#include "chrome/browser/printing/print_view_manager_basic.h"
+#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINTING)
 
 namespace {
 const char kOsOverrideForTabletSite[] = "Linux; Android 4.0.3";
@@ -188,11 +194,15 @@ bool IsShowingWebContentsModalDialog(const Browser* browser) {
 }
 
 bool PrintPreviewShowing(const Browser* browser) {
+#if defined(ENABLE_FULL_PRINTING)
   WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
   printing::PrintPreviewDialogController* controller =
       printing::PrintPreviewDialogController::GetInstance();
   return controller && (controller->GetPrintPreviewForContents(contents) ||
                         controller->is_creating_print_preview_dialog());
+#else
+  return false;
+#endif
 }
 
 }  // namespace
@@ -242,16 +252,18 @@ int GetContentRestrictions(const Browser* browser) {
   int content_restrictions = 0;
   WebContents* current_tab = browser->tab_strip_model()->GetActiveWebContents();
   if (current_tab) {
-    content_restrictions = current_tab->GetContentRestrictions();
+    CoreTabHelper* core_tab_helper =
+        CoreTabHelper::FromWebContents(current_tab);
+    content_restrictions = core_tab_helper->content_restrictions();
     NavigationEntry* active_entry =
         current_tab->GetController().GetActiveEntry();
     // See comment in UpdateCommandsForTabState about why we call url().
     if (!content::IsSavableURL(
             active_entry ? active_entry->GetURL() : GURL()) ||
         current_tab->ShowingInterstitialPage())
-      content_restrictions |= content::CONTENT_RESTRICTION_SAVE;
+      content_restrictions |= CONTENT_RESTRICTION_SAVE;
     if (current_tab->ShowingInterstitialPage())
-      content_restrictions |= content::CONTENT_RESTRICTION_PRINT;
+      content_restrictions |= CONTENT_RESTRICTION_PRINT;
   }
   return content_restrictions;
 }
@@ -375,8 +387,8 @@ void Home(Browser* browser, WindowOpenDisposition disposition) {
   // If the home page is a Google home page, add the RLZ header to the request.
   PrefService* pref_service = browser->profile()->GetPrefs();
   if (pref_service) {
-    std::string home_page = pref_service->GetString(prefs::kHomePage);
-    if (google_util::IsGoogleHomePageUrl(home_page)) {
+    if (google_util::IsGoogleHomePageUrl(
+        GURL(pref_service->GetString(prefs::kHomePage)))) {
       extra_headers = RLZTracker::GetAccessPointHttpHeader(
           RLZTracker::CHROME_HOME_PAGE);
     }
@@ -433,7 +445,7 @@ void OpenCurrentURL(Browser* browser) {
   const extensions::Extension* extension =
       browser->profile()->GetExtensionService()->GetInstalledApp(url);
   if (extension) {
-    AppLauncherHandler::RecordAppLaunchType(
+    CoreAppLauncherHandler::RecordAppLaunchType(
         extension_misc::APP_LAUNCH_OMNIBOX_LOCATION,
         extension->GetType());
   }
@@ -694,7 +706,7 @@ bool CanSavePage(const Browser* browser) {
     return false;
   }
   return !browser->is_devtools() &&
-      !(GetContentRestrictions(browser) & content::CONTENT_RESTRICTION_SAVE);
+      !(GetContentRestrictions(browser) & CONTENT_RESTRICTION_SAVE);
 }
 
 void ShowFindBar(Browser* browser) {
@@ -704,31 +716,29 @@ void ShowFindBar(Browser* browser) {
 void ShowWebsiteSettings(Browser* browser,
                          content::WebContents* web_contents,
                          const GURL& url,
-                         const SSLStatus& ssl,
-                         bool show_history) {
-  Profile* profile = Profile::FromBrowserContext(
-      web_contents->GetBrowserContext());
-
+                         const SSLStatus& ssl) {
   browser->window()->ShowWebsiteSettings(
-      profile, web_contents, url, ssl, show_history);
+      Profile::FromBrowserContext(web_contents->GetBrowserContext()),
+      web_contents, url, ssl);
 }
 
-void ShowChromeToMobileBubble(Browser* browser) {
-  // Only show the bubble if the window is active, otherwise we may get into
-  // weird situations where the bubble is deleted as soon as it is shown.
-  if (browser->window()->IsActive())
-    browser->window()->ShowChromeToMobileBubble();
-}
 
 void Print(Browser* browser) {
+#if defined(ENABLE_PRINTING)
+  WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
+#if defined(ENABLE_FULL_PRINTING)
   printing::PrintViewManager* print_view_manager =
-      printing::PrintViewManager::FromWebContents(
-          browser->tab_strip_model()->GetActiveWebContents());
-  if (browser->profile()->GetPrefs()->GetBoolean(
-      prefs::kPrintPreviewDisabled))
+      printing::PrintViewManager::FromWebContents(contents);
+  if (browser->profile()->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled))
     print_view_manager->PrintNow();
   else
     print_view_manager->PrintPreviewNow(false);
+#else
+  printing::PrintViewManagerBasic* print_view_manager =
+      printing::PrintViewManagerBasic::FromWebContents(contents);
+  print_view_manager->PrintNow();
+#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINTING)
 }
 
 bool CanPrint(const Browser* browser) {
@@ -736,14 +746,16 @@ bool CanPrint(const Browser* browser) {
   // Do not print when a constrained window is showing. It's confusing.
   return browser->profile()->GetPrefs()->GetBoolean(prefs::kPrintingEnabled) &&
       !(IsShowingWebContentsModalDialog(browser) ||
-      GetContentRestrictions(browser) & content::CONTENT_RESTRICTION_PRINT);
+      GetContentRestrictions(browser) & CONTENT_RESTRICTION_PRINT);
 }
 
 void AdvancedPrint(Browser* browser) {
+#if defined(ENABLE_FULL_PRINTING)
   printing::PrintViewManager* print_view_manager =
       printing::PrintViewManager::FromWebContents(
           browser->tab_strip_model()->GetActiveWebContents());
   print_view_manager->AdvancedPrintNow();
+#endif
 }
 
 bool CanAdvancedPrint(const Browser* browser) {
@@ -754,10 +766,12 @@ bool CanAdvancedPrint(const Browser* browser) {
 }
 
 void PrintToDestination(Browser* browser) {
+#if defined(ENABLE_FULL_PRINTING)
   printing::PrintViewManager* print_view_manager =
       printing::PrintViewManager::FromWebContents(
           browser->tab_strip_model()->GetActiveWebContents());
   print_view_manager->PrintToDestination();
+#endif
 }
 
 void EmailPageLocation(Browser* browser) {
@@ -964,10 +978,13 @@ void ToggleRequestTabletSite(Browser* browser) {
     entry->SetIsOverridingUserAgent(false);
   } else {
     entry->SetIsOverridingUserAgent(true);
+    chrome::VersionInfo version_info;
+    std::string product;
+    if (version_info.is_valid())
+      product = version_info.ProductNameAndVersionForUserAgent();
     current_tab->SetUserAgentOverride(
         webkit_glue::BuildUserAgentFromOSAndProduct(
-            kOsOverrideForTabletSite,
-            ChromeContentClient::GetProductImpl()));
+            kOsOverrideForTabletSite, product));
   }
   controller.ReloadOriginalRequestURL(true);
 }

@@ -10,7 +10,7 @@
 
 #include "base/logging.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -116,7 +116,7 @@ NSImage* DragImageForBookmark(NSImage* favicon, const string16& title) {
   NSImage* drag_image =
       [[[NSImage alloc] initWithSize:drag_image_size] autorelease];
   [drag_image lockFocus];
-  [favicon drawAtPoint:NSMakePoint(0, 0)
+  [favicon drawAtPoint:NSZeroPoint
               fromRect:NSZeroRect
              operation:NSCompositeSourceOver
               fraction:0.7];

@@ -8,15 +8,10 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/process_util.h"
+#include "base/process/process_handle.h"
+#include "base/process/process_metrics.h"
 
 typedef std::vector<base::ProcessId> ChromeProcessList;
-
-// Returns the executable name of the current Chrome browser process.
-const base::FilePath::CharType* GetRunningBrowserExecutableName();
-
-// Returns the executable name of the current Chrome helper process.
-const base::FilePath::CharType* GetRunningHelperExecutableName();
 
 // Returns a vector of PIDs of all chrome processes (main and renderers etc)
 // based on |browser_pid|, the PID of the main browser process.

@@ -70,27 +70,30 @@ class PermissionSet
   // Gets the API permissions in this set as a set of strings.
   std::set<std::string> GetAPIsAsStrings() const;
 
-  // Returns whether this namespace has any functions which the extension has
-  // permission to use.  For example, even though the extension may not have
-  // the "tabs" permission, "tabs.create" requires no permissions so
-  // HasAnyAccessToAPI("tabs") will return true.
-  bool HasAnyAccessToAPI(const std::string& api_name) const;
-
   // Gets the localized permission messages that represent this set.
   // The set of permission messages shown varies by extension type.
-  PermissionMessages GetPermissionMessages(Manifest::Type extension_type)
-      const;
+  PermissionMessages GetPermissionMessages(Manifest::Type extension_type) const;
 
   // Gets the localized permission messages that represent this set (represented
   // as strings). The set of permission messages shown varies by extension type.
-  std::vector<string16> GetWarningMessages(Manifest::Type extension_type)
-      const;
+  std::vector<string16> GetWarningMessages(Manifest::Type extension_type) const;
+
+  // Gets the localized permission details for messages that represent this set
+  // (represented as strings). The set of permission messages shown varies by
+  // extension type.
+  std::vector<string16> GetWarningMessagesDetails(
+      Manifest::Type extension_type) const;
 
   // Returns true if this is an empty set (e.g., the default permission set).
   bool IsEmpty() const;
 
   // Returns true if the set has the specified API permission.
   bool HasAPIPermission(APIPermission::ID permission) const;
+
+  // Returns true if the |extension| explicitly requests access to the given
+  // |permission_name|. Note this does not include APIs without no corresponding
+  // permission, like "runtime" or "browserAction".
+  bool HasAPIPermission(const std::string& permission_name) const;
 
   // Returns true if the set allows the given permission with the default
   // permission detal.
@@ -99,13 +102,6 @@ class PermissionSet
   // Returns true if the set allows the given permission and permission param.
   bool CheckAPIPermissionWithParam(APIPermission::ID permission,
       const APIPermission::CheckParam* param) const;
-
-  // Returns true if the permissions in this set grant access to the specified
-  // |function_name|. The |allow_implicit| flag controls whether we
-  // want to strictly check against just the explicit permissions, or also
-  // include implicit "no permission needed" namespaces/functions.
-  bool HasAccessToFunction(const std::string& function_name,
-                           bool allow_implicit) const;
 
   // Returns true if this includes permission to access |origin|.
   bool HasExplicitAccessToOrigin(const GURL& origin) const;
@@ -126,7 +122,9 @@ class PermissionSet
 
   // Returns true if |permissions| has a greater privilege level than this
   // permission set (e.g., this permission set has less permissions).
-  bool HasLessPrivilegesThan(const PermissionSet* permissions) const;
+  // Whether certain permissions are considered varies by extension type.
+  bool HasLessPrivilegesThan(const PermissionSet* permissions,
+                             Manifest::Type extension_type) const;
 
   const APIPermissionSet& apis() const { return apis_; }
 
@@ -166,17 +164,20 @@ class PermissionSet
   void InitEffectiveHosts();
 
   // Gets the permission messages for the API permissions.
-  std::set<PermissionMessage> GetSimplePermissionMessages() const;
+  std::set<PermissionMessage> GetAPIPermissionMessages() const;
+
+  // Gets the permission messages for the host permissions.
+  std::set<PermissionMessage> GetHostPermissionMessages(
+      Manifest::Type extension_type) const;
 
   // Returns true if |permissions| has an elevated API privilege level than
   // this set.
-  bool HasLessAPIPrivilegesThan(
-      const PermissionSet* permissions) const;
+  bool HasLessAPIPrivilegesThan(const PermissionSet* permissions) const;
 
   // Returns true if |permissions| has more host permissions compared to this
   // set.
-  bool HasLessHostPrivilegesThan(
-      const PermissionSet* permissions) const;
+  bool HasLessHostPrivilegesThan(const PermissionSet* permissions,
+                                 Manifest::Type extension_type) const;
 
   // Gets a list of the distinct hosts for displaying to the user.
   // NOTE: do not use this for comparing permissions, since this disgards some

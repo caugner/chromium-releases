@@ -6,10 +6,11 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/browser_thread.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -56,7 +57,7 @@ void XDGEmail(const std::string& email) {
 // show the folder.
 void ShowItemInFolderOnFileThread(const base::FilePath& full_path) {
   base::FilePath dir = full_path.DirName();
-  if (!file_util::DirectoryExists(dir))
+  if (!base::DirectoryExists(dir))
     return;
 
   XDGOpen(dir.value());

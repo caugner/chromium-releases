@@ -121,6 +121,28 @@ const ResourceEntry& ResourceMetadataStorage::Iterator::Get() const {
   return entry_;
 }
 
+bool ResourceMetadataStorage::Iterator::GetCacheEntry(
+    FileCacheEntry* cache_entry) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(!IsAtEnd());
+
+  // Try to seek to the cache entry.
+  std::string current_key = it_->key().ToString();
+  std::string cache_entry_key = GetCacheEntryKey(current_key);
+  it_->Seek(leveldb::Slice(cache_entry_key));
+
+  bool success = it_->Valid() &&
+      it_->key().compare(cache_entry_key) == 0 &&
+      cache_entry->ParseFromArray(it_->value().data(), it_->value().size());
+
+  // Seek back to the original position.
+  it_->Seek(leveldb::Slice(current_key));
+  DCHECK(!IsAtEnd());
+  DCHECK_EQ(current_key, it_->key().ToString());
+
+  return success;
+}
+
 void ResourceMetadataStorage::Iterator::Advance() {
   base::ThreadRestrictions::AssertIOAllowed();
   DCHECK(!IsAtEnd());
@@ -217,7 +239,7 @@ bool ResourceMetadataStorage::Initialize() {
 
   // Remove unused child map DB.
   const base::FilePath child_map_path = directory_path_.Append(kChildMapDBName);
-  file_util::Delete(child_map_path, true /* recursive */);
+  base::DeleteFile(child_map_path, true /* recursive */);
 
   resource_map_.reset();
 
@@ -227,10 +249,11 @@ bool ResourceMetadataStorage::Initialize() {
   // Try to open the existing DB.
   leveldb::DB* db = NULL;
   leveldb::Options options;
+  options.max_open_files = 64;  // Use minimum.
   options.create_if_missing = false;
 
   DBInitStatus open_existing_result = DB_INIT_NOT_FOUND;
-  if (file_util::PathExists(resource_map_path)) {
+  if (base::PathExists(resource_map_path)) {
     leveldb::Status status =
         leveldb::DB::Open(options, resource_map_path.AsUTF8Unsafe(), &db);
     open_existing_result = LevelDBStatusToDBInitStatus(status);
@@ -267,9 +290,10 @@ bool ResourceMetadataStorage::Initialize() {
 
     // Clean up the destination.
     const bool kRecursive = true;
-    file_util::Delete(resource_map_path, kRecursive);
+    base::DeleteFile(resource_map_path, kRecursive);
 
     // Create DB.
+    options.max_open_files = 64;  // Use minimum.
     options.create_if_missing = true;
 
     leveldb::Status status =
@@ -557,7 +581,7 @@ bool ResourceMetadataStorage::CheckValidity() {
     return false;
   }
 
-  // Check all entires.
+  // Check all entries.
   size_t num_entries_with_parent = 0;
   size_t num_child_entries = 0;
   ResourceEntry entry;

@@ -1,7 +1,6 @@
 /* Copyright (c) 2013 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+ * found in the LICENSE file. */
 
 /* XRay -- a simple profiler for Native Client */
 
@@ -10,6 +9,10 @@
 #define LIBRARIES_XRAY_XRAY_H_
 
 #include <stdint.h>
+
+#ifndef XRAY_DISABLE_BROWSER_INTEGRATION
+#include "ppapi/c/ppb.h"
+#endif
 
 #if defined(__arm__)
 #undef XRAY
@@ -20,7 +23,7 @@ extern "C" {
 #endif
 
 #define XRAY_NO_INSTRUMENT  __attribute__((no_instrument_function))
-#define XRAY_INLINE __attribute__((always_inline))
+#define XRAY_INLINE __attribute__((always_inline, no_instrument_function))
 
 #if defined(XRAY)
 
@@ -32,13 +35,36 @@ XRAY_NO_INSTRUMENT void __XRayAnnotateFiltered(const uint32_t filter,
   const char* str, ...) __attribute__ ((format(printf, 2, 3)));
 
 /* This is the beginning of the public XRay API */
-XRAY_NO_INSTRUMENT void XRayInit(int stack_size, int buffer_size,
-                                 int frame_count, const char* mapfilename);
-XRAY_NO_INSTRUMENT void XRayShutdown();
-XRAY_NO_INSTRUMENT void XRayStartFrame();
-XRAY_NO_INSTRUMENT void XRayEndFrame();
-XRAY_NO_INSTRUMENT void XRaySetAnnotationFilter(uint32_t filter);
-XRAY_NO_INSTRUMENT void XRaySaveReport(const char* filename, float cutoff);
+
+/* Ok if mapfilename is NULL, no symbols will be loaded.  On glibc builds,
+ * XRay will also attempt to populate the symbol table with dladdr()
+ */
+XRAY_NO_INSTRUMENT struct XRayTraceCapture* XRayInit(int stack_size,
+                                                     int buffer_size,
+                                                     int frame_count,
+                                                     const char* mapfilename);
+XRAY_NO_INSTRUMENT void XRayShutdown(struct XRayTraceCapture* capture);
+XRAY_NO_INSTRUMENT void XRayStartFrame(struct XRayTraceCapture* capture);
+XRAY_NO_INSTRUMENT void XRayEndFrame(struct XRayTraceCapture* capture);
+XRAY_NO_INSTRUMENT void XRaySetAnnotationFilter(
+    struct XRayTraceCapture* capture, uint32_t filter);
+XRAY_NO_INSTRUMENT void XRaySaveReport(struct XRayTraceCapture* capture,
+                                       const char* filename,
+                                       float percent_cutoff,
+                                       int cycle_cutoff);
+XRAY_NO_INSTRUMENT void XRayReport(struct XRayTraceCapture* capture,
+                                   FILE* f,
+                                   float percent_cutoff,
+                                   int ticks_cutoff);
+
+#ifndef XRAY_DISABLE_BROWSER_INTEGRATION
+XRAY_NO_INSTRUMENT void XRayBrowserTraceReport(
+    struct XRayTraceCapture* capture);
+XRAY_NO_INSTRUMENT void XRayRegisterBrowserInterface(
+    PPB_GetInterface get_browser_interface);
+#endif  /* XRAY_DISABLE_BROWSER_INTEGRATION */
+
+
 #if defined(XRAY_ANNOTATE)
 #define XRayAnnotate(...) __XRayAnnotate(__VA_ARGS__)
 #define XRayAnnotateFiltered(...) __XRayAnnotateFiltered(__VA_ARGS__)
@@ -55,13 +81,32 @@ XRAY_NO_INSTRUMENT void XRaySaveReport(const char* filename, float cutoff);
 #define XRayAnnotate(...)
 #define XRayAnnotateFiltered(...)
 
-inline void XRayInit(int stack_size, int buffer_size,
-                          int frame_count, const char* mapfilename) {}
-inline void XRayShutdown() {}
-inline void XRayStartFrame() {}
-inline void XRayEndFrame() {}
-inline void XRaySetAnnotationFilter(uint32_t filter) {}
-inline void XRaySaveReport(const char* filename, float cutoff) {}
+inline struct XRayTraceCapture* XRayInit(int stack_size,
+                                         int buffer_size,
+                                         int frame_count,
+                                         const char* mapfilename) {
+  return NULL;
+}
+inline void XRayShutdown(struct XRayTraceCapture* capture) {}
+inline void XRayStartFrame(struct XRayTraceCapture* capture) {}
+inline void XRayEndFrame(struct XRayTraceCapture* capture) {}
+inline void XRaySetAnnotationFilter(struct XRayTraceCapture* capture,
+                                    uint32_t filter) {}
+inline void XRaySaveReport(struct XRayTraceCapture* capture,
+                           const char* filename,
+                           float percent_cutoff,
+                           int cycle_cutoff) {}
+inline void XRayReport(struct XRayTraceCapture* capture,
+                       FILE* f,
+                       float percent_cutoff,
+                       int ticks_cutoff) {}
+
+#ifndef XRAY_DISABLE_BROWSER_INTEGRATION
+inline void XRayBrowserTraceReport(struct XRayTraceCapture* capture) {}
+inline void XRayRegisterBrowserInterface(
+    PPB_GetInterface get_browser_interface) {}
+#endif  /* XRAY_DISABLE_BROWSER_INTEGRATION */
+
 
 #endif  /* defined(XRAY) */
 
@@ -70,4 +115,3 @@ inline void XRaySaveReport(const char* filename, float cutoff) {}
 #endif
 
 #endif  /* LIBRARIES_XRAY_XRAY_H_ */
-

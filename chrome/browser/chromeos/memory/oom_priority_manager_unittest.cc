@@ -7,11 +7,11 @@
 
 #include "base/logging.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/memory/oom_priority_manager.h"
 #include "chrome/common/url_constants.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace chromeos {
 

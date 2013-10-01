@@ -12,7 +12,6 @@
 #include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
-#include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 #include "net/url_request/url_request_job_factory.h"
@@ -23,6 +22,8 @@ class ExtensionSpecialStoragePolicy;
 class FaviconService;
 class HostContentSettingsMap;
 class PasswordStore;
+class PrefProxyConfigTracker;
+class PrefService;
 class PromoCounter;
 class ProtocolHandlerRegistry;
 class TestingProfile;
@@ -67,6 +68,9 @@ namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
+// Instead of adding more members to Profile, consider creating a
+// BrowserContextKeyedService. See
+// http://dev.chromium.org/developers/design-documents/profile-architecture
 class Profile : public content::BrowserContext {
  public:
   // Profile services are accessed with the following parameter. This parameter
@@ -144,7 +148,7 @@ class Profile : public content::BrowserContext {
 
   // Profile prefs are registered as soon as the prefs are loaded for the first
   // time.
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Gets task runner for I/O operations associated with |profile|.
   static scoped_refptr<base::SequencedTaskRunner> GetTaskRunnerForProfile(
@@ -193,6 +197,9 @@ class Profile : public content::BrowserContext {
   // Return the original "recording" profile. This method returns this if the
   // profile is not incognito.
   virtual Profile* GetOriginalProfile() = 0;
+
+  // Returns whether the profile is managed (see ManagedUserService).
+  virtual bool IsManaged() = 0;
 
   // Returns a pointer to the TopSites (thumbnail manager) instance
   // for this profile.
@@ -322,7 +329,7 @@ class Profile : public content::BrowserContext {
   std::string GetDebugName();
 
   // Returns whether it is a guest session.
-  bool IsGuestSession() const;
+  virtual bool IsGuestSession() const;
 
   // Did the user restore the last session? This is set by SessionRestore.
   void set_restored_last_session(bool restored_last_session) {

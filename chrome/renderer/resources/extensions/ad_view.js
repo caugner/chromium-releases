@@ -10,8 +10,9 @@
 // TODO(rpaquay): This file is currently very similar to "web_view.js". Do we
 //                want to refactor to extract common pieces?
 
+var eventBindings = require('event_bindings');
 var process = requireNative('process');
-var watchForTag = require('tagWatcher').watchForTag;
+var addTagWatcher = require('tagWatcher').addTagWatcher;
 
 /**
  * Define "allowCustomAdNetworks" function such that the
@@ -68,9 +69,31 @@ var AD_VIEW_API_METHODS = [
  * List of events to blindly forward from the browser plugin to the <adview>.
  */
 var AD_VIEW_EVENTS = {
-  'loadabort' : ['url', 'isTopLevel', 'reason'],
-  'loadcommit' : ['url', 'isTopLevel'],
   'sizechanged': ['oldHeight', 'oldWidth', 'newHeight', 'newWidth'],
+};
+
+var createEvent = function(name) {
+  var eventOpts = {supportsListeners: true, supportsFilters: true};
+  return new eventBindings.Event(name, undefined, eventOpts);
+};
+
+var AdviewLoadAbortEvent = createEvent('adview.onLoadAbort');
+var AdviewLoadCommitEvent = createEvent('adview.onLoadCommit');
+
+var AD_VIEW_EXT_EVENTS = {
+  'loadabort': {
+    evt: AdviewLoadAbortEvent,
+    fields: ['url', 'isTopLevel', 'reason']
+  },
+  'loadcommit': {
+    customHandler: function(adview, event) {
+      if (event.isTopLevel) {
+        adview.browserPluginNode_.setAttribute('src', event.url);
+      }
+    },
+    evt: AdviewLoadCommitEvent,
+    fields: ['url', 'isTopLevel']
+  }
 };
 
 /**
@@ -124,8 +147,6 @@ function AdView(adviewNode) {
 AdView.prototype.createBrowserPluginNode_ = function() {
   var browserPluginNode = document.createElement('object');
   browserPluginNode.type = 'application/browser-plugin';
-  // TODO(fsamuel): Change this to 'adview' once AdViewGuest is ready.
-  browserPluginNode.setAttribute('api', 'webview');
   // The <object> node fills in the <adview> container.
   browserPluginNode.style.width = '100%';
   browserPluginNode.style.height = '100%';
@@ -176,7 +197,7 @@ AdView.prototype.setupAdviewNodeObservers_ = function() {
   var handleMutation = $Function.bind(function(mutation) {
     this.handleAdviewAttributeMutation_(mutation);
   }, this);
-  var observer = new WebKitMutationObserver(function(mutations) {
+  var observer = new MutationObserver(function(mutations) {
     $Array.forEach(mutations, handleMutation);
   });
   observer.observe(
@@ -193,7 +214,7 @@ AdView.prototype.setupAdviewNodeCustomObservers_ = function() {
   var handleMutation = $Function.bind(function(mutation) {
     this.handleAdviewCustomAttributeMutation_(mutation);
   }, this);
-  var observer = new WebKitMutationObserver(function(mutations) {
+  var observer = new MutationObserver(function(mutations) {
     $Array.forEach(mutations, handleMutation);
   });
   var customAttributeNames =
@@ -210,7 +231,7 @@ AdView.prototype.setupBrowserPluginNodeObservers_ = function() {
   var handleMutation = $Function.bind(function(mutation) {
     this.handleBrowserPluginAttributeMutation_(mutation);
   }, this);
-  var objectObserver = new WebKitMutationObserver(function(mutations) {
+  var objectObserver = new MutationObserver(function(mutations) {
     $Array.forEach(mutations, handleMutation);
   });
   objectObserver.observe(
@@ -432,10 +453,44 @@ AdView.prototype.handleSrcMutation = function(mutation) {
  * @private
  */
 AdView.prototype.setupAdviewNodeEvents_ = function() {
+  var self = this;
+  var onInstanceIdAllocated = function(e) {
+    var detail = e.detail ? JSON.parse(e.detail) : {};
+    self.instanceId_ = detail.windowId;
+    var params = {
+      'api': 'adview'
+    };
+    self.browserPluginNode_['-internal-attach'](params);
+
+    for (var eventName in AD_VIEW_EXT_EVENTS) {
+      self.setupExtEvent_(eventName, AD_VIEW_EXT_EVENTS[eventName]);
+    }
+  };
+  this.browserPluginNode_.addEventListener('-internal-instanceid-allocated',
+                                           onInstanceIdAllocated);
+
   for (var eventName in AD_VIEW_EVENTS) {
     this.setupEvent_(eventName, AD_VIEW_EVENTS[eventName]);
   }
 }
+
+/**
+ * @private
+ */
+AdView.prototype.setupExtEvent_ = function(eventName, eventInfo) {
+  var self = this;
+  var adviewNode = this.adviewNode_;
+  eventInfo.evt.addListener(function(event) {
+    var adviewEvent = new Event(eventName, {bubbles: true});
+    $Array.forEach(eventInfo.fields, function(field) {
+      adviewEvent[field] = event[field];
+    });
+    if (eventInfo.customHandler) {
+      eventInfo.customHandler(self, event);
+    }
+    adviewNode.dispatchEvent(adviewEvent);
+  }, {instanceId: self.instanceId_});
+};
 
 /**
  * @private
@@ -467,9 +522,4 @@ AdView.prototype.dispatchEvent = function(eventname, detail) {
   this.adviewNode_.dispatchEvent(evt);
 }
 
-//
-// Hook up <adview> tag creation in DOM.
-//
-window.addEventListener('DOMContentLoaded', function() {
-  watchForTag('ADVIEW', function(addedNode) { new AdView(addedNode); });
-});
+addTagWatcher('ADVIEW', function(addedNode) { new AdView(addedNode); });

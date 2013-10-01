@@ -1,7 +1,6 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "nacl_io/mount_node_html5fs.h"
 
@@ -18,6 +17,8 @@
 #include "nacl_io/osdirent.h"
 #include "nacl_io/pepper_interface.h"
 #include "sdk_util/auto_lock.h"
+
+namespace nacl_io {
 
 namespace {
 
@@ -155,7 +156,7 @@ Error MountNodeHtml5Fs::GetDents(size_t offs,
 }
 
 Error MountNodeHtml5Fs::GetStat(struct stat* stat) {
-  AutoLock lock(&lock_);
+  AUTO_LOCK(node_lock_);
 
   PP_FileInfo info;
   int32_t result = mount_->ppapi()->GetFileRefInterface()->Query(
@@ -244,7 +245,7 @@ Error MountNodeHtml5Fs::Write(size_t offs,
 Error MountNodeHtml5Fs::GetSize(size_t* out_size) {
   *out_size = 0;
 
-  AutoLock lock(&lock_);
+  AUTO_LOCK(node_lock_);
 
   PP_FileInfo info;
   int32_t result = mount_->ppapi()->GetFileIoInterface()
@@ -268,10 +269,12 @@ Error MountNodeHtml5Fs::Init(int perm) {
 
   // First query the FileRef to see if it is a file or directory.
   PP_FileInfo file_info;
-  mount_->ppapi()->GetFileRefInterface()->Query(fileref_resource_, &file_info,
-                                                PP_BlockUntilComplete());
+  int32_t query_result =
+      mount_->ppapi()->GetFileRefInterface()->Query(fileref_resource_,
+                                                    &file_info,
+                                                    PP_BlockUntilComplete());
   // If this is a directory, do not get a FileIO.
-  if (file_info.type == PP_FILETYPE_DIRECTORY)
+  if (query_result == PP_OK && file_info.type == PP_FILETYPE_DIRECTORY)
     return 0;
 
   fileio_resource_ = mount_->ppapi()->GetFileIoInterface()
@@ -302,3 +305,6 @@ void MountNodeHtml5Fs::Destroy() {
   fileref_resource_ = 0;
   MountNode::Destroy();
 }
+
+}  // namespace nacl_io
+

@@ -7,14 +7,14 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
-#include "googleurl/src/gurl.h"
 #include "ui/gfx/native_widget_types.h"
+#include "url/gurl.h"
 
 namespace content {
 class CertStore;
@@ -144,7 +144,7 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
   WebsiteSettingsUI* ui_;
 
   // The infobar service of the active tab.
-  InfoBarService* infobar_service_;  // Owned by the active tab contents.
+  InfoBarService* infobar_service_;
 
   // The flag that controls whether an infobar is displayed after the website
   // settings UI is closed or not.

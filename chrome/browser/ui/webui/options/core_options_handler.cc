@@ -13,22 +13,22 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/options/options_util.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
-#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 using content::UserMetricsAction;
 
@@ -212,7 +212,11 @@ void CoreOptionsHandler::ObservePref(const std::string& pref_name) {
         base::Bind(&CoreOptionsHandler::OnPreferenceChanged,
                    base::Unretained(this),
                    local_state_registrar_.prefs()));
-  } else {
+  }
+  // TODO(pneubeck): change this to if/else once kProxy is only used as a user
+  // pref. Currently, it is both a user and a local state pref.
+  if (Profile::FromWebUI(web_ui())->GetPrefs()->FindPreference(
+          pref_name.c_str())) {
     registrar_.Add(
         pref_name.c_str(),
         base::Bind(&CoreOptionsHandler::OnPreferenceChanged,
@@ -472,26 +476,41 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args, PrefType type) {
 
   switch (type) {
     case TYPE_BOOLEAN:
-      CHECK_EQ(base::Value::TYPE_BOOLEAN, value->GetType());
+      if (!value->IsType(base::Value::TYPE_BOOLEAN)) {
+        NOTREACHED();
+        return;
+      }
       break;
     case TYPE_INTEGER: {
       // In JS all numbers are doubles.
       double double_value;
-      CHECK(value->GetAsDouble(&double_value));
+      if (!value->GetAsDouble(&double_value)) {
+        NOTREACHED();
+        return;
+      }
       int int_value = static_cast<int>(double_value);
       temp_value.reset(new base::FundamentalValue(int_value));
       value = temp_value.get();
       break;
     }
     case TYPE_DOUBLE:
-      CHECK_EQ(base::Value::TYPE_DOUBLE, value->GetType());
+      if (!value->IsType(base::Value::TYPE_DOUBLE)) {
+        NOTREACHED();
+        return;
+      }
       break;
     case TYPE_STRING:
-      CHECK_EQ(base::Value::TYPE_STRING, value->GetType());
+      if (!value->IsType(base::Value::TYPE_STRING)) {
+        NOTREACHED();
+        return;
+      }
       break;
     case TYPE_URL: {
       std::string original;
-      CHECK(value->GetAsString(&original));
+      if (!value->GetAsString(&original)) {
+        NOTREACHED();
+        return;
+      }
       GURL fixed = URLFixerUpper::FixupURL(original, std::string());
       temp_value.reset(new base::StringValue(fixed.spec()));
       value = temp_value.get();
@@ -500,11 +519,17 @@ void CoreOptionsHandler::HandleSetPref(const ListValue* args, PrefType type) {
     case TYPE_LIST: {
       // In case we have a List pref we got a JSON string.
       std::string json_string;
-      CHECK(value->GetAsString(&json_string));
+      if (!value->GetAsString(&json_string)) {
+        NOTREACHED();
+        return;
+      }
       temp_value.reset(
           base::JSONReader::Read(json_string));
       value = temp_value.get();
-      CHECK_EQ(base::Value::TYPE_LIST, value->GetType());
+      if (!value->IsType(base::Value::TYPE_LIST)) {
+        NOTREACHED();
+        return;
+      }
       break;
     }
     default:

@@ -21,10 +21,16 @@ class ChromeRenderProcessObserver;
 class ExtensionSet;
 class PrescientNetworkingDispatcher;
 class RendererNetPredictor;
+#if defined(ENABLE_SPELLCHECK)
 class SpellCheck;
 class SpellCheckProvider;
+#endif
 
 struct ChromeViewHostMsg_GetPluginInfo_Output;
+
+namespace content {
+struct WebPluginInfo;
+}
 
 namespace extensions {
 class Dispatcher;
@@ -42,10 +48,6 @@ class PhishingClassifierFilter;
 
 namespace visitedlink {
 class VisitedLinkSlave;
-}
-
-namespace webkit {
-struct WebPluginInfo;
 }
 
 namespace WebKit {
@@ -85,12 +87,8 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const WebKit::WebURLError& error,
       std::string* error_html,
       string16* error_description) OVERRIDE;
-  virtual webkit_media::WebMediaPlayerImpl* OverrideCreateWebMediaPlayer(
-      content::RenderView* render_view,
-      WebKit::WebFrame* frame,
-      WebKit::WebMediaPlayerClient* client,
-      base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
-      const webkit_media::WebMediaPlayerParams& params) OVERRIDE;
+  virtual void DeferMediaLoad(content::RenderView* render_view,
+                              const base::Closure& closure) OVERRIDE;
   virtual bool RunIdleHandlerWhenWidgetsHidden() OVERRIDE;
   virtual bool AllowPopup() OVERRIDE;
   virtual bool ShouldFork(WebKit::WebFrame* frame,
@@ -115,11 +113,10 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   virtual unsigned long long VisitedLinkHash(const char* canonical_url,
                                              size_t length) OVERRIDE;
   virtual bool IsLinkVisited(unsigned long long link_hash) OVERRIDE;
-  virtual void PrefetchHostName(const char* hostname, size_t length) OVERRIDE;
   virtual WebKit::WebPrescientNetworking* GetPrescientNetworking() OVERRIDE;
   virtual bool ShouldOverridePageVisibilityState(
       const content::RenderView* render_view,
-      WebKit::WebPageVisibilityState* override_state) const OVERRIDE;
+      WebKit::WebPageVisibilityState* override_state) OVERRIDE;
   virtual bool HandleGetCookieRequest(content::RenderView* sender,
                                       const GURL& url,
                                       const GURL& first_party_for_cookies,
@@ -129,23 +126,26 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                                       const GURL& first_party_for_cookies,
                                       const std::string& value) OVERRIDE;
   virtual bool AllowBrowserPlugin(
-      WebKit::WebPluginContainer* container) const OVERRIDE;
-  virtual void RegisterPPAPIInterfaceFactories(
-      webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) OVERRIDE;
+      WebKit::WebPluginContainer* container) OVERRIDE;
+  virtual const void* CreatePPAPIInterface(
+      const std::string& interface_name) OVERRIDE;
+  virtual bool IsExternalPepperPlugin(const std::string& module_name) OVERRIDE;
   // TODO(victorhsieh): move to ChromeContentBrowserClient once we migrate
   // PPAPI FileIO host to browser.
   virtual bool IsPluginAllowedToCallRequestOSFileHandle(
-      WebKit::WebPluginContainer* container) const OVERRIDE;
+      WebKit::WebPluginContainer* container) OVERRIDE;
   virtual WebKit::WebSpeechSynthesizer* OverrideSpeechSynthesizer(
       WebKit::WebSpeechSynthesizerClient* client) OVERRIDE;
-  virtual bool AllowPepperMediaStreamAPI(const GURL& url) const OVERRIDE;
+  virtual bool AllowPepperMediaStreamAPI(const GURL& url) OVERRIDE;
 
   // For testing.
   void SetExtensionDispatcher(extensions::Dispatcher* extension_dispatcher);
 
+#if defined(ENABLE_SPELLCHECK)
   // Sets a new |spellcheck|. Used for low-mem restart and testing only.
   // Takes ownership of |spellcheck|.
   void SetSpellcheck(SpellCheck* spellcheck);
+#endif
 
   // Called in low-memory conditions to dump the memory used by the spellchecker
   // and start over.
@@ -180,7 +180,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                                bool is_initial_navigation);
 
   static GURL GetNaClContentHandlerURL(const std::string& actual_mime_type,
-                                       const webkit::WebPluginInfo& plugin);
+                                       const content::WebPluginInfo& plugin);
   static bool IsNaClAllowed(const GURL& manifest_url,
                             const GURL& app_url,
                             bool is_nacl_unrestricted,
@@ -193,7 +193,9 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       permissions_policy_delegate_;
   scoped_ptr<PrescientNetworkingDispatcher> prescient_networking_dispatcher_;
   scoped_ptr<RendererNetPredictor> net_predictor_;
+#if defined(ENABLE_SPELLCHECK)
   scoped_ptr<SpellCheck> spellcheck_;
+#endif
   scoped_ptr<visitedlink::VisitedLinkSlave> visited_link_slave_;
   scoped_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
   scoped_ptr<prerender::PrerenderDispatcher> prerender_dispatcher_;

@@ -6,13 +6,25 @@
 #define REMOTING_PROTOCOL_PAIRING_REGISTRY_H_
 
 #include <map>
+#include <queue>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/threading/non_thread_safe.h"
-#include "base/time.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/time/time.h"
+
+namespace base {
+class DictionaryValue;
+class ListValue;
+class SingleThreadTaskRunner;
+}  // namespace base
+
+namespace tracked_objects {
+class Location;
+}  // namespace tracked_objects
 
 namespace remoting {
 namespace protocol {
@@ -26,8 +38,7 @@ namespace protocol {
 //     class and sent in plain-text by the client during authentication.
 //   * The shared secret for the client. This is generated on-demand by this
 //     class and used in the SPAKE2 exchange to mutually verify identity.
-class PairingRegistry : public base::RefCountedThreadSafe<PairingRegistry>,
-                        public base::NonThreadSafe {
+class PairingRegistry : public base::RefCountedThreadSafe<PairingRegistry> {
  public:
   struct Pairing {
     Pairing();
@@ -38,6 +49,9 @@ class PairingRegistry : public base::RefCountedThreadSafe<PairingRegistry>,
     ~Pairing();
 
     static Pairing Create(const std::string& client_name);
+    static Pairing CreateFromValue(const base::DictionaryValue& pairing);
+
+    scoped_ptr<base::DictionaryValue> ToValue() const;
 
     bool operator==(const Pairing& other) const;
 
@@ -59,27 +73,40 @@ class PairingRegistry : public base::RefCountedThreadSafe<PairingRegistry>,
   typedef std::map<std::string, Pairing> PairedClients;
 
   // Delegate callbacks.
-  typedef base::Callback<void(const std::string& pairings_json)> LoadCallback;
-  typedef base::Callback<void(bool success)> SaveCallback;
-  typedef base::Callback<void(Pairing pariring)> GetPairingCallback;
+  typedef base::Callback<void(bool success)> DoneCallback;
+  typedef base::Callback<void(scoped_ptr<base::ListValue> pairings)>
+      GetAllPairingsCallback;
+  typedef base::Callback<void(Pairing pairing)> GetPairingCallback;
+
+  static const char kCreatedTimeKey[];
+  static const char kClientIdKey[];
+  static const char kClientNameKey[];
+  static const char kSharedSecretKey[];
 
   // Interface representing the persistent storage back-end.
   class Delegate {
    public:
     virtual ~Delegate() {}
 
-    // Save JSON-encoded pairing information to persistent storage. If
-    // a non-NULL callback is provided, invoke it on completion to
-    // indicate success or failure. Must not block.
-    virtual void Save(const std::string& pairings_json,
-                      const SaveCallback& callback) = 0;
+    // Retrieves all JSON-encoded pairings from persistent storage.
+    virtual scoped_ptr<base::ListValue> LoadAll() = 0;
 
-    // Retrieve the JSON-encoded pairing information from persistent
-    // storage. Must not block.
-    virtual void Load(const LoadCallback& callback) = 0;
+    // Deletes all pairings in persistent storage.
+    virtual bool DeleteAll() = 0;
+
+    // Retrieves the pairing identified by |client_id|.
+    virtual Pairing Load(const std::string& client_id) = 0;
+
+    // Saves |pairing| to persistent storage.
+    virtual bool Save(const Pairing& pairing) = 0;
+
+    // Deletes the pairing identified by |client_id|.
+    virtual bool Delete(const std::string& client_id) = 0;
   };
 
-  explicit PairingRegistry(scoped_ptr<Delegate> delegate);
+  PairingRegistry(
+      scoped_refptr<base::SingleThreadTaskRunner> delegate_task_runner,
+      scoped_ptr<Delegate> delegate);
 
   // Creates a pairing for a new client and saves it to disk.
   //
@@ -94,24 +121,79 @@ class PairingRegistry : public base::RefCountedThreadSafe<PairingRegistry>,
   void GetPairing(const std::string& client_id,
                   const GetPairingCallback& callback);
 
+  // Gets all pairings with the shared secrets removed as a base::ListValue.
+  void GetAllPairings(const GetAllPairingsCallback& callback);
+
+  // Delete a pairing, identified by its client ID. |callback| is called with
+  // the result of saving the new config, which occurs even if the client ID
+  // did not match any pairing.
+  void DeletePairing(const std::string& client_id,
+                     const DoneCallback& callback);
+
+  // Clear all pairings from the registry.
+  void ClearAllPairings(const DoneCallback& callback);
+
+ protected:
+  friend class base::RefCountedThreadSafe<PairingRegistry>;
+  virtual ~PairingRegistry();
+
+  // Lets the tests override task posting to make all callbacks synchronous.
+  virtual void PostTask(
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+      const tracked_objects::Location& from_here,
+      const base::Closure& task);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(PairingRegistryTest, AddPairing);
   friend class NegotiatingAuthenticatorTest;
-  friend class base::RefCountedThreadSafe<PairingRegistry>;
 
-  virtual ~PairingRegistry();
+  // Helper method for unit tests.
+  void AddPairing(const Pairing& pairing);
 
-  void AddPairing(const Pairing& pairing);;
-  void MergePairingAndSave(const Pairing& pairing,
-                           const std::string& pairings_json);
-  void DoGetPairing(const std::string& client_id,
-                    const GetPairingCallback& callback,
-                    const std::string& pairings_json);
+  // Blocking helper methods used to call the delegate.
+  void DoLoadAll(
+      const protocol::PairingRegistry::GetAllPairingsCallback& callback);
+  void DoDeleteAll(
+      const protocol::PairingRegistry::DoneCallback& callback);
+  void DoLoad(
+      const std::string& client_id,
+      const protocol::PairingRegistry::GetPairingCallback& callback);
+  void DoSave(
+      const protocol::PairingRegistry::Pairing& pairing,
+      const protocol::PairingRegistry::DoneCallback& callback);
+  void DoDelete(
+      const std::string& client_id,
+      const protocol::PairingRegistry::DoneCallback& callback);
 
-  static PairedClients DecodeJson(const std::string& pairings_json);
-  static std::string EncodeJson(const PairedClients& clients);
+  // "Trampoline" callbacks that schedule the next pending request and then
+  // invoke the original caller-supplied callback.
+  void InvokeDoneCallbackAndScheduleNext(
+      const DoneCallback& callback, bool success);
+  void InvokeGetPairingCallbackAndScheduleNext(
+      const GetPairingCallback& callback, Pairing pairing);
+  void InvokeGetAllPairingsCallbackAndScheduleNext(
+      const GetAllPairingsCallback& callback,
+      scoped_ptr<base::ListValue> pairings);
+
+  // Sanitize |pairings| by parsing each entry and removing the secret from it.
+  void SanitizePairings(const GetAllPairingsCallback& callback,
+                        scoped_ptr<base::ListValue> pairings);
+
+  // Queue management methods.
+  void ServiceOrQueueRequest(const base::Closure& request);
+  void ServiceNextRequest();
+
+  // Task runner on which all public methods of this class should be called.
+  scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner_;
+
+  // Task runner used to run blocking calls to the delegate. A single thread
+  // task runner is used to guarantee that one one method of the delegate is
+  // called at a time.
+  scoped_refptr<base::SingleThreadTaskRunner> delegate_task_runner_;
 
   scoped_ptr<Delegate> delegate_;
+
+  std::queue<base::Closure> pending_requests_;
 
   DISALLOW_COPY_AND_ASSIGN(PairingRegistry);
 };

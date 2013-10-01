@@ -9,11 +9,12 @@
 #include "base/bind.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -31,7 +32,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -54,6 +54,10 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if !defined(OS_ANDROID)
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
+#endif
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
@@ -191,6 +195,15 @@ WebContents* ExtensionHost::GetAssociatedWebContents() const {
   return associated_web_contents_;
 }
 
+WebContents* ExtensionHost::GetVisibleWebContents() const {
+  if (associated_web_contents_)
+    return associated_web_contents_;
+  if ((extension_host_type_ == VIEW_TYPE_EXTENSION_POPUP) ||
+      (extension_host_type_ == VIEW_TYPE_PANEL))
+    return host_contents_.get();
+  return NULL;
+}
+
 void ExtensionHost::SetAssociatedWebContents(
     content::WebContents* web_contents) {
   associated_web_contents_ = web_contents;
@@ -252,6 +265,16 @@ void ExtensionHost::LoadInitialURL() {
     return;
   }
 
+#if !defined(OS_ANDROID)
+  if ((extension_host_type_ == VIEW_TYPE_EXTENSION_POPUP) ||
+      (extension_host_type_ == VIEW_TYPE_PANEL)) {
+    web_modal::WebContentsModalDialogManager::CreateForWebContents(
+        host_contents_.get());
+    web_modal::WebContentsModalDialogManager::FromWebContents(
+        host_contents_.get())->set_delegate(this);
+  }
+#endif
+
   host_contents_->GetController().LoadURL(
       initial_url_, content::Referrer(), content::PAGE_TRANSITION_LINK,
       std::string());
@@ -301,7 +324,7 @@ void ExtensionHost::ResizeDueToAutoResize(WebContents* source,
     view()->ResizeDueToAutoResize(new_size);
 }
 
-void ExtensionHost::RenderViewGone(base::TerminationStatus status) {
+void ExtensionHost::RenderProcessGone(base::TerminationStatus status) {
   // During browser shutdown, we may use sudden termination on an extension
   // process, so it is expected to lose our connection to the render view.
   // Do nothing.

@@ -5,9 +5,8 @@
 #include "webkit/browser/fileapi/file_system_url.h"
 
 #include "base/files/file_path.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/browser/fileapi/syncable/syncable_file_system_util.h"
+#include "url/gurl.h"
 #include "webkit/common/fileapi/file_system_types.h"
 #include "webkit/common/fileapi/file_system_util.h"
 

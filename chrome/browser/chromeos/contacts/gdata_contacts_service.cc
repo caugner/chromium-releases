@@ -16,8 +16,9 @@
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/contacts/contact.pb.h"
 #include "chrome/browser/google_apis/gdata_contacts_requests.h"
@@ -144,9 +145,6 @@ const char kLinkRelField[] = "rel";
 const char kLinkETagField[] = "gd$etag";
 const char kLinkRelPhotoValue[] =
     "http://schemas.google.com/contacts/2008/rel#photo";
-
-// OAuth2 scope for the Contacts API.
-const char kContactsScope[] = "https://www.google.com/m8/feeds/";
 
 // Returns a string containing a pretty-printed JSON representation of |value|.
 std::string PrettyPrintValue(const base::Value& value) {
@@ -436,14 +434,12 @@ class GDataContactsService::DownloadContactsRequest {
  public:
   DownloadContactsRequest(
       GDataContactsService* service,
-      google_apis::RequestSender* runner,
-      net::URLRequestContextGetter* url_request_context_getter,
+      google_apis::RequestSender* sender,
       SuccessCallback success_callback,
       FailureCallback failure_callback,
       const base::Time& min_update_time)
       : service_(service),
-        sender_(runner),
-        url_request_context_getter_(url_request_context_getter),
+        sender_(sender),
         success_callback_(success_callback),
         failure_callback_(failure_callback),
         min_update_time_(min_update_time),
@@ -481,7 +477,6 @@ class GDataContactsService::DownloadContactsRequest {
       google_apis::GetContactGroupsRequest* operation =
           new google_apis::GetContactGroupsRequest(
               sender_,
-              url_request_context_getter_,
               base::Bind(&DownloadContactsRequest::HandleGroupsFeedData,
                          weak_ptr_factory_.GetWeakPtr()));
       if (!service_->groups_feed_url_for_testing_.is_empty()) {
@@ -589,7 +584,6 @@ class GDataContactsService::DownloadContactsRequest {
     google_apis::GetContactsRequest* operation =
         new google_apis::GetContactsRequest(
             sender_,
-            url_request_context_getter_,
             my_contacts_group_id_,
             min_update_time_,
             base::Bind(&DownloadContactsRequest::HandleContactsFeedData,
@@ -649,7 +643,7 @@ class GDataContactsService::DownloadContactsRequest {
       return false;
     }
     const DictionaryValue* category_dict = NULL;
-    if (!category_list->GetSize() == 1 ||
+    if (category_list->GetSize() != 1 ||
         !category_list->GetDictionary(0, &category_dict)) {
       LOG(WARNING) << "Unable to get dictionary from category list of size "
                    << category_list->GetSize();
@@ -746,7 +740,6 @@ class GDataContactsService::DownloadContactsRequest {
       sender_->StartRequestWithRetry(
           new google_apis::GetContactPhotoRequest(
               sender_,
-              url_request_context_getter_,
               GURL(url),
               base::Bind(&DownloadContactsRequest::HandlePhotoData,
                          weak_ptr_factory_.GetWeakPtr(),
@@ -803,7 +796,6 @@ class GDataContactsService::DownloadContactsRequest {
 
   GDataContactsService* service_;  // not owned
   google_apis::RequestSender* sender_;  // not owned
-  net::URLRequestContextGetter* url_request_context_getter_;  // not owned
 
   SuccessCallback success_callback_;
   FailureCallback failure_callback_;
@@ -856,32 +848,21 @@ class GDataContactsService::DownloadContactsRequest {
 
 GDataContactsService::GDataContactsService(
     net::URLRequestContextGetter* url_request_context_getter,
-    Profile* profile)
-    : url_request_context_getter_(url_request_context_getter),
-      max_photo_downloads_per_second_(kMaxPhotoDownloadsPerSecond),
+    google_apis::AuthServiceInterface* auth_service)
+    : max_photo_downloads_per_second_(kMaxPhotoDownloadsPerSecond),
       photo_download_timer_interval_(base::TimeDelta::FromSeconds(1)) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  std::vector<std::string> scopes;
-  scopes.push_back(kContactsScope);
-  sender_.reset(new google_apis::RequestSender(profile,
-                                               url_request_context_getter_,
-                                               scopes,
-                                               "" /* custom_user_agent */));
+  sender_.reset(new google_apis::RequestSender(
+      auth_service,
+      url_request_context_getter,
+      content::BrowserThread::GetBlockingPool(),
+      "" /* custom_user_agent */));
 }
 
 GDataContactsService::~GDataContactsService() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   STLDeleteContainerPointers(requests_.begin(), requests_.end());
   requests_.clear();
-}
-
-google_apis::AuthService* GDataContactsService::auth_service_for_testing() {
-  return sender_->auth_service();
-}
-
-void GDataContactsService::Initialize() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  sender_->Initialize();
 }
 
 void GDataContactsService::DownloadContacts(SuccessCallback success_callback,
@@ -891,7 +872,6 @@ void GDataContactsService::DownloadContacts(SuccessCallback success_callback,
   DownloadContactsRequest* request =
       new DownloadContactsRequest(this,
                                   sender_.get(),
-                                  url_request_context_getter_,
                                   success_callback,
                                   failure_callback,
                                   min_update_time);

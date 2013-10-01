@@ -21,7 +21,7 @@
 #include "chrome/common/extensions/message_bundle.h"
 #include "chrome/common/url_constants.h"
 #include "extensions/common/constants.h"
-#include "third_party/icu/public/common/unicode/uloc.h"
+#include "third_party/icu/source/common/unicode/uloc.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace errors = extension_manifest_errors;
@@ -211,7 +211,7 @@ bool AddLocale(const std::set<std::string>& chrome_locales,
     return true;
   }
   // Check if messages file is actually present (but don't check content).
-  if (file_util::PathExists(
+  if (base::PathExists(
       locale_folder.Append(extensions::kMessagesFilename))) {
     valid_locales->insert(locale_name);
   } else {

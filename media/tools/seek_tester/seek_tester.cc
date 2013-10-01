@@ -17,9 +17,10 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "media/base/media.h"
+#include "media/base/media_log.h"
 #include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/file_data_source.h"
 
@@ -46,10 +47,10 @@ void TimestampExtractor(uint64* timestamp_ms,
                         media::DemuxerStream::Status status,
                         const scoped_refptr<media::DecoderBuffer>& buffer) {
   CHECK_EQ(status, media::DemuxerStream::kOk);
-  if (buffer->GetTimestamp() == media::kNoTimestamp())
+  if (buffer->timestamp() == media::kNoTimestamp())
     *timestamp_ms = -1;
   else
-    *timestamp_ms = buffer->GetTimestamp().InMillisecondsF();
+    *timestamp_ms = buffer->timestamp().InMillisecondsF();
   loop->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
 }
 
@@ -73,8 +74,11 @@ int main(int argc, char** argv) {
   base::MessageLoop loop;
   media::PipelineStatusCB quitter = base::Bind(&QuitMessageLoop, &loop);
   media::FFmpegNeedKeyCB need_key_cb = base::Bind(&NeedKey);
-  scoped_ptr<media::FFmpegDemuxer> demuxer(new media::FFmpegDemuxer(
-      loop.message_loop_proxy(), file_data_source.get(), need_key_cb));
+  scoped_ptr<media::FFmpegDemuxer> demuxer(
+      new media::FFmpegDemuxer(loop.message_loop_proxy(),
+                               file_data_source.get(),
+                               need_key_cb,
+                               new media::MediaLog()));
   demuxer->Initialize(&host, quitter);
   loop.Run();
 

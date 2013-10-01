@@ -8,24 +8,43 @@
 
 #include "chrome/browser/notifications/sync_notifier/chrome_notifier_service.h"
 
+#include <string>
+#include <vector>
+
+#include "base/command_line.h"
+#include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
+#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "googleurl/src/gurl.h"
+#include "content/public/browser/browser_thread.h"
+#include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_change_processor.h"
 #include "sync/api/sync_error_factory.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/protocol/synced_notification_specifics.pb.h"
 #include "third_party/WebKit/public/web/WebTextDirection.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/message_center/notifier_settings.h"
+#include "url/gurl.h"
 
 namespace notifier {
+namespace {
+
+const char kFirstSyncedNotificationServiceId[] = "Google+";
+
+}
 
 bool ChromeNotifierService::avoid_bitmap_fetching_for_test_ = false;
 
 ChromeNotifierService::ChromeNotifierService(Profile* profile,
                                              NotificationUIManager* manager)
-    : profile_(profile), notification_manager_(manager) {}
+    : profile_(profile), notification_manager_(manager) {
+}
 ChromeNotifierService::~ChromeNotifierService() {}
 
 // Methods from BrowserContextKeyedService.
@@ -40,8 +59,7 @@ syncer::SyncMergeResult ChromeNotifierService::MergeDataAndStartSyncing(
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
       scoped_ptr<syncer::SyncErrorFactory> error_handler) {
-  // TODO(petewil): After I add the infrastructure for the test, add a check
-  // that we are currently on the UI thread here.
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   DCHECK_EQ(syncer::SYNCED_NOTIFICATIONS, type);
   syncer::SyncMergeResult merge_result(syncer::SYNCED_NOTIFICATIONS);
   // A list of local changes to send up to the sync server.
@@ -66,7 +84,7 @@ syncer::SyncMergeResult ChromeNotifierService::MergeDataAndStartSyncing(
     // Process each incoming remote notification.
     const std::string& key = incoming->GetKey();
     DCHECK_GT(key.length(), 0U);
-    SyncedNotification* found = FindNotificationByKey(key);
+    SyncedNotification* found = FindNotificationById(key);
 
     if (NULL == found) {
       // If there are no conflicts, copy in the data from remote.
@@ -84,7 +102,13 @@ syncer::SyncMergeResult ChromeNotifierService::MergeDataAndStartSyncing(
           if (incoming->GetReadState() == SyncedNotification::kDismissed) {
             // If it is marked as read on the server, but not the client.
             found->NotificationHasBeenDismissed();
-            // TODO(petewil): Tell the Notification UI Manager to mark it read.
+            // Tell the Notification UI Manager to remove it.
+            notification_manager_->CancelById(found->GetKey());
+          } else if (incoming->GetReadState() == SyncedNotification::kRead) {
+            // If it is marked as read on the server, but not the client.
+            found->NotificationHasBeenRead();
+            // Tell the Notification UI Manager to remove it.
+            notification_manager_->CancelById(found->GetKey());
           } else {
             // If it is marked as read on the client, but not the server.
             syncer::SyncData sync_data = CreateSyncDataFromNotification(*found);
@@ -101,6 +125,9 @@ syncer::SyncMergeResult ChromeNotifierService::MergeDataAndStartSyncing(
         // TODO(petewil): Someday we may allow changes from the client to
         // flow upwards, when we do, we will need better merge resolution.
         found->Update(sync_data);
+
+        // Tell the notification manager to update the notification.
+        UpdateInMessageCenter(found);
       }
     }
   }
@@ -125,10 +152,9 @@ syncer::SyncDataList ChromeNotifierService::GetAllSyncData(
   syncer::SyncDataList sync_data;
 
   // Copy our native format data into a SyncDataList format.
-  for (std::vector<SyncedNotification*>::const_iterator it =
-          notification_data_.begin();
-      it != notification_data_.end();
-      ++it) {
+  ScopedVector<SyncedNotification>::const_iterator it =
+      notification_data_.begin();
+  for (; it != notification_data_.end(); ++it) {
     sync_data.push_back(CreateSyncDataFromNotification(**it));
   }
 
@@ -139,7 +165,7 @@ syncer::SyncDataList ChromeNotifierService::GetAllSyncData(
 syncer::SyncError ChromeNotifierService::ProcessSyncChanges(
       const tracked_objects::Location& from_here,
       const syncer::SyncChangeList& change_list) {
-  // TODO(petewil): add a check that we are called on the thread we expect.
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   syncer::SyncError error;
 
   for (syncer::SyncChangeList::const_iterator it = change_list.begin();
@@ -155,15 +181,38 @@ syncer::SyncError ChromeNotifierService::ProcessSyncChanges(
       continue;
     }
 
+    const std::string& key = new_notification->GetKey();
+    DCHECK_GT(key.length(), 0U);
+    SyncedNotification* found = FindNotificationById(key);
+
     switch (change_type) {
       case syncer::SyncChange::ACTION_ADD:
-        // TODO(petewil): Update the notification if it already exists
-        // as opposed to adding it.
-        Add(new_notification.Pass());
+        // Intentional fall through, cases are identical.
+      case syncer::SyncChange::ACTION_UPDATE:
+        if (found == NULL) {
+          Add(new_notification.Pass());
+          break;
+        }
+        // Update it in our store.
+        found->Update(sync_data);
+        // Tell the notification manager to update the notification.
+        UpdateInMessageCenter(found);
         break;
-      // TODO(petewil): Implement code to add delete and update actions.
+
+      case syncer::SyncChange::ACTION_DELETE:
+        if (found == NULL) {
+          break;
+        }
+        // Remove it from our store.
+        FreeNotificationById(key);
+        // Remove it from the message center.
+        UpdateInMessageCenter(new_notification.get());
+        // TODO(petewil): Do I need to remember that it was deleted in case the
+        // add arrives after the delete?  If so, how long do I need to remember?
+        break;
 
       default:
+        NOTREACHED();
         break;
     }
   }
@@ -203,25 +252,32 @@ scoped_ptr<SyncedNotification>
     return scoped_ptr<SyncedNotification>();
   }
 
-  // TODO(petewil): Is this the right set?  Should I add more?
   bool is_well_formed_unread_notification =
       (static_cast<SyncedNotification::ReadState>(
           specifics.coalesced_notification().read_state()) ==
        SyncedNotification::kUnread &&
+       specifics.coalesced_notification().has_render_info());
+  bool is_well_formed_read_notification =
+      (static_cast<SyncedNotification::ReadState>(
+          specifics.coalesced_notification().read_state()) ==
+       SyncedNotification::kRead &&
        specifics.coalesced_notification().has_render_info());
   bool is_well_formed_dismissed_notification =
       (static_cast<SyncedNotification::ReadState>(
           specifics.coalesced_notification().read_state()) ==
        SyncedNotification::kDismissed);
 
-  // if the notification is poorly formed, return a null pointer
+  // If the notification is poorly formed, return a null pointer.
   if (!is_well_formed_unread_notification &&
+      !is_well_formed_read_notification &&
       !is_well_formed_dismissed_notification) {
     DVLOG(1) << "Synced Notification is not well formed."
              << " unread well formed? "
              << is_well_formed_unread_notification
              << " dismissed well formed? "
-             << is_well_formed_dismissed_notification;
+             << is_well_formed_dismissed_notification
+             << " read well formed? "
+             << is_well_formed_read_notification;
     return scoped_ptr<SyncedNotification>();
   }
 
@@ -234,29 +290,73 @@ scoped_ptr<SyncedNotification>
 
 // This returns a pointer into a vector that we own.  Caller must not free it.
 // Returns NULL if no match is found.
-SyncedNotification* ChromeNotifierService::FindNotificationByKey(
-    const std::string& key) {
+SyncedNotification* ChromeNotifierService::FindNotificationById(
+    const std::string& notification_id) {
   // TODO(petewil): We can make a performance trade off here.
   // While the vector has good locality of reference, a map has faster lookup.
   // Based on how big we expect this to get, maybe change this to a map.
-  for (std::vector<SyncedNotification*>::const_iterator it =
-          notification_data_.begin();
-      it != notification_data_.end();
-      ++it) {
+  ScopedVector<SyncedNotification>::const_iterator it =
+      notification_data_.begin();
+  for (; it != notification_data_.end(); ++it) {
     SyncedNotification* notification = *it;
-    if (key == notification->GetKey())
+    if (notification_id == notification->GetKey())
       return *it;
   }
 
   return NULL;
 }
 
-void ChromeNotifierService::MarkNotificationAsDismissed(
+void ChromeNotifierService::FreeNotificationById(
+    const std::string& notification_id) {
+  ScopedVector<SyncedNotification>::iterator it = notification_data_.begin();
+  for (; it != notification_data_.end(); ++it) {
+    SyncedNotification* notification = *it;
+    if (notification_id == notification->GetKey()) {
+      notification_data_.erase(it);
+      return;
+    }
+  }
+}
+
+void ChromeNotifierService::GetSyncedNotificationServices(
+    std::vector<message_center::Notifier*>* notifiers) {
+  // TODO(mukai|petewil): Check the profile's eligibility before adding the
+  // sample app.
+
+  // TODO(petewil): Really obtain the list of synced notification sending
+  // services from the server and create the list of ids here.  Until then, we
+  // are hardcoding the service names.  Once that is done, remove this
+  // hardcoding.
+  // crbug.com/248337
+  DesktopNotificationService* desktop_notification_service =
+      DesktopNotificationServiceFactory::GetForProfile(profile_);
+  message_center::NotifierId notifier_id(
+      message_center::NotifierId::SYNCED_NOTIFICATION_SERVICE,
+      kFirstSyncedNotificationServiceId);
+  message_center::Notifier* notifier_service = new message_center::Notifier(
+      notifier_id,
+      l10n_util::GetStringUTF16(
+          IDS_FIRST_SYNCED_NOTIFICATION_SERVICE_NAME),
+      desktop_notification_service->IsNotifierEnabled(notifier_id));
+
+  // Add icons for our sending services.
+  // TODO(petewil): Replace this temporary hardcoding with a new sync datatype
+  // to dynamically get the name and icon for each synced notification sending
+  // service.  Until then, we use hardcoded service icons for all services.
+  // crbug.com/248337
+  notifier_service->icon = ui::ResourceBundle::GetSharedInstance().
+      GetImageNamed(IDR_TEMPORARY_GOOGLE_PLUS_ICON);
+
+  notifiers->push_back(notifier_service);
+}
+
+void ChromeNotifierService::MarkNotificationAsRead(
     const std::string& key) {
-  SyncedNotification* notification = FindNotificationByKey(key);
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  SyncedNotification* notification = FindNotificationById(key);
   CHECK(notification != NULL);
 
-  notification->NotificationHasBeenDismissed();
+  notification->NotificationHasBeenRead();
   syncer::SyncChangeList new_changes;
 
   syncer::SyncData sync_data = CreateSyncDataFromNotification(*notification);
@@ -276,10 +376,47 @@ void ChromeNotifierService::Add(scoped_ptr<SyncedNotification> notification) {
   // Take ownership of the object and put it into our local storage.
   notification_data_.push_back(notification.release());
 
+  // If the user is not interested in this type of notification, ignore it.
+  std::vector<std::string>::iterator iter =
+      find(enabled_sending_services_.begin(),
+           enabled_sending_services_.end(),
+           notification_copy->GetSendingServiceId());
+  if (iter == enabled_sending_services_.end()) {
+    return;
+  }
+
+  UpdateInMessageCenter(notification_copy);
+}
+
+void ChromeNotifierService::AddForTest(
+    scoped_ptr<notifier::SyncedNotification> notification) {
+  notification_data_.push_back(notification.release());
+}
+
+void ChromeNotifierService::UpdateInMessageCenter(
+    SyncedNotification* notification) {
+  // If the feature is disabled, exit now.
+  if (!notifier::ChromeNotifierServiceFactory::UseSyncedNotifications(
+      CommandLine::ForCurrentProcess()))
+    return;
+
+  notification->LogNotification();
+
+  if (notification->GetReadState() == SyncedNotification::kUnread) {
+    // If the message is unread, update it.
+    Display(notification);
+  } else {
+    // If the message is read or deleted, dismiss it from the center.
+    // We intentionally ignore errors if it is not in the center.
+    notification_manager_->CancelById(notification->GetKey());
+  }
+}
+
+void ChromeNotifierService::Display(SyncedNotification* notification) {
   // Set up to fetch the bitmaps.
-  notification_copy->QueueBitmapFetchJobs(notification_manager_,
-                                          this,
-                                          profile_);
+  notification->QueueBitmapFetchJobs(notification_manager_,
+                                     this,
+                                     profile_);
 
   // Our tests cannot use the network for reliability reasons.
   if (avoid_bitmap_fetching_for_test_) {
@@ -288,7 +425,28 @@ void ChromeNotifierService::Add(scoped_ptr<SyncedNotification> notification) {
 
   // Start the bitmap fetching, Show() will be called when the last bitmap
   // either arrives or times out.
-  notification_copy->StartBitmapFetch();
+  notification->StartBitmapFetch();
+}
+
+void ChromeNotifierService::OnSyncedNotificationServiceEnabled(
+    const std::string& notifier_id, bool enabled) {
+  std::vector<std::string>::iterator iter;
+
+  iter = find(enabled_sending_services_.begin(),
+              enabled_sending_services_.end(),
+              notifier_id);
+
+  // Add the notifier_id if it is enabled and not already there.
+  if (iter == enabled_sending_services_.end() && enabled) {
+    enabled_sending_services_.push_back(notifier_id);
+    // TODO(petewil) Check now for any outstanding notifications.
+  // Remove the notifier_id if it is disabled and present.
+  } else if (iter != enabled_sending_services_.end() && !enabled) {
+    enabled_sending_services_.erase(iter);
+  }
+
+  // Otherwise, nothing to do, we can exit.
+  return;
 }
 
 }  // namespace notifier

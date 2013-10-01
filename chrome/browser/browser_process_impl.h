@@ -18,7 +18,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/browser_process.h"
 
 class ChromeNetLog;
@@ -40,10 +40,6 @@ namespace policy {
 class BrowserPolicyConnector;
 class PolicyService;
 };
-
-#if defined(OS_MACOSX)
-class AppShimHostManager;
-#endif
 
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess,
@@ -110,6 +106,8 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual DownloadStatusUpdater* download_status_updater() OVERRIDE;
   virtual DownloadRequestLimiter* download_request_limiter() OVERRIDE;
   virtual BackgroundModeManager* background_mode_manager() OVERRIDE;
+  virtual void set_background_mode_manager_for_test(
+      scoped_ptr<BackgroundModeManager> manager) OVERRIDE;
   virtual StatusTray* status_tray() OVERRIDE;
   virtual SafeBrowsingService* safe_browsing_service() OVERRIDE;
   virtual safe_browsing::ClientSideDetectionService*
@@ -125,6 +123,8 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual CRLSetFetcher* crl_set_fetcher() OVERRIDE;
   virtual PnaclComponentInstaller* pnacl_component_installer() OVERRIDE;
   virtual BookmarkPromptController* bookmark_prompt_controller() OVERRIDE;
+  virtual chrome::StorageMonitor* storage_monitor() OVERRIDE;
+  void set_storage_monitor_for_test(scoped_ptr<chrome::StorageMonitor> monitor);
   virtual chrome::MediaFileSystemRegistry*
       media_file_system_registry() OVERRIDE;
   virtual bool created_local_state() const OVERRIDE;
@@ -194,6 +194,10 @@ class BrowserProcessImpl : public BrowserProcess,
 
   // Bookmark prompt controller displays the prompt for frequently visited URL.
   scoped_ptr<BookmarkPromptController> bookmark_prompt_controller_;
+#endif
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  scoped_ptr<chrome::StorageMonitor> storage_monitor_;
 
   scoped_ptr<chrome::MediaFileSystemRegistry> media_file_system_registry_;
 #endif
@@ -282,11 +286,6 @@ class BrowserProcessImpl : public BrowserProcess,
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   scoped_refptr<PluginsResourceService> plugins_resource_service_;
-#endif
-
-#if defined(OS_MACOSX)
-  // Hosts the IPC channel factory that App Shims connect to on Mac.
-  scoped_ptr<AppShimHostManager> app_shim_host_manager_;
 #endif
 
   scoped_ptr<BrowserProcessPlatformPart> platform_part_;

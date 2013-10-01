@@ -54,7 +54,7 @@ bool CheckForChromeExe(const std::vector<base::FilePath>& browser_exes,
   for (size_t i = 0; i < browser_exes.size(); ++i) {
     for (size_t j = 0; j < locations.size(); ++j) {
       base::FilePath path = locations[j].Append(browser_exes[i]);
-      if (file_util::PathExists(path)) {
+      if (base::PathExists(path)) {
         *browser_exe = path;
         return true;
       }
@@ -97,7 +97,7 @@ bool GetDefaultChromeExe(base::FilePath* browser_exe) {
   if (PathService::Get(base::DIR_MODULE, &module_dir)) {
     for (size_t j = 0; j < browser_exes.size(); ++j) {
       base::FilePath path = module_dir.Append(browser_exes[j]);
-      if (file_util::PathExists(path)) {
+      if (base::PathExists(path)) {
         *browser_exe = path;
         return true;
       }
@@ -411,7 +411,7 @@ void Automation::Init(
     }
     command.SetProgram(browser_exe);
   }
-  if (!file_util::PathExists(command.GetProgram())) {
+  if (!base::PathExists(command.GetProgram())) {
     std::string message = base::StringPrintf(
         "Could not find Chrome binary at: %" PRFilePath,
         command.GetProgram().value().c_str());
@@ -440,7 +440,7 @@ void Automation::Init(
 #elif defined(OS_POSIX)
     base::FilePath temp_file;
     if (!file_util::CreateTemporaryFile(&temp_file) ||
-        !file_util::Delete(temp_file, false /* recursive */)) {
+        !base::DeleteFile(temp_file, false /* recursive */)) {
       *error = new Error(kUnknownError, "Could not create temporary filename");
       return;
     }
@@ -544,15 +544,14 @@ void Automation::ExecuteScript(const WebViewId& view_id,
   if (*error)
     return;
 
-  Value* unscoped_value;
   automation::Error auto_error;
+  scoped_ptr<Value> value;
   if (!SendExecuteJavascriptJSONRequest(automation(), view_locator,
                                         frame_path.value(), script,
-                                        &unscoped_value, &auto_error)) {
+                                        &value, &auto_error)) {
     *error = Error::FromAutomationError(auto_error);
     return;
   }
-  scoped_ptr<Value> value(unscoped_value);
   if (!value->GetAsString(result))
     *error = new Error(kUnknownError, "Execute script did not return string");
 }
@@ -844,7 +843,7 @@ void Automation::Reload(const WebViewId& view_id, Error** error) {
 }
 
 void Automation::GetCookies(const std::string& url,
-                            ListValue** cookies,
+                            scoped_ptr<ListValue>* cookies,
                             Error** error) {
   automation::Error auto_error;
   if (!SendGetCookiesJSONRequest(automation(), url, cookies, &auto_error))

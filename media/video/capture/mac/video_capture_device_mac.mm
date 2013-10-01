@@ -7,13 +7,16 @@
 #import <QTKit/QTKit.h>
 
 #include "base/logging.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "media/video/capture/mac/video_capture_device_qtkit_mac.h"
 
 namespace {
 
 const int kMinFrameRate = 1;
 const int kMaxFrameRate = 30;
+
+// In QT device identifiers, the USB VID and PID are stored in 4 bytes each.
+const size_t kVidPidSize = 4;
 
 struct Resolution {
   int width;
@@ -56,11 +59,25 @@ void VideoCaptureDevice::GetDeviceNames(Names* device_names) {
 
   NSDictionary* capture_devices = [VideoCaptureDeviceQTKit deviceNames];
   for (NSString* key in capture_devices) {
-    Name name;
-    name.device_name = [[capture_devices valueForKey:key] UTF8String];
-    name.unique_id = [key UTF8String];
+    Name name([[capture_devices valueForKey:key] UTF8String],
+              [key UTF8String]);
     device_names->push_back(name);
   }
+}
+
+const std::string VideoCaptureDevice::Name::GetModel() const {
+  // Both PID and VID are 4 characters.
+  if (unique_id_.size() < 2 * kVidPidSize) {
+    return "";
+  }
+
+  // The last characters of device id is a concatenation of VID and then PID.
+  const size_t vid_location = unique_id_.size() - 2 * kVidPidSize;
+  std::string id_vendor = unique_id_.substr(vid_location, kVidPidSize);
+  const size_t pid_location = unique_id_.size() - kVidPidSize;
+  std::string id_product = unique_id_.substr(pid_location, kVidPidSize);
+
+  return id_vendor + ":" + id_product;
 }
 
 VideoCaptureDevice* VideoCaptureDevice::Create(const Name& device_name) {
@@ -85,20 +102,25 @@ VideoCaptureDeviceMac::~VideoCaptureDeviceMac() {
   [capture_device_ release];
 }
 
-void VideoCaptureDeviceMac::Allocate(int width, int height, int frame_rate,
-                                     EventHandler* observer) {
+void VideoCaptureDeviceMac::Allocate(
+    const VideoCaptureCapability& capture_format,
+    EventHandler* observer) {
   if (state_ != kIdle) {
     return;
   }
+  int width = capture_format.width;
+  int height = capture_format.height;
+  int frame_rate = capture_format.frame_rate;
 
   // QTKit can scale captured frame to any size requested, which would lead to
   // undesired aspect ratio change. Tries to open the camera with a natively
   // supported format and let the client to crop/pad the captured frames.
-  GetBestMatchSupportedResolution(&width, &height);
+  GetBestMatchSupportedResolution(&width,
+                                  &height);
 
   observer_ = observer;
   NSString* deviceId =
-      [NSString stringWithUTF8String:device_name_.unique_id.c_str()];
+      [NSString stringWithUTF8String:device_name_.id().c_str()];
 
   [capture_device_ setFrameReceiver:this];
 
@@ -167,20 +189,17 @@ bool VideoCaptureDeviceMac::Init() {
 
   Names device_names;
   GetDeviceNames(&device_names);
-  for (Names::iterator it = device_names.begin();
-       it != device_names.end();
-       ++it) {
-    if (device_name_.unique_id == it->unique_id) {
-      capture_device_ =
-          [[VideoCaptureDeviceQTKit alloc] initWithFrameReceiver:this];
-      if (!capture_device_) {
-        return false;
-      }
-      state_ = kIdle;
-      return true;
-    }
-  }
-  return false;
+  Name* found = device_names.FindById(device_name_.id());
+  if (!found)
+    return false;
+
+  capture_device_ =
+      [[VideoCaptureDeviceQTKit alloc] initWithFrameReceiver:this];
+  if (!capture_device_)
+    return false;
+
+  state_ = kIdle;
+  return true;
 }
 
 void VideoCaptureDeviceMac::ReceiveFrame(

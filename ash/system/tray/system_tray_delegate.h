@@ -15,6 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/native_widget_types.h"
 
 namespace base {
 class TimeDelta;
@@ -136,10 +137,11 @@ class SystemTrayDelegate {
   // Returns notification for enterprise enrolled devices.
   virtual const base::string16 GetEnterpriseMessage() const = 0;
 
-  // Returns the email of user that manages current locally managed user.
+  // Returns the display email of user that manages current
+  // locally managed user.
   virtual const std::string GetLocallyManagedUserManager() const = 0;
 
-  // Returns the email of user that manages current locally managed user.
+  // Returns the name of user that manages current locally managed user.
   virtual const base::string16 GetLocallyManagedUserManagerName() const = 0;
 
   // Returns notification for locally managed users.
@@ -154,6 +156,9 @@ class SystemTrayDelegate {
   // Shows settings.
   virtual void ShowSettings() = 0;
 
+  // Returns true if settings menu item should appear.
+  virtual bool ShouldShowSettings() = 0;
+
   // Shows the settings related to date, timezone etc.
   virtual void ShowDateSettings() = 0;
 
@@ -166,6 +171,9 @@ class SystemTrayDelegate {
 
   // Shows settings related to multiple displays.
   virtual void ShowDisplaySettings() = 0;
+
+  // Shows the page that lets you disable performance tracing.
+  virtual void ShowChromeSlow() = 0;
 
   // Returns true if the notification for the display configuration change
   // should appear.
@@ -250,17 +258,23 @@ class SystemTrayDelegate {
   // Shows UI to configure or activate the network specified by |network_id|.
   virtual void ConfigureNetwork(const std::string& network_id) = 0;
 
-  // Sends a connect request for the network specified by |network_id|.
-  virtual void ConnectToNetwork(const std::string& network_id) = 0;
+  // Shows UI to enroll the network specified by |network_id| if appropriate,
+  // otherwise behaves the same as ConfigureNetwork. |parent_window| is used
+  // to parent any configuration UI. If NULL a default window will be used.
+  virtual void EnrollOrConfigureNetwork(const std::string& network_id,
+                                        gfx::NativeWindow parent_window) = 0;
 
-  // Shows UI to add a new bluetooth device.
-  virtual void AddBluetoothDevice() = 0;
+  // Shows UI to manage bluetooth devices.
+  virtual void ManageBluetoothDevices() = 0;
 
   // Toggles bluetooth.
   virtual void ToggleBluetooth() = 0;
 
   // Shows UI to unlock a mobile sim.
   virtual void ShowMobileSimDialog() = 0;
+
+  // Shows UI to setup a mobile network.
+  virtual void ShowMobileSetup(const std::string& network_id) = 0;
 
   // Shows UI to connect to an unlisted wifi network.
   virtual void ShowOtherWifi() = 0;

@@ -10,6 +10,11 @@
 namespace chromeos {
 namespace system {
 
+// Min/max possible pointer sensitivity values. Defined in CrOS inputcontrol
+// scripts (see kTpControl/kMouseControl in the source file).
+const int kMinPointerSensitivity = 1;
+const int kMaxPointerSensitivity = 5;
+
 typedef base::Callback<void(bool)> DeviceExistsCallback;
 
 namespace touchpad_settings {
@@ -25,9 +30,6 @@ void SetTapToClick(bool enabled);
 
 // Switch for three-finger click.
 void SetThreeFingerClick(bool enabled);
-
-// Switch for three-finger swipe.
-void SetThreeFingerSwipe(bool enabled);
 
 // Turns tap-dragging on/off.
 void SetTapDragging(bool enabled);
@@ -46,6 +48,14 @@ void SetSensitivity(int value);
 void SetPrimaryButtonRight(bool right);
 
 }  // namespace mouse_settings
+
+namespace keyboard_settings {
+
+// Returns true if UI should implement enhanced keyboard support for cases where
+// other input devices like mouse are absent.
+bool ForceKeyboardDrivenUINavigation();
+
+}  // namespace keyboard_settings
 
 }  // namespace system
 }  // namespace chromeos

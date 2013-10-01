@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/test/chromedriver/chrome/log.h"
+
 #include <stdio.h>
 
 #include "base/json/json_reader.h"
@@ -9,7 +11,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "chrome/test/chromedriver/logging.h"
 
 namespace {
 
@@ -79,7 +80,7 @@ std::string ConvertForDisplayInternal(const std::string& input) {
 // Pretty prints encapsulated JSON and truncates long strings for display.
 std::string ConvertForDisplay(const std::string& input) {
   std::string display = ConvertForDisplayInternal(input);
-  char remove_chars[] = {'\r'};
+  char remove_chars[] = {'\r', '\0'};
   RemoveChars(display, remove_chars, &display);
   return display;
 }

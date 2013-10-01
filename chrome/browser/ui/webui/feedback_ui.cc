@@ -13,17 +13,18 @@
 #include "base/files/file_enumerator.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/feedback/feedback_data.h"
 #include "chrome/browser/feedback/feedback_util.h"
+#include "chrome/browser/feedback/tracing_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_manager.h"
@@ -60,13 +61,12 @@
 #include "ash/shell_delegate.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/system_logs/system_logs_fetcher.h"
+#include "chrome/browser/chromeos/system_logs/system_logs_fetcher_base.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #endif
@@ -87,6 +87,7 @@ const char kCustomPageUrlParameter[] = "customPageUrl=";
 #if defined(OS_CHROMEOS)
 
 const char kTimestampParameter[] = "timestamp=";
+const char kTraceIdParameter[] = "traceId=";
 
 const size_t kMaxSavedScreenshots = 2;
 size_t kMaxNumScanFiles = 1000;
@@ -117,7 +118,6 @@ void ReadDirectoryCallback(size_t max_saved,
                            std::vector<std::string>* saved_screenshots,
                            base::Closure callback,
                            drive::FileError error,
-                           bool hide_hosted_documents,
                            scoped_ptr<drive::ResourceEntryVector> entries) {
   if (error != drive::FILE_ERROR_OK) {
     callback.Run();
@@ -146,7 +146,7 @@ void ReadDirectoryCallback(size_t max_saved,
     saved_screenshots->push_back(
         std::string(ScreenshotSource::kScreenshotUrlRoot) +
         std::string(ScreenshotSource::kScreenshotSaved) +
-        entry.resource_id());
+        entry.base_name());
   }
   callback.Run();
 }
@@ -238,6 +238,13 @@ void ShowFeedbackPage(Browser* browser,
 #if defined(OS_CHROMEOS)
   feedback_url = feedback_url + "&" + kTimestampParameter +
                  net::EscapeUrlEncodedData(timestamp, false);
+
+  // The manager is only available if tracing is enabled.
+  if (TracingManager* manager = TracingManager::Get()) {
+    int trace_id = manager->RequestTrace();
+    feedback_url = feedback_url + "&" + kTraceIdParameter +
+                   base::IntToString(trace_id);
+  }
 #endif
   chrome::ShowSingletonTab(browser, GURL(feedback_url));
 }
@@ -309,6 +316,8 @@ content::WebUIDataSource* CreateFeedbackUIHTMLSource(bool successful_init) {
   source->AddLocalizedString("user-email", IDS_FEEDBACK_USER_EMAIL_LABEL);
 
 #if defined(OS_CHROMEOS)
+  source->AddLocalizedString("performance-trace",
+                             IDS_FEEDBACK_INCLUDE_PERFORMANCE_TRACE_CHECKBOX);
   source->AddLocalizedString("sysinfo",
                              IDS_FEEDBACK_INCLUDE_SYSTEM_INFORMATION_CHKBOX);
   source->AddLocalizedString("currentscreenshots",
@@ -610,6 +619,11 @@ void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
   (*i++)->GetAsString(&sys_info_checkbox);
   bool send_sys_info = (sys_info_checkbox == "true");
 
+  std::string trace_id_str;
+  (*i++)->GetAsString(&trace_id_str);
+  int trace_id = 0;
+  base::StringToInt(trace_id_str, &trace_id);
+
   std::string attached_filename;
   scoped_ptr<std::string> attached_filedata;
   // If we have an attached file, we'll still have more data in the list.
@@ -647,6 +661,7 @@ void FeedbackHandler::HandleSendReport(const ListValue* list_value) {
   feedback_data_->set_attached_filename(attached_filename);
   feedback_data_->set_send_sys_info(send_sys_info);
   feedback_data_->set_timestamp(timestamp_);
+  feedback_data_->set_trace_id(trace_id);
 #endif
 
   // Signal the feedback object that the data from the feedback page has been

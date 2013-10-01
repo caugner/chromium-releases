@@ -13,7 +13,6 @@
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_popup_view_mac.h"
@@ -139,8 +138,11 @@ OmniboxViewMac::OmniboxViewMac(OmniboxEditController* controller,
                                CommandUpdater* command_updater,
                                AutocompleteTextField* field)
     : OmniboxView(profile, controller, toolbar_model, command_updater),
-      popup_view_(OmniboxPopupViewMac::Create(this, model(), field)),
+      popup_view_(new OmniboxPopupViewMac(this, model(), field)),
       field_(field),
+      saved_temporary_selection_(NSMakeRange(0, 0)),
+      selection_before_change_(NSMakeRange(0, 0)),
+      marked_range_before_change_(NSMakeRange(0, 0)),
       delete_was_pressed_(false),
       delete_at_end_pressed_(false) {
   [field_ setObserver:this];
@@ -463,7 +465,7 @@ void OmniboxViewMac::ApplyTextAttributes(const string16& display_text,
   // [Could it be to not change if no change?  If so, I'm guessing
   // AppKit may already handle that.]
   const ToolbarModel::SecurityLevel security_level =
-      toolbar_model()->GetSecurityLevel();
+      toolbar_model()->GetSecurityLevel(false);
 
   // Emphasize the scheme for security UI display purposes (if necessary).
   if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
@@ -523,16 +525,9 @@ bool OmniboxViewMac::OnInlineAutocompleteTextMaybeChanged(
 void OmniboxViewMac::OnRevertTemporaryText() {
   SetSelectedRange(saved_temporary_selection_);
   // We got here because the user hit the Escape key. We explicitly don't call
-  // TextChanged(), since calling it breaks Instant-Extended, and isn't needed
-  // otherwise (in regular non-Instant or Instant-but-not-Extended modes).
-  //
-  // Why it breaks Instant-Extended: Instant handles the Escape key separately
-  // (cf: OmniboxEditModel::RevertTemporaryText). Calling TextChanged() makes
-  // the page think the user additionally typed some text, causing it to update
-  // its suggestions dropdown with new suggestions, which is wrong.
-  //
-  // Why it isn't needed: OmniboxPopupModel::ResetToDefaultMatch() has already
-  // been called by now; it would've called TextChanged() if it was warranted.
+  // TextChanged(), since OmniboxPopupModel::ResetToDefaultMatch() has already
+  // been called by now, and it would've called TextChanged() if it was
+  // warranted.
 }
 
 bool OmniboxViewMac::IsFirstResponder() const {
@@ -609,15 +604,15 @@ gfx::NativeView OmniboxViewMac::GetRelativeWindowForPopup() const {
   return NULL;
 }
 
-void OmniboxViewMac::SetInstantSuggestion(const string16& suggest_text) {
+void OmniboxViewMac::SetGrayTextAutocompletion(const string16& suggest_text) {
   if (suggest_text == suggest_text_)
     return;
   suggest_text_ = suggest_text;
-  [field_ setInstantSuggestion:base::SysUTF16ToNSString(suggest_text)
-                     textColor:SuggestTextColor()];
+  [field_ setGrayTextAutocompletion:base::SysUTF16ToNSString(suggest_text)
+                          textColor:SuggestTextColor()];
 }
 
-string16 OmniboxViewMac::GetInstantSuggestion() const {
+string16 OmniboxViewMac::GetGrayTextAutocompletion() const {
   return suggest_text_;
 }
 
@@ -665,16 +660,12 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
   }
 
   if (model()->popup_model()->IsOpen()) {
-    // If instant extended is enabled then allow users to press tab to select
-    // results from the omnibox popup.
-    BOOL enableTabAutocomplete = chrome::IsInstantExtendedAPIEnabled();
-
     if (cmd == @selector(insertBacktab:)) {
       if (model()->popup_model()->selected_line_state() ==
             OmniboxPopupModel::KEYWORD) {
         model()->ClearKeyword(GetText());
         return true;
-      } else if (enableTabAutocomplete) {
+      } else {
         model()->OnUpOrDownKeyPressed(-1);
         return true;
       }
@@ -682,7 +673,7 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
 
     if ((cmd == @selector(insertTab:) ||
         cmd == @selector(insertTabIgnoringFieldEditor:)) &&
-        !model()->is_keyword_hint() && enableTabAutocomplete) {
+        !model()->is_keyword_hint()) {
       model()->OnUpOrDownKeyPressed(1);
       return true;
     }
@@ -876,7 +867,7 @@ void OmniboxViewMac::OnPaste() {
 // this method could call the OmniboxView version.
 bool OmniboxViewMac::ShouldEnableCopyURL() {
   return !model()->user_input_in_progress() &&
-      toolbar_model()->WouldReplaceSearchURLWithSearchTerms();
+      toolbar_model()->WouldReplaceSearchURLWithSearchTerms(false);
 }
 
 bool OmniboxViewMac::CanPasteAndGo() {
@@ -902,7 +893,6 @@ void OmniboxViewMac::OnFrameChanged() {
   // things even cheaper by refactoring between the popup-placement
   // code and the matrix-population code.
   popup_view_->UpdatePopupAppearance();
-  model()->OnPopupBoundsChanged(popup_view_->GetTargetBounds());
 
   // Give controller a chance to rearrange decorations.
   model()->OnChanged();

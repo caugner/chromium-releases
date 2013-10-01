@@ -7,7 +7,6 @@
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_size.h"
 #include "ppapi/proxy/audio_input_resource.h"
-#include "ppapi/proxy/browser_font_resource_trusted.h"
 #include "ppapi/proxy/connection.h"
 #include "ppapi/proxy/ext_crx_file_system_private_resource.h"
 #include "ppapi/proxy/file_chooser_resource.h"
@@ -32,13 +31,13 @@
 #include "ppapi/proxy/ppb_graphics_3d_proxy.h"
 #include "ppapi/proxy/ppb_image_data_proxy.h"
 #include "ppapi/proxy/ppb_network_monitor_private_proxy.h"
-#include "ppapi/proxy/ppb_tcp_server_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_tcp_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_tcp_socket_proxy.h"
 #include "ppapi/proxy/ppb_video_decoder_proxy.h"
 #include "ppapi/proxy/ppb_x509_certificate_private_proxy.h"
 #include "ppapi/proxy/printing_resource.h"
 #include "ppapi/proxy/talk_resource.h"
+#include "ppapi/proxy/tcp_server_socket_private_resource.h"
 #include "ppapi/proxy/truetype_font_resource.h"
 #include "ppapi/proxy/udp_socket_private_resource.h"
 #include "ppapi/proxy/udp_socket_resource.h"
@@ -325,7 +324,8 @@ PP_Resource ResourceCreationProxy::CreatePrinting(PP_Instance instance) {
 
 PP_Resource ResourceCreationProxy::CreateTCPServerSocketPrivate(
     PP_Instance instance) {
-  return PPB_TCPServerSocket_Private_Proxy::CreateProxyResource(instance);
+  return (new TCPServerSocketPrivateResource(GetConnection(), instance))->
+      GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateTCPSocket(
@@ -384,10 +384,8 @@ PP_Resource ResourceCreationProxy::CreateBrowserFont(
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
   if (!dispatcher)
     return 0;
-  if (!BrowserFontResource_Trusted::IsPPFontDescriptionValid(*description))
-    return 0;
-  return (new BrowserFontResource_Trusted(GetConnection(), instance,
-      *description, dispatcher->preferences()))->GetReference();
+  return PluginGlobals::Get()->CreateBrowserFont(
+      GetConnection(), instance, *description, dispatcher->preferences());
 }
 
 PP_Resource ResourceCreationProxy::CreateBuffer(PP_Instance instance,

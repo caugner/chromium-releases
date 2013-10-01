@@ -95,8 +95,10 @@ cr.define('options', function() {
      * Updates the edit state based on the current selected and lead states.
      */
     updateEditState: function() {
-      if (this.editable)
-        this.editing = this.selected && this.lead;
+      if (this.editable) {
+        this.editing = this.selected && this.lead &&
+          !this.isExtraFocusableControl(document.activeElement);
+      }
     },
 
     /**
@@ -340,6 +342,11 @@ cr.define('options', function() {
         return;
 
       var clickTarget = e.target;
+      if (this.isExtraFocusableControl(clickTarget)) {
+        clickTarget.focus();
+        return;
+      }
+
       var editFields = this.editFields_;
       for (var i = 0; i < editFields.length; i++) {
         if (editFields[i] == clickTarget ||
@@ -348,6 +355,17 @@ cr.define('options', function() {
           return;
         }
       }
+    },
+
+    /**
+     * Check if the specified element is a focusable form control which is in
+     * the list item and not in |editFields_|.
+     * @param {!Element} element An element.
+     * @return {boolean} Returns true if the element is one of focusable
+     *     controls in this list item.
+     */
+    isExtraFocusableControl: function(element) {
+      return false;
     },
   };
 

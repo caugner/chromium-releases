@@ -17,9 +17,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_byteorder.h"
 #include "base/test/test_file_util.h"
-#include "base/time.h"
-#include "googleurl/src/gurl.h"
+#include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace net {
 
@@ -759,28 +759,25 @@ TEST(NetUtilTest, CompliantHost) {
     {"a", "", true},
     {"-", "", false},
     {".", "", false},
-    {"9", "", false},
-    {"9", "a", true},
-    {"9a", "", false},
-    {"9a", "a", true},
+    {"9", "", true},
+    {"9a", "", true},
     {"a.", "", true},
     {"a.a", "", true},
     {"9.a", "", true},
-    {"a.9", "", false},
+    {"a.9", "", true},
     {"_9a", "", false},
     {"-9a", "", false},
+    {"-9a", "a", true},
     {"a.a9", "", true},
-    {"a.9a", "", false},
+    {"a.-a9", "", false},
     {"a+9a", "", false},
     {"-a.a9", "", true},
     {"1-.a-b", "", true},
     {"1_.a-b", "", false},
     {"1-2.a_b", "", true},
     {"a.b.c.d.e", "", true},
-    {"1.2.3.4.e", "", true},
-    {"a.b.c.d.5", "", false},
-    {"1.2.3.4.e.", "", true},
-    {"a.b.c.d.5.", "", false},
+    {"1.2.3.4.5", "", true},
+    {"1.2.3.4.5.", "", true},
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(compliant_host_cases); ++i) {
@@ -1073,7 +1070,7 @@ TEST(NetUtilTest, GenerateFileName) {
       L"",
       L"test.html"
     },
-    { // Now that we use googleurl's ExtractFileName, this case falls back to
+    { // Now that we use src/url's ExtractFileName, this case falls back to
       // the hostname. If this behavior is not desirable, we'd better change
       // ExtractFileName (in url_parse).
       __LINE__,
@@ -3500,5 +3497,73 @@ TEST(NetUtilTest, IsSafePortableRelativePath) {
     }
   }
 }
+
+struct NonUniqueNameTestData {
+  bool is_unique;
+  const char* hostname;
+};
+
+// Google Test pretty-printer.
+void PrintTo(const NonUniqueNameTestData& data, std::ostream* os) {
+  ASSERT_TRUE(data.hostname);
+  *os << " hostname: " << testing::PrintToString(data.hostname)
+      << "; is_unique: " << testing::PrintToString(data.is_unique);
+}
+
+const NonUniqueNameTestData kNonUniqueNameTestData[] = {
+    // Domains under ICANN-assigned domains.
+    { true, "google.com" },
+    { true, "google.co.uk" },
+    // Domains under private registries.
+    { true, "appspot.com" },
+    { true, "test.appspot.com" },
+    // IPv4 addresses (in various forms).
+    { true, "8.8.8.8" },
+    { true, "1.2.3" },
+    { true, "14.15" },
+    { true, "676768" },
+    // IPv6 addresses.
+    { true, "FEDC:ba98:7654:3210:FEDC:BA98:7654:3210" },
+    { true, "::192.9.5.5" },
+    { true, "FEED::BEEF" },
+    // 'internal'/non-IANA assigned domains.
+    { false, "intranet" },
+    { false, "intranet." },
+    { false, "intranet.example" },
+    { false, "host.intranet.example" },
+    // gTLDs under discussion, but not yet assigned.
+    { false, "intranet.corp" },
+    { false, "example.tech" },
+    { false, "intranet.internal" },
+    // Invalid host names are treated as unique - but expected to be
+    // filtered out before then.
+    { true, "junk)(£)$*!@~#" },
+    { true, "w$w.example.com" },
+    { true, "nocolonsallowed:example" },
+    { true, "[::4.5.6.9]" },
+};
+
+class NetUtilNonUniqueNameTest
+    : public testing::TestWithParam<NonUniqueNameTestData> {
+ public:
+  virtual ~NetUtilNonUniqueNameTest() {}
+
+ protected:
+  bool IsUnique(const std::string& hostname) {
+    return !IsHostnameNonUnique(hostname);
+  }
+};
+
+// Test that internal/non-unique names are properly identified as such, but
+// that IP addresses and hosts beneath registry-controlled domains are flagged
+// as unique names.
+TEST_P(NetUtilNonUniqueNameTest, IsHostnameNonUnique) {
+  const NonUniqueNameTestData& test_data = GetParam();
+
+  EXPECT_EQ(test_data.is_unique, IsUnique(test_data.hostname));
+}
+
+INSTANTIATE_TEST_CASE_P(, NetUtilNonUniqueNameTest,
+                        testing::ValuesIn(kNonUniqueNameTestData));
 
 }  // namespace net

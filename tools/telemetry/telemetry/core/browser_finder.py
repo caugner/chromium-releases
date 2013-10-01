@@ -9,10 +9,14 @@ from telemetry.core.chrome import android_browser_finder
 from telemetry.core.chrome import cros_browser_finder
 from telemetry.core.chrome import desktop_browser_finder
 
-ALL_BROWSER_TYPES = (
-    desktop_browser_finder.ALL_BROWSER_TYPES + ',' +
-    android_browser_finder.ALL_BROWSER_TYPES + ',' +
-    cros_browser_finder.ALL_BROWSER_TYPES)
+BROWSER_FINDERS = [
+  desktop_browser_finder,
+  android_browser_finder,
+  cros_browser_finder
+  ]
+
+ALL_BROWSER_TYPES = ','.join([bf.ALL_BROWSER_TYPES for bf in BROWSER_FINDERS])
+
 
 class BrowserTypeRequiredException(Exception):
   pass
@@ -43,13 +47,23 @@ def FindBrowser(options):
     raise BrowserFinderException(
         'cros_remote requires browser_type=cros-chrome or cros-chrome-guest.')
 
-  if options.browser_type == None:
-    raise BrowserTypeRequiredException('browser_type must be specified')
-
   browsers = []
-  browsers.extend(desktop_browser_finder.FindAllAvailableBrowsers(options))
-  browsers.extend(android_browser_finder.FindAllAvailableBrowsers(options))
-  browsers.extend(cros_browser_finder.FindAllAvailableBrowsers(options))
+  default_browser = None
+  for finder in BROWSER_FINDERS:
+    curr_browsers = finder.FindAllAvailableBrowsers(options)
+    if not default_browser:
+      default_browser = finder.SelectDefaultBrowser(curr_browsers)
+    browsers.extend(curr_browsers)
+
+  if options.browser_type == None:
+    if default_browser:
+      logging.warning('--browser omitted. Using most recent local build: %s' %
+                      default_browser.browser_type)
+      options.browser_type = default_browser.browser_type
+      return default_browser
+    raise BrowserTypeRequiredException(
+        '--browser must be specified. Available browsers:\n%s' %
+        '\n'.join(sorted(set([b.browser_type for b in browsers]))))
 
   if options.browser_type == 'any':
     types = ALL_BROWSER_TYPES.split(',')
@@ -81,9 +95,8 @@ def GetAllAvailableBrowserTypes(options):
   improperly set or if an error occurs when finding a browser.
   """
   browsers = []
-  browsers.extend(desktop_browser_finder.FindAllAvailableBrowsers(options))
-  browsers.extend(android_browser_finder.FindAllAvailableBrowsers(options))
-  browsers.extend(cros_browser_finder.FindAllAvailableBrowsers(options))
+  for finder in BROWSER_FINDERS:
+    browsers.extend(finder.FindAllAvailableBrowsers(options))
 
   type_list = set([browser.browser_type for browser in browsers])
   type_list = list(type_list)

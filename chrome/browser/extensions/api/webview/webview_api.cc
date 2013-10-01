@@ -5,7 +5,7 @@
 #include "chrome/browser/extensions/api/webview/webview_api.h"
 
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/webview/webview_guest.h"
+#include "chrome/browser/guestview/webview/webview_guest.h"
 #include "chrome/common/extensions/api/webview.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -52,7 +52,7 @@ bool WebviewExecuteCodeFunction::CanExecuteScriptOnPage() {
 }
 
 extensions::ScriptExecutor* WebviewExecuteCodeFunction::GetScriptExecutor() {
-  chrome::WebViewGuest* guest = chrome::WebViewGuest::From(
+  WebViewGuest* guest = WebViewGuest::From(
       render_view_host()->GetProcess()->GetID(), guest_instance_id_);
   if (!guest)
     return NULL;
@@ -62,6 +62,9 @@ extensions::ScriptExecutor* WebviewExecuteCodeFunction::GetScriptExecutor() {
 
 bool WebviewExecuteCodeFunction::IsWebView() const {
   return true;
+}
+
+WebviewExecuteScriptFunction::WebviewExecuteScriptFunction() {
 }
 
 void WebviewExecuteScriptFunction::OnExecuteCodeFinished(
@@ -76,7 +79,117 @@ void WebviewExecuteScriptFunction::OnExecuteCodeFinished(
                                                     result);
 }
 
+WebviewInsertCSSFunction::WebviewInsertCSSFunction() {
+}
+
 bool WebviewInsertCSSFunction::ShouldInsertCSS() const {
   return true;
 }
 
+WebviewGoFunction::WebviewGoFunction() {
+}
+
+WebviewGoFunction::~WebviewGoFunction() {
+}
+
+bool WebviewGoFunction::RunImpl() {
+  int instance_id = 0;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &instance_id));
+
+  int relative_index = 0;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(1, &relative_index));
+
+  WebViewGuest* guest = WebViewGuest::From(
+      render_view_host()->GetProcess()->GetID(), instance_id);
+  if (!guest)
+    return false;
+
+  guest->Go(relative_index);
+  return true;
+}
+
+WebviewReloadFunction::WebviewReloadFunction() {
+}
+
+WebviewReloadFunction::~WebviewReloadFunction() {
+}
+
+bool WebviewReloadFunction::RunImpl() {
+  int instance_id = 0;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &instance_id));
+
+  WebViewGuest* guest = WebViewGuest::From(
+      render_view_host()->GetProcess()->GetID(), instance_id);
+  if (!guest)
+    return false;
+
+  guest->Reload();
+  return true;
+}
+
+WebviewSetPermissionFunction::WebviewSetPermissionFunction() {
+}
+
+WebviewSetPermissionFunction::~WebviewSetPermissionFunction() {
+}
+
+bool WebviewSetPermissionFunction::RunImpl() {
+  int instance_id = 0;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &instance_id));
+
+  int request_id = 0;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(1, &request_id));
+
+  bool should_allow = false;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(2, &should_allow));
+
+  std::string user_input;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(3, &user_input));
+
+  WebViewGuest* guest = WebViewGuest::From(
+      render_view_host()->GetProcess()->GetID(), instance_id);
+  if (!guest)
+    return false;
+
+  EXTENSION_FUNCTION_VALIDATE(
+      guest->SetPermission(request_id, should_allow, user_input));
+  return true;
+}
+
+WebviewStopFunction::WebviewStopFunction() {
+}
+
+WebviewStopFunction::~WebviewStopFunction() {
+}
+
+bool WebviewStopFunction::RunImpl() {
+  int instance_id = 0;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &instance_id));
+
+  WebViewGuest* guest = WebViewGuest::From(
+      render_view_host()->GetProcess()->GetID(), instance_id);
+  if (!guest)
+    return false;
+
+  guest->Stop();
+  return true;
+}
+
+WebviewTerminateFunction::WebviewTerminateFunction() {
+}
+
+WebviewTerminateFunction::~WebviewTerminateFunction() {
+}
+
+bool WebviewTerminateFunction::RunImpl() {
+  int instance_id = 0;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &instance_id));
+
+  WebViewGuest* guest = WebViewGuest::From(
+      render_view_host()->GetProcess()->GetID(), instance_id);
+  if (!guest)
+    return false;
+
+  guest->Terminate();
+  return true;
+}

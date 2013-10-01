@@ -11,7 +11,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -70,7 +70,7 @@ class NotificationPromo {
 
   // Register preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
   static void MigrateUserPrefs(PrefService* user_prefs);
 
  private:

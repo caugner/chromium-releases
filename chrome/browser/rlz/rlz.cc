@@ -13,18 +13,18 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -62,10 +62,6 @@ namespace {
 // master preferences. Somewhat arbitrary, may need to be adjusted in future.
 const base::TimeDelta kMaxInitDelay = base::TimeDelta::FromSeconds(200);
 const base::TimeDelta kMinInitDelay = base::TimeDelta::FromSeconds(20);
-
-bool IsGoogleUrl(const GURL& url) {
-  return google_util::IsGoogleHomePageUrl(url.possibly_invalid_spec());
-}
 
 bool IsBrandOrganic(const std::string& brand) {
   return brand.empty() || google_util::IsOrganic(brand);
@@ -232,16 +228,17 @@ bool RLZTracker::InitRlzFromProfileDelayed(Profile* profile,
 
   PrefService* pref_service = profile->GetPrefs();
   bool is_google_homepage = google_util::IsGoogleHomePageUrl(
-      pref_service->GetString(prefs::kHomePage));
+      GURL(pref_service->GetString(prefs::kHomePage)));
 
   bool is_google_in_startpages = false;
   SessionStartupPref session_startup_prefs =
       StartupBrowserCreator::GetSessionStartupPref(
           *CommandLine::ForCurrentProcess(), profile);
   if (session_startup_prefs.type == SessionStartupPref::URLS) {
-    is_google_in_startpages = std::count_if(session_startup_prefs.urls.begin(),
-                                            session_startup_prefs.urls.end(),
-                                            IsGoogleUrl) > 0;
+    is_google_in_startpages =
+        std::count_if(session_startup_prefs.urls.begin(),
+                      session_startup_prefs.urls.end(),
+                      google_util::IsGoogleHomePageUrl) > 0;
   }
 
   if (!InitRlzDelayed(first_run, send_ping_immediately, delay,
@@ -280,10 +277,6 @@ bool RLZTracker::Init(bool first_run,
     // Register for notifications from the omnibox so that we can record when
     // the user performs a first search.
     registrar_.Add(this, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
-                   content::NotificationService::AllSources());
-    // If instant is enabled we'll start searching as soon as the user starts
-    // typing in the omnibox (which triggers INSTANT_CONTROLLER_UPDATED).
-    registrar_.Add(this, chrome::NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
                    content::NotificationService::AllSources());
 
     // Register for notifications from navigations, to see if the user has used
@@ -344,10 +337,11 @@ void RLZTracker::DelayedInit() {
 }
 
 void RLZTracker::ScheduleFinancialPing() {
-  BrowserThread::GetBlockingPool()->PostSequencedWorkerTask(
+  BrowserThread::GetBlockingPool()->PostSequencedWorkerTaskWithShutdownBehavior(
       worker_pool_token_,
       FROM_HERE,
-      base::Bind(&RLZTracker::PingNowImpl, base::Unretained(this)));
+      base::Bind(&RLZTracker::PingNowImpl, base::Unretained(this)),
+      base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
 }
 
 void RLZTracker::PingNowImpl() {
@@ -389,11 +383,8 @@ void RLZTracker::Observe(int type,
                          const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_OMNIBOX_OPENED_URL:
-    case chrome::NOTIFICATION_INSTANT_CONTROLLER_UPDATED:
       RecordFirstSearch(CHROME_OMNIBOX);
       registrar_.Remove(this, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
-                        content::NotificationService::AllSources());
-      registrar_.Remove(this, chrome::NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
                         content::NotificationService::AllSources());
       break;
     case content::NOTIFICATION_NAV_ENTRY_PENDING: {
@@ -446,11 +437,12 @@ bool RLZTracker::ScheduleRecordProductEvent(rlz_lib::Product product,
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI))
     return false;
 
-  BrowserThread::GetBlockingPool()->PostSequencedWorkerTask(
+  BrowserThread::GetBlockingPool()->PostSequencedWorkerTaskWithShutdownBehavior(
       worker_pool_token_,
       FROM_HERE,
       base::Bind(base::IgnoreResult(&RLZTracker::RecordProductEvent),
-                 product, point, event_id));
+                 product, point, event_id),
+      base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
 
   return true;
 }
@@ -475,11 +467,12 @@ void RLZTracker::RecordFirstSearch(rlz_lib::AccessPoint point) {
 bool RLZTracker::ScheduleRecordFirstSearch(rlz_lib::AccessPoint point) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI))
     return false;
-  BrowserThread::GetBlockingPool()->PostSequencedWorkerTask(
+  BrowserThread::GetBlockingPool()->PostSequencedWorkerTaskWithShutdownBehavior(
       worker_pool_token_,
       FROM_HERE,
       base::Bind(&RLZTracker::RecordFirstSearch,
-                 base::Unretained(this), point));
+                 base::Unretained(this), point),
+      base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
   return true;
 }
 
@@ -544,11 +537,12 @@ bool RLZTracker::ScheduleGetAccessPointRlz(rlz_lib::AccessPoint point) {
     return false;
 
   string16* not_used = NULL;
-  BrowserThread::GetBlockingPool()->PostSequencedWorkerTask(
+  BrowserThread::GetBlockingPool()->PostSequencedWorkerTaskWithShutdownBehavior(
       worker_pool_token_,
       FROM_HERE,
       base::Bind(base::IgnoreResult(&RLZTracker::GetAccessPointRlz), point,
-                 not_used));
+                 not_used),
+      base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
   return true;
 }
 
@@ -568,11 +562,12 @@ bool RLZTracker::ScheduleClearRlzState() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI))
     return false;
 
-  BrowserThread::GetBlockingPool()->PostSequencedWorkerTask(
+  BrowserThread::GetBlockingPool()->PostSequencedWorkerTaskWithShutdownBehavior(
       worker_pool_token_,
       FROM_HERE,
       base::Bind(&RLZTracker::ClearRlzStateImpl,
-                 base::Unretained(this)));
+                 base::Unretained(this)),
+      base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
   return true;
 }
 #endif

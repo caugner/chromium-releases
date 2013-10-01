@@ -5,17 +5,18 @@
 #include "chrome/browser/extensions/event_router_forwarder.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/power_monitor/power_monitor.h"
+#include "base/power_monitor/power_monitor_device_source.h"
 #include "base/test/thread_test_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/test/test_browser_thread.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -92,9 +93,11 @@ class EventRouterForwarderTest : public testing::Test {
         profile_manager_(
             TestingBrowserProcess::GetGlobal()) {
 #if defined(OS_MACOSX)
-    base::PowerMonitor::AllocateSystemIOPorts();
+    base::PowerMonitorDeviceSource::AllocateSystemIOPorts();
 #endif
-    dummy.reset(new base::PowerMonitor);
+    scoped_ptr<base::PowerMonitorSource> power_monitor_source(
+      new base::PowerMonitorDeviceSource());
+    dummy.reset(new base::PowerMonitor(power_monitor_source.Pass()));
   }
 
   virtual void SetUp() {

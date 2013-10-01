@@ -26,6 +26,7 @@
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest.h"
+#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
@@ -49,6 +50,7 @@ enum ManifestReloadReason {
   NOT_NEEDED = 0,  // Reload not needed.
   UNPACKED_DIR,  // Unpacked directory.
   NEEDS_RELOCALIZATION,  // The locale has changed since we read this extension.
+  CORRUPT_PREFERENCES,  // The manifest in the preferences is corrupt.
   NUM_MANIFEST_RELOAD_REASONS
 };
 
@@ -60,6 +62,33 @@ enum BackgroundPageType {
   EVENT_PAGE = 2,
 };
 
+// Used in histogram Extensions.ExternalItemState. Values may be added, as
+// long as existing values are not changed.
+enum ExternalItemState {
+  DEPRECATED_EXTERNAL_ITEM_DISABLED = 0,
+  DEPRECATED_EXTERNAL_ITEM_ENABLED = 1,
+  EXTERNAL_ITEM_WEBSTORE_DISABLED = 2,
+  EXTERNAL_ITEM_WEBSTORE_ENABLED = 3,
+  EXTERNAL_ITEM_NONWEBSTORE_DISABLED = 4,
+  EXTERNAL_ITEM_NONWEBSTORE_ENABLED = 5,
+  EXTERNAL_ITEM_MAX_ITEMS = 6
+};
+
+bool IsManifestCorrupt(const DictionaryValue* manifest) {
+  if (!manifest) return false;
+
+  // Because of bug #272524 sometimes manifests got mangled in the preferences
+  // file, one particularly bad case resulting in having both a background page
+  // and background scripts values. In those situations we want to reload the
+  // manifest from the extension to fix this.
+  const Value* background_page;
+  const Value* background_scripts;
+  return manifest->Get(extension_manifest_keys::kBackgroundPage,
+                       &background_page) &&
+         manifest->Get(extension_manifest_keys::kBackgroundScripts,
+                       &background_scripts);
+}
+
 ManifestReloadReason ShouldReloadExtensionManifest(const ExtensionInfo& info) {
   // Always reload manifests of unpacked extensions, because they can change
   // on disk independent of the manifest in our prefs.
@@ -70,6 +99,10 @@ ManifestReloadReason ShouldReloadExtensionManifest(const ExtensionInfo& info) {
   if (extension_l10n_util::ShouldRelocalizeManifest(
           info.extension_manifest.get()))
     return NEEDS_RELOCALIZATION;
+
+  // Reload if the copy of the manifest in the preferences is corrupt.
+  if (IsManifestCorrupt(info.extension_manifest.get()))
+    return CORRUPT_PREFERENCES;
 
   return NOT_NEEDED;
 }
@@ -247,6 +280,7 @@ void InstalledLoader::LoadAllExtensions() {
   int browser_action_count = 0;
   int disabled_for_permissions_count = 0;
   int item_user_count = 0;
+  int non_webstore_ntp_override_count = 0;
   const ExtensionSet* extensions = extension_service_->extensions();
   ExtensionSet::const_iterator ex;
   for (ex = extensions->begin(); ex != extensions->end(); ++ex) {
@@ -259,11 +293,50 @@ void InstalledLoader::LoadAllExtensions() {
       UMA_HISTOGRAM_ENUMERATION("Extensions.ExtensionLocation",
                                 location, 100);
     }
+    if (!ManifestURL::UpdatesFromGallery(*ex)) {
+      UMA_HISTOGRAM_ENUMERATION("Extensions.NonWebstoreLocation",
+                                location, 100);
+    }
+    if (Manifest::IsExternalLocation(location)) {
+      // See loop below for DISABLED.
+      if (ManifestURL::UpdatesFromGallery(*ex)) {
+        UMA_HISTOGRAM_ENUMERATION("Extensions.ExternalItemState",
+                                  EXTERNAL_ITEM_WEBSTORE_ENABLED,
+                                  EXTERNAL_ITEM_MAX_ITEMS);
+      } else {
+        UMA_HISTOGRAM_ENUMERATION("Extensions.ExternalItemState",
+                                  EXTERNAL_ITEM_NONWEBSTORE_ENABLED,
+                                  EXTERNAL_ITEM_MAX_ITEMS);
+      }
+    }
+    if ((*ex)->from_webstore()) {
+      // Check for inconsistencies if the extension was supposedly installed
+      // from the webstore.
+      enum {
+        BAD_UPDATE_URL = 0,
+        // This value was a mistake. Turns out sideloaded extensions can
+        // have the from_webstore bit if they update from the webstore.
+        DEPRECATED_IS_EXTERNAL = 1,
+      };
+      if (!ManifestURL::UpdatesFromGallery(*ex)) {
+        UMA_HISTOGRAM_ENUMERATION("Extensions.FromWebstoreInconsistency",
+                                  BAD_UPDATE_URL, 2);
+      }
+    }
 
     // Don't count component extensions, since they are only extensions as an
     // implementation detail.
     if (location == Manifest::COMPONENT)
       continue;
+    // Histogram for non-webstore extensions overriding new tab page should
+    // include unpacked extensions.
+    if (!(*ex)->from_webstore()) {
+      const extensions::URLOverrides::URLOverrideMap& override_map =
+          extensions::URLOverrides::GetChromeURLOverrides(ex->get());
+      if (override_map.find("newtab") != override_map.end()) {
+        ++non_webstore_ntp_override_count;
+      }
+    }
 
     // Don't count unpacked extensions, since they're a developer-specific
     // feature.
@@ -347,6 +420,18 @@ void InstalledLoader::LoadAllExtensions() {
         DidExtensionEscalatePermissions((*ex)->id())) {
       ++disabled_for_permissions_count;
     }
+    if (Manifest::IsExternalLocation((*ex)->location())) {
+      // See loop above for ENABLED.
+      if (ManifestURL::UpdatesFromGallery(*ex)) {
+        UMA_HISTOGRAM_ENUMERATION("Extensions.ExternalItemState",
+                                  EXTERNAL_ITEM_WEBSTORE_DISABLED,
+                                  EXTERNAL_ITEM_MAX_ITEMS);
+      } else {
+        UMA_HISTOGRAM_ENUMERATION("Extensions.ExternalItemState",
+                                  EXTERNAL_ITEM_NONWEBSTORE_DISABLED,
+                                  EXTERNAL_ITEM_MAX_ITEMS);
+      }
+    }
   }
 
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadAllUser", item_user_count);
@@ -372,6 +457,8 @@ void InstalledLoader::LoadAllExtensions() {
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadContentPack", content_pack_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.DisabledForPermissions",
                            disabled_for_permissions_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.NonWebStoreNewTabPageOverrides",
+                           non_webstore_ntp_override_count);
 }
 
 int InstalledLoader::GetCreationFlags(const ExtensionInfo* info) {

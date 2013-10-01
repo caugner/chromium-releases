@@ -19,13 +19,13 @@ extern const char kFileBrowserGalleryTaskId[];
 extern const char kFileBrowserWatchTaskId[];
 
 // File manager helper methods.
-namespace file_manager_util {
+namespace file_manager {
+namespace util {
 
 // Gets base file browser url.
 GURL GetFileBrowserExtensionUrl();
 GURL GetFileBrowserUrl();
 GURL GetMediaPlayerUrl();
-GURL GetVideoPlayerUrl();
 
 // Converts |relative_path| (e.g., "drive/root" or "Downloads") into external
 // filesystem URL (e.g., filesystem://id/external/drive/root).
@@ -68,27 +68,32 @@ string16 GetTitleFromType(ui::SelectFileDialog::Type type);
 // |path|. In this case the tab will automatically close on |path| unmount.
 void ViewRemovableDrive(const base::FilePath& path);
 
-// Opens a new window of the Files.app on the specified url using the
-// provided profile. If |profile| is null, then the default one is used.
-void OpenNewWindow(Profile* profile, const GURL& url);
-
 // Opens an action choice dialog for an external drive.
 // One of the actions is opening the File Manager. Passes |advanced_mode|
 // flag to the dialog. If it is enabled, then auto-choice gets disabled.
 void OpenActionChoiceDialog(const base::FilePath& path, bool advanced_mode);
 
-// Opens item with the default File Browser handler.
+// Opens an item (file or directory). If the target is a directory, the
+// directory will be opened in the file manager. If the target is a file, the
+// file will be opened using a file handler, a file browser handler, or the
+// browser (open in a tab). The default handler has precedence over other
+// handlers, if defined for the type of the target file.
 void ViewItem(const base::FilePath& path);
 
 // Opens file browser on the folder containing the file, with the file selected.
 void ShowFileInFolder(const base::FilePath& path);
 
-// Executes the built-in File Manager handler or tries to open |file| directly
-// in the browser. Returns false if neither is possible.
-bool ExecuteBuiltinHandler(
-    Browser* browser,
-    const base::FilePath& path,
-    const std::string& internal_task_id);
+// Opens the file specified by |path| with the browser. This function takes
+// care of the following intricacies:
+//
+// - If the file is a Drive hosted document, the hosted document will be
+//   opened in the browser by extracting the right URL for the file.
+// - If the file is a CRX file, the CRX file will be installed.
+// - If the file is on Drive, the file will be downloaded from Drive as
+//   needed.
+//
+// Returns false if failed to open. This happens if the file type is unknown.
+bool OpenFileWithBrowser(Browser* browser, const base::FilePath& path);
 
 // Checks whether a pepper plugin for |file_extension| is enabled.
 bool ShouldBeOpenedWithPlugin(Profile* profile, const char* file_extension);
@@ -96,6 +101,7 @@ bool ShouldBeOpenedWithPlugin(Profile* profile, const char* file_extension);
 // Returns the MIME type of |file_path|.
 std::string GetMimeTypeForPath(const base::FilePath& file_path);
 
-}  // namespace file_manager_util
+}  // namespace util
+}  // namespace file_manager
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_FILE_MANAGER_UTIL_H_

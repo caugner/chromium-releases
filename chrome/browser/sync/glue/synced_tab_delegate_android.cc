@@ -106,6 +106,14 @@ SyncedTabDelegateAndroid::GetBlockedNavigations() const {
       ->GetBlockedNavigations();
 }
 
+int SyncedTabDelegateAndroid::GetSyncId() const {
+  return tab_android_->GetSyncId();
+}
+
+void SyncedTabDelegateAndroid::SetSyncId(int sync_id) {
+  tab_android_->SetSyncId(sync_id);
+}
+
 // static
 SyncedTabDelegate* SyncedTabDelegate::ImplFromWebContents(
     content::WebContents* web_contents) {

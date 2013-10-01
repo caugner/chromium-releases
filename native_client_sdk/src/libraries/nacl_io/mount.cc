@@ -1,7 +1,7 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "nacl_io/mount.h"
 
 #include <errno.h>
@@ -20,6 +20,8 @@
 #include <windows.h>
 #endif
 
+namespace nacl_io {
+
 Mount::Mount() : dev_(0) {}
 
 Mount::~Mount() {}
@@ -32,18 +34,8 @@ Error Mount::Init(int dev, StringMap_t& args, PepperInterface* ppapi) {
 
 void Mount::Destroy() {}
 
-void Mount::AcquireNode(MountNode* node) {
-  AutoLock lock(&lock_);
-  node->Acquire();
-}
-
-void Mount::ReleaseNode(MountNode* node) {
-  AutoLock lock(&lock_);
-  node->Release();
-}
-
-Error Mount::OpenResource(const Path& path, MountNode** out_node) {
-  *out_node = NULL;
+Error Mount::OpenResource(const Path& path, ScopedMountNode* out_node) {
+  out_node->reset(NULL);
   return EINVAL;
 }
 
@@ -69,3 +61,6 @@ void Mount::OnNodeDestroyed(MountNode* node) {
   if (node->stat_.st_ino)
     inode_pool_.Release(node->stat_.st_ino);
 }
+
+}  // namespace nacl_io
+

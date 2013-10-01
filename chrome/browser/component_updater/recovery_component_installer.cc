@@ -14,7 +14,7 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
@@ -112,7 +112,7 @@ bool RecoveryComponentInstaller::Install(const base::DictionaryValue& manifest,
   if (current_version_.CompareTo(version) >= 0)
     return false;
   base::FilePath main_file = unpack_path.Append(kRecoveryFileName);
-  if (!file_util::PathExists(main_file))
+  if (!base::PathExists(main_file))
     return false;
   // Passed the basic tests. The installation continues with the
   // recovery component itself running from the temp directory.

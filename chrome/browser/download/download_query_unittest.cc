@@ -10,7 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/download/download_query.h"
 #include "content/public/test/mock_download_item.h"
@@ -31,7 +31,7 @@ static const int kSomeKnownTime = 1355864160;
 static const char kSomeKnownTime8601[] = "2012-12-18T20:56:0";
 static const char k8601Suffix[] = ".000Z";
 
-bool IdNotEqual(int not_id, const DownloadItem& item) {
+bool IdNotEqual(uint32 not_id, const DownloadItem& item) {
   return item.GetId() != not_id;
 }
 
@@ -77,7 +77,7 @@ class DownloadQueryTest : public testing::Test {
   void ExpectStandardFilterResults() {
     Search();
     ASSERT_EQ(1U, results()->size());
-    ASSERT_EQ(0, results()->at(0)->GetId());
+    ASSERT_EQ(0U, results()->at(0)->GetId());
   }
 
   // If no sorters distinguish between two items, then DownloadQuery sorts by ID
@@ -86,8 +86,8 @@ class DownloadQueryTest : public testing::Test {
   void ExpectSortInverted() {
     Search();
     ASSERT_EQ(2U, results()->size());
-    ASSERT_EQ(1, results()->at(0)->GetId());
-    ASSERT_EQ(0, results()->at(1)->GetId());
+    ASSERT_EQ(1U, results()->at(0)->GetId());
+    ASSERT_EQ(0U, results()->at(1)->GetId());
   }
 
  private:
@@ -128,6 +128,26 @@ template<> void DownloadQueryTest::AddFilter(
   CHECK(query_.AddFilter(name, *value.get()));
 }
 
+template<> void DownloadQueryTest::AddFilter(
+    DownloadQuery::FilterType name, std::vector<string16> cpp_value) {
+  scoped_ptr<base::ListValue> list(new base::ListValue());
+  for (std::vector<string16>::const_iterator it = cpp_value.begin();
+       it != cpp_value.end(); ++it) {
+    list->Append(Value::CreateStringValue(*it));
+  }
+  CHECK(query_.AddFilter(name, *list.get()));
+}
+
+template<> void DownloadQueryTest::AddFilter(
+    DownloadQuery::FilterType name, std::vector<std::string> cpp_value) {
+  scoped_ptr<base::ListValue> list(new base::ListValue());
+  for (std::vector<std::string>::const_iterator it = cpp_value.begin();
+       it != cpp_value.end(); ++it) {
+    list->Append(Value::CreateStringValue(*it));
+  }
+  CHECK(query_.AddFilter(name, *list.get()));
+}
+
 #if defined(OS_WIN)
 template<> void DownloadQueryTest::AddFilter(
     DownloadQuery::FilterType name, std::wstring cpp_value) {
@@ -152,8 +172,8 @@ TEST_F(DownloadQueryTest, DownloadQueryTest_EmptyQuery) {
   CreateMocks(2);
   Search();
   ASSERT_EQ(2U, results()->size());
-  ASSERT_EQ(0, results()->at(0)->GetId());
-  ASSERT_EQ(1, results()->at(1)->GetId());
+  ASSERT_EQ(0U, results()->at(0)->GetId());
+  ASSERT_EQ(1U, results()->at(1)->GetId());
 }
 
 TEST_F(DownloadQueryTest, DownloadQueryTest_Limit) {
@@ -177,7 +197,9 @@ TEST_F(DownloadQueryTest, DownloadQueryTest_FilterGenericQueryFilename) {
   GURL fail_url("http://example.com/fail");
   EXPECT_CALL(mock(0), GetOriginalUrl()).WillRepeatedly(ReturnRef(fail_url));
   EXPECT_CALL(mock(1), GetOriginalUrl()).WillRepeatedly(ReturnRef(fail_url));
-  AddFilter(DownloadQuery::FILTER_QUERY, "query");
+  std::vector<std::string> query_terms;
+  query_terms.push_back("query");
+  AddFilter(DownloadQuery::FILTER_QUERY, query_terms);
   ExpectStandardFilterResults();
 }
 
@@ -196,7 +218,9 @@ TEST_F(DownloadQueryTest, DownloadQueryTest_FilterGenericQueryUrl) {
   EXPECT_CALL(mock(0), GetOriginalUrl()).WillRepeatedly(ReturnRef(match_url));
   GURL fail_url("http://example.com/fail");
   EXPECT_CALL(mock(1), GetOriginalUrl()).WillRepeatedly(ReturnRef(fail_url));
-  AddFilter(DownloadQuery::FILTER_QUERY, "query");
+  std::vector<std::string> query_terms;
+  query_terms.push_back("query");
+  AddFilter(DownloadQuery::FILTER_QUERY, query_terms);
   ExpectStandardFilterResults();
 }
 
@@ -222,7 +246,9 @@ TEST_F(DownloadQueryTest, DownloadQueryTest_FilterGenericQueryFilenameI18N) {
   GURL fail_url("http://example.com/fail");
   EXPECT_CALL(mock(0), GetOriginalUrl()).WillRepeatedly(ReturnRef(fail_url));
   EXPECT_CALL(mock(1), GetOriginalUrl()).WillRepeatedly(ReturnRef(fail_url));
-  AddFilter(DownloadQuery::FILTER_QUERY, kTestString);
+  std::vector<base::FilePath::StringType> query_terms;
+  query_terms.push_back(kTestString);
+  AddFilter(DownloadQuery::FILTER_QUERY, query_terms);
   ExpectStandardFilterResults();
 }
 
@@ -556,8 +582,8 @@ TEST_F(DownloadQueryTest, DownloadQueryTest_DefaultSortById1) {
                      DownloadQuery::ASCENDING);
   Search();
   ASSERT_EQ(2U, results()->size());
-  EXPECT_EQ(0, results()->at(0)->GetId());
-  EXPECT_EQ(1, results()->at(1)->GetId());
+  EXPECT_EQ(0U, results()->at(0)->GetId());
+  EXPECT_EQ(1U, results()->at(1)->GetId());
 }
 
 TEST_F(DownloadQueryTest, DownloadQueryTest_DefaultSortById2) {
@@ -568,8 +594,8 @@ TEST_F(DownloadQueryTest, DownloadQueryTest_DefaultSortById2) {
                      DownloadQuery::DESCENDING);
   Search();
   ASSERT_EQ(2U, results()->size());
-  EXPECT_EQ(0, results()->at(0)->GetId());
-  EXPECT_EQ(1, results()->at(1)->GetId());
+  EXPECT_EQ(0U, results()->at(0)->GetId());
+  EXPECT_EQ(1U, results()->at(1)->GetId());
 }
 
 TEST_F(DownloadQueryTest, DownloadQueryFilterPerformance) {

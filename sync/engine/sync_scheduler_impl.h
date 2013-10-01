@@ -16,8 +16,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "sync/base/sync_export.h"
 #include "sync/engine/net/server_connection_manager.h"
 #include "sync/engine/nudge_source.h"
@@ -55,7 +55,7 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   virtual void Start(Mode mode) OVERRIDE;
   virtual bool ScheduleConfiguration(
       const ConfigurationParams& params) OVERRIDE;
-  virtual void RequestStop(const base::Closure& callback) OVERRIDE;
+  virtual void RequestStop() OVERRIDE;
   virtual void ScheduleLocalNudge(
       const base::TimeDelta& desired_delay,
       ModelTypeSet types,
@@ -130,6 +130,8 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
                            ServerConnectionChangeDuringBackoff);
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerTest,
                            ConnectionChangeCanaryPreemptedByNudge);
+  FRIEND_TEST_ALL_PREFIXES(BackoffTriggersSyncSchedulerTest,
+                           FailGetEncryptionKey);
 
   struct SYNC_EXPORT_PRIVATE WaitInterval {
     enum Mode {
@@ -181,7 +183,7 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   bool CanRunNudgeJobNow(JobPriority priority);
 
   // 'Impl' here refers to real implementation of public functions.
-  void StopImpl(const base::Closure& callback);
+  void StopImpl();
 
   // If the scheduler's current state supports it, this will create a job based
   // on the passed in parameters and coalesce it with any other pending jobs,
@@ -224,6 +226,9 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
 
   // Creates a session for a poll and performs the sync.
   void PollTimerCallback();
+
+  // Returns the set of types that are enabled and not currently throttled.
+  ModelTypeSet GetEnabledAndUnthrottledTypes();
 
   // Called as we are started to broadcast an initial session snapshot
   // containing data like initial_sync_ended.  Important when the client starts
@@ -305,6 +310,15 @@ class SYNC_EXPORT_PRIVATE SyncSchedulerImpl
   // take place during a sync cycle. We call this out because such violations
   // could result in tight sync loops hitting sync servers.
   bool no_scheduling_allowed_;
+
+  // crbug/251307. This is a workaround for M29. crbug/259913 tracks proper fix
+  // for M30.
+  // The issue is that poll job runs after few hours of inactivity and therefore
+  // will always fail with auth error because of expired access token. Once
+  // fresh access token is requested poll job is not retried.
+  // The change is to remember that poll timer just fired and retry poll job
+  // after credentials are updated.
+  bool do_poll_after_credentials_updated_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSchedulerImpl);
 };

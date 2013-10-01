@@ -16,6 +16,7 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/nacl_host/nacl_browser.h"
+#include "chrome/browser/nacl_host/pnacl_host.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/password_manager/password_store.h"
@@ -42,7 +44,6 @@
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
@@ -50,8 +51,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/local_storage_usage_info.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_data_remover.h"
+#include "content/public/browser/session_storage_usage_info.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "net/base/net_errors.h"
@@ -65,7 +68,6 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "webkit/browser/quota/quota_manager.h"
 #include "webkit/browser/quota/special_storage_policy.h"
-#include "webkit/common/dom_storage/dom_storage_types.h"
 #include "webkit/common/quota/quota_types.h"
 
 using content::BrowserContext;
@@ -168,10 +170,12 @@ BrowsingDataRemover::BrowsingDataRemover(Profile* profile,
       waiting_for_clear_network_predictor_(false),
       waiting_for_clear_networking_history_(false),
       waiting_for_clear_plugin_data_(false),
+      waiting_for_clear_pnacl_cache_(false),
       waiting_for_clear_quota_managed_data_(false),
       waiting_for_clear_server_bound_certs_(false),
       waiting_for_clear_session_storage_(false),
       waiting_for_clear_shader_cache_(false),
+      waiting_for_clear_webrtc_identity_store_(false),
       remove_mask_(0),
       remove_origin_(GURL()),
       origin_set_mask_(0) {
@@ -528,6 +532,12 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
         BrowserThread::IO, FROM_HERE,
         base::Bind(&BrowsingDataRemover::ClearNaClCacheOnIOThread,
                    base::Unretained(this)));
+
+    waiting_for_clear_pnacl_cache_ = true;
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&BrowsingDataRemover::ClearPnaclCacheOnIOThread,
+                   base::Unretained(this), delete_begin_, delete_end_));
 #endif
 
     // The PrerenderManager may have a page actively being prerendered, which
@@ -544,6 +554,15 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     content::RecordAction(UserMetricsAction("ClearBrowsingData_ShaderCache"));
 
     ClearShaderCacheOnUIThread();
+
+    waiting_for_clear_webrtc_identity_store_ = true;
+    BrowserContext::GetDefaultStoragePartition(profile_)->ClearDataForRange(
+        content::StoragePartition::REMOVE_DATA_MASK_WEBRTC_IDENTITY,
+        content::StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL,
+        delete_begin_,
+        delete_end_,
+        base::Bind(&BrowsingDataRemover::OnClearWebRTCIdentityStore,
+                   base::Unretained(this)));
   }
 
 #if defined(ENABLE_PLUGINS)
@@ -616,24 +635,22 @@ base::Time BrowsingDataRemover::CalculateBeginDeleteTime(
 }
 
 bool BrowsingDataRemover::AllDone() {
-  return registrar_.IsEmpty() &&
-      !waiting_for_clear_autofill_origin_urls_ &&
-      !waiting_for_clear_cache_ &&
-      !waiting_for_clear_nacl_cache_ &&
-      !waiting_for_clear_cookies_count_&&
-      !waiting_for_clear_history_ &&
-      !waiting_for_clear_local_storage_ &&
-      !waiting_for_clear_logged_in_predictor_ &&
-      !waiting_for_clear_session_storage_ &&
-      !waiting_for_clear_networking_history_ &&
-      !waiting_for_clear_server_bound_certs_ &&
-      !waiting_for_clear_plugin_data_ &&
-      !waiting_for_clear_quota_managed_data_ &&
-      !waiting_for_clear_content_licenses_ &&
-      !waiting_for_clear_form_ &&
-      !waiting_for_clear_hostname_resolution_cache_ &&
-      !waiting_for_clear_network_predictor_ &&
-      !waiting_for_clear_shader_cache_;
+  return registrar_.IsEmpty() && !waiting_for_clear_autofill_origin_urls_ &&
+         !waiting_for_clear_cache_ && !waiting_for_clear_nacl_cache_ &&
+         !waiting_for_clear_cookies_count_ && !waiting_for_clear_history_ &&
+         !waiting_for_clear_local_storage_ &&
+         !waiting_for_clear_logged_in_predictor_ &&
+         !waiting_for_clear_session_storage_ &&
+         !waiting_for_clear_networking_history_ &&
+         !waiting_for_clear_server_bound_certs_ &&
+         !waiting_for_clear_plugin_data_ &&
+         !waiting_for_clear_pnacl_cache_ &&
+         !waiting_for_clear_quota_managed_data_ &&
+         !waiting_for_clear_content_licenses_ && !waiting_for_clear_form_ &&
+         !waiting_for_clear_hostname_resolution_cache_ &&
+         !waiting_for_clear_network_predictor_ &&
+         !waiting_for_clear_shader_cache_ &&
+         !waiting_for_clear_webrtc_identity_store_;
 }
 
 void BrowsingDataRemover::Observe(int type,
@@ -849,8 +866,10 @@ void BrowsingDataRemover::ClearedShaderCache() {
 void BrowsingDataRemover::ClearShaderCacheOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  BrowserContext::GetDefaultStoragePartition(profile_)->AsyncClearDataBetween(
-      content::StoragePartition::kShaderStorage, delete_begin_, delete_end_,
+  BrowserContext::GetDefaultStoragePartition(profile_)->ClearDataForRange(
+      content::StoragePartition::REMOVE_DATA_MASK_SHADER_CACHE,
+      content::StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL,
+      delete_begin_, delete_end_,
       base::Bind(&BrowsingDataRemover::ClearedShaderCache,
                  base::Unretained(this)));
 }
@@ -883,6 +902,36 @@ void BrowsingDataRemover::ClearNaClCacheOnIOThread() {
       base::Bind(&BrowsingDataRemover::ClearedNaClCacheOnIOThread,
                  base::Unretained(this)));
 }
+
+void BrowsingDataRemover::ClearedPnaclCache() {
+  // This function should be called on the UI thread.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  waiting_for_clear_pnacl_cache_ = false;
+
+  NotifyAndDeleteIfDone();
+}
+
+void BrowsingDataRemover::ClearedPnaclCacheOnIOThread() {
+  // This function should be called on the IO thread.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  // Notify the UI thread that we are done.
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&BrowsingDataRemover::ClearedPnaclCache,
+                 base::Unretained(this)));
+}
+
+void BrowsingDataRemover::ClearPnaclCacheOnIOThread(base::Time begin,
+                                                    base::Time end) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  PnaclHost::GetInstance()->ClearTranslationCacheEntriesBetween(
+      begin, end,
+      base::Bind(&BrowsingDataRemover::ClearedPnaclCacheOnIOThread,
+                 base::Unretained(this)));
+}
 #endif
 
 void BrowsingDataRemover::ClearLocalStorageOnUIThread() {
@@ -894,7 +943,7 @@ void BrowsingDataRemover::ClearLocalStorageOnUIThread() {
 }
 
 void BrowsingDataRemover::OnGotLocalStorageUsageInfo(
-    const std::vector<dom_storage::LocalStorageUsageInfo>& infos) {
+    const std::vector<content::LocalStorageUsageInfo>& infos) {
   DCHECK(waiting_for_clear_local_storage_);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -922,7 +971,7 @@ void BrowsingDataRemover::ClearSessionStorageOnUIThread() {
 }
 
 void BrowsingDataRemover::OnGotSessionStorageUsageInfo(
-    const std::vector<dom_storage::SessionStorageUsageInfo>& infos) {
+    const std::vector<content::SessionStorageUsageInfo>& infos) {
   DCHECK(waiting_for_clear_session_storage_);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -1118,5 +1167,11 @@ void BrowsingDataRemover::OnClearedFormData() {
 void BrowsingDataRemover::OnClearedAutofillOriginURLs() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   waiting_for_clear_autofill_origin_urls_ = false;
+  NotifyAndDeleteIfDone();
+}
+
+void BrowsingDataRemover::OnClearWebRTCIdentityStore() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  waiting_for_clear_webrtc_identity_store_ = false;
   NotifyAndDeleteIfDone();
 }

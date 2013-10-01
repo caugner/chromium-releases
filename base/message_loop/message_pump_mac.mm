@@ -10,7 +10,7 @@
 
 #include "base/logging.h"
 #include "base/run_loop.h"
-#include "base/time.h"
+#include "base/time/time.h"
 
 #if !defined(OS_IOS)
 #import <AppKit/AppKit.h>
@@ -602,7 +602,7 @@ void MessagePumpNSApplication::Quit() {
 
   // Send a fake event to wake the loop up.
   [NSApp postEvent:[NSEvent otherEventWithType:NSApplicationDefined
-                                      location:NSMakePoint(0, 0)
+                                      location:NSZeroPoint
                                  modifierFlags:0
                                      timestamp:0
                                   windowNumber:0
@@ -614,6 +614,9 @@ void MessagePumpNSApplication::Quit() {
 }
 
 MessagePumpCrApplication::MessagePumpCrApplication() {
+}
+
+MessagePumpCrApplication::~MessagePumpCrApplication() {
 }
 
 // Prevents an autorelease pool from being created if the app is in the midst of

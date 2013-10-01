@@ -7,6 +7,7 @@
 
 #include "ui/base/ui_export.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/rect.h"
 
 namespace gfx {
 class VSyncProvider;
@@ -26,7 +27,7 @@ class SurfaceFactoryOzone {
   // native surface.
   virtual const char* DefaultDisplaySpec();
 
-  // Sets the implementation delegate.
+  // Sets the implementation delegate. Ownership is retained by the caller.
   UI_EXPORT static void SetInstance(SurfaceFactoryOzone* impl);
 
   // TODO(rjkroege): Add a status code if necessary.
@@ -52,10 +53,12 @@ class SurfaceFactoryOzone {
   // Sets up GL bindings for the native surface.
   virtual bool LoadEGLGLES2Bindings() = 0;
 
-  // Tests if the given AcceleratedWidget instance can be resized. (Native
-  // hardware may only support a single fixed size.)
-  // Perhaps, this should be "attempt to resize the accelerated widget"?
-  virtual bool AcceleratedWidgetCanBeResized(gfx::AcceleratedWidget w) = 0;
+  // If possible attempts to resize the given AcceleratedWidget instance and if
+  // a resize action was performed returns true, otherwise false (native
+  // hardware may only support a single fixed size).
+  virtual bool AttemptToResizeAcceleratedWidget(
+      gfx::AcceleratedWidget w,
+      const gfx::Rect& bounds) = 0;
 
   // Returns a gfx::VsyncProvider for the provided AcceleratedWidget. Note
   // that this may be called after we have entered the sandbox so if there are
@@ -63,6 +66,12 @@ class SurfaceFactoryOzone {
   // must be done outside of the sandbox, they must have been completed
   // in InitializeHardware. Returns NULL on error.
   virtual gfx::VSyncProvider* GetVSyncProvider(gfx::AcceleratedWidget w) = 0;
+
+  // Create a default SufaceFactoryOzone implementation useful for tests.
+  UI_EXPORT static SurfaceFactoryOzone* CreateTestHelper();
+
+ private:
+  static SurfaceFactoryOzone* impl_; // not owned
 };
 
 }  // namespace ui

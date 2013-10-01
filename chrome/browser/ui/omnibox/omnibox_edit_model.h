@@ -9,20 +9,18 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
-#include "chrome/common/metrics/proto/omnibox_event.pb.h"
 #include "chrome/common/omnibox_focus_state.h"
 #include "content/public/common/page_transition_types.h"
-#include "googleurl/src/gurl.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
+#include "url/gurl.h"
 
 class AutocompleteController;
 class AutocompleteResult;
-struct InstantSuggestion;
 class OmniboxCurrentPageDelegate;
 class OmniboxEditController;
 class OmniboxPopupModel;
@@ -45,21 +43,31 @@ enum EnteredKeywordModeMethod {
 
 class OmniboxEditModel {
  public:
+  // Did the Omnibox focus originate via the user clicking on the Omnibox or on
+  // the Fakebox?
+  enum FocusSource {
+    INVALID = 0,
+    OMNIBOX = 1,
+    FAKEBOX = 2
+  };
+
   struct State {
     State(bool user_input_in_progress,
           const string16& user_text,
-          const string16& instant_suggestion,
+          const string16& gray_text,
           const string16& keyword,
           bool is_keyword_hint,
-          OmniboxFocusState focus_state);
+          OmniboxFocusState focus_state,
+          FocusSource focus_source);
     ~State();
 
     bool user_input_in_progress;
     const string16 user_text;
-    const string16 instant_suggestion;
+    const string16 gray_text;
     const string16 keyword;
     const bool is_keyword_hint;
     OmniboxFocusState focus_state;
+    FocusSource focus_source;
   };
 
   OmniboxEditModel(OmniboxView* view,
@@ -140,16 +148,13 @@ class OmniboxEditModel {
   // Sets the user_text_ to |text|.  Only the View should call this.
   void SetUserText(const string16& text);
 
-  // Sets the suggestion text.
-  void SetInstantSuggestion(const InstantSuggestion& suggestion);
-
   // Commits the gray suggested text as if it's been input by the user.
   // Returns true if the text was committed.
   // TODO: can the return type be void?
   bool CommitSuggestedText();
 
-  // Invoked any time the text may have changed in the edit. Updates Instant and
-  // notifies the controller.
+  // Invoked any time the text may have changed in the edit. Notifies the
+  // controller.
   void OnChanged();
 
   // Reverts the edit model back to its unedited state (permanent text showing,
@@ -297,24 +302,11 @@ class OmniboxEditModel {
                              bool just_deleted_text,
                              bool allow_keyword_ui_change);
 
-  // TODO(beaudoin): Mac code still calls this here. We should try to untangle
-  // this.
-  // Invoked when the popup has changed its bounds to |bounds|. |bounds| here
-  // is in screen coordinates.
-  void OnPopupBoundsChanged(const gfx::Rect& bounds) {
-    omnibox_controller_->OnPopupBoundsChanged(bounds);
-  }
-
   // Called when the current match has changed in the OmniboxController.
-  void OnCurrentMatchChanged(bool is_temporary_set_by_instant);
-
-  // Callend when the gray text suggestion has changed in the OmniboxController.
-  void OnGrayTextChanged();
+  void OnCurrentMatchChanged();
 
   // Access the current view text.
   string16 GetViewText() const;
-
-  string16 user_text() const { return user_text_; }
 
   // TODO(beaudoin): We need this to allow OmniboxController access the
   // InstantController via OmniboxEditController, because the only valid pointer
@@ -323,7 +315,6 @@ class OmniboxEditModel {
   InstantController* GetInstantController() const;
 
  private:
-  friend class InstantTestBase;
   friend class OmniboxControllerTest;
 
   enum PasteState {
@@ -405,8 +396,7 @@ class OmniboxEditModel {
   // page or a normal web page.  Used for logging omnibox events for
   // UMA opted-in users.  Examines the user's profile to determine if the
   // current page is the user's home page.
-  metrics::OmniboxEventProto::PageClassification ClassifyPage(
-      const GURL& gurl) const;
+  AutocompleteInput::PageClassification ClassifyPage() const;
 
   // Sets |match| and |alternate_nav_url| based on classifying |text|.
   // |alternate_nav_url| may be NULL.
@@ -430,6 +420,11 @@ class OmniboxEditModel {
 
   OmniboxFocusState focus_state_;
 
+  // Used to keep track whether the input currently in progress originated by
+  // focusing in the Omnibox or in the Fakebox. This will be INVALID if no input
+  // is in progress or the Omnibox is not focused.
+  FocusSource focus_source_;
+
   // The URL of the currently displayed page.
   string16 permanent_text_;
 
@@ -443,6 +438,15 @@ class OmniboxEditModel {
   // The text that the user has entered.  This does not include inline
   // autocomplete text that has not yet been accepted.
   string16 user_text_;
+
+  // We keep track of when the user last focused on the omnibox.
+  base::TimeTicks last_omnibox_focus_;
+
+  // Whether any user input has occurred since focusing on the omnibox. This is
+  // used along with |last_omnibox_focus_| to calculate the time between a user
+  // focusing on the omnibox and editing. It is initialized to true since
+  // there was no focus event.
+  bool user_input_since_focus_;
 
   // We keep track of when the user began modifying the omnibox text.
   // This should be valid whenever user_input_in_progress_ is true.
@@ -492,26 +496,6 @@ class OmniboxEditModel {
   bool has_temporary_text_;
   GURL original_url_;
 
-  // True if Instant set the current temporary text, as opposed to it being set
-  // due to the user arrowing up/down through the popup. This can only be true
-  // if |has_temporary_text_| is true.
-  // TODO(sreeram): This is a temporary hack. Remove it once the omnibox edit
-  // model/view code is decoupled from Instant (among other things).
-  bool is_temporary_text_set_by_instant_;
-
-  // The index of the selected AutocompleteMatch in AutocompleteResult. This is
-  // needed to get the metadata details of the temporary text set by instant on
-  // the Local NTP. If the Instant extended is disabled or an Instant NTP is
-  // used, this is set to OmniboxPopupModel::kNoMatch.
-  size_t selected_instant_autocomplete_match_index_;
-
-  // True if the current temporary text set by Instant is a search query; false
-  // if it is a URL that can be directly navigated to. This is only valid if
-  // |is_temporary_text_set_by_instant_| is true. This field is needed because
-  // Instant's temporary text doesn't come from the popup model, so we can't
-  // lookup its type from the current match.
-  bool is_instant_temporary_text_a_search_query_;
-
   // When the user's last action was to paste, we disallow inline autocomplete
   // (on the theory that the user is trying to paste in a new URL or part of
   // one, and in either case inline autocomplete would get in the way).
@@ -535,27 +519,9 @@ class OmniboxEditModel {
 
   Profile* profile_;
 
-  // This is needed as prior to accepting the current text the model is
-  // reverted, which triggers resetting Instant. We don't want to update Instant
-  // in this case, so we use the flag to determine if this is happening.
-  //
-  // For example: The permanent text is "foo". The user has typed "bar" and
-  // Instant is showing a search results preview for "bar". The user hits Enter.
-  // in_revert_ is used to tell Instant, "The omnibox text is about to change to
-  // 'foo', thus TextChanged() will be called, leading to DoInstant(), but
-  // please don't change what you are showing. I'll commit the real match
-  // ("bar") immediately after the revert."
-  //
-  // Without in_revert_, Instant would erroneously change its search results to
-  // "foo". Because of the way the code is structured (specifically, DoInstant()
-  // is NOT called for "bar" again), this leaves Instant showing results for
-  // "foo", which is wrong.
+  // This is needed to properly update the SearchModel state when the user
+  // presses escape.
   bool in_revert_;
-
-  // InstantController needs this in extended mode to distinguish the case in
-  // which it should instruct a committed search results page to revert to
-  // showing results for the original query.
-  bool in_escape_handler_;
 
   // Indicates if the upcoming autocomplete search is allowed to be treated as
   // an exact keyword match.  If this is true then keyword mode will be

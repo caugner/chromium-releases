@@ -45,10 +45,8 @@
       },
       'conditions': [
         ['component == "shared_library"', {
-          'msvs_settings': {
-            'VCManifestTool': {
-              'EmbedManifest': 'false',
-            },
+          'variables': {
+            'win_use_external_manifest': 1,
           },
         }],
         ['order_profiling!=0 and (chromeos==1 or OS=="linux")', {
@@ -150,6 +148,7 @@
                 # Chromium functionality directly into the executable.
                 '<@(chromium_browser_dependencies)',
                 '<@(chromium_child_dependencies)',
+                '../content/content.gyp:content_app_both',
                 # Needed for chrome_main.cc initialization of libraries.
                 '../build/linux/system.gyp:gtk',
                 # Needed to use the master_preferences functions
@@ -161,6 +160,7 @@
                 # Chromium functionality directly into the executable.
                 '<@(chromium_browser_dependencies)',
                 '<@(chromium_child_dependencies)',
+                '../content/content.gyp:content_app_both',
                 # Needed for chrome_main.cc initialization of libraries.
                 '../build/linux/system.gyp:x11',
                 '../build/linux/system.gyp:pangocairo',
@@ -473,10 +473,13 @@
             '../base/base.gyp:base',
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../breakpad/breakpad.gyp:breakpad_sender',
+            '../components/components.gyp:breakpad_component',
             '../sandbox/sandbox.gyp:sandbox',
             'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'sources': [
+            'app/chrome_breakpad_client.cc',
+            'app/chrome_breakpad_client.h',
             'app/chrome_exe.rc',
             'common/crash_keys.cc',
             'common/crash_keys.h',
@@ -496,7 +499,9 @@
               'SubSystem': '2',
             },
             'VCManifestTool': {
-              'AdditionalManifestFiles': '$(ProjectDir)\\app\\chrome.exe.manifest',
+              'AdditionalManifestFiles': [
+                '$(ProjectDir)\\app\\chrome.exe.manifest',
+              ],
             },
           },
           'actions': [
@@ -554,6 +559,7 @@
               'product_name': 'nacl64',
               'sources': [
                 'app/breakpad_win.cc',
+                'app/chrome_breakpad_client.cc',
                 'app/hard_error_handler_win.cc',
                 'common/crash_keys.cc',
                 'nacl/nacl_exe_win_64.cc',
@@ -567,14 +573,15 @@
                 'app/policy/cloud_policy_codegen.gyp:policy_win64',
                 'chrome_version_resources',
                 'installer_util_nacl_win64',
-                'nacl_win64',
                 '../breakpad/breakpad.gyp:breakpad_handler_win64',
                 '../breakpad/breakpad.gyp:breakpad_sender_win64',
                 '../base/base.gyp:base_i18n_nacl_win64',
                 '../base/base.gyp:base_nacl_win64',
                 '../base/base.gyp:base_static_win64',
                 '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
+                '../components/components.gyp:breakpad_win64',
                 '../chrome/common_constants.gyp:common_constants_win64',
+                '../components/nacl.gyp:nacl_win64',
                 '../crypto/crypto.gyp:crypto_nacl_win64',
                 '../ipc/ipc.gyp:ipc_win64',
                 '../sandbox/sandbox.gyp:sandbox_win64',

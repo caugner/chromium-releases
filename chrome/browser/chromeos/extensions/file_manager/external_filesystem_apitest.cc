@@ -6,6 +6,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/extensions/file_manager/drive_test_util.h"
 #include "chrome/browser/drive/fake_drive_service.h"
@@ -13,7 +14,6 @@
 #include "chrome/browser/google_apis/test_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
@@ -45,6 +45,7 @@
 
 using extensions::Extension;
 
+namespace file_manager {
 namespace {
 
 // Root dirs for file systems expected by the test extensions.
@@ -76,7 +77,7 @@ const char kTestFileContent[] = "This is some test content.";
 // All files except test_dir/empty_file.foo, which is empty, initially contain
 // kTestFileContent.
 const char kTestRootFeed[] =
-    "chromeos/gdata/remote_file_system_apitest_root_feed.json";
+    "gdata/remote_file_system_apitest_root_feed.json";
 
 // Sets up the initial file system state for native local and restricted native
 // local file systems. The hierarchy is the same as for the drive file system.
@@ -290,10 +291,9 @@ class DriveFileSystemExtensionApiTest : public FileSystemExtensionApiTestBase {
 
   // FileSystemExtensionApiTestBase OVERRIDE.
   virtual void InitTestFileSystem() OVERRIDE {
-    // Set up cache root and documents service to be used when creating gdata
-    // system service. This has to be done early on (before the browser is
-    // created) because the system service instance is initialized very early
-    // by FileManagerEventRouter.
+    // Set up cache root to be used by DriveIntegrationService. This has to be
+    // done before the browser is created because the service instance is
+    // initialized by EventRouter.
     ASSERT_TRUE(test_cache_root_.CreateUniqueTempDir());
 
     drive::DriveIntegrationServiceFactory::SetFactoryForTest(
@@ -304,7 +304,7 @@ class DriveFileSystemExtensionApiTest : public FileSystemExtensionApiTestBase {
 
   // FileSystemExtensionApiTestBase OVERRIDE.
   virtual void AddTestMountPoint() OVERRIDE {
-    drive_test_util::WaitUntilDriveMountPointIsAdded(browser()->profile());
+    test_util::WaitUntilDriveMountPointIsAdded(browser()->profile());
   }
 
  protected:
@@ -314,8 +314,8 @@ class DriveFileSystemExtensionApiTest : public FileSystemExtensionApiTestBase {
     fake_drive_service_ = new drive::FakeDriveService;
     fake_drive_service_->LoadResourceListForWapi(kTestRootFeed);
     fake_drive_service_->LoadAccountMetadataForWapi(
-        "chromeos/gdata/account_metadata.json");
-    fake_drive_service_->LoadAppListForDriveApi("chromeos/drive/applist.json");
+        "gdata/account_metadata.json");
+    fake_drive_service_->LoadAppListForDriveApi("drive/applist.json");
 
     return new drive::DriveIntegrationService(profile,
                                               fake_drive_service_,
@@ -432,3 +432,4 @@ IN_PROC_BROWSER_TEST_F(DriveFileSystemExtensionApiTest, AppFileHandler) {
 }
 
 }  // namespace
+}  // namespace file_manager

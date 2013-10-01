@@ -11,7 +11,7 @@
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/policy/cloud/cloud_policy_constants.h"
 #include "chrome/browser/policy/cloud/mock_cloud_policy_store.h"
@@ -32,6 +32,7 @@ using testing::AnyNumber;
 using testing::Eq;
 using testing::Mock;
 using testing::Property;
+using testing::Return;
 using testing::SaveArg;
 using testing::_;
 
@@ -76,7 +77,7 @@ class UserCloudPolicyStoreChromeOSTest : public testing::Test {
     // Install the initial public key, so that by default the validation of
     // the stored/loaded policy blob succeeds.
     std::vector<uint8> public_key;
-    ASSERT_TRUE(policy_.signing_key()->ExportPublicKey(&public_key));
+    ASSERT_TRUE(policy_.GetSigningKey()->ExportPublicKey(&public_key));
     StoreUserPolicyKey(public_key);
 
     policy_.payload().mutable_homepagelocation()->set_value(kDefaultHomepage);
@@ -160,7 +161,7 @@ class UserCloudPolicyStoreChromeOSTest : public testing::Test {
       previous_policy.Set(key::kHomepageLocation,
                           POLICY_LEVEL_MANDATORY,
                           POLICY_SCOPE_USER,
-                          base::Value::CreateStringValue(previous_value));
+                          base::Value::CreateStringValue(previous_value), NULL);
     }
     EXPECT_TRUE(previous_policy.Equals(store_->policy_map()));
     EXPECT_EQ(CloudPolicyStore::STATUS_OK, store_->status());
@@ -239,12 +240,12 @@ class UserCloudPolicyStoreChromeOSTest : public testing::Test {
 
 TEST_F(UserCloudPolicyStoreChromeOSTest, InitialStore) {
   // Start without any public key to trigger the initial key checks.
-  ASSERT_TRUE(file_util::Delete(user_policy_key_file(), false));
+  ASSERT_TRUE(base::DeleteFile(user_policy_key_file(), false));
   // Make the policy blob contain a new public key.
-  policy_.set_new_signing_key(PolicyBuilder::CreateTestNewSigningKey());
+  policy_.SetDefaultNewSigningKey();
   policy_.Build();
   std::vector<uint8> new_public_key;
-  ASSERT_TRUE(policy_.new_signing_key()->ExportPublicKey(&new_public_key));
+  ASSERT_TRUE(policy_.GetNewSigningKey()->ExportPublicKey(&new_public_key));
   ASSERT_NO_FATAL_FAILURE(
       PerformStorePolicy(&new_public_key, NULL, kDefaultHomepage));
 }
@@ -256,10 +257,10 @@ TEST_F(UserCloudPolicyStoreChromeOSTest, StoreWithExistingKey) {
 
 TEST_F(UserCloudPolicyStoreChromeOSTest, StoreWithRotation) {
   // Make the policy blob contain a new public key.
-  policy_.set_new_signing_key(PolicyBuilder::CreateTestNewSigningKey());
+  policy_.SetDefaultNewSigningKey();
   policy_.Build();
   std::vector<uint8> new_public_key;
-  ASSERT_TRUE(policy_.new_signing_key()->ExportPublicKey(&new_public_key));
+  ASSERT_TRUE(policy_.GetNewSigningKey()->ExportPublicKey(&new_public_key));
   ASSERT_NO_FATAL_FAILURE(
       PerformStorePolicy(&new_public_key, NULL, kDefaultHomepage));
 }
@@ -383,7 +384,7 @@ TEST_F(UserCloudPolicyStoreChromeOSTest, LoadValidationError) {
 
 TEST_F(UserCloudPolicyStoreChromeOSTest, LoadNoKey) {
   // The loaded policy can't be verified without the public key.
-  ASSERT_TRUE(file_util::Delete(user_policy_key_file(), false));
+  ASSERT_TRUE(base::DeleteFile(user_policy_key_file(), false));
   ExpectError(CloudPolicyStore::STATUS_VALIDATION_ERROR);
   ASSERT_NO_FATAL_FAILURE(PerformPolicyLoad(policy_.GetBlob()));
   VerifyStoreHasValidationError();
@@ -480,7 +481,7 @@ TEST_F(UserCloudPolicyStoreChromeOSTest, MigrationNoPolicy) {
 
 TEST_F(UserCloudPolicyStoreChromeOSTest, MigrationAndStoreNew) {
   // Start without an existing public key.
-  ASSERT_TRUE(file_util::Delete(user_policy_key_file(), false));
+  ASSERT_TRUE(base::DeleteFile(user_policy_key_file(), false));
 
   std::string data;
   em::CachedCloudPolicyResponse cached_policy;
@@ -502,21 +503,119 @@ TEST_F(UserCloudPolicyStoreChromeOSTest, MigrationAndStoreNew) {
             store_->policy()->SerializeAsString());
   VerifyPolicyMap(kDefaultHomepage);
   EXPECT_EQ(CloudPolicyStore::STATUS_OK, store_->status());
-  EXPECT_TRUE(file_util::PathExists(policy_file()));
+  EXPECT_TRUE(base::PathExists(policy_file()));
 
   // Now store a new policy using the new homepage location.
   const char kNewHomepage[] = "http://google.com";
   policy_.payload().mutable_homepagelocation()->set_value(kNewHomepage);
-  policy_.set_new_signing_key(PolicyBuilder::CreateTestNewSigningKey());
+  policy_.SetDefaultNewSigningKey();
   policy_.Build();
   std::vector<uint8> new_public_key;
-  ASSERT_TRUE(policy_.new_signing_key()->ExportPublicKey(&new_public_key));
+  ASSERT_TRUE(policy_.GetNewSigningKey()->ExportPublicKey(&new_public_key));
   ASSERT_NO_FATAL_FAILURE(
       PerformStorePolicy(&new_public_key, kDefaultHomepage, kNewHomepage));
   VerifyPolicyMap(kNewHomepage);
 
   // Verify that the legacy cache has been removed.
-  EXPECT_FALSE(file_util::PathExists(policy_file()));
+  EXPECT_FALSE(base::PathExists(policy_file()));
+}
+
+TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediately) {
+  EXPECT_CALL(observer_, OnStoreLoaded(store_.get()));
+  EXPECT_CALL(session_manager_client_,
+              BlockingRetrievePolicyForUser(PolicyBuilder::kFakeUsername))
+      .WillOnce(Return(policy_.GetBlob()));
+  EXPECT_CALL(cryptohome_client_,
+              BlockingGetSanitizedUsername(PolicyBuilder::kFakeUsername))
+      .WillOnce(Return(kSanitizedUsername));
+
+  EXPECT_FALSE(store_->policy());
+  store_->LoadImmediately();
+  // Note: verify that the |observer_| got notified synchronously, without
+  // having to spin the current loop. TearDown() will flush the loop so this
+  // must be done within the test.
+  Mock::VerifyAndClearExpectations(&observer_);
+  Mock::VerifyAndClearExpectations(&session_manager_client_);
+  Mock::VerifyAndClearExpectations(&cryptohome_client_);
+
+  // The policy should become available without having to spin any loops.
+  ASSERT_TRUE(store_->policy());
+  EXPECT_EQ(policy_.policy_data().SerializeAsString(),
+            store_->policy()->SerializeAsString());
+  VerifyPolicyMap(kDefaultHomepage);
+  EXPECT_EQ(CloudPolicyStore::STATUS_OK, store_->status());
+}
+
+TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyNoPolicy) {
+  EXPECT_CALL(observer_, OnStoreLoaded(store_.get()));
+  EXPECT_CALL(session_manager_client_,
+              BlockingRetrievePolicyForUser(PolicyBuilder::kFakeUsername))
+      .WillOnce(Return(""));
+
+  EXPECT_FALSE(store_->policy());
+  store_->LoadImmediately();
+  Mock::VerifyAndClearExpectations(&observer_);
+  Mock::VerifyAndClearExpectations(&session_manager_client_);
+
+  EXPECT_FALSE(store_->policy());
+  EXPECT_TRUE(store_->policy_map().empty());
+  EXPECT_EQ(CloudPolicyStore::STATUS_OK, store_->status());
+}
+
+TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyInvalidBlob) {
+  EXPECT_CALL(observer_, OnStoreError(store_.get()));
+  EXPECT_CALL(session_manager_client_,
+              BlockingRetrievePolicyForUser(PolicyBuilder::kFakeUsername))
+      .WillOnce(Return("le blob"));
+
+  EXPECT_FALSE(store_->policy());
+  store_->LoadImmediately();
+  Mock::VerifyAndClearExpectations(&observer_);
+  Mock::VerifyAndClearExpectations(&session_manager_client_);
+
+  EXPECT_FALSE(store_->policy());
+  EXPECT_TRUE(store_->policy_map().empty());
+  EXPECT_EQ(CloudPolicyStore::STATUS_PARSE_ERROR, store_->status());
+}
+
+TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyDBusFailure) {
+  EXPECT_CALL(observer_, OnStoreError(store_.get()));
+  EXPECT_CALL(session_manager_client_,
+              BlockingRetrievePolicyForUser(PolicyBuilder::kFakeUsername))
+      .WillOnce(Return(policy_.GetBlob()));
+  EXPECT_CALL(cryptohome_client_,
+              BlockingGetSanitizedUsername(PolicyBuilder::kFakeUsername))
+      .WillOnce(Return(""));
+
+  EXPECT_FALSE(store_->policy());
+  store_->LoadImmediately();
+  Mock::VerifyAndClearExpectations(&observer_);
+  Mock::VerifyAndClearExpectations(&session_manager_client_);
+  Mock::VerifyAndClearExpectations(&cryptohome_client_);
+
+  EXPECT_FALSE(store_->policy());
+  EXPECT_TRUE(store_->policy_map().empty());
+  EXPECT_EQ(CloudPolicyStore::STATUS_LOAD_ERROR, store_->status());
+}
+
+TEST_F(UserCloudPolicyStoreChromeOSTest, LoadImmediatelyNoUserPolicyKey) {
+  EXPECT_CALL(observer_, OnStoreError(store_.get()));
+  EXPECT_CALL(session_manager_client_,
+              BlockingRetrievePolicyForUser(PolicyBuilder::kFakeUsername))
+      .WillOnce(Return(policy_.GetBlob()));
+  EXPECT_CALL(cryptohome_client_,
+              BlockingGetSanitizedUsername(PolicyBuilder::kFakeUsername))
+      .WillOnce(Return("wrong"));
+
+  EXPECT_FALSE(store_->policy());
+  store_->LoadImmediately();
+  Mock::VerifyAndClearExpectations(&observer_);
+  Mock::VerifyAndClearExpectations(&session_manager_client_);
+  Mock::VerifyAndClearExpectations(&cryptohome_client_);
+
+  EXPECT_FALSE(store_->policy());
+  EXPECT_TRUE(store_->policy_map().empty());
+  EXPECT_EQ(CloudPolicyStore::STATUS_VALIDATION_ERROR, store_->status());
 }
 
 }  // namespace

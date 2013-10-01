@@ -26,12 +26,13 @@ class IdleActionWarningObserver;
 class MagnificationManager;
 class PeripheralBatteryObserver;
 class PowerButtonObserver;
+class PowerPrefs;
 class ResumeObserver;
 class ScreenLockObserver;
 class ScreensaverController;
 class SessionManagerObserver;
-class StorageMonitorCros;
 class SuspendObserver;
+class SwapMetrics;
 class UserActivityNotifier;
 class VideoActivityNotifier;
 
@@ -41,10 +42,6 @@ class ExternalLoader;
 
 namespace internal {
 class DBusServices;
-}
-
-namespace system {
-class DeviceChangeHandler;
 }
 
 class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
@@ -80,13 +77,13 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   scoped_ptr<ScreenLockObserver> screen_lock_observer_;
   scoped_ptr<ScreensaverController> screensaver_controller_;
   scoped_ptr<PeripheralBatteryObserver> peripheral_battery_observer_;
+  scoped_ptr<PowerPrefs> power_prefs_;
   scoped_ptr<PowerButtonObserver> power_button_observer_;
   scoped_ptr<content::PowerSaveBlocker> retail_mode_power_save_blocker_;
   scoped_ptr<UserActivityNotifier> user_activity_notifier_;
   scoped_ptr<VideoActivityNotifier> video_activity_notifier_;
-  scoped_ptr<StorageMonitorCros> storage_monitor_;
   scoped_ptr<IdleActionWarningObserver> idle_action_warning_observer_;
-  scoped_ptr<system::DeviceChangeHandler> device_change_handler_;
+  scoped_ptr<SwapMetrics> swap_metrics_;
 
   scoped_ptr<internal::DBusServices> dbus_services_;
 

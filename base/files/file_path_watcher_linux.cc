@@ -24,7 +24,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/synchronization/lock.h"
@@ -351,7 +351,7 @@ void FilePathWatcherImpl::OnFilePathChanged(InotifyReader::Watch fired_watch,
       //    recheck.
       if (target_changed ||
           (change_on_target_path && !created) ||
-          (change_on_target_path && file_util::PathExists(target_))) {
+          (change_on_target_path && PathExists(target_))) {
         callback_.Run(target_, false);
         return;
       }

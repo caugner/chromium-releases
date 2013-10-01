@@ -9,7 +9,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/hash.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/stats_counters.h"
@@ -18,8 +18,8 @@
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/cache_util.h"
 #include "net/disk_cache/disk_format.h"
@@ -89,9 +89,8 @@ bool InitExperiment(disk_cache::IndexHeader* header, bool cache_created) {
     if (cache_created) {
       header->experiment = disk_cache::EXPERIMENT_SIMPLE_CONTROL;
       return true;
-    } else if (header->experiment != disk_cache::EXPERIMENT_SIMPLE_CONTROL) {
-      return false;
     }
+    return header->experiment == disk_cache::EXPERIMENT_SIMPLE_CONTROL;
   }
 
   header->experiment = disk_cache::NO_EXPERIMENT;
@@ -1368,6 +1367,8 @@ bool BackendImpl::InitStats() {
 
     if (!CreateBlock(file_type, num_blocks, &address))
       return false;
+
+    data_->header.stats = address.value();
     return stats_.Init(NULL, 0, address);
   }
 

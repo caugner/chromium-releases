@@ -6,13 +6,13 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
@@ -20,10 +20,10 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/common/url_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request.h"
+#include "url/gurl.h"
 
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/signin/signin_manager.h"
@@ -391,7 +391,7 @@ bool URLBlacklistManager::IsRequestBlocked(
 }
 
 // static
-void URLBlacklistManager::RegisterUserPrefs(
+void URLBlacklistManager::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterListPref(prefs::kUrlBlacklist,
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);

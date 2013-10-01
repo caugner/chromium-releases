@@ -36,7 +36,8 @@ class NetworkConfigurationPolicyHandler : public TypeCheckingPolicyHandler {
  private:
   explicit NetworkConfigurationPolicyHandler(
       const char* policy_name,
-      chromeos::onc::ONCSource onc_source);
+      chromeos::onc::ONCSource onc_source,
+      const char* pref_path);
 
   // Takes network policy in Value representation and produces an output Value
   // that contains a pretty-printed and sanitized version. In particular, we
@@ -47,6 +48,9 @@ class NetworkConfigurationPolicyHandler : public TypeCheckingPolicyHandler {
   // The kind of ONC source that this handler represents. ONCSource
   // distinguishes between user and device policy.
   const chromeos::onc::ONCSource onc_source_;
+
+  // The name of the pref to apply the policy to.
+  const char* pref_path_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkConfigurationPolicyHandler);
 };
@@ -76,6 +80,40 @@ class ScreenMagnifierPolicyHandler : public IntRangePolicyHandlerBase {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ScreenMagnifierPolicyHandler);
+};
+
+// ConfigurationPolicyHandler for login screen power management settings. This
+// does not actually set any prefs, it just checks whether the settings are
+// valid and generates errors if appropriate.
+class LoginScreenPowerManagementPolicyHandler
+    : public TypeCheckingPolicyHandler {
+ public:
+  LoginScreenPowerManagementPolicyHandler();
+  virtual ~LoginScreenPowerManagementPolicyHandler();
+
+  // TypeCheckingPolicyHandler:
+  virtual bool CheckPolicySettings(const PolicyMap& policies,
+                                   PolicyErrorMap* errors) OVERRIDE;
+  virtual void ApplyPolicySettings(const PolicyMap& policies,
+                                   PrefValueMap* prefs) OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(LoginScreenPowerManagementPolicyHandler);
+};
+
+// Handles the deprecated IdleAction policy, so both kIdleActionBattery and
+// kIdleActionAC fall back to the deprecated action.
+class DeprecatedIdleActionHandler : public IntRangePolicyHandlerBase {
+ public:
+  DeprecatedIdleActionHandler();
+  virtual ~DeprecatedIdleActionHandler();
+
+  // ConfigurationPolicyHandler methods:
+  virtual void ApplyPolicySettings(const PolicyMap& policies,
+                                   PrefValueMap* prefs) OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DeprecatedIdleActionHandler);
 };
 
 }  // namespace policy

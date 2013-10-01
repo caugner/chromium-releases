@@ -83,7 +83,7 @@ ContentSettingImageView::ContentSettingImageView(
   text_label_->SetElideBehavior(views::Label::NO_ELIDE);
   AddChildView(text_label_);
 
-  TouchableLocationBarView::Init(this);
+  LocationBarView::InitTouchableLocationBarChildView(this);
 
   slide_animator_.SetSlideDuration(kAnimationDurationMS);
   slide_animator_.SetTweenType(ui::Tween::LINEAR);
@@ -94,13 +94,10 @@ ContentSettingImageView::~ContentSettingImageView() {
     bubble_widget_->RemoveObserver(this);
 }
 
-int ContentSettingImageView::GetBuiltInHorizontalPadding() const {
-  return GetBuiltInHorizontalPaddingImpl();
-}
-
 void ContentSettingImageView::Update(content::WebContents* web_contents) {
-  if (web_contents)
-    content_setting_image_model_->UpdateFromWebContents(web_contents);
+  // Note: We explicitly want to call this even if |web_contents| is NULL, so we
+  // get hidden properly while the user is editing the omnibox.
+  content_setting_image_model_->UpdateFromWebContents(web_contents);
 
   if (!content_setting_image_model_->is_visible()) {
     SetVisible(false);

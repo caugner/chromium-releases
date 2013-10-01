@@ -4,13 +4,11 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/managed_mode/managed_user_refresh_token_fetcher.h"
 #include "chrome/browser/signin/oauth2_token_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -25,7 +23,6 @@
 namespace {
 
 const char kManagedUserId[] = "abcdef";
-const char kName[] = "Homestar";
 const char kDeviceName[] = "Compy";
 
 const char kAccessToken[] = "accesstoken";
@@ -81,6 +78,9 @@ class MockOAuth2TokenService : public OAuth2TokenService {
      const OAuth2TokenService::ScopeSet& scopes,
       OAuth2TokenService::Consumer* consumer) OVERRIDE;
   virtual std::string GetRefreshToken() OVERRIDE;
+  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE {
+    return NULL;
+  }
 
   Request* request_;
 
@@ -110,9 +110,7 @@ void MockOAuth2TokenService::Request::Fail(
   consumer_->OnGetTokenFailure(this, GoogleServiceAuthError(error));
 }
 
-MockOAuth2TokenService::MockOAuth2TokenService()
-    : OAuth2TokenService(NULL),
-      request_(NULL) {}
+MockOAuth2TokenService::MockOAuth2TokenService() : request_(NULL) {}
 
 MockOAuth2TokenService::~MockOAuth2TokenService() {
   EXPECT_FALSE(request_);
@@ -194,9 +192,7 @@ class ManagedUserRefreshTokenFetcherTest : public testing::Test {
   void OnTokenFetched(const GoogleServiceAuthError& error,
                       const std::string& token);
 
-  base::WeakPtrFactory<ManagedUserRefreshTokenFetcherTest> weak_ptr_factory_;
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   TestingProfile profile_;
   MockOAuth2TokenService oauth2_token_service_;
   net::TestURLFetcherFactory url_fetcher_factory_;
@@ -204,18 +200,18 @@ class ManagedUserRefreshTokenFetcherTest : public testing::Test {
 
   GoogleServiceAuthError error_;
   std::string token_;
+  base::WeakPtrFactory<ManagedUserRefreshTokenFetcherTest> weak_ptr_factory_;
 };
 
 ManagedUserRefreshTokenFetcherTest::ManagedUserRefreshTokenFetcherTest()
-    : weak_ptr_factory_(this),
-      ui_thread_(content::BrowserThread::UI, &message_loop_),
-      token_fetcher_(
+    : token_fetcher_(
           ManagedUserRefreshTokenFetcher::Create(&oauth2_token_service_,
                                           profile_.GetRequestContext())),
-      error_(GoogleServiceAuthError::NONE) {}
+      error_(GoogleServiceAuthError::NONE),
+      weak_ptr_factory_(this) {}
 
 void ManagedUserRefreshTokenFetcherTest::StartFetching() {
-  token_fetcher_->Start(kManagedUserId, UTF8ToUTF16(kName), kDeviceName,
+  token_fetcher_->Start(kManagedUserId, kDeviceName,
                         base::Bind(
                             &ManagedUserRefreshTokenFetcherTest::OnTokenFetched,
                             weak_ptr_factory_.GetWeakPtr()));
@@ -248,9 +244,6 @@ ManagedUserRefreshTokenFetcherTest::GetIssueTokenRequest() {
   std::string managed_user_id;
   EXPECT_TRUE(GetValueForKey(upload_data, "profile_id", &managed_user_id));
   EXPECT_EQ(kManagedUserId, managed_user_id);
-  std::string name;
-  EXPECT_TRUE(GetValueForKey(upload_data, "profile_name", &name));
-  EXPECT_EQ(kName, name);
   std::string device_name;
   EXPECT_TRUE(GetValueForKey(upload_data, "device_name", &device_name));
   EXPECT_EQ(kDeviceName, device_name);

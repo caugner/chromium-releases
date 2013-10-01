@@ -12,7 +12,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
@@ -21,9 +21,9 @@
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -32,7 +32,6 @@
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/net/connectivity_state_helper.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -41,7 +40,6 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/policy/policy_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
@@ -136,7 +134,8 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
       is_login_in_progress_(false),
       password_changed_(false),
       do_auto_enrollment_(false),
-      signin_screen_ready_(false) {
+      signin_screen_ready_(false),
+      network_state_helper_(new login::NetworkStateHelper) {
   DCHECK(current_controller_ == NULL);
   current_controller_ = this;
 
@@ -389,7 +388,7 @@ void ExistingUserController::CompleteLoginInternal(
 }
 
 string16 ExistingUserController::GetConnectedNetworkName() {
-  return GetCurrentNetworkName();
+  return network_state_helper_->GetCurrentNetworkName();
 }
 
 bool ExistingUserController::IsSigninInProgress() const {
@@ -716,6 +715,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
 
   if (UserManager::Get()->GetUserFlow(last_login_attempt_username_)->
           HandleLoginFailure(failure)) {
+    login_display_->SetUIEnabled(true);
     return;
   }
 
@@ -736,7 +736,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
     // cached locally or the local admin account.
     bool is_known_user =
         UserManager::Get()->IsKnownUser(last_login_attempt_username_);
-    if (!ConnectivityStateHelper::Get()->IsConnected()) {
+    if (!network_state_helper_->IsConnected()) {
       if (is_known_user)
         ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
       else
@@ -812,8 +812,6 @@ void ExistingUserController::OnLoginSuccess(
 }
 
 void ExistingUserController::OnProfilePrepared(Profile* profile) {
-  OptionallyShowReleaseNotes(profile);
-
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
 
@@ -824,22 +822,19 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
     // URLs via policy.
     if (!SessionStartupPref::TypeIsManaged(profile->GetPrefs()))
       InitializeStartUrls();
-#ifndef NDEBUG
+
+    // Mark the device as registered., i.e. the second part of OOBE as
+    // completed.
+    if (!StartupUtils::IsDeviceRegistered())
+      StartupUtils::MarkDeviceRegistered();
+
     if (CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kOobeSkipPostLogin)) {
       LoginUtils::Get()->DoBrowserLaunch(profile, host_);
       host_ = NULL;
     } else {
-#endif
-      // Mark the device as registered., i.e. the second part of OOBE as
-      // completed.
-      if (!StartupUtils::IsDeviceRegistered())
-        StartupUtils::MarkDeviceRegistered();
-
       ActivateWizard(WizardController::kTermsOfServiceScreenName);
-#ifndef NDEBUG
     }
-#endif
   } else {
     LoginUtils::Get()->DoBrowserLaunch(profile, host_);
     host_ = NULL;
@@ -1086,51 +1081,6 @@ void ExistingUserController::InitializeStartUrls() const {
   }
 }
 
-void ExistingUserController::OptionallyShowReleaseNotes(
-    Profile* profile) const {
-  // TODO(nkostylev): Fix WizardControllerFlowTest case.
-  if (!profile || KioskModeSettings::Get()->IsKioskModeEnabled())
-    return;
-  if (UserManager::Get()->GetCurrentUserFlow()->ShouldSkipPostLoginScreens())
-    return;
-  PrefService* prefs = profile->GetPrefs();
-  chrome::VersionInfo version_info;
-  // New users would get this info with default getting started guide.
-  // In password changed case 2 options are available:
-  // 1. Cryptohome removed, pref is gone, not yet synced, recreate
-  //    with latest version.
-  // 2. Cryptohome migrated, pref is available. To simplify implementation
-  //    update version here too. Unlikely that user signs in first time on
-  //    the machine after update with password changed.
-  if (UserManager::Get()->IsCurrentUserNew() || password_changed_) {
-    prefs->SetString(prefs::kChromeOSReleaseNotesVersion,
-                     version_info.Version());
-    return;
-  }
-
-  std::string prev_version_pref =
-      prefs->GetString(prefs::kChromeOSReleaseNotesVersion);
-  Version prev_version(prev_version_pref);
-  if (!prev_version.IsValid())
-    prev_version = Version("0.0.0.0");
-  Version current_version(version_info.Version());
-
-  if (!current_version.components().size()) {
-    NOTREACHED() << "Incorrect version " << current_version.GetString();
-    return;
-  }
-
-  // No "Release Notes" content yet for upgrade from M19 to later release.
-  if (prev_version.components()[0] >= kReleaseNotesTargetRelease)
-    return;
-
-  // Otherwise, trigger on major version change.
-  if (current_version.components()[0] > prev_version.components()[0]) {
-    prefs->SetString(prefs::kChromeOSReleaseNotesVersion,
-                     current_version.GetString());
-  }
-}
-
 void ExistingUserController::ShowError(int error_id,
                                        const std::string& details) {
   // TODO(dpolukhin): show detailed error info. |details| string contains
@@ -1139,7 +1089,7 @@ void ExistingUserController::ShowError(int error_id,
   // for end users, developers can see details string in Chrome logs.
   VLOG(1) << details;
   HelpAppLauncher::HelpTopic help_topic_id;
-  bool is_offline = !ConnectivityStateHelper::Get()->IsConnected();
+  bool is_offline = !network_state_helper_->IsConnected();
   switch (login_performer_->error().state()) {
     case GoogleServiceAuthError::CONNECTION_FAILED:
       help_topic_id = HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT_OFFLINE;

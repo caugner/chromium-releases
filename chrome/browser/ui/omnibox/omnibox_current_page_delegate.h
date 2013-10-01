@@ -32,6 +32,12 @@ class OmniboxCurrentPageDelegate {
   // Returns the URL of the current page.
   virtual const GURL& GetURL() const = 0;
 
+  // Returns true if the visible entry is a New Tab Page rendered by Instant.
+  virtual bool IsInstantNTP() const = 0;
+
+  // Returns true if the committed entry is a search results page.
+  virtual bool IsSearchResultsPage() const = 0;
+
   // Returns whether the current page is loading.
   virtual bool IsLoading() const = 0;
 
@@ -51,9 +57,7 @@ class OmniboxCurrentPageDelegate {
   // Notifies the SearchTabHelper, if one exists, of relevant changes to the
   // omnibox state.
   virtual void NotifySearchTabHelper(bool user_input_in_progress,
-                                     bool cancelling,
-                                     bool popup_is_open,
-                                     bool user_text_is_empty) = 0;
+                                     bool cancelling) = 0;
 
   // Performs prerendering for |match|.
   virtual void DoPrerender(const AutocompleteMatch& match) = 0;

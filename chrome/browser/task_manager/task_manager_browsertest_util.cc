@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/resource_provider.h"
 #include "chrome/browser/task_manager/task_manager.h"
@@ -13,7 +14,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
@@ -29,7 +29,6 @@ int GetWebResourceCount(const TaskManagerModel* model) {
         type == task_manager::Resource::NACL ||
         type == task_manager::Resource::GPU ||
         type == task_manager::Resource::UTILITY ||
-        type == task_manager::Resource::PROFILE_IMPORT ||
         type == task_manager::Resource::ZYGOTE ||
         type == task_manager::Resource::SANDBOX_HELPER) {
       continue;

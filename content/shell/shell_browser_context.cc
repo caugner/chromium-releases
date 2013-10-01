@@ -43,6 +43,12 @@ class ShellBrowserContext::ShellResourceContext : public ResourceContext {
     CHECK(getter_);
     return getter_->GetURLRequestContext();
   }
+  virtual bool AllowMicAccess(const GURL& origin) OVERRIDE {
+    return false;
+  }
+  virtual bool AllowCameraAccess(const GURL& origin) OVERRIDE {
+    return false;
+  }
 
   void set_url_request_context_getter(ShellURLRequestContextGetter* getter) {
     getter_ = getter;
@@ -54,8 +60,10 @@ class ShellBrowserContext::ShellResourceContext : public ResourceContext {
   DISALLOW_COPY_AND_ASSIGN(ShellResourceContext);
 };
 
-ShellBrowserContext::ShellBrowserContext(bool off_the_record)
+ShellBrowserContext::ShellBrowserContext(bool off_the_record,
+                                         net::NetLog* net_log)
     : off_the_record_(off_the_record),
+      net_log_(net_log),
       ignore_certificate_errors_(false),
       resource_context_(new ShellResourceContext) {
   InitWhileIOAllowed();
@@ -98,11 +106,11 @@ void ShellBrowserContext::InitWhileIOAllowed() {
   NOTIMPLEMENTED();
 #endif
 
-  if (!file_util::PathExists(path_))
+  if (!base::PathExists(path_))
     file_util::CreateDirectory(path_);
 }
 
-base::FilePath ShellBrowserContext::GetPath() {
+base::FilePath ShellBrowserContext::GetPath() const {
   return path_;
 }
 
@@ -138,7 +146,8 @@ net::URLRequestContextGetter* ShellBrowserContext::CreateRequestContext(
       GetPath(),
       BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::IO),
       BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::FILE),
-      protocol_handlers);
+      protocol_handlers,
+      net_log_);
   resource_context_->set_url_request_context_getter(url_request_getter_.get());
   return url_request_getter_.get();
 }
@@ -167,6 +176,21 @@ net::URLRequestContextGetter*
   return GetRequestContext();
 }
 
+void ShellBrowserContext::RequestMIDISysExPermission(
+      int render_process_id,
+      int render_view_id,
+      const GURL& requesting_frame,
+      const MIDISysExPermissionCallback& callback) {
+  // Always reject requests for LayoutTests for now.
+  // TODO(toyoshim): Make it programmable to improve test coverage.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree)) {
+    callback.Run(false);
+    return;
+  }
+  // TODO(toyoshim): Implement. http://crbug.com/257618 .
+  callback.Run(false);
+}
+
 net::URLRequestContextGetter*
     ShellBrowserContext::CreateRequestContextForStoragePartition(
         const base::FilePath& partition_path,
@@ -181,11 +205,6 @@ ResourceContext* ShellBrowserContext::GetResourceContext()  {
 
 GeolocationPermissionContext*
     ShellBrowserContext::GetGeolocationPermissionContext()  {
-  return NULL;
-}
-
-SpeechRecognitionPreferences*
-    ShellBrowserContext::GetSpeechRecognitionPreferences() {
   return NULL;
 }
 

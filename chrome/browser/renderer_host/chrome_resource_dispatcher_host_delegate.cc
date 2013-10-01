@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_resource_throttle.h"
@@ -32,9 +33,7 @@
 #include "chrome/browser/ui/auto_login_prompter.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/mime_types_handler.h"
-#include "chrome/common/extensions/user_script.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -45,6 +44,7 @@
 #include "content/public/browser/stream_handle.h"
 #include "content/public/common/resource_response.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/user_script.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/http/http_response_headers.h"
@@ -207,8 +207,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldBeginRequest(
     const std::string& method,
     const GURL& url,
     ResourceType::Type resource_type,
-    content::ResourceContext* resource_context,
-    const content::Referrer& referrer) {
+    content::ResourceContext* resource_context) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   // Handle a PREFETCH resource type. If prefetch is disabled, squelch the
@@ -231,7 +230,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldBeginRequest(
           child_id, route_id, prerender::FINAL_STATUS_INVALID_HTTP_METHOD);
       return false;
     }
-    if (!prerender::PrerenderManager::DoesURLHaveValidScheme(url)) {
+    if (!prerender::PrerenderManager::DoesSubresourceURLHaveValidScheme(url)) {
       ReportUnsupportedPrerenderScheme(url);
       prerender_tracker_->TryCancelOnIOThread(
           child_id, route_id, prerender::FINAL_STATUS_UNSUPPORTED_SCHEME);
@@ -500,7 +499,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldInterceptResourceAsStream(
     content::ResourceContext* resource_context,
     const GURL& url,
     const std::string& mime_type,
-    GURL* security_origin,
+    GURL* origin,
     std::string* target_id) {
 #if !defined(OS_ANDROID)
   ProfileIOData* io_data =
@@ -524,7 +523,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldInterceptResourceAsStream(
     }
 
     if (ExtensionCanHandleMimeType(extension, mime_type)) {
-      *security_origin = Extension::GetBaseURLFromExtensionId(extension_id);
+      *origin = Extension::GetBaseURLFromExtensionId(extension_id);
       *target_id = extension_id;
       return true;
     }

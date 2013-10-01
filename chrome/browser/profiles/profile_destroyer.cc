@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -43,7 +43,8 @@ void ProfileDestroyer::DestroyProfileWhenAppropriate(Profile* const profile) {
   // RenderProcessHostImpl::Release() avoids destroying RenderProcessHosts in
   // --single-process mode to avoid race conditions.
   DCHECK(hosts.empty() || profile->IsOffTheRecord() ||
-         content::RenderProcessHost::run_renderer_in_process());
+      content::RenderProcessHost::run_renderer_in_process()) << \
+      "Profile still has " << hosts.size() << " hosts";
   // Note that we still test for !profile->IsOffTheRecord here even though we
   // DCHECK'd above because we want to protect Release builds against this even
   // we need to identify if there are leaks when we run Debug builds.

@@ -58,12 +58,33 @@ remoting.HostController.AsyncResult = {
 };
 
 /**
- * @param {function(boolean, boolean, boolean):void} callback Callback to be
- *     called when done.
+ * Set of features for which hasFeature() can be used to test.
+ *
+ * @enum {string}
  */
-remoting.HostController.prototype.getConsent = function(callback) {
-  this.hostDispatcher_.getUsageStatsConsent(callback,
-                                            remoting.showErrorMessage);
+remoting.HostController.Feature = {
+  PAIRING_REGISTRY: 'pairingRegistry'
+};
+
+/**
+ * @param {remoting.HostController.Feature} feature The feature to test for.
+ * @param {function(boolean):void} callback
+ * @return {void}
+ */
+remoting.HostController.prototype.hasFeature = function(feature, callback) {
+  // TODO(rmsousa): This could synchronously return a boolean, provided it were
+  // only called after the dispatcher is completely initialized.
+  this.hostDispatcher_.hasFeature(feature, callback);
+};
+
+/**
+ * @param {function(boolean, boolean, boolean):void} onDone Callback to be
+ *     called when done.
+ * @param {function(remoting.Error):void} onError Callback to be called on
+ *     error.
+ */
+remoting.HostController.prototype.getConsent = function(onDone, onError) {
+  this.hostDispatcher_.getUsageStatsConsent(onDone, onError);
 };
 
 /**
@@ -71,11 +92,13 @@ remoting.HostController.prototype.getConsent = function(callback) {
  *
  * @param {string} hostPin Host PIN.
  * @param {boolean} consent The user's consent to crash dump reporting.
- * @param {function(remoting.HostController.AsyncResult):void} callback
- * callback Callback to be called when done.
+ * @param {function():void} onDone Callback to be called when done.
+ * @param {function(remoting.Error):void} onError Callback to be called on
+ *     error.
  * @return {void} Nothing.
  */
-remoting.HostController.prototype.start = function(hostPin, consent, callback) {
+remoting.HostController.prototype.start = function(hostPin, consent, onDone,
+                                                   onError) {
   /** @type {remoting.HostController} */
   var that = this;
 
@@ -89,45 +112,34 @@ remoting.HostController.prototype.start = function(hostPin, consent, callback) {
       e[i] = (/** @type {number} */random[i] + 0x10000).
           toString(16).substring(1);
     }
-    return e[0] + e[1] + '-' + e[2] + "-" + e[3] + '-' +
+    return e[0] + e[1] + '-' + e[2] + '-' + e[3] + '-' +
         e[4] + '-' + e[5] + e[6] + e[7];
   };
 
   var newHostId = generateUuid();
 
-  /** @param {function(remoting.HostController.AsyncResult):void} callback
-   *  @param {remoting.HostController.AsyncResult} result
-   *  @param {string} hostName
-   *  @param {string} publicKey */
-  function onStarted(callback, result, hostName, publicKey) {
-    if (result == remoting.HostController.AsyncResult.OK) {
-      remoting.hostList.onLocalHostStarted(hostName, newHostId, publicKey);
-    } else {
-      // Unregister the host if we failed to start it.
-      remoting.HostList.unregisterHostById(newHostId);
-    }
-    callback(result);
-  };
+  /** @param {remoting.Error} error */
+  function onStartError(error) {
+    // Unregister the host if we failed to start it.
+    remoting.HostList.unregisterHostById(newHostId);
+    onError(error);
+  }
 
   /**
    * @param {string} hostName
    * @param {string} publicKey
-   * @param {string} privateKey
-   * @param {XMLHttpRequest} xhr
+   * @param {remoting.HostController.AsyncResult} result
    */
-  function onRegistered(hostName, publicKey, privateKey, xhr) {
-    var success = (xhr.status == 200);
-
-    if (success) {
-      that.hostDispatcher_.getPinHash(newHostId, hostPin,
-          startHostWithHash.bind(null, hostName, publicKey, privateKey, xhr),
-          remoting.showErrorMessage);
+  function onStarted(hostName, publicKey, result) {
+    if (result == remoting.HostController.AsyncResult.OK) {
+      remoting.hostList.onLocalHostStarted(hostName, newHostId, publicKey);
+      onDone();
+    } else if (result == remoting.HostController.AsyncResult.CANCELLED) {
+      onStartError(remoting.Error.CANCELLED);
     } else {
-      console.log('Failed to register the host. Status: ' + xhr.status +
-                  ' response: ' + xhr.responseText);
-      callback(remoting.HostController.AsyncResult.FAILED_DIRECTORY);
+      onStartError(remoting.Error.UNEXPECTED);
     }
-  };
+  }
 
   /**
    * @param {string} hostName
@@ -146,13 +158,30 @@ remoting.HostController.prototype.start = function(hostPin, consent, callback) {
         host_secret_hash: hostSecretHash,
         private_key: privateKey
     };
-    /** @param {remoting.HostController.AsyncResult} result */
-    var onStartDaemon = function(result) {
-      onStarted(callback, result, hostName, publicKey);
-    };
-    that.hostDispatcher_.startDaemon(hostConfig, consent, onStartDaemon,
-                                     remoting.showErrorMessage);
+    that.hostDispatcher_.startDaemon(hostConfig, consent,
+                                     onStarted.bind(null, hostName, publicKey),
+                                     onStartError);
   }
+
+  /**
+   * @param {string} hostName
+   * @param {string} publicKey
+   * @param {string} privateKey
+   * @param {XMLHttpRequest} xhr
+   */
+  function onRegistered(hostName, publicKey, privateKey, xhr) {
+    var success = (xhr.status == 200);
+
+    if (success) {
+      that.hostDispatcher_.getPinHash(newHostId, hostPin,
+          startHostWithHash.bind(null, hostName, publicKey, privateKey, xhr),
+          onError);
+    } else {
+      console.log('Failed to register the host. Status: ' + xhr.status +
+                  ' response: ' + xhr.responseText);
+      onError(remoting.Error.REGISTRATION_FAILED);
+    }
+  };
 
   /**
    * @param {string} hostName
@@ -173,8 +202,7 @@ remoting.HostController.prototype.start = function(hostPin, consent, callback) {
     } };
     remoting.xhr.post(
         remoting.settings.DIRECTORY_API_BASE_URL + '/@me/hosts/',
-        /** @param {XMLHttpRequest} xhr */
-        function (xhr) { onRegistered(hostName, publicKey, privateKey, xhr); },
+        onRegistered.bind(null, hostName, publicKey, privateKey),
         JSON.stringify(newHostDetails),
         headers);
   };
@@ -186,15 +214,8 @@ remoting.HostController.prototype.start = function(hostPin, consent, callback) {
    */
   function onKeyGenerated(hostName, privateKey, publicKey) {
     remoting.identity.callWithToken(
-        /** @param {string} oauthToken */
-        function(oauthToken) {
-          doRegisterHost(hostName, privateKey, publicKey, oauthToken);
-        },
-        /** @param {remoting.Error} error */
-        function(error) {
-          // TODO(jamiewalch): Have a more specific error code here?
-          callback(remoting.HostController.AsyncResult.FAILED);
-        });
+        doRegisterHost.bind(null, hostName, privateKey, publicKey),
+        onError);
   };
 
   /**
@@ -203,48 +224,43 @@ remoting.HostController.prototype.start = function(hostPin, consent, callback) {
    */
   function startWithHostname(hostName) {
     that.hostDispatcher_.generateKeyPair(onKeyGenerated.bind(null, hostName),
-                                         remoting.showErrorMessage);
+                                         onError);
   }
 
-  this.hostDispatcher_.getHostName(startWithHostname,
-                                   remoting.showErrorMessage);
+  this.hostDispatcher_.getHostName(startWithHostname, onError);
 };
 
 /**
  * Stop the daemon process.
- * @param {function(remoting.HostController.AsyncResult):void} callback
- *     Callback to be called when finished.
+ * @param {function():void} onDone Callback to be called when done.
+ * @param {function(remoting.Error):void} onError Callback to be called on
+ *     error.
  * @return {void} Nothing.
  */
-remoting.HostController.prototype.stop = function(callback) {
+remoting.HostController.prototype.stop = function(onDone, onError) {
   /** @type {remoting.HostController} */
   var that = this;
 
-  /**
-   * @param {remoting.HostController.AsyncResult} result The result of the
-   *     stopDaemon call, to be passed to the callback.
-   * @param {string?} hostId The host id of the local host.
-   */
-  function unregisterHost(result, hostId) {
+  /** @param {string?} hostId The host id of the local host. */
+  function unregisterHost(hostId) {
     if (hostId) {
       remoting.HostList.unregisterHostById(hostId);
     }
-    callback(result);
+    onDone();
   };
 
-  /**
-   * @param {remoting.HostController.AsyncResult} result The result of the
-   *     stopDaemon call, to be passed to the callback.
-   */
+  /** @param {remoting.HostController.AsyncResult} result */
   function onStopped(result) {
-    if (result != remoting.HostController.AsyncResult.OK) {
-      callback(result);
-      return;
+    if (result == remoting.HostController.AsyncResult.OK) {
+      that.getLocalHostId(unregisterHost);
+    } else if (result == remoting.HostController.AsyncResult.CANCELLED) {
+      onError(remoting.Error.CANCELLED);
+    } else {
+      onError(remoting.Error.UNEXPECTED);
     }
-    that.getLocalHostId(unregisterHost.bind(null, result));
-  };
+  }
 
-  this.hostDispatcher_.stopDaemon(onStopped, remoting.showErrorMessage);
+  this.hostDispatcher_.stopDaemon(onStopped, onError);
 };
 
 /**
@@ -260,24 +276,25 @@ function isHostConfigValid_(config) {
 
 /**
  * @param {string} newPin The new PIN to set
- * @param {function(remoting.HostController.AsyncResult):void} callback
- *     Callback to be called when finished.
+ * @param {function():void} onDone Callback to be called when done.
+ * @param {function(remoting.Error):void} onError Callback to be called on
+ *     error.
  * @return {void} Nothing.
  */
-remoting.HostController.prototype.updatePin = function(newPin, callback) {
+remoting.HostController.prototype.updatePin = function(newPin, onDone,
+                                                       onError) {
   /** @type {remoting.HostController} */
   var that = this;
 
-  /** @param {Object} config */
-  function onConfig(config) {
-    if (!isHostConfigValid_(config)) {
-      callback(remoting.HostController.AsyncResult.FAILED);
-      return;
+  /** @param {remoting.HostController.AsyncResult} result */
+  function onConfigUpdated(result) {
+    if (result == remoting.HostController.AsyncResult.OK) {
+      onDone();
+    } else if (result == remoting.HostController.AsyncResult.CANCELLED) {
+      onError(remoting.Error.CANCELLED);
+    } else {
+      onError(remoting.Error.UNEXPECTED);
     }
-    /** @type {string} */
-    var hostId = config['host_id'];
-    that.hostDispatcher_.getPinHash(hostId, newPin, updateDaemonConfigWithHash,
-                                    remoting.showErrorMessage);
   }
 
   /** @param {string} pinHash */
@@ -285,20 +302,32 @@ remoting.HostController.prototype.updatePin = function(newPin, callback) {
     var newConfig = {
       host_secret_hash: pinHash
     };
-    that.hostDispatcher_.updateDaemonConfig(newConfig, callback,
-                                            remoting.showErrorMessage);
+    that.hostDispatcher_.updateDaemonConfig(newConfig, onConfigUpdated,
+                                            onError);
+  }
+
+  /** @param {Object} config */
+  function onConfig(config) {
+    if (!isHostConfigValid_(config)) {
+      onError(remoting.Error.UNEXPECTED);
+      return;
+    }
+    /** @type {string} */
+    var hostId = config['host_id'];
+    that.hostDispatcher_.getPinHash(hostId, newPin, updateDaemonConfigWithHash,
+                                    onError);
   }
 
   // TODO(sergeyu): When crbug.com/121518 is fixed: replace this call
   // with an unprivileged version if that is necessary.
-  this.hostDispatcher_.getDaemonConfig(onConfig, remoting.showErrorMessage);
+  this.hostDispatcher_.getDaemonConfig(onConfig, onError);
 };
 
 /**
  * Get the state of the local host.
  *
- * @param {function(remoting.HostController.State):void} onDone
- *     Completion callback.
+ * @param {function(remoting.HostController.State):void} onDone Completion
+ *     callback.
  */
 remoting.HostController.prototype.getLocalHostState = function(onDone) {
   this.hostDispatcher_.getDaemonState(onDone, function() {
@@ -326,6 +355,43 @@ remoting.HostController.prototype.getLocalHostId = function(onDone) {
   this.hostDispatcher_.getDaemonConfig(onConfig, function(error) {
     onDone(null);
   });
+};
+
+/**
+ * Fetch the list of paired clients for this host.
+ *
+ * @param {function(Array.<remoting.PairedClient>):void} onDone
+ * @param {function(remoting.Error):void} onError
+ * @return {void}
+ */
+remoting.HostController.prototype.getPairedClients = function(onDone,
+                                                              onError) {
+  this.hostDispatcher_.getPairedClients(onDone, onError);
+};
+
+/**
+ * Delete a single paired client.
+ *
+ * @param {string} client The client id of the pairing to delete.
+ * @param {function():void} onDone Completion callback.
+ * @param {function(remoting.Error):void} onError Error callback.
+ * @return {void}
+ */
+remoting.HostController.prototype.deletePairedClient = function(
+    client, onDone, onError) {
+  this.hostDispatcher_.deletePairedClient(client, onDone, onError);
+};
+
+/**
+ * Delete all paired clients.
+ *
+ * @param {function():void} onDone Completion callback.
+ * @param {function(remoting.Error):void} onError Error callback.
+ * @return {void}
+ */
+remoting.HostController.prototype.clearPairedClients = function(
+    onDone, onError) {
+  this.hostDispatcher_.clearPairedClients(onDone, onError);
 };
 
 /** @type {remoting.HostController} */

@@ -163,16 +163,6 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kShowBookmarkBar) {
   ASSERT_TRUE(BooleanPrefMatches(prefs::kShowBookmarkBar));
 }
 
-IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kEnableInstant) {
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  ASSERT_TRUE(BooleanPrefMatches(prefs::kSearchInstantEnabled));
-
-  ChangeBooleanPref(0, prefs::kSearchInstantEnabled);
-
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_TRUE(BooleanPrefMatches(prefs::kSearchInstantEnabled));
-}
-
 // TCM ID - 3611311.
 IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kCheckDefaultBrowser) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -401,18 +391,18 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
 
   TranslatePrefs translate_client0_prefs(GetPrefs(0));
   TranslatePrefs translate_client1_prefs(GetPrefs(1));
-  ASSERT_FALSE(translate_client0_prefs.IsLanguageBlacklisted("fr"));
-  translate_client0_prefs.BlacklistLanguage("fr");
-  ASSERT_TRUE(translate_client0_prefs.IsLanguageBlacklisted("fr"));
+  ASSERT_FALSE(translate_client0_prefs.IsBlockedLanguage("fr"));
+  translate_client0_prefs.BlockLanguage("fr");
+  ASSERT_TRUE(translate_client0_prefs.IsBlockedLanguage("fr"));
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_TRUE(translate_client1_prefs.IsLanguageBlacklisted("fr"));
+  ASSERT_TRUE(translate_client1_prefs.IsBlockedLanguage("fr"));
 
-  translate_client0_prefs.RemoveLanguageFromBlacklist("fr");
-  ASSERT_FALSE(translate_client0_prefs.IsLanguageBlacklisted("fr"));
+  translate_client0_prefs.UnblockLanguage("fr");
+  ASSERT_FALSE(translate_client0_prefs.IsBlockedLanguage("fr"));
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_FALSE(translate_client1_prefs.IsLanguageBlacklisted("fr"));
+  ASSERT_FALSE(translate_client1_prefs.IsBlockedLanguage("fr"));
 }
 
 // TCM ID - 7307195.

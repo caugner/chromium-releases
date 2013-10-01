@@ -16,8 +16,7 @@
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop_proxy.h"
-#include "base/process.h"
-#include "base/process_util.h"
+#include "base/process/process.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -26,7 +25,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_constants.h"
@@ -309,7 +308,7 @@ Error* Session::SendKeys(const ElementId& element, const string16& keys) {
 }
 
 Error* Session::SendKeys(const string16& keys) {
-  Error* error;
+  Error* error = NULL;
   RunSessionTask(base::Bind(
       &Session::SendKeysOnSessionThread,
       base::Unretained(this),
@@ -561,7 +560,8 @@ Error* Session::MouseDoubleClick() {
   return error;
 }
 
-Error* Session::GetCookies(const std::string& url, base::ListValue** cookies) {
+Error* Session::GetCookies(const std::string& url,
+                           scoped_ptr<base::ListValue>* cookies) {
   Error* error = NULL;
   RunSessionTask(base::Bind(
       &Automation::GetCookies,

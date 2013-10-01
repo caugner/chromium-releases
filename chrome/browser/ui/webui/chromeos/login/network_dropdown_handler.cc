@@ -10,6 +10,8 @@
 
 namespace {
 
+const char kJsScreenPath[] = "cr.ui.DropDown";
+
 // JS API callbacks names.
 const char kJsApiNetworkItemChosen[] = "networkItemChosen";
 const char kJsApiNetworkDropdownShow[] = "networkDropdownShow";
@@ -20,10 +22,20 @@ const char kJsApiNetworkDropdownRefresh[] = "networkDropdownRefresh";
 
 namespace chromeos {
 
-NetworkDropdownHandler::NetworkDropdownHandler() {
+NetworkDropdownHandler::NetworkDropdownHandler()
+    : BaseScreenHandler(kJsScreenPath) {
 }
 
 NetworkDropdownHandler::~NetworkDropdownHandler() {
+}
+
+void NetworkDropdownHandler::AddObserver(Observer* observer) {
+  if (observer && !observers_.HasObserver(observer))
+    observers_.AddObserver(observer);
+}
+
+void NetworkDropdownHandler::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 void NetworkDropdownHandler::DeclareLocalizedValues(
@@ -46,6 +58,12 @@ void NetworkDropdownHandler::RegisterMessages() {
               &NetworkDropdownHandler::HandleNetworkDropdownRefresh);
 }
 
+void NetworkDropdownHandler::OnConnectToNetworkRequested(
+    const std::string& service_path) {
+  FOR_EACH_OBSERVER(Observer, observers_,
+                    OnConnectToNetworkRequested(service_path));
+}
+
 void NetworkDropdownHandler::HandleNetworkItemChosen(double id) {
   if (dropdown_.get()) {
     dropdown_->OnItemChosen(static_cast<int>(id));
@@ -59,7 +77,7 @@ void NetworkDropdownHandler::HandleNetworkItemChosen(double id) {
 void NetworkDropdownHandler::HandleNetworkDropdownShow(
     const std::string& element_id,
     bool oobe) {
-  dropdown_.reset(new NetworkDropdown(web_ui(), oobe));
+  dropdown_.reset(new NetworkDropdown(this, web_ui(), oobe));
 }
 
 void NetworkDropdownHandler::HandleNetworkDropdownHide() {

@@ -90,24 +90,6 @@ const char kGalleryBrowsePrefix[] = "https://chrome.google.com/webstore";
 
 }  // namespace extension_urls
 
-namespace extension_filenames {
-
-const char kTempExtensionName[] = "CRX_INSTALL";
-
-// The file to write our decoded images to, relative to the extension_path.
-const char kDecodedImagesFilename[] = "DECODED_IMAGES";
-
-// The file to write our decoded message catalogs to, relative to the
-// extension_path.
-const char kDecodedMessageCatalogsFilename[] = "DECODED_MESSAGE_CATALOGS";
-
-const char kGeneratedBackgroundPageFilename[] =
-    "_generated_background_page.html";
-
-const char kModulesDir[] = "_modules";
-
-}  // namespace extension_filenames
-
 namespace extension_misc {
 
 const char kBookmarkManagerId[] = "eemcgdkfndhakfknompkggombfjjjeno";
@@ -143,11 +125,22 @@ const char kPlatformAppLaunchHistogram[] = "Apps.AppLaunch";
 #if defined(OS_CHROMEOS)
 const char kChromeVoxExtensionPath[] =
     "/usr/share/chromeos-assets/accessibility/extensions/access_chromevox";
+// The extension id for the built-in component extension.
+const char kChromeVoxExtensionId[] =
+    "mndnfokpggljbaajbnioimlmbfngpief";
+const char kConnectivityDiagnosticsPath[] =
+    "/usr/share/chromeos-assets/connectivity_diagnostics";
+const char kConnectivityDiagnosticsLauncherPath[] =
+    "/usr/share/chromeos-assets/connectivity_diagnostics_launcher";
 const char kSpeechSynthesisExtensionPath[] =
     "/usr/share/chromeos-assets/speech_synthesis/patts";
 const char kSpeechSynthesisExtensionId[] =
     "gjjabgpgjpampikjhjpfhneeoapjbjaf";
 const char kWallpaperManagerId[] = "obklkkbkpaoaejdabbfldmcfplpdgolj";
+#else
+// The extension id for the web store extension.
+const char kChromeVoxExtensionId[] =
+    "kgejglhpjiefppelpmljglcjbhoiplfn";
 #endif
 
 const char kAppStateNotInstalled[] = "not_installed";
@@ -166,7 +159,10 @@ const int kExtensionIconSizes[] = {
   EXTENSION_ICON_MEDIUM,  // 48
   EXTENSION_ICON_SMALL,  // 32
   EXTENSION_ICON_SMALLISH,  // 24
-  EXTENSION_ICON_BITTY  // 16
+  EXTENSION_ICON_BITTY,  // 16
+  // Additional 2x resources to load.
+  2 * EXTENSION_ICON_MEDIUM,  // 96
+  2 * EXTENSION_ICON_SMALL  // 64
 };
 
 const size_t kNumExtensionIconSizes =

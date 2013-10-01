@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/extension_infobar_delegate.h"
 
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -11,7 +12,6 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -30,7 +30,7 @@ void ExtensionInfoBarDelegate::Create(InfoBarService* infobar_service,
                                       int height) {
   infobar_service->AddInfoBar(scoped_ptr<InfoBarDelegate>(
       new ExtensionInfoBarDelegate(browser, infobar_service, extension, url,
-                                   height)));
+                                   infobar_service->web_contents(), height)));
 }
 
 ExtensionInfoBarDelegate::ExtensionInfoBarDelegate(
@@ -38,31 +38,32 @@ ExtensionInfoBarDelegate::ExtensionInfoBarDelegate(
     InfoBarService* infobar_service,
     const extensions::Extension* extension,
     const GURL& url,
+    content::WebContents* web_contents,
     int height)
-        : InfoBarDelegate(infobar_service),
-          browser_(browser),
-          observer_(NULL),
-          extension_(extension),
-          closing_(false) {
+    : InfoBarDelegate(infobar_service),
+#if defined(TOOLKIT_VIEWS)
+      browser_(browser),
+#endif
+      observer_(NULL),
+      extension_(extension),
+      closing_(false) {
   ExtensionProcessManager* manager =
       extensions::ExtensionSystem::Get(browser->profile())->process_manager();
   extension_host_.reset(manager->CreateInfobarHost(url, browser));
-  extension_host_->SetAssociatedWebContents(infobar_service->web_contents());
+  extension_host_->SetAssociatedWebContents(web_contents);
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
                  content::Source<Profile>(browser->profile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::Source<Profile>(browser->profile()));
 
-#if defined(TOOLKIT_VIEWS) || defined(TOOLKIT_GTK)
+#if defined(TOOLKIT_VIEWS) || defined(TOOLKIT_GTK) || defined(OS_ANDROID)
+  // TODO(dtrainor): On Android, this is not used.  Might need to pull this from
+  // Android UI level in the future.  Tracked via issue 115303.
   int default_height = InfoBar::kDefaultBarTargetHeight;
 #elif defined(OS_MACOSX)
   // TODO(pkasting): Once Infobars have been ported to Mac, we can remove the
   // ifdefs and just use the Infobar constant below.
-  int default_height = 36;
-#elif defined(OS_ANDROID)
-  // TODO(dtrainor): This is not used.  Might need to pull this from Android UI
-  // level in the future.  Tracked via issue 115303.
   int default_height = 36;
 #endif
   height_ = std::max(0, height);
@@ -110,10 +111,8 @@ void ExtensionInfoBarDelegate::Observe(
       RemoveSelf();
   } else {
     DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
-    if (extension_ ==
-        content::Details<extensions::UnloadedExtensionInfo>(
-            details)->extension) {
+    if (extension_ == content::Details<extensions::UnloadedExtensionInfo>(
+        details)->extension)
       RemoveSelf();
-    }
   }
 }

@@ -6,7 +6,7 @@
 
 #include "ash/ash_switches.h"
 #include "ash/shell.h"
-#include "ash/wm/window_cycle_controller.h"
+#include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -23,9 +23,9 @@
 
 namespace {
 
-// When a window gets opened in default mode and the screen is less then this
-// width, the window will get opened in maximized mode. This value can be
-// reduced to a "tame" number if the feature is disabled.
+// When a window gets opened in default mode and the screen is less than or
+// equal to this width, the window will get opened in maximized mode. This value
+// can be reduced to a "tame" number if the feature is disabled.
 const int kForceMaximizeWidthLimit = 1366;
 const int kForceMaximizeWidthLimitDisabled = 640;
 
@@ -72,7 +72,7 @@ aura::Window* GetTopWindow(const gfx::Rect& bounds_in_screen) {
 
   // Get a list of all windows.
   const std::vector<aura::Window*> windows =
-      ash::WindowCycleController::BuildWindowList(NULL, false);
+      ash::MruWindowTracker::BuildWindowList(false);
 
   if (windows.empty())
     return NULL;
@@ -133,15 +133,6 @@ bool MoveRect(const gfx::Rect& work_area,
     }
   }
   return false;
-}
-
-// Adjust the |target_in_screen| rectangle so it moves as much as possible into
-// the |work_area| .
-void AdjustTargetRectVerticallyAgainstWorkspace(const gfx::Rect& work_area,
-                                                gfx::Rect* target_in_screen) {
-  if (target_in_screen->bottom() > work_area.bottom())
-    target_in_screen->set_y(std::max(work_area.y(),
-        work_area.bottom() - target_in_screen->height()));
 }
 
 }  // namespace
@@ -205,14 +196,13 @@ bool WindowSizer::GetBoundsOverrideAsh(gfx::Rect* bounds_in_screen,
     if ((!count || !top_window)) {
       if (has_saved_bounds) {
         // Restore to previous state - if there is one.
-        AdjustTargetRectVerticallyAgainstWorkspace(work_area,
-                                                     bounds_in_screen);
+        bounds_in_screen->AdjustToFit(work_area);
         return true;
       }
       // When using "small screens" we want to always open in full screen mode.
       if (passed_show_state == ui::SHOW_STATE_DEFAULT &&
           !browser_->is_session_restore() &&
-          work_area.width() < GetForceMaximizedWidthLimit() &&
+          work_area.width() <= GetForceMaximizedWidthLimit() &&
           (!browser_->window() || !browser_->window()->IsFullscreen()) &&
           (!browser_->fullscreen_controller() ||
            !browser_->fullscreen_controller()->IsFullscreenForBrowser()))
@@ -239,7 +229,7 @@ bool WindowSizer::GetBoundsOverrideAsh(gfx::Rect* bounds_in_screen,
         bounds_in_screen->CenterPoint().x() < work_area.CenterPoint().x();
 
     MoveRect(work_area, *bounds_in_screen, move_right);
-    AdjustTargetRectVerticallyAgainstWorkspace(work_area, bounds_in_screen);
+    bounds_in_screen->AdjustToFit(work_area);
     return true;
   }
 

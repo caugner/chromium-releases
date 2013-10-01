@@ -9,6 +9,7 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window_state.h"
@@ -141,7 +142,7 @@ TEST_F(BrowserCommandControllerTest, AppFullScreen) {
 }
 
 TEST_F(BrowserCommandControllerTest, AvatarMenuDisabledWhenOnlyOneProfile) {
-  if (!ProfileManager::IsMultipleProfilesEnabled())
+  if (!profiles::IsMultipleProfilesEnabled())
     return;
 
   TestingProfileManager testing_profile_manager(
@@ -301,8 +302,7 @@ TEST_F(BrowserCommandControllerTest,
   profile1->SetOffTheRecordProfile(profile2);
 
   // Create a new browser based on the off the record profile.
-  Browser::CreateParams profile_params(profile2,
-                                       chrome::HOST_DESKTOP_TYPE_NATIVE);
+  Browser::CreateParams profile_params(profile2, chrome::GetActiveDesktop());
   scoped_ptr<Browser> browser2(
       chrome::CreateBrowserWithTestWindowForParams(&profile_params));
 

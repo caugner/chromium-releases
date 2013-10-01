@@ -191,6 +191,8 @@ enum KeyboardCode {
   VKEY_OEM_7 = 0xDE,
   VKEY_OEM_8 = 0xDF,
   VKEY_OEM_102 = 0xE2,
+  VKEY_OEM_103 = 0xE3,  // GTV KEYCODE_MEDIA_REWIND
+  VKEY_OEM_104 = 0xE4,  // GTV KEYCODE_MEDIA_FAST_FORWARD
   VKEY_PROCESSKEY = 0xE5,
   VKEY_PACKET = 0xE7,
   VKEY_DBE_SBCSCHAR = 0xF3,
@@ -213,7 +215,12 @@ enum KeyboardCode {
   VKEY_BRIGHTNESS_DOWN = 0xD8,
   VKEY_BRIGHTNESS_UP = 0xD9,
   VKEY_KBD_BRIGHTNESS_DOWN = 0xDA,
-  VKEY_KBD_BRIGHTNESS_UP = 0xE8
+  VKEY_KBD_BRIGHTNESS_UP = 0xE8,
+
+  // Windows does not have a specific key code for AltGr. We use the unused 0xE1
+  // (VK_OEM_AX) code to represent AltGr, matching the behaviour of Firefox on
+  // Linux.
+  VKEY_ALTGR = 0xE1,
 };
 
 }  // namespace ui

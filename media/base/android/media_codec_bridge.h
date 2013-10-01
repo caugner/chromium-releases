@@ -9,12 +9,14 @@
 #include <string>
 
 #include "base/android/scoped_java_ref.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/video_decoder_config.h"
 #include "ui/gfx/size.h"
 
 namespace media {
+
+struct SubsampleEntry;
 
 // This class serves as a bridge for native code to call java functions inside
 // Android MediaCodec class. For more information on Android MediaCodec, check
@@ -43,7 +45,9 @@ class MEDIA_EXPORT MediaCodecBridge {
   // DequeueInputBuffer() and DequeueOutputBuffer() become invalid.
   // Please note that this clears all the inputs in the media codec. In other
   // words, there will be no outputs until new input is provided.
-  void Reset();
+  // Returns MEDIA_CODEC_ERROR if an unexpected error happens, or Media_CODEC_OK
+  // otherwise.
+  int Reset();
 
   // Finishes the decode/encode session. The instance remains active
   // and ready to be StartAudio/Video()ed again. HOWEVER, due to the buggy
@@ -62,11 +66,20 @@ class MEDIA_EXPORT MediaCodecBridge {
   size_t QueueInputBuffer(int index, const uint8* data, int size,
                           const base::TimeDelta& presentation_time);
 
+  // Similar to the above call, but submits a buffer that is encrypted.
+  size_t QueueSecureInputBuffer(
+      int index, const uint8* data, int data_size,
+      const uint8* key_id, int key_id_size,
+      const uint8* iv, int iv_size,
+      const SubsampleEntry* subsamples, int subsamples_size,
+      const base::TimeDelta& presentation_time);
+
   // Submits an empty buffer with a EOS (END OF STREAM) flag.
   void QueueEOS(int input_buffer_index);
 
-  // Returns the index of an input buffer to be filled with valid data or
-  // INFO_TRY_AGAIN_LATER if no such buffer is currently available.
+  // Returns an index (>=0) of an input buffer to be filled with valid data,
+  // INFO_TRY_AGAIN_LATER if no such buffer is currently available, or
+  // INFO_MEDIA_CODEC_ERROR if unexpected error happens.
   // Use kTimeOutInfinity for infinite timeout.
   int DequeueInputBuffer(base::TimeDelta timeout);
 
@@ -98,6 +111,9 @@ class MEDIA_EXPORT MediaCodecBridge {
   jobject media_codec() { return j_media_codec_.obj(); }
 
  private:
+  // Fills a particular input buffer and returns the size of copied data.
+  size_t FillInputBuffer(int index, const uint8* data, int data_size);
+
   // Java MediaCodec instance.
   base::android::ScopedJavaGlobalRef<jobject> j_media_codec_;
 
@@ -119,6 +135,9 @@ class AudioCodecBridge : public MediaCodecBridge {
   // DequeueOutputBuffer() and before ReleaseOutputBuffer.
   void PlayOutputBuffer(int index, size_t size);
 
+  // Set the volume of the audio output.
+  void SetVolume(double volume);
+
  private:
   explicit AudioCodecBridge(const char* mime);
 
@@ -127,7 +146,7 @@ class AudioCodecBridge : public MediaCodecBridge {
                             const uint8* extra_data, size_t extra_data_size);
 };
 
-class VideoCodecBridge : public MediaCodecBridge {
+class MEDIA_EXPORT VideoCodecBridge : public MediaCodecBridge {
  public:
   // Returns an VideoCodecBridge instance if |codec| is supported, or a NULL
   // pointer otherwise.

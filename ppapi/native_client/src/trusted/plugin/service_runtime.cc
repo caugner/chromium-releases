@@ -6,7 +6,7 @@
 
 #define NACL_LOG_MODULE_NAME "Plugin::ServiceRuntime"
 
-#include "native_client/src/trusted/plugin/service_runtime.h"
+#include "ppapi/native_client/src/trusted/plugin/service_runtime.h"
 
 #include <string.h>
 #include <set>
@@ -32,7 +32,6 @@
 #include "native_client/src/trusted/desc/nacl_desc_io.h"
 #include "native_client/src/trusted/desc/nrd_xfer.h"
 #include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
-#include "native_client/src/trusted/plugin/manifest.h"
 
 // This is here due to a Windows API collision; plugin.h through
 // file_downloader.h transitively includes Instance.h which defines a
@@ -41,21 +40,23 @@
 #undef PostMessage
 #endif
 #include "native_client/src/public/imc_types.h"
-#include "native_client/src/trusted/plugin/plugin.h"
-#include "native_client/src/trusted/plugin/plugin_error.h"
-#include "native_client/src/trusted/plugin/pnacl_coordinator.h"
-#include "native_client/src/trusted/plugin/pnacl_resources.h"
-#include "native_client/src/trusted/plugin/sel_ldr_launcher_chrome.h"
-#include "native_client/src/trusted/plugin/srpc_client.h"
 #include "native_client/src/trusted/service_runtime/nacl_error_code.h"
 #include "native_client/src/trusted/validator/nacl_file_info.h"
-#include "native_client/src/trusted/weak_ref/call_on_main_thread.h"
 
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/trusted/ppb_file_io_trusted.h"
 #include "ppapi/cpp/core.h"
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/file_io.h"
+
+#include "ppapi/native_client/src/trusted/plugin/manifest.h"
+#include "ppapi/native_client/src/trusted/plugin/plugin.h"
+#include "ppapi/native_client/src/trusted/plugin/plugin_error.h"
+#include "ppapi/native_client/src/trusted/plugin/pnacl_coordinator.h"
+#include "ppapi/native_client/src/trusted/plugin/pnacl_resources.h"
+#include "ppapi/native_client/src/trusted/plugin/sel_ldr_launcher_chrome.h"
+#include "ppapi/native_client/src/trusted/plugin/srpc_client.h"
+#include "ppapi/native_client/src/trusted/weak_ref/call_on_main_thread.h"
 
 namespace {
 
@@ -536,8 +537,8 @@ void PluginReverseInterface::QuotaRequest_MainThreadResponse(
     int32_t err) {
   NaClLog(4,
           "PluginReverseInterface::QuotaRequest_MainThreadResponse:"
-          " (resource=%"NACL_PRIx32", offset=%"NACL_PRId64", requested=%"
-          NACL_PRId64", err=%"NACL_PRId32")\n",
+          " (resource=%" NACL_PRIx32 ", offset=%" NACL_PRId64 ", requested=%"
+          NACL_PRId64 ", err=%" NACL_PRId32 ")\n",
           request->data.resource,
           request->offset, request->bytes_requested, err);
   nacl::MutexLocker take(&mu_);
@@ -555,8 +556,8 @@ int64_t PluginReverseInterface::RequestQuotaForWrite(
     nacl::string file_id, int64_t offset, int64_t bytes_to_write) {
   NaClLog(4,
           "PluginReverseInterface::RequestQuotaForWrite:"
-          " (file_id='%s', offset=%"NACL_PRId64", bytes_to_write=%"
-          NACL_PRId64")\n", file_id.c_str(), offset, bytes_to_write);
+          " (file_id='%s', offset=%" NACL_PRId64 ", bytes_to_write=%"
+          NACL_PRId64 ")\n", file_id.c_str(), offset, bytes_to_write);
   QuotaData quota_data;
   {
     nacl::MutexLocker take(&mu_);
@@ -604,7 +605,7 @@ void PluginReverseInterface::AddQuotaManagedFile(const nacl::string& file_id,
   PP_Resource resource = file_io.pp_resource();
   NaClLog(4,
           "PluginReverseInterface::AddQuotaManagedFile: "
-          "(file_id='%s', file_io_ref=%"NACL_PRIx32")\n",
+          "(file_id='%s', file_io_ref=%" NACL_PRIx32 ")\n",
           file_id.c_str(), resource);
   nacl::MutexLocker take(&mu_);
   uint64_t file_key = STRTOULL(file_id.c_str(), NULL, 10);
@@ -630,15 +631,16 @@ ServiceRuntime::ServiceRuntime(Plugin* plugin,
     : plugin_(plugin),
       should_report_uma_(should_report_uma),
       reverse_service_(NULL),
-      subprocess_(NULL),
       anchor_(new nacl::WeakRefAnchor()),
       rev_interface_(new PluginReverseInterface(anchor_, plugin,
                                                 manifest,
                                                 this,
                                                 init_done_cb, crash_cb)),
-      exit_status_(-1) {
+      exit_status_(-1),
+      start_sel_ldr_done_(false) {
   NaClSrpcChannelInitialize(&command_channel_);
   NaClXMutexCtor(&mu_);
+  NaClXCondVarCtor(&cond_);
 }
 
 bool ServiceRuntime::InitCommunication(nacl::DescWrapper* nacl_desc,
@@ -668,7 +670,7 @@ bool ServiceRuntime::InitCommunication(nacl::DescWrapper* nacl_desc,
   }
   //  Get connection capability to service runtime where the IMC
   //  server/SRPC client is waiting for a rendezvous.
-  NaClLog(4, "ServiceRuntime: got 0x%"NACL_PRIxPTR"\n",
+  NaClLog(4, "ServiceRuntime: got 0x%" NACL_PRIxPTR "\n",
           (uintptr_t) out_conn_cap);
   nacl::DescWrapper* conn_cap = plugin_->wrapper_factory()->MakeGenericCleanup(
       out_conn_cap);
@@ -714,41 +716,59 @@ bool ServiceRuntime::InitCommunication(nacl::DescWrapper* nacl_desc,
   return true;
 }
 
-bool ServiceRuntime::Start(nacl::DescWrapper* nacl_desc,
-                           ErrorInfo* error_info,
-                           const nacl::string& url,
-                           bool uses_irt,
-                           bool uses_ppapi,
-                           bool enable_ppapi_dev,
-                           bool enable_dyncode_syscalls,
-                           bool enable_exception_handling,
-                           pp::CompletionCallback crash_cb) {
-  NaClLog(4, "ServiceRuntime::Start (nacl_desc=%p)\n",
-          reinterpret_cast<void*>(nacl_desc));
+bool ServiceRuntime::StartSelLdr(const SelLdrStartParams& params) {
+  NaClLog(4, "ServiceRuntime::Start\n");
 
   nacl::scoped_ptr<SelLdrLauncherChrome>
       tmp_subprocess(new SelLdrLauncherChrome());
   if (NULL == tmp_subprocess.get()) {
     NaClLog(LOG_ERROR, "ServiceRuntime::Start (subprocess create failed)\n");
-    error_info->SetReport(ERROR_SEL_LDR_CREATE_LAUNCHER,
-                          "ServiceRuntime: failed to create sel_ldr launcher");
+    params.error_info->SetReport(
+        ERROR_SEL_LDR_CREATE_LAUNCHER,
+        "ServiceRuntime: failed to create sel_ldr launcher");
     return false;
   }
+  nacl::string error_message;
   bool started = tmp_subprocess->Start(plugin_->pp_instance(),
-                                       url.c_str(),
-                                       uses_irt,
-                                       uses_ppapi,
-                                       enable_ppapi_dev,
-                                       enable_dyncode_syscalls,
-                                       enable_exception_handling);
+                                       params.url.c_str(),
+                                       params.uses_irt,
+                                       params.uses_ppapi,
+                                       params.enable_dev_interfaces,
+                                       params.enable_dyncode_syscalls,
+                                       params.enable_exception_handling,
+                                       &error_message);
   if (!started) {
     NaClLog(LOG_ERROR, "ServiceRuntime::Start (start failed)\n");
-    error_info->SetReport(ERROR_SEL_LDR_LAUNCH,
-                          "ServiceRuntime: failed to start");
+    params.error_info->SetReportWithConsoleOnlyError(
+        ERROR_SEL_LDR_LAUNCH,
+        "ServiceRuntime: failed to start",
+        error_message);
     return false;
   }
 
   subprocess_.reset(tmp_subprocess.release());
+  NaClLog(4, "ServiceRuntime::StartSelLdr (return 1)\n");
+  return true;
+}
+
+void ServiceRuntime::WaitForSelLdrStart() {
+  nacl::MutexLocker take(&mu_);
+  while(!start_sel_ldr_done_) {
+    NaClXCondVarWait(&cond_, &mu_);
+  }
+}
+
+void ServiceRuntime::SignalStartSelLdrDone() {
+  nacl::MutexLocker take(&mu_);
+  start_sel_ldr_done_ = true;
+  NaClXCondVarSignal(&cond_);
+}
+
+bool ServiceRuntime::LoadNexeAndStart(nacl::DescWrapper* nacl_desc,
+                                      ErrorInfo* error_info,
+                                      const pp::CompletionCallback& crash_cb) {
+  NaClLog(4, "ServiceRuntime::LoadNexeAndStart (nacl_desc=%p)\n",
+          reinterpret_cast<void*>(nacl_desc));
   if (!InitCommunication(nacl_desc, error_info)) {
     // On a load failure the service runtime does not crash itself to
     // avoid a race where the no-more-senders error on the reverse
@@ -769,7 +789,7 @@ bool ServiceRuntime::Start(nacl::DescWrapper* nacl_desc,
     return false;
   }
 
-  NaClLog(4, "ServiceRuntime::Start (return 1)\n");
+  NaClLog(4, "ServiceRuntime::LoadNexeAndStart (return 1)\n");
   return true;
 }
 
@@ -839,6 +859,7 @@ ServiceRuntime::~ServiceRuntime() {
   rev_interface_->Unref();
 
   anchor_->Unref();
+  NaClCondVarDtor(&cond_);
   NaClMutexDtor(&mu_);
 }
 

@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "ui/app_list/app_list_export.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_model_observer.h"
@@ -202,6 +202,10 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   void CalculateDropTarget(const gfx::Point& drag_point,
                            bool use_page_button_hovering);
 
+  // Prepares |drag_and_drop_host_| for dragging. |grid_location| contains
+  // the drag point in this grid view's coordinates.
+  void StartDragAndDropHostDrag(const gfx::Point& grid_location);
+
   // Dispatch the drag and drop update event to the dnd host (if needed).
   void DispatchDragEventToDragAndDropHost(const gfx::Point& point);
 
@@ -214,6 +218,13 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
 
   // Updates |model_| to move item represented by |item_view| to |target| slot.
   void MoveItemInModel(views::View* item_view, const Index& target);
+
+  // Cancels any context menus showing for app items on the current page.
+  void CancelContextMenusOnCurrentPage();
+
+  // Returnes true if |point| lies within the bounds of this grid view plus a
+  // buffer area surrounding it.
+  bool IsPointWithinDragBuffer(const gfx::Point& point) const;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
@@ -228,6 +239,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // Overridden from PaginationModelObserver:
   virtual void TotalPagesChanged() OVERRIDE;
   virtual void SelectedPageChanged(int old_selected, int new_selected) OVERRIDE;
+  virtual void TransitionStarted() OVERRIDE;
   virtual void TransitionChanged() OVERRIDE;
 
   // Overridden from AppListModelObserver:
@@ -264,6 +276,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
 
   // The location of |drag_view_| when the drag started.
   gfx::Point drag_view_start_;
+
+  // Page the drag started on.
+  int drag_start_page_;
 
 #if defined(OS_WIN) && !defined(USE_AURA)
   // Created when a drag is started (ie: drag exceeds the drag threshold), but

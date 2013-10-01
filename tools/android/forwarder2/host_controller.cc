@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "tools/android/forwarder2/command.h"
@@ -14,28 +16,109 @@
 
 namespace forwarder2 {
 
-HostController::HostController(int device_port,
-                               const std::string& forward_to_host,
-                               int forward_to_host_port,
-                               int adb_port,
-                               int exit_notifier_fd)
-    : device_port_(device_port),
-      forward_to_host_(forward_to_host),
-      forward_to_host_port_(forward_to_host_port),
-      adb_port_(adb_port),
-      global_exit_notifier_fd_(exit_notifier_fd),
-      ready_(false) {
-  adb_control_socket_.AddEventFd(global_exit_notifier_fd_);
-  adb_control_socket_.AddEventFd(delete_controller_notifier_.receiver_fd());
+// static
+scoped_ptr<HostController> HostController::Create(
+    int device_port,
+    int host_port,
+    int adb_port,
+    int exit_notifier_fd,
+    const DeletionCallback& deletion_callback) {
+  scoped_ptr<HostController> host_controller;
+  scoped_ptr<PipeNotifier> delete_controller_notifier(new PipeNotifier());
+  scoped_ptr<Socket> adb_control_socket(new Socket());
+  adb_control_socket->AddEventFd(exit_notifier_fd);
+  adb_control_socket->AddEventFd(delete_controller_notifier->receiver_fd());
+  if (!adb_control_socket->ConnectTcp(std::string(), adb_port)) {
+    LOG(ERROR) << "Could not connect HostController socket on port: "
+               << adb_port;
+    return host_controller.Pass();
+  }
+  // Send the command to the device start listening to the "device_forward_port"
+  bool send_command_success = SendCommand(
+      command::LISTEN, device_port, adb_control_socket.get());
+  CHECK(send_command_success);
+  int device_port_allocated;
+  command::Type command;
+  if (!ReadCommand(
+          adb_control_socket.get(), &device_port_allocated, &command) ||
+      command != command::BIND_SUCCESS) {
+    LOG(ERROR) << "Device binding error using port " << device_port;
+    return host_controller.Pass();
+  }
+  host_controller.reset(
+      new HostController(
+          device_port_allocated, host_port, adb_port, exit_notifier_fd,
+          deletion_callback, adb_control_socket.Pass(),
+          delete_controller_notifier.Pass()));
+  return host_controller.Pass();
 }
 
 HostController::~HostController() {
-  delete_controller_notifier_.Notify();
-  Join();
+  DCHECK(deletion_task_runner_->RunsTasksOnCurrentThread());
+  delete_controller_notifier_->Notify();
   // Note that the Forwarder instance (that also received a delete notification)
   // might still be running on its own thread at this point. This is not a
   // problem since it will self-delete once the socket that it is operating on
   // is closed.
+}
+
+void HostController::Start() {
+  thread_.Start();
+  ReadNextCommandSoon();
+}
+
+HostController::HostController(
+    int device_port,
+    int host_port,
+    int adb_port,
+    int exit_notifier_fd,
+    const DeletionCallback& deletion_callback,
+    scoped_ptr<Socket> adb_control_socket,
+    scoped_ptr<PipeNotifier> delete_controller_notifier)
+    : device_port_(device_port),
+      host_port_(host_port),
+      adb_port_(adb_port),
+      global_exit_notifier_fd_(exit_notifier_fd),
+      deletion_callback_(deletion_callback),
+      adb_control_socket_(adb_control_socket.Pass()),
+      delete_controller_notifier_(delete_controller_notifier.Pass()),
+      deletion_task_runner_(base::MessageLoopProxy::current()),
+      thread_("HostControllerThread") {
+}
+
+void HostController::ReadNextCommandSoon() {
+  thread_.message_loop_proxy()->PostTask(
+      FROM_HERE,
+      base::Bind(&HostController::ReadCommandOnInternalThread,
+                 base::Unretained(this)));
+}
+
+void HostController::ReadCommandOnInternalThread() {
+  if (!ReceivedCommand(command::ACCEPT_SUCCESS, adb_control_socket_.get())) {
+    SelfDelete();
+    return;
+  }
+  // Try to connect to host server.
+  scoped_ptr<Socket> host_server_data_socket(CreateSocket());
+  if (!host_server_data_socket->ConnectTcp(std::string(), host_port_)) {
+    LOG(ERROR) << "Could not Connect HostServerData socket on port: "
+               << host_port_;
+    SendCommand(
+        command::HOST_SERVER_ERROR, device_port_, adb_control_socket_.get());
+    if (ReceivedCommand(command::ACK, adb_control_socket_.get())) {
+      // It can continue if the host forwarder could not connect to the host
+      // server but the device acknowledged that, so that the device could
+      // re-try later.
+      ReadNextCommandSoon();
+      return;
+    }
+    SelfDelete();
+    return;
+  }
+  SendCommand(
+      command::HOST_SERVER_SUCCESS, device_port_, adb_control_socket_.get());
+  StartForwarder(host_server_data_socket.Pass());
+  ReadNextCommandSoon();
 }
 
 void HostController::StartForwarder(
@@ -43,107 +126,61 @@ void HostController::StartForwarder(
   scoped_ptr<Socket> adb_data_socket(CreateSocket());
   if (!adb_data_socket->ConnectTcp("", adb_port_)) {
     LOG(ERROR) << "Could not connect AdbDataSocket on port: " << adb_port_;
+    SelfDelete();
     return;
   }
   // Open the Adb data connection, and send a command with the
   // |device_forward_port| as a way for the device to identify the connection.
-  SendCommand(command::DATA_CONNECTION,
-              device_port_,
-              adb_data_socket.get());
+  SendCommand(command::DATA_CONNECTION, device_port_, adb_data_socket.get());
 
-  // Check that the device received the new Adb Data Connection.  Observe that
-  // this check is done through the |adb_control_socket_| that is handled in the
+  // Check that the device received the new Adb Data Connection. Note that this
+  // check is done through the |adb_control_socket_| that is handled in the
   // DeviceListener thread just after the call to WaitForAdbDataSocket().
   if (!ReceivedCommand(command::ADB_DATA_SOCKET_SUCCESS,
-                       &adb_control_socket_)) {
+                       adb_control_socket_.get())) {
     LOG(ERROR) << "Device could not handle the new Adb Data Connection.";
-    host_server_data_socket->Close();
-    adb_data_socket->Close();
+    SelfDelete();
     return;
   }
-  Forwarder* forwarder = new Forwarder(host_server_data_socket.Pass(),
-                                       adb_data_socket.Pass());
-  // Forwarder object will self delete after returning.
-  forwarder->Start();
+  forwarder2::StartForwarder(
+      host_server_data_socket.Pass(), adb_data_socket.Pass());
 }
 
 scoped_ptr<Socket> HostController::CreateSocket() {
   scoped_ptr<Socket> socket(new Socket());
   socket->AddEventFd(global_exit_notifier_fd_);
-  socket->AddEventFd(delete_controller_notifier_.receiver_fd());
+  socket->AddEventFd(delete_controller_notifier_->receiver_fd());
   return socket.Pass();
 }
 
-bool HostController::Connect() {
-  if (!adb_control_socket_.ConnectTcp("", adb_port_)) {
-    LOG(ERROR) << "Could not connect HostController socket on port: "
-               << adb_port_;
-    return false;
+void HostController::SelfDelete() {
+  scoped_ptr<HostController> self_deleter(this);
+  deletion_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&HostController::SelfDeleteOnDeletionTaskRunner,
+                 deletion_callback_, base::Passed(&self_deleter)));
+  // Tell the device to delete its corresponding controller instance before we
+  // self-delete.
+  Socket socket;
+  if (!socket.ConnectTcp("", adb_port_)) {
+    LOG(ERROR) << "Could not connect to device on port " << adb_port_;
+    return;
   }
-  // Send the command to the device start listening to the "device_forward_port"
-  bool send_command_success = SendCommand(
-      command::LISTEN, device_port_, &adb_control_socket_);
-  CHECK(send_command_success);
-  int device_port_allocated;
-  command::Type command;
-  if (!ReadCommand(&adb_control_socket_, &device_port_allocated, &command) ||
-      command != command::BIND_SUCCESS) {
-    LOG(ERROR) << "Device binding error using port " << device_port_;
-    adb_control_socket_.Close();
-    return false;
+  if (!SendCommand(command::UNLISTEN, device_port_, &socket)) {
+    LOG(ERROR) << "Could not send unmap command for port " << device_port_;
+    return;
   }
-  // When doing dynamically allocation of port, we get the port from the
-  // BIND_SUCCESS command we received above.
-  device_port_ = device_port_allocated;
-  ready_ = true;
-  return true;
+  if (!ReceivedCommand(command::UNLISTEN_SUCCESS, &socket)) {
+    LOG(ERROR) << "Unamp command failed for port " << device_port_;
+    return;
+  }
 }
 
-void HostController::Run() {
-  CHECK(ready_) << "HostController not ready. Must call Connect() first.";
-  while (true) {
-    if (!ReceivedCommand(command::ACCEPT_SUCCESS, &adb_control_socket_)) {
-      if (adb_control_socket_.DidReceiveEventOnFd(
-              delete_controller_notifier_.receiver_fd())) {
-        // The instance is being deleted. The control socket will be closed and
-        // the device controller will see that as an error (that it will recover
-        // from properly). TODO(pliard): tell the device controller that this is
-        // a graceful (i.e. user-intended) shutdown rather than an error.
-        break;
-      }
-      // TODO(pliard): This can also happen if device_forwarder was
-      // intentionally killed before host_forwarder. In that case,
-      // device_forwarder should send a notification to the host.  Currently the
-      // error message below is always emitted to the log file although this is
-      // not necessarily an error.
-      LOG(ERROR) << "Device socket error on accepting using port "
-                 << device_port_;
-      break;
-    }
-    // Try to connect to host server.
-    scoped_ptr<Socket> host_server_data_socket(CreateSocket());
-    if (!host_server_data_socket->ConnectTcp(
-            forward_to_host_, forward_to_host_port_)) {
-      LOG(ERROR) << "Could not Connect HostServerData socket on port: "
-                 << forward_to_host_port_;
-      SendCommand(command::HOST_SERVER_ERROR,
-                  device_port_,
-                  &adb_control_socket_);
-      if (ReceivedCommand(command::ACK, &adb_control_socket_)) {
-        // It can continue if the host forwarder could not connect to the host
-        // server but the device acknowledged that, so that the device could
-        // re-try later.
-        continue;
-      } else {
-        break;
-      }
-    }
-    SendCommand(command::HOST_SERVER_SUCCESS,
-                device_port_,
-                &adb_control_socket_);
-    StartForwarder(host_server_data_socket.Pass());
-  }
-  adb_control_socket_.Close();
+// static
+void HostController::SelfDeleteOnDeletionTaskRunner(
+    const DeletionCallback& deletion_callback,
+    scoped_ptr<HostController> controller) {
+  deletion_callback.Run(controller.Pass());
 }
 
 }  // namespace forwarder2

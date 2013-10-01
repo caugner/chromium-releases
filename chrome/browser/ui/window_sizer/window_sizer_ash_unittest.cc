@@ -76,33 +76,8 @@ int AlignToGridRoundDown(int location, int grid_size) {
   return location / grid_size * grid_size;
 }
 
-// A special test class for use with browser creation - it will create a
-// browser thread and deletes it after all other things have been destroyed.
-class WindowSizerTestWithBrowser : public WindowSizerTest {
- public:
-  WindowSizerTestWithBrowser();
-  virtual ~WindowSizerTestWithBrowser();
+}  // namespace
 
- private:
-  // Note: It is important to delete the thread after the browser instances got
-  // deleted. For this we transfer the thread here.
-  scoped_ptr<content::TestBrowserThread> ui_thread_;
-
-  DISALLOW_COPY_AND_ASSIGN(WindowSizerTestWithBrowser);
-};
-
-// The class function definitions from window_sizer_common_unittest.h
-WindowSizerTestWithBrowser::WindowSizerTestWithBrowser() {
-  // Set up a UI message thread.
-  base::MessageLoopForUI* ui_loop = message_loop();
-  ui_thread_.reset(
-      new content::TestBrowserThread(content::BrowserThread::UI, ui_loop));
-}
-
-WindowSizerTestWithBrowser::~WindowSizerTestWithBrowser() {
-}
-
-}
 // Test that the window is sized appropriately for the first run experience
 // where the default window bounds calculation is invoked.
 TEST_F(WindowSizerTest, DefaultSizeCase) {
@@ -455,7 +430,7 @@ TEST_F(WindowSizerTest, LastWindowOffscreenWithNonAggressiveRepositioning) {
 }
 
 // Test the placement of newly created windows.
-TEST_F(WindowSizerTestWithBrowser, PlaceNewWindows) {
+TEST_F(WindowSizerTest, PlaceNewWindows) {
   // Create a dummy window.
   scoped_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
   window->SetBounds(gfx::Rect(16, 32, 640, 320));
@@ -575,7 +550,7 @@ TEST_F(WindowSizerTestWithBrowser, PlaceNewWindows) {
 // Test the placement of newly created windows on an empty desktop.
 // This test supplements "PlaceNewWindows" by testing the creation of a newly
 // created browser window on an empty desktop.
-TEST_F(WindowSizerTestWithBrowser, PlaceNewBrowserWindowOnEmptyDesktop) {
+TEST_F(WindowSizerTest, PlaceNewBrowserWindowOnEmptyDesktop) {
   // Create a browser which we can use to pass into the GetWindowBounds
   // function.
   scoped_ptr<TestingProfile> profile(new TestingProfile());
@@ -584,45 +559,64 @@ TEST_F(WindowSizerTestWithBrowser, PlaceNewBrowserWindowOnEmptyDesktop) {
   scoped_ptr<Browser> browser(
       chrome::CreateBrowserWithTestWindowForParams(&native_params));
 
+  // A common screen size for Chrome OS devices where this behavior is
+  // desirable.
+  const gfx::Rect p1366x768(0, 0, 1366, 768);
+
   // If there is no previous state the window should get maximized if the
-  // screen is smaller than our limit (1350 pixels width).
+  // screen is less than or equal to our limit (1366 pixels width).
   gfx::Rect window_bounds;
   ui::WindowShowState out_show_state1 = ui::SHOW_STATE_DEFAULT;
   GetWindowBoundsAndShowState(
-                  p1024x768,                    // The screen resolution.
-                  p1024x768,                    // The monitor work area.
-                  gfx::Rect(),                  // The second monitor.
-                  gfx::Rect(),                  // The (persisted) bounds.
-                  p1024x768,                    // The overall work area.
-                  ui::SHOW_STATE_NORMAL,        // The persisted show state.
-                  ui::SHOW_STATE_DEFAULT,       // The last show state.
-                  DEFAULT,                      // No persisted values.
-                  browser.get(),                // Use this browser.
-                  gfx::Rect(),                  // Don't request valid bounds.
-                  &window_bounds,
-                  &out_show_state1);
+      p1366x768,                    // The screen resolution.
+      p1366x768,                    // The monitor work area.
+      gfx::Rect(),                  // The second monitor.
+      gfx::Rect(),                  // The (persisted) bounds.
+      p1366x768,                    // The overall work area.
+      ui::SHOW_STATE_NORMAL,        // The persisted show state.
+      ui::SHOW_STATE_DEFAULT,       // The last show state.
+      DEFAULT,                      // No persisted values.
+      browser.get(),                // Use this browser.
+      gfx::Rect(),                  // Don't request valid bounds.
+      &window_bounds,
+      &out_show_state1);
   EXPECT_EQ(ui::SHOW_STATE_MAXIMIZED, out_show_state1);
 
   // If there is a stored coordinate however, that should be taken instead.
   ui::WindowShowState out_show_state2 = ui::SHOW_STATE_DEFAULT;
   GetWindowBoundsAndShowState(
-                  p1024x768,                    // The screen resolution.
-                  p1024x768,                    // The monitor work area.
-                  gfx::Rect(),                  // The second monitor.
-                  gfx::Rect(50, 100, 300, 150), // The (persisted) bounds.
-                  p1024x768,                    // The overall work area.
-                  ui::SHOW_STATE_NORMAL,        // The persisted show state.
-                  ui::SHOW_STATE_DEFAULT,       // The last show state.
-                  PERSISTED,                    // Set the persisted values.
-                  browser.get(),                // Use this browser.
-                  gfx::Rect(),                  // Don't request valid bounds.
-                  &window_bounds,
-                  &out_show_state2);
+      p1366x768,                    // The screen resolution.
+      p1366x768,                    // The monitor work area.
+      gfx::Rect(),                  // The second monitor.
+      gfx::Rect(50, 100, 300, 150), // The (persisted) bounds.
+      p1366x768,                    // The overall work area.
+      ui::SHOW_STATE_NORMAL,        // The persisted show state.
+      ui::SHOW_STATE_DEFAULT,       // The last show state.
+      PERSISTED,                    // Set the persisted values.
+      browser.get(),                // Use this browser.
+      gfx::Rect(),                  // Don't request valid bounds.
+      &window_bounds,
+      &out_show_state2);
   EXPECT_EQ(ui::SHOW_STATE_NORMAL, out_show_state2);
   EXPECT_EQ("50,100 300x150", window_bounds.ToString());
 
- }
-
+  // A larger monitor should not trigger auto-maximize.
+  ui::WindowShowState out_show_state3 = ui::SHOW_STATE_DEFAULT;
+  GetWindowBoundsAndShowState(
+      p1600x1200,                   // The screen resolution.
+      p1600x1200,                   // The monitor work area.
+      gfx::Rect(),                  // The second monitor.
+      gfx::Rect(),                  // The (persisted) bounds.
+      p1600x1200,                   // The overall work area.
+      ui::SHOW_STATE_NORMAL,        // The persisted show state.
+      ui::SHOW_STATE_DEFAULT,       // The last show state.
+      DEFAULT,                      // No persisted values.
+      browser.get(),                // Use this browser.
+      gfx::Rect(),                  // Don't request valid bounds.
+      &window_bounds,
+      &out_show_state3);
+  EXPECT_EQ(ui::SHOW_STATE_DEFAULT, out_show_state3);
+}
 
 #if defined(OS_CHROMEOS)
 #define MAYBE_PlaceNewWindowsOnMultipleDisplays PlaceNewWindowsOnMultipleDisplays
@@ -632,7 +626,7 @@ TEST_F(WindowSizerTestWithBrowser, PlaceNewBrowserWindowOnEmptyDesktop) {
 #endif
 
 // Test the placement of newly created windows on multiple dislays.
-TEST_F(WindowSizerTestWithBrowser, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
+TEST_F(WindowSizerTest, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
   UpdateDisplay("1600x1200,1600x1200");
   const gfx::Rect secondary(1600, 0, 1600, 1200);
 
@@ -721,7 +715,7 @@ TEST_F(WindowSizerTestWithBrowser, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
 }
 
 // Test that the show state is properly returned for non default cases.
-TEST_F(WindowSizerTestWithBrowser, TestShowState) {
+TEST_F(WindowSizerTest, TestShowState) {
   // Creating a browser & window to play with.
   scoped_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
   window->SetBounds(gfx::Rect(16, 32, 640, 320));
@@ -826,7 +820,7 @@ TEST_F(WindowSizerTestWithBrowser, TestShowState) {
 }
 
 // Test that the default show state override behavior is properly handled.
-TEST_F(WindowSizerTestWithBrowser, TestShowStateDefaults) {
+TEST_F(WindowSizerTest, TestShowStateDefaults) {
   // Creating a browser & window to play with.
   scoped_ptr<aura::Window> window(CreateTestWindowInShellWithId(0));
   window->SetBounds(gfx::Rect(16, 32, 640, 320));

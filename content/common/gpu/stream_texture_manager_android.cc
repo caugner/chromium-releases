@@ -10,6 +10,7 @@
 #include "gpu/command_buffer/service/stream_texture.h"
 #include "ui/gfx/size.h"
 #include "ui/gl/android/surface_texture_bridge.h"
+#include "ui/gl/gl_bindings.h"
 
 namespace content {
 
@@ -26,7 +27,10 @@ StreamTextureManagerAndroid::StreamTextureAndroid::~StreamTextureAndroid() {
 }
 
 void StreamTextureManagerAndroid::StreamTextureAndroid::Update() {
+  GLint texture_id = 0;
+  glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES, &texture_id);
   surface_texture_bridge_->UpdateTexImage();
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture_id);
   if (matrix_callback_.is_null())
     return;
 
@@ -103,7 +107,7 @@ void StreamTextureManagerAndroid::SendMatrixChanged(
 }
 
 void StreamTextureManagerAndroid::RegisterStreamTextureProxy(
-    int32 stream_id, const gfx::Size& initial_size, int32 route_id) {
+    int32 stream_id, int32 route_id) {
   StreamTextureAndroid* stream_texture = textures_.Lookup(stream_id);
   if (stream_texture) {
     // TODO(sievers): Post from binder thread to IO thread directly.
@@ -118,9 +122,6 @@ void StreamTextureManagerAndroid::RegisterStreamTextureProxy(
     stream_texture->set_matrix_changed_callback(matrix_cb);
     stream_texture->surface_texture_bridge()->SetFrameAvailableCallback(
         frame_cb);
-    stream_texture->surface_texture_bridge()->SetDefaultBufferSize(
-        initial_size.width(), initial_size.height());
-    stream_texture->SetSize(initial_size);
   }
 }
 
@@ -136,6 +137,13 @@ void StreamTextureManagerAndroid::EstablishStreamTexture(
         primary_id,
         secondary_id);
   }
+}
+
+void StreamTextureManagerAndroid::SetStreamTextureSize(
+    int32 stream_id, const gfx::Size& size) {
+  StreamTextureAndroid* stream_texture = textures_.Lookup(stream_id);
+  if (stream_texture)
+    stream_texture->SetSize(size);
 }
 
 }  // namespace content

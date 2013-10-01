@@ -4,14 +4,16 @@
 
 #include "chrome/browser/ui/ash/launcher/shell_window_launcher_controller.h"
 
+#include "apps/shell_window.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/shell_window_launcher_item_controller.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "ui/aura/client/activation_client.h"
+
+using apps::ShellWindow;
 
 namespace {
 
@@ -26,7 +28,7 @@ std::string GetAppLauncherId(ShellWindow* shell_window) {
 ShellWindowLauncherController::ShellWindowLauncherController(
     ChromeLauncherController* owner)
     : owner_(owner),
-      registry_(extensions::ShellWindowRegistry::Get(owner->profile())),
+      registry_(apps::ShellWindowRegistry::Get(owner->profile())),
       activation_client_(NULL) {
   registry_->AddObserver(this);
   if (ash::Shell::HasInstance()) {

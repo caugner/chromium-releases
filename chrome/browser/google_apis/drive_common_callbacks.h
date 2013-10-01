@@ -27,22 +27,25 @@ typedef base::Callback<void(GDataErrorCode error,
                             scoped_ptr<ResourceEntry> entry)>
     GetResourceEntryCallback;
 
-// Callback used for gettign AboutResource.
+// Callback used for getting AboutResource.
 typedef base::Callback<void(GDataErrorCode error,
                             scoped_ptr<AboutResource> about_resource)>
     GetAboutResourceCallback;
 
+// Callback used for getting ShareUrl.
+typedef base::Callback<void(GDataErrorCode error,
+                            const GURL& share_url)> GetShareUrlCallback;
+
 // Callback used for getting AppList.
 typedef base::Callback<void(GDataErrorCode error,
-                            scoped_ptr<AppList> app_list)>
-    GetAppListCallback;
+                            scoped_ptr<AppList> app_list)> GetAppListCallback;
 
 // Callback used for handling UploadRangeResponse.
 typedef base::Callback<void(
     const UploadRangeResponse& response,
     scoped_ptr<ResourceEntry> new_entry)> UploadRangeCallback;
 
-// Callback used for authrozing an app. |open_url| is used to open the target
+// Callback used for authorizing an app. |open_url| is used to open the target
 // file with the authorized app.
 typedef base::Callback<void(GDataErrorCode error,
                             const GURL& open_url)>

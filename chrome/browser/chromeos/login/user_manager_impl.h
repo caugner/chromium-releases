@@ -13,6 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_image_manager_impl.h"
@@ -83,9 +84,13 @@ class UserManagerImpl
                                     const std::string& display_email) OVERRIDE;
   virtual std::string GetUserDisplayEmail(
       const std::string& username) const OVERRIDE;
+  virtual std::string GetManagedUserSyncId(
+      const std::string& managed_user_id) const OVERRIDE;
   virtual string16 GetManagerDisplayNameForManagedUser(
       const std::string& managed_user_id) const OVERRIDE;
   virtual std::string GetManagerUserIdForManagedUser(
+      const std::string& managed_user_id) const OVERRIDE;
+  virtual std::string GetManagerDisplayEmailForManagedUser(
       const std::string& managed_user_id) const OVERRIDE;
   virtual bool IsCurrentUserOwner() const OVERRIDE;
   virtual bool IsCurrentUserNew() const OVERRIDE;
@@ -115,7 +120,8 @@ class UserManagerImpl
   virtual void NotifyLocalStateChanged() OVERRIDE;
   virtual const User* CreateLocallyManagedUserRecord(
       const std::string& manager_id,
-      const std::string& e_mail,
+      const std::string& local_user_id,
+      const std::string& sync_user_id,
       const string16& display_name) OVERRIDE;
   virtual std::string GenerateUniqueLocallyManagedUserId() OVERRIDE;
   virtual void StartLocallyManagedUserCreationTransaction(
@@ -152,6 +158,7 @@ class UserManagerImpl
   friend class UserManager;
   friend class WallpaperManager;
   friend class UserManagerTest;
+  friend class WallpaperManagerTest;
 
   UserManagerImpl();
 
@@ -298,6 +305,9 @@ class UserManagerImpl
   // Process continues till |pending_user_sessions_| map is not empty.
   void RestorePendingUserSessions();
 
+  // Sends metrics in response to a regular user logging in.
+  void SendRegularUserLoginMetrics(const std::string& email);
+
   // Interface to the signed settings store.
   CrosSettings* cros_settings_;
 
@@ -405,6 +415,9 @@ class UserManagerImpl
   // User sessions that have to be restored after browser crash.
   // [user_id] > [user_id_hash]
   SessionManagerClient::ActiveSessionsMap pending_user_sessions_;
+
+  // Time at which this object was created.
+  base::TimeTicks manager_creation_time_;
 
   DISALLOW_COPY_AND_ASSIGN(UserManagerImpl);
 };

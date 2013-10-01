@@ -10,14 +10,14 @@
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_service.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "cc/base/switches.h"
 #include "chrome/browser/browser_process.h"
@@ -32,7 +32,6 @@
 #include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
-#include "googleurl/src/gurl.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "media/base/media_switches.h"
 #include "ui/base/ui_base_switches.h"
@@ -40,7 +39,7 @@
 #include "ui/gfx/switches.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/views/corewm/corewm_switches.h"
-#include "webkit/plugins/plugin_switches.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -68,6 +67,7 @@ std::string DeriveCommandLine(const GURL& start_url,
   DCHECK_NE(&base_command_line, command_line);
 
   static const char* kForwardSwitches[] = {
+      ::switches::kAllowFiltersOverIPC,
       ::switches::kAllowWebUICompositing,
       ::switches::kDeviceManagementUrl,
       ::switches::kDisableAccelerated2dCanvas,
@@ -75,9 +75,11 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kDisableAcceleratedPlugins,
       ::switches::kDisableAcceleratedVideoDecode,
       ::switches::kDisableBrowserPluginCompositing,
+      ::switches::kDisableDelegatedRenderer,
       ::switches::kDisableForceCompositingMode,
       ::switches::kDisableGpuShaderDiskCache,
       ::switches::kDisableGpuWatchdog,
+      ::switches::kDisableGpuCompositing,
       ::switches::kDisableLegacyEncryptedMedia,
       ::switches::kDisablePanelFitting,
       ::switches::kDisableSeccompFilterSandbox,
@@ -86,10 +88,13 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kDisableTouchDragDrop,
       ::switches::kDisableTouchEditing,
       ::switches::kDisableWebKitMediaSource,
+      ::switches::kDisableAcceleratedFixedRootBackground,
+      ::switches::kEnableAcceleratedFixedRootBackground,
       ::switches::kEnableAcceleratedOverflowScroll,
       ::switches::kEnableBeginFrameScheduling,
       ::switches::kEnableBrowserInputController,
       ::switches::kEnableCompositingForFixedPosition,
+      ::switches::kEnableDelegatedRenderer,
       ::switches::kEnableEncryptedMedia,
       ::switches::kEnableGestureTapHighlight,
       ::switches::kDisableGestureTapHighlight,
@@ -102,6 +107,7 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kEnableViewport,
       ::switches::kForceDeviceScaleFactor,
       ::switches::kGpuStartupDialog,
+      ::switches::kGpuSandboxAllowSysVShm,
       ::switches::kMultiProfiles,
       ::switches::kNoSandbox,
       ::switches::kPpapiFlashArgs,
@@ -127,15 +133,15 @@ std::string DeriveCommandLine(const GURL& start_url,
 #endif
       ::switches::kUseGL,
       ::switches::kUserDataDir,
-      ::switches::kUseExynosVda,
       ::switches::kV,
       ::switches::kEnableWebGLDraftExtensions,
       ash::switches::kAshDefaultGuestWallpaperLarge,
       ash::switches::kAshDefaultGuestWallpaperSmall,
       ash::switches::kAshDefaultWallpaperLarge,
       ash::switches::kAshDefaultWallpaperSmall,
-      ash::switches::kAshDisableNewAudioHandler,
-      ash::switches::kAshEnableAudioDeviceMenu,
+#if defined(OS_CHROMEOS)
+      ash::switches::kAshDisableAudioDeviceMenu,
+#endif
       ash::switches::kAshHostWindowBounds,
       ash::switches::kAshTouchHud,
       ash::switches::kAuraLegacyPowerButton,
@@ -144,7 +150,7 @@ std::string DeriveCommandLine(const GURL& start_url,
       // content/browser/renderer_host/render_process_host_impl.cc.
       cc::switches::kBackgroundColorInsteadOfCheckerboard,
       cc::switches::kCompositeToMailbox,
-      cc::switches::kDisableColorEstimator,
+      cc::switches::kDisableCompositedAntialiasing,
       cc::switches::kDisableImplSidePainting,
       cc::switches::kDisableThreadedAnimation,
       cc::switches::kEnableImplSidePainting,
@@ -178,7 +184,6 @@ std::string DeriveCommandLine(const GURL& start_url,
       chromeos::switches::kLoginProfile,
       chromeos::switches::kNaturalScrollDefault,
       chromeos::switches::kUseNewNetworkConfigurationHandlers,
-      chromeos::switches::kUseNewNetworkConnectionHandler,
       gfx::switches::kEnableBrowserTextSubpixelPositioning,
       gfx::switches::kEnableWebkitTextSubpixelPositioning,
       views::corewm::switches::kNoDropShadows,

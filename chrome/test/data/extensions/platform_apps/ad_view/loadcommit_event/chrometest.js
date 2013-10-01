@@ -10,14 +10,18 @@ function runTests(guestURL) {
     function test() {
       var adview = document.getElementsByTagName("adview")[0];
 
-      adview.addEventListener("loadcommit", function(event) {
-        var url = event.url;
+      var onLoadCommit = function(event) {
         var isTopLevel = event.isTopLevel;
+        if (!isTopLevel)
+          return;
+        var url = event.url;
         chrome.test.assertEq(guestURL, url);
-        chrome.test.assertEq(true, isTopLevel);
         console.log("loadcommit event called: url=" + url);
+        adview.removeEventListener("loadcommit", onLoadCommit);
         chrome.test.succeed();
-      })
+      };
+
+      adview.addEventListener("loadcommit", onLoadCommit);
 
       adview.setAttribute("src", guestURL);
     }
@@ -27,7 +31,7 @@ function runTests(guestURL) {
 window.onload = function() {
   chrome.test.getConfig(function(config) {
     var guestURL = 'http://localhost:' + config.testServer.port +
-        '/files/extensions/platform_apps/ad_view/ad_network_site/testsdk.html';
+        '/extensions/platform_apps/ad_view/ad_network_site/testsdk.html';
     runTests(guestURL);
   });
 }

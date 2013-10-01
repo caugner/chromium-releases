@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "chromeos/network/device_state.h"
+#include "chromeos/network/favorite_state.h"
 #include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_state.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -16,7 +17,7 @@ namespace chromeos {
 ManagedState::ManagedState(ManagedType type, const std::string& path)
     : managed_type_(type),
       path_(path),
-      is_observed_(false),
+      update_received_(false),
       update_requested_(false) {
 }
 
@@ -27,6 +28,8 @@ ManagedState* ManagedState::Create(ManagedType type, const std::string& path) {
   switch (type) {
     case MANAGED_TYPE_NETWORK:
       return new NetworkState(path);
+    case MANAGED_TYPE_FAVORITE:
+      return new FavoriteState(path);
     case MANAGED_TYPE_DEVICE:
       return new DeviceState(path);
   }
@@ -45,7 +48,15 @@ DeviceState* ManagedState::AsDeviceState() {
   return NULL;
 }
 
-void ManagedState::InitialPropertiesReceived() {
+FavoriteState* ManagedState::AsFavoriteState() {
+  if (managed_type() == MANAGED_TYPE_FAVORITE)
+    return static_cast<FavoriteState*>(this);
+  return NULL;
+}
+
+bool ManagedState::InitialPropertiesReceived(
+    const base::DictionaryValue& properties) {
+  return false;
 }
 
 bool ManagedState::ManagedStatePropertyChanged(const std::string& key,
@@ -94,6 +105,25 @@ bool ManagedState::GetStringValue(const std::string& key,
     NET_LOG_ERROR("Error parsing state value", path() + "." + key);
     return false;
   }
+  if (*out_value == new_value)
+    return false;
+  *out_value = new_value;
+  return true;
+}
+
+bool ManagedState::GetUInt32Value(const std::string& key,
+                                  const base::Value& value,
+                                  uint32* out_value) {
+  // base::Value restricts the number types to BOOL, INTEGER, and DOUBLE only.
+  // uint32 will automatically get converted to a double, which is why we try
+  // to obtain the value as a double (see dbus/values_util.h).
+  uint32 new_value;
+  double double_value;
+  if (!value.GetAsDouble(&double_value) || double_value < 0) {
+    NET_LOG_ERROR("Error parsing state value", path() + "." + key);
+    return false;
+  }
+  new_value = static_cast<uint32>(double_value);
   if (*out_value == new_value)
     return false;
   *out_value = new_value;

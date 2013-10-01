@@ -19,30 +19,45 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 
+namespace diagnostics {
+
+// This is the count of diagnostic tests on each platform.  This should
+// only be used by testing code.
+#if defined(OS_WIN)
+const int DiagnosticsModel::kDiagnosticsTestCount = 19;
+#elif defined(OS_MACOSX)
+const int DiagnosticsModel::kDiagnosticsTestCount = 15;
+#elif defined(OS_POSIX)
+#if defined(OS_CHROMEOS)
+const int DiagnosticsModel::kDiagnosticsTestCount = 19;
+#else
+const int DiagnosticsModel::kDiagnosticsTestCount = 17;
+#endif
+#endif
+
 namespace {
 
 // Embodies the commonalities of the model across platforms. It manages the
 // list of tests and can loop over them. The main job of the platform specific
 // code becomes:
-// 1- Inserting the appropiate tests into |tests_|
-// 2- Overriding RunTest() to wrap it with the appropiate fatal exception
+// 1- Inserting the appropriate tests into |tests_|
+// 2- Overriding RunTest() to wrap it with the appropriate fatal exception
 //    handler for the OS.
 // This class owns the all the tests and will only delete them upon
 // destruction.
 class DiagnosticsModelImpl : public DiagnosticsModel {
  public:
-  DiagnosticsModelImpl() : tests_run_(0) {
-  }
+  DiagnosticsModelImpl() : tests_run_(0) {}
 
   virtual ~DiagnosticsModelImpl() {
     STLDeleteElements(&tests_);
   }
 
-  virtual int GetTestRunCount() OVERRIDE {
+  virtual int GetTestRunCount() const OVERRIDE {
     return tests_run_;
   }
 
-  virtual int GetTestAvailableCount() OVERRIDE {
+  virtual int GetTestAvailableCount() const OVERRIDE {
     return tests_.size();
   }
 
@@ -54,20 +69,54 @@ class DiagnosticsModelImpl : public DiagnosticsModel {
       if (!do_next)
         break;
     }
-    observer->OnDoneAll(this);
+    if (observer)
+      observer->OnAllTestsDone(this);
   }
 
-  virtual TestInfo& GetTest(size_t id) OVERRIDE {
-    return *tests_[id];
+  virtual void RecoverAll(DiagnosticsModel::Observer* observer) OVERRIDE {
+    size_t test_count = tests_.size();
+    for (size_t i = 0; i != test_count; ++i) {
+      bool do_next = RunRecovery(tests_[i], observer, i);
+      if (!do_next)
+        break;
+    }
+    if (observer)
+      observer->OnAllRecoveryDone(this);
+  }
+
+  virtual const TestInfo& GetTest(size_t index) const OVERRIDE {
+    return *tests_[index];
+  }
+
+  virtual bool GetTestInfo(const std::string& id,
+                           const TestInfo** result) const OVERRIDE {
+    for (size_t i = 0; i < tests_.size(); i++) {
+      if (tests_[i]->GetId() == id) {
+        *result = tests_[i];
+        return true;
+      }
+    }
+    return false;
   }
 
  protected:
-  // Run a particular test. Return false if no other tests should be run.
-  virtual bool RunTest(DiagnosticTest* test, Observer* observer, size_t index) {
+  // Run a particular diagnostic test. Return false if no other tests should be
+  // run.
+  virtual bool RunTest(DiagnosticsTest* test,
+                       Observer* observer,
+                       size_t index) {
     return test->Execute(observer, this, index);
   }
 
-  typedef std::vector<DiagnosticTest*> TestArray;
+  // Recover from a particular diagnostic test. Return false if no further
+  // recovery should be run.
+  virtual bool RunRecovery(DiagnosticsTest* test,
+                           Observer* observer,
+                           size_t index) {
+    return test->Recover(observer, this, index);
+  }
+
+  typedef std::vector<DiagnosticsTest*> TestArray;
   TestArray tests_;
   int tests_run_;
 
@@ -114,7 +163,6 @@ class DiagnosticsModelMac : public DiagnosticsModelImpl {
     tests_.push_back(MakeUserDirTest());
     tests_.push_back(MakeLocalStateFileTest());
     tests_.push_back(MakeDictonaryDirTest());
-    tests_.push_back(MakeResourcesFileTest());
     tests_.push_back(MakeDiskSpaceTest());
     tests_.push_back(MakePreferencesTest());
     tests_.push_back(MakeLocalStateTest());
@@ -153,6 +201,10 @@ class DiagnosticsModelPosix : public DiagnosticsModelImpl {
     tests_.push_back(MakeSqliteThumbnailsDbTest());
     tests_.push_back(MakeSqliteAppCacheDbTest());
     tests_.push_back(MakeSqliteWebDatabaseTrackerDbTest());
+#if defined(OS_CHROMEOS)
+    tests_.push_back(MakeSqliteNssCertDbTest());
+    tests_.push_back(MakeSqliteNssKeyDbTest());
+#endif
   }
 
  private:
@@ -176,3 +228,5 @@ DiagnosticsModel* MakeDiagnosticsModel(const CommandLine& cmdline) {
   return new DiagnosticsModelPosix();
 #endif
 }
+
+}  // namespace diagnostics

@@ -55,27 +55,10 @@ class BrowserInstantController : public SearchModelObserver {
   // this BrowserInstantController.
   InstantController* instant() { return &instant_; }
 
-  // Invoked by |instant_| to commit the |overlay| by merging it into the active
-  // tab or adding it as a new tab.
-  void CommitInstant(scoped_ptr<content::WebContents> overlay, bool in_new_tab);
+  // Invoked by |instant_| to change the omnibox focus.
+  void FocusOmnibox(OmniboxFocusState state);
 
-  // Invoked by |instant_| to autocomplete the |suggestion| into the omnibox.
-  void SetInstantSuggestion(const InstantSuggestion& suggestion);
-
-  // Invoked by |instant_| to get the bounds that the overlay is placed at,
-  // in screen coordinates.
-  gfx::Rect GetInstantBounds();
-
-  // Invoked by |instant_| to notify that the overlay gained focus, usually due
-  // to the user clicking on it.
-  void InstantOverlayFocused();
-
-  // Invoked by |instant_| to give the omnibox focus, with the option of making
-  // the caret invisible.
-  void FocusOmnibox(bool caret_visibility);
-
-  // Invoked by |instant_| to get the currently active tab, over which the
-  // overlay would be shown.
+  // Invoked by |instant_| to get the currently active tab.
   content::WebContents* GetActiveWebContents() const;
 
   // Invoked by |browser_| when the active tab changes.
@@ -89,6 +72,11 @@ class BrowserInstantController : public SearchModelObserver {
                content::PageTransition transition,
                WindowOpenDisposition disposition);
 
+  // Invoked by |instant_| to paste the |text| (or clipboard content if text is
+  // empty) into the omnibox. It will set focus to the omnibox if the omnibox is
+  // not focused.
+  void PasteIntoOmnibox(const string16& text);
+
   // Sets the stored omnibox bounds.
   void SetOmniboxBounds(const gfx::Rect& bounds);
 
@@ -96,10 +84,6 @@ class BrowserInstantController : public SearchModelObserver {
   void ToggleVoiceSearch();
 
  private:
-  // Sets the value of |instant_| based on value from profile. Invoked
-  // on pref change.
-  void ResetInstant(const std::string& pref_name);
-
   // Overridden from search::SearchModelObserver:
   virtual void ModelChanged(const SearchModel::State& old_state,
                             const SearchModel::State& new_state) OVERRIDE;

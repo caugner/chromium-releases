@@ -12,7 +12,6 @@
 #include "base/md5.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/singleton.h"
-#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
@@ -20,6 +19,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/history/most_visited_tiles_experiment.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -27,11 +28,11 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/ntp_stats.h"
 #include "chrome/browser/ui/webui/ntp/thumbnail_source.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/user_prefs/pref_registry_syncable.h"
@@ -42,36 +43,13 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
-#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 using content::UserMetricsAction;
-
-namespace {
-
-// Constants for the most visited tile placement field trial.
-const char kMostVisitedFieldTrialName[] = "MostVisitedTilePlacement";
-const char kTabsGroupName[] = "DontShowOpenTabs";
-
-// Minimum number of suggestions that |pages_value_| must hold for the Most
-// Visited Field Trial to remove a URL if already open in the browser.
-const size_t kMinUrlSuggestions = 8;
-
-// Creates a set containing the canonical URLs of the currently open tabs.
-void GetOpenUrls(const TabStripModel& tabs,
-                 const history::TopSites& ts,
-                 std::set<std::string>* urls) {
-  for (int i = 0; i < tabs.count(); ++i) {
-    content::WebContents* web_contents = tabs.GetWebContentsAt(i);
-    if (web_contents)
-      urls->insert(ts.GetCanonicalURLString(web_contents->GetURL()));
-  }
-}
-
-}  // namespace
 
 MostVisitedHandler::MostVisitedHandler()
     : weak_ptr_factory_(this),
@@ -170,15 +148,7 @@ void MostVisitedHandler::SendPagesValue() {
     if (ts) {
       has_blacklisted_urls = ts->HasBlacklistedItems();
 
-      // The following experiment removes recommended URLs if a matching URL is
-      // already open in the Browser. Note: this targets only the
-      // top-level of sites i.e. if www.foo.com/bar is open in browser, and
-      // www.foo.com is a recommended URL, www.foo.com will still appear on the
-      // next NTP open.
-      if (base::FieldTrialList::FindFullName(kMostVisitedFieldTrialName) ==
-          kTabsGroupName) {
-        RemovePageValuesMatchingOpenTabs();
-      }
+      MaybeRemovePageValues();
     }
 
     base::FundamentalValue has_blacklisted_urls_value(has_blacklisted_urls);
@@ -253,7 +223,7 @@ void MostVisitedHandler::SetPagesValueFromTopSites(
   pages_value_.reset(new ListValue);
 
   history::MostVisitedURLList top_sites(data);
-  history::TopSites::MaybeShuffle(&top_sites);
+  history::MostVisitedTilesExperiment::MaybeShuffle(&top_sites);
 
   for (size_t i = 0; i < top_sites.size(); i++) {
     const history::MostVisitedURL& url = top_sites[i];
@@ -299,38 +269,31 @@ std::string MostVisitedHandler::GetDictionaryKeyForUrl(const std::string& url) {
   return base::MD5String(url);
 }
 
-void MostVisitedHandler::RemovePageValuesMatchingOpenTabs() {
+void MostVisitedHandler::MaybeRemovePageValues() {
+// The code below uses APIs not available on Android and the experiment should
+// not run there.
 #if !defined(OS_ANDROID)
+  if (!history::MostVisitedTilesExperiment::IsDontShowOpenURLsEnabled())
+    return;
+
   TabStripModel* tab_strip_model = chrome::FindBrowserWithWebContents(
       web_ui()->GetWebContents())->tab_strip_model();
-  history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
-  if (!tab_strip_model || !ts) {
+  history::TopSites* top_sites = Profile::FromWebUI(web_ui())->GetTopSites();
+  if (!tab_strip_model || !top_sites) {
     NOTREACHED();
     return;
   }
 
-  // Iterate through most visited suggestions and remove pages already open in
-  // current browser, making sure to not drop below 8 suggestions.
   std::set<std::string> open_urls;
-  GetOpenUrls(*tab_strip_model, *ts, &open_urls);
-  size_t i = 0;
-  while (i < pages_value_->GetSize() &&
-         pages_value_->GetSize() > kMinUrlSuggestions) {
-    base::DictionaryValue* page_value;
-    std::string url;
-    if (pages_value_->GetDictionary(i, &page_value) &&
-        page_value->GetString("url", &url) &&
-        open_urls.count(url) != 0) {
-      pages_value_->Remove(*page_value, &i);
-    } else {
-      ++i;
-    }
-  }
+  chrome::GetOpenUrls(*tab_strip_model, *top_sites, &open_urls);
+  history::MostVisitedTilesExperiment::RemovePageValuesMatchingOpenTabs(
+      open_urls,
+      pages_value_.get());
 #endif
 }
 
 // static
-void MostVisitedHandler::RegisterUserPrefs(
+void MostVisitedHandler::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterDictionaryPref(
       prefs::kNtpMostVisitedURLsBlacklist,

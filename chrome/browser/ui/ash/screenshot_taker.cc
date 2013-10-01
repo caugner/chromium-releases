@@ -15,7 +15,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -39,6 +39,7 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chromeos/login/login_state.h"
 #endif
 
 namespace {
@@ -69,7 +70,7 @@ class ScreenshotTakerNotificationDelegate : public NotificationDelegate {
     if (!success_)
       return;
 #if defined(OS_CHROMEOS)
-    file_manager_util::ShowFileInFolder(screenshot_path_);
+    file_manager::util::ShowFileInFolder(screenshot_path_);
 #else
     // TODO(sschmitz): perhaps add similar action for Windows.
 #endif
@@ -352,10 +353,17 @@ void ScreenshotTaker::ShowNotification(
     const base::FilePath& screenshot_path) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 #if defined(OS_CHROMEOS)
+  // Do not show a notification that a screenshot was taken while no user is
+  // logged in, since it is confusing for the user to get a message about it
+  // after he logs in (crbug.com/235217).
+  if (!chromeos::LoginState::Get()->IsUserLoggedIn())
+    return;
+
   // TODO(sschmitz): make this work for Windows.
   DesktopNotificationService* const service =
       DesktopNotificationServiceFactory::GetForProfile(GetProfile());
-  if (service->IsSystemComponentEnabled(message_center::Notifier::SCREENSHOT)) {
+  if (service->IsNotifierEnabled(
+          message_center::NotifierId(message_center::NotifierId::SCREENSHOT))) {
     scoped_ptr<Notification> notification(
         CreateNotification(screenshot_result, screenshot_path));
     g_browser_process->notification_ui_manager()->Add(*notification,

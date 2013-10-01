@@ -115,7 +115,7 @@ class IDLLexer(object):
     return t
 
   def t_integer(self, t):
-    r'-?(0([Xx][0-9A-Fa-f]+|[0-7]*)|[1-9][0-9]*)'
+    r'-?([1-9][0-9]*|0[Xx][0-9A-Fa-f]+|0[0-7]*)'
     return t
 
 
@@ -256,6 +256,11 @@ class IDLLexer(object):
       value = key.upper()
       self._AddToken(value)
       self.keywords[key] = value
+
+  def _DelKeywords(self, keywords):
+    for key in keywords:
+      self.tokens.remove(key.upper())
+      del self.keywords[key]
 
   def __init__(self):
     self.index = [0]

@@ -21,23 +21,23 @@ class AppListServiceDisabled : public AppListService {
   AppListServiceDisabled() {}
 
   // AppListService overrides:
+  virtual void HandleFirstRun() OVERRIDE {}
   virtual void Init(Profile* initial_profile) OVERRIDE {}
 
   virtual base::FilePath GetProfilePath(
       const base::FilePath& user_data_dir) OVERRIDE {
     return base::FilePath();
   }
+  virtual void SetProfilePath(const base::FilePath& profile_path) OVERRIDE {}
 
-  virtual void ShowForSavedProfile() OVERRIDE {}
-  virtual void ShowAppList(Profile* profile) OVERRIDE {}
+  virtual void Show() OVERRIDE {}
+  virtual void CreateForProfile(Profile* profile) OVERRIDE {}
+  virtual void ShowForProfile(Profile* profile) OVERRIDE {}
   virtual void DismissAppList() OVERRIDE {}
-
-  virtual void SetAppListProfile(
-    const base::FilePath& profile_file_path) OVERRIDE {}
 
   virtual Profile* GetCurrentAppListProfile() OVERRIDE { return NULL; }
   virtual bool IsAppListVisible() const OVERRIDE { return false; }
-  virtual void EnableAppList() OVERRIDE {}
+  virtual void EnableAppList(Profile* initial_profile) OVERRIDE {}
 
   virtual AppListControllerDelegate* CreateControllerDelegate() OVERRIDE {
     return NULL;

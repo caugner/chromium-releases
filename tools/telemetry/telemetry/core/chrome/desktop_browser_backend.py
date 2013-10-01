@@ -9,14 +9,15 @@ import sys
 import tempfile
 
 from telemetry.core import util
-from telemetry.core.chrome import browser_backend
+from telemetry.core.backends import browser_backend
+from telemetry.core.backends.chrome import chrome_browser_backend
 
-class DesktopBrowserBackend(browser_backend.BrowserBackend):
+class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   """The backend for controlling a locally-executed browser instance, on Linux,
   Mac or Windows.
   """
-  def __init__(self, options, executable, is_content_shell,
-               delete_profile_dir_after_run=True):
+  def __init__(self, options, executable, flash_path, is_content_shell,
+               browser_directory, delete_profile_dir_after_run=True):
     super(DesktopBrowserBackend, self).__init__(
         is_content_shell=is_content_shell,
         supports_extensions=not is_content_shell,
@@ -31,27 +32,40 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
     if not self._executable:
       raise Exception('Cannot create browser, no executable found!')
 
+    self._flash_path = flash_path
+    if self._flash_path and not os.path.exists(self._flash_path):
+      logging.warning(('Could not find flash at %s. Running without flash.\n\n'
+                       'To fix this see http://go/read-src-internal') %
+                      self._flash_path)
+      self._flash_path = None
+
     if len(options.extensions_to_load) > 0 and is_content_shell:
       raise browser_backend.ExtensionsNotSupportedException(
           'Content shell does not support extensions.')
 
+    self._browser_directory = browser_directory
     self._port = util.GetAvailableLocalPort()
     self._profile_dir = None
     self._supports_net_benchmarking = True
     self._delete_profile_dir_after_run = delete_profile_dir_after_run
-    self._LaunchBrowser(options)
 
-    # For old chrome versions, might have to relaunch to have the
-    # correct net_benchmarking switch.
-    if self._chrome_branch_number < 1418:
-      self.Close()
-      self._supports_net_benchmarking = False
-      self._LaunchBrowser(options)
+    self._SetupProfile()
 
-  def _LaunchBrowser(self, options):
+  def _SetupProfile(self):
+    if not self.options.dont_override_profile:
+      self._tmpdir = tempfile.mkdtemp()
+      profile_dir = self._profile_dir or self.options.profile_dir
+      if profile_dir:
+        if self.is_content_shell:
+          logging.critical('Profiles cannot be used with content shell')
+          sys.exit(1)
+        shutil.rmtree(self._tmpdir)
+        shutil.copytree(profile_dir, self._tmpdir)
+
+  def _LaunchBrowser(self):
     args = [self._executable]
     args.extend(self.GetBrowserStartupArgs())
-    if not options.show_stdout:
+    if not self.options.show_stdout:
       self._tmp_output_file = tempfile.NamedTemporaryFile('w', 0)
       self._proc = subprocess.Popen(
           args, stdout=self._tmp_output_file, stderr=subprocess.STDOUT)
@@ -70,19 +84,13 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
     args.append('--remote-debugging-port=%i' % self._port)
     if not self.is_content_shell:
       args.append('--window-size=1280,1024')
+      if self._flash_path:
+        args.append('--ppapi-flash-path=%s' % self._flash_path)
       if self._supports_net_benchmarking:
         args.append('--enable-net-benchmarking')
       else:
         args.append('--enable-benchmarking')
       if not self.options.dont_override_profile:
-        self._tmpdir = tempfile.mkdtemp()
-        profile_dir = self._profile_dir or self.options.profile_dir
-        if profile_dir:
-          if self.is_content_shell:
-            logging.critical('Profiles cannot be used with content shell')
-            sys.exit(1)
-          shutil.rmtree(self._tmpdir)
-          shutil.copytree(profile_dir, self._tmpdir)
         args.append('--user-data-dir=%s' % self._tmpdir)
     return args
 
@@ -96,12 +104,25 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
 
     self._profile_dir = profile_dir
 
+  def Start(self):
+    self._LaunchBrowser()
+
+    # For old chrome versions, might have to relaunch to have the
+    # correct net_benchmarking switch.
+    if self._chrome_branch_number < 1418:
+      self.Close()
+      self._supports_net_benchmarking = False
+      self._LaunchBrowser()
+
   @property
   def pid(self):
     if self._proc:
       return self._proc.pid
     return None
 
+  @property
+  def browser_directory(self):
+    return self._browser_directory
 
   @property
   def profile_directory(self):
@@ -118,6 +139,12 @@ class DesktopBrowserBackend(browser_backend.BrowserBackend):
         return f.read()
     except IOError:
       return ''
+
+  def GetStackTrace(self):
+    # crbug.com/223572, symbolize stack trace for desktop browsers.
+    logging.warning('Stack traces not supported on desktop browsers, '
+                    'returning stdout')
+    return self.GetStandardOutput()
 
   def __del__(self):
     self.Close()

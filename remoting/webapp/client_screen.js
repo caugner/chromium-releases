@@ -294,6 +294,12 @@ remoting.connectMe2MeHostVersionAcknowledged_ = function(host) {
       pinField.value = '';
       if (event.target == pinForm) {
         event.preventDefault();
+
+        // Set the focus away from the password field. This has to be done
+        // before the password field gets hidden, to work around a Blink
+        // clipboard-handling bug - http://crbug.com/281523.
+        document.getElementById('pin-connect-button').focus();
+
         remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
         onPinFetched(pin);
         if (/** @type {boolean} */(rememberPinCheckbox.checked)) {
@@ -337,6 +343,7 @@ remoting.onConnected = function(clientSession) {
   setConnectionInterruptedButtonsText_();
   var connectedTo = document.getElementById('connected-to');
   connectedTo.innerText = clientSession.hostDisplayName;
+  document.getElementById('access-code-entry').value = '';
   remoting.setMode(remoting.AppMode.IN_SESSION);
   remoting.toolbar.center();
   remoting.toolbar.preview();
@@ -355,9 +362,24 @@ remoting.onConnected = function(clientSession) {
         }
       };
       remoting.HostSettings.save(clientSession.hostId, pairingInfo);
+      remoting.connector.updatePairingInfo(clientId, sharedSecret);
     };
-    // TODO(jamiewalch): Since we can't get a descriptive name for the local
-    // computer from Javascript, pass the empty string for now.
-    clientSession.requestPairing('', onPairingComplete);
+    // Use the platform name as a proxy for the local computer name.
+    // TODO(jamiewalch): Use a descriptive name for the local computer, for
+    // example, its Chrome Sync name.
+    var clientName = '';
+    if (navigator.platform.indexOf('Mac') != -1) {
+      clientName = 'Mac';
+    } else if (navigator.platform.indexOf('Win32') != -1) {
+      clientName = 'Windows';
+    } else if (navigator.userAgent.match(/\bCrOS\b/)) {
+      clientName = 'ChromeOS';
+    } else if (navigator.platform.indexOf('Linux') != -1) {
+      clientName = 'Linux';
+    } else {
+      console.log('Unrecognized client platform. Using navigator.platform.');
+      clientName = navigator.platform;
+    }
+    clientSession.requestPairing(clientName, onPairingComplete);
   }
 };

@@ -5,8 +5,8 @@
 #include "base/command_line.h"
 #include "components/autofill/content/browser/wallet/wallet_service_url.h"
 #include "components/autofill/core/common/autofill_switches.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace autofill {
 namespace wallet {
@@ -15,35 +15,31 @@ TEST(WalletServiceUrl, CheckDefaultUrls) {
   EXPECT_EQ("https://payments-form-dogfood.sandbox.google.com/online/v2/wallet/"
            "autocheckout/v1/getWalletItemsJwtless",
             GetGetWalletItemsUrl().spec());
-  EXPECT_EQ("https://payments-form-dogfood.sandbox.google.com/online/v2/wallet/"
-            "autocheckout/v1/getFullWalletJwtless",
+  EXPECT_EQ("https://wallet-web.sandbox.google.com/online-secure/v2/"
+            "autocheckout/v1/getFullWalletJwtless?s7e=otp",
             GetGetFullWalletUrl().spec());
-  EXPECT_EQ("https://wallet-web.sandbox.google.com/manage/w/0/#paymentMethods:",
+  EXPECT_EQ("https://wallet-web.sandbox.google.com/manage/paymentMethods",
             GetManageInstrumentsUrl().spec());
-  EXPECT_EQ("https://wallet-web.sandbox.google.com/manage/w/0/"
-            "#settings:addresses",
+  EXPECT_EQ("https://wallet-web.sandbox.google.com/manage/settings/addresses",
             GetManageAddressesUrl().spec());
   EXPECT_EQ("https://payments-form-dogfood.sandbox.google.com/online/v2/wallet/"
             "autocheckout/v1/acceptLegalDocument",
             GetAcceptLegalDocumentsUrl().spec());
-  EXPECT_EQ("https://payments-form-dogfood.sandbox.google.com/online/v2/wallet/"
-            "autocheckout/v1/authenticateInstrument",
+  EXPECT_EQ("https://wallet-web.sandbox.google.com/online-secure/v2/"
+            "autocheckout/v1/authenticateInstrument?s7e=cvn",
             GetAuthenticateInstrumentUrl().spec());
   EXPECT_EQ("https://payments-form-dogfood.sandbox.google.com/online/v2/wallet/"
             "autocheckout/v1/reportStatus",
             GetSendStatusUrl().spec());
   EXPECT_EQ("https://payments-form-dogfood.sandbox.google.com/online/v2/wallet/"
             "autocheckout/v1/saveToWallet",
+            GetSaveToWalletNoEscrowUrl().spec());
+  EXPECT_EQ("https://wallet-web.sandbox.google.com/online-secure/v2/"
+            "autocheckout/v1/saveToWallet?s7e=card_number%3Bcvn",
             GetSaveToWalletUrl().spec());
   EXPECT_EQ("https://payments-form-dogfood.sandbox.google.com/online/v2/"
             "passiveauth?isChromePayments=true",
             GetPassiveAuthUrl().spec());
-  EXPECT_EQ("https://wallet-web.sandbox.google.com/online-secure/"
-            "temporarydata/cvv?s7e=cvv",
-            GetEncryptionUrl().spec());
-  EXPECT_EQ("https://wallet-web.sandbox.google.com/checkout/dehEfe?"
-            "s7e=cardNumber%3Bcvv",
-            GetEscrowUrl().spec());
 }
 
 TEST(WalletServiceUrl, IsUsingProd) {

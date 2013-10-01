@@ -8,7 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -25,10 +25,7 @@
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
-#endif
-
-#if defined(OS_WIN) || defined(USE_AURA)
-#include "base/message_loop.h"
+#include "base/android/jni_string.h"
 #endif
 
 namespace ui {
@@ -647,6 +644,7 @@ TEST_F(ClipboardTest, InternalClipboardInvalidation) {
   // Simulate that another application copied something in the Clipboard
   //
   std::string new_value("Some text copied by some other app");
+  using base::android::ConvertUTF8ToJavaString;
   using base::android::MethodID;
   using base::android::ScopedJavaLocalRef;
 
@@ -664,7 +662,8 @@ TEST_F(ClipboardTest, InternalClipboardInvalidation) {
       "(Ljava/lang/String;)Ljava/lang/Object;");
 
   // Retrieve the system service.
-  ScopedJavaLocalRef<jstring> service_name(env, env->NewStringUTF("clipboard"));
+  ScopedJavaLocalRef<jstring> service_name = ConvertUTF8ToJavaString(
+      env, "clipboard");
   ScopedJavaLocalRef<jobject> clipboard_manager(
       env, env->CallObjectMethod(
         context, get_system_service, service_name.obj()));
@@ -674,11 +673,13 @@ TEST_F(ClipboardTest, InternalClipboardInvalidation) {
       base::android::GetClass(env, "android/text/ClipboardManager");
   jmethodID set_text = MethodID::Get<MethodID::TYPE_INSTANCE>(
       env, clipboard_class.obj(), "setText", "(Ljava/lang/CharSequence;)V");
+  ScopedJavaLocalRef<jstring> new_value_string = ConvertUTF8ToJavaString(
+      env, new_value.c_str());
 
   // Will need to call toString as CharSequence is not always a String.
   env->CallVoidMethod(clipboard_manager.obj(),
                       set_text,
-                      env->NewStringUTF(new_value.c_str()));
+                      new_value_string.obj());
 
   // The bitmap that should have been available should be gone.
   EXPECT_FALSE(clipboard().IsFormatAvailable(Clipboard::GetBitmapFormatType(),

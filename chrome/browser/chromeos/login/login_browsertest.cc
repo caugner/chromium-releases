@@ -7,6 +7,7 @@
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
@@ -14,7 +15,6 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
@@ -40,9 +40,9 @@ class LoginTestBase : public chromeos::CrosInProcessBrowserTest {
 
  protected:
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+    CrosInProcessBrowserTest::SetUpInProcessBrowserTestFixture();
+
     mock_cryptohome_library_.reset(new chromeos::MockCryptohomeLibrary());
-    cros_mock_->InitStatusAreaMocks();
-    cros_mock_->SetStatusAreaMocksExpectations();
     EXPECT_CALL(*(mock_cryptohome_library_.get()), GetSystemSalt())
         .WillRepeatedly(Return(std::string("stub_system_salt")));
     EXPECT_CALL(*(mock_cryptohome_library_.get()), InstallAttributesIsReady())
@@ -65,7 +65,6 @@ class LoginUserTest : public LoginTestBase {
     command_line->AppendSwitchASCII(
         chromeos::switches::kLoginUser, "TestUser@gmail.com");
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "user");
-    command_line->AppendSwitch(::switches::kNoFirstRun);
   }
 };
 
@@ -75,7 +74,6 @@ class LoginGuestTest : public LoginTestBase {
     command_line->AppendSwitch(chromeos::switches::kGuestSession);
     command_line->AppendSwitch(::switches::kIncognito);
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "user");
-    command_line->AppendSwitch(::switches::kNoFirstRun);
   }
 };
 
@@ -96,7 +94,7 @@ class TestBrowserMainExtraParts
 
   // ChromeBrowserMainExtraParts implementation.
   virtual void PreEarlyInitialization() OVERRIDE {
-    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
                    content::NotificationService::AllSources());
   }
 
@@ -212,4 +210,4 @@ IN_PROC_BROWSER_TEST_F(LoginSigninTest, WebUIVisible) {
   runner->Run();
 }
 
-}
+}  // namespace

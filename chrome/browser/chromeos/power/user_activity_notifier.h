@@ -8,7 +8,7 @@
 #include "ash/wm/user_activity_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/time.h"
+#include "base/time/time.h"
 
 namespace chromeos {
 
@@ -19,7 +19,7 @@ class UserActivityNotifier : public ash::UserActivityObserver {
   virtual ~UserActivityNotifier();
 
   // ash::UserActivityObserver implementation.
-  virtual void OnUserActivity() OVERRIDE;
+  virtual void OnUserActivity(const ui::Event* event) OVERRIDE;
 
  private:
   // Last time that the power manager was notified.

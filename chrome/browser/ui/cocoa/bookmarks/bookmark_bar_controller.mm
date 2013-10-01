@@ -9,17 +9,16 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/sys_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/bookmarks/bookmark_editor.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -44,9 +43,8 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #import "chrome/browser/ui/cocoa/view_resizer.h"
-#include "chrome/browser/ui/search/search_ui.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
+#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -138,7 +136,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (!extension)
     return;
 
-  AppLauncherHandler::RecordAppLaunchType(
+  CoreAppLauncherHandler::RecordAppLaunchType(
       extension_misc::APP_LAUNCH_BOOKMARK_BAR,
       extension->GetType());
 }
@@ -472,13 +470,17 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   // Add padding to the detached bookmark bar.
   // The state of our morph (if any); 1 is total bubble, 0 is the regular bar.
   CGFloat morph = [self detachedMorphProgress];
-  CGFloat padding = chrome::IsInstantExtendedAPIEnabled()
-                    ? bookmarks::kSearchNTPBookmarkBarPadding
-                    : bookmarks::kNTPBookmarkBarPadding;
+  CGFloat padding = bookmarks::kNTPBookmarkBarPadding;
   buttonViewFrame =
       NSInsetRect(buttonViewFrame, morph * padding, morph * padding);
 
   [buttonView_ setFrame:buttonViewFrame];
+
+  // Update bookmark button backgrounds.
+  if ([self isAnimationRunning]) {
+    for (NSButton* button in buttons_.get())
+      [button setNeedsDisplay:YES];
+  }
 }
 
 // We don't change a preference; we only change visibility. Preference changing
@@ -899,10 +901,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     [[self backgroundGradientView] setShowsDivider:YES];
     [[self view] setHidden:NO];
     AnimatableView* view = [self animatableView];
-    CGFloat newHeight = chrome::IsInstantExtendedAPIEnabled()
-                        ? bookmarks::kSearchNewTabBookmarkBarHeight
-                        : chrome::kNTPBookmarkBarHeight;
-    [view animateToNewHeight:newHeight
+    [view animateToNewHeight:chrome::kNTPBookmarkBarHeight
                     duration:kBookmarkBarAnimationDuration];
   } else if ([self isAnimatingFromState:BookmarkBar::DETACHED
                                 toState:BookmarkBar::SHOW]) {
@@ -946,8 +945,6 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     case BookmarkBar::SHOW:
       return bookmarks::kBookmarkBarHeight;
     case BookmarkBar::DETACHED:
-      if (chrome::IsInstantExtendedAPIEnabled())
-        return bookmarks::kSearchNewTabBookmarkBarHeight;
       return chrome::kNTPBookmarkBarHeight;
     case BookmarkBar::HIDDEN:
       return 0;
@@ -1094,8 +1091,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   ui::ThemeProvider* themeProvider = [[[self view] window] themeProvider];
   if (themeProvider) {
     NSColor* color =
-        themeProvider->GetNSColor(ThemeProperties::COLOR_BOOKMARK_TEXT,
-                                  true);
+        themeProvider->GetNSColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
     [cell setTextColor:color];
   }
 
@@ -1706,8 +1702,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (!themeProvider)
     return;
   NSColor* color =
-      themeProvider->GetNSColor(ThemeProperties::COLOR_BOOKMARK_TEXT,
-                                true);
+      themeProvider->GetNSColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
   for (BookmarkButton* button in buttons_.get()) {
     BookmarkButtonCell* cell = [button cell];
     [cell setTextColor:color];

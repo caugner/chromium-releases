@@ -10,8 +10,8 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_image_loader.h"
 #include "chrome/browser/chromeos/login/user_image_manager.h"
@@ -49,6 +49,7 @@ class UserImageManagerImpl : public UserImageManager,
   virtual void DeleteUserImage(const std::string& username) OVERRIDE;
   virtual void DownloadProfileImage(const std::string& reason) OVERRIDE;
   virtual const gfx::ImageSkia& DownloadedProfileImage() const OVERRIDE;
+  virtual void Shutdown() OVERRIDE;
 
  private:
   friend class UserImageManagerTest;

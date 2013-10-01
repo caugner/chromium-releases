@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_CHROMEOS_DRIVE_LOGGING_H_
 #define CHROME_BROWSER_CHROMEOS_DRIVE_LOGGING_H_
 
-#include <string>
 #include <vector>
 
 #include "chrome/browser/drive/event_logger.h"
@@ -17,7 +16,8 @@ namespace util {
 
 // Logs a message using printf format.
 // This function can be called from any thread.
-void Log(const char* format, ...) PRINTF_FORMAT(1, 2);
+void Log(
+    logging::LogSeverity severity, const char* format, ...) PRINTF_FORMAT(2, 3);
 
 // Returns the log history.
 // This function can be called from any thread.

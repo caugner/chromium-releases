@@ -16,6 +16,24 @@ class AssemblyProgram;
 
 class DisassemblerElf32X86 : public DisassemblerElf32 {
  public:
+  class TypedRVAX86 : public TypedRVA {
+   public:
+    explicit TypedRVAX86(RVA rva) : TypedRVA(rva) {
+    }
+
+    virtual CheckBool ComputeRelativeTarget(const uint8* op_pointer) OVERRIDE {
+      set_relative_target(Read32LittleEndian(op_pointer) + 4);
+      return true;
+    }
+
+    virtual CheckBool EmitInstruction(AssemblyProgram* program,
+                                       RVA target_rva) OVERRIDE {
+      return program->EmitRel32(program->FindOrMakeRel32Label(target_rva));
+    }
+
+    virtual uint16 op_size() const OVERRIDE { return 4; }
+  };
+
   explicit DisassemblerElf32X86(const void* start, size_t length);
 
   virtual ExecutableType kind() { return EXE_ELF_32_X86; }

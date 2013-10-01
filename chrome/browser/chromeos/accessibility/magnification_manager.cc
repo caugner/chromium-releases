@@ -15,17 +15,18 @@
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 
 namespace chromeos {
 
@@ -36,12 +37,16 @@ static MagnificationManager* g_magnification_manager = NULL;
 class MagnificationManagerImpl : public MagnificationManager,
                                  public content::NotificationObserver {
  public:
-  MagnificationManagerImpl() : first_time_update_(true),
-                               profile_(NULL),
-                               type_(ash::kDefaultMagnifierType),
-                               enabled_(false) {
+  MagnificationManagerImpl()
+      : first_time_update_(true),
+        profile_(NULL),
+        magnifier_enabled_pref_handler_(prefs::kScreenMagnifierEnabled),
+        magnifier_type_pref_handler_(prefs::kScreenMagnifierType),
+        magnifier_scale_pref_handler_(prefs::kScreenMagnifierScale),
+        type_(ash::kDefaultMagnifierType),
+        enabled_(false) {
     registrar_.Add(this,
-                   chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+                   chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
                    content::NotificationService::AllSources());
     registrar_.Add(this,
                    chrome::NOTIFICATION_SESSION_STARTED,
@@ -102,11 +107,10 @@ class MagnificationManagerImpl : public MagnificationManager,
 
  private:
   void SetProfile(Profile* profile) {
-    if (pref_change_registrar_) {
-      pref_change_registrar_.reset();
-    }
+    pref_change_registrar_.reset();
 
     if (profile) {
+      // TODO(yoshiki): Move following code to PrefHandler.
       pref_change_registrar_.reset(new PrefChangeRegistrar);
       pref_change_registrar_->Init(profile->GetPrefs());
       pref_change_registrar_->Add(
@@ -118,6 +122,10 @@ class MagnificationManagerImpl : public MagnificationManager,
           base::Bind(&MagnificationManagerImpl::UpdateMagnifierFromPrefs,
                      base::Unretained(this)));
     }
+
+    magnifier_enabled_pref_handler_.HandleProfileChanged(profile_, profile);
+    magnifier_type_pref_handler_.HandleProfileChanged(profile_, profile);
+    magnifier_scale_pref_handler_.HandleProfileChanged(profile_, profile);
 
     profile_ = profile;
     UpdateMagnifierFromPrefs();
@@ -186,14 +194,13 @@ class MagnificationManagerImpl : public MagnificationManager,
         content::Details<AccessibilityStatusEventDetails>(&details));
   }
 
-  // content::NotificationObserver implimentation:
+  // content::NotificationObserver implementation:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
-      case chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE: {
-        // Update |profile_| when entering the login screen or when entering a
-        // session.
+      case chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE: {
+        // Update |profile_| when entering the login screen.
         Profile* profile = ProfileManager::GetDefaultProfile();
         if (ProfileHelper::IsSigninProfile(profile))
           SetProfile(profile);
@@ -215,6 +222,11 @@ class MagnificationManagerImpl : public MagnificationManager,
 
   bool first_time_update_;
   Profile* profile_;
+
+  AccessibilityManager::PrefHandler magnifier_enabled_pref_handler_;
+  AccessibilityManager::PrefHandler magnifier_type_pref_handler_;
+  AccessibilityManager::PrefHandler magnifier_scale_pref_handler_;
+
   ash::MagnifierType type_;
   bool enabled_;
   content::NotificationRegistrar registrar_;

@@ -24,12 +24,11 @@
 #include "content/public/browser/pepper_flash_settings_helper.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/content_constants.h"
-#include "googleurl/src/gurl.h"
+#include "content/public/common/webplugininfo.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_listener.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "webkit/plugins/plugin_constants.h"
-#include "webkit/plugins/webplugininfo.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -401,7 +400,7 @@ void PepperFlashSettingsManager::Core::InitializeOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK_EQ(STATE_UNINITIALIZED, state_);
 
-  webkit::WebPluginInfo plugin_info;
+  content::WebPluginInfo plugin_info;
   if (!PepperFlashSettingsManager::IsPepperFlashInUse(plugin_prefs_.get(),
                                                       &plugin_info)) {
     NotifyErrorFromIOThread();
@@ -461,7 +460,7 @@ void PepperFlashSettingsManager::Core::DeauthorizeContentLicensesOnBlockingPool(
   // Wipe that file.
   const base::FilePath& device_id_path =
       chrome::DeviceIDFetcher::GetLegacyDeviceIDPath(profile_path);
-  bool success = file_util::Delete(device_id_path, false);
+  bool success = base::DeleteFile(device_id_path, false);
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -947,19 +946,19 @@ PepperFlashSettingsManager::~PepperFlashSettingsManager() {
 // static
 bool PepperFlashSettingsManager::IsPepperFlashInUse(
     PluginPrefs* plugin_prefs,
-    webkit::WebPluginInfo* plugin_info) {
+    content::WebPluginInfo* plugin_info) {
   if (!plugin_prefs)
     return false;
 
   content::PluginService* plugin_service =
       content::PluginService::GetInstance();
-  std::vector<webkit::WebPluginInfo> plugins;
+  std::vector<content::WebPluginInfo> plugins;
   plugin_service->GetPluginInfoArray(
-      GURL(), kFlashPluginSwfMimeType, false, &plugins, NULL);
+      GURL(), content::kFlashPluginSwfMimeType, false, &plugins, NULL);
 
-  for (std::vector<webkit::WebPluginInfo>::iterator iter = plugins.begin();
+  for (std::vector<content::WebPluginInfo>::iterator iter = plugins.begin();
        iter != plugins.end(); ++iter) {
-    if (webkit::IsPepperPlugin(*iter) && plugin_prefs->IsPluginEnabled(*iter)) {
+    if (iter->is_pepper_plugin() && plugin_prefs->IsPluginEnabled(*iter)) {
       if (plugin_info)
         *plugin_info = *iter;
       return true;
@@ -969,7 +968,7 @@ bool PepperFlashSettingsManager::IsPepperFlashInUse(
 }
 
 // static
-void PepperFlashSettingsManager::RegisterUserPrefs(
+void PepperFlashSettingsManager::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
       prefs::kDeauthorizeContentLicenses,

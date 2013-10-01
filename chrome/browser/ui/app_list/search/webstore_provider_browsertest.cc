@@ -35,6 +35,11 @@ class WebstoreProviderTest : public InProcessBrowserTest {
   virtual ~WebstoreProviderTest() {}
 
   // InProcessBrowserTest overrides:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitchASCII(switches::kForceFieldTrials,
+                                    "LauncherUseWebstoreSearch/Enable/");
+  }
+
   virtual void SetUpOnMainThread() OVERRIDE {
     test_server_.reset(new EmbeddedTestServer(
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
@@ -47,7 +52,7 @@ class WebstoreProviderTest : public InProcessBrowserTest {
         switches::kAppsGalleryURL, test_server_->base_url().spec());
 
     webstore_provider_.reset(new WebstoreProvider(
-        ProfileManager::GetDefaultProfile()));
+        ProfileManager::GetDefaultProfile(), NULL));
     webstore_provider_->set_webstore_search_fetched_callback(
         base::Bind(&WebstoreProviderTest::OnSearchResultsFetched,
                    base::Unretained(this)));
@@ -98,11 +103,11 @@ class WebstoreProviderTest : public InProcessBrowserTest {
 
     if (request.relative_url.find("/jsonsearch?") != std::string::npos) {
       if (mock_server_response_ == "404") {
-        response->set_code(net::test_server::NOT_FOUND);
+        response->set_code(net::HTTP_NOT_FOUND);
       } else if (mock_server_response_ == "500") {
-        response->set_code(net::test_server::ACCESS_DENIED);
+        response->set_code(net::HTTP_INTERNAL_SERVER_ERROR);
       } else {
-        response->set_code(net::test_server::SUCCESS);
+        response->set_code(net::HTTP_OK);
         response->set_content(mock_server_response_);
       }
     }
@@ -182,6 +187,27 @@ IN_PROC_BROWSER_TEST_F(WebstoreProviderTest, MAYBE_Basic) {
                        kTestCases[i].mock_server_response))
         << "Case " << i << ": q=" << kTestCases[i].query;
   }
+}
+
+IN_PROC_BROWSER_TEST_F(WebstoreProviderTest, NoSearchForSensitiveData) {
+  // None of the following input strings should be accepted because they may
+  // contain private data.
+  const char* inputs[] = {
+    // file: scheme is bad.
+    "file://filename",
+    "FILE://filename",
+    // URLs with usernames, ports, queries or refs are bad.
+    "http://username:password@hostname/",
+    "http://www.example.com:1000",
+    "http://foo:1000",
+    "http://hostname/?query=q",
+    "http://hostname/path#ref",
+    // A https URL with path is bad.
+    "https://hostname/path",
+  };
+
+  for (size_t i = 0; i < arraysize(inputs); ++i)
+    EXPECT_EQ("", RunQuery(inputs[i], ""));
 }
 
 }  // namespace test

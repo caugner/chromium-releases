@@ -13,7 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/web_contents.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 using content::WebContents;
 
@@ -24,6 +24,7 @@ const char kIconUrlKey[] = "icon_url";
 const char kLocalizedNameKey[] = "localized_name";
 const char kLocalizedDescriptionKey[] = "localized_description";
 const char kUsersKey[] = "users";
+const char kShowUserCountKey[] = "show_user_count";
 const char kAverageRatingKey[] = "average_rating";
 const char kRatingCountKey[] = "rating_count";
 const char kRedirectUrlKey[] = "redirect_url";
@@ -43,6 +44,7 @@ WebstoreStandaloneInstaller::WebstoreStandaloneInstaller(
     : id_(webstore_item_id),
       callback_(callback),
       profile_(profile),
+      show_user_count_(true),
       average_rating_(0.0),
       rating_count_(0) {
   CHECK(!callback_.is_null());
@@ -71,6 +73,11 @@ void WebstoreStandaloneInstaller::BeginInstall() {
       GetRequestorURL(),
       id_));
   webstore_data_fetcher_->Start();
+}
+
+scoped_ptr<ExtensionInstallPrompt>
+WebstoreStandaloneInstaller::CreateInstallUI() {
+  return make_scoped_ptr(new ExtensionInstallPrompt(GetWebContents()));
 }
 
 void WebstoreStandaloneInstaller::OnWebstoreRequestFailure() {
@@ -105,6 +112,10 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
     CompleteInstall(kInvalidWebstoreResponseError);
     return;
   }
+
+  // Optional.
+  show_user_count_ = true;
+  webstore_data->GetBoolean(kShowUserCountKey, &show_user_count_);
 
   if (average_rating_ < ExtensionInstallPrompt::kMinExtensionRating ||
       average_rating_ > ExtensionInstallPrompt::kMaxExtensionRating) {
@@ -174,7 +185,7 @@ void WebstoreStandaloneInstaller::OnWebstoreParseSuccess(
 
   install_prompt_ = CreateInstallPrompt();
   if (install_prompt_) {
-    CreateInstallUI();
+    ShowInstallUI();
     // Control flow finishes up in InstallUIProceed or InstallUIAbort.
   } else {
     InstallUIProceed();
@@ -251,7 +262,7 @@ void WebstoreStandaloneInstaller::CompleteInstall(const std::string& error) {
 }
 
 void
-WebstoreStandaloneInstaller::CreateInstallUI() {
+WebstoreStandaloneInstaller::ShowInstallUI() {
   std::string error;
   localized_extension_for_display_ =
       ExtensionInstallPrompt::GetLocalizedExtensionForDisplay(
@@ -266,7 +277,7 @@ WebstoreStandaloneInstaller::CreateInstallUI() {
     return;
   }
 
-  install_ui_.reset(new ExtensionInstallPrompt(GetWebContents()));
+  install_ui_ = CreateInstallUI();
   install_ui_->ConfirmStandaloneInstall(
       this, localized_extension_for_display_.get(), &icon_, *install_prompt_);
 }

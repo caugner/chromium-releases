@@ -3,17 +3,17 @@
 // found in the LICENSE file.
 
 #include <string>
+
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
 #include "base/test/simple_test_clock.h"
-#include "base/time.h"
+#include "base/time/time.h"
+#include "chrome/browser/extensions/activity_log/activity_action_constants.h"
 #include "chrome/browser/extensions/activity_log/activity_database.h"
-#include "chrome/browser/extensions/activity_log/api_actions.h"
-#include "chrome/browser/extensions/activity_log/blocked_actions.h"
-#include "chrome/browser/extensions/activity_log/dom_actions.h"
+#include "chrome/browser/extensions/activity_log/fullstream_ui_policy.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/chrome_constants.h"
@@ -27,7 +27,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/mock_user_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -37,7 +37,74 @@
 
 using content::BrowserThread;
 
+namespace constants = activity_log_constants;
+
 namespace extensions {
+
+// A dummy implementation of ActivityDatabase::Delegate, sufficient for
+// the unit tests.
+class ActivityDatabaseTestPolicy : public ActivityDatabase::Delegate {
+ public:
+  ActivityDatabaseTestPolicy() {};
+
+  static const char kTableName[];
+  static const char* kTableContentFields[];
+  static const char* kTableFieldTypes[];
+
+  virtual void Record(ActivityDatabase* db, scoped_refptr<Action> action);
+
+ protected:
+  virtual bool InitDatabase(sql::Connection* db) OVERRIDE;
+  virtual bool FlushDatabase(sql::Connection*) OVERRIDE;
+  virtual void OnDatabaseFailure() OVERRIDE {}
+  virtual void OnDatabaseClose() OVERRIDE { delete this; }
+
+  std::vector<scoped_refptr<Action> > queue_;
+};
+
+const char ActivityDatabaseTestPolicy::kTableName[] = "actions";
+const char* ActivityDatabaseTestPolicy::kTableContentFields[] = {
+    "extension_id", "time", "action_type", "api_name"};
+const char* ActivityDatabaseTestPolicy::kTableFieldTypes[] = {
+    "LONGVARCHAR NOT NULL", "INTEGER", "INTEGER", "LONGVARCHAR"};
+
+bool ActivityDatabaseTestPolicy::InitDatabase(sql::Connection* db) {
+  return ActivityDatabase::InitializeTable(db,
+                                           kTableName,
+                                           kTableContentFields,
+                                           kTableFieldTypes,
+                                           arraysize(kTableContentFields));
+}
+
+bool ActivityDatabaseTestPolicy::FlushDatabase(sql::Connection* db) {
+  std::string sql_str =
+      "INSERT INTO " + std::string(kTableName) +
+      " (extension_id, time, action_type, api_name) VALUES (?,?,?,?)";
+
+  std::vector<scoped_refptr<Action> >::size_type i;
+  for (i = 0; i < queue_.size(); i++) {
+    const Action& action = *queue_[i];
+    sql::Statement statement(db->GetCachedStatement(
+        sql::StatementID(SQL_FROM_HERE), sql_str.c_str()));
+    statement.BindString(0, action.extension_id());
+    statement.BindInt64(1, action.time().ToInternalValue());
+    statement.BindInt(2, static_cast<int>(action.action_type()));
+    statement.BindString(3, action.api_name());
+    if (!statement.Run()) {
+      LOG(ERROR) << "Activity log database I/O failed: " << sql_str;
+      return false;
+    }
+  }
+
+  queue_.clear();
+  return true;
+}
+
+void ActivityDatabaseTestPolicy::Record(ActivityDatabase* db,
+                                        scoped_refptr<Action> action) {
+  queue_.push_back(action);
+  db->AdviseFlush(queue_.size());
+}
 
 class ActivityDatabaseTest : public ChromeRenderViewHostTestHarness {
  protected:
@@ -58,16 +125,50 @@ class ActivityDatabaseTest : public ChromeRenderViewHostTestHarness {
     ChromeRenderViewHostTestHarness::TearDown();
   }
 
+  // Creates a test database and initializes the table schema.
+  ActivityDatabase* OpenDatabase(const base::FilePath& db_file) {
+    db_delegate_ = new ActivityDatabaseTestPolicy();
+    ActivityDatabase* activity_db = new ActivityDatabase(db_delegate_);
+    activity_db->Init(db_file);
+    CHECK(activity_db->is_db_valid());
+    return activity_db;
+  }
+
+  scoped_refptr<Action> CreateAction(const base::Time& time,
+                                     const std::string& api_name) const {
+    scoped_refptr<Action> action(
+        new Action("punky", time, Action::ACTION_API_CALL, api_name));
+    return action;
+  }
+
+  void Record(ActivityDatabase* db, scoped_refptr<Action> action) {
+    db_delegate_->Record(db, action);
+  }
+
+  int CountActions(sql::Connection* db, const std::string& api_name_pattern) {
+    if (!db->DoesTableExist(ActivityDatabaseTestPolicy::kTableName))
+      return -1;
+    std::string sql_str = "SELECT COUNT(*) FROM " +
+                          std::string(ActivityDatabaseTestPolicy::kTableName) +
+                          " WHERE api_name LIKE ?";
+    sql::Statement statement(db->GetCachedStatement(
+        sql::StatementID(SQL_FROM_HERE), sql_str.c_str()));
+    statement.BindString(0, api_name_pattern);
+    if (!statement.Step())
+      return -1;
+    return statement.ColumnInt(0);
+  }
+
  private:
 #if defined OS_CHROMEOS
-  chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
+  chromeos::ScopedStubNetworkLibraryEnabler stub_network_library_enabler_;
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
   chromeos::ScopedTestCrosSettings test_cros_settings_;
   scoped_ptr<chromeos::ScopedTestUserManager> test_user_manager_;
 #endif
 
+  ActivityDatabaseTestPolicy* db_delegate_;
 };
-
 
 // Check that the database is initialized properly.
 TEST_F(ActivityDatabaseTest, Init) {
@@ -75,267 +176,35 @@ TEST_F(ActivityDatabaseTest, Init) {
   base::FilePath db_file;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   db_file = temp_dir.path().AppendASCII("ActivityInit.db");
-  file_util::Delete(db_file, false);
+  base::DeleteFile(db_file, false);
 
-  ActivityDatabase* activity_db = new ActivityDatabase();
-  activity_db->Init(db_file);
-  ASSERT_TRUE(activity_db->is_db_valid());
+  ActivityDatabase* activity_db = OpenDatabase(db_file);
   activity_db->Close();
 
   sql::Connection db;
   ASSERT_TRUE(db.Open(db_file));
-  ASSERT_TRUE(db.DoesTableExist(DOMAction::kTableName));
-  ASSERT_TRUE(db.DoesTableExist(APIAction::kTableName));
-  ASSERT_TRUE(db.DoesTableExist(BlockedAction::kTableName));
+  ASSERT_TRUE(db.DoesTableExist(ActivityDatabaseTestPolicy::kTableName));
   db.Close();
 }
 
-// Check that API actions are recorded in the db.
-TEST_F(ActivityDatabaseTest, RecordAPIAction) {
+// Check that actions are recorded in the db.
+TEST_F(ActivityDatabaseTest, RecordAction) {
   base::ScopedTempDir temp_dir;
   base::FilePath db_file;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   db_file = temp_dir.path().AppendASCII("ActivityRecord.db");
-  file_util::Delete(db_file, false);
+  base::DeleteFile(db_file, false);
 
-  ActivityDatabase* activity_db = new ActivityDatabase();
-  activity_db->Init(db_file);
+  ActivityDatabase* activity_db = OpenDatabase(db_file);
   activity_db->SetBatchModeForTesting(false);
-  ASSERT_TRUE(activity_db->is_db_valid());
-  scoped_refptr<APIAction> action = new APIAction(
-      "punky",
-      base::Time::Now(),
-      APIAction::CALL,
-      "brewster",
-      "woof",
-      "extra");
-  activity_db->RecordAction(action);
+  scoped_refptr<Action> action = CreateAction(base::Time::Now(), "brewster");
+  Record(activity_db, action);
   activity_db->Close();
 
   sql::Connection db;
   ASSERT_TRUE(db.Open(db_file));
 
-  ASSERT_TRUE(db.DoesTableExist(APIAction::kTableName));
-  std::string sql_str = "SELECT * FROM " +
-      std::string(APIAction::kTableName);
-  sql::Statement statement(db.GetUniqueStatement(sql_str.c_str()));
-  ASSERT_TRUE(statement.Step());
-  ASSERT_EQ("punky", statement.ColumnString(0));
-  ASSERT_EQ(0, statement.ColumnInt(2));
-  ASSERT_EQ("brewster", statement.ColumnString(3));
-  ASSERT_EQ("woof", statement.ColumnString(4));
-}
-
-// Check that DOM actions are recorded in the db.
-TEST_F(ActivityDatabaseTest, RecordDOMAction) {
-  base::ScopedTempDir temp_dir;
-  base::FilePath db_file;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  db_file = temp_dir.path().AppendASCII("ActivityRecord.db");
-  file_util::Delete(db_file, false);
-
-  ActivityDatabase* activity_db = new ActivityDatabase();
-  activity_db->Init(db_file);
-  activity_db->SetBatchModeForTesting(false);
-  ASSERT_TRUE(activity_db->is_db_valid());
-  scoped_refptr<DOMAction> action = new DOMAction(
-      "punky",
-      base::Time::Now(),
-      DomActionType::MODIFIED,
-      GURL("http://www.google.com/foo?bar"),
-      string16(),
-      "lets",
-      "vamoose",
-      "extra");
-  activity_db->RecordAction(action);
-  activity_db->Close();
-
-  sql::Connection db;
-  ASSERT_TRUE(db.Open(db_file));
-
-  ASSERT_TRUE(db.DoesTableExist(APIAction::kTableName));
-  std::string sql_str = "SELECT * FROM " +
-      std::string(DOMAction::kTableName);
-  sql::Statement statement(db.GetUniqueStatement(sql_str.c_str()));
-  ASSERT_TRUE(statement.Step());
-  ASSERT_EQ("punky", statement.ColumnString(0));
-  ASSERT_EQ(DomActionType::MODIFIED, statement.ColumnInt(2));
-  ASSERT_EQ("http://www.google.com", statement.ColumnString(3));
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableExtensionActivityLogTesting))
-    ASSERT_EQ("/foo?bar", statement.ColumnString(4));
-  else
-    ASSERT_EQ("/foo", statement.ColumnString(4));
-  ASSERT_EQ("lets", statement.ColumnString(6));
-  ASSERT_EQ("vamoose", statement.ColumnString(7));
-  ASSERT_EQ("extra", statement.ColumnString(8));
-}
-
-// Check that blocked actions are recorded in the db.
-TEST_F(ActivityDatabaseTest, RecordBlockedAction) {
-  base::ScopedTempDir temp_dir;
-  base::FilePath db_file;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  db_file = temp_dir.path().AppendASCII("ActivityRecord.db");
-  file_util::Delete(db_file, false);
-
-  ActivityDatabase* activity_db = new ActivityDatabase();
-  activity_db->Init(db_file);
-  ASSERT_TRUE(activity_db->is_db_valid());
-  scoped_refptr<BlockedAction> action = new BlockedAction(
-      "punky",
-      base::Time::Now(),
-      "do.evilThings",
-      "1, 2",
-      BlockedAction::ACCESS_DENIED,
-      "extra");
-  activity_db->RecordAction(action);
-  activity_db->Close();
-
-  sql::Connection db;
-  ASSERT_TRUE(db.Open(db_file));
-
-  ASSERT_TRUE(db.DoesTableExist(BlockedAction::kTableName));
-  std::string sql_str = "SELECT * FROM " +
-      std::string(BlockedAction::kTableName);
-  sql::Statement statement(db.GetUniqueStatement(sql_str.c_str()));
-  ASSERT_TRUE(statement.Step());
-  ASSERT_EQ("punky", statement.ColumnString(0));
-  ASSERT_EQ("do.evilThings", statement.ColumnString(2));
-  ASSERT_EQ("1, 2", statement.ColumnString(3));
-  ASSERT_EQ(1, statement.ColumnInt(4));
-  ASSERT_EQ("extra", statement.ColumnString(5));
-}
-
-// Check that we can read back recent actions in the db.
-TEST_F(ActivityDatabaseTest, GetTodaysActions) {
-  base::ScopedTempDir temp_dir;
-  base::FilePath db_file;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  db_file = temp_dir.path().AppendASCII("ActivityRecord.db");
-  file_util::Delete(db_file, false);
-
-  // Use a mock clock to ensure that events are not recorded on the wrong day
-  // when the test is run close to local midnight.
-  base::SimpleTestClock mock_clock;
-  mock_clock.SetNow(base::Time::Now().LocalMidnight() +
-                    base::TimeDelta::FromHours(12));
-
-  // Record some actions
-  ActivityDatabase* activity_db = new ActivityDatabase();
-  activity_db->Init(db_file);
-  ASSERT_TRUE(activity_db->is_db_valid());
-  scoped_refptr<APIAction> api_action = new APIAction(
-      "punky",
-      mock_clock.Now() - base::TimeDelta::FromMinutes(40),
-      APIAction::CALL,
-      "brewster",
-      "woof",
-      "extra");
-  scoped_refptr<DOMAction> dom_action = new DOMAction(
-      "punky",
-      mock_clock.Now(),
-      DomActionType::MODIFIED,
-      GURL("http://www.google.com"),
-      string16(),
-      "lets",
-      "vamoose",
-      "extra");
-  scoped_refptr<DOMAction> extra_dom_action = new DOMAction(
-      "scoobydoo",
-      mock_clock.Now(),
-      DomActionType::MODIFIED,
-      GURL("http://www.google.com"),
-      string16(),
-      "lets",
-      "vamoose",
-      "extra");
-  activity_db->RecordAction(api_action);
-  activity_db->RecordAction(dom_action);
-  activity_db->RecordAction(extra_dom_action);
-
-  // Read them back
-  std::string api_print = "ID: punky, CATEGORY: call, "
-      "API: brewster, ARGS: woof";
-  std::string dom_print = "DOM API CALL: lets, ARGS: vamoose, VERB: modified";
-  scoped_ptr<std::vector<scoped_refptr<Action> > > actions =
-      activity_db->GetActions("punky", 0);
-  ASSERT_EQ(2, static_cast<int>(actions->size()));
-  ASSERT_EQ(dom_print, actions->at(0)->PrintForDebug());
-  ASSERT_EQ(api_print, actions->at(1)->PrintForDebug());
-
-  activity_db->Close();
-}
-
-// Check that we can read back recent actions in the db.
-TEST_F(ActivityDatabaseTest, GetOlderActions) {
-  base::ScopedTempDir temp_dir;
-  base::FilePath db_file;
-  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  db_file = temp_dir.path().AppendASCII("ActivityRecord.db");
-  file_util::Delete(db_file, false);
-
-  // Use a mock clock to ensure that events are not recorded on the wrong day
-  // when the test is run close to local midnight.
-  base::SimpleTestClock mock_clock;
-  mock_clock.SetNow(base::Time::Now().LocalMidnight() +
-                    base::TimeDelta::FromHours(12));
-
-  // Record some actions
-  ActivityDatabase* activity_db = new ActivityDatabase();
-  activity_db->Init(db_file);
-  ASSERT_TRUE(activity_db->is_db_valid());
-  scoped_refptr<APIAction> api_action = new APIAction(
-      "punky",
-      mock_clock.Now() - base::TimeDelta::FromDays(3)
-          - base::TimeDelta::FromMinutes(40),
-      APIAction::CALL,
-      "brewster",
-      "woof",
-      "extra");
-  scoped_refptr<DOMAction> dom_action = new DOMAction(
-      "punky",
-      mock_clock.Now() - base::TimeDelta::FromDays(3),
-      DomActionType::MODIFIED,
-      GURL("http://www.google.com"),
-      string16(),
-      "lets",
-      "vamoose",
-      "extra");
-  scoped_refptr<DOMAction> toonew_dom_action = new DOMAction(
-      "punky",
-      mock_clock.Now(),
-      DomActionType::MODIFIED,
-      GURL("http://www.google.com"),
-      string16(),
-      "too new",
-      "vamoose",
-      "extra");
-  scoped_refptr<DOMAction> tooold_dom_action = new DOMAction(
-      "punky",
-      mock_clock.Now() - base::TimeDelta::FromDays(7),
-      DomActionType::MODIFIED,
-      GURL("http://www.google.com"),
-      string16(),
-      "too old",
-      "vamoose",
-      "extra");
-  activity_db->RecordAction(api_action);
-  activity_db->RecordAction(dom_action);
-  activity_db->RecordAction(toonew_dom_action);
-  activity_db->RecordAction(tooold_dom_action);
-
-  // Read them back
-  std::string api_print = "ID: punky, CATEGORY: call, "
-      "API: brewster, ARGS: woof";
-  std::string dom_print = "DOM API CALL: lets, ARGS: vamoose, VERB: modified";
-  scoped_ptr<std::vector<scoped_refptr<Action> > > actions =
-      activity_db->GetActions("punky", 3);
-  ASSERT_EQ(2, static_cast<int>(actions->size()));
-  ASSERT_EQ(dom_print, actions->at(0)->PrintForDebug());
-  ASSERT_EQ(api_print, actions->at(1)->PrintForDebug());
-
-  activity_db->Close();
+  ASSERT_EQ(1, CountActions(&db, "brewster"));
 }
 
 TEST_F(ActivityDatabaseTest, BatchModeOff) {
@@ -343,32 +212,16 @@ TEST_F(ActivityDatabaseTest, BatchModeOff) {
   base::FilePath db_file;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   db_file = temp_dir.path().AppendASCII("ActivityRecord.db");
-  file_util::Delete(db_file, false);
-
-  // Use a mock clock to ensure that events are not recorded on the wrong day
-  // when the test is run close to local midnight.
-  base::SimpleTestClock mock_clock;
-  mock_clock.SetNow(base::Time::Now().LocalMidnight() +
-                    base::TimeDelta::FromHours(12));
+  base::DeleteFile(db_file, false);
 
   // Record some actions
-  ActivityDatabase* activity_db = new ActivityDatabase();
-  activity_db->Init(db_file);
+  ActivityDatabase* activity_db = OpenDatabase(db_file);
   activity_db->SetBatchModeForTesting(false);
-  activity_db->SetClockForTesting(&mock_clock);
-  ASSERT_TRUE(activity_db->is_db_valid());
-  scoped_refptr<APIAction> api_action = new APIAction(
-      "punky",
-      mock_clock.Now() - base::TimeDelta::FromMinutes(40),
-      APIAction::CALL,
-      "brewster",
-      "woof",
-      "extra");
-  activity_db->RecordAction(api_action);
 
-  scoped_ptr<std::vector<scoped_refptr<Action> > > actions =
-      activity_db->GetActions("punky", 0);
-  ASSERT_EQ(1, static_cast<int>(actions->size()));
+  scoped_refptr<Action> action = CreateAction(base::Time::Now(), "brewster");
+  Record(activity_db, action);
+  ASSERT_EQ(1, CountActions(&activity_db->db_, "brewster"));
+
   activity_db->Close();
 }
 
@@ -377,40 +230,40 @@ TEST_F(ActivityDatabaseTest, BatchModeOn) {
   base::FilePath db_file;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   db_file = temp_dir.path().AppendASCII("ActivityRecord.db");
-  file_util::Delete(db_file, false);
-
-  // Use a mock clock to set the time, and a special timer to control the
-  // timing and skip ahead in time.
-  base::SimpleTestClock mock_clock;
-  mock_clock.SetNow(base::Time::Now().LocalMidnight() +
-                    base::TimeDelta::FromHours(11));
+  base::DeleteFile(db_file, false);
 
   // Record some actions
-  ActivityDatabase* activity_db = new ActivityDatabase();
-  activity_db->Init(db_file);
+  ActivityDatabase* activity_db = OpenDatabase(db_file);
   activity_db->SetBatchModeForTesting(true);
-  activity_db->SetClockForTesting(&mock_clock);
-  ASSERT_TRUE(activity_db->is_db_valid());
-  scoped_refptr<APIAction> api_action = new APIAction(
-      "punky",
-      mock_clock.Now() - base::TimeDelta::FromMinutes(40),
-      APIAction::CALL,
-      "brewster",
-      "woof",
-      "extra");
-  activity_db->RecordAction(api_action);
-
-  scoped_ptr<std::vector<scoped_refptr<Action> > > actions_before =
-      activity_db->GetActions("punky", 0);
-  ASSERT_EQ(0, static_cast<int>(actions_before->size()));
+  scoped_refptr<Action> action = CreateAction(base::Time::Now(), "brewster");
+  Record(activity_db, action);
+  ASSERT_EQ(0, CountActions(&activity_db->db_, "brewster"));
 
   // Artificially trigger and then stop the timer.
   activity_db->SetTimerForTesting(0);
   base::MessageLoop::current()->RunUntilIdle();
+  ASSERT_EQ(1, CountActions(&activity_db->db_, "brewster"));
 
-  scoped_ptr<std::vector<scoped_refptr<Action> > > actions_after =
-        activity_db->GetActions("punky", 0);
-    ASSERT_EQ(1, static_cast<int>(actions_after->size()));
+  activity_db->Close();
+}
+
+TEST_F(ActivityDatabaseTest, BatchModeFlush) {
+  base::ScopedTempDir temp_dir;
+  base::FilePath db_file;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  db_file = temp_dir.path().AppendASCII("ActivityFlush.db");
+  base::DeleteFile(db_file, false);
+
+  // Record some actions
+  ActivityDatabase* activity_db = OpenDatabase(db_file);
+  activity_db->SetBatchModeForTesting(true);
+  scoped_refptr<Action> action = CreateAction(base::Time::Now(), "brewster");
+  Record(activity_db, action);
+  ASSERT_EQ(0, CountActions(&activity_db->db_, "brewster"));
+
+  // Request an immediate database flush.
+  activity_db->AdviseFlush(ActivityDatabase::kFlushImmediately);
+  ASSERT_EQ(1, CountActions(&activity_db->db_, "brewster"));
 
   activity_db->Close();
 }
@@ -421,19 +274,15 @@ TEST_F(ActivityDatabaseTest, InitFailure) {
   base::FilePath db_file;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   db_file = temp_dir.path().AppendASCII("ActivityRecord.db");
-  file_util::Delete(db_file, false);
+  base::DeleteFile(db_file, false);
 
-  ActivityDatabase* activity_db = new ActivityDatabase();
-  scoped_refptr<APIAction> action = new APIAction(
-      "punky",
-      base::Time::Now(),
-      APIAction::CALL,
-      "brewster",
-      "woooof",
-      "extra");
-  activity_db->RecordAction(action);
+  ActivityDatabaseTestPolicy* delegate = new ActivityDatabaseTestPolicy();
+  ActivityDatabase* activity_db = new ActivityDatabase(delegate);
+  scoped_refptr<Action> action = new Action(
+      "punky", base::Time::Now(), Action::ACTION_API_CALL, "brewster");
+  action->mutable_args()->AppendString("woof");
+  delegate->Record(activity_db, action);
   activity_db->Close();
 }
 
 }  // namespace extensions
-

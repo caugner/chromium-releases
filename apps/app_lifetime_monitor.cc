@@ -4,9 +4,9 @@
 
 #include "apps/app_lifetime_monitor.h"
 
+#include "apps/shell_window.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -15,7 +15,6 @@ namespace apps {
 
 using extensions::Extension;
 using extensions::ExtensionHost;
-using extensions::ShellWindowRegistry;
 
 AppLifetimeMonitor::AppLifetimeMonitor(Profile* profile)
     : profile_(profile) {

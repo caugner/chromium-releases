@@ -22,6 +22,13 @@ class BubbleBorder;
 class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView,
                                      public ButtonListener {
  public:
+  // Internal class name.
+  static const char kViewClassName[];
+
+  // Insets to make bubble contents align horizontal with the bubble title.
+  // NOTE: this does not take into account whether a title actually exists.
+  static gfx::Insets GetTitleInsets();
+
   explicit BubbleFrameView(const gfx::Insets& content_margins);
   virtual ~BubbleFrameView();
 
@@ -52,8 +59,6 @@ class VIEWS_EXPORT BubbleFrameView : public NonClientFrameView,
 
   gfx::Insets content_margins() const { return content_margins_; }
 
-  void SetTitle(const string16& title);
-  void SetShowCloseButton(bool show);
   void SetTitlebarExtraView(View* view);
 
   // Given the size of the contents and the rect to point at, returns the bounds

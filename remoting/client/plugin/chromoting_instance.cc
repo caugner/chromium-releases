@@ -18,7 +18,6 @@
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
-#include "googleurl/src/gurl.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "media/base/media.h"
 #include "net/socket/ssl_server_socket.h"
@@ -35,13 +34,14 @@
 #include "remoting/client/plugin/pepper_audio_player.h"
 #include "remoting/client/plugin/pepper_input_handler.h"
 #include "remoting/client/plugin/pepper_port_allocator.h"
+#include "remoting/client/plugin/pepper_signal_strategy.h"
 #include "remoting/client/plugin/pepper_token_fetcher.h"
 #include "remoting/client/plugin/pepper_view.h"
-#include "remoting/client/plugin/pepper_signal_strategy.h"
 #include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/libjingle_transport_factory.h"
+#include "url/gurl.h"
 
 // Windows defines 'PostMessage', so we have to undef it.
 #if defined(PostMessage)
@@ -144,7 +144,7 @@ logging::LogMessageHandlerFunction g_logging_old_handler = NULL;
 const char ChromotingInstance::kApiFeatures[] =
     "highQualityScaling injectKeyEvent sendClipboardItem remapKey trapKey "
     "notifyClientDimensions notifyClientResolution pauseVideo pauseAudio "
-    "asyncPin thirdPartyAuth pinlessAuth";
+    "asyncPin thirdPartyAuth pinlessAuth extensionMessage";
 
 const char ChromotingInstance::kRequestedCapabilities[] = "";
 const char ChromotingInstance::kSupportedCapabilities[] = "desktopShape";
@@ -294,7 +294,7 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
     if (use_async_pin_dialog_) {
       config.fetch_secret_callback =
           base::Bind(&ChromotingInstance::FetchSecretFromDialog,
-                     this->AsWeakPtr());
+                     weak_factory_.GetWeakPtr());
     } else {
       std::string shared_secret;
       if (!data->GetString("sharedSecret", &shared_secret)) {
@@ -433,6 +433,13 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
       return;
     }
     RequestPairing(client_name);
+  } else if (method == "extensionMessage") {
+    std::string type, message;
+    if (!data->GetString("type", &type) || !data->GetString("data", &message)) {
+      LOG(ERROR) << "Invalid extensionMessage.";
+      return;
+    }
+    SendClientMessage(type, message);
   }
 }
 
@@ -537,6 +544,14 @@ void ChromotingInstance::SetPairingResponse(
   PostChromotingMessage("pairingResponse", data.Pass());
 }
 
+void ChromotingInstance::DeliverHostMessage(
+    const protocol::ExtensionMessage& message) {
+  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  data->SetString("type", message.type());
+  data->SetString("data", message.data());
+  PostChromotingMessage("extensionMessage", data.Pass());
+}
+
 void ChromotingInstance::FetchSecretFromDialog(
     bool pairing_supported,
     const protocol::SecretFetchedCallback& secret_fetched_callback) {
@@ -572,7 +587,7 @@ protocol::CursorShapeStub* ChromotingInstance::GetCursorShapeStub() {
 scoped_ptr<protocol::ThirdPartyClientAuthenticator::TokenFetcher>
 ChromotingInstance::GetTokenFetcher(const std::string& host_public_key) {
   return scoped_ptr<protocol::ThirdPartyClientAuthenticator::TokenFetcher>(
-      new PepperTokenFetcher(this->AsWeakPtr(), host_public_key));
+      new PepperTokenFetcher(weak_factory_.GetWeakPtr(), host_public_key));
 }
 
 void ChromotingInstance::InjectClipboardEvent(
@@ -701,7 +716,8 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
   // Setup the PepperSignalStrategy.
   signal_strategy_.reset(new PepperSignalStrategy(
       config.local_jid,
-      base::Bind(&ChromotingInstance::SendOutgoingIq, AsWeakPtr())));
+      base::Bind(&ChromotingInstance::SendOutgoingIq,
+                 weak_factory_.GetWeakPtr())));
 
   scoped_ptr<cricket::HttpPortAllocatorBase> port_allocator(
       PepperPortAllocator::Create(this));
@@ -713,7 +729,8 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
 
   // Start timer that periodically sends perf stats.
   plugin_task_runner_->PostDelayedTask(
-      FROM_HERE, base::Bind(&ChromotingInstance::SendPerfStats, AsWeakPtr()),
+      FROM_HERE, base::Bind(&ChromotingInstance::SendPerfStats,
+                            weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kPerfStatsIntervalMs));
 }
 
@@ -837,6 +854,17 @@ void ChromotingInstance::RequestPairing(const std::string& client_name) {
   host_connection_->host_stub()->RequestPairing(pairing_request);
 }
 
+void ChromotingInstance::SendClientMessage(const std::string& type,
+                                           const std::string& data) {
+  if (!IsConnected()) {
+    return;
+  }
+  protocol::ExtensionMessage message;
+  message.set_type(type);
+  message.set_data(data);
+  host_connection_->host_stub()->DeliverClientMessage(message);
+}
+
 ChromotingStats* ChromotingInstance::GetStats() {
   if (!client_.get())
     return NULL;
@@ -874,7 +902,8 @@ void ChromotingInstance::SendPerfStats() {
   }
 
   plugin_task_runner_->PostDelayedTask(
-      FROM_HERE, base::Bind(&ChromotingInstance::SendPerfStats, AsWeakPtr()),
+      FROM_HERE, base::Bind(&ChromotingInstance::SendPerfStats,
+                            weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kPerfStatsIntervalMs));
 
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());

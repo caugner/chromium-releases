@@ -3,6 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import multiprocessing
 import optparse
 import os
 import sys
@@ -22,13 +23,18 @@ import getos
 import http_download
 
 
-MAKE = 'nacl_sdk/make_3_81/make.exe'
+MAKE = 'nacl_sdk/make_3.99.90-26-gf80222c/make.exe'
 LIB_DICT = {
   'linux': [],
   'mac': [],
   'win': ['x86_32']
 }
 VALID_TOOLCHAINS = ['newlib', 'glibc', 'pnacl', 'win', 'linux', 'mac']
+
+# Global verbosity setting.
+# If set to try (normally via a command line arg) then build_projects will
+# add V=1 to all calls to 'make'
+verbose = False
 
 
 def CopyFilesFromTo(filelist, srcdir, dstdir):
@@ -38,9 +44,10 @@ def CopyFilesFromTo(filelist, srcdir, dstdir):
     buildbot_common.CopyFile(srcpath, dstpath)
 
 
-def UpdateHelpers(pepperdir, platform, clobber=False):
-  if not os.path.exists(os.path.join(pepperdir, 'tools')):
-    buildbot_common.ErrorExit('Examples depend on missing tools.')
+def UpdateHelpers(pepperdir, clobber=False):
+  tools_dir = os.path.join(pepperdir, 'tools')
+  if not os.path.exists(tools_dir):
+    buildbot_common.ErrorExit('SDK tools dir is missing: %s' % tools_dir)
 
   exampledir = os.path.join(pepperdir, 'examples')
   if clobber:
@@ -58,15 +65,15 @@ def UpdateHelpers(pepperdir, platform, clobber=False):
 
   # Copy tools scripts and make includes
   buildbot_common.CopyDir(os.path.join(SDK_SRC_DIR, 'tools', '*.py'),
-      os.path.join(pepperdir, 'tools'))
+      tools_dir)
   buildbot_common.CopyDir(os.path.join(SDK_SRC_DIR, 'tools', '*.mk'),
-      os.path.join(pepperdir, 'tools'))
+      tools_dir)
 
   # On Windows add a prebuilt make
-  if platform == 'win':
+  if getos.GetPlatform() == 'win':
     buildbot_common.BuildStep('Add MAKE')
     http_download.HttpDownload(GSTORE + MAKE,
-                               os.path.join(pepperdir, 'tools', 'make.exe'))
+                               os.path.join(tools_dir, 'make.exe'))
 
 
 def ValidateToolchains(toolchains):
@@ -76,7 +83,7 @@ def ValidateToolchains(toolchains):
         ', '.join(invalid_toolchains)))
 
 
-def UpdateProjects(pepperdir, platform, project_tree, toolchains,
+def UpdateProjects(pepperdir, project_tree, toolchains,
                    clobber=False, configs=None, first_toolchain=False):
   if configs is None:
     configs = ['Debug', 'Release']
@@ -89,6 +96,7 @@ def UpdateProjects(pepperdir, platform, project_tree, toolchains,
 
   # Create the library output directories
   libdir = os.path.join(pepperdir, 'lib')
+  platform = getos.GetPlatform()
   for config in configs:
     for arch in LIB_DICT[platform]:
       dirpath = os.path.join(libdir, '%s_%s_host' % (platform, arch), config)
@@ -141,44 +149,59 @@ def UpdateProjects(pepperdir, platform, project_tree, toolchains,
                                        targets)
 
 
-def BuildProjectsBranch(pepperdir, platform, branch, deps, clean, config):
+def BuildProjectsBranch(pepperdir, branch, deps, clean, config, args=None):
   make_dir = os.path.join(pepperdir, branch)
-  print "\n\nMake: " + make_dir
-  if platform == 'win':
+  print "\nMake: " + make_dir
+
+  if getos.GetPlatform() == 'win':
     # We need to modify the environment to build host on Windows.
     make = os.path.join(make_dir, 'make.bat')
   else:
     make = 'make'
 
-  extra_args = ['CONFIG='+config]
+  env = None
+  if os.environ.get('USE_GOMA') == '1':
+    env = dict(os.environ)
+    env['NACL_COMPILER_PREFIX'] = 'gomacc'
+    # Add -m32 to the CFLAGS when building using i686-nacl-gcc
+    # otherwise goma won't recognise it as different to the x86_64
+    # build.
+    env['X86_32_CFLAGS'] = '-m32'
+    env['X86_32_CXXFLAGS'] = '-m32'
+    jobs = '50'
+  else:
+    jobs = str(multiprocessing.cpu_count())
+
+  make_cmd = [make, '-j', jobs]
+
+  make_cmd.append('CONFIG='+config)
   if not deps:
-    extra_args += ['IGNORE_DEPS=1']
+    make_cmd.append('IGNORE_DEPS=1')
 
-  try:
-    buildbot_common.Run([make, '-j8', 'TOOLCHAIN=all'] + extra_args,
-                        cwd=make_dir)
-  except:
-    print 'Failed to build ' + branch
-    raise
+  if verbose:
+    make_cmd.append('V=1')
 
+  if args:
+    make_cmd += args
+  else:
+    make_cmd.append('TOOLCHAIN=all')
+
+  buildbot_common.Run(make_cmd, cwd=make_dir, env=env)
   if clean:
     # Clean to remove temporary files but keep the built
-    buildbot_common.Run([make, '-j8', 'clean', 'TOOLCHAIN=all'] + extra_args,
-                        cwd=make_dir)
+    buildbot_common.Run(make_cmd + ['clean'], cwd=make_dir, env=env)
 
 
-def BuildProjects(pepperdir, platform, project_tree, deps=True,
+def BuildProjects(pepperdir, project_tree, deps=True,
                   clean=False, config='Debug'):
-  # First build libraries
-  build_order = ['src', 'testlibs']
-  for branch in build_order:
-    if branch in project_tree:
-      BuildProjectsBranch(pepperdir, platform, branch, deps, clean, config)
 
-  # Build everything else.
-  for branch in project_tree:
-    if branch not in build_order:
-      BuildProjectsBranch(pepperdir, platform, branch, deps, clean, config)
+  # Make sure we build libraries (which live in 'src') before
+  # any of the examples.
+  build_first = [p for p in project_tree if p != 'src']
+  build_second = [p for p in project_tree if p == 'src']
+
+  for branch in build_first + build_second:
+    BuildProjectsBranch(pepperdir, branch, deps, clean, config)
 
 
 def main(args):
@@ -215,15 +238,14 @@ def main(args):
 
   pepper_ver = str(int(build_version.ChromeMajorVersion()))
   pepperdir = os.path.join(OUT_DIR, 'pepper_' + pepper_ver)
-  platform = getos.GetPlatform()
 
   if not options.toolchain:
     options.toolchain = ['newlib', 'glibc', 'pnacl', 'host']
 
   if 'host' in options.toolchain:
     options.toolchain.remove('host')
-    options.toolchain.append(platform)
-    print 'Adding platform: ' + platform
+    options.toolchain.append(getos.GetPlatform())
+    print 'Adding platform: ' + getos.GetPlatform()
 
   ValidateToolchains(options.toolchain)
 
@@ -240,12 +262,19 @@ def main(args):
     filters['NAME'] = options.project
     print 'Filter by name: ' + str(options.project)
 
-  project_tree = parse_dsc.LoadProjectTree(SDK_SRC_DIR, filters=filters)
+  try:
+    project_tree = parse_dsc.LoadProjectTree(SDK_SRC_DIR, include=filters)
+  except parse_dsc.ValidationError as e:
+    buildbot_common.ErrorExit(str(e))
   parse_dsc.PrintProjectTree(project_tree)
 
-  UpdateHelpers(pepperdir, platform, clobber=options.clobber)
-  UpdateProjects(pepperdir, platform, project_tree, options.toolchain,
+  UpdateHelpers(pepperdir, clobber=options.clobber)
+  UpdateProjects(pepperdir, project_tree, options.toolchain,
                  clobber=options.clobber)
+
+  if options.verbose:
+    global verbose
+    verbose = True
 
   if options.build:
     if options.config:
@@ -253,13 +282,16 @@ def main(args):
     else:
       configs = ['Debug', 'Release']
     for config in configs:
-      BuildProjects(pepperdir, platform, project_tree, config=config)
+      BuildProjects(pepperdir, project_tree, config=config)
 
   return 0
 
 
 if __name__ == '__main__':
+  script_name = os.path.basename(sys.argv[0])
   try:
     sys.exit(main(sys.argv))
+  except parse_dsc.ValidationError as e:
+    buildbot_common.ErrorExit('%s: %s' % (script_name, e))
   except KeyboardInterrupt:
-    buildbot_common.ErrorExit('%s: interrupted' % os.path.basename(sys.argv[0]))
+    buildbot_common.ErrorExit('%s: interrupted' % script_name)

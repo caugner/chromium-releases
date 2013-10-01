@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/website_settings/website_settings.h"
 
 #include "base/at_exit.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
@@ -389,7 +389,7 @@ TEST_F(WebsiteSettingsTest, ShowInfoBar) {
   website_settings()->OnSitePermissionChanged(
       CONTENT_SETTINGS_TYPE_GEOLOCATION, CONTENT_SETTING_ALLOW);
   website_settings()->OnUIClosing();
-  EXPECT_EQ(1u, infobar_service()->infobar_count());
+  ASSERT_EQ(1u, infobar_service()->infobar_count());
 
   // Removing an |InfoBarDelegate| from the |InfoBarService| does not delete
   // it. Hence the |delegate| must be cleaned up after it was removed from the

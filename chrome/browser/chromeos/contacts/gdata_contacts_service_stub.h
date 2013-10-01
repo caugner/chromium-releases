@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/time.h"
+#include "base/time/time.h"
 
 namespace contacts {
 typedef std::vector<const contacts::Contact*> ContactPointers;
@@ -39,7 +39,6 @@ class GDataContactsServiceStub : public GDataContactsServiceInterface {
                    const base::Time& expected_min_update_time);
 
   // Overridden from GDataContactsServiceInterface:
-  virtual void Initialize() OVERRIDE;
   virtual void DownloadContacts(SuccessCallback success_callback,
                                 FailureCallback failure_callback,
                                 const base::Time& min_update_time) OVERRIDE;

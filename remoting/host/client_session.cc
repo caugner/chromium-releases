@@ -177,7 +177,7 @@ void ClientSession::SetCapabilities(
 
 void ClientSession::RequestPairing(
     const protocol::PairingRequest& pairing_request) {
-  if (pairing_request.has_client_name()) {
+  if (pairing_registry_ && pairing_request.has_client_name()) {
     protocol::PairingRegistry::Pairing pairing =
         pairing_registry_->CreatePairing(pairing_request.client_name());
     protocol::PairingResponse pairing_response;
@@ -185,6 +185,13 @@ void ClientSession::RequestPairing(
     pairing_response.set_shared_secret(pairing.shared_secret());
     connection_->client_stub()->SetPairingResponse(pairing_response);
   }
+}
+
+void ClientSession::DeliverClientMessage(
+    const protocol::ExtensionMessage& message) {
+  // No messages are currently supported.
+  LOG(INFO) << "Unexpected message received: "
+            << message.type() << ": " << message.data();
 }
 
 void ClientSession::OnConnectionAuthenticated(

@@ -7,13 +7,13 @@
 #include "base/android/jni_string.h"
 #include "base/logging.h"
 #include "chrome/browser/android/chrome_web_contents_delegate_android.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/android/window_android_helper.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/web_contents.h"
-#include "googleurl/src/gurl.h"
 #include "jni/TestShellTab_jni.h"
 #include "ui/android/window_android.h"
+#include "url/gurl.h"
 
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
@@ -89,6 +89,10 @@ bool TestShellTab::ShouldWelcomePageLinkToTermsOfService() {
   return false;
 }
 
+void TestShellTab::OnNewTabPageReady() {
+  NOTIMPLEMENTED();
+}
+
 void TestShellTab::RunExternalProtocolDialog(const GURL& url) {
   NOTIMPLEMENTED();
 }
@@ -130,3 +134,10 @@ static jint Init(JNIEnv* env,
       reinterpret_cast<WindowAndroid*>(window_android_ptr));
   return reinterpret_cast<jint>(tab);
 }
+
+int TestShellTab::GetSyncId() const {
+  NOTIMPLEMENTED();
+  return 0;
+}
+
+void TestShellTab::SetSyncId(int sync_id) { NOTIMPLEMENTED(); }

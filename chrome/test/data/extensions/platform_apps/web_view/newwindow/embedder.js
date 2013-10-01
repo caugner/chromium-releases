@@ -7,7 +7,7 @@ embedder.test = {};
 embedder.baseGuestURL = '';
 embedder.guestURL = '';
 
-window.runNewWindowTest = function(testName) {
+window.runTest = function(testName) {
   if (!embedder.test.testList[testName]) {
     console.log('Incorrect testName: ' + testName);
     embedder.test.fail();
@@ -23,7 +23,7 @@ window.runNewWindowTest = function(testName) {
 embedder.setUp_ = function(config) {
   embedder.baseGuestURL = 'http://localhost:' + config.testServer.port;
   embedder.guestURL = embedder.baseGuestURL +
-      '/files/extensions/platform_apps/web_view/newwindow' +
+      '/extensions/platform_apps/web_view/newwindow' +
       '/guest_opener.html';
   chrome.test.log('Guest url is: ' + embedder.guestURL);
 };
@@ -210,6 +210,14 @@ function testNoName() {
                     webViewName, guestName, partitionName, expectedName);
 };
 
+// This test exercises the need for queuing events that occur prior to
+// attachment. In this test a new window is opened that initially navigates to
+// about:blank and then subsequently redirects to its final destination. This
+// test responds to loadstop in the new <webview>. Since "about:blank" does not
+// have any external resources, it loads immediately prior to attachment, and
+// the <webview> that is eventually attached never gets a chance to see the
+// event. GuestView solves this problem by queuing events that occur prior to
+// attachment and firing them immediately after attachment.
 function testNewWindowRedirect() {
   var webViewName = 'foo';
   var guestName = '';

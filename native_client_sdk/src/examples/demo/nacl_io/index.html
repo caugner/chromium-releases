@@ -16,8 +16,8 @@ found in the LICENSE file.
   <h1>{{title}}</h1>
   <h2>Status: <code id="statusField">NO-STATUS</code></h2>
   <p>
-    This example shows how you can use standard C library file operation
-    functions in Native Client using a library called nacl_io.
+    This example shows how you can use standard C library file and socket
+    operation functions in Native Client using a library called nacl_io.
   </p>
   <p>
     nacl_io provides a virtual filesystem. The filesystem can be "mounted"
@@ -37,14 +37,25 @@ found in the LICENSE file.
           /dev/zero, etc.</li>
     </ol>
   </p>
+  <p>
+    nacl_io also provides a (currently incomplete) posix socket api. Like the
+    virtual filesystem, it is an abstraction layer on top of ppapi. To use this
+    API, an app must be a packaged app with the appropriate socket permissions
+    specified in the manifest file.
+  <hr>
+  <p><b>File Operations:</b></p>
   <div>
     <span>
-      <input type="radio" id="radiofopen" name="group" checked="checked">fopen
-      <input type="radio" id="radiofclose" name="group">fclose
-      <input type="radio" id="radiofread" name="group">fread
-      <input type="radio" id="radiofwrite" name="group">fwrite
-      <input type="radio" id="radiofseek" name="group">fseek
-      <input type="radio" id="radiostat" name="group">stat
+      <input type="radio" id="radiofopen" name="filegroup" checked="checked">fopen
+      <input type="radio" id="radiofclose" name="filegroup">fclose
+      <input type="radio" id="radiofread" name="filegroup">fread
+      <input type="radio" id="radiofwrite" name="filegroup">fwrite
+      <input type="radio" id="radiofseek" name="filegroup">fseek
+      <input type="radio" id="radiostat" name="filegroup">stat
+      <input type="radio" id="radioopendir" name="filegroup">opendir
+      <input type="radio" id="radioreaddir" name="filegroup">readdir
+      <input type="radio" id="radioclosedir" name="filegroup">closedir
+      <input type="radio" id="radiomkdir" name="filegroup">mkdir
     </span>
   </div>
   <div class="function" id="fopen">
@@ -59,13 +70,13 @@ found in the LICENSE file.
         <option value="a">Append Write (a)</option>
         <option value="w+">Append Read/Write (a+)</option>
       </select>
-      <button id="fopenExecute">fopen</button>
+      <button>fopen</button>
     </span>
   </div>
   <div class="function" id="fclose" hidden>
     <span>
       <select class="file-handle" id="fcloseHandle"></select>
-      <button id="fcloseExecute">fclose</button>
+      <button>fclose</button>
     </span>
   </div>
   <div class="function" id="fread" hidden>
@@ -73,7 +84,7 @@ found in the LICENSE file.
       <select class="file-handle" id="freadHandle"></select>
       Count:
       <input type="text" id="freadBytes">
-      <button id="freadExecute">fread</button>
+      <button>fread</button>
     </span>
   </div>
   <div class="function" id="fwrite" hidden>
@@ -81,7 +92,7 @@ found in the LICENSE file.
       <select class="file-handle" id="fwriteHandle"></select>
       Data:
       <input type="text" id="fwriteData">
-      <button id="fwriteExecute">fwrite</button>
+      <button>fwrite</button>
     </span>
   </div>
   <div class="function" id="fseek" hidden>
@@ -95,16 +106,61 @@ found in the LICENSE file.
         <option value="1">SEEK_CUR</option>
         <option value="2">SEEK_END</option>
       </select>
-      <button id="fseekExecute">fseek</button>
+      <button>fseek</button>
     </span>
   </div>
   <div class="function" id="stat" hidden>
     <span>
       Filename:
       <input type="text" id="statFilename">
-      <button id="statExecute">stat</button>
+      <button>stat</button>
     </span>
   </div>
+  <div class="function" id="opendir" hidden>
+    <span>
+      Dirname:
+      <input type="text" id="opendirDirname">
+      <button>opendir</button>
+    </span>
+  </div>
+  <div class="function" id="readdir" hidden>
+    <span>
+      <select class="dir-handle" id="readdirHandle"></select>
+      <button>readdir</button>
+    </span>
+  </div>
+  <div class="function" id="closedir" hidden>
+    <span>
+      <select class="dir-handle" id="closedirHandle"></select>
+      <button>closedir</button>
+    </span>
+  </div>
+  <div class="function" id="mkdir" hidden>
+    <span>
+      Dirname:
+      <input type="text" id="mkdirDirname">
+      Mode (in octal):
+      <input type="text" id="mkdirMode" value="0644">
+      <button>mkdir</button>
+    </span>
+  </div>
+  <hr>
+  <p><b>Socket Operations:</b></p>
+  <div>
+    <span>
+      <input type="radio" id="radiogethostbyname" name="socketgroup" checked="checked">gethostbyname
+    </span>
+  </div>
+  <div class="function" id="gethostbyname">
+    <span>
+      Name:
+      <input type="text" id="gethostbynameName">
+      <button>gethostbyname</button>
+    </span>
+  </div>
+
+  <hr>
+  <p><b>Log:</b></p>
   <pre id="log" style="font-weight: bold"></pre>
   <!-- The NaCl plugin will be embedded inside the element with id "listener".
       See common.js.-->

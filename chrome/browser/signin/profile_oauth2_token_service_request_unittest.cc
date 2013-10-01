@@ -115,8 +115,7 @@ void MockProfileOAuth2TokenService::Request::InformConsumer() const {
 }
 
 MockProfileOAuth2TokenService::MockProfileOAuth2TokenService()
-    : ProfileOAuth2TokenService(NULL /* URLRequestContextGetter */),
-      success_(true),
+    : success_(true),
       oauth2_access_token_(std::string("success token")) {
 }
 
@@ -159,7 +158,9 @@ scoped_ptr<OAuth2TokenService::Request>
 
 static BrowserContextKeyedService* CreateOAuth2TokenService(
     content::BrowserContext* profile) {
-  return new MockProfileOAuth2TokenService();
+  MockProfileOAuth2TokenService* mock = new MockProfileOAuth2TokenService();
+  mock->Initialize(static_cast<Profile*>(profile));
+  return mock;
 }
 
 class ProfileOAuth2TokenServiceRequestTest : public testing::Test {

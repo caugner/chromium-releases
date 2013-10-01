@@ -12,6 +12,7 @@
 #include "ash/wm/workspace_controller.h"
 #include "ash/wm/workspace_controller_test_helper.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
@@ -44,6 +45,37 @@ class WorkspaceEventHandlerTest : public test::AshTestBase {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WorkspaceEventHandlerTest);
+};
+
+// Keeps track of the properties changed of a particular window.
+class WindowPropertyObserver : public aura::WindowObserver {
+ public:
+  explicit WindowPropertyObserver(aura::Window* window)
+      : window_(window) {
+    window->AddObserver(this);
+  }
+
+  virtual ~WindowPropertyObserver() {
+    window_->RemoveObserver(this);
+  }
+
+  bool DidPropertyChange(const void* property) const {
+    return std::find(properties_changed_.begin(),
+                     properties_changed_.end(),
+                     property) != properties_changed_.end();
+  }
+
+ private:
+  virtual void OnWindowPropertyChanged(aura::Window* window,
+                                       const void* key,
+                                       intptr_t old) OVERRIDE {
+    properties_changed_.push_back(key);
+  }
+
+  aura::Window* window_;
+  std::vector<const void*> properties_changed_;
+
+  DISALLOW_COPY_AND_ASSIGN(WindowPropertyObserver);
 };
 
 TEST_F(WorkspaceEventHandlerTest, DoubleClickSingleAxisResizeEdge) {
@@ -215,20 +247,36 @@ TEST_F(WorkspaceEventHandlerTest,
 
 TEST_F(WorkspaceEventHandlerTest, DoubleClickCaptionTogglesMaximize) {
   aura::test::TestWindowDelegate wd;
-  scoped_ptr<aura::Window> window(CreateTestWindow(&wd, gfx::Rect(1, 2, 3, 4)));
+  scoped_ptr<aura::Window> window(
+      CreateTestWindow(&wd, gfx::Rect(1, 2, 30, 40)));
   window->SetProperty(aura::client::kCanMaximizeKey, true);
   wd.set_window_component(HTCAPTION);
   EXPECT_FALSE(wm::IsWindowMaximized(window.get()));
-  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
-                                       window.get());
+  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::test::EventGenerator generator(root, window.get());
   generator.DoubleClickLeftButton();
-  EXPECT_NE("1,2 3x4", window->bounds().ToString());
+  EXPECT_NE("1,2 30x40", window->bounds().ToString());
 
   EXPECT_TRUE(wm::IsWindowMaximized(window.get()));
   generator.DoubleClickLeftButton();
 
   EXPECT_FALSE(wm::IsWindowMaximized(window.get()));
-  EXPECT_EQ("1,2 3x4", window->bounds().ToString());
+  EXPECT_EQ("1,2 30x40", window->bounds().ToString());
+
+  // Double-clicking the middle button shouldn't toggle the maximized state.
+  WindowPropertyObserver observer(window.get());
+  ui::MouseEvent press(ui::ET_MOUSE_PRESSED, generator.current_location(),
+                       generator.current_location(),
+                       ui::EF_MIDDLE_MOUSE_BUTTON | ui::EF_IS_DOUBLE_CLICK);
+  root->AsRootWindowHostDelegate()->OnHostMouseEvent(&press);
+  ui::MouseEvent release(ui::ET_MOUSE_RELEASED, generator.current_location(),
+                         generator.current_location(),
+                         ui::EF_IS_DOUBLE_CLICK);
+  root->AsRootWindowHostDelegate()->OnHostMouseEvent(&release);
+
+  EXPECT_FALSE(wm::IsWindowMaximized(window.get()));
+  EXPECT_EQ("1,2 30x40", window->bounds().ToString());
+  EXPECT_FALSE(observer.DidPropertyChange(aura::client::kShowStateKey));
 }
 
 TEST_F(WorkspaceEventHandlerTest, DoubleTapCaptionTogglesMaximize) {

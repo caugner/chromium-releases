@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -11,13 +13,13 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
 #include "content/public/browser/notification_service.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 
 class InfoBarsTest : public InProcessBrowserTest {
  public:
@@ -39,10 +41,10 @@ class InfoBarsTest : public InProcessBrowserTest {
         chrome::NOTIFICATION_EXTENSION_LOADED,
         content::NotificationService::AllSources());
 
-    ExtensionInstallPrompt* client = new ExtensionInstallPrompt(
-        browser()->tab_strip_model()->GetActiveWebContents());
+    scoped_ptr<ExtensionInstallPrompt> client(new ExtensionInstallPrompt(
+        browser()->tab_strip_model()->GetActiveWebContents()));
     scoped_refptr<extensions::CrxInstaller> installer(
-        extensions::CrxInstaller::Create(service, client));
+        extensions::CrxInstaller::Create(service, client.Pass()));
     installer->set_install_cause(extension_misc::INSTALL_CAUSE_AUTOMATION);
     installer->InstallCrx(path);
 
@@ -51,10 +53,16 @@ class InfoBarsTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(InfoBarsTest, TestInfoBarsCloseOnNewTheme) {
-  ASSERT_TRUE(test_server()->Start());
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ui_test_utils::NavigateToURL(
-      browser(), test_server()->GetURL("files/simple.html"));
+      browser(), embedded_test_server()->GetURL("/simple.html"));
 
   content::WindowedNotificationObserver infobar_added_1(
         chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
@@ -63,7 +71,7 @@ IN_PROC_BROWSER_TEST_F(InfoBarsTest, TestInfoBarsCloseOnNewTheme) {
   infobar_added_1.Wait();
 
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), test_server()->GetURL("files/simple.html"),
+      browser(), embedded_test_server()->GetURL("/simple.html"),
       NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   content::WindowedNotificationObserver infobar_added_2(
         chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,

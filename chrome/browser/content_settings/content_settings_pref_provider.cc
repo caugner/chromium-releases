@@ -13,11 +13,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
@@ -27,7 +27,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using content::UserMetricsAction;
@@ -72,7 +72,7 @@ namespace content_settings {
 //
 
 // static
-void PrefProvider::RegisterUserPrefs(
+void PrefProvider::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterIntegerPref(
       prefs::kContentSettingsVersion,
@@ -398,7 +398,8 @@ void PrefProvider::ReadContentSettingsFromPref(bool overwrite) {
         ParsePatternString(pattern_str);
     if (!pattern_pair.first.IsValid() ||
         !pattern_pair.second.IsValid()) {
-      LOG(DFATAL) << "Invalid pattern strings: " << pattern_str;
+      // TODO: Change this to DFATAL when crbug.com/132659 is fixed.
+      LOG(ERROR) << "Invalid pattern strings: " << pattern_str;
       continue;
     }
 
@@ -547,11 +548,11 @@ void PrefProvider::CanonicalizeContentSettingsExceptions(
   }
 
   for (size_t i = 0; i < move_items.size(); ++i) {
-    Value* pattern_settings_dictionary = NULL;
+    scoped_ptr<Value> pattern_settings_dictionary;
     all_settings_dictionary->RemoveWithoutPathExpansion(
         move_items[i].first, &pattern_settings_dictionary);
     all_settings_dictionary->SetWithoutPathExpansion(
-        move_items[i].second, pattern_settings_dictionary);
+        move_items[i].second, pattern_settings_dictionary.release());
   }
 }
 

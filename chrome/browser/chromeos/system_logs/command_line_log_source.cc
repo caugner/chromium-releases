@@ -11,7 +11,7 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -32,6 +32,16 @@ void ExecuteCommandLines(chromeos::SystemLogsResponse* response) {
   command = CommandLine((base::FilePath("/usr/bin/cras_test_client")));
   command.AppendArg("--dump_server_info");
   commands.push_back(std::make_pair("cras", command));
+
+  command = CommandLine((base::FilePath("/usr/bin/cras_test_client")));
+  command.AppendArg("--loopback_file");
+  command.AppendArg("/dev/null");
+  command.AppendArg("--rate");
+  command.AppendArg("44100");
+  command.AppendArg("--duration_seconds");
+  command.AppendArg("0.01");
+  command.AppendArg("--show_total_rms");
+  commands.push_back(std::make_pair("cras_rms", command));
 
   command = CommandLine((base::FilePath("/usr/bin/printenv")));
   commands.push_back(std::make_pair("env", command));

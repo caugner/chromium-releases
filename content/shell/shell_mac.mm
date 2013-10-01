@@ -14,8 +14,8 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/shell/app/resource.h"
-#include "googleurl/src/gurl.h"
 #import "ui/base/cocoa/underlay_opengl_hosting_window.h"
+#include "url/gurl.h"
 
 #if !defined(MAC_OS_X_VERSION_10_7) || \
     MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
@@ -164,8 +164,11 @@ void Shell::PlatformSetIsLoading(bool loading) {
 }
 
 void Shell::PlatformCreateWindow(int width, int height) {
-  if (headless_)
+  if (headless_) {
+    content_width_ = width;
+    content_height_ = height;
     return;
+  }
 
   NSRect initial_window_bounds =
       NSMakeRect(0, 0, width, height + kURLBarHeight);
@@ -239,12 +242,10 @@ void Shell::PlatformCreateWindow(int width, int height) {
 
 void Shell::PlatformSetContents() {
   NSView* web_view = web_contents_->GetView()->GetNativeView();
+  [web_view setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
 
   if (headless_) {
-    NSRect frame = NSMakeRect(
-        0, 0, kDefaultTestWindowWidthDip, kDefaultTestWindowHeightDip);
-    [web_view setFrame:frame];
-    [web_view setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
+    SizeTo(content_width_, content_height_);
     return;
   }
 
@@ -254,8 +255,17 @@ void Shell::PlatformSetContents() {
   NSRect frame = [content bounds];
   frame.size.height -= kURLBarHeight;
   [web_view setFrame:frame];
-  [web_view setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
   [web_view setNeedsDisplay:YES];
+}
+
+void Shell::SizeTo(int width, int height) {
+  if (!headless_) {
+    NOTREACHED();
+    return;
+  }
+  NSView* web_view = web_contents_->GetView()->GetNativeView();
+  NSRect frame = NSMakeRect(0, 0, width, height);
+  [web_view setFrame:frame];
 }
 
 void Shell::PlatformResizeSubViews() {

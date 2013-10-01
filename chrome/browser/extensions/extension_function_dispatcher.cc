@@ -9,12 +9,12 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/process.h"
-#include "base/process_util.h"
+#include "base/process/process.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/extensions/activity_log/activity_action_constants.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
-#include "chrome/browser/extensions/activity_log/blocked_actions.h"
+#include "chrome/browser/extensions/api/activity_log_private/activity_log_private_api.h"
 #include "chrome/browser/extensions/extension_function_registry.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -36,13 +36,13 @@
 #include "content/public/common/result_codes.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
-#include "third_party/WebKit/public/web/WebSecurityOrigin.h"
-#include "webkit/glue/resource_type.h"
+#include "webkit/common/resource_type.h"
 
+using extensions::api::activity_log_private::BlockedChromeActivityDetail;
 using extensions::Extension;
 using extensions::ExtensionAPI;
+using extensions::Feature;
 using content::RenderViewHost;
-using WebKit::WebSecurityOrigin;
 
 namespace {
 
@@ -63,15 +63,20 @@ void LogSuccess(const std::string& extension_id,
   } else {
     extensions::ActivityLog* activity_log =
         extensions::ActivityLog::GetInstance(profile);
-    activity_log->LogAPIAction(
-        extension_id, api_name, args.get(), std::string());
+    scoped_refptr<extensions::Action> action =
+        new extensions::Action(extension_id,
+                               base::Time::Now(),
+                               extensions::Action::ACTION_API_CALL,
+                               api_name);
+    action->set_args(args.Pass());
+    activity_log->LogAction(action);
   }
 }
 
 void LogFailure(const std::string& extension_id,
                 const std::string& api_name,
                 scoped_ptr<base::ListValue> args,
-                extensions::BlockedAction::Reason reason,
+                BlockedChromeActivityDetail::Reason reason,
                 Profile* profile) {
   // The ActivityLog can only be accessed from the main (UI) thread.  If we're
   // running on the wrong thread, re-dispatch from the main thread.
@@ -87,8 +92,16 @@ void LogFailure(const std::string& extension_id,
   } else {
     extensions::ActivityLog* activity_log =
         extensions::ActivityLog::GetInstance(profile);
-    activity_log->LogBlockedAction(
-        extension_id, api_name, args.get(), reason, std::string());
+    scoped_refptr<extensions::Action> action =
+        new extensions::Action(extension_id,
+                               base::Time::Now(),
+                               extensions::Action::ACTION_API_BLOCKED,
+                               api_name);
+    action->set_args(args.Pass());
+    action->mutable_other()
+        ->SetString(activity_log_constants::kActionBlockedReason,
+                    BlockedChromeActivityDetail::ToString(reason));
+    activity_log->LogAction(action);
   }
 }
 
@@ -155,7 +168,7 @@ void IOThreadResponseCallback(
 
   CommonResponseCallback(ipc_sender.get(),
                          routing_id,
-                         ipc_sender->peer_handle(),
+                         ipc_sender->PeerHandle(),
                          request_id,
                          type,
                          results,
@@ -226,6 +239,11 @@ ExtensionFunctionDispatcher::Delegate::GetAssociatedWebContents() const {
   return NULL;
 }
 
+content::WebContents*
+ExtensionFunctionDispatcher::Delegate::GetVisibleWebContents() const {
+  return GetAssociatedWebContents();
+}
+
 void ExtensionFunctionDispatcher::GetAllFunctionNames(
     std::vector<std::string>* names) {
   ExtensionFunctionRegistry::GetInstance()->GetAllNames(names);
@@ -268,7 +286,7 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
     LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               extensions::BlockedAction::ACCESS_DENIED,
+               BlockedChromeActivityDetail::REASON_ACCESS_DENIED,
                profile_cast);
     return;
   }
@@ -288,7 +306,7 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
     LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               extensions::BlockedAction::ACCESS_DENIED,
+               BlockedChromeActivityDetail::REASON_ACCESS_DENIED,
                profile_cast);
     return;
   }
@@ -308,7 +326,7 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
     LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               extensions::BlockedAction::QUOTA_EXCEEDED,
+               BlockedChromeActivityDetail::REASON_QUOTA_EXCEEDED,
                profile_cast);
     function->OnQuotaExceeded(violation_error);
   }
@@ -357,9 +375,7 @@ void ExtensionFunctionDispatcher::DispatchWithCallback(
   const Extension* extension = service->extensions()->GetByID(
       params.extension_id);
   if (!extension)
-    extension = service->extensions()->GetHostedAppByURL(ExtensionURLInfo(
-        WebSecurityOrigin::createFromString(params.source_origin),
-        params.source_url));
+    extension = service->extensions()->GetHostedAppByURL(params.source_url);
 
   scoped_refptr<ExtensionFunction> function(
       CreateExtensionFunction(params, extension,
@@ -373,7 +389,7 @@ void ExtensionFunctionDispatcher::DispatchWithCallback(
     LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               extensions::BlockedAction::ACCESS_DENIED,
+               BlockedChromeActivityDetail::REASON_ACCESS_DENIED,
                profile());
     return;
   }
@@ -393,7 +409,7 @@ void ExtensionFunctionDispatcher::DispatchWithCallback(
     LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               extensions::BlockedAction::ACCESS_DENIED,
+               BlockedChromeActivityDetail::REASON_ACCESS_DENIED,
                profile());
     return;
   }
@@ -412,7 +428,7 @@ void ExtensionFunctionDispatcher::DispatchWithCallback(
     LogFailure(extension->id(),
                params.name,
                args.Pass(),
-               extensions::BlockedAction::QUOTA_EXCEEDED,
+               BlockedChromeActivityDetail::REASON_QUOTA_EXCEEDED,
                profile());
     function->OnQuotaExceeded(violation_error);
   }
@@ -458,8 +474,8 @@ namespace {
 // to just the permissions they explicitly request. They should not have access
 // to extension APIs like eg chrome.runtime, chrome.windows, etc. that normally
 // are available without permission.
-// TODO(asargent/kalman) - get rid of this when the features system can express
-// the "non permission" permissions.
+// TODO(mpcomplete): move this to ExtensionFunction::HasPermission (or remove
+// it altogether).
 bool AllowHostedAppAPICall(const Extension& extension,
                            const GURL& source_url,
                            const std::string& function_name) {
@@ -469,11 +485,11 @@ bool AllowHostedAppAPICall(const Extension& extension,
   if (!extension.web_extent().MatchesURL(source_url))
     return false;
 
-  // We just allow the hosted app's explicit permissions, plus chrome.test.
-  scoped_refptr<const extensions::PermissionSet> permissions =
-      extension.GetActivePermissions();
-  return (permissions->HasAccessToFunction(function_name, false) ||
-          StartsWithASCII(function_name, "test.", true /*case_sensitive*/));
+  Feature::Availability availability =
+      ExtensionAPI::GetSharedInstance()->IsAvailable(
+          function_name, &extension, Feature::BLESSED_EXTENSION_CONTEXT,
+          source_url);
+  return availability.is_available();
 }
 
 }  // namespace

@@ -11,6 +11,7 @@
 
 namespace content {
 
+class RenderWidgetHostImpl;
 class RenderWidgetHostViewAndroid;
 struct NativeWebKeyboardEvent;
 
@@ -42,6 +43,7 @@ class ImeAdapterAndroid {
   void SetComposingText(JNIEnv*, jobject, jstring text, int new_cursor_pos);
   void ImeBatchStateChanged(JNIEnv*, jobject, jboolean is_begin);
   void CommitText(JNIEnv*, jobject, jstring text);
+  void FinishComposingText(JNIEnv* env, jobject);
   void AttachImeAdapter(JNIEnv*, jobject java_object);
   void SetEditableSelectionOffsets(JNIEnv*, jobject, int start, int end);
   void SetComposingRegion(JNIEnv*, jobject, int start, int end);
@@ -57,6 +59,8 @@ class ImeAdapterAndroid {
   void CancelComposition();
 
  private:
+  RenderWidgetHostImpl* GetRenderWidgetHostImpl();
+
   RenderWidgetHostViewAndroid* rwhva_;
   JavaObjectWeakGlobalRef java_ime_adapter_;
 };

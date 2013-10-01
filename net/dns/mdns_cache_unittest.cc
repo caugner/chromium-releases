@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
+
 #include "base/bind.h"
 #include "net/dns/dns_response.h"
 #include "net/dns/dns_test_util.h"
@@ -19,57 +21,108 @@ namespace net {
 static const uint8 kTestResponsesDifferentAnswers[] = {
   // Answer 1
   // ghs.l.google.com in DNS format.
-  0x03, 'g', 'h', 's',
-  0x01, 'l',
-  0x06, 'g', 'o', 'o', 'g', 'l', 'e',
-  0x03, 'c', 'o', 'm',
+  3, 'g', 'h', 's',
+  1, 'l',
+  6, 'g', 'o', 'o', 'g', 'l', 'e',
+  3, 'c', 'o', 'm',
   0x00,
   0x00, 0x01,         // TYPE is A.
   0x00, 0x01,         // CLASS is IN.
-  0x00, 0x00,         // TTL (4 bytes) is 53 seconds.
-  0x00, 0x35,
-  0x00, 0x04,         // RDLENGTH is 4 bytes.
-  0x4a, 0x7d,         // RDATA is the IP: 74.125.95.121
-  0x5f, 0x79,
+  0, 0, 0, 53,        // TTL (4 bytes) is 53 seconds.
+  0, 4,               // RDLENGTH is 4 bytes.
+  74, 125, 95, 121,   // RDATA is the IP: 74.125.95.121
 
   // Answer 2
   // Pointer to answer 1
   0xc0, 0x00,
   0x00, 0x01,         // TYPE is A.
   0x00, 0x01,         // CLASS is IN.
-  0x00, 0x00,         // TTL (4 bytes) is 53 seconds.
-  0x00, 0x35,
-  0x00, 0x04,         // RDLENGTH is 4 bytes.
-  0x4a, 0x7d,         // RDATA is the IP: 74.125.95.122
-  0x5f, 0x80,
+  0, 0, 0, 53,        // TTL (4 bytes) is 53 seconds.
+  0, 4,               // RDLENGTH is 4 bytes.
+  74, 125, 95, 122,   // RDATA is the IP: 74.125.95.122
 };
 
 static const uint8 kTestResponsesSameAnswers[] = {
   // Answer 1
   // ghs.l.google.com in DNS format.
-  0x03, 'g', 'h', 's',
-  0x01, 'l',
-  0x06, 'g', 'o', 'o', 'g', 'l', 'e',
-  0x03, 'c', 'o', 'm',
+  3, 'g', 'h', 's',
+  1, 'l',
+  6, 'g', 'o', 'o', 'g', 'l', 'e',
+  3, 'c', 'o', 'm',
   0x00,
   0x00, 0x01,         // TYPE is A.
   0x00, 0x01,         // CLASS is IN.
-  0x00, 0x00,         // TTL (4 bytes) is 53 seconds.
-  0x00, 0x35,
-  0x00, 0x04,         // RDLENGTH is 4 bytes.
-  0x4a, 0x7d,         // RDATA is the IP: 74.125.95.121
-  0x5f, 0x79,
+  0, 0, 0, 53,        // TTL (4 bytes) is 53 seconds.
+  0, 4,               // RDLENGTH is 4 bytes.
+  74, 125, 95, 121,   // RDATA is the IP: 74.125.95.121
 
   // Answer 2
   // Pointer to answer 1
   0xc0, 0x00,
   0x00, 0x01,         // TYPE is A.
   0x00, 0x01,         // CLASS is IN.
-  0x00, 0x00,         // TTL (4 bytes) is 112 seconds.
-  0x00, 0x70,
-  0x00, 0x04,         // RDLENGTH is 4 bytes.
-  0x4a, 0x7d,         // RDATA is the IP: 74.125.95.121
-  0x5f, 0x79,
+  0, 0, 0, 112,       // TTL (4 bytes) is 112 seconds.
+  0, 4,               // RDLENGTH is 4 bytes.
+  74, 125, 95, 121,   // RDATA is the IP: 74.125.95.121
+};
+
+static const uint8 kTestResponseTwoRecords[] = {
+  // Answer 1
+  // ghs.l.google.com in DNS format. (A)
+  3, 'g', 'h', 's',
+  1, 'l',
+  6, 'g', 'o', 'o', 'g', 'l', 'e',
+  3, 'c', 'o', 'm',
+  0x00,
+  0x00, 0x01,         // TYPE is A.
+  0x00, 0x01,         // CLASS is IN.
+  0, 0, 0, 53,        // TTL (4 bytes) is 53 seconds.
+  0, 4,               // RDLENGTH is 4 bytes.
+  74, 125, 95, 121,   // RDATA is the IP: 74.125.95.121
+
+  // Answer 2
+  // ghs.l.google.com in DNS format. (AAAA)
+  3, 'g', 'h', 's',
+  1, 'l',
+  6, 'g', 'o', 'o', 'g', 'l', 'e',
+  3, 'c', 'o', 'm',
+  0x00,
+  0x00, 0x1c,         // TYPE is AAA.
+  0x00, 0x01,         // CLASS is IN.
+  0, 0, 0, 53,        // TTL (4 bytes) is 53 seconds.
+  0, 16,              // RDLENGTH is 16 bytes.
+  0x4a, 0x7d, 0x4a, 0x7d,
+  0x5f, 0x79, 0x5f, 0x79,
+  0x5f, 0x79, 0x5f, 0x79,
+  0x5f, 0x79, 0x5f, 0x79,
+};
+
+static const uint8 kTestResponsesGoodbyePacket[] = {
+  // Answer 1
+  // ghs.l.google.com in DNS format. (Goodbye packet)
+  3, 'g', 'h', 's',
+  1, 'l',
+  6, 'g', 'o', 'o', 'g', 'l', 'e',
+  3, 'c', 'o', 'm',
+  0x00,
+  0x00, 0x01,         // TYPE is A.
+  0x00, 0x01,         // CLASS is IN.
+  0, 0, 0, 0,         // TTL (4 bytes) is zero.
+  0, 4,               // RDLENGTH is 4 bytes.
+  74, 125, 95, 121,   // RDATA is the IP: 74.125.95.121
+
+  // Answer 2
+  // ghs.l.google.com in DNS format.
+  3, 'g', 'h', 's',
+  1, 'l',
+  6, 'g', 'o', 'o', 'g', 'l', 'e',
+  3, 'c', 'o', 'm',
+  0x00,
+  0x00, 0x01,         // TYPE is A.
+  0x00, 0x01,         // CLASS is IN.
+  0, 0, 0, 53,        // TTL (4 bytes) is 53 seconds.
+  0, 4,               // RDLENGTH is 4 bytes.
+  74, 125, 95, 121,   // RDATA is the IP: 74.125.95.121
 };
 
 class RecordRemovalMock {
@@ -231,4 +284,92 @@ TEST_F(MDnsCacheTest, RecordPreemptExpirationTime) {
   EXPECT_EQ(default_time_ + ttl1, cache_.next_expiration());
 }
 
-} // namespace net
+// Test that the cache handles mDNS "goodbye" packets correctly, not adding the
+// records to the cache if they are not already there, and eventually removing
+// records from the cache if they are.
+TEST_F(MDnsCacheTest, GoodbyePacket) {
+  DnsRecordParser parser(kTestResponsesGoodbyePacket,
+                         sizeof(kTestResponsesGoodbyePacket),
+                         0);
+
+  scoped_ptr<const RecordParsed> record_goodbye;
+  scoped_ptr<const RecordParsed> record_hello;
+  scoped_ptr<const RecordParsed> record_goodbye2;
+  std::vector<const RecordParsed*> results;
+
+  record_goodbye = RecordParsed::CreateFrom(&parser, default_time_);
+  record_hello = RecordParsed::CreateFrom(&parser, default_time_);
+  parser = DnsRecordParser(kTestResponsesGoodbyePacket,
+                           sizeof(kTestResponsesGoodbyePacket),
+                           0);
+  record_goodbye2 = RecordParsed::CreateFrom(&parser, default_time_);
+
+  base::TimeDelta ttl = base::TimeDelta::FromSeconds(record_hello->ttl());
+
+  EXPECT_EQ(base::Time(), cache_.next_expiration());
+  EXPECT_EQ(MDnsCache::NoChange, cache_.UpdateDnsRecord(record_goodbye.Pass()));
+  EXPECT_EQ(base::Time(), cache_.next_expiration());
+  EXPECT_EQ(MDnsCache::RecordAdded,
+            cache_.UpdateDnsRecord(record_hello.Pass()));
+  EXPECT_EQ(default_time_ + ttl, cache_.next_expiration());
+  EXPECT_EQ(MDnsCache::NoChange,
+            cache_.UpdateDnsRecord(record_goodbye2.Pass()));
+  EXPECT_EQ(default_time_ + base::TimeDelta::FromSeconds(1),
+            cache_.next_expiration());
+}
+
+TEST_F(MDnsCacheTest, AnyRRType) {
+  DnsRecordParser parser(kTestResponseTwoRecords,
+                         sizeof(kTestResponseTwoRecords),
+                         0);
+
+  scoped_ptr<const RecordParsed> record1;
+  scoped_ptr<const RecordParsed> record2;
+  std::vector<const RecordParsed*> results;
+
+  record1 = RecordParsed::CreateFrom(&parser, default_time_);
+  record2 = RecordParsed::CreateFrom(&parser, default_time_);
+  EXPECT_EQ(MDnsCache::RecordAdded, cache_.UpdateDnsRecord(record1.Pass()));
+  EXPECT_EQ(MDnsCache::RecordAdded, cache_.UpdateDnsRecord(record2.Pass()));
+
+  cache_.FindDnsRecords(0, "ghs.l.google.com", &results, default_time_);
+
+  EXPECT_EQ(2u, results.size());
+  EXPECT_EQ(default_time_, results.front()->time_created());
+
+  EXPECT_EQ("ghs.l.google.com", results[0]->name());
+  EXPECT_EQ("ghs.l.google.com", results[1]->name());
+  EXPECT_EQ(dns_protocol::kTypeA,
+            std::min(results[0]->type(), results[1]->type()));
+  EXPECT_EQ(dns_protocol::kTypeAAAA,
+            std::max(results[0]->type(), results[1]->type()));
+}
+
+TEST_F(MDnsCacheTest, RemoveRecord) {
+  DnsRecordParser parser(kT1ResponseDatagram, sizeof(kT1ResponseDatagram),
+                         sizeof(dns_protocol::Header));
+  parser.SkipQuestion();
+
+  scoped_ptr<const RecordParsed> record1;
+  std::vector<const RecordParsed*> results;
+
+  record1 = RecordParsed::CreateFrom(&parser, default_time_);
+  EXPECT_EQ(MDnsCache::RecordAdded, cache_.UpdateDnsRecord(record1.Pass()));
+
+  cache_.FindDnsRecords(dns_protocol::kTypeCNAME, "codereview.chromium.org",
+                        &results, default_time_);
+
+  EXPECT_EQ(1u, results.size());
+
+  scoped_ptr<const RecordParsed> record_out =
+      cache_.RemoveRecord(results.front());
+
+  EXPECT_EQ(record_out.get(), results.front());
+
+  cache_.FindDnsRecords(dns_protocol::kTypeCNAME, "codereview.chromium.org",
+                        &results, default_time_);
+
+  EXPECT_EQ(0u, results.size());
+}
+
+}  // namespace net

@@ -15,7 +15,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/storage_monitor/mock_removable_storage_observer.h"
@@ -23,6 +23,8 @@
 #include "chrome/browser/storage_monitor/storage_info.h"
 #include "chrome/browser/storage_monitor/storage_monitor.h"
 #include "chrome/browser/storage_monitor/test_media_transfer_protocol_manager_linux.h"
+#include "chrome/browser/storage_monitor/test_storage_monitor.h"
+#include "chrome/test/base/testing_browser_process.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -181,8 +183,13 @@ class StorageMonitorLinuxTest : public testing::Test {
                 arraysize(initial_test_data),
                 true  /* overwrite */);
 
-    // Initialize the test subject.
-    monitor_.reset(new TestStorageMonitorLinux(mtab_file_, &message_loop_));
+    test::TestStorageMonitor::RemoveSingleton();
+    monitor_ = new TestStorageMonitorLinux(mtab_file_, &message_loop_);
+    scoped_ptr<StorageMonitor> pass_monitor(monitor_);
+    TestingBrowserProcess* browser_process = TestingBrowserProcess::GetGlobal();
+    DCHECK(browser_process);
+    browser_process->SetStorageMonitor(pass_monitor.Pass());
+
     mock_storage_observer_.reset(new MockRemovableStorageObserver);
     monitor_->AddObserver(mock_storage_observer_.get());
 
@@ -193,7 +200,10 @@ class StorageMonitorLinuxTest : public testing::Test {
   virtual void TearDown() OVERRIDE {
     base::RunLoop().RunUntilIdle();
     monitor_->RemoveObserver(mock_storage_observer_.get());
-    monitor_.reset();
+    base::RunLoop().RunUntilIdle();
+
+    // Linux storage monitor must be destroyed on the UI thread, so do it here.
+    test::TestStorageMonitor::RemoveSingleton();
     base::RunLoop().RunUntilIdle();
   }
 
@@ -235,7 +245,7 @@ class StorageMonitorLinuxTest : public testing::Test {
   void RemoveDCIMDirFromMountPoint(const std::string& dir) {
     base::FilePath dcim =
         scoped_temp_dir_.path().AppendASCII(dir).Append(kDCIMDirectoryName);
-    file_util::Delete(dcim, false);
+    base::DeleteFile(dcim, false);
   }
 
   MockRemovableStorageObserver& observer() {
@@ -243,7 +253,7 @@ class StorageMonitorLinuxTest : public testing::Test {
   }
 
   StorageMonitor* notifier() {
-    return monitor_.get();
+    return monitor_;
   }
 
   uint64 GetStorageSize(const base::FilePath& path) {
@@ -316,7 +326,7 @@ class StorageMonitorLinuxTest : public testing::Test {
   // Path to the test mtab file.
   base::FilePath mtab_file_;
 
-  scoped_ptr<TestStorageMonitorLinux> monitor_;
+  TestStorageMonitorLinux* monitor_;
 
   DISALLOW_COPY_AND_ASSIGN(StorageMonitorLinuxTest);
 };
@@ -558,7 +568,7 @@ TEST_F(StorageMonitorLinuxTest, MultipleMountPointsWithNonDCIMDevices) {
   MtabTestData test_data5[] = {
     MtabTestData(kDeviceNoDCIM, test_path_b.value(), kValidFS),
   };
-  file_util::Delete(test_path_b.Append(kDCIMDirectoryName), false);
+  base::DeleteFile(test_path_b.Append(kDCIMDirectoryName), false);
   AppendToMtabAndRunLoop(test_data5, arraysize(test_data5));
   EXPECT_EQ(4, observer().attach_calls());
   EXPECT_EQ(2, observer().detach_calls());

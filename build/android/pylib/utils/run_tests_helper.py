@@ -2,10 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Helper functions common to native, java and python test runners."""
+"""Helper functions common to native, java and host-driven test runners."""
 
 import logging
-import os
+import sys
 import time
 
 
@@ -30,14 +30,6 @@ class CustomFormatter(logging.Formatter):
     return '%s %ss %s' % (record.levelname[0], timediff.rjust(4), msg)
 
 
-def GetExpectations(file_name):
-  """Returns a list of test names in the |file_name| test expectations file."""
-  if not file_name or not os.path.exists(file_name):
-    return []
-  return [x for x in [x.strip() for x in file(file_name).readlines()]
-          if x and x[0] != '#']
-
-
 def SetLogLevel(verbose_count):
   """Sets log level as |verbose_count|."""
   log_level = logging.WARNING  # Default.
@@ -47,6 +39,6 @@ def SetLogLevel(verbose_count):
     log_level = logging.DEBUG
   logger = logging.getLogger()
   logger.setLevel(log_level)
-  custom_handler = logging.StreamHandler()
+  custom_handler = logging.StreamHandler(sys.stdout)
   custom_handler.setFormatter(CustomFormatter())
   logging.getLogger().addHandler(custom_handler)

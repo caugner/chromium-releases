@@ -18,6 +18,10 @@ from telemetry.core.timeline import model
 class TracingUnsupportedException(Exception):
   pass
 
+# This class supports legacy format of trace presentation within DevTools
+# protocol, where trace data were sent as JSON-serialized strings. DevTools
+# now send the data as raw objects within the protocol message JSON, so there's
+# no need in extra de-serialization. We might want to remove this in the future.
 class TraceResultImpl(object):
   def __init__(self, tracing_data):
     self._tracing_data = tracing_data
@@ -43,7 +47,23 @@ class TraceResultImpl(object):
   def AsTimelineModel(self):
     f = cStringIO.StringIO()
     self.Serialize(f)
-    return model.TimelineModel(event_data=f.getvalue())
+    return model.TimelineModel(
+      event_data=f.getvalue(),
+      shift_world_to_zero=False)
+
+# RawTraceResultImpl differs from TraceResultImpl above in that
+# data are kept as a list of dicts, not strings.
+class RawTraceResultImpl(object):
+  def __init__(self, tracing_data):
+    self._tracing_data = tracing_data
+
+  def Serialize(self, f):
+    f.write('{"traceEvents":')
+    json.dump(self._tracing_data, f)
+    f.write('}')
+
+  def AsTimelineModel(self):
+    return model.TimelineModel(self._tracing_data)
 
 class TracingBackend(object):
   def __init__(self, devtools_port):
@@ -54,12 +74,12 @@ class TracingBackend(object):
     self._thread = None
     self._tracing_data = []
 
-  def BeginTracing(self, custom_categories=None):
+  def BeginTracing(self, custom_categories=None, timeout=10):
     self._CheckNotificationSupported()
     req = {'method': 'Tracing.start'}
     if custom_categories:
       req['params'] = {'categories': custom_categories}
-    self._SyncRequest(req)
+    self._SyncRequest(req, timeout)
     # Tracing.start will send asynchronous notifications containing trace
     # data, until Tracing.end is called.
     self._thread = threading.Thread(target=self._TracingReader)
@@ -73,10 +93,12 @@ class TracingBackend(object):
 
   def GetTraceResultAndReset(self):
     assert not self._thread
-    ret = trace_result.TraceResult(
-      TraceResultImpl(self._tracing_data))
+    if self._tracing_data and type(self._tracing_data[0]) in [str, unicode]:
+      result_impl = TraceResultImpl(self._tracing_data)
+    else:
+      result_impl = RawTraceResultImpl(self._tracing_data)
     self._tracing_data = []
-    return ret
+    return trace_result.TraceResult(result_impl)
 
   def Close(self):
     if self._socket:
@@ -93,7 +115,12 @@ class TracingBackend(object):
         logging.debug('got [%s]', data)
         if 'Tracing.dataCollected' == res.get('method'):
           value = res.get('params', {}).get('value')
-          self._tracing_data.append(value)
+          if type(value) in [str, unicode]:
+            self._tracing_data.append(value)
+          elif type(value) is list:
+            self._tracing_data.extend(value)
+          else:
+            logging.warning('Unexpected type in tracing data')
         elif 'Tracing.tracingComplete' == res.get('method'):
           break
       except (socket.error, websocket.WebSocketException):

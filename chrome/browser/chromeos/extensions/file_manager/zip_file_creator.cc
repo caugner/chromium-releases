@@ -8,7 +8,7 @@
 #include "base/command_line.h"
 #include "base/files/file_util_proxy.h"
 #include "base/memory/scoped_handle.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/common/chrome_paths.h"
@@ -23,7 +23,7 @@
 using content::BrowserThread;
 using content::UtilityProcessHost;
 
-namespace extensions {
+namespace file_manager {
 
 ZipFileCreator::ZipFileCreator(
     Observer* observer,
@@ -96,7 +96,8 @@ void ZipFileCreator::StartProcessOnIOThread(base::PlatformFile dest_file) {
   dest_fd.auto_close = true;
 
   UtilityProcessHost* host = UtilityProcessHost::Create(
-      this, BrowserThread::GetMessageLoopProxyForThread(thread_identifier_));
+      this,
+      BrowserThread::GetMessageLoopProxyForThread(thread_identifier_).get());
   host->Send(new ChromeUtilityMsg_CreateZipFile(src_dir_, src_relative_paths_,
                                                 dest_fd));
 }
@@ -122,4 +123,4 @@ void ZipFileCreator::ReportDone(bool success) {
   observer_->OnZipDone(success);
 }
 
-}  // namespace extensions
+}  // namespace file_manager

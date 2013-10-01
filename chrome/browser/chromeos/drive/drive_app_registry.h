@@ -14,7 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace base {
 class FilePath;
@@ -22,7 +22,7 @@ class FilePath;
 
 namespace google_apis {
 class AppList;
-}  // namespace AppList
+}  // namespace google_apis
 
 namespace drive {
 
@@ -144,6 +144,8 @@ class DriveAppRegistry {
 
   // Map of MIME type to application info.
   DriveAppFileSelectorMap app_mimetypes_map_;
+
+  bool is_updating_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -236,7 +236,7 @@ TEST_F(BookmarkIndexTest, GetResultsSortedByTypedCount) {
   content::TestBrowserThreadBundle thread_bundle;
 
   TestingProfile profile;
-  profile.CreateHistoryService(true, false);
+  ASSERT_TRUE(profile.CreateHistoryService(true, false));
   profile.BlockUntilHistoryProcessesPendingRequests();
   profile.CreateBookmarkModel(true);
 

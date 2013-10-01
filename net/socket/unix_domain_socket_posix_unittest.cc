@@ -23,7 +23,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
@@ -183,7 +183,7 @@ class UnixDomainSocketTestHelper : public testing::Test {
 
   void DeleteSocketFile() {
     ASSERT_FALSE(file_path_.empty());
-    file_util::Delete(file_path_, false /* not recursive */);
+    base::DeleteFile(file_path_, false /* not recursive */);
   }
 
   SocketDescriptor CreateClientSocket() {

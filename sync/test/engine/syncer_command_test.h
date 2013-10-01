@@ -11,7 +11,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "sync/engine/model_changing_syncer_command.h"
 #include "sync/engine/traffic_recorder.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
@@ -22,7 +22,7 @@
 #include "sync/test/engine/fake_model_worker.h"
 #include "sync/test/engine/mock_connection_manager.h"
 #include "sync/test/engine/test_directory_setter_upper.h"
-#include "sync/test/fake_extensions_activity_monitor.h"
+#include "sync/util/extensions_activity.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -103,24 +103,8 @@ class SyncerCommandTestBase : public testing::Test,
 
   // Lazily create a session requesting all datatypes with no state.
   sessions::SyncSession* session() {
-    ModelTypeInvalidationMap types =
-        ModelSafeRoutingInfoToInvalidationMap(routing_info_, std::string());
-    return session(sessions::SyncSourceInfo(types));
-  }
-
-  // Create a session with the provided source.
-  sessions::SyncSession* session(const sessions::SyncSourceInfo& source) {
-    // These sources require a valid nudge tracker.
-    DCHECK_NE(sync_pb::GetUpdatesCallerInfo::LOCAL, source.updates_source);
-    DCHECK_NE(sync_pb::GetUpdatesCallerInfo::NOTIFICATION,
-              source.updates_source);
-    DCHECK_NE(sync_pb::GetUpdatesCallerInfo::DATATYPE_REFRESH,
-              source.updates_source);
-    if (!session_.get()) {
-      std::vector<ModelSafeWorker*> workers = GetWorkers();
-      session_.reset(
-          sessions::SyncSession::Build(context(), delegate(), source));
-    }
+    if (!session_.get())
+      session_.reset(sessions::SyncSession::Build(context(), delegate()));
     return session_.get();
   }
 
@@ -131,11 +115,12 @@ class SyncerCommandTestBase : public testing::Test,
   void ResetContext() {
     context_.reset(new sessions::SyncSessionContext(
             mock_server_.get(), directory(),
-            GetWorkers(), &extensions_activity_monitor_,
+            GetWorkers(), extensions_activity_.get(),
             std::vector<SyncEngineEventListener*>(),
             &mock_debug_info_getter_,
             &traffic_recorder_,
             true,  // enable keystore encryption
+            false,  // force enable pre-commit GU avoidance experiment
             "fake_invalidator_client_id"));
     context_->set_routing_info(routing_info_);
     context_->set_account_name(directory()->name());
@@ -209,7 +194,7 @@ class SyncerCommandTestBase : public testing::Test,
   std::vector<scoped_refptr<ModelSafeWorker> > workers_;
   ModelSafeRoutingInfo routing_info_;
   NiceMock<MockDebugInfoGetter> mock_debug_info_getter_;
-  FakeExtensionsActivityMonitor extensions_activity_monitor_;
+  scoped_refptr<ExtensionsActivity> extensions_activity_;
   TrafficRecorder traffic_recorder_;
   DISALLOW_COPY_AND_ASSIGN(SyncerCommandTestBase);
 };

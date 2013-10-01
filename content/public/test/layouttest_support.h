@@ -6,19 +6,15 @@
 #define CONTENT_PUBLIC_TEST_LAYOUTTEST_SUPPORT_H_
 
 #include "base/callback_forward.h"
-#include "base/memory/ref_counted.h"
 
 namespace WebKit {
+class WebDeviceMotionData;
 class WebGamepads;
 struct WebSize;
 }
 
 namespace WebTestRunner {
 class WebTestProxyBase;
-}
-
-namespace base {
-class MessageLoopProxy;
 }
 
 namespace content {
@@ -43,6 +39,10 @@ void EnableWebTestProxyCreation(const base::Callback<
 // Sets the WebGamepads that should be returned by
 // WebKitPlatformSupport::sampleGamepads().
 void SetMockGamepads(const WebKit::WebGamepads& pads);
+
+// Sets WebDeviceMotionData that should be used when registering
+// a listener through WebKitPlatformSupport::setDeviceMotionListener().
+void SetMockDeviceMotionData(const WebKit::WebDeviceMotionData& data);
 
 // Returns the length of the local session history of a render view.
 int GetLocalSessionHistoryLength(RenderView* render_view);
@@ -69,11 +69,8 @@ void EnableAutoResizeMode(RenderView* render_view,
 void DisableAutoResizeMode(RenderView* render_view,
                            const WebKit::WebSize& new_size);
 
-// Return the thread on which media operations should run.
-//
-// TODO(scherkus): We should be using RenderViewImpl::createMediaPlayer(), see
-// http://crbug.com/239826
-scoped_refptr<base::MessageLoopProxy> GetMediaThreadMessageLoopProxy();
+// Forces the |render_view| to use mock media streams.
+void UseMockMediaStreams(RenderView* render_view);
 
 }  // namespace content
 

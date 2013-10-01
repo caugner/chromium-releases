@@ -14,37 +14,38 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_changed_details.h"
-#include "chrome/browser/favicon/imported_favicon_usage.h"
 #include "chrome/browser/history/download_row.h"
 #include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_publisher.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
+#include "chrome/browser/history/page_collector.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/select_favicon_frames.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/history/typed_url_syncable_service.h"
 #include "chrome/browser/history/visit_filter.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/importer/imported_favicon_usage.h"
 #include "chrome/common/url_constants.h"
-#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "sql/error_delegate_util.h"
+#include "url/gurl.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/history/android/android_provider_backend.h"
@@ -68,10 +69,6 @@ using base::TimeTicks;
       VisitDatabase (stores a list of visits for the URLs)
 
       (this does not store visit segments as they expire after 3 mos.)
-
-    TextDatabaseManager (manages multiple text database for different times)
-      TextDatabase (represents a single month of full-text index).
-      ...more TextDatabase objects...
 
     ExpireHistoryBackend (manages moving things from HistoryDatabase to
                           the ArchivedDatabase and deleting)
@@ -169,53 +166,6 @@ class CommitLaterTask : public base::RefCounted<CommitLaterTask> {
   scoped_refptr<HistoryBackend> history_backend_;
 };
 
-// Handles querying first the main database, then the full text database if that
-// fails. It will optionally keep track of all URLs seen so duplicates can be
-// eliminated. This is used by the querying sub-functions.
-//
-// TODO(brettw): This class may be able to be simplified or eliminated. After
-// this was written, QueryResults can efficiently look up by URL, so the need
-// for this extra set of previously queried URLs is less important.
-class HistoryBackend::URLQuerier {
- public:
-  URLQuerier(URLDatabase* main_db, URLDatabase* archived_db, bool track_unique)
-      : main_db_(main_db),
-        archived_db_(archived_db),
-        track_unique_(track_unique) {
-  }
-
-  // When we're tracking unique URLs, returns true if this URL has been
-  // previously queried. Only call when tracking unique URLs.
-  bool HasURL(const GURL& url) {
-    DCHECK(track_unique_);
-    return unique_urls_.find(url) != unique_urls_.end();
-  }
-
-  bool GetRowForURL(const GURL& url, URLRow* row) {
-    if (!main_db_->GetRowForURL(url, row)) {
-      if (!archived_db_ || !archived_db_->GetRowForURL(url, row)) {
-        // This row is neither in the main nor the archived DB.
-        return false;
-      }
-    }
-
-    if (track_unique_)
-      unique_urls_.insert(url);
-    return true;
-  }
-
- private:
-  URLDatabase* main_db_;  // Guaranteed non-NULL.
-  URLDatabase* archived_db_;  // Possibly NULL.
-
-  bool track_unique_;
-
-  // When track_unique_ is set, this is updated with every URL seen so far.
-  std::set<GURL> unique_urls_;
-
-  DISALLOW_COPY_AND_ASSIGN(URLQuerier);
-};
-
 // HistoryBackend --------------------------------------------------------------
 
 HistoryBackend::HistoryBackend(const base::FilePath& history_dir,
@@ -252,7 +202,7 @@ HistoryBackend::~HistoryBackend() {
   }
 
 #if defined(OS_ANDROID)
-  file_util::Delete(GetAndroidCacheFileName(), false);
+  sql::Connection::Delete(GetAndroidCacheFileName());
 #endif
 }
 
@@ -261,6 +211,8 @@ void HistoryBackend::Init(const std::string& languages, bool force_fail) {
     InitImpl(languages);
   delegate_->DBLoaded(id_);
   typed_url_syncable_service_.reset(new TypedUrlSyncableService(this));
+  memory_pressure_listener_.reset(new base::MemoryPressureListener(
+      base::Bind(&HistoryBackend::OnMemoryPressure, base::Unretained(this))));
 #if defined(OS_ANDROID)
   PopulateMostVisitedURLMap();
 #endif
@@ -581,7 +533,7 @@ void HistoryBackend::AddPage(const HistoryAddPageArgs& request) {
     }
 
     // Last, save this redirect chain for later so we can set titles & favicons
-    // on the redirected pages properly. It is indexed by the destination page.
+    // on the redirected pages properly.
     recent_redirects_.Put(request.url, redirects);
   }
 
@@ -599,10 +551,8 @@ void HistoryBackend::AddPage(const HistoryAddPageArgs& request) {
                       last_ids.second);
   }
 
-  if (text_database_) {
-    text_database_->AddPageURL(request.url, last_ids.first, last_ids.second,
-                               request.time);
-  }
+  if (page_collector_)
+    page_collector_->AddPageURL(request.url, request.time);
 
   ScheduleCommit();
 }
@@ -616,11 +566,13 @@ void HistoryBackend::InitImpl(const std::string& languages) {
 
   TimeTicks beginning_time = TimeTicks::Now();
 
-  // Compute the file names. Note that the index file can be removed when the
-  // text db manager is finished being hooked up.
+  // Compute the file names.
   base::FilePath history_name = history_dir_.Append(chrome::kHistoryFilename);
   base::FilePath thumbnail_name = GetThumbnailFileName();
   base::FilePath archived_name = GetArchivedFileName();
+
+  // Delete the old index database files which are no longer used.
+  DeleteFTSIndexDatabases();
 
   // History database.
   db_.reset(new HistoryDatabase());
@@ -661,8 +613,11 @@ void HistoryBackend::InitImpl(const std::string& languages) {
     delete mem_backend;  // Error case, run without the in-memory DB.
   db_->BeginExclusiveMode();  // Must be after the mem backend read the data.
 
-  // Create the history publisher which needs to be passed on to the text and
-  // thumbnail databases for publishing history.
+  // Create the history publisher which needs to be passed on to the thumbnail
+  // database for publishing history.
+  // TODO(shess): HistoryPublisher is being deprecated.  I am still
+  // trying to track down who depends on it, meanwhile talk to me
+  // before removing interactions with it.  http://crbug.com/294306
   history_publisher_.reset(new HistoryPublisher());
   if (!history_publisher_->Init()) {
     // The init may fail when there are no indexers wanting our history.
@@ -670,20 +625,10 @@ void HistoryBackend::InitImpl(const std::string& languages) {
     history_publisher_.reset();
   }
 
-  // Full-text database. This has to be first so we can pass it to the
-  // HistoryDatabase for migration.
-  text_database_.reset(new TextDatabaseManager(history_dir_,
-                                               db_.get(), db_.get()));
-  if (!text_database_->Init(history_publisher_.get())) {
-    LOG(WARNING) << "Text database initialization failed, running without it.";
-    text_database_.reset();
-  }
-  if (db_->needs_version_17_migration()) {
-    // See needs_version_17_migration() decl for more. In this case, we want
-    // to erase all the text database files. This must be done after the text
-    // database manager has been initialized, since it knows about all the
-    // files it manages.
-    text_database_->DeleteAll();
+  // Collects page data for history_publisher_.
+  if (history_publisher_.get()) {
+    page_collector_.reset(new PageCollector());
+    page_collector_->Init(history_publisher_.get());
   }
 
   // Thumbnail database.
@@ -714,7 +659,7 @@ void HistoryBackend::InitImpl(const std::string& languages) {
     // See needs_version_17_migration() decl for more. In this case, we want
     // to delete the archived database and need to do so before we try to
     // open the file. We can ignore any error (maybe the file doesn't exist).
-    file_util::Delete(archived_name, false);
+    sql::Connection::Delete(archived_name);
   }
   archived_db_.reset(new ArchivedDatabase());
   if (!archived_db_->Init(archived_name)) {
@@ -727,7 +672,8 @@ void HistoryBackend::InitImpl(const std::string& languages) {
   if (base::RandInt(1, 100) == 50) {
     // Only do this computation sometimes since it can be expensive.
     db_->ComputeDatabaseMetrics(history_name);
-    thumbnail_db_->ComputeDatabaseMetrics();
+    if (thumbnail_db_)
+      thumbnail_db_->ComputeDatabaseMetrics();
   }
 
   // Tell the expiration module about all the nice databases we made. This must
@@ -737,8 +683,7 @@ void HistoryBackend::InitImpl(const std::string& languages) {
   // *sigh*, this can all be cleaned up when that migration code is removed.
   // The main DB initialization should intuitively be first (not that it
   // actually matters) and the expirer should be set last.
-  expirer_.SetDatabases(db_.get(), archived_db_.get(),
-                        thumbnail_db_.get(), text_database_.get());
+  expirer_.SetDatabases(db_.get(), archived_db_.get(), thumbnail_db_.get());
 
   // Open the long-running transaction.
   db_->BeginTransaction();
@@ -746,8 +691,6 @@ void HistoryBackend::InitImpl(const std::string& languages) {
     thumbnail_db_->BeginTransaction();
   if (archived_db_)
     archived_db_->BeginTransaction();
-  if (text_database_)
-    text_database_->BeginTransaction();
 
   // Get the first item in our database.
   db_->GetStartDate(&first_recorded_time_);
@@ -767,6 +710,18 @@ void HistoryBackend::InitImpl(const std::string& languages) {
                   TimeTicks::Now() - beginning_time);
 }
 
+void HistoryBackend::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  bool trim_aggressively = memory_pressure_level ==
+      base::MemoryPressureListener::MEMORY_PRESSURE_CRITICAL;
+  if (db_)
+    db_->TrimMemory(trim_aggressively);
+  if (thumbnail_db_)
+    thumbnail_db_->TrimMemory(trim_aggressively);
+  if (archived_db_)
+    archived_db_->TrimMemory(trim_aggressively);
+}
+
 void HistoryBackend::CloseAllDatabases() {
   if (db_) {
     // Commit the long-running transaction.
@@ -780,10 +735,6 @@ void HistoryBackend::CloseAllDatabases() {
   if (archived_db_) {
     archived_db_->CommitTransaction();
     archived_db_.reset();
-  }
-  if (text_database_) {
-    text_database_->CommitTransaction();
-    text_database_.reset();
   }
 }
 
@@ -848,14 +799,6 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
       return std::make_pair(0, 0);
     }
     url_info.id_ = url_id;
-
-    // We don't actually add the URL to the full text index at this point. It
-    // might be nice to do this so that even if we get no title or body, the
-    // user can search for URL components and get the page.
-    //
-    // However, in most cases, we'll get at least a title and usually contents,
-    // and this add will be redundant, slowing everything down. As a result,
-    // we ignore this edge case.
   }
 
   // Add the visit with the time to the database.
@@ -925,24 +868,10 @@ void HistoryBackend::AddPagesWithDetails(const URLRows& urls,
       }
     }
 
-    // Add the page to the full text index. This function is also used for
-    // importing. Even though we don't have page contents, we can at least
-    // add the title and URL to the index so they can be searched. We don't
-    // bother to delete any already-existing FTS entries for the URL, since
-    // this is normally called on import.
-    //
-    // If you ever import *after* first run (selecting import from the menu),
-    // then these additional entries will "shadow" the originals when querying
-    // for the most recent match only, and the user won't get snippets. This is
-    // a very minor issue, and fixing it will make import slower, so we don't
-    // bother.
-    bool has_indexed = false;
-    if (text_database_) {
-      // We do not have to make it update the visit database, below, we will
-      // create the visit entry with the indexed flag set.
-      has_indexed = text_database_->AddPageData(i->url(), url_id, 0,
-                                                i->last_visit(),
-                                                i->title(), string16());
+    // TODO(shess): I'm not sure this case needs to exist anymore.
+    if (page_collector_) {
+      page_collector_->AddPageData(i->url(), i->last_visit(),
+                                   i->title(), string16());
     }
 
     // Sync code manages the visits itself.
@@ -953,7 +882,6 @@ void HistoryBackend::AddPagesWithDetails(const URLRows& urls,
                               content::PAGE_TRANSITION_LINK |
                               content::PAGE_TRANSITION_CHAIN_START |
                               content::PAGE_TRANSITION_CHAIN_END), 0);
-      visit_info.is_indexed = has_indexed;
       if (!visit_database->AddVisit(&visit_info, visit_source)) {
         NOTREACHED() << "Adding visit failed.";
         return;
@@ -983,14 +911,12 @@ bool HistoryBackend::IsExpiredVisitTime(const base::Time& time) {
   return time < expirer_.GetCurrentArchiveTime();
 }
 
-void HistoryBackend::SetPageTitle(const GURL& url,
-                                  const string16& title) {
+void HistoryBackend::SetPageTitle(const GURL& url, const string16& title) {
   if (!db_)
     return;
 
-  // Update the full text index.
-  if (text_database_)
-    text_database_->AddPageTitle(url, title);
+  if (page_collector_)
+    page_collector_->AddPageTitle(url, title);
 
   // Search for recent redirects which should get the same title. We make a
   // dummy list containing the exact URL visited if there are no redirects so
@@ -1295,9 +1221,9 @@ void HistoryBackend::GetMostRecentKeywordSearchTerms(
 
 // Downloads -------------------------------------------------------------------
 
-void HistoryBackend::GetNextDownloadId(int* id) {
+void HistoryBackend::GetNextDownloadId(uint32* next_id) {
   if (db_)
-    *id = db_->next_download_id();
+    db_->GetNextDownloadId(next_id);
 }
 
 // Get all the download entries from the database.
@@ -1315,43 +1241,45 @@ void HistoryBackend::UpdateDownload(const history::DownloadRow& data) {
 }
 
 void HistoryBackend::CreateDownload(const history::DownloadRow& history_info,
-                                    int64* db_handle) {
+                                    bool* success) {
   if (!db_)
     return;
-  *db_handle = db_->CreateDownload(history_info);
+  *success = db_->CreateDownload(history_info);
   ScheduleCommit();
 }
 
-void HistoryBackend::RemoveDownloads(const std::set<int64>& handles) {
+void HistoryBackend::RemoveDownloads(const std::set<uint32>& ids) {
   if (!db_)
     return;
-  int downloads_count_before = db_->CountDownloads();
+  size_t downloads_count_before = db_->CountDownloads();
   base::TimeTicks started_removing = base::TimeTicks::Now();
   // HistoryBackend uses a long-running Transaction that is committed
   // periodically, so this loop doesn't actually hit the disk too hard.
-  for (std::set<int64>::const_iterator it = handles.begin();
-       it != handles.end(); ++it) {
+  for (std::set<uint32>::const_iterator it = ids.begin();
+       it != ids.end(); ++it) {
     db_->RemoveDownload(*it);
   }
-  base::TimeTicks finished_removing = base::TimeTicks::Now();
-  int downloads_count_after = db_->CountDownloads();
-  int num_downloads_deleted = downloads_count_before - downloads_count_after;
-  if (num_downloads_deleted >= 0) {
-    UMA_HISTOGRAM_COUNTS("Download.DatabaseRemoveDownloadsCount",
-                         num_downloads_deleted);
-    base::TimeDelta micros = (1000 * (finished_removing - started_removing));
-    UMA_HISTOGRAM_TIMES("Download.DatabaseRemoveDownloadsTime", micros);
-    if (num_downloads_deleted > 0) {
-      UMA_HISTOGRAM_TIMES("Download.DatabaseRemoveDownloadsTimePerRecord",
-                          (1000 * micros) / num_downloads_deleted);
-    }
-  }
-  int num_downloads_not_deleted = handles.size() - num_downloads_deleted;
-  if (num_downloads_not_deleted >= 0) {
-    UMA_HISTOGRAM_COUNTS("Download.DatabaseRemoveDownloadsCountNotRemoved",
-                         num_downloads_not_deleted);
-  }
   ScheduleCommit();
+  base::TimeTicks finished_removing = base::TimeTicks::Now();
+  size_t downloads_count_after = db_->CountDownloads();
+
+  DCHECK_LE(downloads_count_after, downloads_count_before);
+  if (downloads_count_after > downloads_count_before)
+    return;
+  size_t num_downloads_deleted = downloads_count_before - downloads_count_after;
+  UMA_HISTOGRAM_COUNTS("Download.DatabaseRemoveDownloadsCount",
+                        num_downloads_deleted);
+  base::TimeDelta micros = (1000 * (finished_removing - started_removing));
+  UMA_HISTOGRAM_TIMES("Download.DatabaseRemoveDownloadsTime", micros);
+  if (num_downloads_deleted > 0) {
+    UMA_HISTOGRAM_TIMES("Download.DatabaseRemoveDownloadsTimePerRecord",
+                        (1000 * micros) / num_downloads_deleted);
+  }
+  DCHECK_GE(ids.size(), num_downloads_deleted);
+  if (ids.size() < num_downloads_deleted)
+    return;
+  UMA_HISTOGRAM_COUNTS("Download.DatabaseRemoveDownloadsCountNotRemoved",
+                        ids.size() - num_downloads_deleted);
 }
 
 void HistoryBackend::QueryHistory(scoped_refptr<QueryHistoryRequest> request,
@@ -1481,59 +1409,6 @@ void HistoryBackend::QueryHistoryText(URLDatabase* url_db,
 
   if (matching_visits.size() == result->size() &&
       options.begin_time <= first_recorded_time_)
-    result->set_reached_beginning(true);
-}
-
-void HistoryBackend::QueryHistoryFTS(const string16& text_query,
-                                     const QueryOptions& options,
-                                     QueryResults* result) {
-  if (!text_database_)
-    return;
-
-  // Full text query, first get all the FTS results in the time range.
-  std::vector<TextDatabase::Match> fts_matches;
-  Time first_time_searched;
-  text_database_->GetTextMatches(text_query, options,
-                                 &fts_matches, &first_time_searched);
-
-  URLQuerier querier(db_.get(), archived_db_.get(), true);
-
-  // Now get the row and visit information for each one.
-  URLResult url_result;  // Declare outside loop to prevent re-construction.
-  for (size_t i = 0; i < fts_matches.size(); i++) {
-    if (options.max_count != 0 &&
-        static_cast<int>(result->size()) >= options.max_count)
-      break;  // Got too many items.
-
-    // Get the URL, querying the main and archived databases as necessary. If
-    // this is not found, the history and full text search databases are out
-    // of sync and we give up with this result.
-    if (!querier.GetRowForURL(fts_matches[i].url, &url_result))
-      continue;
-
-    if (!url_result.url().is_valid())
-      continue;  // Don't report invalid URLs in case of corruption.
-
-    // Copy over the FTS stuff that the URLDatabase doesn't know about.
-    // We do this with swap() to avoid copying, since we know we don't
-    // need the original any more. Note that we override the title with the
-    // one from FTS, since that will match the title_match_positions (the
-    // FTS title and the history DB title may differ).
-    url_result.set_title(fts_matches[i].title);
-    url_result.title_match_positions_.swap(
-        fts_matches[i].title_match_positions);
-    url_result.snippet_.Swap(&fts_matches[i].snippet);
-
-    // The visit time also comes from the full text search database. Since it
-    // has the time, we can avoid an extra query of the visits table.
-    url_result.set_visit_time(fts_matches[i].time);
-
-    // Add it to the vector, this will clear our |url_row| object as a
-    // result of the swap.
-    result->AppendURLBySwapping(&url_result);
-  }
-
-  if (first_time_searched <= first_recorded_time_)
     result->set_reached_beginning(true);
 }
 
@@ -1796,14 +1671,6 @@ void HistoryBackend::ScheduleAutocomplete(HistoryURLProvider* provider,
   provider->ExecuteWithDB(this, db_.get(), params);
 }
 
-void HistoryBackend::SetPageContents(const GURL& url,
-                                     const string16& contents) {
-  // This is histogrammed in the text database manager.
-  if (!text_database_)
-    return;
-  text_database_->AddPageContents(url, contents);
-}
-
 void HistoryBackend::SetPageThumbnail(
     const GURL& url,
     const gfx::Image* thumbnail,
@@ -1887,6 +1754,23 @@ void HistoryBackend::MigrateThumbnailsDatabase() {
   }
 }
 
+void HistoryBackend::DeleteFTSIndexDatabases() {
+  // Find files on disk matching the text databases file pattern so we can
+  // quickly test for and delete them.
+  base::FilePath::StringType filepattern =
+      FILE_PATH_LITERAL("History Index *");
+  base::FileEnumerator enumerator(
+      history_dir_, false, base::FileEnumerator::FILES, filepattern);
+  int num_databases_deleted = 0;
+  base::FilePath current_file;
+  while (!(current_file = enumerator.Next()).empty()) {
+    if (sql::Connection::Delete(current_file))
+      num_databases_deleted++;
+  }
+  UMA_HISTOGRAM_COUNTS("History.DeleteFTSIndexDatabases",
+                       num_databases_deleted);
+}
+
 bool HistoryBackend::GetThumbnailFromOlderRedirect(
     const GURL& page_url,
     std::vector<unsigned char>* data) {
@@ -1916,6 +1800,12 @@ bool HistoryBackend::GetThumbnailFromOlderRedirect(
   }
 
   return success;
+}
+
+void HistoryBackend::SetPageContents(const GURL& url,
+                                     const string16& contents) {
+  if (page_collector_)
+    page_collector_->AddPageContents(url, contents);
 }
 
 void HistoryBackend::GetFavicons(
@@ -1983,8 +1873,7 @@ void HistoryBackend::MergeFavicon(
 
   if (!favicon_id) {
     // There is no favicon at |icon_url|, create it.
-    favicon_id = thumbnail_db_->AddFavicon(icon_url, icon_type,
-                                           GetDefaultFaviconSizes());
+    favicon_id = thumbnail_db_->AddFavicon(icon_url, icon_type);
   }
 
   std::vector<FaviconBitmapIDSize> bitmap_id_sizes;
@@ -2143,8 +2032,7 @@ void HistoryBackend::SetFavicons(
     if (!icon_id) {
       // TODO(pkotwicz): Remove the favicon sizes attribute from
       // ThumbnailDatabase::AddFavicon().
-      icon_id = thumbnail_db_->AddFavicon(icon_url, icon_type,
-                                          GetDefaultFaviconSizes());
+      icon_id = thumbnail_db_->AddFavicon(icon_url, icon_type);
       data_modified = true;
     }
     icon_ids.push_back(icon_id);
@@ -2213,7 +2101,6 @@ void HistoryBackend::SetImportedFavicons(
       favicon_id = thumbnail_db_->AddFavicon(
           favicon_usage[i].favicon_url,
           chrome::FAVICON,
-          GetDefaultFaviconSizes(),
           new base::RefCountedBytes(favicon_usage[i].png_data),
           now,
           gfx::Size());
@@ -2498,7 +2385,7 @@ bool HistoryBackend::GetFaviconBitmapResultsForBestMatch(
   GURL icon_url;
   chrome::IconType icon_type;
   if (!thumbnail_db_->GetFaviconHeader(best_favicon_id, &icon_url,
-                                       &icon_type, NULL)) {
+                                       &icon_type)) {
     return false;
   }
 
@@ -2655,11 +2542,6 @@ void HistoryBackend::Commit() {
   if (archived_db_) {
     archived_db_->CommitTransaction();
     archived_db_->BeginTransaction();
-  }
-
-  if (text_database_) {
-    text_database_->CommitTransaction();
-    text_database_->BeginTransaction();
   }
 }
 
@@ -2891,7 +2773,7 @@ void HistoryBackend::KillHistoryDatabase() {
 
   // The expirer keeps tabs on the active databases. Tell it about the
   // databases which will be closed.
-  expirer_.SetDatabases(NULL, NULL, NULL, NULL);
+  expirer_.SetDatabases(NULL, NULL, NULL);
 
   // Reopen a new transaction for |db_| for the sake of CloseAllDatabases().
   db_->BeginTransaction();
@@ -2981,20 +2863,12 @@ void HistoryBackend::DeleteAllHistory() {
     LOG(ERROR) << "Main history could not be cleared";
   kept_urls.clear();
 
-  // Delete FTS files & archived history.
-  if (text_database_) {
-    // We assume that the text database has one transaction on them that we need
-    // to close & restart (the long-running history transaction).
-    text_database_->CommitTransaction();
-    text_database_->DeleteAll();
-    text_database_->BeginTransaction();
-  }
-
+  // Delete archived history.
   if (archived_db_) {
     // Close the database and delete the file.
     archived_db_.reset();
     base::FilePath archived_file_name = GetArchivedFileName();
-    file_util::Delete(archived_file_name, false);
+    sql::Connection::Delete(archived_file_name);
 
     // Now re-initialize the database (which may fail).
     archived_db_.reset(new ArchivedDatabase());
@@ -3023,7 +2897,7 @@ bool HistoryBackend::ClearAllThumbnailHistory(URLRows* kept_urls) {
     // error opening it. In this case, we just try to blow it away to try to
     // fix the error if it exists. This may fail, in which case either the
     // file doesn't exist or there's no more we can do.
-    file_util::Delete(GetThumbnailFileName(), false);
+    sql::Connection::Delete(GetThumbnailFileName());
     return true;
   }
 

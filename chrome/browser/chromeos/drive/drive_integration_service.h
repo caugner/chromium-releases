@@ -29,7 +29,6 @@ class DownloadHandler;
 class DriveAppRegistry;
 class DriveServiceInterface;
 class FileSystemInterface;
-class FileSystemProxy;
 class FileWriteHelper;
 class JobListInterface;
 
@@ -105,22 +104,19 @@ class DriveIntegrationService
   DriveAppRegistry* drive_app_registry() { return drive_app_registry_.get(); }
   JobListInterface* job_list() { return scheduler_.get(); }
 
-  // Clears all the local cache files and in-memory data, and remounts the
-  // file system. |callback| is called with true when this operation is done
-  // successfully. Otherwise, |callback| is called with false.
-  // |callback| must not be null.
+  // Clears all the local cache file, the local resource metadata, and
+  // in-memory Drive app registry, and remounts the file system. |callback|
+  // is called with true when this operation is done successfully. Otherwise,
+  // |callback| is called with false. |callback| must not be null.
   void ClearCacheAndRemountFileSystem(
       const base::Callback<void(bool)>& callback);
-
-  // Reloads and remounts the file system.
-  void ReloadAndRemountFileSystem();
 
  private:
   // Returns true if Drive is enabled.
   // Must be called on UI thread.
   bool IsDriveEnabled();
 
-  // Registers remote file system proxy for drive mount point.
+  // Registers remote file system for drive mount point.
   void AddDriveMountPoint();
   // Unregisters drive mount point from File API.
   void RemoveDriveMountPoint();
@@ -158,7 +154,6 @@ class DriveIntegrationService
   scoped_ptr<FileSystemInterface> file_system_;
   scoped_ptr<FileWriteHelper> file_write_helper_;
   scoped_ptr<DownloadHandler> download_handler_;
-  scoped_refptr<FileSystemProxy> file_system_proxy_;
   scoped_ptr<DebugInfoCollector> debug_info_collector_;
 
   ObserverList<DriveIntegrationServiceObserver> observers_;

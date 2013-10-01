@@ -7,7 +7,7 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "sync/engine/syncer_types.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/base/model_type_invalidation_map_test_util.h"
@@ -16,7 +16,7 @@
 #include "sync/syncable/syncable_write_transaction.h"
 #include "sync/test/engine/fake_model_worker.h"
 #include "sync/test/engine/test_directory_setter_upper.h"
-#include "sync/test/fake_extensions_activity_monitor.h"
+#include "sync/util/extensions_activity.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace syncer {
@@ -32,12 +32,12 @@ class SyncSessionTest : public testing::Test,
   SyncSessionTest() : controller_invocations_allowed_(false) {}
 
   SyncSession* MakeSession() {
-    return SyncSession::Build(context_.get(),
-                              this,
-                              SyncSourceInfo());
+    return SyncSession::Build(context_.get(), this);
   }
 
   virtual void SetUp() {
+    extensions_activity_ = new ExtensionsActivity();
+
     routes_.clear();
     routes_[BOOKMARKS] = GROUP_UI;
     routes_[AUTOFILL] = GROUP_DB;
@@ -60,11 +60,12 @@ class SyncSessionTest : public testing::Test,
             NULL,
             NULL,
             workers,
-            &extensions_activity_monitor_,
+            extensions_activity_.get(),
             std::vector<SyncEngineEventListener*>(),
             NULL,
             NULL,
             true,  // enable keystore encryption
+            false,  // force enable pre-commit GU avoidance experiment
             "fake_invalidator_client_id"));
     context_->set_routing_info(routes_);
 
@@ -145,7 +146,7 @@ class SyncSessionTest : public testing::Test,
   scoped_ptr<SyncSessionContext> context_;
   std::vector<scoped_refptr<ModelSafeWorker> > workers_;
   ModelSafeRoutingInfo routes_;
-  FakeExtensionsActivityMonitor extensions_activity_monitor_;
+  scoped_refptr<ExtensionsActivity> extensions_activity_;
 };
 
 TEST_F(SyncSessionTest, MoreToDownloadIfDownloadFailed) {

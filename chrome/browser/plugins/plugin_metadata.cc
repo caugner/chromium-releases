@@ -8,9 +8,7 @@
 
 #include "base/logging.h"
 #include "base/strings/string_util.h"
-#include "webkit/plugins/npapi/plugin_list.h"
-#include "webkit/plugins/npapi/plugin_utils.h"
-#include "webkit/plugins/webplugininfo.h"
+#include "content/public/common/webplugininfo.h"
 
 // static
 const char PluginMetadata::kAdobeReaderGroupName[] = "Adobe Reader";
@@ -60,13 +58,16 @@ bool PluginMetadata::HasMimeType(const std::string& mime_type) const {
       all_mime_types_.end();
 }
 
-bool PluginMetadata::MatchesPlugin(const webkit::WebPluginInfo& plugin) {
-  using webkit::npapi::PluginList;
-
+bool PluginMetadata::MatchesPlugin(const content::WebPluginInfo& plugin) {
   for (size_t i = 0; i < matching_mime_types_.size(); ++i) {
     // To have a match, every one of the |matching_mime_types_|
     // must be handled by the plug-in.
-    if (!PluginList::SupportsType(plugin, matching_mime_types_[i], false))
+    size_t j = 0;
+    for (; j < plugin.mime_types.size(); ++j) {
+      if (plugin.mime_types[j].mime_type == matching_mime_types_[i])
+        break;
+    }
+    if (j == plugin.mime_types.size())
       return false;
   }
 
@@ -90,7 +91,7 @@ bool PluginMetadata::ParseSecurityStatus(
 }
 
 PluginMetadata::SecurityStatus PluginMetadata::GetSecurityStatus(
-    const webkit::WebPluginInfo& plugin) const {
+    const content::WebPluginInfo& plugin) const {
   if (versions_.empty()) {
 #if defined(OS_LINUX)
     // On Linux, unknown plugins require authorization.
@@ -101,7 +102,7 @@ PluginMetadata::SecurityStatus PluginMetadata::GetSecurityStatus(
   }
 
   Version version;
-  webkit::npapi::CreateVersionFromString(plugin.version, &version);
+  content::WebPluginInfo::CreateVersionFromString(plugin.version, &version);
   if (!version.IsValid())
     version = Version("0");
 

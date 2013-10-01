@@ -1,11 +1,13 @@
 {
   'TOOLS': ['newlib', 'glibc', 'pnacl'],
+  'SEL_LDR': True,
   'TARGETS': [
     {
       'NAME' : 'simple_hello_world',
       'TYPE' : 'main',
       'SOURCES' : ['hello_world.c'],
-      'LIBS': ['ppapi_simple', 'nacl_io', 'ppapi_cpp', 'ppapi', 'pthread']
+      'DEPS': ['ppapi_simple', 'nacl_io', 'ppapi_cpp'],
+      'LIBS': ['ppapi', 'pthread']
     }
   ],
   'DATA': [

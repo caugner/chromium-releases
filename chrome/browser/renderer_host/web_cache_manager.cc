@@ -9,15 +9,15 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/sys_info.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/notification_service.h"
@@ -315,15 +315,13 @@ void WebCacheManager::EnactStrategy(const AllocationStrategy& strategy) {
       // This is the capacity this renderer has been allocated.
       size_t capacity = allocation->second;
 
-      // We don't reserve any space for dead objects in the cache.  Instead, we
-      // prefer to keep live objects around.  There is probably some performance
+      // We don't reserve any space for dead objects in the cache. Instead, we
+      // prefer to keep live objects around. There is probably some performance
       // tuning to be done here.
       size_t min_dead_capacity = 0;
 
-      // We allow the dead objects to consume all of the cache, if the renderer
-      // so desires.  If we wanted this memory, we would have set the total
-      // capacity lower.
-      size_t max_dead_capacity = capacity;
+      // We allow the dead objects to consume up to half of the cache capacity.
+      size_t max_dead_capacity = capacity / 2;
 
       host->Send(new ChromeViewMsg_SetCacheCapacities(min_dead_capacity,
                                                       max_dead_capacity,

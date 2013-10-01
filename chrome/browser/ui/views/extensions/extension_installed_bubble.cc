@@ -9,13 +9,15 @@
 
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/singleton_tabs.h"
@@ -23,11 +25,9 @@
 #include "chrome/browser/ui/views/browser_action_view.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
 #include "chrome/common/extensions/extension.h"
@@ -262,8 +262,8 @@ class InstalledBubbleContent : public views::View,
       configure_url = chrome::kChromeUIExtensionsURL;
       configure_url += chrome::kExtensionConfigureCommandsSubPage;
     } else if (source == sign_in_link_) {
-      configure_url = SyncPromoUI::GetSyncPromoURL(
-          SyncPromoUI::SOURCE_EXTENSION_INSTALL_BUBBLE, false).spec();
+      configure_url = signin::GetPromoURL(
+          signin::SOURCE_EXTENSION_INSTALL_BUBBLE, false).spec();
     } else {
       NOTREACHED();
       return;
@@ -543,13 +543,11 @@ ExtensionInstalledBubble::ExtensionInstalledBubble(const Extension* extension,
       icon_(icon),
       animation_wait_retries_(0),
       weak_factory_(this) {
-  extensions::ExtensionActionManager* extension_action_manager =
-      extensions::ExtensionActionManager::Get(browser_->profile());
   if (!extensions::OmniboxInfo::GetKeyword(extension).empty())
     type_ = OMNIBOX_KEYWORD;
-  else if (extension_action_manager->GetBrowserAction(*extension_))
+  else if (extensions::ActionInfo::GetBrowserActionInfo(extension))
     type_ = BROWSER_ACTION;
-  else if (extension_action_manager->GetPageAction(*extension) &&
+  else if (extensions::ActionInfo::GetPageActionInfo(extension) &&
            extensions::ActionInfo::IsVerboseInstallMessage(extension))
     type_ = PAGE_ACTION;
   else
@@ -655,14 +653,6 @@ void ExtensionInstalledBubble::ShowInternal() {
   AddChildView(
       new InstalledBubbleContent(browser_, extension_, type_, &icon_, this));
 
-  // If we are in immersive fullscreen, reveal the top-of-window views
-  // (omnibox, toolbar) so that the view the bubble is anchored to is visible.
-  // We do not need to hold onto the lock because ImmersiveModeController will
-  // keep the top-of-window views revealed as long as the popup is active.
-  // TODO(pkotwicz): Move logic to ImmersiveModeController.
-  scoped_ptr<ImmersiveRevealedLock> immersive_reveal_lock(
-      browser_view->immersive_mode_controller()->GetRevealedLock(
-          ImmersiveModeController::ANIMATE_REVEAL_NO));
   views::BubbleDelegateView::CreateBubble(this);
 
   // The bubble widget is now the parent and owner of |this| and takes care of

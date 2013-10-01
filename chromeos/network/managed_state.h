@@ -13,11 +13,13 @@
 
 namespace base {
 class Value;
+class DictionaryValue;
 }
 
 namespace chromeos {
 
 class DeviceState;
+class FavoriteState;
 class NetworkState;
 
 // Base class for states managed by NetworkStateManger which are associated
@@ -26,6 +28,7 @@ class ManagedState {
  public:
   enum ManagedType {
     MANAGED_TYPE_NETWORK,
+    MANAGED_TYPE_FAVORITE,
     MANAGED_TYPE_DEVICE
   };
 
@@ -39,6 +42,7 @@ class ManagedState {
   // NULL if it is not.
   NetworkState* AsNetworkState();
   DeviceState* AsDeviceState();
+  FavoriteState* AsFavoriteState();
 
   // Called by NetworkStateHandler when a property was received. The return
   // value indicates if the state changed and is used to reduce the number of
@@ -53,15 +57,18 @@ class ManagedState {
 
   // Called by NetworkStateHandler after all calls to PropertyChanged for the
   // initial set of properties. Used to update state requiring multiple
-  // parsed properties, e.g. name from hex_ssid in NetworkState.
-  virtual void InitialPropertiesReceived();
+  // properties, e.g. name from hex_ssid in NetworkState.
+  // |properties| contains the complete set of initial properties.
+  // Returns true if any additional properties are updated.
+  virtual bool InitialPropertiesReceived(
+      const base::DictionaryValue& properties);
 
   const ManagedType managed_type() const { return managed_type_; }
   const std::string& path() const { return path_; }
   const std::string& name() const { return name_; }
   const std::string& type() const { return type_; }
-  bool is_observed() const { return is_observed_; }
-  void set_is_observed(bool is_observed) { is_observed_ = is_observed; }
+  bool update_received() const { return update_received_; }
+  void set_update_received() { update_received_ = true; }
   bool update_requested() const { return update_requested_; }
   void set_update_requested(bool update_requested) {
     update_requested_ = update_requested;
@@ -85,6 +92,9 @@ class ManagedState {
   bool GetStringValue(const std::string& key,
                       const base::Value& value,
                       std::string* out_value);
+  bool GetUInt32Value(const std::string& key,
+                      const base::Value& value,
+                      uint32* out_value);
 
   void set_name(const std::string& name) { name_ = name; }
 
@@ -100,8 +110,8 @@ class ManagedState {
   std::string name_;  // flimflam::kNameProperty
   std::string type_;  // flimflam::kTypeProperty
 
-  // Tracks when the state is being observed.
-  bool is_observed_;
+  // Set to true when the an update has been received.
+  bool update_received_;
 
   // Tracks when an update has been requested.
   bool update_requested_;

@@ -9,13 +9,15 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/network_constants.h"
 #include "chromeos/network/network_ip_config.h"
@@ -25,9 +27,10 @@
 
 namespace chromeos {
 
+class CertificatePattern;
+class EnrollmentDelegate;
 class NetworkDeviceParser;
 class NetworkParser;
-class CertificatePattern;
 
 // This is the list of all implementation classes that are allowed
 // access to the internals of the network library classes.
@@ -294,25 +297,6 @@ class NetworkDevice {
   DISALLOW_COPY_AND_ASSIGN(NetworkDevice);
 };
 
-// A virtual class that can be used to handle certificate enrollment URIs when
-// encountered.  Also used by unit tests to avoid opening browser windows
-// when testing.
-class EnrollmentDelegate {
- public:
-  EnrollmentDelegate() {}
-  virtual ~EnrollmentDelegate() {}
-
-  // Implemented to handle a given certificate enrollment URI.  Returns false
-  // if the enrollment URI doesn't use a scheme that we can handle, and in
-  // that case, this will be called for any remaining enrollment URIs.
-  // If enrollment succeeds, then the enrollment handler must run
-  // |post_action| to finish connecting.
-  virtual void Enroll(const std::vector<std::string>& uri_list,
-                      const base::Closure& post_action) = 0;
- private:
-  DISALLOW_COPY_AND_ASSIGN(EnrollmentDelegate);
-};
-
 // Contains data common to all network service types.
 class Network {
  public:
@@ -322,12 +306,7 @@ class Network {
   class TestApi {
    public:
     explicit TestApi(Network* network) : network_(network) {}
-    void SetBehindPortal() {
-      network_->set_is_behind_portal_for_testing(true);
-      network_->set_behind_portal();
-    }
     void SetConnected() {
-      network_->set_is_behind_portal_for_testing(false);
       network_->set_connected();
     }
     void SetConnecting() {
@@ -350,7 +329,6 @@ class Network {
   const std::string& device_path() const { return device_path_; }
   const std::string& ip_address() const { return ip_address_; }
   ConnectionType type() const { return type_; }
-  ConnectionMode mode() const { return mode_; }
   ConnectionState connection_state() const { return state_; }
   bool connecting() const { return IsConnectingState(state_); }
   bool configuring() const { return state_ == STATE_CONFIGURATION; }
@@ -363,7 +341,6 @@ class Network {
   UserConnectState user_connect_state() const { return user_connect_state_; }
   bool failed() const { return state_ == STATE_FAILURE; }
   bool disconnected() const { return IsDisconnectedState(state_); }
-  bool ready() const { return state_ == STATE_READY; }
   bool online() const { return state_ == STATE_ONLINE; }
   bool restricted_pool() const { return state_ == STATE_PORTAL; }
   ConnectionError error() const { return error_; }
@@ -441,17 +418,11 @@ class Network {
 
   // Adopts the given enrollment handler to handle any certificate enrollment
   // URIs encountered during network connection.
-  void SetEnrollmentDelegate(EnrollmentDelegate* delegate) {
-    enrollment_delegate_.reset(delegate);
-  }
+  void SetEnrollmentDelegate(EnrollmentDelegate* delegate);
 
   virtual bool UpdateStatus(const std::string& key,
                             const base::Value& value,
                             PropertyIndex* index);
-
-  // Retrieves a property from the property_map_.  If |value| is NULL,
-  // just returns whether or not the given property was found.
-  bool GetProperty(PropertyIndex index, const base::Value** value) const;
 
   // Creates a Network object for the given type for testing.
   static Network* CreateForTesting(ConnectionType type);
@@ -462,10 +433,6 @@ class Network {
 
   NetworkParser* network_parser() { return network_parser_.get(); }
   void SetNetworkParser(NetworkParser* parser);
-
-  // Updates |property_map_| for the corresponding property |index|. If |value|
-  // is non-NULL, it's put into the map. Otherwise, the entry is removed.
-  void UpdatePropertyMap(PropertyIndex index, const base::Value* value);
 
   // Set the state and update flags if necessary.
   void SetState(ConnectionState state);
@@ -509,8 +476,6 @@ class Network {
   }
 
  private:
-  typedef std::map<PropertyIndex, base::Value*> PropertyMap;
-
   // This allows NetworkParser and its subclasses access to device
   // privates so that they can be reconstituted during parsing.  The
   // parsers only access things through the private set_ functions so
@@ -532,14 +497,7 @@ class Network {
     device_path_ = device_path;
   }
   void set_name(const std::string& name) { name_ = name; }
-  void set_mode(ConnectionMode mode) { mode_ = mode; }
   void set_connecting();
-  void set_is_behind_portal_for_testing(bool value) {
-    is_behind_portal_for_testing_ = value;
-  }
-  bool is_behind_portal_for_testing() const {
-    return is_behind_portal_for_testing_;
-  }
   void set_behind_portal() {
     state_ = STATE_PORTAL;
   }
@@ -586,7 +544,6 @@ class Network {
   std::string device_path_;
   std::string name_;
   std::string ip_address_;
-  ConnectionMode mode_;
   ConnectionState state_;
   ConnectionError error_;
   bool connectable_;
@@ -628,12 +585,6 @@ class Network {
   // network layer.
   scoped_ptr<NetworkParser> network_parser_;
 
-  // This map stores the set of properties for the network.
-  // Not all properties in this map are exposed via get methods.
-  PropertyMap property_map_;
-
-  bool is_behind_portal_for_testing_;
-
   DISALLOW_COPY_AND_ASSIGN(Network);
 };
 
@@ -656,13 +607,11 @@ class VirtualNetwork : public Network {
 
   const std::string& server_hostname() const { return server_hostname_; }
   ProviderType provider_type() const { return provider_type_; }
-  const std::string& ca_cert_nss() const { return ca_cert_nss_; }
+  const std::string& ca_cert_pem() const { return ca_cert_pem_; }
   const std::string& psk_passphrase() const { return psk_passphrase_; }
-  bool psk_passphrase_required() const { return psk_passphrase_required_; }
   const std::string& client_cert_id() const { return client_cert_id_; }
   const std::string& username() const { return username_; }
   const std::string& user_passphrase() const { return user_passphrase_; }
-  bool user_passphrase_required() const { return user_passphrase_required_; }
   const std::string& group_name() const { return group_name_; }
 
   // Sets the well-known PKCS#11 slot and PIN for accessing certificates.
@@ -683,7 +632,7 @@ class VirtualNetwork : public Network {
   bool IsUserPassphraseRequired() const;
 
   // Public setters.
-  void SetCACertNSS(const std::string& ca_cert_nss);
+  void SetCACertPEM(const std::string& ca_cert_pem);
   void SetL2TPIPsecPSKCredentials(const std::string& psk_passphrase,
                                   const std::string& username,
                                   const std::string& user_passphrase,
@@ -720,8 +669,8 @@ class VirtualNetwork : public Network {
   void set_provider_type(ProviderType provider_type) {
     provider_type_ = provider_type;
   }
-  void set_ca_cert_nss(const std::string& ca_cert_nss) {
-    ca_cert_nss_ = ca_cert_nss;
+  void set_ca_cert_pem(const std::string& ca_cert_pem) {
+    ca_cert_pem_ = ca_cert_pem;
   }
   void set_psk_passphrase(const std::string& psk_passphrase) {
     psk_passphrase_ = psk_passphrase;
@@ -756,13 +705,9 @@ class VirtualNetwork : public Network {
   virtual void EraseCredentials() OVERRIDE;
   virtual void CalculateUniqueId() OVERRIDE;
 
-  // VirtualNetwork private methods.
-  bool ParseProviderValue(int index, const base::Value* value);
-
   std::string server_hostname_;
   ProviderType provider_type_;
-  // NSS nickname for server CA certificate.
-  std::string ca_cert_nss_;
+  std::string ca_cert_pem_;
   std::string psk_passphrase_;
   bool psk_passphrase_required_;
   // PKCS#11 ID for client certificate.
@@ -995,8 +940,8 @@ class WifiNetwork : public WirelessNetwork {
 
   EAPMethod eap_method() const { return eap_method_; }
   EAPPhase2Auth eap_phase_2_auth() const { return eap_phase_2_auth_; }
-  const std::string& eap_server_ca_cert_nss_nickname() const {
-    return eap_server_ca_cert_nss_nickname_; }
+  const std::string& eap_server_ca_cert_pem() const {
+    return eap_server_ca_cert_pem_; }
   const std::string& eap_client_cert_pkcs11_id() const {
     return eap_client_cert_pkcs11_id_; }
   const bool eap_use_system_cas() const { return eap_use_system_cas_; }
@@ -1012,13 +957,11 @@ class WifiNetwork : public WirelessNetwork {
   // Set property and call SetNetworkServiceProperty:
 
   void SetPassphrase(const std::string& passphrase);
-  void SetIdentity(const std::string& identity);
-  void SetHiddenSSID(bool hidden_ssid);
 
   // 802.1x properties
   void SetEAPMethod(EAPMethod method);
   void SetEAPPhase2Auth(EAPPhase2Auth auth);
-  void SetEAPServerCaCertNssNickname(const std::string& nss_nickname);
+  void SetEAPServerCaCertPEM(const std::string& ca_cert_pem);
   void SetEAPClientCertPkcs11Id(const std::string& pkcs11_id);
   void SetEAPUseSystemCAs(bool use_system_cas);
   void SetEAPIdentity(const std::string& identity);
@@ -1079,9 +1022,8 @@ class WifiNetwork : public WirelessNetwork {
   void set_eap_phase_2_auth(EAPPhase2Auth eap_phase_2_auth) {
     eap_phase_2_auth_ = eap_phase_2_auth;
   }
-  void set_eap_server_ca_cert_nss_nickname(
-      const std::string& eap_server_ca_cert_nss_nickname) {
-    eap_server_ca_cert_nss_nickname_ = eap_server_ca_cert_nss_nickname;
+  void set_eap_server_ca_cert_pem(const std::string& eap_server_ca_cert_pem) {
+    eap_server_ca_cert_pem_ = eap_server_ca_cert_pem;
   }
   void set_eap_client_cert_pkcs11_id(
       const std::string& eap_client_cert_pkcs11_id) {
@@ -1126,7 +1068,7 @@ class WifiNetwork : public WirelessNetwork {
 
   EAPMethod eap_method_;
   EAPPhase2Auth eap_phase_2_auth_;
-  std::string eap_server_ca_cert_nss_nickname_;
+  std::string eap_server_ca_cert_pem_;
   std::string eap_client_cert_pkcs11_id_;
   bool eap_use_system_cas_;
   std::string eap_identity_;
@@ -1216,7 +1158,7 @@ typedef std::vector<CellTower> CellTowerVector;
 
 // This class handles the interaction with the ChromeOS network library APIs.
 // Classes can add themselves as observers. Users can get an instance of the
-// library like this: chromeos::CrosLibrary::Get()->GetNetworkLibrary()
+// library like this: chromeos::NetworkLibrary::Get()
 class NetworkLibrary {
  public:
   enum HardwareAddressFormat {
@@ -1266,10 +1208,6 @@ class NetworkLibrary {
 
   class NetworkDeviceObserver {
    public:
-    // Called when the state of a single device has changed.
-    virtual void OnNetworkDeviceChanged(NetworkLibrary* cros,
-                                        const NetworkDevice* device) {}
-
     // Called when |device| got notification about new networks available.
     virtual void OnNetworkDeviceFoundNetworks(NetworkLibrary* cros,
                                               const NetworkDevice* device) {}
@@ -1289,16 +1227,6 @@ class NetworkLibrary {
                                          PinOperationError error) = 0;
    protected:
     virtual ~PinOperationObserver() {}
-  };
-
-  class UserActionObserver {
-   public:
-    // Called when user initiates a new connection.
-    // Network is NULL when we don't have an associated Network object.
-    virtual void OnConnectionInitiated(NetworkLibrary* cros,
-                                       const Network* network) = 0;
-   protected:
-    virtual ~UserActionObserver() {}
   };
 
   virtual ~NetworkLibrary() {}
@@ -1336,9 +1264,6 @@ class NetworkLibrary {
   virtual void AddPinOperationObserver(PinOperationObserver* observer) = 0;
   virtual void RemovePinOperationObserver(PinOperationObserver* observer) = 0;
 
-  virtual void AddUserActionObserver(UserActionObserver* observer) = 0;
-  virtual void RemoveUserActionObserver(UserActionObserver* observer) = 0;
-
   // Return the active or default Ethernet network (or NULL if none).
   virtual const EthernetNetwork* ethernet_network() const = 0;
   virtual bool ethernet_connecting() const = 0;
@@ -1358,12 +1283,6 @@ class NetworkLibrary {
   virtual const WimaxNetwork* wimax_network() const = 0;
   virtual bool wimax_connecting() const = 0;
   virtual bool wimax_connected() const = 0;
-
-  // Return the active mobile (cellular or WiMax) network
-  // (or NULL if none active).
-  virtual const Network* mobile_network() const = 0;
-  virtual bool mobile_connecting() const = 0;
-  virtual bool mobile_connected() const = 0;
 
   // Return the active virtual network (or NULL if none active).
   virtual const VirtualNetwork* virtual_network() const = 0;
@@ -1403,20 +1322,14 @@ class NetworkLibrary {
   virtual bool wifi_available() const = 0;
   virtual bool wimax_available() const = 0;
   virtual bool cellular_available() const = 0;
-  virtual bool mobile_available() const = 0;
 
   virtual bool ethernet_enabled() const = 0;
   virtual bool wifi_enabled() const = 0;
   virtual bool wimax_enabled() const = 0;
   virtual bool cellular_enabled() const = 0;
-  virtual bool mobile_enabled() const = 0;
 
   virtual bool wifi_scanning() const = 0;
   virtual bool cellular_initializing() const = 0;
-  virtual bool offline_mode() const = 0;
-
-  // Returns the current IP address if connected. If not, returns empty string.
-  virtual const std::string& IPAddress() const = 0;
 
   // Return a pointer to the device, if it exists, or NULL.
   virtual const NetworkDevice* FindNetworkDeviceByPath(
@@ -1426,17 +1339,8 @@ class NetworkLibrary {
   // Returns NULL if none exists.
   virtual const NetworkDevice* FindMobileDevice() const = 0;
 
-  // Returns device with TYPE_WIMAX. Returns NULL if none exists.
-  virtual const NetworkDevice* FindWimaxDevice() const = 0;
-
   // Returns device with TYPE_CELLULAR. Returns NULL if none exists.
   virtual const NetworkDevice* FindCellularDevice() const = 0;
-
-  // Returns device with TYPE_ETHERNET. Returns NULL if none exists.
-  virtual const NetworkDevice* FindEthernetDevice() const = 0;
-
-  // Returns device with TYPE_WIFI. Returns NULL if none exists.
-  virtual const NetworkDevice* FindWifiDevice() const = 0;
 
   // Return a pointer to the network, if it exists, or NULL.
   // NOTE: Never store these results, store service paths instead.
@@ -1513,10 +1417,6 @@ class NetworkLibrary {
   virtual void SetCarrier(const std::string& carrier,
                           const NetworkOperationCallback& completed) = 0;
 
-  // Resets the cellular device, calls the closure once the transition is
-  // complete.
-  virtual void ResetModem() = 0;
-
   // Return true if GSM SIM card can work only with enabled roaming.
   virtual bool IsCellularAlwaysInRoaming() = 0;
 
@@ -1525,16 +1425,9 @@ class NetworkLibrary {
 
   // TODO(joth): Add GetCellTowers to retrieve a CellTowerVector.
 
-  // Return true if a profile matching |type| is loaded.
-  virtual bool HasProfileType(NetworkProfileType type) const = 0;
-
   // Returns false if there is no way to connect to this network, even with
   // user input (e.g. it requires a user profile but none is available).
   virtual bool CanConnectToNetwork(const Network* network) const = 0;
-
-  // Refresh the IP configuration of the given network after changes.  Puts
-  // newly configured properties into effect and renews DHCP lease.
-  virtual void RefreshIPConfig(Network* network) = 0;
 
   // Connect to the specified wireless network.
   virtual void ConnectToWifiNetwork(WifiNetwork* network) = 0;
@@ -1564,7 +1457,7 @@ class NetworkLibrary {
     ~EAPConfigData();
     EAPMethod method;
     EAPPhase2Auth auth;
-    std::string server_ca_cert_nss_nickname;
+    std::string server_ca_cert_pem;
     bool use_system_cas;
     std::string client_cert_pkcs11_id;
     std::string identity;
@@ -1584,7 +1477,7 @@ class NetworkLibrary {
     VPNConfigData();
     ~VPNConfigData();
     std::string psk;
-    std::string server_ca_cert_nss_nickname;
+    std::string server_ca_cert_pem;
     std::string client_cert_pkcs11_id;
     std::string username;
     std::string user_passphrase;
@@ -1610,33 +1503,17 @@ class NetworkLibrary {
   // Enables/disables the wifi network device.
   virtual void EnableWifiNetworkDevice(bool enable) = 0;
 
-  // Enables/disables mobile (cellular, wimax) network device.
-  virtual void EnableMobileNetworkDevice(bool enable) = 0;
-
   // Enables/disables the wimax network device.
   virtual void EnableWimaxNetworkDevice(bool enable) = 0;
 
   // Enables/disables the cellular network device.
   virtual void EnableCellularNetworkDevice(bool enable) = 0;
 
-  // Enables/disables offline mode.
-  virtual void EnableOfflineMode(bool enable) = 0;
-
   // Fetches IP configs and hardware address for a given device_path and returns
   // them via the given callback.
   virtual void GetIPConfigs(const std::string& device_path,
                             HardwareAddressFormat format,
                             const NetworkGetIPConfigsCallback& callback) = 0;
-
-  // DEPRECATED: DO NOT USE. Instead, use the asynchronous GetIPConfigs above.
-  // Fetches IP configs and hardware address for a given device_path. The
-  // hardware address is usually a MAC address like "0011AA22BB33".
-  // |hardware_address| will be an empty string, if no hardware address is
-  // found.
-  virtual NetworkIPConfigVector GetIPConfigsAndBlock(
-      const std::string& device_path,
-      std::string* hardware_address,
-      HardwareAddressFormat) = 0;
 
   // Sets the configuration of the IP parameters. This is called when user
   // changes IP settings from dhcp to static or vice versa or when user changes
@@ -1660,12 +1537,7 @@ class NetworkLibrary {
       const std::string& service_path,
       const NetworkServicePropertiesCallback& callback) = 0;
 
-  // This will connect to a preferred network if the currently connected
-  // network is not preferred. This should be called when the active profile
-  // changes.
-  virtual void SwitchToPreferredNetwork() = 0;
-
-  // Load networks from an NetworkConfigurations list of ONC.
+  // Load networks from a list of NetworkConfigurations of ONC.
   virtual void LoadOncNetworks(const base::ListValue& network_configs,
                                onc::ONCSource source) = 0;
 
@@ -1678,8 +1550,39 @@ class NetworkLibrary {
                                 const std::string& service_path) = 0;
 
   // Factory function, creates a new instance and returns ownership.
-  // For normal usage, access the singleton via CrosLibrary::Get().
+  // For normal usage, access the singleton via NetworkLibrary::Get().
   static NetworkLibrary* GetImpl(bool stub);
+
+  // Initializes the global instance.
+  static void Initialize(bool use_stub);
+
+  // Destroys the global instance. Must be called before AtExitManager is
+  // destroyed to ensure a clean shutdown.
+  static void Shutdown();
+
+  // Gets the global instance. Returns NULL if Initialize() has not been
+  // called (or Shutdown() has been called).
+  static NetworkLibrary* Get();
+
+  // Sets the network library to be returned from Get(). The existing network
+  // library will be deleted.
+  static void SetForTesting(NetworkLibrary* network_library);
+};
+
+// The class is used for enabling the stub libcros, and cleaning it up at
+// the end of the object lifetime. Useful for testing.
+class ScopedStubNetworkLibraryEnabler {
+ public:
+  ScopedStubNetworkLibraryEnabler() {
+    NetworkLibrary::Initialize(true);
+  }
+
+  ~ScopedStubNetworkLibraryEnabler() {
+    NetworkLibrary::Shutdown();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ScopedStubNetworkLibraryEnabler);
 };
 
 }  // namespace chromeos

@@ -11,7 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/login/lock_window.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/screen_locker_delegate.h"
@@ -32,6 +32,10 @@ namespace chromeos {
 class ScreenLocker;
 class WebUILoginDisplay;
 struct UserContext;
+
+namespace login {
+class NetworkStateHelper;
+}
 
 namespace test {
 class WebUIScreenLockerTester;
@@ -107,7 +111,7 @@ class WebUIScreenLocker : public WebUILoginView,
                                 const base::TimeTicks& time) OVERRIDE;
 
   // Overridden from content::WebContentsObserver:
-  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
+  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
 
  private:
   friend class test::WebUIScreenLockerTester;
@@ -134,6 +138,8 @@ class WebUIScreenLocker : public WebUILoginView,
 
   // Time when lock was initiated, required for metrics.
   base::TimeTicks lock_time_;
+
+  scoped_ptr<login::NetworkStateHelper> network_state_helper_;
 
   base::WeakPtrFactory<WebUIScreenLocker> weak_factory_;
 

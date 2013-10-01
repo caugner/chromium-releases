@@ -7,14 +7,10 @@
 import logging
 import os
 import re
-import shutil
-import sys
 import time
 
 from pylib import android_commands
-from pylib import cmd_helper
 from pylib import constants
-from pylib import forwarder
 from pylib import json_perf_parser
 from pylib import perf_tests_helper
 from pylib import valgrind_tools
@@ -27,17 +23,17 @@ import test_result
 _PERF_TEST_ANNOTATION = 'PerfTest'
 
 
-def _GetDataFilesForTestSuite(test_suite_basename):
+def _GetDataFilesForTestSuite(suite_basename):
   """Returns a list of data files/dirs needed by the test suite.
 
   Args:
-    test_suite_basename: The test suite basename for which to return file paths.
+    suite_basename: The test suite basename for which to return file paths.
 
   Returns:
     A list of test file and directory paths.
   """
   test_files = []
-  if test_suite_basename in ['ChromeTest', 'ContentShellTest']:
+  if suite_basename in ['ChromeTest', 'ContentShellTest']:
     test_files += [
         'net/data/ssl/certificates/',
     ]
@@ -53,45 +49,31 @@ class TestRunner(base_test_runner.BaseTestRunner):
                                        '/chrome-profile*')
   _DEVICE_HAS_TEST_FILES = {}
 
-  def __init__(self, options, device, shard_index, test_pkg, ports_to_forward):
+  def __init__(self, test_options, device, shard_index, test_pkg,
+               ports_to_forward):
     """Create a new TestRunner.
 
     Args:
-      options: An options object with the following required attributes:
-      -  build_type: 'Release' or 'Debug'.
-      -  install_apk: Re-installs the apk if opted.
-      -  save_perf_json: Whether or not to save the JSON file from UI perf
-            tests.
-      -  screenshot_failures: Take a screenshot for a test failure
-      -  tool: Name of the Valgrind tool.
-      -  wait_for_debugger: blocks until the debugger is connected.
-      -  disable_assertions: Whether to disable java assertions on the device.
-      -  push_deps: If True, push all dependencies to the device.
+      test_options: An InstrumentationOptions object.
       device: Attached android device.
       shard_index: Shard index.
       test_pkg: A TestPackage object.
       ports_to_forward: A list of port numbers for which to set up forwarders.
-                        Can be optionally requested by a test case.
+          Can be optionally requested by a test case.
     """
-    super(TestRunner, self).__init__(device, options.tool, options.build_type,
-                                     options.push_deps)
+    super(TestRunner, self).__init__(device, test_options.tool,
+                                     test_options.build_type,
+                                     test_options.push_deps,
+                                     test_options.cleanup_test_files)
     self._lighttp_port = constants.LIGHTTPD_RANDOM_PORT_FIRST + shard_index
 
-    self.build_type = options.build_type
-    self.test_data = options.test_data
-    self.save_perf_json = options.save_perf_json
-    self.screenshot_failures = options.screenshot_failures
-    self.wait_for_debugger = options.wait_for_debugger
-    self.disable_assertions = options.disable_assertions
+    self.options = test_options
     self.test_pkg = test_pkg
     self.ports_to_forward = ports_to_forward
-    self.install_apk = options.install_apk
-    self.forwarder = None
 
   #override
   def InstallTestPackage(self):
-    if self.install_apk:
-      self.test_pkg.Install(self.adb)
+    self.test_pkg.Install(self.adb)
 
   #override
   def PushDataDeps(self):
@@ -106,12 +88,14 @@ class TestRunner(base_test_runner.BaseTestRunner):
     if test_data:
       # Make sure SD card is ready.
       self.adb.WaitForSdCardReady(20)
-      for data in test_data:
-        self.CopyTestData([data], self.adb.GetExternalStorage())
+      for p in test_data:
+        self.adb.PushIfNeeded(
+            os.path.join(constants.DIR_SOURCE_ROOT, p),
+            os.path.join(self.adb.GetExternalStorage(), p))
 
     # TODO(frankf): Specify test data in this file as opposed to passing
     # as command-line.
-    for dest_host_pair in self.test_data:
+    for dest_host_pair in self.options.test_data:
       dst_src = dest_host_pair.split(':',1)
       dst_layer = dst_src[0]
       host_src = dst_src[1]
@@ -125,7 +109,7 @@ class TestRunner(base_test_runner.BaseTestRunner):
 
   def _GetInstrumentationArgs(self):
     ret = {}
-    if self.wait_for_debugger:
+    if self.options.wait_for_debugger:
       ret['debug'] = 'true'
     return ret
 
@@ -142,7 +126,7 @@ class TestRunner(base_test_runner.BaseTestRunner):
       logging.warning('Unable to enable java asserts for %s, non rooted device',
                       self.device)
     else:
-      if self.adb.SetJavaAssertsEnabled(enable=not self.disable_assertions):
+      if self.adb.SetJavaAssertsEnabled(True):
         self.adb.Reboot(full_reboot=False)
 
     # We give different default value to launch HTTP server based on shard index
@@ -151,18 +135,13 @@ class TestRunner(base_test_runner.BaseTestRunner):
     http_server_ports = self.LaunchTestHttpServer(
         os.path.join(constants.DIR_SOURCE_ROOT), self._lighttp_port)
     if self.ports_to_forward:
-      port_pairs = [(port, port) for port in self.ports_to_forward]
-      # We need to remember which ports the HTTP server is using, since the
-      # forwarder will stomp on them otherwise.
-      port_pairs.append(http_server_ports)
-      self.forwarder = forwarder.Forwarder(self.adb, self.build_type)
-      self.forwarder.Run(port_pairs, self.tool, '127.0.0.1')
+      self._ForwardPorts([(port, port) for port in self.ports_to_forward])
     self.flags.AddFlags(['--enable-test-intents'])
 
   def TearDown(self):
     """Cleans up the test harness and saves outstanding data from test run."""
-    if self.forwarder:
-      self.forwarder.Close()
+    if self.ports_to_forward:
+      self._UnmapPorts([(port, port) for port in self.ports_to_forward])
     super(TestRunner, self).TearDown()
 
   def TestSetup(self, test):
@@ -176,7 +155,7 @@ class TestRunner(base_test_runner.BaseTestRunner):
     self.tool.SetupEnvironment()
 
     # Make sure the forwarder is still running.
-    self.RestartHttpServerForwarderIfNecessary()
+    self._RestartHttpServerForwarderIfNecessary()
 
   def _IsPerfTest(self, test):
     """Determines whether a test is a performance test.
@@ -255,7 +234,7 @@ class TestRunner(base_test_runner.BaseTestRunner):
       else:
         raise Exception('Perf file does not exist or is empty')
 
-      if self.save_perf_json:
+      if self.options.save_perf_json:
         json_local_file = '/tmp/chromium-android-perf-json-' + raw_test_name
         with open(json_local_file, 'w') as f:
           f.write(json_string)
@@ -291,7 +270,7 @@ class TestRunner(base_test_runner.BaseTestRunner):
         scale_match = re.match('TimeoutScale:([0-9]+)', annotation)
         if scale_match:
           timeout_scale = int(scale_match.group(1))
-    if self.wait_for_debugger:
+    if self.options.wait_for_debugger:
       timeout_scale *= 100
     return timeout_scale
 
@@ -335,7 +314,8 @@ class TestRunner(base_test_runner.BaseTestRunner):
         log = raw_result.GetFailureReason()
         if not log:
           log = 'No information.'
-        if self.screenshot_failures or log.find('INJECT_EVENTS perm') >= 0:
+        if (self.options.screenshot_failures or
+            log.find('INJECT_EVENTS perm') >= 0):
           self._TakeScreenshot(test)
         result = test_result.InstrumentationTestResult(
             test, base_test_result.ResultType.FAIL, start_date_ms, duration_ms,

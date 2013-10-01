@@ -7,11 +7,11 @@
 
 #include "base/callback.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugins/plugin_installer_observer.h"
-#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+#endif
 
 class InfoBarService;
 class HostContentSettingsMap;
@@ -23,12 +23,9 @@ class WebContents;
 
 // Base class for blocked plug-in infobars.
 class PluginInfoBarDelegate : public ConfirmInfoBarDelegate {
- public:
-  PluginInfoBarDelegate(InfoBarService* infobar_service,
-                        const string16& name,
-                        const std::string& identifier);
-
  protected:
+  PluginInfoBarDelegate(InfoBarService* infobar_service,
+                        const std::string& identifier);
   virtual ~PluginInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
@@ -37,8 +34,6 @@ class PluginInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual std::string GetLearnMoreURL() const = 0;
 
   void LoadBlockedPlugins();
-
-  string16 name_;
 
  private:
   // ConfirmInfoBarDelegate:
@@ -53,7 +48,8 @@ class PluginInfoBarDelegate : public ConfirmInfoBarDelegate {
 // Infobar that's shown when a plug-in requires user authorization to run.
 class UnauthorizedPluginInfoBarDelegate : public PluginInfoBarDelegate {
  public:
-  // Creates an unauthorized plugin delegate and adds it to |infobar_service|.
+  // Creates an unauthorized plugin infobar delegate and adds it to
+  // |infobar_service|.
   static void Create(InfoBarService* infobar_service,
                      HostContentSettingsMap* content_settings,
                      const string16& name,
@@ -76,6 +72,7 @@ class UnauthorizedPluginInfoBarDelegate : public PluginInfoBarDelegate {
   virtual std::string GetLearnMoreURL() const OVERRIDE;
 
   HostContentSettingsMap* content_settings_;
+  string16 name_;
 
   DISALLOW_COPY_AND_ASSIGN(UnauthorizedPluginInfoBarDelegate);
 };
@@ -85,7 +82,8 @@ class UnauthorizedPluginInfoBarDelegate : public PluginInfoBarDelegate {
 class OutdatedPluginInfoBarDelegate : public PluginInfoBarDelegate,
                                       public WeakPluginInstallerObserver {
  public:
-  // Creates an outdated plugin delegate and adds it to |infobar_service|.
+  // Creates an outdated plugin infobar delegate and adds it to
+  // |infobar_service|.
   static void Create(InfoBarService* infobar_service,
                      PluginInstaller* installer,
                      scoped_ptr<PluginMetadata> metadata);
@@ -146,7 +144,7 @@ class PluginInstallerInfoBarDelegate : public ConfirmInfoBarDelegate,
   // the user to install or update a particular plugin.
   static void Replace(InfoBarDelegate* infobar,
                       PluginInstaller* installer,
-                      scoped_ptr<PluginMetadata> metadata,
+                      scoped_ptr<PluginMetadata> plugin_metadata,
                       bool new_install,
                       const string16& message);
 

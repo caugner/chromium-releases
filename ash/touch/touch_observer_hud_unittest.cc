@@ -7,12 +7,16 @@
 #include "ash/ash_switches.h"
 #include "ash/display/display_manager.h"
 #include "ash/root_window_controller.h"
+#include "ash/screen_ash.h"
+#include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/display_manager_test_api.h"
+#include "ash/touch/touch_hud_debug.h"
 #include "ash/wm/property_util.h"
 #include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/strings/stringprintf.h"
+#include "ui/aura/window.h"
 
 namespace ash {
 namespace internal {
@@ -46,12 +50,12 @@ class TouchHudTest : public test::AshTestBase {
         CreateDisplayInfo(mirrored_display_id_, gfx::Rect(0, 0, 100, 100));
   }
 
-  const gfx::Display& GetPrimaryDisplay() {
-    return GetDisplayController()->GetPrimaryDisplay();
+  gfx::Display GetPrimaryDisplay() {
+    return Shell::GetScreen()->GetPrimaryDisplay();
   }
 
   const gfx::Display& GetSecondaryDisplay() {
-    return *GetDisplayController()->GetSecondaryDisplay();
+    return ScreenAsh::GetSecondaryDisplay();
   }
 
   void SetupSingleDisplay() {
@@ -208,23 +212,23 @@ class TouchHudTest : public test::AshTestBase {
   }
 
   internal::TouchObserverHUD* GetInternalTouchHud() {
-    return GetInternalRootController()->touch_observer_hud();
+    return GetInternalRootController()->touch_hud_debug();
   }
 
   internal::TouchObserverHUD* GetExternalTouchHud() {
-    return GetExternalRootController()->touch_observer_hud();
+    return GetExternalRootController()->touch_hud_debug();
   }
 
   internal::TouchObserverHUD* GetPrimaryTouchHud() {
-    return GetPrimaryRootController()->touch_observer_hud();
+    return GetPrimaryRootController()->touch_hud_debug();
   }
 
   internal::TouchObserverHUD* GetSecondaryTouchHud() {
-    return GetSecondaryRootController()->touch_observer_hud();
+    return GetSecondaryRootController()->touch_hud_debug();
   }
 
   DisplayInfo CreateDisplayInfo(int64 id, const gfx::Rect& bounds) {
-    DisplayInfo info(id, base::StringPrintf("x-%"PRId64, id), false);
+    DisplayInfo info(id, base::StringPrintf("x-%" PRId64, id), false);
     info.SetBounds(bounds);
     return info;
   }

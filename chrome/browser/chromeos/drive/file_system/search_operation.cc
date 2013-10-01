@@ -17,7 +17,7 @@
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "content/public/browser/browser_thread.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -38,7 +38,10 @@ FileError RefreshEntriesOnBlockingPool(
       resource_list->entries();
   result->reserve(entries.size());
   for (size_t i = 0; i < entries.size(); ++i) {
-    ResourceEntry entry = ConvertToResourceEntry(*entries[i]);
+    ResourceEntry entry;
+    if (!ConvertToResourceEntry(*entries[i], &entry))
+      continue;  // Skip non-file entries.
+
     const std::string id = entry.resource_id();
     FileError error = resource_metadata->RefreshEntry(entry);
     if (error == FILE_ERROR_NOT_FOUND) {
@@ -112,7 +115,7 @@ void SearchOperation::SearchAfterGetResourceList(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  FileError error = util::GDataToFileError(gdata_error);
+  FileError error = GDataToFileError(gdata_error);
   if (error != FILE_ERROR_OK) {
     callback.Run(error, GURL(), scoped_ptr<std::vector<SearchResultInfo> >());
     return;

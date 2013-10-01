@@ -4,9 +4,9 @@
 
 #include "chrome/browser/google/google_url_tracker_navigation_helper_impl.h"
 
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -31,12 +31,8 @@ void GoogleURLTrackerNavigationHelperImpl::SetListeningForNavigationStart(
   if (listen) {
     registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
         content::NotificationService::AllBrowserContextsAndSources());
-    registrar_.Add(this, chrome::NOTIFICATION_INSTANT_COMMITTED,
-        content::NotificationService::AllBrowserContextsAndSources());
   } else {
     registrar_.Remove(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
-        content::NotificationService::AllBrowserContextsAndSources());
-    registrar_.Remove(this, chrome::NOTIFICATION_INSTANT_COMMITTED,
         content::NotificationService::AllBrowserContextsAndSources());
   }
 }
@@ -148,33 +144,7 @@ void GoogleURLTrackerNavigationHelperImpl::Observe(
       break;
     }
 
-    case chrome::NOTIFICATION_INSTANT_COMMITTED: {
-      content::WebContents* web_contents =
-          content::Source<content::WebContents>(source).ptr();
-      content::NavigationController* nav_controller =
-          &web_contents->GetController();
-      const GURL& search_url = web_contents->GetURL();
-      if (!search_url.is_valid())  // Not clear if this can happen.
-        tracker_->OnTabClosed(nav_controller);
-      OnInstantCommitted(nav_controller,
-                         InfoBarService::FromWebContents(web_contents),
-                         search_url);
-      break;
-    }
-
     default:
       NOTREACHED() << "Unknown notification received:" << type;
   }
-}
-
-void GoogleURLTrackerNavigationHelperImpl::OnInstantCommitted(
-    content::NavigationController* nav_controller,
-    InfoBarService* infobar_service,
-    const GURL& search_url) {
-  // Call OnNavigationPending, giving |tracker_| the option to register for
-  // navigation commit messages for this navigation controller. If it does
-  // register for them, simulate the commit as well.
-  tracker_->OnNavigationPending(nav_controller, infobar_service, 0);
-  if (IsListeningForNavigationCommit(nav_controller))
-    tracker_->OnNavigationCommitted(infobar_service, search_url);
 }

@@ -6,10 +6,12 @@
 #define ANDROID_WEBVIEW_BROWSER_BROWSER_VIEW_RENDERER_H_
 
 #include "base/android/scoped_java_ref.h"
+#include "skia/ext/refptr.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/vector2d_f.h"
 
+class SkPicture;
 struct AwDrawGLInfo;
 struct AwDrawSWFunctionTable;
 
@@ -37,11 +39,17 @@ class BrowserViewRenderer {
     // Called to trigger view invalidations.
     virtual void PostInvalidate() = 0;
 
+    // Synchronously call back to SetGlobalVisibleRect with current value.
+    virtual void UpdateGlobalVisibleRect() = 0;
+
     // Called to get view's absolute location on the screen.
     virtual gfx::Point GetLocationOnScreen() = 0;
 
     // Try to set the view's scroll offset to |new_value|.
     virtual void ScrollContainerViewTo(gfx::Vector2d new_value) = 0;
+
+    // Handle overscroll.
+    virtual void DidOverscroll(gfx::Vector2d overscroll_delta) = 0;
 
    protected:
     virtual ~Client() {}
@@ -55,7 +63,8 @@ class BrowserViewRenderer {
         JNIEnv* env,
         int width,
         int height,
-        const base::android::JavaRef<jobject>& jcanvas) = 0;
+        const base::android::JavaRef<jobject>& jcanvas,
+        void* owner_key) = 0;
 
     // Draws the provided Java Bitmap into the provided Java Canvas.
     virtual void DrawBitmapIntoCanvas(
@@ -77,7 +86,6 @@ class BrowserViewRenderer {
   // Global hookup methods.
   static void SetAwDrawSWFunctionTable(AwDrawSWFunctionTable* table);
   static AwDrawSWFunctionTable* GetAwDrawSWFunctionTable();
-  static bool IsSkiaVersionCompatible();
 
   // Rendering methods.
 
@@ -86,34 +94,42 @@ class BrowserViewRenderer {
   // return value indicates nothing was or will be drawn.
   // |java_canvas| is the target of the draw. |is_hardware_canvas| indicates
   // a GL Draw maybe possible on this canvas. |scroll| if the view's current
-  // scroll offset. |clip| is the canvas's clip bounds.
+  // scroll offset. |clip| is the canvas's clip bounds. |visible_rect| is the
+  // intersection of the view size and the window in window coordinates.
   virtual bool OnDraw(jobject java_canvas,
                       bool is_hardware_canvas,
                       const gfx::Vector2d& scroll,
                       const gfx::Rect& clip) = 0;
+
   // Called in response to a prior Client::RequestDrawGL() call. See
   // AwDrawGLInfo documentation for more details of the contract.
   virtual void DrawGL(AwDrawGLInfo* draw_info) = 0;
 
+  // The global visible rect changed and this is the new value.
+  virtual void SetGlobalVisibleRect(const gfx::Rect& visible_rect) = 0;
+
   // CapturePicture API methods.
-  virtual base::android::ScopedJavaLocalRef<jobject> CapturePicture() = 0;
+  virtual skia::RefPtr<SkPicture> CapturePicture(int width, int height) = 0;
   virtual void EnableOnNewPicture(bool enabled) = 0;
 
   // View update notifications.
-  virtual void OnVisibilityChanged(bool visible) = 0;
+  virtual void SetIsPaused(bool paused) = 0;
+  virtual void SetViewVisibility(bool visible) = 0;
+  virtual void SetWindowVisibility(bool visible) = 0;
   virtual void OnSizeChanged(int width, int height) = 0;
   virtual void OnAttachedToWindow(int width, int height) = 0;
   virtual void OnDetachedFromWindow() = 0;
 
   // Sets the scale for logical<->physical pixel conversions.
   virtual void SetDipScale(float dip_scale) = 0;
+  virtual void SetPageScaleFactor(float page_scale_factor) = 0;
 
   // Set the root layer scroll offset to |new_value|.
   virtual void ScrollTo(gfx::Vector2d new_value) = 0;
 
   // Android views hierarchy gluing.
   virtual bool IsAttachedToWindow() = 0;
-  virtual bool IsViewVisible() = 0;
+  virtual bool IsVisible() = 0;
   virtual gfx::Rect GetScreenRect() = 0;
 
   virtual ~BrowserViewRenderer() {}

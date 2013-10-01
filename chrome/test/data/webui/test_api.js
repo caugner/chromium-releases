@@ -131,7 +131,26 @@ var testing = {};
      * Configuration for the accessibility audit.
      * @type {axs.AuditConfiguration}
      */
-    accessibilityAuditConfig: new axs.AuditConfiguration(),
+    accessibilityAuditConfig_: null,
+
+    /**
+     * Returns the configuration for the accessibility audit, creating it
+     * on-demand.
+     * @return {axs.AuditConfiguration}
+     */
+    accessibilityAuditConfig: function() {
+      if (!this.accessibilityAuditConfig_) {
+        this.accessibilityAuditConfig_ = new axs.AuditConfiguration();
+
+        // The "elements with meaningful background image" accessibility
+        // audit (AX_IMAGE_01) does not apply, since Chrome doesn't
+        // disable background images in high-contrast mode like some
+        // browsers do.
+        this.accessibilityAuditConfig_.ignoreSelectors(
+            "elementsWithMeaningfulBackgroundImage", "*");
+      }
+      return this.accessibilityAuditConfig_;
+    },
 
     /**
      * Whether to treat accessibility issues (errors or warnings) as test
@@ -198,6 +217,36 @@ var testing = {};
     },
 
     /**
+      * Create a container of mocked standalone functions to handle
+      * '.'-separated |apiNames|, assign it to |this.mockApis|, register its API
+      * overrides and return it.
+      * @return {Mock} Mock handler class.
+      * @see makeMockFunctions
+      * @see registerMockApis
+      */
+    makeAndRegisterMockApis: function (apiNames) {
+      var apiMockNames = apiNames.map(function(name) {
+        return name.replace(/\./g, '_');
+      });
+
+      this.mockApis = makeMockFunctions(apiMockNames);
+      registerMockApis(this.mockApis);
+      return this.mockApis;
+    },
+
+    /**
+      * Create a container of mocked standalone functions to handle
+      * |functionNames|, assign it to |this.mockLocalFunctions| and return it.
+      * @param {!Array.<string>} functionNames
+      * @return {Mock} Mock handler class.
+      * @see makeMockFunctions
+      */
+    makeMockLocalFunctions: function(functionNames) {
+      this.mockLocalFunctions = makeMockFunctions(functionNames);
+      return this.mockLocalFunctions;
+    },
+
+    /**
      * Override this method to perform initialization during preload (such as
      * creating mocks and registering handlers).
      * @type {Function}
@@ -237,7 +286,7 @@ var testing = {};
         return;
 
       if (!runAccessibilityAudit(this.a11yResults_,
-                                 this.accessibilityAuditConfig)) {
+                                 this.accessibilityAuditConfig())) {
         var report = accessibilityAuditReport(this.a11yResults_);
         if (this.accessibilityIssuesAreErrors)
           throw new Error(report);
@@ -506,6 +555,28 @@ var testing = {};
   }
 
   /**
+   * Registers the mock API call and its function.
+   * @param {string} name The '_'-separated name of the API call.
+   * @param {function(...)} theFunction Mock function for this API call.
+   */
+  function registerMockApi(name, theFunction) {
+    var path = name.split('_');
+
+    var namespace = this;
+    for(var i = 0; i < path.length - 1; i++) {
+      var fieldName = path[i];
+      if(!namespace[fieldName])
+        namespace[fieldName] = {};
+
+      namespace = namespace[fieldName];
+    }
+
+    var fieldName = path[path.length-1];
+    assertEquals(undefined, namespace[fieldName]);
+    namespace[fieldName] = theFunction;
+  }
+
+  /**
    * Empty function for use in making mocks.
    * @const
    */
@@ -525,6 +596,31 @@ var testing = {};
   }
 
   /**
+    * Create a new class to handle |functionNames|, add method 'functions()'
+    * that returns a container of standalone functions based on the mock class
+    * members, and return it.
+    * @return {Mock} Mock handler class.
+    */
+  function makeMockFunctions(functionNames) {
+    var MockClass = makeMockClass(functionNames);
+    var mockFunctions = mock(MockClass);
+    var mockProxy = mockFunctions.proxy();
+
+    mockFunctions.functions_ = {};
+
+    for (var func in MockClass.prototype) {
+      if (typeof MockClass.prototype[func] === 'function')
+        mockFunctions.functions_[func] = mockProxy[func].bind(mockProxy);
+    }
+
+    mockFunctions.functions = function () {
+      return this.functions_;
+    };
+
+    return mockFunctions;
+  }
+
+  /**
    * Register all methods of {@code mockClass.prototype} as overrides to global
    * functions of the same name as the method, using the proxy of the
    * |mockObject| to handle the functions.
@@ -537,6 +633,19 @@ var testing = {};
     for (var func in mockClass.prototype) {
       if (typeof mockClass.prototype[func] === 'function')
         registerMockGlobal(func, mockProxy, mockProxy[func]);
+    }
+  }
+
+  /**
+   * Register all functions in |mockObject.functions()| as global API calls.
+   * @param {Mock4JS.Mock} mockObject The mock to register callbacks against.
+   * @see registerMockApi
+   */
+  function registerMockApis(mockObject) {
+    var functions = mockObject.functions();
+    for (var func in functions) {
+      if (typeof functions[func] === 'function')
+        registerMockApi(func, functions[func]);
     }
   }
 
@@ -917,7 +1026,7 @@ var testing = {};
   function assertAccessibilityOk(opt_results) {
     helper.registerCall();
     var a11yResults = opt_results || [];
-    var auditConfig = currentTestCase.fixture.accessibilityAuditConfig;
+    var auditConfig = currentTestCase.fixture.accessibilityAuditConfig();
     if (!runAccessibilityAudit(a11yResults, auditConfig))
       throw new Error(accessibilityAuditReport(a11yResults));
   }
@@ -1495,6 +1604,69 @@ var testing = {};
                             Array.prototype.slice.call(arguments, 1));
   }
 
+  /**
+   * Syntactic sugar for use with will() on a Mock4JS.Mock.
+   * Creates an action for will() that invokes a callback that the tested code
+   * passes to a mocked function.
+   * @param {SaveMockArguments} savedArgs Arguments that will contain the
+   *     callback once the mocked function is called.
+   * @param {number} callbackParameter Index of the callback parameter in
+   *     |savedArgs|.
+   * @param {...Object} var_args Arguments to pass to the callback.
+   * @return {CallFunctionAction} Action for use in will().
+   */
+  function invokeCallback(savedArgs, callbackParameter, var_args) {
+    var callbackArguments = Array.prototype.slice.call(arguments, 2);
+    return callFunction(function() {
+      savedArgs.arguments[callbackParameter].apply(null, callbackArguments);
+
+      // Mock4JS does not clear the saved args after invocation.
+      // To allow reuse of the same SaveMockArguments for multiple
+      // invocations with similar arguments, clear them here.
+      savedArgs.arguments.splice(0, savedArgs.arguments.length);
+    });
+  }
+
+  /**
+   * Mock4JS matcher object that matches the actual agrument and the expected
+   * value iff their JSON represenations are same.
+   * @param {Object} expectedValue Expected value.
+   * @constructor
+   */
+  function MatchJSON(expectedValue) {
+    this.expectedValue_ = expectedValue;
+  }
+
+  MatchJSON.prototype = {
+    /**
+     * Checks that JSON represenation of the actual and expected arguments are
+     * same.
+     * @param {Object} actualArgument The argument to match.
+     * @return {boolean} Result of the comparison.
+     */
+    argumentMatches: function(actualArgument) {
+      return JSON.stringify(this.expectedValue_) ===
+          JSON.stringify(actualArgument);
+    },
+
+    /**
+     * Describes the matcher.
+     * @return {string} Description of this Mock4JS matcher.
+     */
+    describe: function() {
+      return 'eqJSON(' + JSON.stringify(this.expectedValue_) + ')';
+    },
+  };
+
+  /**
+   * Builds a MatchJSON agrument matcher for a given expected value.
+   * @param {Object} expectedValue Expected value.
+   * @return {MatchJSON} Resulting Mock4JS matcher.
+   */
+  function eqJSON(expectedValue) {
+    return new MatchJSON(expectedValue);
+  }
+
   // Exports.
   testing.Test = Test;
   exports.testDone = testDone;
@@ -1511,6 +1683,7 @@ var testing = {};
   exports.callFunction = callFunction;
   exports.callFunctionWithSavedArgs = callFunctionWithSavedArgs;
   exports.callGlobalWithSavedArgs = callGlobalWithSavedArgs;
+  exports.eqJSON = eqJSON;
   exports.expectTrue = createExpect(assertTrue);
   exports.expectFalse = createExpect(assertFalse);
   exports.expectGE = createExpect(assertGE);
@@ -1521,6 +1694,7 @@ var testing = {};
   exports.expectNotEquals = createExpect(assertNotEquals);
   exports.expectNotReached = createExpect(assertNotReached);
   exports.expectAccessibilityOk = createExpect(assertAccessibilityOk);
+  exports.invokeCallback = invokeCallback;
   exports.preloadJavascriptLibraries = preloadJavascriptLibraries;
   exports.registerMessageCallback = registerMessageCallback;
   exports.registerMockGlobals = registerMockGlobals;

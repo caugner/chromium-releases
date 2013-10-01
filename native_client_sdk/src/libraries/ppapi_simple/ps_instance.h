@@ -1,13 +1,11 @@
-/* Copyright (c) 2013 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
-
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef PPAPI_SIMPLE_PS_INSTANCE_H_
 #define PPAPI_SIMPLE_PS_INSTANCE_H_
 
-#include <map>
+#include <stdarg.h>
 
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_stdint.h"
@@ -29,23 +27,24 @@
 #include "sdk_util/thread_safe_queue.h"
 
 
-typedef std::map<std::string, std::string> PropertyMap_t;
-
 // The basic instance class which also inherits the MouseLock and
 // Graphics3DClient interfaces.
 class PSInstance : public pp::Instance, pp::MouseLock, pp::Graphics3DClient {
  public:
+  // Verbosity levels, ecplicitly numbered since we pass these
+  // in from html attributes as numberic values.
   enum Verbosity {
-    PSV_SILENT,
-    PSV_ERROR,
-    PSV_WARN,
-    PSV_LOG,
+    PSV_SILENT = 0,
+    PSV_ERROR = 1,
+    PSV_WARN = 2,
+    PSV_LOG = 3,
+    PSV_TRACE = 4,
   };
 
   // Returns a pointer to the global instance
   static PSInstance* GetInstance();
 
-  PSInstance(PP_Instance inst, const char *argv[]);
+  PSInstance(PP_Instance inst);
   virtual ~PSInstance();
 
   // Set a function which will be called on a new thread once initialized.
@@ -53,14 +52,12 @@ class PSInstance : public pp::Instance, pp::MouseLock, pp::Graphics3DClient {
   // function will have no effect.
   void SetMain(PSMainFunc_t func);
 
-  // Returns value based on KEY or default.
-  const char* GetProperty(const char* key, const char* def = NULL);
-
   // Started on Init, a thread which can be safely blocked.
   virtual int MainThread(int argc, char* argv[]);
 
   // Logging Functions
   void SetVerbosity(Verbosity verbosity);
+  void Trace(const char *fmt, ...);
   void Log(const char *fmt, ...);
   void Warn(const char *fmt, ...);
   void Error(const char *fmt, ...);
@@ -85,6 +82,10 @@ class PSInstance : public pp::Instance, pp::MouseLock, pp::Graphics3DClient {
   // Called by the browser when the NaCl module is loaded and all ready to go.
   // This function will create a new thread which will run the pseudo main.
   virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]);
+
+  // Output log message to stderr if the current verbosity is set
+  // at or above the given verbosity.
+  void VALog(Verbosity verbosity, const char *fmt, va_list args);
 
   // Called whenever the in-browser window changes size, it will pass a
   // context change request to whichever thread is handling rendering.
@@ -116,16 +117,16 @@ class PSInstance : public pp::Instance, pp::MouseLock, pp::Graphics3DClient {
  protected:
   pp::MessageLoop* main_loop_;
 
-  PropertyMap_t properties_;
-  ThreadSafeQueue<PSEvent> event_queue_;
+  sdk_util::ThreadSafeQueue<PSEvent> event_queue_;
   uint32_t events_enabled_;
   Verbosity verbosity_;
+  int fd_tty_;
 
   PSMainFunc_t main_cb_;
 
-  friend class PSGraphics3DClient;
-  friend class PSMouseLock;
+  const PPB_Core* ppb_core_;
+  const PPB_Var* ppb_var_;
+  const PPB_View* ppb_view_;
 };
 
 #endif  // PPAPI_MAIN_PS_INSTANCE_H_
-

@@ -128,8 +128,7 @@ class NET_EXPORT MDnsClient {
  public:
   virtual ~MDnsClient() {}
 
-  // Create listener object for RRType |rrtype| and name |name|.  If |name| is
-  // an empty string, listen to all notification of type |rrtype|.
+  // Create listener object for RRType |rrtype| and name |name|.
   virtual scoped_ptr<MDnsListener> CreateListener(
       uint16 rrtype,
       const std::string& name,
@@ -144,12 +143,15 @@ class NET_EXPORT MDnsClient {
       int flags,
       const MDnsTransaction::ResultCallback& callback) = 0;
 
-  // Lazily create and return static instance for MDnsClient.
-  static MDnsClient* GetInstance();
+  virtual bool StartListening() = 0;
 
-  // Set the global instance (for testing). MUST be called before the first call
-  // to GetInstance.
-  static void SetInstance(MDnsClient* instance);
+  // Do not call this inside callbacks from related MDnsListener and
+  // MDnsTransaction objects.
+  virtual void StopListening() = 0;
+  virtual bool IsListening() const = 0;
+
+  // Create the default MDnsClient
+  static scoped_ptr<MDnsClient> CreateDefault();
 };
 
 }  // namespace net

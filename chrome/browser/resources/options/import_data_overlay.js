@@ -42,6 +42,7 @@ cr.define('options', function() {
       $('import-browsers').onchange = function() {
         self.updateCheckboxes_();
         self.validateCommitButton_();
+        self.updateBottomBar_();
       };
 
       $('import-data-commit').onclick = function() {
@@ -57,6 +58,10 @@ cr.define('options', function() {
         ImportDataOverlay.dismiss();
       };
 
+      $('import-choose-file').onclick = function() {
+        chrome.send('chooseBookmarksFile');
+      };
+
       $('import-data-show-bookmarks-bar').onchange = function() {
         // Note: The callback 'toggleShowBookmarksBar' is handled within the
         // browser options handler -- rather than the import data handler --
@@ -69,11 +74,11 @@ cr.define('options', function() {
       };
 
       // Form controls are disabled until the profile list has been loaded.
-      self.setControlsSensitive_(false);
+      self.setAllControlsEnabled_(false);
     },
 
     /**
-     * Set enabled and checked state of the commit button.
+     * Sets the enabled and checked state of the commit button.
      * @private
      */
     validateCommitButton_: function() {
@@ -84,25 +89,30 @@ cr.define('options', function() {
     },
 
     /**
-     * Sets the sensitivity of all the checkboxes and the commit button.
+     * Sets the enabled state of all the checkboxes and the commit button.
      * @private
      */
-    setControlsSensitive_: function(sensitive) {
+    setAllControlsEnabled_: function(enabled) {
       var checkboxes =
           document.querySelectorAll('#import-checkboxes input[type=checkbox]');
       for (var i = 0; i < checkboxes.length; i++)
-        this.setUpCheckboxState_(checkboxes[i], sensitive);
-      $('import-data-commit').disabled = !sensitive;
+        this.setUpCheckboxState_(checkboxes[i], enabled);
+      $('import-data-commit').disabled = !enabled;
+      $('mac-password-keychain').hidden = !enabled;
     },
 
     /**
-     * Set enabled and checked states a checkbox element.
+     * Sets the enabled and checked states of a checkbox element.
      * @param {Object} checkbox A checkbox element.
-     * @param {boolean} enabled The enabled state of the chekbox.
+     * @param {boolean} enabled The enabled state of the checkbox. If false,
+     * the checkbox is disabled and unchecked. If true, the checkbox is enabled
+     * and checked.
+     * @param {boolean} visible The visible state of the checkbox.
      * @private
      */
     setUpCheckboxState_: function(checkbox, enabled) {
-       checkbox.setDisabled('noProfileData', !enabled);
+      checkbox.setDisabled('noProfileData', !enabled);
+      checkbox.checked = enabled;
     },
 
     /**
@@ -111,6 +121,10 @@ cr.define('options', function() {
      */
     updateCheckboxes_: function() {
       var index = $('import-browsers').selectedIndex;
+      var bookmarksFileSelected = index == this.browserProfiles.length - 1;
+      $('import-choose-file').hidden = !bookmarksFileSelected;
+      $('import-data-commit').hidden = bookmarksFileSelected;
+
       var browserProfile;
       if (this.browserProfiles.length > index)
         browserProfile = this.browserProfiles[index];
@@ -118,8 +132,24 @@ cr.define('options', function() {
       for (var i = 0; i < importOptions.length; i++) {
         var checkbox = $('import-' + importOptions[i]);
         var enable = browserProfile && browserProfile[importOptions[i]];
+        checkbox.checked = enable;
         this.setUpCheckboxState_(checkbox, enable);
+        var checkboxWithLabel = $('import-' + importOptions[i] + '-with-label');
+        checkboxWithLabel.style.display = enable ? '' : 'none';
       }
+    },
+
+    /**
+     * Show or hide gray message at the bottom.
+     * @private
+     */
+    updateBottomBar_: function() {
+      var index = $('import-browsers').selectedIndex;
+      var browserProfile;
+      if (this.browserProfiles.length > index)
+        browserProfile = this.browserProfiles[index];
+      var enable = browserProfile && browserProfile['show_bottom_bar'];
+      $('mac-password-keychain').hidden = !enable;
     },
 
     /**
@@ -138,9 +168,9 @@ cr.define('options', function() {
         var option = new Option(loadTimeData.getString('noProfileFound'), 0);
         browserSelect.appendChild(option);
 
-        this.setControlsSensitive_(false);
+        this.setAllControlsEnabled_(false);
       } else {
-        this.setControlsSensitive_(true);
+        this.setAllControlsEnabled_(true);
         for (var i = 0; i < browserCount; i++) {
           var browser = browsers[i];
           var option = new Option(browser.name, browser.index);
@@ -149,6 +179,7 @@ cr.define('options', function() {
 
         this.updateCheckboxes_();
         this.validateCommitButton_();
+        this.updateBottomBar_();
       }
     },
 
@@ -236,6 +267,7 @@ cr.define('options', function() {
     // Make sure that any previous import success message is hidden, and
     // we're showing the UI to import further data.
     ImportDataOverlay.getInstance().updateSuccessState_(false);
+    ImportDataOverlay.getInstance().validateCommitButton_();
 
     OptionsPage.navigateToPage('importData');
   };

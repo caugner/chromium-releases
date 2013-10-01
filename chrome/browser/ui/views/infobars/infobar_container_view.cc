@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/infobars/infobar_view.h"
 #include "grit/generated_resources.h"
@@ -14,9 +14,8 @@
 // static
 const char InfoBarContainerView::kViewClassName[] = "InfoBarContainerView";
 
-InfoBarContainerView::InfoBarContainerView(Delegate* delegate,
-                                           SearchModel* search_model)
-    : InfoBarContainer(delegate, search_model) {
+InfoBarContainerView::InfoBarContainerView(Delegate* delegate)
+    : InfoBarContainer(delegate) {
   set_id(VIEW_ID_INFO_BAR_CONTAINER);
 }
 

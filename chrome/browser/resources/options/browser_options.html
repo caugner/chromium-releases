@@ -137,22 +137,6 @@
               i18n-content="defaultSearchManageEngines">
           </button>
         </div>
-        <div id="instant-enabled-setting" class="checkbox"
-            guest-visibility="disabled">
-          <span class="controlled-setting-with-label">
-            <input id="instant-enabled-control" type="checkbox"
-                pref="instant_extended.instant_enabled"
-                metric="Options_InstantExtendedEnabled">
-            <span>
-              <!-- The content of the label is inserted by JS -->
-              <label id="instant-enabled-label" for="instant-enabled-control">
-              </label>
-              <span class="controlled-setting-indicator"
-                  pref="instant_extended.instant_enabled">
-              </span>
-            </span>
-          </span>
-        </div>
       </div>
   </section>
   <section id="sync-users-section" guest-visibility="hidden">
@@ -527,7 +511,7 @@
         </span>
       </div>
 <if expr="pp_ifdef('chromeos')">
-      <div class="checkbox" guest-visibility="disabled">
+      <div class="checkbox" id="disable-drive-row" guest-visibility="disabled">
         <span class="controlled-setting-with-label">
           <input id="drive-disabled" type="checkbox"
               pref="gdata.disabled"
@@ -653,6 +637,22 @@
               </label>
               <span class="controlled-setting-indicator"
                   pref="settings.a11y.high_contrast_enabled">
+              </span>
+            </span>
+          </span>
+        </div>
+      </div>
+      <div id="accessibility-sticky-keys" class="option-name" hidden>
+        <div class="checkbox">
+          <span class="controlled-setting-with-label">
+            <input id="accessibility-sticky-keys-check"
+                pref="settings.a11y.sticky_keys_enabled" type="checkbox">
+            <span>
+              <label for="accessibility-sticky-keys-check"
+                  i18n-content="accessibilityStickyKeys">
+              </label>
+              <span class="controlled-setting-indicator"
+                  pref="settings.a11y.sticky_keys_enabled">
               </span>
             </span>
           </span>

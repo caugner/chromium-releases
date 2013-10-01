@@ -19,7 +19,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 #if defined(ENABLE_RLZ)
 #include "chrome/browser/rlz/rlz.h"
@@ -38,11 +38,6 @@ std::string SearchTermsData::GoogleBaseURLValue() const {
 }
 
 std::string SearchTermsData::GoogleBaseSuggestURLValue() const {
-  std::string base_suggest_url = CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kGoogleBaseSuggestURL);
-  if (!base_suggest_url.empty())
-    return base_suggest_url;
-
   // Start with the Google base URL.
   const GURL base_url(GoogleBaseURLValue());
   DCHECK(base_url.is_valid());
@@ -95,21 +90,25 @@ std::string* UIThreadSearchTermsData::google_base_url_ = NULL;
 
 UIThreadSearchTermsData::UIThreadSearchTermsData(Profile* profile)
     : profile_(profile) {
-  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+  DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 std::string UIThreadSearchTermsData::GoogleBaseURLValue() const {
-  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+  DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (google_base_url_)
     return *google_base_url_;
+  std::string base_url = CommandLine::ForCurrentProcess()->
+      GetSwitchValueASCII(switches::kGoogleBaseURL);
+  if (!base_url.empty())
+    return base_url;
   return profile_ ? GoogleURLTracker::GoogleURL(profile_).spec() :
       SearchTermsData::GoogleBaseURLValue();
 }
 
 std::string UIThreadSearchTermsData::GetApplicationLocale() const {
-  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+  DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
   return g_browser_process->GetApplicationLocale();
 }
@@ -117,7 +116,7 @@ std::string UIThreadSearchTermsData::GetApplicationLocale() const {
 // Android implementations are located in search_terms_data_android.cc.
 #if !defined(OS_ANDROID)
 string16 UIThreadSearchTermsData::GetRlzParameterValue() const {
-  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+  DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
   string16 rlz_string;
 #if defined(ENABLE_RLZ)
@@ -139,26 +138,26 @@ string16 UIThreadSearchTermsData::GetRlzParameterValue() const {
 // search client string.  There is already a unit test in place for Android
 // called TemplateURLTest::SearchClient.
 std::string UIThreadSearchTermsData::GetSearchClient() const {
-  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+  DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
   return std::string();
 }
 #endif
 
 std::string UIThreadSearchTermsData::GetSuggestClient() const {
-  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+  DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
       BrowserThread::CurrentlyOn(BrowserThread::UI));
   return chrome::IsInstantExtendedAPIEnabled() ? "chrome-omni" : "chrome";
 }
 
 std::string UIThreadSearchTermsData::InstantEnabledParam() const {
-  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+  DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::UI));
   return chrome::IsInstantExtendedAPIEnabled() ? std::string() : "ion=1&";
 }
 
 std::string UIThreadSearchTermsData::InstantExtendedEnabledParam() const {
-  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+  DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::UI));
   uint64 instant_extended_api_version = chrome::EmbeddedSearchPageVersion();
   if (instant_extended_api_version) {
@@ -169,7 +168,7 @@ std::string UIThreadSearchTermsData::InstantExtendedEnabledParam() const {
 }
 
 std::string UIThreadSearchTermsData::NTPIsThemedParam() const {
-  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+  DCHECK(!BrowserThread::IsThreadInitialized(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::UI));
 #if defined(ENABLE_THEMES)
   if (!chrome::IsInstantExtendedAPIEnabled())

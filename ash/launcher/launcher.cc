@@ -142,6 +142,10 @@ bool Launcher::IsVisible() const {
   return launcher_view_->visible();
 }
 
+void Launcher::SchedulePaint() {
+  launcher_view_->SchedulePaintForAllButtons();
+}
+
 views::View* Launcher::GetAppListButtonView() const {
   return launcher_view_->GetAppListButtonView();
 }
@@ -184,6 +188,10 @@ void Launcher::SetLauncherViewBounds(gfx::Rect bounds) {
 
 gfx::Rect Launcher::GetLauncherViewBounds() const {
   return launcher_view_->bounds();
+}
+
+app_list::ApplicationDragAndDropHost* Launcher::GetDragAndDropHostForAppList() {
+  return launcher_view_;
 }
 
 }  // namespace ash

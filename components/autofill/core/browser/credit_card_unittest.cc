@@ -6,6 +6,7 @@
 #include "base/guid.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_common_test.h"
+#include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/form_field_data.h"
@@ -34,6 +35,9 @@ const char* const kValidNumbers[] = {
   "4222-2222-2222-2",
   "5019717010103742",
   "6331101999990016",
+
+  // A UnionPay card that doesn't pass the Luhn checksum
+  "6200000000000000",
 };
 const char* const kInvalidNumbers[] = {
   "4111 1111 112", /* too short */
@@ -324,11 +328,13 @@ TEST(CreditCardTest, SetExpirationMonth) {
   EXPECT_EQ(ASCIIToUTF16("07"), card.GetRawInfo(CREDIT_CARD_EXP_MONTH));
   EXPECT_EQ(7, card.expiration_month());
 
-  card.SetInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("January"), "en-US");
+  card.SetInfo(
+      AutofillType(CREDIT_CARD_EXP_MONTH), ASCIIToUTF16("January"), "en-US");
   EXPECT_EQ(ASCIIToUTF16("01"), card.GetRawInfo(CREDIT_CARD_EXP_MONTH));
   EXPECT_EQ(1, card.expiration_month());
 
-  card.SetInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("Apr"), "en-US");
+  card.SetInfo(
+      AutofillType(CREDIT_CARD_EXP_MONTH), ASCIIToUTF16("Apr"), "en-US");
   EXPECT_EQ(ASCIIToUTF16("04"), card.GetRawInfo(CREDIT_CARD_EXP_MONTH));
   EXPECT_EQ(4, card.expiration_month());
 }
@@ -370,7 +376,8 @@ TEST(CreditCardTest, CreditCardMonthExact) {
 
   CreditCard credit_card(base::GenerateGUID(), "https://www.example.com/");
   credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("01"));
-  credit_card.FillSelectControl(CREDIT_CARD_EXP_MONTH, "en-US", &field);
+  credit_card.FillSelectControl(
+      AutofillType(CREDIT_CARD_EXP_MONTH), "en-US", &field);
   EXPECT_EQ(ASCIIToUTF16("01"), field.value);
 }
 
@@ -391,7 +398,8 @@ TEST(CreditCardTest, CreditCardMonthAbbreviated) {
 
   CreditCard credit_card(base::GenerateGUID(), "https://www.example.com/");
   credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("01"));
-  credit_card.FillSelectControl(CREDIT_CARD_EXP_MONTH, "en-US", &field);
+  credit_card.FillSelectControl(
+      AutofillType(CREDIT_CARD_EXP_MONTH), "en-US", &field);
   EXPECT_EQ(ASCIIToUTF16("Jan"), field.value);
 }
 
@@ -412,7 +420,8 @@ TEST(CreditCardTest, CreditCardMonthFull) {
 
   CreditCard credit_card(base::GenerateGUID(), "https://www.example.com/");
   credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("01"));
-  credit_card.FillSelectControl(CREDIT_CARD_EXP_MONTH, "en-US", &field);
+  credit_card.FillSelectControl(
+      AutofillType(CREDIT_CARD_EXP_MONTH), "en-US", &field);
   EXPECT_EQ(ASCIIToUTF16("January"), field.value);
 }
 
@@ -432,7 +441,8 @@ TEST(CreditCardTest, CreditCardMonthNumeric) {
 
   CreditCard credit_card(base::GenerateGUID(), "https://www.example.com/");
   credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("01"));
-  credit_card.FillSelectControl(CREDIT_CARD_EXP_MONTH, "en-US", &field);
+  credit_card.FillSelectControl(
+      AutofillType(CREDIT_CARD_EXP_MONTH), "en-US", &field);
   EXPECT_EQ(ASCIIToUTF16("1"), field.value);
 }
 
@@ -452,7 +462,8 @@ TEST(CreditCardTest, CreditCardTwoDigitYear) {
 
   CreditCard credit_card(base::GenerateGUID(), "https://www.example.com/");
   credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2017"));
-  credit_card.FillSelectControl(CREDIT_CARD_EXP_4_DIGIT_YEAR, "en-US", &field);
+  credit_card.FillSelectControl(
+      AutofillType(CREDIT_CARD_EXP_4_DIGIT_YEAR), "en-US", &field);
   EXPECT_EQ(ASCIIToUTF16("17"), field.value);
   EXPECT_EQ(2017, credit_card.expiration_year());
 }
@@ -480,7 +491,8 @@ TEST(CreditCardTest, CreditCardTypeSelectControl) {
     CreditCard credit_card(base::GenerateGUID(), "https://www.example.com/");
     credit_card.SetRawInfo(CREDIT_CARD_NUMBER,
                            ASCIIToUTF16("4111111111111111"));
-    credit_card.FillSelectControl(CREDIT_CARD_TYPE, "en-US", &field);
+    credit_card.FillSelectControl(
+        AutofillType(CREDIT_CARD_TYPE), "en-US", &field);
     EXPECT_EQ(ASCIIToUTF16("Visa"), field.value);
   }
 
@@ -489,7 +501,8 @@ TEST(CreditCardTest, CreditCardTypeSelectControl) {
     CreditCard credit_card(base::GenerateGUID(), "https://www.example.com/");
     credit_card.SetRawInfo(CREDIT_CARD_NUMBER,
                            ASCIIToUTF16("5105105105105100"));
-    credit_card.FillSelectControl(CREDIT_CARD_TYPE, "en-US", &field);
+    credit_card.FillSelectControl(
+        AutofillType(CREDIT_CARD_TYPE), "en-US", &field);
     EXPECT_EQ(ASCIIToUTF16("Master Card"), field.value);
   }
 
@@ -497,7 +510,8 @@ TEST(CreditCardTest, CreditCardTypeSelectControl) {
     // American Express is sometimes abbreviated as AmEx:
     CreditCard credit_card(base::GenerateGUID(), "https://www.example.com/");
     credit_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("371449635398431"));
-    credit_card.FillSelectControl(CREDIT_CARD_TYPE, "en-US", &field);
+    credit_card.FillSelectControl(
+        AutofillType(CREDIT_CARD_TYPE), "en-US", &field);
     EXPECT_EQ(ASCIIToUTF16("AmEx"), field.value);
   }
 
@@ -506,7 +520,8 @@ TEST(CreditCardTest, CreditCardTypeSelectControl) {
     CreditCard credit_card(base::GenerateGUID(), "https://www.example.com/");
     credit_card.SetRawInfo(CREDIT_CARD_NUMBER,
                            ASCIIToUTF16("6011111111111117"));
-    credit_card.FillSelectControl(CREDIT_CARD_TYPE, "en-US", &field);
+    credit_card.FillSelectControl(
+        AutofillType(CREDIT_CARD_TYPE), "en-US", &field);
     EXPECT_EQ(ASCIIToUTF16("discover"), field.value);
   }
 }
@@ -559,6 +574,9 @@ TEST(CreditCardTest, GetCreditCardType) {
     { "5112345112345114", kMasterCard, true },
     { "5115915115915118", kMasterCard, true },
 
+    // A UnionPay card that doesn't pass the Luhn checksum
+    { "6200000000000000", kUnionPay, true },
+
     // Empty string
     { std::string(), kGenericCard, false },
 
@@ -603,6 +621,7 @@ TEST(CreditCardTest, GetCreditCardType) {
     { "53", kMasterCard, false },
     { "54", kMasterCard, false },
     { "55", kMasterCard, false },
+    { "62", kUnionPay, false },
 
     // Not enough data to determine an IIN uniquely.
     { "3", kGenericCard, false },
@@ -646,7 +665,6 @@ TEST(CreditCardTest, GetCreditCardType) {
     { "608", kGenericCard, false },
     { "609", kGenericCard, false },
     { "61", kGenericCard, false },
-    { "62", kGenericCard, false },
     { "63", kGenericCard, false },
     { "640", kGenericCard, false },
     { "641", kGenericCard, false },

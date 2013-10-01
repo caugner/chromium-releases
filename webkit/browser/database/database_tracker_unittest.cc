@@ -6,11 +6,11 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -249,7 +249,7 @@ class DatabaseTracker_TestHelper_Test {
     tracker->DatabaseClosed(kOrigin1, kDB1);
     result = callback.GetResult(result);
     EXPECT_EQ(net::OK, result);
-    EXPECT_FALSE(file_util::PathExists(
+    EXPECT_FALSE(base::PathExists(
           tracker->DatabaseDirectory().AppendASCII(kOrigin1)));
 
     // Recreate db1.
@@ -285,12 +285,12 @@ class DatabaseTracker_TestHelper_Test {
     tracker->DatabaseClosed(kOrigin2, kDB2);
     result = callback.GetResult(result);
     EXPECT_EQ(net::OK, result);
-    EXPECT_FALSE(file_util::PathExists(
+    EXPECT_FALSE(base::PathExists(
         tracker->DatabaseDirectory().AppendASCII(kOrigin1)));
     EXPECT_TRUE(
-        file_util::PathExists(tracker->GetFullDBFilePath(kOrigin2, kDB2)));
+        base::PathExists(tracker->GetFullDBFilePath(kOrigin2, kDB2)));
     EXPECT_TRUE(
-        file_util::PathExists(tracker->GetFullDBFilePath(kOrigin2, kDB3)));
+        base::PathExists(tracker->GetFullDBFilePath(kOrigin2, kDB3)));
 
     tracker->DatabaseClosed(kOrigin2, kDB3);
     tracker->RemoveObserver(&observer);
@@ -613,13 +613,13 @@ class DatabaseTracker_TestHelper_Test {
     EXPECT_EQ(size_t(1), origins_info.size());
     EXPECT_EQ(kOrigin1, origins_info[0].GetOriginIdentifier());
     EXPECT_TRUE(
-        file_util::PathExists(tracker->GetFullDBFilePath(kOrigin1, kDB1)));
+        base::PathExists(tracker->GetFullDBFilePath(kOrigin1, kDB1)));
     EXPECT_EQ(base::FilePath(), tracker->GetFullDBFilePath(kOrigin2, kDB2));
 
     // The origin directory of kOrigin1 remains, but the origin directory of
     // kOrigin2 is deleted.
-    EXPECT_TRUE(file_util::PathExists(origin1_db_dir));
-    EXPECT_FALSE(file_util::PathExists(origin2_db_dir));
+    EXPECT_TRUE(base::PathExists(origin1_db_dir));
+    EXPECT_FALSE(base::PathExists(origin2_db_dir));
   }
 
   static void DatabaseTrackerSetForceKeepSessionState() {
@@ -692,12 +692,12 @@ class DatabaseTracker_TestHelper_Test {
     // No origins were deleted.
     EXPECT_EQ(size_t(2), origins_info.size());
     EXPECT_TRUE(
-        file_util::PathExists(tracker->GetFullDBFilePath(kOrigin1, kDB1)));
+        base::PathExists(tracker->GetFullDBFilePath(kOrigin1, kDB1)));
     EXPECT_TRUE(
-        file_util::PathExists(tracker->GetFullDBFilePath(kOrigin2, kDB2)));
+        base::PathExists(tracker->GetFullDBFilePath(kOrigin2, kDB2)));
 
-    EXPECT_TRUE(file_util::PathExists(origin1_db_dir));
-    EXPECT_TRUE(file_util::PathExists(origin2_db_dir));
+    EXPECT_TRUE(base::PathExists(origin1_db_dir));
+    EXPECT_TRUE(base::PathExists(origin2_db_dir));
   }
 
   static void EmptyDatabaseNameIsValid() {
@@ -794,12 +794,12 @@ class DatabaseTracker_TestHelper_Test {
     tracker->HandleSqliteError(kOriginId, kName, SQLITE_CORRUPT);
     EXPECT_TRUE(tracker->IsDatabaseScheduledForDeletion(kOriginId, kName));
     EXPECT_TRUE(observer.DidReceiveNewNotification());
-    EXPECT_TRUE(file_util::PathExists(spoof_db_file));
+    EXPECT_TRUE(base::PathExists(spoof_db_file));
 
     // Verify that once closed, the file is deleted and the record in the
     // tracker db is removed.
     tracker->DatabaseClosed(kOriginId, kName);
-    EXPECT_FALSE(file_util::PathExists(spoof_db_file));
+    EXPECT_FALSE(base::PathExists(spoof_db_file));
     EXPECT_TRUE(tracker->GetFullDBFilePath(kOriginId, kName).empty());
 
     // --------------------------------------------------------
@@ -819,7 +819,7 @@ class DatabaseTracker_TestHelper_Test {
     EXPECT_FALSE(tracker->IsDatabaseScheduledForDeletion(kOriginId, kName));
     EXPECT_FALSE(observer.DidReceiveNewNotification());
     EXPECT_TRUE(tracker->GetFullDBFilePath(kOriginId, kName).empty());
-    EXPECT_FALSE(file_util::PathExists(spoof_db_file2));
+    EXPECT_FALSE(base::PathExists(spoof_db_file2));
 
     tracker->RemoveObserver(&observer);
   }

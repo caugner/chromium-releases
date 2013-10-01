@@ -14,8 +14,8 @@
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
+#include "url/gurl.h"
 
 // Url must not be matched by "urls" section of
 // cloud_print_app/manifest.json. If it's matched, print driver dialog will
@@ -28,7 +28,7 @@ const char kTestPageURL[] =
     "http://www.google.com/landing/cloudprint/enable.html?print=true";
 
 // static
-void CloudPrintURL::RegisterUserPrefs(
+void CloudPrintURL::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterStringPref(
       prefs::kCloudPrintServiceURL,

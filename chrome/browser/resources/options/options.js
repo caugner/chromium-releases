@@ -138,8 +138,7 @@ function load() {
                                $('manage-languages')]);
   OptionsPage.registerOverlay(ManageProfileOverlay.getInstance(),
                               BrowserOptions.getInstance());
-  if (loadTimeData.getBoolean('managedUsersEnabled') &&
-      !cr.isChromeOS) {
+  if (loadTimeData.getBoolean('managedUsersEnabled') && !cr.isChromeOS) {
     OptionsPage.registerOverlay(ManagedUserCreateConfirmOverlay.getInstance(),
                                 BrowserOptions.getInstance());
     OptionsPage.registerOverlay(ManagedUserLearnMoreOverlay.getInstance(),
@@ -228,6 +227,7 @@ function load() {
                                 CertificateManager.getInstance());
   }
 
+  cr.ui.FocusManager.disableMouseFocusOnButtons();
   OptionsFocusManager.getInstance().initialize();
   Preferences.getInstance().initialize();
   OptionsPage.initialize();

@@ -7,8 +7,10 @@
 #include <algorithm>
 
 #include "grit/ui_resources.h"
+#include "ui/app_list/app_list_model.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_box_view_delegate.h"
+#include "ui/app_list/views/app_list_menu_views.h"
 #include "ui/base/events/event.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/button/menu_button.h"
@@ -27,16 +29,22 @@ const int kMenuButtonDimension = 29;
 
 const SkColor kHintTextColor = SkColorSetRGB(0xA0, 0xA0, 0xA0);
 
+// Menu offset relative to the bottom-right corner of the menu button.
+const int kMenuYOffsetFromButton = -4;
+const int kMenuXOffsetFromButton = -7;
+
 }  // namespace
 
 SearchBoxView::SearchBoxView(SearchBoxViewDelegate* delegate,
-                             AppListViewDelegate* view_delegate)
+                             AppListViewDelegate* view_delegate,
+                             AppListModel* model)
     : delegate_(delegate),
-      model_(NULL),
-      menu_(view_delegate),
+      view_delegate_(view_delegate),
+      model_(model->search_box()),
       icon_view_(new views::ImageView),
       search_box_(new views::Textfield),
       contents_view_(NULL) {
+  DCHECK(model_);
   AddChildView(icon_view_);
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
@@ -56,26 +64,14 @@ SearchBoxView::SearchBoxView(SearchBoxViewDelegate* delegate,
   search_box_->set_placeholder_text_color(kHintTextColor);
   search_box_->SetController(this);
   AddChildView(search_box_);
+
+  model_->AddObserver(this);
+  IconChanged();
+  HintTextChanged();
 }
 
 SearchBoxView::~SearchBoxView() {
-  if (model_)
-    model_->RemoveObserver(this);
-}
-
-void SearchBoxView::SetModel(SearchBoxModel* model) {
-  if (model_ == model)
-    return;
-
-  if (model_)
-    model_->RemoveObserver(this);
-
-  model_ = model;
-  if (model_) {
-    model_->AddObserver(this);
-    IconChanged();
-    HintTextChanged();
-  }
+  model_->RemoveObserver(this);
 }
 
 bool SearchBoxView::HasSearch() const {
@@ -88,6 +84,10 @@ void SearchBoxView::ClearSearch() {
   // does not generate ContentsChanged() notification.
   UpdateModel();
   NotifyQueryChanged();
+}
+
+void SearchBoxView::InvalidateMenu() {
+  menu_.reset();
 }
 
 gfx::Size SearchBoxView::GetPreferredSize() {
@@ -159,8 +159,13 @@ bool SearchBoxView::HandleKeyEvent(views::Textfield* sender,
 }
 
 void SearchBoxView::OnMenuButtonClicked(View* source, const gfx::Point& point) {
-  menu_.RunMenuAt(menu_button_,
-                  menu_button_->GetBoundsInScreen().bottom_right());
+  if (!menu_)
+    menu_.reset(new AppListMenuViews(view_delegate_));
+
+  const gfx::Point menu_location =
+      menu_button_->GetBoundsInScreen().bottom_right() +
+      gfx::Vector2d(kMenuXOffsetFromButton, kMenuYOffsetFromButton);
+  menu_->RunMenuAt(menu_button_, menu_location);
 }
 
 void SearchBoxView::IconChanged() {

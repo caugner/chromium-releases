@@ -5,13 +5,15 @@
 #include "chrome/browser/task_manager/tab_contents_resource_provider.h"
 
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
-#include "chrome/browser/printing/background_printing_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/search/instant_service.h"
+#include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/task_manager/renderer_resource.h"
@@ -20,10 +22,8 @@
 #include "chrome/browser/task_manager/task_manager_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -32,6 +32,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
+
+#if defined(ENABLE_FULL_PRINTING)
+#include "chrome/browser/printing/background_printing_manager.h"
+#endif
 
 using content::WebContents;
 using extensions::Extension;
@@ -48,9 +52,13 @@ bool IsContentsPrerendering(WebContents* web_contents) {
 }
 
 bool IsContentsBackgroundPrinted(WebContents* web_contents) {
+#if defined(ENABLE_FULL_PRINTING)
   printing::BackgroundPrintingManager* printing_manager =
       g_browser_process->background_printing_manager();
   return printing_manager->HasPrintPreviewDialog(web_contents);
+#else
+  return false;
+#endif
 }
 
 }  // namespace
@@ -63,10 +71,6 @@ class TabContentsResource : public RendererResource {
  public:
   explicit TabContentsResource(content::WebContents* web_contents);
   virtual ~TabContentsResource();
-
-  // Called when the underlying web_contents has been committed and is no
-  // longer an Instant overlay.
-  void InstantCommitted();
 
   // Resource methods:
   virtual Type GetType() const OVERRIDE;
@@ -83,7 +87,7 @@ class TabContentsResource : public RendererResource {
   static gfx::ImageSkia* prerender_icon_;
   content::WebContents* web_contents_;
   Profile* profile_;
-  bool is_instant_overlay_;
+  bool is_instant_ntp_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsResource);
 };
@@ -96,8 +100,7 @@ TabContentsResource::TabContentsResource(
                        web_contents->GetRenderViewHost()),
       web_contents_(web_contents),
       profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
-      is_instant_overlay_(chrome::IsInstantOverlay(web_contents) ||
-                          chrome::IsPreloadedInstantExtendedNTP(web_contents)) {
+      is_instant_ntp_(chrome::IsPreloadedInstantExtendedNTP(web_contents)) {
   if (!prerender_icon_) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     prerender_icon_ = rb.GetImageSkiaNamed(IDR_PRERENDER);
@@ -105,11 +108,6 @@ TabContentsResource::TabContentsResource(
 }
 
 TabContentsResource::~TabContentsResource() {
-}
-
-void TabContentsResource::InstantCommitted() {
-  DCHECK(is_instant_overlay_);
-  is_instant_overlay_ = false;
 }
 
 bool TabContentsResource::HostsExtension() const {
@@ -138,7 +136,7 @@ string16 TabContentsResource::GetTitle() const {
       HostsExtension(),
       profile_->IsOffTheRecord(),
       IsContentsPrerendering(web_contents_),
-      is_instant_overlay_,
+      is_instant_ntp_,
       false);  // is_background
   return l10n_util::GetStringFUTF16(message_id, tab_title);
 }
@@ -217,16 +215,6 @@ void TabContentsResourceProvider::StartUpdating() {
   for (TabContentsIterator iterator; !iterator.done(); iterator.Next())
     Add(*iterator);
 
-  // Add all the Instant pages.
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    if (it->instant_controller()) {
-      if (it->instant_controller()->instant()->GetOverlayContents())
-        Add(it->instant_controller()->instant()->GetOverlayContents());
-      if (it->instant_controller()->instant()->GetNTPContents())
-        Add(it->instant_controller()->instant()->GetNTPContents());
-    }
-  }
-
   // Add all the prerender pages.
   std::vector<Profile*> profiles(
       g_browser_process->profile_manager()->GetLoadedProfiles());
@@ -241,6 +229,15 @@ void TabContentsResourceProvider::StartUpdating() {
     }
   }
 
+  // Add all the Instant Extended prerendered NTPs.
+  for (size_t i = 0; i < profiles.size(); ++i) {
+    const InstantService* instant_service =
+        InstantServiceFactory::GetForProfile(profiles[i]);
+    if (instant_service && instant_service->GetNTPContents())
+      Add(instant_service->GetNTPContents());
+  }
+
+#if defined(ENABLE_FULL_PRINTING)
   // Add all the pages being background printed.
   printing::BackgroundPrintingManager* printing_manager =
       g_browser_process->background_printing_manager();
@@ -249,6 +246,7 @@ void TabContentsResourceProvider::StartUpdating() {
        i != printing_manager->end(); ++i) {
     Add(*i);
   }
+#endif
 
   // Then we register for notifications to get new web contents.
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
@@ -256,8 +254,6 @@ void TabContentsResourceProvider::StartUpdating() {
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_SWAPPED,
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
-                 content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this, chrome::NOTIFICATION_INSTANT_COMMITTED,
                  content::NotificationService::AllBrowserContextsAndSources());
 }
 
@@ -271,8 +267,6 @@ void TabContentsResourceProvider::StopUpdating() {
   registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_SWAPPED,
       content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
-      content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Remove(this, chrome::NOTIFICATION_INSTANT_COMMITTED,
       content::NotificationService::AllBrowserContextsAndSources());
 
   // Delete all the resources.
@@ -296,7 +290,6 @@ void TabContentsResourceProvider::Add(WebContents* web_contents) {
   // pages, prerender pages, and background printed pages.
   if (!chrome::FindBrowserWithWebContents(web_contents) &&
       !IsContentsPrerendering(web_contents) &&
-      !chrome::IsInstantOverlay(web_contents) &&
       !chrome::IsPreloadedInstantExtendedNTP(web_contents) &&
       !IsContentsBackgroundPrinted(web_contents)) {
     return;
@@ -340,16 +333,6 @@ void TabContentsResourceProvider::Remove(WebContents* web_contents) {
   delete resource;
 }
 
-void TabContentsResourceProvider::InstantCommitted(WebContents* web_contents) {
-  if (!updating_)
-    return;
-  std::map<WebContents*, TabContentsResource*>::iterator
-      iter = resources_.find(web_contents);
-  DCHECK(iter != resources_.end());
-  if (iter != resources_.end())
-    iter->second->InstantCommitted();
-}
-
 void TabContentsResourceProvider::Observe(
     int type,
     const content::NotificationSource& source,
@@ -366,9 +349,6 @@ void TabContentsResourceProvider::Observe(
       break;
     case content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED:
       Remove(web_contents);
-      break;
-    case chrome::NOTIFICATION_INSTANT_COMMITTED:
-      InstantCommitted(web_contents);
       break;
     default:
       NOTREACHED() << "Unexpected notification.";

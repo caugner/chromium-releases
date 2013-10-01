@@ -140,8 +140,7 @@ TEST_F(CertVerifyProcTest, WithoutRevocationChecking) {
 #else
 #define MAYBE_EVVerification EVVerification
 #endif
-TEST_F(CertVerifyProcTest, DISABLED_EVVerification) {
-  // DISABLED: This certificate expired Jun 21, 2013.
+TEST_F(CertVerifyProcTest, MAYBE_EVVerification) {
   CertificateList certs = CreateCertificateListFromFile(
       GetTestCertsDirectory(),
       "comodo.chain.pem",
@@ -156,7 +155,7 @@ TEST_F(CertVerifyProcTest, DISABLED_EVVerification) {
       X509Certificate::CreateFromHandle(certs[0]->os_cert_handle(),
                                         intermediates);
 
-  scoped_refptr<CRLSet> crl_set(CRLSet::EmptyCRLSetForTesting());
+  scoped_refptr<CRLSet> crl_set(CRLSet::ForTesting(false, NULL, ""));
   CertVerifyResult verify_result;
   int flags = CertVerifier::VERIFY_EV_CERT;
   int error = Verify(comodo_chain.get(),
@@ -207,46 +206,43 @@ TEST_F(CertVerifyProcTest, PaypalNullCertParsing) {
 }
 
 // A regression test for http://crbug.com/31497.
-// This certificate will expire on 2012-04-08. The test will still
-// pass if error == ERR_CERT_DATE_INVALID.  TODO(wtc): generate test
-// certificates for this unit test. http://crbug.com/111742
-TEST_F(CertVerifyProcTest, IntermediateCARequireExplicitPolicy) {
+#if defined(OS_ANDROID)
+// Disabled on Android, as the Android verification libraries require an
+// explicit policy to be specified, even when anyPolicy is permitted.
+#define MAYBE_IntermediateCARequireExplicitPolicy \
+    DISABLED_IntermediateCARequireExplicitPolicy
+#else
+#define MAYBE_IntermediateCARequireExplicitPolicy \
+    IntermediateCARequireExplicitPolicy
+#endif
+TEST_F(CertVerifyProcTest, MAYBE_IntermediateCARequireExplicitPolicy) {
   base::FilePath certs_dir = GetTestCertsDirectory();
 
-  scoped_refptr<X509Certificate> server_cert =
-      ImportCertFromFile(certs_dir, "www_us_army_mil_cert.der");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), server_cert);
-
-  // The intermediate CA certificate's policyConstraints extension has a
-  // requireExplicitPolicy field with SkipCerts=0.
-  scoped_refptr<X509Certificate> intermediate_cert =
-      ImportCertFromFile(certs_dir, "dod_ca_17_cert.der");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), intermediate_cert);
-
-  scoped_refptr<X509Certificate> root_cert =
-      ImportCertFromFile(certs_dir, "dod_root_ca_2_cert.der");
-  ScopedTestRoot scoped_root(root_cert.get());
+  CertificateList certs = CreateCertificateListFromFile(
+      certs_dir, "explicit-policy-chain.pem",
+      X509Certificate::FORMAT_AUTO);
+  ASSERT_EQ(3U, certs.size());
 
   X509Certificate::OSCertHandles intermediates;
-  intermediates.push_back(intermediate_cert->os_cert_handle());
-  scoped_refptr<X509Certificate> cert_chain =
-      X509Certificate::CreateFromHandle(server_cert->os_cert_handle(),
+  intermediates.push_back(certs[1]->os_cert_handle());
+
+  scoped_refptr<X509Certificate> cert =
+      X509Certificate::CreateFromHandle(certs[0]->os_cert_handle(),
                                         intermediates);
+  ASSERT_TRUE(cert.get());
+
+  ScopedTestRoot scoped_root(certs[2].get());
 
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = Verify(cert_chain.get(),
-                     "www.us.army.mil",
+  int error = Verify(cert.get(),
+                     "policy_test.example",
                      flags,
                      NULL,
                      empty_cert_list_,
                      &verify_result);
-  if (error == OK) {
-    EXPECT_EQ(0U, verify_result.cert_status);
-  } else {
-    EXPECT_EQ(ERR_CERT_DATE_INVALID, error);
-    EXPECT_EQ(CERT_STATUS_DATE_INVALID, verify_result.cert_status);
-  }
+  EXPECT_EQ(OK, error);
+  EXPECT_EQ(0u, verify_result.cert_status);
 }
 
 
@@ -396,28 +392,38 @@ TEST_F(CertVerifyProcTest, RejectWeakKeys) {
   }
 }
 
-// Test for bug 108514.
-// The certificate will expire on 2012-07-20. The test will still
-// pass if error == ERR_CERT_DATE_INVALID.  TODO(rsleevi): generate test
-// certificates for this unit test.  http://crbug.com/111730
-TEST_F(CertVerifyProcTest, ExtraneousMD5RootCert) {
+// Regression test for http://crbug.com/108514.
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+// Disabled on OS X - Security.framework doesn't ignore superflous certificates
+// provided by servers. See CertVerifyProcTest.CybertrustGTERoot for further
+// details.
+#define MAYBE_ExtraneousMD5RootCert DISABLED_ExtraneousMD5RootCert
+#elif defined(USE_OPENSSL) || defined(OS_ANDROID)
+// Disabled for OpenSSL / Android - Android and OpenSSL do not attempt to find
+// a minimal certificate chain, thus prefer the MD5 root over the SHA-1 root.
+#define MAYBE_ExtraneousMD5RootCert DISABLED_ExtraneousMD5RootCert
+#else
+#define MAYBE_ExtraneousMD5RootCert ExtraneousMD5RootCert
+#endif
+TEST_F(CertVerifyProcTest, MAYBE_ExtraneousMD5RootCert) {
   base::FilePath certs_dir = GetTestCertsDirectory();
 
   scoped_refptr<X509Certificate> server_cert =
-      ImportCertFromFile(certs_dir, "images_etrade_wallst_com.pem");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), server_cert);
+      ImportCertFromFile(certs_dir, "cross-signed-leaf.pem");
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), server_cert.get());
 
-  scoped_refptr<X509Certificate> intermediate_cert =
-      ImportCertFromFile(certs_dir, "globalsign_orgv1_ca.pem");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), intermediate_cert);
+  scoped_refptr<X509Certificate> extra_cert =
+      ImportCertFromFile(certs_dir, "cross-signed-root-md5.pem");
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), extra_cert.get());
 
-  scoped_refptr<X509Certificate> md5_root_cert =
-      ImportCertFromFile(certs_dir, "globalsign_root_ca_md5.pem");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), md5_root_cert);
+  scoped_refptr<X509Certificate> root_cert =
+      ImportCertFromFile(certs_dir, "cross-signed-root-sha1.pem");
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), root_cert.get());
+
+  ScopedTestRoot scoped_root(root_cert.get());
 
   X509Certificate::OSCertHandles intermediates;
-  intermediates.push_back(intermediate_cert->os_cert_handle());
-  intermediates.push_back(md5_root_cert->os_cert_handle());
+  intermediates.push_back(extra_cert->os_cert_handle());
   scoped_refptr<X509Certificate> cert_chain =
       X509Certificate::CreateFromHandle(server_cert->os_cert_handle(),
                                         intermediates);
@@ -425,16 +431,22 @@ TEST_F(CertVerifyProcTest, ExtraneousMD5RootCert) {
   CertVerifyResult verify_result;
   int flags = 0;
   int error = Verify(cert_chain.get(),
-                     "images.etrade.wallst.com",
+                     "127.0.0.1",
                      flags,
                      NULL,
                      empty_cert_list_,
                      &verify_result);
-  if (error != OK)
-    EXPECT_EQ(ERR_CERT_DATE_INVALID, error);
+  EXPECT_EQ(OK, error);
+
+  // The extra MD5 root should be discarded
+  ASSERT_TRUE(verify_result.verified_cert.get());
+  ASSERT_EQ(1u,
+            verify_result.verified_cert->GetIntermediateCertificates().size());
+  EXPECT_TRUE(X509Certificate::IsSameOSCert(
+        verify_result.verified_cert->GetIntermediateCertificates().front(),
+        root_cert->os_cert_handle()));
 
   EXPECT_FALSE(verify_result.has_md5);
-  EXPECT_FALSE(verify_result.has_md5_ca);
 }
 
 // Test for bug 94673.
@@ -512,15 +524,15 @@ TEST_F(CertVerifyProcTest, DigiNotarCerts) {
   }
 }
 
+// The certse.pem certificate has been revoked. crbug.com/259723.
 TEST_F(CertVerifyProcTest, TestKnownRoot) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   CertificateList certs = CreateCertificateListFromFile(
-      certs_dir, "certse.pem", X509Certificate::FORMAT_AUTO);
-  ASSERT_EQ(3U, certs.size());
+      certs_dir, "satveda.pem", X509Certificate::FORMAT_AUTO);
+  ASSERT_EQ(2U, certs.size());
 
   X509Certificate::OSCertHandles intermediates;
   intermediates.push_back(certs[1]->os_cert_handle());
-  intermediates.push_back(certs[2]->os_cert_handle());
 
   scoped_refptr<X509Certificate> cert_chain =
       X509Certificate::CreateFromHandle(certs[0]->os_cert_handle(),
@@ -528,10 +540,10 @@ TEST_F(CertVerifyProcTest, TestKnownRoot) {
 
   int flags = 0;
   CertVerifyResult verify_result;
-  // This will blow up, June 8th, 2014. Sorry! Please disable and file a bug
+  // This will blow up, May 24th, 2019. Sorry! Please disable and file a bug
   // against agl. See also PublicKeyHashes.
   int error = Verify(cert_chain.get(),
-                     "cert.se",
+                     "satveda.com",
                      flags,
                      NULL,
                      empty_cert_list_,
@@ -541,15 +553,15 @@ TEST_F(CertVerifyProcTest, TestKnownRoot) {
   EXPECT_TRUE(verify_result.is_issued_by_known_root);
 }
 
+// The certse.pem certificate has been revoked. crbug.com/259723.
 TEST_F(CertVerifyProcTest, PublicKeyHashes) {
   base::FilePath certs_dir = GetTestCertsDirectory();
   CertificateList certs = CreateCertificateListFromFile(
-      certs_dir, "certse.pem", X509Certificate::FORMAT_AUTO);
-  ASSERT_EQ(3U, certs.size());
+      certs_dir, "satveda.pem", X509Certificate::FORMAT_AUTO);
+  ASSERT_EQ(2U, certs.size());
 
   X509Certificate::OSCertHandles intermediates;
   intermediates.push_back(certs[1]->os_cert_handle());
-  intermediates.push_back(certs[2]->os_cert_handle());
 
   scoped_refptr<X509Certificate> cert_chain =
       X509Certificate::CreateFromHandle(certs[0]->os_cert_handle(),
@@ -557,17 +569,17 @@ TEST_F(CertVerifyProcTest, PublicKeyHashes) {
   int flags = 0;
   CertVerifyResult verify_result;
 
-  // This will blow up, June 8th, 2014. Sorry! Please disable and file a bug
+  // This will blow up, May 24th, 2019. Sorry! Please disable and file a bug
   // against agl. See also TestKnownRoot.
   int error = Verify(cert_chain.get(),
-                     "cert.se",
+                     "satveda.com",
                      flags,
                      NULL,
                      empty_cert_list_,
                      &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
-  ASSERT_LE(3u, verify_result.public_key_hashes.size());
+  ASSERT_LE(2U, verify_result.public_key_hashes.size());
 
   HashValueVector sha1_hashes;
   for (size_t i = 0; i < verify_result.public_key_hashes.size(); ++i) {
@@ -575,10 +587,10 @@ TEST_F(CertVerifyProcTest, PublicKeyHashes) {
       continue;
     sha1_hashes.push_back(verify_result.public_key_hashes[i]);
   }
-  ASSERT_LE(3u, sha1_hashes.size());
+  ASSERT_LE(2u, sha1_hashes.size());
 
-  for (size_t i = 0; i < 3; ++i) {
-    EXPECT_EQ(HexEncode(kCertSESPKIs[i], base::kSHA1Length),
+  for (size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(HexEncode(kSatvedaSPKIs[i], base::kSHA1Length),
               HexEncode(sha1_hashes[i].data(), base::kSHA1Length));
   }
 
@@ -588,10 +600,10 @@ TEST_F(CertVerifyProcTest, PublicKeyHashes) {
       continue;
     sha256_hashes.push_back(verify_result.public_key_hashes[i]);
   }
-  ASSERT_LE(3u, sha256_hashes.size());
+  ASSERT_LE(2u, sha256_hashes.size());
 
-  for (size_t i = 0; i < 3; ++i) {
-    EXPECT_EQ(HexEncode(kCertSESPKIsSHA256[i], crypto::kSHA256Length),
+  for (size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(HexEncode(kSatvedaSPKIsSHA256[i], crypto::kSHA256Length),
               HexEncode(sha256_hashes[i].data(), crypto::kSHA256Length));
   }
 }
@@ -768,18 +780,18 @@ TEST_F(CertVerifyProcTest, VerifyReturnChainFiltersUnrelatedCerts) {
   ASSERT_EQ(3U, certs.size());
   ScopedTestRoot scoped_root(certs[2].get());
 
-  scoped_refptr<X509Certificate> unrelated_dod_certificate =
-      ImportCertFromFile(certs_dir, "dod_ca_17_cert.der");
-  scoped_refptr<X509Certificate> unrelated_dod_certificate2 =
-      ImportCertFromFile(certs_dir, "dod_root_ca_2_cert.der");
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), unrelated_dod_certificate);
-  ASSERT_NE(static_cast<X509Certificate*>(NULL), unrelated_dod_certificate2);
+  scoped_refptr<X509Certificate> unrelated_certificate =
+      ImportCertFromFile(certs_dir, "duplicate_cn_1.pem");
+  scoped_refptr<X509Certificate> unrelated_certificate2 =
+      ImportCertFromFile(certs_dir, "aia-cert.pem");
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), unrelated_certificate);
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), unrelated_certificate2);
 
   // Interject unrelated certificates into the list of intermediates.
   X509Certificate::OSCertHandles intermediates;
-  intermediates.push_back(unrelated_dod_certificate->os_cert_handle());
+  intermediates.push_back(unrelated_certificate->os_cert_handle());
   intermediates.push_back(certs[1]->os_cert_handle());
-  intermediates.push_back(unrelated_dod_certificate2->os_cert_handle());
+  intermediates.push_back(unrelated_certificate2->os_cert_handle());
   intermediates.push_back(certs[2]->os_cert_handle());
 
   scoped_refptr<X509Certificate> google_full_chain =
@@ -887,7 +899,7 @@ TEST_F(CertVerifyProcTest, CybertrustGTERoot) {
                          "cybertrust_baltimore_root.pem");
   ASSERT_TRUE(baltimore_root.get());
 
-  ScopedTestRoot scoped_root(baltimore_root);
+  ScopedTestRoot scoped_root(baltimore_root.get());
 
   // Ensure that ONLY the Baltimore CyberTrust Root is trusted. This
   // simulates Keychain removing support for the GTE CyberTrust Root.
@@ -902,8 +914,12 @@ TEST_F(CertVerifyProcTest, CybertrustGTERoot) {
   // works. Only the first two certificates are included in the chain.
   int flags = 0;
   CertVerifyResult verify_result;
-  int error = Verify(cybertrust_basic, "cacert.omniroot.com", flags, NULL,
-                     empty_cert_list_, &verify_result);
+  int error = Verify(cybertrust_basic.get(),
+                     "cacert.omniroot.com",
+                     flags,
+                     NULL,
+                     empty_cert_list_,
+                     &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 
@@ -921,8 +937,12 @@ TEST_F(CertVerifyProcTest, CybertrustGTERoot) {
   scoped_refptr<X509Certificate> baltimore_chain_1 =
       X509Certificate::CreateFromHandle(cybertrust_basic->os_cert_handle(),
                                         intermediate_chain_1);
-  error = Verify(baltimore_chain_1, "cacert.omniroot.com", flags, NULL,
-                 empty_cert_list_, &verify_result);
+  error = Verify(baltimore_chain_1.get(),
+                 "cacert.omniroot.com",
+                 flags,
+                 NULL,
+                 empty_cert_list_,
+                 &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 
@@ -940,8 +960,12 @@ TEST_F(CertVerifyProcTest, CybertrustGTERoot) {
   scoped_refptr<X509Certificate> baltimore_chain_2 =
       X509Certificate::CreateFromHandle(cybertrust_basic->os_cert_handle(),
                                         intermediate_chain_2);
-  error = Verify(baltimore_chain_2, "cacert.omniroot.com", flags, NULL,
-                 empty_cert_list_, &verify_result);
+  error = Verify(baltimore_chain_2.get(),
+                 "cacert.omniroot.com",
+                 flags,
+                 NULL,
+                 empty_cert_list_,
+                 &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 
@@ -956,8 +980,12 @@ TEST_F(CertVerifyProcTest, CybertrustGTERoot) {
   scoped_refptr<X509Certificate> baltimore_chain_with_root =
       X509Certificate::CreateFromHandle(cybertrust_basic->os_cert_handle(),
                                         intermediate_chain_2);
-  error = Verify(baltimore_chain_with_root, "cacert.omniroot.com", flags,
-                 NULL, empty_cert_list_, &verify_result);
+  error = Verify(baltimore_chain_with_root.get(),
+                 "cacert.omniroot.com",
+                 flags,
+                 NULL,
+                 empty_cert_list_,
+                 &verify_result);
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 
@@ -1091,8 +1119,6 @@ struct WeakDigestTestData {
   bool expected_has_md5;
   bool expected_has_md4;
   bool expected_has_md2;
-  bool expected_has_md5_ca;
-  bool expected_has_md2_ca;
 };
 
 // GTest 'magic' pretty-printer, so that if/when a test fails, it knows how
@@ -1152,8 +1178,6 @@ TEST_P(CertVerifyProcWeakDigestTest, Verify) {
   EXPECT_EQ(data.expected_has_md5, verify_result.has_md5);
   EXPECT_EQ(data.expected_has_md4, verify_result.has_md4);
   EXPECT_EQ(data.expected_has_md2, verify_result.has_md2);
-  EXPECT_EQ(data.expected_has_md5_ca, verify_result.has_md5_ca);
-  EXPECT_EQ(data.expected_has_md2_ca, verify_result.has_md2_ca);
   EXPECT_FALSE(verify_result.is_issued_by_additional_trust_anchor);
 
   // Ensure that MD4 and MD2 are tagged as invalid.
@@ -1199,14 +1223,14 @@ TEST_P(CertVerifyProcWeakDigestTest, Verify) {
 // The signature algorithm of the root CA should not matter.
 const WeakDigestTestData kVerifyRootCATestData[] = {
   { "weak_digest_md5_root.pem", "weak_digest_sha1_intermediate.pem",
-    "weak_digest_sha1_ee.pem", false, false, false, false, false },
+    "weak_digest_sha1_ee.pem", false, false, false },
 #if defined(USE_OPENSSL) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { "weak_digest_md4_root.pem", "weak_digest_sha1_intermediate.pem",
-    "weak_digest_sha1_ee.pem", false, false, false, false, false },
+    "weak_digest_sha1_ee.pem", false, false, false },
 #endif
   { "weak_digest_md2_root.pem", "weak_digest_sha1_intermediate.pem",
-    "weak_digest_sha1_ee.pem", false, false, false, false, false },
+    "weak_digest_sha1_ee.pem", false, false, false },
 };
 INSTANTIATE_TEST_CASE_P(VerifyRoot, CertVerifyProcWeakDigestTest,
                         testing::ValuesIn(kVerifyRootCATestData));
@@ -1214,14 +1238,14 @@ INSTANTIATE_TEST_CASE_P(VerifyRoot, CertVerifyProcWeakDigestTest,
 // The signature algorithm of intermediates should be properly detected.
 const WeakDigestTestData kVerifyIntermediateCATestData[] = {
   { "weak_digest_sha1_root.pem", "weak_digest_md5_intermediate.pem",
-    "weak_digest_sha1_ee.pem", true, false, false, true, false },
+    "weak_digest_sha1_ee.pem", true, false, false },
 #if defined(USE_OPENSSL) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { "weak_digest_sha1_root.pem", "weak_digest_md4_intermediate.pem",
-    "weak_digest_sha1_ee.pem", false, true, false, false, false },
+    "weak_digest_sha1_ee.pem", false, true, false },
 #endif
   { "weak_digest_sha1_root.pem", "weak_digest_md2_intermediate.pem",
-    "weak_digest_sha1_ee.pem", false, false, true, false, true },
+    "weak_digest_sha1_ee.pem", false, false, true },
 };
 // Disabled on NSS - MD4 is not supported, and MD2 and MD5 are disabled.
 #if defined(USE_NSS) || defined(OS_IOS)
@@ -1237,14 +1261,14 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 // The signature algorithm of end-entity should be properly detected.
 const WeakDigestTestData kVerifyEndEntityTestData[] = {
   { "weak_digest_sha1_root.pem", "weak_digest_sha1_intermediate.pem",
-    "weak_digest_md5_ee.pem", true, false, false, false, false },
+    "weak_digest_md5_ee.pem", true, false, false },
 #if defined(USE_OPENSSL) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { "weak_digest_sha1_root.pem", "weak_digest_sha1_intermediate.pem",
-    "weak_digest_md4_ee.pem", false, true, false, false, false },
+    "weak_digest_md4_ee.pem", false, true, false },
 #endif
   { "weak_digest_sha1_root.pem", "weak_digest_sha1_intermediate.pem",
-    "weak_digest_md2_ee.pem", false, false, true, false, false },
+    "weak_digest_md2_ee.pem", false, false, true },
 };
 // Disabled on NSS - NSS caches chains/signatures in such a way that cannot
 // be cleared until NSS is cleanly shutdown, which is not presently supported
@@ -1261,14 +1285,14 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(MAYBE_VerifyEndEntity,
 // Incomplete chains should still report the status of the intermediate.
 const WeakDigestTestData kVerifyIncompleteIntermediateTestData[] = {
   { NULL, "weak_digest_md5_intermediate.pem", "weak_digest_sha1_ee.pem",
-    true, false, false, true, false },
+    true, false, false },
 #if defined(USE_OPENSSL) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { NULL, "weak_digest_md4_intermediate.pem", "weak_digest_sha1_ee.pem",
-    false, true, false, false, false },
+    false, true, false },
 #endif
   { NULL, "weak_digest_md2_intermediate.pem", "weak_digest_sha1_ee.pem",
-    false, false, true, false, true },
+    false, false, true },
 };
 // Disabled on NSS - libpkix does not return constructed chains on error,
 // preventing us from detecting/inspecting the verified chain.
@@ -1286,14 +1310,14 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 // Incomplete chains should still report the status of the end-entity.
 const WeakDigestTestData kVerifyIncompleteEETestData[] = {
   { NULL, "weak_digest_sha1_intermediate.pem", "weak_digest_md5_ee.pem",
-    true, false, false, false, false },
+    true, false, false },
 #if defined(USE_OPENSSL) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { NULL, "weak_digest_sha1_intermediate.pem", "weak_digest_md4_ee.pem",
-    false, true, false, false, false },
+    false, true, false },
 #endif
   { NULL, "weak_digest_sha1_intermediate.pem", "weak_digest_md2_ee.pem",
-    false, false, true, false, false },
+    false, false, true },
 };
 // Disabled on NSS - libpkix does not return constructed chains on error,
 // preventing us from detecting/inspecting the verified chain.
@@ -1311,13 +1335,13 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 // reported.
 const WeakDigestTestData kVerifyMixedTestData[] = {
   { "weak_digest_sha1_root.pem", "weak_digest_md5_intermediate.pem",
-    "weak_digest_md2_ee.pem", true, false, true, true, false },
+    "weak_digest_md2_ee.pem", true, false, true },
   { "weak_digest_sha1_root.pem", "weak_digest_md2_intermediate.pem",
-    "weak_digest_md5_ee.pem", true, false, true, false, true },
+    "weak_digest_md5_ee.pem", true, false, true },
 #if defined(USE_OPENSSL) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { "weak_digest_sha1_root.pem", "weak_digest_md4_intermediate.pem",
-    "weak_digest_md2_ee.pem", false, true, true, false, false },
+    "weak_digest_md2_ee.pem", false, true, true },
 #endif
 };
 // NSS does not support MD4 and does not enable MD2 by default, making all
@@ -1331,73 +1355,5 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     MAYBE_VerifyMixed,
     CertVerifyProcWeakDigestTest,
     testing::ValuesIn(kVerifyMixedTestData));
-
-struct NonUniqueNameTestData {
-  bool is_unique;
-  const char* hostname;
-};
-
-// Google Test pretty-printer.
-void PrintTo(const NonUniqueNameTestData& data, std::ostream* os) {
-  ASSERT_TRUE(data.hostname);
-  *os << " hostname: " << testing::PrintToString(data.hostname)
-      << "; is_unique: " << testing::PrintToString(data.is_unique);
-}
-
-const NonUniqueNameTestData kNonUniqueNameTestData[] = {
-    // Domains under ICANN-assigned domains.
-    { true, "google.com" },
-    { true, "google.co.uk" },
-    // Domains under private registries.
-    { true, "appspot.com" },
-    { true, "test.appspot.com" },
-    // IPv4 addresses (in various forms).
-    { true, "8.8.8.8" },
-    { true, "1.2.3" },
-    { true, "14.15" },
-    { true, "676768" },
-    // IPv6 addresses.
-    { true, "FEDC:ba98:7654:3210:FEDC:BA98:7654:3210" },
-    { true, "::192.9.5.5" },
-    { true, "FEED::BEEF" },
-    // 'internal'/non-IANA assigned domains.
-    { false, "intranet" },
-    { false, "intranet." },
-    { false, "intranet.example" },
-    { false, "host.intranet.example" },
-    // gTLDs under discussion, but not yet assigned.
-    { false, "intranet.corp" },
-    { false, "example.tech" },
-    { false, "intranet.internal" },
-    // Invalid host names are treated as unique - but expected to be
-    // filtered out before then.
-    { true, "junk)(£)$*!@~#" },
-    { true, "w$w.example.com" },
-    { true, "nocolonsallowed:example" },
-    { true, "[::4.5.6.9]" },
-};
-
-class CertVerifyProcNonUniqueNameTest
-    : public testing::TestWithParam<NonUniqueNameTestData> {
- public:
-  virtual ~CertVerifyProcNonUniqueNameTest() {}
-
- protected:
-  bool IsUnique(const std::string& hostname) {
-    return !CertVerifyProc::IsHostnameNonUnique(hostname);
-  }
-};
-
-// Test that internal/non-unique names are properly identified as such, but
-// that IP addresses and hosts beneath registry-controlled domains are flagged
-// as unique names.
-TEST_P(CertVerifyProcNonUniqueNameTest, IsHostnameNonUnique) {
-  const NonUniqueNameTestData& test_data = GetParam();
-
-  EXPECT_EQ(test_data.is_unique, IsUnique(test_data.hostname));
-}
-
-INSTANTIATE_TEST_CASE_P(, CertVerifyProcNonUniqueNameTest,
-                        testing::ValuesIn(kNonUniqueNameTestData));
 
 }  // namespace net

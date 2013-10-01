@@ -10,18 +10,21 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
 #include "ui/aura/root_window.h"
 #include "ui/message_center/message_center_switches.h"
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/login/login_state.h"
+#endif
 
 namespace ash {
 namespace test {
@@ -30,21 +33,17 @@ class ScreenshotTakerTest : public AshTestBase,
                             public ScreenshotTakerObserver {
  public:
   ScreenshotTakerTest()
-      : ui_thread_(content::BrowserThread::UI, message_loop()),
-        running_(false),
+      : running_(false),
         screenshot_complete_(false),
         screenshot_result_(ScreenshotTakerObserver::SCREENSHOT_SUCCESS) {
   }
 
   virtual void SetUp() {
     AshTestBase::SetUp();
-    local_state_.reset(
-        new ScopedTestingLocalState(TestingBrowserProcess::GetGlobal()));
   }
 
   virtual void TearDown() {
     RunAllPendingInMessageLoop();
-    local_state_.reset();
     AshTestBase::TearDown();
   }
 
@@ -89,8 +88,6 @@ class ScreenshotTakerTest : public AshTestBase,
     EXPECT_TRUE(screenshot_complete_);
   }
 
-  scoped_ptr<ScopedTestingLocalState> local_state_;
-  content::TestBrowserThread ui_thread_;
   bool running_;
   bool screenshot_complete_;
   ScreenshotTakerObserver::Result screenshot_result_;
@@ -101,14 +98,24 @@ class ScreenshotTakerTest : public AshTestBase,
 };
 
 TEST_F(ScreenshotTakerTest, TakeScreenshot) {
-  TestingProfile profile;
+#if defined(OS_CHROMEOS)
+  // Note that within the test framework the LoginState object will always
+  // claim that the user did log in.
+  ASSERT_FALSE(chromeos::LoginState::IsInitialized());
+  chromeos::LoginState::Initialize();
+#endif
+  scoped_ptr<TestingProfileManager> profile_manager(
+      new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
+  ASSERT_TRUE(profile_manager->SetUp());
+  TestingProfile* profile =
+      profile_manager->CreateTestingProfile("test_profile");
   ScreenshotTaker screenshot_taker;
   screenshot_taker.AddObserver(this);
   base::ScopedTempDir directory;
   ASSERT_TRUE(directory.CreateUniqueTempDir());
   SetScreenshotDirectoryForTest(&screenshot_taker, directory.path());
   SetScreenshotBasenameForTest(&screenshot_taker, "Screenshot");
-  SetScreenshotProfileForTest(&screenshot_taker, &profile);
+  SetScreenshotProfileForTest(&screenshot_taker, profile);
 
   EXPECT_TRUE(screenshot_taker.CanTakeScreenshot());
 
@@ -121,15 +128,19 @@ TEST_F(ScreenshotTakerTest, TakeScreenshot) {
 
 #if defined(OS_CHROMEOS)
   // Screenshot notifications on Windows not yet turned on.
-  EXPECT_TRUE(g_browser_process->notification_ui_manager()->DoesIdExist(
-                  std::string("screenshot")));
+  EXPECT_TRUE(g_browser_process->notification_ui_manager()->FindById(
+      std::string("screenshot")) != NULL);
   g_browser_process->notification_ui_manager()->CancelAll();
 #endif
 
   EXPECT_EQ(ScreenshotTakerObserver::SCREENSHOT_SUCCESS, screenshot_result_);
 
   if (ScreenshotTakerObserver::SCREENSHOT_SUCCESS == screenshot_result_)
-    EXPECT_TRUE(file_util::PathExists(screenshot_path_));
+    EXPECT_TRUE(base::PathExists(screenshot_path_));
+
+#if defined(OS_CHROMEOS)
+  chromeos::LoginState::Shutdown();
+#endif
 }
 
 }  // namespace test

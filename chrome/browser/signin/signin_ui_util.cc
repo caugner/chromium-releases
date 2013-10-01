@@ -28,13 +28,20 @@ const int kUsernameMaxWidth = 200;
 namespace signin_ui_util {
 
 GlobalError* GetSignedInServiceError(Profile* profile) {
+  std::vector<GlobalError*> errors = GetSignedInServiceErrors(profile);
+  if (errors.empty())
+    return NULL;
+  return errors[0];
+}
+
+std::vector<GlobalError*> GetSignedInServiceErrors(Profile* profile) {
+  std::vector<GlobalError*> errors;
+
   // Auth errors have the highest priority - after that, individual service
   // errors.
-  SigninManagerBase* signin_manager =
-      SigninManagerFactory::GetForProfile(profile);
-  SigninGlobalError* signin_error = signin_manager->signin_global_error();
+  SigninGlobalError* signin_error = SigninGlobalError::GetForProfile(profile);
   if (signin_error && signin_error->HasMenuItem())
-    return signin_error;
+    errors.push_back(signin_error);
 
   // No auth error - now try other services. Currently the list is just hard-
   // coded but in the future if we add more we can create some kind of
@@ -44,9 +51,10 @@ GlobalError* GetSignedInServiceError(Profile* profile) {
         ProfileSyncServiceFactory::GetForProfile(profile);
     SyncGlobalError* error = service->sync_global_error();
     if (error && error->HasMenuItem())
-      return error;
+      errors.push_back(error);
   }
-  return NULL;
+
+  return errors;
 }
 
 string16 GetSigninMenuLabel(Profile* profile) {
@@ -80,7 +88,8 @@ string16 GetSigninMenuLabel(Profile* profile) {
 
 // Given an authentication state this helper function returns various labels
 // that can be used to display information about the state.
-void GetStatusLabelsForAuthError(const SigninManagerBase& signin_manager,
+void GetStatusLabelsForAuthError(Profile* profile,
+                                 const SigninManagerBase& signin_manager,
                                  string16* status_label,
                                  string16* link_label) {
   string16 username = UTF8ToUTF16(signin_manager.GetAuthenticatedUsername());
@@ -88,7 +97,9 @@ void GetStatusLabelsForAuthError(const SigninManagerBase& signin_manager,
   if (link_label)
     link_label->assign(l10n_util::GetStringUTF16(IDS_SYNC_RELOGIN_LINK_LABEL));
 
-  switch (signin_manager.signin_global_error()->GetLastAuthError().state()) {
+  const GoogleServiceAuthError::State state =
+      SigninGlobalError::GetForProfile(profile)->GetLastAuthError().state();
+  switch (state) {
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
     case GoogleServiceAuthError::ACCOUNT_DELETED:
     case GoogleServiceAuthError::ACCOUNT_DISABLED:
@@ -115,14 +126,16 @@ void GetStatusLabelsForAuthError(const SigninManagerBase& signin_manager,
         link_label->clear();
       break;
     case GoogleServiceAuthError::CONNECTION_FAILED:
-      // Note that there is little the user can do if the server is not
-      // reachable. Since attempting to re-connect is done automatically by
-      // the Syncer, we do not show the (re)login link.
       if (status_label) {
         status_label->assign(
             l10n_util::GetStringFUTF16(IDS_SYNC_SERVER_IS_UNREACHABLE,
                                        product_name));
       }
+      // Note that there is little the user can do if the server is not
+      // reachable. Since attempting to re-connect is done automatically by
+      // the Syncer, we do not show the (re)login link.
+      if (link_label)
+        link_label->clear();
       break;
     default:
       if (status_label) {
@@ -132,6 +145,5 @@ void GetStatusLabelsForAuthError(const SigninManagerBase& signin_manager,
       break;
   }
 }
-
 
 }  // namespace signin_ui_util

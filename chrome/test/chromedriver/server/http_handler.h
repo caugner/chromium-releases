@@ -8,81 +8,120 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
+#include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "base/threading/thread_checker.h"
+#include "chrome/test/chromedriver/command.h"
+#include "chrome/test/chromedriver/commands.h"
+#include "chrome/test/chromedriver/element_commands.h"
+#include "chrome/test/chromedriver/net/sync_websocket_factory.h"
+#include "chrome/test/chromedriver/session_commands.h"
+#include "chrome/test/chromedriver/session_thread_map.h"
+#include "chrome/test/chromedriver/window_commands.h"
 
 namespace base {
 class DictionaryValue;
+class SingleThreadTaskRunner;
 }
 
-class CommandExecutor;
-class HttpResponse;
+namespace net {
+class HttpServerRequestInfo;
+class HttpServerResponseInfo;
+}
+
+class Adb;
+class DeviceManager;
 class Log;
+class URLRequestContextGetter;
 
 enum HttpMethod {
-  kGet = 0,
+  kGet,
   kPost,
   kDelete,
-};
-
-struct HttpRequest {
-  HttpRequest(HttpMethod method,
-              const std::string& path,
-              const std::string& body);
-  ~HttpRequest();
-
-  HttpMethod method;
-  std::string path;
-  std::string body;
 };
 
 struct CommandMapping {
   CommandMapping(HttpMethod method,
                  const std::string& path_pattern,
-                 const std::string& name);
+                 const Command& command);
   ~CommandMapping();
 
   HttpMethod method;
   std::string path_pattern;
-  std::string name;
+  Command command;
 };
+
+typedef base::Callback<void(scoped_ptr<net::HttpServerResponseInfo>)>
+    HttpResponseSenderFunc;
 
 class HttpHandler {
  public:
-  typedef std::vector<CommandMapping> CommandMap;
-  static scoped_ptr<CommandMap> CreateCommandMap();
-
-  HttpHandler(Log* log,
-              scoped_ptr<CommandExecutor> executor,
-              scoped_ptr<std::vector<CommandMapping> > commands,
+  HttpHandler(Log* log, const std::string& url_base);
+  HttpHandler(const base::Closure& quit_func,
+              const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+              Log* log,
               const std::string& url_base);
   ~HttpHandler();
 
-  void Handle(const HttpRequest& request,
-              HttpResponse* response);
-
-  bool ShouldShutdown(const HttpRequest& request);
+  void Handle(const net::HttpServerRequestInfo& request,
+              const HttpResponseSenderFunc& send_response_func);
 
  private:
-  void HandleInternal(const HttpRequest& request,
-                      HttpResponse* response);
-  bool HandleWebDriverCommand(
-      const HttpRequest& request,
-      const std::string& trimmed_path,
-      HttpResponse* response);
+  FRIEND_TEST_ALL_PREFIXES(HttpHandlerTest, HandleUnknownCommand);
+  FRIEND_TEST_ALL_PREFIXES(HttpHandlerTest, HandleNewSession);
+  FRIEND_TEST_ALL_PREFIXES(HttpHandlerTest, HandleInvalidPost);
+  FRIEND_TEST_ALL_PREFIXES(HttpHandlerTest, HandleUnimplementedCommand);
+  FRIEND_TEST_ALL_PREFIXES(HttpHandlerTest, HandleCommand);
+  typedef std::vector<CommandMapping> CommandMap;
 
+  Command WrapToCommand(const SessionCommand& session_command);
+  Command WrapToCommand(const WindowCommand& window_command);
+  Command WrapToCommand(const ElementCommand& element_command);
+  void HandleCommand(const net::HttpServerRequestInfo& request,
+                     const std::string& trimmed_path,
+                     const HttpResponseSenderFunc& send_response_func);
+  void PrepareResponse(const std::string& trimmed_path,
+                       const HttpResponseSenderFunc& send_response_func,
+                       const Status& status,
+                       scoped_ptr<base::Value> value,
+                       const std::string& session_id);
+  scoped_ptr<net::HttpServerResponseInfo> PrepareResponseHelper(
+      const std::string& trimmed_path,
+      const Status& status,
+      scoped_ptr<base::Value> value,
+      const std::string& session_id);
+
+  base::ThreadChecker thread_checker_;
+  base::Closure quit_func_;
   Log* log_;
-  scoped_ptr<CommandExecutor> executor_;
-  scoped_ptr<CommandMap> command_map_;
   std::string url_base_;
+  bool received_shutdown_;
+  scoped_refptr<URLRequestContextGetter> context_getter_;
+  SyncWebSocketFactory socket_factory_;
+  SessionThreadMap session_thread_map_;
+  scoped_ptr<CommandMap> command_map_;
+  scoped_ptr<Adb> adb_;
+  scoped_ptr<DeviceManager> device_manager_;
+
+  base::WeakPtrFactory<HttpHandler> weak_ptr_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(HttpHandler);
 };
 
 namespace internal {
-extern const char kNewSessionIdCommand[];
-bool MatchesCommand(HttpMethod method,
+
+extern const char kNewSessionPathPattern[];
+
+bool MatchesCommand(const std::string& method,
                     const std::string& path,
                     const CommandMapping& command,
                     std::string* session_id,
                     base::DictionaryValue* out_params);
+
 }  // namespace internal
 
 #endif  // CHROME_TEST_CHROMEDRIVER_SERVER_HTTP_HANDLER_H_

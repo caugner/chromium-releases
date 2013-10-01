@@ -35,12 +35,11 @@ StatusAreaWidget::StatusAreaWidget(aura::Window* status_container)
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.delegate = status_area_widget_delegate_;
   params.parent = status_container;
-  params.transparent = true;
+  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   Init(params);
   set_focus_on_creation(false);
   SetContentsView(status_area_widget_delegate_);
   GetNativeView()->SetName(kNativeViewName);
-  GetNativeView()->SetProperty(internal::kStayInSameRootWindowKey, true);
 }
 
 StatusAreaWidget::~StatusAreaWidget() {
@@ -115,11 +114,6 @@ void StatusAreaWidget::SetShelfAlignment(ShelfAlignment alignment) {
   if (web_notification_tray_)
     web_notification_tray_->SetShelfAlignment(alignment);
   status_area_widget_delegate_->UpdateLayout();
-}
-
-void StatusAreaWidget::SetHideWebNotifications(bool hide) {
-  if (web_notification_tray_)
-    web_notification_tray_->SetHidePopupBubble(hide);
 }
 
 void StatusAreaWidget::SetHideSystemNotifications(bool hide) {

@@ -32,11 +32,12 @@ class TestRasterWorkerPoolTaskImpl : public internal::RasterWorkerPoolTask {
         did_raster_(false) {}
 
   // Overridden from internal::WorkerPoolTask:
-  virtual bool RunOnThread(SkDevice* device, unsigned thread_index) OVERRIDE {
+  virtual bool RunOnWorkerThread(SkDevice* device, unsigned thread_index)
+      OVERRIDE {
     did_raster_ = true;
     return true;
   }
-  virtual void DispatchCompletionCallback() OVERRIDE {
+  virtual void CompleteOnOriginThread() OVERRIDE {
     reply_.Run(PicturePileImpl::Analysis(), !HasFinishedRunning(), did_raster_);
   }
 
@@ -78,6 +79,8 @@ class RasterWorkerPoolTest : public testing::Test,
       OVERRIDE {
     return false;
   }
+  virtual void DidFinishRunningTasks() OVERRIDE {}
+  virtual void DidFinishRunningTasksRequiredForActivation() OVERRIDE {}
 
   virtual void BeginTest() = 0;
   virtual void AfterTest() = 0;

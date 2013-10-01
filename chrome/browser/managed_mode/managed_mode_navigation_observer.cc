@@ -13,7 +13,6 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/managed_mode/managed_mode_interstitial.h"
 #include "chrome/browser/managed_mode/managed_mode_resource_throttle.h"
 #include "chrome/browser/managed_mode/managed_mode_url_filter.h"
@@ -37,9 +36,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using base::Time;
-using content::BrowserThread;
 using content::NavigationEntry;
-using content::UserMetricsAction;
 
 namespace {
 
@@ -73,19 +70,19 @@ void GoBackToSafety(content::WebContents* web_contents) {
 }
 
 
-// ManagedModeWarningInfobarDelegate ------------------------------------------
+// ManagedModeWarningInfoBarDelegate ------------------------------------------
 
-class ManagedModeWarningInfobarDelegate : public ConfirmInfoBarDelegate {
+class ManagedModeWarningInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  // Creates a managed mode warning delegate and adds it to |infobar_service|.
-  // Returns the delegate if it was successfully added.
+  // Creates a managed mode warning infobar delegate and adds it to
+  // |infobar_service|.  Returns the delegate if it was successfully added.
   static InfoBarDelegate* Create(InfoBarService* infobar_service);
 
  private:
-  explicit ManagedModeWarningInfobarDelegate(InfoBarService* infobar_service);
-  virtual ~ManagedModeWarningInfobarDelegate();
+  explicit ManagedModeWarningInfoBarDelegate(InfoBarService* infobar_service);
+  virtual ~ManagedModeWarningInfoBarDelegate();
 
-  // ConfirmInfoBarDelegate overrides:
+  // ConfirmInfoBarDelegate:
   virtual bool ShouldExpire(
       const content::LoadCommittedDetails& details) const OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
@@ -93,64 +90,58 @@ class ManagedModeWarningInfobarDelegate : public ConfirmInfoBarDelegate {
   virtual int GetButtons() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
 
-  DISALLOW_COPY_AND_ASSIGN(ManagedModeWarningInfobarDelegate);
+  DISALLOW_COPY_AND_ASSIGN(ManagedModeWarningInfoBarDelegate);
 };
 
 // static
-InfoBarDelegate* ManagedModeWarningInfobarDelegate::Create(
+InfoBarDelegate* ManagedModeWarningInfoBarDelegate::Create(
     InfoBarService* infobar_service) {
-  scoped_ptr<InfoBarDelegate> delegate(
-    new ManagedModeWarningInfobarDelegate(infobar_service));
-  return infobar_service->AddInfoBar(delegate.Pass());
+  return infobar_service->AddInfoBar(scoped_ptr<InfoBarDelegate>(
+      new ManagedModeWarningInfoBarDelegate(infobar_service)));
 }
 
-ManagedModeWarningInfobarDelegate::ManagedModeWarningInfobarDelegate(
+ManagedModeWarningInfoBarDelegate::ManagedModeWarningInfoBarDelegate(
     InfoBarService* infobar_service)
-    : ConfirmInfoBarDelegate(infobar_service) {}
+    : ConfirmInfoBarDelegate(infobar_service) {
+}
 
-ManagedModeWarningInfobarDelegate::~ManagedModeWarningInfobarDelegate() {}
+ManagedModeWarningInfoBarDelegate::~ManagedModeWarningInfoBarDelegate() {
+}
 
-bool ManagedModeWarningInfobarDelegate::ShouldExpire(
+bool ManagedModeWarningInfoBarDelegate::ShouldExpire(
     const content::LoadCommittedDetails& details) const {
   // ManagedModeNavigationObserver removes us below.
   return false;
 }
 
-void ManagedModeWarningInfobarDelegate::InfoBarDismissed() {
-  ManagedModeNavigationObserver* observer =
-      ManagedModeNavigationObserver::FromWebContents(web_contents());
-  observer->WarnInfobarDismissed();
+void ManagedModeWarningInfoBarDelegate::InfoBarDismissed() {
+  ManagedModeNavigationObserver::FromWebContents(
+      web_contents())->WarnInfoBarDismissed();
 }
 
-string16 ManagedModeWarningInfobarDelegate::GetMessageText() const {
+string16 ManagedModeWarningInfoBarDelegate::GetMessageText() const {
   return l10n_util::GetStringUTF16(IDS_MANAGED_USER_WARN_INFOBAR_MESSAGE);
 }
 
-int ManagedModeWarningInfobarDelegate::GetButtons() const {
+int ManagedModeWarningInfoBarDelegate::GetButtons() const {
   return BUTTON_OK;
 }
 
-string16 ManagedModeWarningInfobarDelegate::GetButtonLabel(
+string16 ManagedModeWarningInfoBarDelegate::GetButtonLabel(
     InfoBarButton button) const {
   DCHECK_EQ(BUTTON_OK, button);
   return l10n_util::GetStringUTF16(IDS_MANAGED_USER_WARN_INFOBAR_GO_BACK);
 }
 
-bool ManagedModeWarningInfobarDelegate::Accept() {
+bool ManagedModeWarningInfoBarDelegate::Accept() {
   GoBackToSafety(web_contents());
 
   return false;
 }
 
-bool ManagedModeWarningInfobarDelegate::Cancel() {
-  NOTREACHED();
-  return false;
-}
 
 }  // namespace
-
 
 // ManagedModeNavigationObserver ----------------------------------------------
 
@@ -162,16 +153,16 @@ ManagedModeNavigationObserver::~ManagedModeNavigationObserver() {
 ManagedModeNavigationObserver::ManagedModeNavigationObserver(
     content::WebContents* web_contents)
     : WebContentsObserver(web_contents),
-      warn_infobar_delegate_(NULL) {
+      warn_infobar_(NULL) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   managed_user_service_ = ManagedUserServiceFactory::GetForProfile(profile);
   url_filter_ = managed_user_service_->GetURLFilterForUIThread();
 }
 
-void ManagedModeNavigationObserver::WarnInfobarDismissed() {
-  DCHECK(warn_infobar_delegate_);
-  warn_infobar_delegate_ = NULL;
+void ManagedModeNavigationObserver::WarnInfoBarDismissed() {
+  DCHECK(warn_infobar_);
+  warn_infobar_ = NULL;
 }
 
 void ManagedModeNavigationObserver::ProvisionalChangeToMainFrameUrl(
@@ -180,14 +171,12 @@ void ManagedModeNavigationObserver::ProvisionalChangeToMainFrameUrl(
   ManagedModeURLFilter::FilteringBehavior behavior =
       url_filter_->GetFilteringBehaviorForURL(url);
 
-  if (behavior == ManagedModeURLFilter::WARN || !warn_infobar_delegate_)
+  if (behavior == ManagedModeURLFilter::WARN || !warn_infobar_)
     return;
 
   // If we shouldn't have a warn infobar remove it here.
-  InfoBarService* infobar_service =
-      InfoBarService::FromWebContents(web_contents());
-  infobar_service->RemoveInfoBar(warn_infobar_delegate_);
-  warn_infobar_delegate_ = NULL;
+  InfoBarService::FromWebContents(web_contents())->RemoveInfoBar(warn_infobar_);
+  warn_infobar_ = NULL;
 }
 
 void ManagedModeNavigationObserver::DidCommitProvisionalLoadForFrame(
@@ -203,8 +192,8 @@ void ManagedModeNavigationObserver::DidCommitProvisionalLoadForFrame(
   ManagedModeURLFilter::FilteringBehavior behavior =
       url_filter_->GetFilteringBehaviorForURL(url);
 
-  if (behavior == ManagedModeURLFilter::WARN && !warn_infobar_delegate_) {
-    warn_infobar_delegate_ = ManagedModeWarningInfobarDelegate::Create(
+  if (behavior == ManagedModeURLFilter::WARN && !warn_infobar_) {
+    warn_infobar_ = ManagedModeWarningInfoBarDelegate::Create(
         InfoBarService::FromWebContents(web_contents()));
   }
 }
@@ -218,8 +207,8 @@ void ManagedModeNavigationObserver::OnRequestBlocked(
   content::WebContents* web_contents =
       tab_util::GetWebContentsByID(render_process_host_id, render_view_id);
   if (!web_contents) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE, base::Bind(callback, false));
+    content::BrowserThread::PostTask(
+        content::BrowserThread::IO, FROM_HERE, base::Bind(callback, false));
     return;
   }
 
@@ -255,4 +244,7 @@ void ManagedModeNavigationObserver::OnRequestBlockedInternal(const GURL& url) {
   entry->SetVirtualURL(url);
   entry->SetTimestamp(timestamp);
   blocked_navigations_.push_back(entry.release());
+  ManagedUserService* managed_user_service =
+      ManagedUserServiceFactory::GetForProfile(profile);
+  managed_user_service->DidBlockNavigation(web_contents());
 }

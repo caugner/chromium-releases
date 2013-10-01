@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #endif
@@ -21,6 +22,7 @@
 #include "chrome/common/extensions/features/complex_feature.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "chrome/common/extensions/features/simple_feature.h"
+#include "chrome/test/base/test_switches.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/content_switches.h"
@@ -35,6 +37,14 @@ class TabCaptureApiTest : public ExtensionApiTest {
  public:
   TabCaptureApiTest() {}
 
+  virtual void SetUp() OVERRIDE {
+    // TODO(danakj): The GPU Video Decoder needs real GL bindings.
+    // crbug.com/269087
+    UseRealGLBindings();
+
+    ExtensionApiTest::SetUp();
+  }
+
   void AddExtensionToCommandLineWhitelist() {
     CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kWhitelistedExtensionID, kExtensionId);
@@ -43,9 +53,18 @@ class TabCaptureApiTest : public ExtensionApiTest {
 
 }  // namespace
 
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, ApiTests) {
-  extensions::FeatureSwitch::ScopedOverride tab_capture(
-      extensions::FeatureSwitch::tab_capture(), true);
+// http://crbug.com/261493 and http://crbug.com/268644
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(USE_AURA)
+#define MAYBE_ApiTests DISABLED_ApiTests
+#else
+#define MAYBE_ApiTests ApiTests
+#endif
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_ApiTests) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
 
 #if defined(OS_WIN)
   // TODO(justinlin): Disabled for WinXP due to timeout issues.
@@ -59,10 +78,13 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, ApiTests) {
                                   "api_tests.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, ApiTestsAudio) {
-  extensions::FeatureSwitch::ScopedOverride tab_capture(
-      extensions::FeatureSwitch::tab_capture(), true);
-
+// http://crbug.com/268644
+#if defined(USE_AURA)
+#define MAYBE_ApiTestsAudio DISABLED_ApiTestsAudio
+#else
+#define MAYBE_ApiTestsAudio ApiTestsAudio
+#endif
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_ApiTestsAudio) {
 #if defined(OS_WIN)
   // TODO(justinlin): Disabled for WinXP due to timeout issues.
   if (base::win::GetVersion() < base::win::VERSION_VISTA) {
@@ -75,19 +97,13 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, ApiTestsAudio) {
                                   "api_tests_audio.html")) << message_;
 }
 
-// http://crbug.com/177163 -- for OS_WIN debug build flakiness
-// http://crbug.com/251863 -- for OS_LINUX (non-Aura) debug build flakiness
-#if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_EndToEnd DISABLED_EndToEnd
-#elif defined(OS_LINUX) && !defined(USE_AURA) && !defined(NDEBUG)
+// http://crbug.com/177163 and http://crbug.com/268644
+#if defined(OS_WIN) && (!defined(NDEBUG) || defined(USE_AURA))
 #define MAYBE_EndToEnd DISABLED_EndToEnd
 #else
 #define MAYBE_EndToEnd EndToEnd
 #endif
 IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_EndToEnd) {
-  extensions::FeatureSwitch::ScopedOverride tab_capture(
-      extensions::FeatureSwitch::tab_capture(), true);
-
 #if defined(OS_WIN)
   // TODO(justinlin): Disabled for WinXP due to timeout issues.
   if (base::win::GetVersion() < base::win::VERSION_VISTA) {
@@ -138,7 +154,7 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_GetUserMediaTest) {
 }
 
 // http://crbug.com/177163
-#if defined(OS_WIN) && !defined(NDEBUG)
+#if defined(OS_WIN)
 #define MAYBE_ActiveTabPermission DISABLED_ActiveTabPermission
 #else
 #define MAYBE_ActiveTabPermission ActiveTabPermission
@@ -195,7 +211,7 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_ActiveTabPermission) {
 #elif defined(USE_AURA) || defined(OS_MACOSX)
 // These don't always fire fullscreen events when run in tests. Tested manually.
 #define MAYBE_FullscreenEvents DISABLED_FullscreenEvents
-#elif defined(OS_LINUX) && defined(NDEBUG)
+#elif defined(OS_LINUX)
 // Flaky to get out of fullscreen in tests. Tested manually.
 #define MAYBE_FullscreenEvents DISABLED_FullscreenEvents
 #else

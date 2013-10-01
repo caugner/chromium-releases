@@ -13,11 +13,16 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string_util.h"
 #include "base/version.h"
+#include "base/win/registry.h"
 #include "base/win/windows_version.h"
+#include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/util/copy_tree_work_item.h"
+#include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/installer_state.h"
 #include "chrome/installer/util/master_preferences.h"
@@ -134,56 +139,8 @@ int BsdiffPatchFiles(const base::FilePath& src,
   return exit_code;
 }
 
-int ApplyDiffPatch(const base::FilePath& src,
-                   const base::FilePath& patch,
-                   const base::FilePath& dest,
-                   const InstallerState* installer_state) {
-  VLOG(1) << "Applying patch " << patch.value() << " to file "
-          << src.value() << " and generating file " << dest.value();
-
-  if (installer_state != NULL)
-    installer_state->UpdateStage(installer::ENSEMBLE_PATCHING);
-
-  // Try Courgette first.  Courgette checks the patch file first and fails
-  // quickly if the patch file does not have a valid Courgette header.
-  courgette::Status patch_status =
-      courgette::ApplyEnsemblePatch(src.value().c_str(),
-                                    patch.value().c_str(),
-                                    dest.value().c_str());
-  if (patch_status == courgette::C_OK)
-    return 0;
-
-  LOG(ERROR)
-        << "Failed to apply patch " << patch.value()
-        << " to file " << src.value() << " and generating file " << dest.value()
-        << " using courgette. err=" << patch_status;
-
-  // If we ran out of memory or disk space, then these are likely the errors
-  // we will see.  If we run into them, return an error and stay on the
-  // 'ENSEMBLE_PATCHING' update stage.
-  if (patch_status == courgette::C_DISASSEMBLY_FAILED ||
-      patch_status == courgette::C_STREAM_ERROR) {
-    return MEM_ERROR;
-  }
-
-  if (installer_state != NULL)
-    installer_state->UpdateStage(installer::BINARY_PATCHING);
-
-  int binary_patch_status = ApplyBinaryPatch(src.value().c_str(),
-                                             patch.value().c_str(),
-                                             dest.value().c_str());
-
-  LOG_IF(ERROR, binary_patch_status != OK)
-      << "Failed to apply patch " << patch.value()
-      << " to file " << src.value() << " and generating file " << dest.value()
-      << " using bsdiff. err=" << binary_patch_status;
-
-  return binary_patch_status;
-}
-
 Version* GetMaxVersionFromArchiveDir(const base::FilePath& chrome_path) {
   VLOG(1) << "Looking for Chrome version folder under " << chrome_path.value();
-  Version* version = NULL;
   base::FileEnumerator version_enum(chrome_path, false,
       base::FileEnumerator::DIRECTORIES);
   // TODO(tommi): The version directory really should match the version of
@@ -206,6 +163,32 @@ Version* GetMaxVersionFromArchiveDir(const base::FilePath& chrome_path) {
   }
 
   return (version_found ? max_version.release() : NULL);
+}
+
+base::FilePath FindArchiveToPatch(const InstallationState& original_state,
+                                  const InstallerState& installer_state) {
+  // Check based on the version number advertised to Google Update, since that
+  // is the value used to select a specific differential update. If an archive
+  // can't be found using that, fallback to using the newest version present.
+  base::FilePath patch_source;
+  const ProductState* product =
+      original_state.GetProductState(installer_state.system_install(),
+                                     installer_state.state_type());
+  if (product) {
+    patch_source = installer_state.GetInstallerDirectory(product->version())
+        .Append(installer::kChromeArchive);
+    if (base::PathExists(patch_source))
+      return patch_source;
+  }
+  scoped_ptr<Version> version(
+      installer::GetMaxVersionFromArchiveDir(installer_state.target_path()));
+  if (version) {
+    patch_source = installer_state.GetInstallerDirectory(*version)
+        .Append(installer::kChromeArchive);
+    if (base::PathExists(patch_source))
+      return patch_source;
+  }
+  return base::FilePath();
 }
 
 bool DeleteFileFromTempProcess(const base::FilePath& path,
@@ -386,6 +369,76 @@ bool AdjustProcessPriority() {
     }
   }
   return false;
+}
+
+void MigrateGoogleUpdateStateMultiToSingle(
+    bool system_level,
+    BrowserDistribution::Type to_migrate,
+    const installer::InstallationState& machine_state) {
+  const HKEY root = system_level ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+  const ProductState* product = NULL;
+  BrowserDistribution* dist = NULL;
+  LONG result = ERROR_SUCCESS;
+  base::win::RegKey state_key;
+
+  Product product_to_migrate(
+      BrowserDistribution::GetSpecificDistribution(to_migrate));
+
+  // Copy usagestats from the binaries to the product's ClientState key.
+  product = machine_state.GetProductState(system_level,
+                                          BrowserDistribution::CHROME_BINARIES);
+  DWORD usagestats = 0;
+  if (product && product->GetUsageStats(&usagestats)) {
+    dist = product_to_migrate.distribution();
+    result = state_key.Open(root, dist->GetStateKey().c_str(),
+                            KEY_SET_VALUE);
+    if (result != ERROR_SUCCESS) {
+      LOG(ERROR) << "Failed opening ClientState key for "
+                 << dist->GetAppShortCutName() << " to migrate usagestats.";
+    } else {
+      state_key.WriteValue(google_update::kRegUsageStatsField, usagestats);
+    }
+  }
+
+  // Remove the migrating product from the "ap" value of other multi-install
+  // products.
+  for (int i = 0; i < BrowserDistribution::NUM_TYPES; ++i) {
+    BrowserDistribution::Type type =
+        static_cast<BrowserDistribution::Type>(i);
+    if (type == to_migrate)
+      continue;
+    product = machine_state.GetProductState(system_level, type);
+    if (product && product->is_multi_install()) {
+      installer::ChannelInfo channel_info;
+      dist = BrowserDistribution::GetSpecificDistribution(type);
+      result = state_key.Open(root, dist->GetStateKey().c_str(),
+                              KEY_QUERY_VALUE | KEY_SET_VALUE);
+      if (result == ERROR_SUCCESS &&
+          channel_info.Initialize(state_key) &&
+          product_to_migrate.SetChannelFlags(false, &channel_info)) {
+        VLOG(1) << "Moving " << dist->GetAppShortCutName()
+                << " to channel: " << channel_info.value();
+        channel_info.Write(&state_key);
+      }
+    }
+  }
+
+  // Remove -multi, all product modifiers, and everything else but the channel
+  // name from the "ap" value of the product to migrate.
+  dist = product_to_migrate.distribution();
+  result = state_key.Open(root, dist->GetStateKey().c_str(),
+                          KEY_QUERY_VALUE | KEY_SET_VALUE);
+  if (result == ERROR_SUCCESS) {
+    installer::ChannelInfo channel_info;
+    if (!channel_info.Initialize(state_key)) {
+      LOG(ERROR) << "Failed reading " << dist->GetAppShortCutName()
+                 << " channel info.";
+    } else if (channel_info.RemoveAllModifiersAndSuffixes()) {
+      VLOG(1) << "Moving " << dist->GetAppShortCutName()
+              << " to channel: " << channel_info.value();
+      channel_info.Write(&state_key);
+    }
+  }
 }
 
 ScopedTokenPrivilege::ScopedTokenPrivilege(const wchar_t* privilege_name)

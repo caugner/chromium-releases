@@ -9,12 +9,13 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "jni/TemplateUrlService_jni.h"
 
@@ -95,12 +96,35 @@ jint TemplateUrlServiceAndroid::GetTemplateUrlCount(JNIEnv* env, jobject obj) {
   return template_url_service_->GetTemplateURLs().size();
 }
 
+jboolean TemplateUrlServiceAndroid::IsSearchProviderManaged(JNIEnv* env,
+                                                            jobject obj) {
+  return template_url_service_->is_default_search_managed();
+}
+
+jboolean TemplateUrlServiceAndroid::IsSearchByImageAvailable(JNIEnv* env,
+                                                             jobject obj) {
+  const TemplateURL* default_search_provider =
+      template_url_service_->GetDefaultSearchProvider();
+  return default_search_provider &&
+      !default_search_provider->image_url().empty() &&
+      default_search_provider->image_url_ref().IsValid();
+}
+
+jboolean TemplateUrlServiceAndroid::IsDefaultSearchEngineGoogle(JNIEnv* env,
+                                                                jobject obj) {
+  TemplateURL* default_search_provider =
+      template_url_service_->GetDefaultSearchProvider();
+  return default_search_provider &&
+      default_search_provider->url_ref().HasGoogleBaseURLs();
+}
+
 base::android::ScopedJavaLocalRef<jobject>
 TemplateUrlServiceAndroid::GetPrepopulatedTemplateUrlAt(JNIEnv* env,
                                                         jobject obj,
                                                         jint index) {
   TemplateURL* template_url = template_url_service_->GetTemplateURLs()[index];
-  if (!IsPrepopulatedTemplate(template_url))
+  if (!IsPrepopulatedTemplate(template_url) &&
+      !template_url->created_by_policy())
    return ScopedJavaLocalRef<jobject>();
 
   return Java_TemplateUrl_create(

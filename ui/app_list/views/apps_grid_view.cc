@@ -36,6 +36,12 @@
 
 namespace {
 
+// Distance a drag needs to be from the app grid to be considered 'outside', at
+// which point we rearrange the apps to their pre-drag configuration, as a drop
+// then would be canceled. We have a buffer to make it easier to drag apps to
+// other pages.
+const int kDragBufferPx = 20;
+
 // Padding space in pixels for fixed layout.
 const int kLeftRightPadding = 20;
 const int kTopPadding = 1;
@@ -183,10 +189,6 @@ class SynchronousDrag : public ui::DragSourceWin {
   virtual void OnDragSourceMove() OVERRIDE {
     grid_view_->UpdateDrag(app_list::AppsGridView::MOUSE,
                            GetCursorInGridViewCoords());
-
-    // Don't turn pages if the cursor is dragged outside the view.
-    if (!IsCursorWithinGridView())
-      grid_view_->StopPageFlipTimer();
   }
 
   void SetupExchangeData(ui::OSExchangeData* data) {
@@ -241,6 +243,7 @@ AppsGridView::AppsGridView(AppsGridViewDelegate* delegate,
       rows_per_page_(0),
       selected_view_(NULL),
       drag_view_(NULL),
+      drag_start_page_(-1),
       drag_pointer_(NONE),
       drag_and_drop_host_(NULL),
       forward_events_to_drag_and_drop_host_(false),
@@ -322,27 +325,8 @@ void AppsGridView::InitiateDrag(AppListItemView* view,
     return;
 
   drag_view_ = view;
-
-  // When a drag and drop host is given, the item can be dragged out of the app
-  // list window. In that case a proxy widget needs to be used.
-  // Note: This code has very likely to be changed for Windows (non metro mode)
-  // when a |drag_and_drop_host_| gets implemented.
-  if (drag_and_drop_host_) {
-    // Determine the mouse offset to the center of the icon so that the drag and
-    // drop host follows this layer.
-    gfx::Vector2d delta = event.root_location() -
-                          drag_view_->GetBoundsInScreen().CenterPoint();
-    delta.set_y(delta.y() + drag_view_->title()->size().height() / 2);
-    // We have to hide the original item since the drag and drop host will do
-    // the OS dependent code to "lift off the dragged item".
-    drag_and_drop_host_->CreateDragIconProxy(event.root_location(),
-                                             view->model()->icon(),
-                                             drag_view_,
-                                             delta,
-                                             kDragAndDropProxyScale);
-    HideView(drag_view_, true);
-  }
   drag_view_offset_ = event.location();
+  drag_start_page_ = pagination_model_->selected_page();
   ExtractDragLocation(event, &drag_start_grid_view_);
   drag_view_start_ = gfx::Point(drag_view_->x(), drag_view_->y());
 }
@@ -392,6 +376,8 @@ void AppsGridView::UpdateDragFromItem(Pointer pointer,
   gfx::Point drag_point_in_grid_view;
   ExtractDragLocation(event, &drag_point_in_grid_view);
   UpdateDrag(pointer, drag_point_in_grid_view);
+  if (!dragging())
+    return;
 
   // If a drag and drop host is provided, see if the drag operation needs to be
   // forwarded.
@@ -415,6 +401,7 @@ void AppsGridView::UpdateDrag(Pointer pointer, const gfx::Point& point) {
     ReorderChildView(drag_view_, -1);
     bounds_animator_.StopAnimatingView(drag_view_);
     StartSettingUpSynchronousDrag();
+    StartDragAndDropHostDrag(point);
   }
 
   if (drag_pointer_ != pointer)
@@ -424,7 +411,10 @@ void AppsGridView::UpdateDrag(Pointer pointer, const gfx::Point& point) {
   const Index last_drop_target = drop_target_;
   CalculateDropTarget(last_drag_point_, false);
 
-  MaybeStartPageFlipTimer(last_drag_point_);
+  if (IsPointWithinDragBuffer(last_drag_point_))
+    MaybeStartPageFlipTimer(last_drag_point_);
+  else
+    StopPageFlipTimer();
 
   gfx::Point page_switcher_point(last_drag_point_);
   views::View::ConvertPointToTarget(this, page_switcher_view_,
@@ -465,6 +455,9 @@ void AppsGridView::EndDrag(bool cancel) {
   drag_pointer_ = NONE;
   drop_target_ = Index();
   drag_view_ = NULL;
+  drag_start_grid_view_ = gfx::Point();
+  drag_start_page_ = -1;
+  drag_view_offset_ = gfx::Point();
   AnimateToIdealBounds();
 
   StopPageFlipTimer();
@@ -915,11 +908,16 @@ void AppsGridView::ExtractDragLocation(const ui::LocatedEvent& event,
 
 void AppsGridView::CalculateDropTarget(const gfx::Point& drag_point,
                                        bool use_page_button_hovering) {
-  const int current_page = pagination_model_->selected_page();
+  int current_page = pagination_model_->selected_page();
+  gfx::Point point(drag_point);
+  if (!IsPointWithinDragBuffer(drag_point)) {
+    point = drag_start_grid_view_;
+    current_page = drag_start_page_;
+  }
 
   if (use_page_button_hovering &&
-      page_switcher_view_->bounds().Contains(drag_point)) {
-    gfx::Point page_switcher_point(drag_point);
+      page_switcher_view_->bounds().Contains(point)) {
+    gfx::Point page_switcher_point(point);
     views::View::ConvertPointToTarget(this, page_switcher_view_,
                                       &page_switcher_point);
     int page = page_switcher_view_->GetPageForPoint(page_switcher_point);
@@ -928,9 +926,10 @@ void AppsGridView::CalculateDropTarget(const gfx::Point& drag_point,
       drop_target_.slot = tiles_per_page() - 1;
     }
   } else {
-    const int drop_row = drag_point.y() / kPreferredTileHeight;
+    gfx::Rect bounds(GetContentsBounds());
+    const int drop_row = (point.y() - bounds.y()) / kPreferredTileHeight;
     const int drop_col = std::min(cols_ - 1,
-                                  drag_point.x() / kPreferredTileWidth);
+        (point.x() - bounds.x()) / kPreferredTileWidth);
 
     drop_target_.page = current_page;
     drop_target_.slot = std::max(0, std::min(
@@ -944,6 +943,33 @@ void AppsGridView::CalculateDropTarget(const gfx::Point& drag_point,
         (view_model_.view_size() - 1) % tiles_per_page(),
         drop_target_.slot);
   }
+}
+
+void AppsGridView::StartDragAndDropHostDrag(const gfx::Point& grid_location) {
+  // When a drag and drop host is given, the item can be dragged out of the app
+  // list window. In that case a proxy widget needs to be used.
+  // Note: This code has very likely to be changed for Windows (non metro mode)
+  // when a |drag_and_drop_host_| gets implemented.
+  if (!drag_view_ || !drag_and_drop_host_)
+    return;
+
+  gfx::Point screen_location = grid_location;
+  views::View::ConvertPointToScreen(this, &screen_location);
+
+  // Determine the mouse offset to the center of the icon so that the drag and
+  // drop host follows this layer.
+  gfx::Vector2d delta = drag_view_offset_ -
+                        drag_view_->GetLocalBounds().CenterPoint();
+  delta.set_y(delta.y() + drag_view_->title()->size().height() / 2);
+
+  // We have to hide the original item since the drag and drop host will do
+  // the OS dependent code to "lift off the dragged item".
+  drag_and_drop_host_->CreateDragIconProxy(screen_location,
+                                           drag_view_->model()->icon(),
+                                           drag_view_,
+                                           delta,
+                                           kDragAndDropProxyScale);
+  HideView(drag_view_, true);
 }
 
 void AppsGridView::DispatchDragEventToDragAndDropHost(
@@ -980,6 +1006,8 @@ void AppsGridView::DispatchDragEventToDragAndDropHost(
 }
 
 void AppsGridView::MaybeStartPageFlipTimer(const gfx::Point& drag_point) {
+  if (!IsPointWithinDragBuffer(drag_point))
+    StopPageFlipTimer();
   int new_page_flip_target = -1;
 
   if (page_switcher_view_->bounds().Contains(drag_point)) {
@@ -1002,18 +1030,15 @@ void AppsGridView::MaybeStartPageFlipTimer(const gfx::Point& drag_point) {
   if (new_page_flip_target == page_flip_target_)
     return;
 
+  StopPageFlipTimer();
   if (pagination_model_->is_valid_page(new_page_flip_target)) {
     page_flip_target_ = new_page_flip_target;
-    page_flip_timer_.Stop();
 
     if (page_flip_target_ != pagination_model_->selected_page()) {
       page_flip_timer_.Start(FROM_HERE,
           base::TimeDelta::FromMilliseconds(page_flip_delay_in_ms_),
           this, &AppsGridView::OnPageFlipTimer);
     }
-  } else {
-    page_flip_target_ = -1;
-    page_flip_timer_.Stop();
   }
 }
 
@@ -1038,6 +1063,22 @@ void AppsGridView::MoveItemInModel(views::View* item_view,
 
   if (pagination_model_->selected_page() != target.page)
     pagination_model_->SelectPage(target.page, false);
+}
+
+void AppsGridView::CancelContextMenusOnCurrentPage() {
+  int start = pagination_model_->selected_page() * tiles_per_page();
+  int end = std::min(view_model_.view_size(), start + tiles_per_page());
+  for (int i = start; i < end; ++i) {
+    AppListItemView* view =
+        static_cast<AppListItemView*>(view_model_.view_at(i));
+    view->CancelContextMenu();
+  }
+}
+
+bool AppsGridView::IsPointWithinDragBuffer(const gfx::Point& point) const {
+  gfx::Rect rect(GetLocalBounds());
+  rect.Inset(-kDragBufferPx, -kDragBufferPx, -kDragBufferPx, -kDragBufferPx);
+  return rect.Contains(point);
 }
 
 void AppsGridView::ButtonPressed(views::Button* sender,
@@ -1108,6 +1149,10 @@ void AppsGridView::SelectedPageChanged(int old_selected, int new_selected) {
     ClearSelectedView(selected_view_);
     Layout();
   }
+}
+
+void AppsGridView::TransitionStarted() {
+  CancelContextMenusOnCurrentPage();
 }
 
 void AppsGridView::TransitionChanged() {

@@ -34,7 +34,7 @@ without changes to the corresponding grd file. fb9 -->
       <include name="IDR_IMAGE_UTIL_JS" file="extensions\image_util.js" type="BINDATA" />
       <include name="IDR_JSON_SCHEMA_JS" file="extensions\json_schema.js" type="BINDATA" />
       <include name="IDR_LAST_ERROR_JS" file="extensions\last_error.js" type="BINDATA" />
-      <include name="IDR_MISCELLANEOUS_BINDINGS_JS" file="extensions\miscellaneous_bindings.js" type="BINDATA" />
+      <include name="IDR_MESSAGING_JS" file="extensions\messaging.js" type="BINDATA" />
       <include name="IDR_SCHEMA_UTILS_JS" file="extensions\schema_utils.js" type="BINDATA" />
       <include name="IDR_SEARCHBOX_API" file="extensions\searchbox_api.js" type="BINDATA" />
       <include name="IDR_SEND_REQUEST_JS" file="extensions\send_request.js" type="BINDATA" />
@@ -51,6 +51,8 @@ without changes to the corresponding grd file. fb9 -->
         <include name="IDR_APP_RUNTIME_CUSTOM_BINDINGS_JS" file="extensions\app_runtime_custom_bindings.js" type="BINDATA" />
         <include name="IDR_APP_WINDOW_CUSTOM_BINDINGS_JS" file="extensions\app_window_custom_bindings.js" type="BINDATA" />
         <include name="IDR_BROWSER_ACTION_CUSTOM_BINDINGS_JS" file="extensions\browser_action_custom_bindings.js" type="BINDATA" />
+        <include name="IDR_CHROME_DIRECT_SETTING_JS"
+        file="extensions\chrome_direct_setting.js" type="BINDATA" />
         <include name="IDR_CHROME_SETTING_JS" file="extensions\chrome_setting.js" type="BINDATA" />
         <include name="IDR_CONTENT_SETTING_JS" file="extensions\content_setting.js" type="BINDATA" />
         <include name="IDR_CONTEXT_MENUS_CUSTOM_BINDINGS_JS" file="extensions\context_menus_custom_bindings.js" type="BINDATA" />
@@ -59,7 +61,6 @@ without changes to the corresponding grd file. fb9 -->
         <include name="IDR_DOWNLOADS_CUSTOM_BINDINGS_JS" file="extensions\downloads_custom_bindings.js" type="BINDATA" />
         <include name="IDR_BLUETOOTH_CUSTOM_BINDINGS_JS" file="extensions\bluetooth_custom_bindings.js" type="BINDATA" />
         <include name="IDR_PERMISSIONS_CUSTOM_BINDINGS_JS" file="extensions\permissions_custom_bindings.js" type="BINDATA" />
-        <include name="IDR_EXPERIMENTAL_MEDIA_GALLERIES_CUSTOM_BINDINGS_JS" file="extensions\experimental.media_galleries_custom_bindings.js" type="BINDATA" />
         <include name="IDR_EXPERIMENTAL_OFFSCREENTABS_CUSTOM_BINDINGS_JS" file="extensions\experimental.offscreenTabs_custom_bindings.js" type="BINDATA" />
         <include name="IDR_EXTENSION_CUSTOM_BINDINGS_JS" file="extensions\extension_custom_bindings.js" type="BINDATA" />
         <include name="IDR_FEEDBACK_PRIVATE_CUSTOM_BINDINGS_JS" file="extensions\feedback_private_custom_bindings.js" type="BINDATA" />
@@ -84,6 +85,8 @@ without changes to the corresponding grd file. fb9 -->
         <include name="IDR_TEST_CUSTOM_BINDINGS_JS" file="extensions\test_custom_bindings.js" type="BINDATA" />
         <include name="IDR_TTS_CUSTOM_BINDINGS_JS" file="extensions\tts_custom_bindings.js" type="BINDATA" />
         <include name="IDR_TTS_ENGINE_CUSTOM_BINDINGS_JS" file="extensions\tts_engine_custom_bindings.js" type="BINDATA" />
+        <include name="IDR_WINDOW_CONTROLS_JS" file="extensions\window_controls.js" type="BINDATA" />
+        <include name="IDR_WINDOW_CONTROLS_TEMPLATE_HTML" file="extensions\window_controls_template.html" type="BINDATA" />
         <include name="IDR_WEB_REQUEST_CUSTOM_BINDINGS_JS" file="extensions\web_request_custom_bindings.js" type="BINDATA" />
         <include name="IDR_WEB_REQUEST_INTERNAL_CUSTOM_BINDINGS_JS" file="extensions\web_request_internal_custom_bindings.js" type="BINDATA" />
         <include name="IDR_WEBSTORE_CUSTOM_BINDINGS_JS" file="extensions\webstore_custom_bindings.js" type="BINDATA" />

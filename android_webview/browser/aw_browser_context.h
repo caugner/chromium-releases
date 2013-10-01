@@ -7,7 +7,6 @@
 
 #include <vector>
 
-#include "android_webview/browser/aw_autofill_manager_delegate.h"
 #include "android_webview/browser/aw_download_manager_delegate.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -76,7 +75,7 @@ class AwBrowserContext : public content::BrowserContext,
   void CreateUserPrefServiceIfNecessary();
 
   // content::BrowserContext implementation.
-  virtual base::FilePath GetPath() OVERRIDE;
+  virtual base::FilePath GetPath() const OVERRIDE;
   virtual bool IsOffTheRecord() const OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
@@ -87,13 +86,16 @@ class AwBrowserContext : public content::BrowserContext,
   virtual net::URLRequestContextGetter*
       GetMediaRequestContextForStoragePartition(
           const base::FilePath& partition_path, bool in_memory) OVERRIDE;
+  virtual void RequestMIDISysExPermission(
+      int render_process_id,
+      int render_view_id,
+      const GURL& requesting_frame,
+      const MIDISysExPermissionCallback& callback) OVERRIDE;
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
   virtual content::DownloadManagerDelegate*
       GetDownloadManagerDelegate() OVERRIDE;
   virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
-  virtual content::SpeechRecognitionPreferences*
-      GetSpeechRecognitionPreferences() OVERRIDE;
   virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
 
   // visitedlink::VisitedLinkDelegate implementation.
@@ -110,7 +112,6 @@ class AwBrowserContext : public content::BrowserContext,
       geolocation_permission_context_;
   scoped_ptr<AwQuotaManagerBridge> quota_manager_bridge_;
   scoped_ptr<AwFormDatabaseService> form_database_service_;
-  scoped_ptr<AwAutofillManagerDelegate> autofill_manager_delegate_;
 
   AwDownloadManagerDelegate download_manager_delegate_;
 

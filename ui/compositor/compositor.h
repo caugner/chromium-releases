@@ -11,7 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/compositor/compositor_export.h"
@@ -77,7 +77,7 @@ class COMPOSITOR_EXPORT ContextFactory {
   // Creates an output surface for the given compositor. The factory may keep
   // per-compositor data (e.g. a shared context), that needs to be cleaned up
   // by calling RemoveCompositor when the compositor gets destroyed.
-  virtual cc::OutputSurface* CreateOutputSurface(
+  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface(
       Compositor* compositor) = 0;
 
   // Creates a context used for offscreen rendering. This context can be shared
@@ -99,6 +99,10 @@ class COMPOSITOR_EXPORT ContextFactory {
 
   // Destroys per-compositor data.
   virtual void RemoveCompositor(Compositor* compositor) = 0;
+
+  // When true, the factory uses test contexts that do not do real GL
+  // operations.
+  virtual bool DoesCreateTestContexts() = 0;
 };
 
 // The default factory that creates in-process contexts.
@@ -108,7 +112,7 @@ class COMPOSITOR_EXPORT DefaultContextFactory : public ContextFactory {
   virtual ~DefaultContextFactory();
 
   // ContextFactory implementation
-  virtual cc::OutputSurface* CreateOutputSurface(
+  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface(
       Compositor* compositor) OVERRIDE;
   virtual scoped_ptr<WebKit::WebGraphicsContext3D> CreateOffscreenContext()
       OVERRIDE;
@@ -123,6 +127,7 @@ class COMPOSITOR_EXPORT DefaultContextFactory : public ContextFactory {
   virtual scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForCompositorThread() OVERRIDE;
   virtual void RemoveCompositor(Compositor* compositor) OVERRIDE;
+  virtual bool DoesCreateTestContexts() OVERRIDE;
 
   bool Initialize();
 
@@ -146,7 +151,7 @@ class COMPOSITOR_EXPORT TestContextFactory : public ContextFactory {
   virtual ~TestContextFactory();
 
   // ContextFactory implementation
-  virtual cc::OutputSurface* CreateOutputSurface(
+  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface(
       Compositor* compositor) OVERRIDE;
   virtual scoped_ptr<WebKit::WebGraphicsContext3D> CreateOffscreenContext()
       OVERRIDE;
@@ -161,6 +166,7 @@ class COMPOSITOR_EXPORT TestContextFactory : public ContextFactory {
   virtual scoped_refptr<cc::ContextProvider>
       OffscreenContextProviderForCompositorThread() OVERRIDE;
   virtual void RemoveCompositor(Compositor* compositor) OVERRIDE;
+  virtual bool DoesCreateTestContexts() OVERRIDE;
 
  private:
   scoped_refptr<ContextProviderFromContextFactory>
@@ -213,20 +219,6 @@ class COMPOSITOR_EXPORT CompositorDelegate {
 
  protected:
   virtual ~CompositorDelegate() {}
-};
-
-class COMPOSITOR_EXPORT Reflector
-    : public base::RefCountedThreadSafe<Reflector> {
- public:
-  Reflector() {}
-
-  virtual void OnMirroringCompositorResized() {}
-
- protected:
-  friend class base::RefCountedThreadSafe<Reflector>;
-  virtual ~Reflector() {}
-
-  DISALLOW_COPY_AND_ASSIGN(Reflector);
 };
 
 // This class represents a lock on the compositor, that can be used to prevent
@@ -303,6 +295,14 @@ class COMPOSITOR_EXPORT Compositor
   Compositor(CompositorDelegate* delegate,
              gfx::AcceleratedWidget widget);
   virtual ~Compositor();
+
+  // Set up the compositor ContextFactory for a test environment. Unit tests
+  // that do not have a full content environment need to call this before
+  // initializing the Compositor.
+  // Some tests expect pixel output, and they should pass false for
+  // |allow_test_contexts|. Most unit tests should pass true. Once this has been
+  // called, the Initialize() and Terminate() methods should be used as normal.
+  static void InitializeContextFactoryForTests(bool allow_test_contexts);
 
   static void Initialize();
   static bool WasInitializedWithThread();
@@ -394,8 +394,8 @@ class COMPOSITOR_EXPORT Compositor
   virtual void Layout() OVERRIDE;
   virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
                                    float page_scale) OVERRIDE {}
-  virtual scoped_ptr<cc::OutputSurface>
-      CreateOutputSurface() OVERRIDE;
+  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface(bool fallback)
+      OVERRIDE;
   virtual void DidInitializeOutputSurface(bool success) OVERRIDE {}
   virtual void WillCommit() OVERRIDE {}
   virtual void DidCommit() OVERRIDE;

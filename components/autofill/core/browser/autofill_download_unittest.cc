@@ -4,11 +4,10 @@
 
 #include <list>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
-#include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/autofill/core/browser/autofill_download.h"
 #include "components/autofill/core/browser/autofill_field.h"
@@ -16,14 +15,13 @@
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/form_data.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 
-using content::BrowserThread;
 using WebKit::WebInputElement;
 
 namespace autofill {
@@ -66,18 +64,7 @@ class AutofillDownloadTest : public AutofillDownloadManager::Observer,
                              public testing::Test {
  public:
   AutofillDownloadTest()
-      : download_manager_(&profile_, this),
-        io_thread_(BrowserThread::IO) {
-  }
-
-  virtual void SetUp() {
-    io_thread_.StartIOThread();
-    profile_.CreateRequestContext();
-  }
-
-  virtual void TearDown() {
-    profile_.ResetRequestContext();
-    io_thread_.Stop();
+      : download_manager_(&profile_, this) {
   }
 
   void LimitCache(size_t cache_size) {
@@ -129,16 +116,12 @@ class AutofillDownloadTest : public AutofillDownloadManager::Observer,
   };
   std::list<ResponseData> responses_;
 
+  content::TestBrowserThreadBundle thread_bundle_;
   TestingProfile profile_;
   AutofillDownloadManager download_manager_;
-
- private:
-  // The profile's request context must be released on the IO thread.
-  content::TestBrowserThread io_thread_;
 };
 
 TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
-  base::MessageLoopForUI message_loop;
   // Create and register factory.
   net::TestURLFetcherFactory factory;
 
@@ -221,10 +204,10 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
   download_manager_.SetNegativeUploadRate(1.0);
   // Request with id 1.
   EXPECT_TRUE(download_manager_.StartUploadRequest(
-      *(form_structures[0]), true, FieldTypeSet()));
+      *(form_structures[0]), true, ServerFieldTypeSet()));
   // Request with id 2.
   EXPECT_TRUE(download_manager_.StartUploadRequest(
-      *(form_structures[1]), false, FieldTypeSet()));
+      *(form_structures[1]), false, ServerFieldTypeSet()));
 
   const char *responses[] = {
     "<autofillqueryresponse>"
@@ -289,9 +272,9 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
   download_manager_.SetNegativeUploadRate(0.0);
   // No actual requests for the next two calls, as we set upload rate to 0%.
   EXPECT_FALSE(download_manager_.StartUploadRequest(
-      *(form_structures[0]), true, FieldTypeSet()));
+      *(form_structures[0]), true, ServerFieldTypeSet()));
   EXPECT_FALSE(download_manager_.StartUploadRequest(
-      *(form_structures[1]), false, FieldTypeSet()));
+      *(form_structures[1]), false, ServerFieldTypeSet()));
   fetcher = factory.GetFetcherByID(3);
   EXPECT_EQ(NULL, fetcher);
 
@@ -332,7 +315,7 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
   form_structures[0]->upload_required_ = UPLOAD_REQUIRED;
   // Request with id 4.
   EXPECT_TRUE(download_manager_.StartUploadRequest(
-      *(form_structures[0]), true, FieldTypeSet()));
+      *(form_structures[0]), true, ServerFieldTypeSet()));
   fetcher = factory.GetFetcherByID(4);
   ASSERT_TRUE(fetcher);
   fetcher->set_backoff_delay(TestTimeouts::action_max_timeout());
@@ -344,13 +327,12 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
 
   // Upload requests should be ignored for the next 10 seconds.
   EXPECT_FALSE(download_manager_.StartUploadRequest(
-      *(form_structures[0]), true, FieldTypeSet()));
+      *(form_structures[0]), true, ServerFieldTypeSet()));
   fetcher = factory.GetFetcherByID(5);
   EXPECT_EQ(NULL, fetcher);
 }
 
 TEST_F(AutofillDownloadTest, CacheQueryTest) {
-  base::MessageLoopForUI message_loop;
   // Create and register factory.
   net::TestURLFetcherFactory factory;
 

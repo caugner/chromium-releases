@@ -8,16 +8,13 @@
 #include <string>
 
 #include "base/files/file_path.h"
-#include "base/message_loop.h"
-#include "base/timer.h"
+#include "base/message_loop/message_loop.h"
+#include "base/timer/timer.h"
 #include "base/tuple.h"
 #include "build/build_config.h"
 
 // Re-creates a given test file inside the cache test folder.
 bool CreateCacheTestFile(const base::FilePath& name);
-
-// Re-creates a given test file inside the cache test folder of the given size.
-bool CreateCacheTestFileWithSize(const base::FilePath& name, size_t size);
 
 // Deletes all file son the cache.
 bool DeleteCache(const base::FilePath& path);

@@ -35,10 +35,17 @@ void CompareQuicDataWithHexError(const std::string& description,
                                  QuicData* actual,
                                  QuicData* expected);
 
-// Returns the length of the QuicPacket that will be created if it contains
-// a stream frame that has |payload| bytes.
-size_t GetPacketLengthForOneStream(
-    bool include_version, InFecGroup is_in_fec_group, size_t payload);
+// Returns the length of a QuicPacket that is capable of holding either a
+// stream frame or a minimal ack frame.  Sets |*payload_length| to the number
+// of bytes of stream data that will fit in such a packet.
+size_t GetPacketLengthForOneStream(QuicVersion version,
+                                   bool include_version,
+                                   InFecGroup is_in_fec_group,
+                                   size_t* payload_length);
+
+// Size in bytes of the stream frame fields for an arbitrary StreamID and
+// offset and the last frame in a packet.
+size_t GetMinStreamFrameSize(QuicVersion version);
 
 string SerializeUncompressedHeaders(const SpdyHeaderBlock& headers);
 
@@ -52,7 +59,7 @@ class MockFramerVisitor : public QuicFramerVisitorInterface {
 
   MOCK_METHOD1(OnError, void(QuicFramer* framer));
   // The constructor sets this up to return false by default.
-  MOCK_METHOD1(OnProtocolVersionMismatch, bool(QuicTag version));
+  MOCK_METHOD1(OnProtocolVersionMismatch, bool(QuicVersion version));
   MOCK_METHOD0(OnPacket, void());
   MOCK_METHOD1(OnPublicResetPacket, void(const QuicPublicResetPacket& header));
   MOCK_METHOD1(OnVersionNegotiationPacket,
@@ -87,7 +94,7 @@ class NoOpFramerVisitor : public QuicFramerVisitorInterface {
   virtual void OnVersionNegotiationPacket(
       const QuicVersionNegotiationPacket& packet) OVERRIDE {}
   virtual void OnRevivedPacket() OVERRIDE {}
-  virtual bool OnProtocolVersionMismatch(QuicTag version) OVERRIDE;
+  virtual bool OnProtocolVersionMismatch(QuicVersion version) OVERRIDE;
   virtual bool OnPacketHeader(const QuicPacketHeader& header) OVERRIDE;
   virtual void OnFecProtectedPayload(base::StringPiece payload) OVERRIDE {}
   virtual bool OnStreamFrame(const QuicStreamFrame& frame) OVERRIDE;
@@ -199,13 +206,8 @@ class MockHelper : public QuicConnectionHelperInterface {
                                       int* error));
   MOCK_METHOD0(IsWriteBlockedDataBuffered, bool());
   MOCK_METHOD1(IsWriteBlocked, bool(int));
-  MOCK_METHOD1(SetRetransmissionAlarm, void(QuicTime::Delta delay));
-  MOCK_METHOD1(SetAckAlarm, void(QuicTime::Delta delay));
-  MOCK_METHOD1(SetSendAlarm, void(QuicTime alarm_time));
-  MOCK_METHOD1(SetTimeoutAlarm, void(QuicTime::Delta delay));
-  MOCK_METHOD0(IsSendAlarmSet, bool());
-  MOCK_METHOD0(UnregisterSendAlarmIfRegistered, void());
-  MOCK_METHOD0(ClearAckAlarm, void());
+  virtual QuicAlarm* CreateAlarm(QuicAlarm::Delegate* delegate);
+
  private:
   MockClock clock_;
   MockRandom random_generator_;
@@ -244,7 +246,7 @@ class MockConnection : public QuicConnection {
     QuicConnection::ProcessUdpPacket(self_address, peer_address, packet);
   }
 
-  virtual bool OnProtocolVersionMismatch(QuicTag version) OVERRIDE {
+  virtual bool OnProtocolVersionMismatch(QuicVersion version) OVERRIDE {
     return false;
   }
 
@@ -333,10 +335,12 @@ class MockSendAlgorithm : public SendAlgorithmInterface {
                                 QuicByteCount, Retransmission));
   MOCK_METHOD2(AbandoningPacket, void(QuicPacketSequenceNumber sequence_number,
                                       QuicByteCount abandoned_bytes));
-  MOCK_METHOD3(TimeUntilSend, QuicTime::Delta(QuicTime now, Retransmission,
-                                              HasRetransmittableData));
+  MOCK_METHOD4(TimeUntilSend, QuicTime::Delta(QuicTime now, Retransmission,
+                                              HasRetransmittableData,
+                                              IsHandshake));
   MOCK_METHOD0(BandwidthEstimate, QuicBandwidth(void));
   MOCK_METHOD0(SmoothedRtt, QuicTime::Delta(void));
+  MOCK_METHOD0(RetransmissionDelay, QuicTime::Delta(void));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSendAlgorithm);
@@ -348,7 +352,7 @@ class TestEntropyCalculator :
   TestEntropyCalculator() { }
   virtual ~TestEntropyCalculator() { }
 
-  virtual QuicPacketEntropyHash ReceivedEntropyHash(
+  virtual QuicPacketEntropyHash EntropyHash(
       QuicPacketSequenceNumber sequence_number) const OVERRIDE;
 };
 

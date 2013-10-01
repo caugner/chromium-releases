@@ -13,7 +13,7 @@
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "sql/transaction.h"
 
 #if defined(OS_MACOSX)
@@ -27,13 +27,13 @@ namespace {
 // Current version number. We write databases at the "current" version number,
 // but any previous version that can read the "compatible" one can make do with
 // or database without *too* many bad effects.
-static const int kCurrentVersionNumber = 26;
-static const int kCompatibleVersionNumber = 16;
-static const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
+const int kCurrentVersionNumber = 28;
+const int kCompatibleVersionNumber = 16;
+const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
 
 // Key in the meta table used to determine if we need to migrate thumbnails out
 // of history.
-static const char kNeedsThumbnailMigrationKey[] = "needs_thumbnail_migration";
+const char kNeedsThumbnailMigrationKey[] = "needs_thumbnail_migration";
 
 }  // namespace
 
@@ -94,6 +94,9 @@ sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name) {
     return sql::INIT_FAILURE;
   CreateMainURLIndex();
   CreateKeywordSearchTermsIndices();
+
+  // TODO(benjhayden) Remove at some point.
+  meta_table_.DeleteKey("next_download_id");
 
   // Version check.
   sql::InitStatus version_status = EnsureCurrentVersion();
@@ -234,6 +237,10 @@ void HistoryDatabase::Vacuum() {
   ignore_result(db_.Execute("VACUUM"));
 }
 
+void HistoryDatabase::TrimMemory(bool aggressively) {
+  db_.TrimMemory(aggressively);
+}
+
 bool HistoryDatabase::Raze() {
   return db_.Raze();
 }
@@ -295,10 +302,6 @@ void HistoryDatabase::UpdateEarlyExpirationThreshold(base::Time threshold) {
 
 sql::Connection& HistoryDatabase::GetDB() {
   return db_;
-}
-
-sql::MetaTable& HistoryDatabase::GetMetaTable() {
-  return meta_table_;
 }
 
 // Migration -------------------------------------------------------------------
@@ -427,6 +430,24 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
     meta_table_.SetVersionNumber(cur_version);
   }
 
+  if (cur_version == 26) {
+    if (!MigrateDownloadedByExtension()) {
+      LOG(WARNING) << "Unable to migrate history to version 27";
+      return sql::INIT_FAILURE;
+    }
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 27) {
+    if (!MigrateDownloadValidators()) {
+      LOG(WARNING) << "Unable to migrate history to version 28";
+      return sql::INIT_FAILURE;
+    }
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
   // When the version is too old, we just try to continue anyway, there should
   // not be a released product that makes a database too old for us to handle.
   LOG_IF(WARNING, cur_version < GetCurrentVersion()) <<
@@ -438,15 +459,13 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
 #if !defined(OS_WIN)
 void HistoryDatabase::MigrateTimeEpoch() {
   // Update all the times in the URLs and visits table in the main database.
-  // For visits, clear the indexed flag since we'll delete the FTS databases in
-  // the next step.
   ignore_result(db_.Execute(
       "UPDATE urls "
       "SET last_visit_time = last_visit_time + 11644473600000000 "
       "WHERE id IN (SELECT id FROM urls WHERE last_visit_time > 0);"));
   ignore_result(db_.Execute(
       "UPDATE visits "
-      "SET visit_time = visit_time + 11644473600000000, is_indexed = 0 "
+      "SET visit_time = visit_time + 11644473600000000 "
       "WHERE id IN (SELECT id FROM visits WHERE visit_time > 0);"));
   ignore_result(db_.Execute(
       "UPDATE segment_usage "

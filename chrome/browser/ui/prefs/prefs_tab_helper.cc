@@ -12,9 +12,9 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_font_webkit_names.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_names_util.h"
@@ -25,8 +25,8 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/locale_settings.h"
 #include "grit/platform_locale_settings.h"
-#include "third_party/icu/public/common/unicode/uchar.h"
-#include "third_party/icu/public/common/unicode/uscript.h"
+#include "third_party/icu/source/common/unicode/uchar.h"
+#include "third_party/icu/source/common/unicode/uscript.h"
 #include "webkit/common/webpreferences.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(ENABLE_THEMES)
@@ -491,7 +491,7 @@ void PrefsTabHelper::InitIncognitoUserPrefStore(
 }
 
 // static
-void PrefsTabHelper::RegisterUserPrefs(
+void PrefsTabHelper::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   WebPreferences pref_defaults;
   registry->RegisterBooleanPref(

@@ -4,7 +4,7 @@
 
 // A mini-zygote specifically for Native Client.
 
-#include "chrome/common/nacl_helper_linux.h"
+#include "components/nacl/common/nacl_helper_linux.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -22,13 +22,13 @@
 #include "base/command_line.h"
 #include "base/json/string_escape.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/global_descriptors.h"
 #include "base/posix/unix_domain_socket_linux.h"
 #include "base/rand_util.h"
-#include "chrome/nacl/nacl_listener.h"
-#include "chrome/nacl/nacl_sandbox_linux.h"
+#include "components/nacl/loader/nacl_listener.h"
+#include "components/nacl/loader/nacl_sandbox_linux.h"
 #include "crypto/nss_util.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_switches.h"

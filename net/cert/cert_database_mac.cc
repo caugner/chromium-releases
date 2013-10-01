@@ -8,9 +8,9 @@
 
 #include "base/logging.h"
 #include "base/mac/mac_logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/observer_list_threadsafe.h"
-#include "base/process_util.h"
+#include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "crypto/mac_security_services_lock.h"

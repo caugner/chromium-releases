@@ -8,9 +8,10 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
-#include "googleurl/src/gurl.h"
-#include "googleurl/src/url_parse.h"
+#include "url/gurl.h"
+#include "url/url_parse.h"
 
 // The user input for an autocomplete query.  Allows copying.
 class AutocompleteInput {
@@ -44,6 +45,36 @@ class AutocompleteInput {
     ALL_MATCHES,
   };
 
+  // The type of page currently displayed.
+  // Note: when adding an element to this enum, please add it at the end
+  // and update omnibox_event.proto::PageClassification and
+  // omnibox_edit_model.cc::ClassifyPage() too.
+  enum PageClassification {
+    INVALID_SPEC = 0,   // invalid URI; shouldn't happen
+    NEW_TAB_PAGE = 1,   // chrome://newtab/
+    // Note that chrome://newtab/ doesn't have to be the built-in
+    // version; it could be replaced by an extension.
+    BLANK = 2,          // about:blank
+    HOMEPAGE = 3,       // user switched settings to "open this page" mode.
+    // Note that if the homepage is set to the new tab page or about blank,
+    // then we'll classify the web page into those categories, not HOMEPAGE.
+    OTHER = 4,          // everything not included somewhere else on this list
+    // The user is on a search result page that's doing search term
+    // replacement, meaning the search terms should've appeared in the omnibox
+    // before the user started editing it, not the URL of the page.
+    SEARCH_RESULT_PAGE_DOING_SEARCH_TERM_REPLACEMENT = 6,
+    // The new tab page in which this omnibox interaction first started
+    // with the user having focus in the omnibox.
+    INSTANT_NEW_TAB_PAGE_WITH_OMNIBOX_AS_STARTING_FOCUS = 7,
+    // The new tab page in which this omnibox interaction first started
+    // with the user having focus in the fakebox.
+    INSTANT_NEW_TAB_PAGE_WITH_FAKEBOX_AS_STARTING_FOCUS = 8,
+    // The user is on a search result page that's not doing search term
+    // replacement, meaning the URL of the page should've appeared in the
+    // omnibox before the user started editing it, not the search terms.
+    SEARCH_RESULT_PAGE_NO_SEARCH_TERM_REPLACEMENT = 9
+  };
+
   AutocompleteInput();
   // |text| and |cursor_position| represent the input query and location of
   // the cursor with the query respectively.  |cursor_position| may be set to
@@ -61,6 +92,11 @@ class AutocompleteInput {
   // Query refinement is only used by mobile ports, so only these set
   // |current_url| to a non-empty string.
   //
+  // |current_page_classification| represents the type of page the user is
+  // viewing and manner in which the user is accessing the omnibox; it's
+  // more than simply the URL.  It includes, for example, whether the page
+  // is a search result page doing search term replacement or not.
+  //
   // |prevent_inline_autocomplete| is true if the generated result set should
   // not require inline autocomplete for the default match.  This is difficult
   // to explain in the abstract; the practical use case is that after the user
@@ -75,7 +111,7 @@ class AutocompleteInput {
   // the input string would be surprising or wrong, e.g. when highlighting text
   // in a page and telling the browser to search for it or navigate to it. This
   // parameter only applies to substituting keywords.
-
+  //
   // If |matches_requested| is BEST_MATCH or SYNCHRONOUS_MATCHES the controller
   // asks the providers to only return matches which are synchronously
   // available, which should mean that all providers will be done immediately.
@@ -83,6 +119,7 @@ class AutocompleteInput {
                     size_t cursor_position,
                     const string16& desired_tld,
                     const GURL& current_url,
+                    PageClassification current_page_classification,
                     bool prevent_inline_autocomplete,
                     bool prefer_keyword,
                     bool allow_exact_keyword_match,
@@ -145,6 +182,12 @@ class AutocompleteInput {
   // The current URL, or an invalid GURL if query refinement is not desired.
   const GURL& current_url() const { return current_url_; }
 
+  // The type of page that is currently behind displayed and how it is
+  // displayed (e.g., with search term replacement or without).
+  AutocompleteInput::PageClassification current_page_classification() const {
+    return current_page_classification_;
+  }
+
   // The type of input supplied.
   Type type() const { return type_; }
 
@@ -179,11 +222,14 @@ class AutocompleteInput {
   void Clear();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(AutocompleteProviderTest, GetDestinationURL);
+
   // NOTE: Whenever adding a new field here, please make sure to update Clear()
   // method.
   string16 text_;
   size_t cursor_position_;
   GURL current_url_;
+  AutocompleteInput::PageClassification current_page_classification_;
   Type type_;
   url_parse::Parsed parts_;
   string16 scheme_;

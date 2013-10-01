@@ -11,10 +11,10 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
-#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -28,7 +28,8 @@ enum DevicePermissionActions {
 
 }  // namespace
 
-MediaStreamInfoBarDelegate::~MediaStreamInfoBarDelegate() {}
+MediaStreamInfoBarDelegate::~MediaStreamInfoBarDelegate() {
+}
 
 // static
 bool MediaStreamInfoBarDelegate::Create(
@@ -42,28 +43,25 @@ bool MediaStreamInfoBarDelegate::Create(
 
   InfoBarService* infobar_service =
       InfoBarService::FromWebContents(web_contents);
-  InfoBarDelegate* old_infobar = NULL;
-  for (size_t i = 0; i < infobar_service->infobar_count(); ++i) {
-    old_infobar =
-        infobar_service->infobar_at(i)->AsMediaStreamInfoBarDelegate();
-    if (old_infobar)
-      break;
-  }
   scoped_ptr<InfoBarDelegate> infobar(
-      new MediaStreamInfoBarDelegate(infobar_service, controller.release()));
-  if (old_infobar)
-    infobar_service->ReplaceInfoBar(old_infobar, infobar.Pass());
-  else
-    infobar_service->AddInfoBar(infobar.Pass());
-
+      new MediaStreamInfoBarDelegate(infobar_service, controller.Pass()));
+  for (size_t i = 0; i < infobar_service->infobar_count(); ++i) {
+    InfoBarDelegate* old_infobar =
+        infobar_service->infobar_at(i)->AsMediaStreamInfoBarDelegate();
+    if (old_infobar) {
+      infobar_service->ReplaceInfoBar(old_infobar, infobar.Pass());
+      return true;
+    }
+  }
+  infobar_service->AddInfoBar(infobar.Pass());
   return true;
 }
 
 MediaStreamInfoBarDelegate::MediaStreamInfoBarDelegate(
     InfoBarService* infobar_service,
-    MediaStreamDevicesController* controller)
+    scoped_ptr<MediaStreamDevicesController> controller)
     : ConfirmInfoBarDelegate(infobar_service),
-      controller_(controller) {
+      controller_(controller.Pass()) {
   DCHECK(controller_.get());
   DCHECK(controller_->has_audio() || controller_->has_video());
 }
@@ -132,14 +130,13 @@ string16 MediaStreamInfoBarDelegate::GetLinkText() const {
 
 bool MediaStreamInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  content::OpenURLParams params(
+  web_contents()->OpenURL(content::OpenURLParams(
       google_util::AppendGoogleLocaleParam(
           GURL(chrome::kMediaAccessLearnMoreUrl)),
       content::Referrer(),
       (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
       content::PAGE_TRANSITION_LINK,
-      false);
-  web_contents()->OpenURL(params);
+      false));
 
   return false;  // Do not dismiss the info bar.
 }

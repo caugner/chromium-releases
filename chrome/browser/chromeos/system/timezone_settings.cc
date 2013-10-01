@@ -21,7 +21,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
-#include "third_party/icu/public/i18n/unicode/timezone.h"
+#include "third_party/icu/source/i18n/unicode/timezone.h"
 
 using content::BrowserThread;
 
@@ -201,14 +201,14 @@ void SetTimezoneIDFromString(const std::string& id) {
   base::FilePath timezone_file(kTimezoneFilesDir + id);
 
   // Make sure timezone_file exists.
-  if (!file_util::PathExists(timezone_file)) {
+  if (!base::PathExists(timezone_file)) {
     LOG(ERROR) << "SetTimezoneID: Cannot find timezone file "
                << timezone_file.value();
     return;
   }
 
   // Delete old symlink2 if it exists.
-  file_util::Delete(timezone_symlink2, false);
+  base::DeleteFile(timezone_symlink2, false);
 
   // Create new symlink2.
   if (symlink(timezone_file.value().c_str(),
@@ -219,7 +219,7 @@ void SetTimezoneIDFromString(const std::string& id) {
   }
 
   // Move symlink2 to symlink.
-  if (!file_util::ReplaceFile(timezone_symlink2, timezone_symlink)) {
+  if (!base::ReplaceFile(timezone_symlink2, timezone_symlink, NULL)) {
     LOG(ERROR) << "SetTimezoneID: Unable to move symlink "
                << timezone_symlink2.value() << " to "
                << timezone_symlink.value();

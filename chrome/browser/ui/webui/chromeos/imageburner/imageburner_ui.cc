@@ -12,16 +12,16 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/imageburner/burn_controller.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/time_format.h"
 #include "ui/base/text/bytes_formatting.h"
+#include "url/gurl.h"
 
 namespace chromeos {
 namespace imageburner {
@@ -168,7 +168,7 @@ class WebUIHandler
       const base::TimeDelta& time_remaining) OVERRIDE {
     const string16 time_remaining_text = l10n_util::GetStringFUTF16(
         IDS_IMAGEBURN_DOWNLOAD_TIME_REMAINING,
-        TimeFormat::TimeRemaining(time_remaining));
+        ui::TimeFormat::TimeRemaining(time_remaining));
     SendProgressSignal(progress_type, amount_finished, amount_total,
                        time_remaining_text);
   }

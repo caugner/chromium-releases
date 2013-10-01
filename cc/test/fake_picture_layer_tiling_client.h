@@ -29,11 +29,11 @@ class FakePictureLayerTilingClient : public PictureLayerTilingClient {
   void SetTileSize(gfx::Size tile_size);
   gfx::Size TileSize() const { return tile_size_; }
   scoped_refptr<PicturePileImpl> pile() { return pile_; }
+  const PicturePileImpl* pile() const { return pile_.get(); }
 
   virtual const Region* GetInvalidation() OVERRIDE;
   virtual const PictureLayerTiling* GetTwinTiling(
       const PictureLayerTiling* tiling) OVERRIDE;
-  virtual bool TileMayHaveLCDText(Tile* tile) OVERRIDE;
 
   void set_twin_tiling(PictureLayerTiling* tiling) { twin_tiling_ = tiling; }
   void set_text_rect(gfx::Rect rect) { text_rect_ = rect; }

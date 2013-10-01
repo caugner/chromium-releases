@@ -9,34 +9,30 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "content/public/browser/gpu_data_manager.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/common/three_d_api_types.h"
-#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 
-// ThreeDAPIInfoBarDelegate ---------------------------------------------
+// ThreeDAPIInfoBarDelegate ---------------------------------------------------
 
 class ThreeDAPIInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  // Creates a 3D API delegate and adds it to |infobar_service|.
+  // Creates a 3D API infobar delegate and adds it to |infobar_service|.
   static void Create(InfoBarService* infobar_service,
                      const GURL& url,
                      content::ThreeDAPIType requester);
 
  private:
-  enum ThreeDInfobarDismissalHistogram {
-    THREE_D_INFOBAR_IGNORED,
-    THREE_D_INFOBAR_RELOADED,
-    THREE_D_INFOBAR_CLOSED_WITHOUT_ACTION,
-    THREE_D_INFOBAR_DISMISSAL_MAX
+  enum DismissalHistogram {
+    IGNORED,
+    RELOADED,
+    CLOSED_WITHOUT_ACTION,
+    DISMISSAL_MAX
   };
 
-  ThreeDAPIInfoBarDelegate(
-      InfoBarService* owner,
-      const GURL& url,
-      content::ThreeDAPIType requester);
+  ThreeDAPIInfoBarDelegate(InfoBarService* owner,
+                           const GURL& url,
+                           content::ThreeDAPIType requester);
   virtual ~ThreeDAPIInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
@@ -83,23 +79,20 @@ ThreeDAPIInfoBarDelegate::ThreeDAPIInfoBarDelegate(
 ThreeDAPIInfoBarDelegate::~ThreeDAPIInfoBarDelegate() {
   if (message_text_queried_ && !action_taken_) {
     UMA_HISTOGRAM_ENUMERATION("GPU.ThreeDAPIInfoBarDismissal",
-                              THREE_D_INFOBAR_CLOSED_WITHOUT_ACTION,
-                              THREE_D_INFOBAR_DISMISSAL_MAX);
+                              CLOSED_WITHOUT_ACTION, DISMISSAL_MAX);
   }
 }
 
 bool ThreeDAPIInfoBarDelegate::EqualsDelegate(InfoBarDelegate* delegate) const {
-  ThreeDAPIInfoBarDelegate* three_d_delegate =
-      delegate->AsThreeDAPIInfoBarDelegate();
   // For the time being, if a given web page is actually using both
   // WebGL and Pepper 3D and both APIs are blocked, just leave the
   // first infobar up. If the user selects "try again", both APIs will
   // be unblocked and the web page reload will succeed.
-  return (three_d_delegate != NULL);
+  return (delegate->AsThreeDAPIInfoBarDelegate() != NULL);
 }
 
 ThreeDAPIInfoBarDelegate*
-ThreeDAPIInfoBarDelegate::AsThreeDAPIInfoBarDelegate() {
+    ThreeDAPIInfoBarDelegate::AsThreeDAPIInfoBarDelegate() {
   return this;
 }
 
@@ -129,17 +122,15 @@ string16 ThreeDAPIInfoBarDelegate::GetButtonLabel(
 
 bool ThreeDAPIInfoBarDelegate::Accept() {
   action_taken_ = true;
-  UMA_HISTOGRAM_ENUMERATION("GPU.ThreeDAPIInfoBarDismissal",
-                            THREE_D_INFOBAR_IGNORED,
-                            THREE_D_INFOBAR_DISMISSAL_MAX);
+  UMA_HISTOGRAM_ENUMERATION("GPU.ThreeDAPIInfoBarDismissal", IGNORED,
+                            DISMISSAL_MAX);
   return true;
 }
 
 bool ThreeDAPIInfoBarDelegate::Cancel() {
   action_taken_ = true;
-  UMA_HISTOGRAM_ENUMERATION("GPU.ThreeDAPIInfoBarDismissal",
-                            THREE_D_INFOBAR_RELOADED,
-                            THREE_D_INFOBAR_DISMISSAL_MAX);
+  UMA_HISTOGRAM_ENUMERATION("GPU.ThreeDAPIInfoBarDismissal", RELOADED,
+                            DISMISSAL_MAX);
   content::GpuDataManager::GetInstance()->UnblockDomainFrom3DAPIs(url_);
   web_contents()->GetController().Reload(true);
   return true;
@@ -160,7 +151,7 @@ bool ThreeDAPIInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
 }
 
 
-// ThreeDAPIObserver ----------------------------------------------------
+// ThreeDAPIObserver ----------------------------------------------------------
 
 ThreeDAPIObserver::ThreeDAPIObserver() {
   content::GpuDataManager::GetInstance()->AddObserver(this);

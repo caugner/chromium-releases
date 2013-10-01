@@ -15,14 +15,15 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/common/gpu/client/gl_helper.h"
 #include "content/common/gpu/client/gl_helper_scaling.h"
 #include "content/public/test/unittest_test_suite.h"
 #include "content/test/content_test_suite.h"
+#include "gpu/config/gpu_util.h"
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -816,6 +817,12 @@ class GLHelperTest : public testing::Test {
                          GL_UNSIGNED_BYTE,
                          input_pixels.getPixels());
 
+    gpu::Mailbox mailbox;
+    context_->genMailboxCHROMIUM(mailbox.name);
+    EXPECT_FALSE(mailbox.IsZero());
+    context_->produceTextureCHROMIUM(GL_TEXTURE_2D, mailbox.name);
+    uint32 sync_point = context_->insertSyncPoint();
+
     std::string message = base::StringPrintf("input size: %dx%d "
                                              "output size: %dx%d "
                                              "margin: %dx%d "
@@ -851,7 +858,8 @@ class GLHelperTest : public testing::Test {
 
     base::RunLoop run_loop;
     yuv_reader->ReadbackYUV(
-        src_texture,
+        mailbox,
+        sync_point,
         output_frame.get(),
         base::Bind(&callcallback, run_loop.QuitClosure()));
     run_loop.Run();
@@ -1106,6 +1114,7 @@ class GLHelperTest : public testing::Test {
   std::deque<GLHelperScaling::ScaleOp> x_ops_, y_ops_;
 };
 
+// Reenable once http://crbug.com/162291 is fixed.
 TEST_F(GLHelperTest, YUVReadbackTest) {
   int sizes[] = { 2, 4, 14 };
   for (int use_mrt = 0; use_mrt <= 1 ; use_mrt++) {
@@ -1247,6 +1256,7 @@ int main(int argc, char** argv) {
   gfx::GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
 #endif
   gfx::GLSurface::InitializeOneOff();
+  gpu::ApplyGpuDriverBugWorkarounds(CommandLine::ForCurrentProcess());
 
   content::UnitTestTestSuite runner(suite);
   base::MessageLoop message_loop;

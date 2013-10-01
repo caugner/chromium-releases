@@ -9,7 +9,7 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 #include "webkit/browser/fileapi/file_system_usage_cache.h"
 #include "webkit/browser/fileapi/task_runner_bound_observer_list.h"
@@ -31,7 +31,6 @@ class FileSystemContext;
 class FileSystemFileUtil;
 class FileSystemOperationContext;
 class FileSystemOperationRunner;
-class LocalFileSystemOperation;
 
 // Filesystem test helper class that encapsulates test environment for
 // a given {origin, type} pair.  This helper only works for sandboxed

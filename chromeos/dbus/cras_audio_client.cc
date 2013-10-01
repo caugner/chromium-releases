@@ -5,6 +5,9 @@
 #include "chromeos/dbus/cras_audio_client.h"
 
 #include "base/bind.h"
+#include "base/format_macros.h"
+#include "base/strings/stringprintf.h"
+#include "chromeos/dbus/cras_audio_client_stub_impl.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_path.h"
@@ -28,29 +31,11 @@ class CrasAudioClientImpl : public CrasAudioClient {
         base::Bind(&CrasAudioClientImpl::NameOwnerChangedReceived,
                    weak_ptr_factory_.GetWeakPtr()));
 
-    // Monitor the D-Bus signal for output volume change.
-    cras_proxy_->ConnectToSignal(
-        cras::kCrasControlInterface,
-        cras::kOutputVolumeChanged,
-        base::Bind(&CrasAudioClientImpl::OutputVolumeChangedReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
-        base::Bind(&CrasAudioClientImpl::SignalConnected,
-                   weak_ptr_factory_.GetWeakPtr()));
-
     // Monitor the D-Bus signal for output mute change.
     cras_proxy_->ConnectToSignal(
         cras::kCrasControlInterface,
         cras::kOutputMuteChanged,
         base::Bind(&CrasAudioClientImpl::OutputMuteChangedReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
-        base::Bind(&CrasAudioClientImpl::SignalConnected,
-                   weak_ptr_factory_.GetWeakPtr()));
-
-    // Monitor the D-Bus signal for input gain change.
-    cras_proxy_->ConnectToSignal(
-        cras::kCrasControlInterface,
-        cras::kInputGainChanged,
-        base::Bind(&CrasAudioClientImpl::InputGainChangedReceived,
                    weak_ptr_factory_.GetWeakPtr()),
         base::Bind(&CrasAudioClientImpl::SignalConnected,
                    weak_ptr_factory_.GetWeakPtr()));
@@ -128,10 +113,11 @@ class CrasAudioClientImpl : public CrasAudioClient {
                    weak_ptr_factory_.GetWeakPtr(), callback));
   }
 
-  virtual void SetOutputVolume(int32 volume) OVERRIDE {
+  virtual void SetOutputNodeVolume(uint64 node_id, int32 volume) OVERRIDE {
     dbus::MethodCall method_call(cras::kCrasControlInterface,
-                                 cras::kSetOutputVolume);
+                                 cras::kSetOutputNodeVolume);
     dbus::MessageWriter writer(&method_call);
+    writer.AppendUint64(node_id);
     writer.AppendInt32(volume);
     cras_proxy_->CallMethod(
         &method_call,
@@ -139,9 +125,9 @@ class CrasAudioClientImpl : public CrasAudioClient {
         dbus::ObjectProxy::EmptyResponseCallback());
   }
 
-  virtual void SetOutputMute(bool mute_on) OVERRIDE {
+  virtual void SetOutputUserMute(bool mute_on) OVERRIDE {
     dbus::MethodCall method_call(cras::kCrasControlInterface,
-                                 cras::kSetOutputMute);
+                                 cras::kSetOutputUserMute);
     dbus::MessageWriter writer(&method_call);
     writer.AppendBool(mute_on);
     cras_proxy_->CallMethod(
@@ -150,10 +136,11 @@ class CrasAudioClientImpl : public CrasAudioClient {
         dbus::ObjectProxy::EmptyResponseCallback());
   }
 
-  virtual void SetInputGain(int32 input_gain) OVERRIDE {
+  virtual void SetInputNodeGain(uint64 node_id, int32 input_gain) OVERRIDE {
     dbus::MethodCall method_call(cras::kCrasControlInterface,
-                                 cras::kSetInputGain);
+                                 cras::kSetInputNodeGain);
     dbus::MessageWriter writer(&method_call);
+    writer.AppendUint64(node_id);
     writer.AppendInt32(input_gain);
     cras_proxy_->CallMethod(
         &method_call,
@@ -207,37 +194,17 @@ class CrasAudioClientImpl : public CrasAudioClient {
     FOR_EACH_OBSERVER(Observer, observers_, AudioClientRestarted());
   }
 
-  // Called when a OutputVolumeChanged signal is received.
-  void OutputVolumeChangedReceived(dbus::Signal* signal) {
-    dbus::MessageReader reader(signal);
-    int32 volume;
-    if (!reader.PopInt32(&volume)) {
-      LOG(ERROR) << "Error reading signal from cras:"
-                 << signal->ToString();
-    }
-    FOR_EACH_OBSERVER(Observer, observers_, OutputVolumeChanged(volume));
-  }
-
   // Called when a OutputMuteChanged signal is received.
   void OutputMuteChangedReceived(dbus::Signal* signal) {
+    // Chrome should always call SetOutputUserMute api to set the output
+    // mute state and monitor user_mute state from OutputMuteChanged signal.
     dbus::MessageReader reader(signal);
-    bool mute;
-    if (!reader.PopBool(&mute)) {
+    bool system_mute, user_mute;
+    if (!reader.PopBool(&system_mute) || !reader.PopBool(&user_mute)) {
       LOG(ERROR) << "Error reading signal from cras:"
                  << signal->ToString();
     }
-    FOR_EACH_OBSERVER(Observer, observers_, OutputMuteChanged(mute));
-  }
-
-  // Called when a InputGainChanged signal is received.
-  void InputGainChangedReceived(dbus::Signal* signal) {
-    dbus::MessageReader reader(signal);
-    int32 gain;
-    if (!reader.PopInt32(&gain)) {
-      LOG(ERROR) << "Error reading signal from cras:"
-                 << signal->ToString();
-    }
-    FOR_EACH_OBSERVER(Observer, observers_, InputGainChanged(gain));
+    FOR_EACH_OBSERVER(Observer, observers_, OutputMuteChanged(user_mute));
   }
 
   // Called when a InputMuteChanged signal is received.
@@ -282,9 +249,10 @@ class CrasAudioClientImpl : public CrasAudioClient {
     if (response) {
       dbus::MessageReader reader(response);
       if (!reader.PopInt32(&volume_state.output_volume) ||
-          !reader.PopBool(&volume_state.output_mute) ||
+          !reader.PopBool(&volume_state.output_system_mute) ||
           !reader.PopInt32(&volume_state.input_gain) ||
-          !reader.PopBool(&volume_state.input_mute)) {
+          !reader.PopBool(&volume_state.input_mute) ||
+          !reader.PopBool(&volume_state.output_user_mute)) {
         success = false;
         LOG(ERROR) << "Error reading response from cras: "
                    << response->ToString();
@@ -319,10 +287,13 @@ class CrasAudioClientImpl : public CrasAudioClient {
                        << response->ToString();
           break;
         }
-
-        node_list.push_back(node);
+        // Filter out the "UNKNOWN" type of audio devices.
+        if (node.type != "UNKNOWN")
+          node_list.push_back(node);
       }
-    } else {
+    }
+
+    if (node_list.size() == 0) {
       success = false;
       LOG(ERROR) << "Error calling " << cras::kGetNodes;
     }
@@ -380,171 +351,13 @@ class CrasAudioClientImpl : public CrasAudioClient {
   DISALLOW_COPY_AND_ASSIGN(CrasAudioClientImpl);
 };
 
-// The CrasAudioClient implementation used on Linux desktop,
-// which does nothing.
-class CrasAudioClientStubImpl : public CrasAudioClient {
- public:
-  CrasAudioClientStubImpl() {
-    VLOG(1) << "CrasAudioClientStubImpl is created";
-
-    // Fake audio output nodes.
-    AudioNode node_1;
-    node_1.is_input = false;
-    node_1.id = 10001;
-    node_1.device_name = "Fake Speaker";
-    node_1.type = "INTERNAL_SPEAKER";
-    node_1.name = "Speaker";
-    node_1.active = false;
-    node_list_.push_back(node_1);
-
-    AudioNode node_2;
-    node_2.is_input = false;
-    node_2.id = 10002;
-    node_2.device_name = "Fake Headphone";
-    node_2.type = "HEADPHONE";
-    node_2.name = "Headphone";
-    node_2.active = true;
-    node_list_.push_back(node_2);
-    active_output_node_id_ = node_2.id;
-
-    AudioNode node_3;
-    node_3.is_input = false;
-    node_3.id = 10003;
-    node_3.device_name = "Fake Audio Output";
-    node_3.type = "BLUETOOTH";
-    node_3.name = "Bluetooth Headphone";
-    node_3.active = false;
-    node_list_.push_back(node_3);
-
-    // Fake audio input ndoes
-    AudioNode node_4;
-    node_4.is_input = true;
-    node_4.id = 10004;
-    node_4.device_name = "Fake Internal Mic";
-    node_4.type = "INTERNAL_MIC";
-    node_4.name = "Internal Mic";
-    node_4.active = false;
-    node_list_.push_back(node_4);
-
-    AudioNode node_5;
-    node_5.is_input = true;
-    node_5.id = 10005;
-    node_5.device_name = "Fake Internal Mic";
-    node_5.type = "USB";
-    node_5.name = "USB Mic";
-    node_5.active = true;
-    node_list_.push_back(node_5);
-    active_input_node_id_ = node_5.id;
-  }
-  virtual ~CrasAudioClientStubImpl() {
-  }
-
-  // CrasAudioClient overrides:
-  // TODO(jennyz): Implement the observers and callbacks in the stub for UI
-  // testing.
-  virtual void AddObserver(Observer* observer) OVERRIDE {
-    observers_.AddObserver(observer);
-  }
-
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {
-    observers_.RemoveObserver(observer);
-  }
-
-  virtual bool HasObserver(Observer* observer) OVERRIDE {
-    return observers_.HasObserver(observer);
-  }
-
-  virtual void GetVolumeState(const GetVolumeStateCallback& callback) OVERRIDE {
-    callback.Run(volume_state_, true);
-  }
-
-  virtual void GetNodes(const GetNodesCallback& callback)OVERRIDE {
-    callback.Run(node_list_, true);
-  }
-
-  virtual void SetOutputVolume(int32 volume) OVERRIDE {
-    volume_state_.output_volume = volume;
-    FOR_EACH_OBSERVER(Observer,
-                      observers_,
-                      OutputVolumeChanged(volume_state_.output_volume));
-  }
-
-  virtual void SetOutputMute(bool mute_on) OVERRIDE {
-    volume_state_.output_mute = mute_on;
-    FOR_EACH_OBSERVER(Observer,
-                      observers_,
-                      OutputMuteChanged(volume_state_.output_mute));
-  }
-
-  virtual void SetInputGain(int32 input_gain) OVERRIDE {
-    volume_state_.input_gain = input_gain;
-    FOR_EACH_OBSERVER(Observer,
-                      observers_,
-                      InputGainChanged(volume_state_.input_gain));
-  }
-
-  virtual void SetInputMute(bool mute_on) OVERRIDE {
-    volume_state_.input_mute = mute_on;
-    FOR_EACH_OBSERVER(Observer,
-                      observers_,
-                      InputMuteChanged(volume_state_.input_mute));
-  }
-
-  virtual void SetActiveOutputNode(uint64 node_id) OVERRIDE {
-    if (active_output_node_id_ == node_id)
-      return;
-
-    for (size_t i = 0; i < node_list_.size(); ++i) {
-      if (node_list_[i].id == active_output_node_id_)
-        node_list_[i].active = false;
-      else if (node_list_[i].id == node_id)
-        node_list_[i].active = true;
-    }
-    active_output_node_id_ = node_id;
-    FOR_EACH_OBSERVER(Observer,
-                      observers_,
-                      ActiveOutputNodeChanged(node_id));
-  }
-
-  virtual void SetActiveInputNode(uint64 node_id) OVERRIDE {
-    if (active_input_node_id_ == node_id)
-      return;
-
-    for (size_t i = 0; i < node_list_.size(); ++i) {
-      if (node_list_[i].id == active_input_node_id_)
-        node_list_[i].active = false;
-      else if (node_list_[i].id == node_id)
-        node_list_[i].active = true;
-    }
-    active_input_node_id_ = node_id;
-    FOR_EACH_OBSERVER(Observer,
-                      observers_,
-                      ActiveInputNodeChanged(node_id));
-  }
-
- private:
-  VolumeState volume_state_;
-  AudioNodeList node_list_;
-  uint64 active_input_node_id_;
-  uint64 active_output_node_id_;
-  ObserverList<Observer> observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(CrasAudioClientStubImpl);
-};
-
 CrasAudioClient::Observer::~Observer() {
 }
 
 void CrasAudioClient::Observer::AudioClientRestarted() {
 }
 
-void CrasAudioClient::Observer::OutputVolumeChanged(int32 volume) {
-}
-
 void CrasAudioClient::Observer::OutputMuteChanged(bool mute_on) {
-}
-
-void CrasAudioClient::Observer::InputGainChanged(int gain) {
 }
 
 void CrasAudioClient::Observer::InputMuteChanged(bool mute_on) {

@@ -33,7 +33,6 @@ class QuicClientSessionTest : public ::testing::Test {
                  DefaultQuicConfig(), &crypto_config_, &net_log_) {
     session_.config()->SetDefaults();
     crypto_config_.SetDefaults();
-    QuicClientSessionPeer::SetMaxOpenStreams(&session_, 1, 1);
   }
 
   void CompleteCryptoHandshake() {
@@ -64,7 +63,7 @@ TEST_F(QuicClientSessionTest, CryptoConnect) {
   CompleteCryptoHandshake();
 }
 
-TEST_F(QuicClientSessionTest, MaxNumConnections) {
+TEST_F(QuicClientSessionTest, MaxNumStreams) {
   if (!Aes128Gcm12Encrypter::IsSupported()) {
     LOG(INFO) << "AES GCM not supported. Test skipped.";
     return;
@@ -83,6 +82,35 @@ TEST_F(QuicClientSessionTest, MaxNumConnections) {
   // Close a stream and ensure I can now open a new one.
   session_.CloseStream(streams[0]->id());
   EXPECT_TRUE(session_.CreateOutgoingReliableStream());
+}
+
+TEST_F(QuicClientSessionTest, MaxNumStreamsViaRequest) {
+  if (!Aes128Gcm12Encrypter::IsSupported()) {
+    LOG(INFO) << "AES GCM not supported. Test skipped.";
+    return;
+  }
+
+  CompleteCryptoHandshake();
+
+  std::vector<QuicReliableClientStream*> streams;
+  for (size_t i = 0; i < kDefaultMaxStreamsPerConnection; i++) {
+    QuicReliableClientStream* stream = session_.CreateOutgoingReliableStream();
+    EXPECT_TRUE(stream);
+    streams.push_back(stream);
+  }
+
+  QuicReliableClientStream* stream;
+  QuicClientSession::StreamRequest stream_request;
+  TestCompletionCallback callback;
+  ASSERT_EQ(ERR_IO_PENDING,
+            stream_request.StartRequest(session_.GetWeakPtr(), &stream,
+                                        callback.callback()));
+
+  // Close a stream and ensure I can now open a new one.
+  session_.CloseStream(streams[0]->id());
+  ASSERT_TRUE(callback.have_result());
+  EXPECT_EQ(OK, callback.WaitForResult());
+  EXPECT_TRUE(stream != NULL);
 }
 
 TEST_F(QuicClientSessionTest, GoAwayReceived) {

@@ -11,7 +11,7 @@ from telemetry.core import tab_list
 from telemetry.core import temporary_http_server
 from telemetry.core import wpr_modes
 from telemetry.core import wpr_server
-from telemetry.core.chrome import browser_backend
+from telemetry.core.backends import browser_backend
 from telemetry.core.platform.profiler import profiler_finder
 
 class Browser(object):
@@ -104,7 +104,9 @@ class Browser(object):
         child_process_name = self._browser_backend.GetProcessName(
             child_cmd_line)
       except Exception:
-        child_process_name = 'renderer'
+        # The cmd line was unavailable, assume it'll be impossible to track
+        # any further stats about this process.
+        continue
       process_name_type_key_map = {'gpu-process': 'Gpu', 'renderer': 'Renderer'}
       if child_process_name in process_name_type_key_map:
         child_process_type_key = process_name_type_key_map[child_process_name]
@@ -192,29 +194,35 @@ class Browser(object):
     del result['ProcessCount']
     return result
 
-  def StartProfiling(self, options, base_output_file):
-    """Starts profiling using |options|.profiler_tool. Results are saved to
+  def StartProfiling(self, profiler_name, base_output_file):
+    """Starts profiling using |profiler_name|. Results are saved to
     |base_output_file|.<process_name>."""
-    assert not self._active_profilers
+    assert not self._active_profilers, 'Already profiling. Must stop first.'
 
-    profiler_class = profiler_finder.FindProfiler(options.profiler_tool)
+    profiler_class = profiler_finder.FindProfiler(profiler_name)
 
-    if not profiler_class.is_supported(options):
+    if not profiler_class.is_supported(self._browser_backend.options):
       raise Exception('The %s profiler is not '
-                      'supported on this platform.' % options.profiler_tool)
+                      'supported on this platform.' % profiler_name)
 
     self._active_profilers.append(
         profiler_class(self._browser_backend, self._platform_backend,
             base_output_file))
 
   def StopProfiling(self):
-    """Stops all active profilers and saves their results."""
-    for profiler in self._active_profilers:
-      profiler.CollectProfile()
-    self._active_profilers = []
+    """Stops all active profilers and saves their results.
 
-  def StartTracing(self, custom_categories=None):
-    return self._browser_backend.StartTracing(custom_categories)
+    Returns:
+      A list of filenames produced by the profiler.
+    """
+    output_files = []
+    for profiler in self._active_profilers:
+      output_files.extend(profiler.CollectProfile())
+    self._active_profilers = []
+    return output_files
+
+  def StartTracing(self, custom_categories=None, timeout=10):
+    return self._browser_backend.StartTracing(custom_categories, timeout)
 
   def StopTracing(self):
     return self._browser_backend.StopTracing()
@@ -222,6 +230,20 @@ class Browser(object):
   def GetTraceResultAndReset(self):
     """Returns the result of the trace, as TraceResult object."""
     return self._browser_backend.GetTraceResultAndReset()
+
+  def Start(self):
+    options = self._browser_backend.options
+    if options.clear_sytem_cache_for_browser_and_profile_on_start:
+      if self._platform.CanFlushIndividualFilesFromSystemCache():
+        self._platform.FlushSystemCacheForDirectory(
+            self._browser_backend.profile_directory)
+        self._platform.FlushSystemCacheForDirectory(
+            self._browser_backend.browser_directory)
+      else:
+        self._platform.FlushEntireSystemCache()
+
+    self._browser_backend.Start()
+    self._browser_backend.SetBrowser(self)
 
   def Close(self):
     """Closes this browser."""
@@ -262,7 +284,8 @@ class Browser(object):
 
     return True
 
-  def SetReplayArchivePath(self, archive_path, append_to_existing_wpr=False):
+  def SetReplayArchivePath(self, archive_path, append_to_existing_wpr=False,
+                           make_javascript_deterministic=True):
     if self._wpr_server:
       self._wpr_server.Close()
       self._wpr_server = None
@@ -282,6 +305,7 @@ class Browser(object):
         archive_path,
         use_record_mode,
         append_to_existing_wpr,
+        make_javascript_deterministic,
         self._browser_backend.WEBPAGEREPLAY_HOST,
         self._browser_backend.webpagereplay_local_http_port,
         self._browser_backend.webpagereplay_local_https_port,
@@ -290,3 +314,6 @@ class Browser(object):
 
   def GetStandardOutput(self):
     return self._browser_backend.GetStandardOutput()
+
+  def GetStackTrace(self):
+    return self._browser_backend.GetStackTrace()

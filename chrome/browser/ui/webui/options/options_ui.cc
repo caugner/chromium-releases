@@ -11,11 +11,11 @@
 #include "base/command_line.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
@@ -45,7 +45,6 @@
 #include "chrome/browser/ui/webui/options/startup_pages_handler.h"
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
-#include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
@@ -296,7 +295,8 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
                           new chromeos::options::DisplayOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::DisplayOverscanHandler());
-  AddOptionsPageUIHandler(localized_strings, new InternetOptionsHandler());
+  AddOptionsPageUIHandler(localized_strings,
+                          new chromeos::options::InternetOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::LanguageChewingHandler());
   AddOptionsPageUIHandler(localized_strings,

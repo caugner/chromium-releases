@@ -15,12 +15,14 @@
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -28,21 +30,19 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/common/page_zoom.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "skia/ext/image_operations.h"
-#include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
@@ -139,11 +139,12 @@ void NTPLoginHandler::HandleShowSyncLoginUI(const ListValue* args) {
 
   if (username.empty()) {
 #if !defined(OS_ANDROID)
-    // The user isn't signed in, show the sync promo.
-    if (SyncPromoUI::ShouldShowSyncPromo(profile)) {
-      SyncPromoUI::Source source =
+    // The user isn't signed in, show the sign in promo.
+    if (signin::ShouldShowPromo(profile)) {
+      signin::Source source =
           (web_contents->GetURL().spec() == chrome::kChromeUIAppsURL) ?
-              SyncPromoUI::SOURCE_APPS_PAGE_LINK : SyncPromoUI::SOURCE_NTP_LINK;
+              signin::SOURCE_APPS_PAGE_LINK :
+              signin::SOURCE_NTP_LINK;
       chrome::ShowBrowserSignin(browser, source);
       RecordInHistogram(NTP_SIGN_IN_PROMO_CLICKED);
     }
@@ -164,8 +165,7 @@ void NTPLoginHandler::HandleShowSyncLoginUI(const ListValue* args) {
     success = args->GetDouble(3, &height);
     DCHECK(success);
 
-    double zoom =
-        WebKit::WebView::zoomLevelToZoomFactor(web_contents->GetZoomLevel());
+    double zoom = content::ZoomLevelToZoomFactor(web_contents->GetZoomLevel());
     gfx::Rect rect(x * zoom, y * zoom, width * zoom, height * zoom);
 
     browser->window()->ShowAvatarBubble(web_ui()->GetWebContents(), rect);
@@ -186,7 +186,7 @@ void NTPLoginHandler::RecordInHistogram(int type) {
 
 void NTPLoginHandler::HandleLoginMessageSeen(const ListValue* args) {
   Profile::FromWebUI(web_ui())->GetPrefs()->SetBoolean(
-      prefs::kSyncPromoShowNTPBubble, false);
+      prefs::kSignInPromoShowNTPBubble, false);
   NewTabUI* ntp_ui = NewTabUI::FromWebUIController(web_ui()->GetController());
   // When instant extended is enabled, there may not be a NewTabUI object.
   if (ntp_ui)
@@ -197,7 +197,7 @@ void NTPLoginHandler::HandleShowAdvancedLoginUI(const ListValue* args) {
   Browser* browser =
       chrome::FindBrowserWithWebContents(web_ui()->GetWebContents());
   if (browser)
-    chrome::ShowBrowserSignin(browser, SyncPromoUI::SOURCE_NTP_LINK);
+    chrome::ShowBrowserSignin(browser, signin::SOURCE_NTP_LINK);
 }
 
 void NTPLoginHandler::UpdateLogin() {
@@ -229,8 +229,8 @@ void NTPLoginHandler::UpdateLogin() {
     }
   } else {
 #if !defined(OS_ANDROID)
-    // Android uses a custom sync promo
-    if (SyncPromoUI::ShouldShowSyncPromo(profile)) {
+    // Android uses a custom sign in promo.
+    if (signin::ShouldShowPromo(profile)) {
       string16 signed_in_link = l10n_util::GetStringUTF16(
           IDS_SYNC_PROMO_NOT_SIGNED_IN_STATUS_LINK);
       signed_in_link = CreateSpanWithClass(signed_in_link, "link-span");
@@ -269,20 +269,17 @@ bool NTPLoginHandler::ShouldShow(Profile* profile) {
 void NTPLoginHandler::GetLocalizedValues(Profile* profile,
                                          DictionaryValue* values) {
   PrefService* prefs = profile->GetPrefs();
-  std::string error_message = prefs->GetString(prefs::kSyncPromoErrorMessage);
-  bool hide_sync = !prefs->GetBoolean(prefs::kSyncPromoShowNTPBubble);
+  bool hide_sync = !prefs->GetBoolean(prefs::kSignInPromoShowNTPBubble);
 
-  string16 message =
-      hide_sync ? string16() :
-          !error_message.empty() ? UTF8ToUTF16(error_message) :
-              l10n_util::GetStringFUTF16(IDS_SYNC_PROMO_NTP_BUBBLE_MESSAGE,
-                  l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
+  string16 message = hide_sync ? string16() :
+      l10n_util::GetStringFUTF16(IDS_SYNC_PROMO_NTP_BUBBLE_MESSAGE,
+          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
 
   values->SetString("login_status_message", message);
   values->SetString("login_status_url",
       hide_sync ? std::string() : chrome::kSyncLearnMoreURL);
   values->SetString("login_status_advanced",
-      hide_sync || !error_message.empty() ? string16() :
+      hide_sync ? string16() :
       l10n_util::GetStringUTF16(IDS_SYNC_PROMO_NTP_BUBBLE_ADVANCED));
   values->SetString("login_status_dismiss",
       hide_sync ? string16() :

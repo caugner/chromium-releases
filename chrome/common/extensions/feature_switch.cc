@@ -17,10 +17,7 @@ namespace {
 class CommonSwitches {
  public:
   CommonSwitches()
-      : action_box(
-            switches::kActionBox,
-            FeatureSwitch::DEFAULT_DISABLED),
-        easy_off_store_install(
+      : easy_off_store_install(
             switches::kEasyOffStoreExtensionInstall,
             FeatureSwitch::DEFAULT_DISABLED),
         script_badges(
@@ -32,20 +29,15 @@ class CommonSwitches {
         prompt_for_external_extensions(
             switches::kPromptForExternalExtensions,
 #if defined(OS_WIN)
-            FeatureSwitch::DEFAULT_ENABLED),
-#else
-            FeatureSwitch::DEFAULT_DISABLED),
-#endif
-        tab_capture(
-            switches::kTabCapture,
             FeatureSwitch::DEFAULT_ENABLED) {}
+#else
+            FeatureSwitch::DEFAULT_DISABLED) {}
+#endif
 
-  FeatureSwitch action_box;
   FeatureSwitch easy_off_store_install;
   FeatureSwitch script_badges;
   FeatureSwitch script_bubble;
   FeatureSwitch prompt_for_external_extensions;
-  FeatureSwitch tab_capture;
 };
 
 base::LazyInstance<CommonSwitches> g_common_switches =
@@ -53,10 +45,6 @@ base::LazyInstance<CommonSwitches> g_common_switches =
 
 }  // namespace
 
-
-FeatureSwitch* FeatureSwitch::action_box() {
-  return &g_common_switches.Get().action_box;
-}
 FeatureSwitch* FeatureSwitch::easy_off_store_install() {
   return &g_common_switches.Get().easy_off_store_install;
 }
@@ -69,10 +57,6 @@ FeatureSwitch* FeatureSwitch::script_bubble() {
 FeatureSwitch* FeatureSwitch::prompt_for_external_extensions() {
   return &g_common_switches.Get().prompt_for_external_extensions;
 }
-FeatureSwitch* FeatureSwitch::tab_capture() {
-  return &g_common_switches.Get().tab_capture;
-}
-
 
 FeatureSwitch::ScopedOverride::ScopedOverride(FeatureSwitch* feature,
                                               bool override_value)

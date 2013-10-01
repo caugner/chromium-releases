@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/json/json_reader.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
@@ -18,9 +18,9 @@
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
-#include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "url/gurl.h"
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugins/plugin_installer.h"
@@ -34,18 +34,18 @@ namespace {
 typedef std::map<std::string, PluginMetadata*> PluginMap;
 
 // Gets the full path of the plug-in file as the identifier.
-std::string GetLongIdentifier(const webkit::WebPluginInfo& plugin) {
+std::string GetLongIdentifier(const content::WebPluginInfo& plugin) {
   return plugin.path.AsUTF8Unsafe();
 }
 
 // Gets the base name of the file path as the identifier.
-std::string GetIdentifier(const webkit::WebPluginInfo& plugin) {
+std::string GetIdentifier(const content::WebPluginInfo& plugin) {
   return plugin.path.BaseName().AsUTF8Unsafe();
 }
 
 // Gets the plug-in group name as the plug-in name if it is not empty or
 // the filename without extension if the name is empty.
-static string16 GetGroupName(const webkit::WebPluginInfo& plugin) {
+static string16 GetGroupName(const content::WebPluginInfo& plugin) {
   if (!plugin.name.empty())
     return plugin.name;
 
@@ -277,7 +277,7 @@ string16 PluginFinder::FindPluginNameWithIdentifier(
 }
 
 scoped_ptr<PluginMetadata> PluginFinder::GetPluginMetadata(
-    const webkit::WebPluginInfo& plugin) {
+    const content::WebPluginInfo& plugin) {
   base::AutoLock lock(mutex_);
   for (PluginMap::const_iterator it = identifier_plugin_.begin();
        it != identifier_plugin_.end(); ++it) {

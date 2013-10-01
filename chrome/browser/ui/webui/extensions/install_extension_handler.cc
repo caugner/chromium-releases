@@ -11,16 +11,19 @@
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "content/public/common/drop_data.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "webkit/common/webdropdata.h"
+
+namespace extensions {
 
 InstallExtensionHandler::InstallExtensionHandler() {
 }
@@ -35,7 +38,7 @@ void InstallExtensionHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_INSTALL_DROP_TARGET));
   source->AddBoolean(
       "offStoreInstallEnabled",
-      extensions::FeatureSwitch::easy_off_store_install()->IsEnabled());
+      FeatureSwitch::easy_off_store_install()->IsEnabled());
 }
 
 void InstallExtensionHandler::RegisterMessages() {
@@ -51,10 +54,15 @@ void InstallExtensionHandler::RegisterMessages() {
       "installDroppedFile",
       base::Bind(&InstallExtensionHandler::HandleInstallMessage,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "installDroppedDirectory",
+      base::Bind(&InstallExtensionHandler::HandleInstallDirectoryMessage,
+                 base::Unretained(this)));
 }
 
 void InstallExtensionHandler::HandleStartDragMessage(const ListValue* args) {
-  WebDropData* drop_data = web_ui()->GetWebContents()->GetView()->GetDropData();
+  content::DropData* drop_data =
+      web_ui()->GetWebContents()->GetView()->GetDropData();
   if (!drop_data) {
     DLOG(ERROR) << "No current drop data.";
     return;
@@ -65,7 +73,7 @@ void InstallExtensionHandler::HandleStartDragMessage(const ListValue* args) {
     return;
   }
 
-  const WebDropData::FileInfo& file_info = drop_data->filenames.front();
+  const content::DropData::FileInfo& file_info = drop_data->filenames.front();
 
   file_to_install_ = base::FilePath::FromWStringHack(
       UTF16ToWide(file_info.path));
@@ -88,13 +96,14 @@ void InstallExtensionHandler::HandleInstallMessage(const ListValue* args) {
 
   Profile* profile = Profile::FromBrowserContext(
       web_ui()->GetWebContents()->GetBrowserContext());
-  scoped_refptr<extensions::CrxInstaller> crx_installer(
-      extensions::CrxInstaller::Create(
-          extensions::ExtensionSystem::Get(profile)->extension_service(),
-          new ExtensionInstallPrompt(web_ui()->GetWebContents())));
+  scoped_ptr<ExtensionInstallPrompt> prompt(
+      new ExtensionInstallPrompt(web_ui()->GetWebContents()));
+  scoped_refptr<CrxInstaller> crx_installer(CrxInstaller::Create(
+      ExtensionSystem::Get(profile)->extension_service(),
+      prompt.Pass()));
   crx_installer->set_error_on_unsupported_requirements(true);
   crx_installer->set_off_store_install_allow_reason(
-      extensions::CrxInstaller::OffStoreInstallAllowedFromSettingsPage);
+      CrxInstaller::OffStoreInstallAllowedFromSettingsPage);
   crx_installer->set_install_wait_for_idle(false);
 
   const bool kCaseSensitive = false;
@@ -114,3 +123,14 @@ void InstallExtensionHandler::HandleInstallMessage(const ListValue* args) {
   file_to_install_.clear();
   file_display_name_.clear();
 }
+
+void InstallExtensionHandler::HandleInstallDirectoryMessage(
+    const ListValue* args) {
+  Profile* profile = Profile::FromBrowserContext(
+      web_ui()->GetWebContents()->GetBrowserContext());
+  UnpackedInstaller::Create(
+      ExtensionSystem::Get(profile)->
+          extension_service())->Load(file_to_install_);
+}
+
+}  // namespace extensions

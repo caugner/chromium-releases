@@ -43,11 +43,14 @@ MESSAGE_CENTER_EXPORT
   // The title of the message.
   base::scoped_nsobject<NSTextField> title_;
 
-  // Body text of the message.
+  // Body text of the message. Hidden for list notifications.
   base::scoped_nsobject<NSTextField> message_;
 
   // Container for optional list item views.
   base::scoped_nsobject<NSView> listItemView_;
+
+  // Container for optional progress bar view.
+  base::scoped_nsobject<NSProgressIndicator> progressBarView_;
 
   // Container for optional items at the bottom of the notification.
   base::scoped_nsobject<NSView> bottomView_;
@@ -75,6 +78,10 @@ MESSAGE_CENTER_EXPORT
 // Called when the user clicks within the notification view.
 - (void)notificationClicked;
 
+@end
+
+@interface MCNotificationController (TestingInterface)
+- (NSImageView*)iconView;
 @end
 
 #endif  // UI_MESSAGE_CENTER_COCOA_NOTIFICATION_CONTROLLER_H_

@@ -13,7 +13,7 @@
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/version.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
@@ -24,9 +24,9 @@
 #include "chrome/common/web_application_info.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/url_pattern.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "url/gurl.h"
 
 namespace extensions {
 
@@ -150,7 +150,7 @@ TEST(ExtensionFromWebApp, Basic) {
                                    web_app.icons[i].width,
                                    ExtensionIconSet::MATCH_EXACTLY);
     ASSERT_TRUE(!resource.empty());
-    EXPECT_TRUE(file_util::PathExists(resource.GetFilePath()));
+    EXPECT_TRUE(base::PathExists(resource.GetFilePath()));
   }
 }
 

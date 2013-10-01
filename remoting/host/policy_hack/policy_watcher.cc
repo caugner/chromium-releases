@@ -13,7 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "remoting/host/dns_blackhole_checker.h"
 
@@ -98,6 +98,9 @@ const char PolicyWatcher::kHostTokenUrlPolicyName[] =
 const char PolicyWatcher::kHostTokenValidationUrlPolicyName[] =
     "RemoteAccessHostTokenValidationUrl";
 
+const char PolicyWatcher::kHostAllowClientPairing[] =
+    "RemoteAccessHostAllowClientPairing";
+
 const char PolicyWatcher::kHostDebugOverridePoliciesName[] =
     "RemoteAccessHostDebugOverridePolicies";
 
@@ -117,6 +120,7 @@ PolicyWatcher::PolicyWatcher(
                                kDefaultHostTalkGadgetPrefix);
   default_values_->SetString(kHostTokenUrlPolicyName, std::string());
   default_values_->SetString(kHostTokenValidationUrlPolicyName, std::string());
+  default_values_->SetBoolean(kHostAllowClientPairing, true);
 #if !defined(NDEBUG)
   default_values_->SetString(kHostDebugOverridePoliciesName, std::string());
 #endif

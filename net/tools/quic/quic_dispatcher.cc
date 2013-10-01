@@ -94,7 +94,8 @@ void QuicDispatcher::ProcessPacket(const IPEndPoint& server_address,
     if (session == NULL) {
       DLOG(INFO) << "Failed to create session for " << guid;
       // Add this guid fo the time-wait state, to safely nack future packets.
-      time_wait_list_manager_->AddGuidToTimeWait(guid);
+      // We don't know the version here, so assume latest.
+      time_wait_list_manager_->AddGuidToTimeWait(guid, QuicVersionMax());
       time_wait_list_manager_->ProcessPacket(server_address,
                                              client_address,
                                              guid,
@@ -114,7 +115,8 @@ void QuicDispatcher::ProcessPacket(const IPEndPoint& server_address,
 void QuicDispatcher::CleanUpSession(SessionMap::iterator it) {
   QuicSession* session = it->second;
   write_blocked_list_.RemoveBlockedObject(session->connection());
-  time_wait_list_manager_->AddGuidToTimeWait(it->first);
+  time_wait_list_manager_->AddGuidToTimeWait(it->first,
+                                             session->connection()->version());
   session_map_.erase(it);
 }
 
@@ -165,7 +167,8 @@ void QuicDispatcher::Shutdown() {
 void QuicDispatcher::OnConnectionClose(QuicGuid guid, QuicErrorCode error) {
   SessionMap::iterator it = session_map_.find(guid);
   if (it == session_map_.end()) {
-    LOG(DFATAL) << "GUID " << guid << " Does not exist in the session map.";
+    LOG(DFATAL) << "GUID " << guid << " does not exist in the session map.  "
+                << "Error: " << QuicUtils::ErrorToString(error);
     return;
   }
 
@@ -188,7 +191,8 @@ QuicSession* QuicDispatcher::CreateQuicSession(
   QuicConnectionHelperInterface* helper =
       new QuicEpollConnectionHelper(this, epoll_server);
   QuicServerSession* session = new QuicServerSession(
-       config_, new QuicConnection(guid, client_address, helper, true), this);
+       config_, new QuicConnection(guid, client_address, helper, true,
+                                   QuicVersionMax()), this);
   session->InitializeSession(crypto_config_);
   return session;
 }

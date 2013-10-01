@@ -146,11 +146,11 @@ Press any key to continue exploring.
   <message name="IDS_FLAGS_DISABLE_QUICKOFFICE_COMPONENT_APP_DESCRIPTION" desc="Description for the flag to disable Chrome Office Viewer component extension.">
     Disable Chrome Office Viewer component extension for testing purpose.
   </message>
-  <message name="IDS_FLAGS_ENABLE_QUICKOFFICE_DESKTOP_EDIT_NAME" desc="Name for the flag to enable office document editing.">
-    Enable document editing.
+  <message name="IDS_FLAGS_ENABLE_QUICKOFFICE_DESKTOP_VIEWING_NAME" desc="Name for the flag to enable office document viewing.">
+    Enable document viewing.
   </message>
-  <message name="IDS_FLAGS_ENABLE_QUICKOFFICE_DESKTOP_EDIT_DESCRIPTION" desc="Description for the flag to enable office document editing.">
-    Enable document editing, instead of viewing.
+  <message name="IDS_FLAGS_ENABLE_QUICKOFFICE_DESKTOP_VIEWING_DESCRIPTION" desc="Description for the flag to enable office document viewing.">
+    Enable document viewing, instead of editing.
   </message>
   <message name="IDS_OFFERS_CONSENT_INFOBAR_LABEL_LEARN_MORE" desc="Text of the Learn More link in the echo dialog.">
     Learn More
@@ -471,6 +471,18 @@ Press any key to continue exploring.
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_NO_MANAGER_TEXT" desc="Text shown when supervised user can be created, but no users that can be manager exist.">
     At least one account must exist on this device before creating a supervised user.
   </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_RESTRICTED_TEXT" desc="Text shown when supervised user can be created, but owner of the device restricted managed user creation or whitelist has been enabled for this device.">
+    Creation of supervised users is restricted by the owner of this device.
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_INTRO_TEXT_TITLE" desc="Supervised user dialog, intro page, title">
+    What is a supervised user?
+  </message>
+  <message name="IDS_CREATE_LOCALLY_MANAGED_INTRO_ALTERNATE_TEXT" desc="Supervised user dialog, intro page, first paragraph">
+    A supervised user can explore the web with your guidance. As the manager of a supervised user, you can
+    <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>allow or prohibit<ph name="END_BOLD">&lt;/strong&gt;</ph> certain websites,
+    <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>review<ph name="END_BOLD">&lt;/strong&gt;</ph> websites the supervised user has visited, and
+    <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>manage<ph name="END_BOLD">&lt;/strong&gt;</ph> other settings.
+  </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_INTRO_TEXT_1" desc="Supervised user dialog, intro page, first paragraph">
     A supervised user can explore the web with your guidance. As the manager of a supervised user in Chrome, you can:
   </message>
@@ -485,8 +497,7 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_INTRO_TEXT_2" desc="Supervised user dialog, intro page, second paragraph">
     Creating a supervised user does not create a Google Account, and their settings
-    and data will not follow them to other devices with Chrome Sync. Currently,
-    a supervised user applies only to this installation of Chrome, on this device.
+    and data will not follow them to other devices with Chrome Sync. A supervised user applies only to this device.
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_INTRO_TEXT_3" desc="Supervised user dialog, intro page, third paragraph">
     After you create a new supervised user, you can manage the settings at any time from any device at <ph name="MANAGEMENT_URL">$1<ex>www.example.com</ex></ph>.
@@ -501,7 +512,7 @@ Press any key to continue exploring.
     Enter password
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_ACCOUNT_NAME_TITLE" desc="Supervised user dialog, new user page, title for name of new user">
-    Create an name -
+    Create a name -
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_ACCOUNT_NAME_EXPLANATION" desc="Supervised user dialog, new user page, explanation for name of new user">
     This supervised user will be managed by <ph name="MANAGER_EMAIL">$1<ex>john.doe@example.com</ex></ph>.
@@ -522,7 +533,7 @@ Press any key to continue exploring.
     Continue
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_START_BUTTON_TEXT" desc="Text shown on start button in supervised user creation dialog.">
-    Create supervised user.
+    Create supervised user
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATE_NEXT_BUTTON_TEXT" desc="Text shown on next button in supervised user creation dialog.">
     Next
@@ -596,23 +607,26 @@ Press any key to continue exploring.
     Retry
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_AUTH_PROGRESS_MESSAGE" desc="Text shown next to progress indicator upon manager authentication.">
-    Authenticating...
+    Authenticating
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_CREATION_PROGRESS_MESSAGE" desc="Text shown next to progress indicator upon supervised user creation.">
-    Creating profile...
+    Creating supervised user
   </message>
   <message name="IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_CREATION_TIMEOUT_MESSAGE" desc="Text shown at the place of progess indicator if creation takes too long and should be cancelled.">
     Profile takes too long to create. You may want to cancel process and retry later.
   </message>
   <message name="IDS_USER_IS_LOCALLY_MANAGED_BY_NOTICE" desc="Text for notifications showing that this user is locally managed">
-    This supervised user is managed by <ph name="USER_DISPLAY_NAME">$1<ex>John</ex></ph>. Usage and browsing history can be viewed by the manager.
+    This user is supervised by <ph name="MANAGER_EMAIL">$1<ex>user@example.com</ex></ph>. Usage and history from this user can be reviewed by the manager on chrome.com.
   </message>
-  <message name="IDS_USER_IS_LOCALLY_MANAGED_REMOVE_WARNING" desc="Text shown as a warning when attempting to remove supervised user.">
+  <message name="IDS_SUPERVISED_USER_EXPIRED_TOKEN_WARNING" desc="Warning text that is shown on login screen trying to sign in as a supervised user that has expired token">
+    This supervised user may have been deleted or disabled by the manager. Please contact the manager if you would like to continue signing in as this user.
+  </message>
+  <message name="IDS_LOGIN_POD_USER_REMOVE_WARNING" desc="Text shown as a warning when attempting to remove supervised user.">
     All files and local data associated with the supervised user will be permanently
     deleted once this supervised user is removed. Visited websites and settings
     for this supervised user may still be visible by the manager at <ph name="MANAGEMENT_URL">$1<ex>www.example.com</ex></ph>.
   </message>
-  <message name="IDS_USER_IS_LOCALLY_MANAGED_REMOVE_WARNING_BUTTON" desc="Text shown on a button that confirms removal of supervised user.">
+  <message name="IDS_LOGIN_POD_USER_REMOVE_WARNING_BUTTON" desc="Text shown on a button that confirms removal of supervised user.">
     Remove this user
   </message>
   <message name="IDS_OFFLINE_LOGIN_HTML" desc="Text which suggests enter as an existing user when valid network isn't presented.">
@@ -651,8 +665,8 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_WIFI_NETWORK" desc="Title for the Wifi network group on the settings page.">
     Wi-Fi network
   </message>
-  <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_WIMAX_NETWORK" desc="Title for the Wimax network group on the settings page.">
-    Wimax network
+  <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_WIMAX_NETWORK" desc="Title for the WiMAX network group on the settings page.">
+    WiMAX network
   </message>
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_CELLULAR_NETWORK" desc="Title for the cellular network group on the settings page.">
     Mobile data
@@ -692,6 +706,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_SETTINGS_NETWORK_DISABLE_WIFI" desc="Menu option in the Wi-Fi menu when there is a connected Wi-Fi network.">
     Disable Wi-Fi
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_NETWORK_DISABLE_WIMAX" desc="Menu option in the WiMAX menu when there is a connected WiMAX network.">
+    Disable WiMAX
   </message>
   <message name="IDS_OPTIONS_SETTINGS_NETWORK_DISABLE_CELLULAR" desc="Menu option in the Cellular menu when there is a connected cellular network.">
     Disable mobile data
@@ -933,6 +950,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_ACCESSIBILITY_SHOULD_ALWAYS_SHOW_MENU" desc="In the settings tab, the text next to the checkbox to show the accessibility tray menu regardless of the state of a11y features.">
     Show accessibility options in the system menu
   </message>
+  <message name="IDS_OPTIONS_SETTINGS_ACCESSIBILITY_STICKY_KEYS_DESCRIPTION" desc="Inthe settings tab, the text next to the checkbox for the sticky keys.">
+    Enable sticky keys (to perform keyboard shortcuts by typing them sequentially)
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_BUTTON_LABEL" desc="Label for the button opening display settings tab.">
     Display settings
   </message>
@@ -948,8 +968,8 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_ORIENTATION" desc="The section title for display orientation option for a selected display.">
     Orientation:
   </message>
-  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_OVERSCAN" desc="The section title for overscan option for a selected display.">
-    Overscan:
+  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_OVERSCAN" desc="The section title for TV alignment (calibration of display overscan) option for a selected display.">
+    TV alignment:
   </message>
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_START_MIRRORING" desc="Button label to start display mirroring.">
     Start mirroring
@@ -969,17 +989,8 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_STANDARD_ORIENTATION" desc="The default value of display orientation option item.">
     Standard
   </message>
-  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_ORIENTATION_90" desc="The value of display orientation option item: 90-degree rotated">
-    90&#x00B0;
-  </message>
-  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_ORIENTATION_180" desc="The value of display orientation option item: 180-degree rotated">
-    180&#x00B0;
-  </message>
-  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_ORIENTATION_270" desc="The value of display orientation option item: 270-degree rotated">
-    270&#x00B0;
-  </message>
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_START_CALIBRATING_OVERSCAN" desc="Button label to start calibrating the overscan preference.">
-    Adjust overscan...
+    Adjust...
   </message>
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OVERSCAN_TAB_TITLE" desc="Title for the display overscan calibration tab.">
     TV alignment
@@ -1008,6 +1019,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_DISCONNECT" desc="In the settings tab, the text on the button to disconnect from a network.">
     Disconnect
   </message>
+  <message name="IDS_OPTIONS_SETTINGS_CONFIGURE" desc="In the settings tab, the text on the button to configure a network.">
+    Configure
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_FORGET" desc="In the settings tab, the text on the button to forget this network.">
     Forget this network
   </message>
@@ -1033,7 +1047,7 @@ Press any key to continue exploring.
     Join Wi-Fi network
   </message>
   <message name="IDS_OPTIONS_SETTINGS_JOIN_WIMAX_NETWORKS" desc="The title for the dialog to join a wimax network.">
-    Join Wimax network
+    Join WiMAX network
   </message>
   <message name="IDS_OPTIONS_SETTINGS_ADD_VPN" desc="In the settings tab, the text on the button to add a private network.">
     Add private network
@@ -1058,6 +1072,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_ACCOUNTS_ALLOW_BWSI_DESCRIPTION" desc="In the Accounts settings tab, the text on the checkbox to allow browse without signing in.">
     Enable Guest browsing
+  </message>
+  <message name="IDS_OPTIONS_ACCOUNTS_ENABLE_SUPERVISED_USERS" desc="In the Users settings dialog, the text on the checkbox to allow creation and sign-in of supervised users.">
+    Enable supervised users
   </message>
   <message name="IDS_OPTIONS_ACCOUNTS_USE_WHITELIST_DESCRIPTION" desc="In the Accounts settings tab, the text on the checkbox to restrict allowed user to a whitelist.">
     Restrict sign-in to the following users:
@@ -1155,8 +1172,8 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_WIFI" desc="In settings Internet options, the title for the wifi tab.">
     Wi-Fi
   </message>
-  <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_WIMAX" desc="In settings Internet options, the title for the Wimax tab.">
-    Wimax
+  <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_WIMAX" desc="In settings Internet options, the title for the WiMAX tab.">
+    WiMAX
   </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_VPN" desc="In settings Internet options, the title for the VPN (Virtual Private Network) tab.">
     VPN
@@ -1602,6 +1619,19 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_SIM_UNLOCK_SIM_DISABLED_MESSAGE" desc="Message shown when there're not PUK tries left and SIM card is disabled.">
     This SIM card is disabled and cannot be used. Please contact your service provider for a replacement.
+  </message>
+
+  <message name="IDS_SLOW_DISABLE" desc="The text of the button that disables performance collection for feedback reports">
+    Disable performance data collection
+  </message>
+  <message name="IDS_SLOW_ENABLE" desc="The text of the button that enables performance collection for feedback reports">
+    Enable performance data collection
+  </message>
+  <message name="IDS_SLOW_DESCRIPTION" desc="The description of the performance tracing feature for feedback reports.">
+    Enabling collection of performance data will help Google improve the system over time. No data is sent until you file a feedback report (Alt-Shift-I) and include performance data. You can return to this screen to disable collection at any time.
+  </message>
+  <message name="IDS_SLOW_WARNING" desc="The warning that informs users that enabling this can have a negative effect on their performance">
+    <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>Note:<ph name="END_BOLD">&lt;/strong&gt;</ph> Only enable if you know what you are doing or if you have been asked to do so, as collection of data may reduce performance.
   </message>
 
   <message name="IDS_EULA_BACK_BUTTON" desc="Back button shown on EULA screen.">
@@ -2504,6 +2534,9 @@ Battery full
   <message name="IDS_PROXY_BYPASS" desc="Label for the proxy bypass list.">
     Do not use the proxy settings for these hosts and domains:
   </message>
+  <message name="IDS_PROXY_WEB_PROXY_AUTO_DISCOVERY" desc="Label for the web proxy auto discovery url.">
+    Web Proxy Auto Discovery URL
+  </message>
 
   <!-- Accessibility strings, to be spoken -->
   <message name="IDS_CHROMEOS_ACC_BUTTON" desc="Label indicating that a control is a pushbutton.">
@@ -3179,6 +3212,9 @@ Battery full
   <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_SPOKEN_FEEDBACK" desc="The text in the keyboard overlay to explain the shortcut (enable or disable spoken feedback).">
     Toggle spoken feedback
   </message>
+  <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_TOUCH_HUD_PROJECTION" desc="The text in the keyboard overlay to explain the shortcut (enable or disable projection touch HUD).">
+    Toggle projection touch HUD
+  </message>
   <message name="IDS_KEYBOARD_OVERLAY_UNDO" desc="The text in the keyboard overlay to explain the shortcut.">
     Undo
   </message>
@@ -3705,7 +3741,7 @@ Battery full
   <message name="IDS_LOGIN_PUBLIC_ACCOUNT_SIGNOUT_REMINDER" desc="Text shown in the public account user pod, reminding the user to log out.">
     Your information will be removed when you sign out.
   </message>
-  <message name="IDS_LOGIN_PUBLIC_ACCOUNT_ENTER" desc="Label text for the sign-in button in the public account user pod.">
+  <message name="IDS_LOGIN_PUBLIC_ACCOUNT_ENTER" meaning="Label text for signing in." desc="Label text for the sign-in button in the public account user pod.">
     Enter
   </message>
   <message name="IDS_LOGIN_PUBLIC_ACCOUNT_ENTER_ACCESSIBLE_NAME" desc="Text to be spoken when focus is set to the sign-in button in the public account user pod.">

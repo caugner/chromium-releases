@@ -8,14 +8,7 @@
 #define CHROME_BROWSER_CHROME_BROWSER_MAIN_LINUX_H_
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chrome_browser_main_posix.h"
-
-#if !defined(OS_CHROMEOS)
-namespace chrome {
-class StorageMonitorLinux;
-}
-#endif
 
 class ChromeBrowserMainPartsLinux : public ChromeBrowserMainPartsPosix {
  public:
@@ -25,13 +18,9 @@ class ChromeBrowserMainPartsLinux : public ChromeBrowserMainPartsPosix {
 
   // ChromeBrowserMainParts overrides.
   virtual void PreProfileInit() OVERRIDE;
-  virtual void PostMainMessageLoopRun() OVERRIDE;
+  virtual void PostProfileInit() OVERRIDE;
 
  private:
-#if !defined(OS_CHROMEOS)
-  scoped_ptr<chrome::StorageMonitorLinux> storage_monitor_;
-#endif
-
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsLinux);
 };
 

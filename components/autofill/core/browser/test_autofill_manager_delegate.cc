@@ -35,10 +35,12 @@ void TestAutofillManagerDelegate::ConfirmSaveCreditCard(
     const CreditCard& credit_card,
     const base::Closure& save_card_callback) {}
 
-void TestAutofillManagerDelegate::ShowAutocheckoutBubble(
+bool TestAutofillManagerDelegate::ShowAutocheckoutBubble(
     const gfx::RectF& bounding_box,
     bool is_google_user,
-    const base::Callback<void(bool)>& callback) {}
+    const base::Callback<void(AutocheckoutBubbleState)>& callback) {
+  return true;
+}
 
 void TestAutofillManagerDelegate::HideAutocheckoutBubble() {}
 
@@ -57,6 +59,10 @@ void TestAutofillManagerDelegate::ShowAutofillPopup(
     const std::vector<base::string16>& icons,
     const std::vector<int>& identifiers,
     base::WeakPtr<AutofillPopupDelegate> delegate) {}
+
+void TestAutofillManagerDelegate::UpdateAutofillPopupDataListValues(
+    const std::vector<base::string16>& values,
+    const std::vector<base::string16>& labels) {}
 
 void TestAutofillManagerDelegate::HideAutofillPopup() {}
 

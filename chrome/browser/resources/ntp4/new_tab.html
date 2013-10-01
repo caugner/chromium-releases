@@ -48,6 +48,7 @@
 <script src="../../../../ui/webui/resources/js/cr/ui/context_menu_handler.js"></script>
 <script src="../../../../ui/webui/resources/js/cr/ui/drag_wrapper.js"></script>
 <script src="../../../../ui/webui/resources/js/cr/ui/expandable_bubble.js"></script>
+<script src="../../../../ui/webui/resources/js/cr/ui/focus_manager.js"></script>
 <script src="../../../../ui/webui/resources/js/cr/ui/menu.js"></script>
 <script src="../../../../ui/webui/resources/js/cr/ui/menu_item.js"></script>
 <script src="../../../../ui/webui/resources/js/cr/ui/position_util.js"></script>
@@ -96,7 +97,8 @@
   <div id="app-launcher-promo" hidden>
     <div class="apps-promo-text" i18n-content="appsPromoTitle"></div>
     <a href="https://chrome.google.com/webstore/launcher"
-       class="apps-promo-learn-more" i18n-content="learn_more">
+       id="apps-promo-learn-more" class="apps-promo-learn-more"
+       i18n-content="learn_more">
     </a>
     <img src="app_launcher_promo.png">
     <button class="close-button custom-appearance"

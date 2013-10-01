@@ -13,9 +13,9 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/common/thumbnail_score.h"
-#include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/image/image.h"
+#include "url/gurl.h"
 
 class Profile;
 
@@ -43,9 +43,6 @@ class TopSites
 
   // Initializes TopSites.
   static TopSites* Create(Profile* profile, const base::FilePath& db_name);
-
-  // Helper method to shuffle MostVisited tiles for A/B testing purposes.
-  static void MaybeShuffle(MostVisitedURLList* data);
 
   // Sets the given thumbnail for the given URL. Returns true if the thumbnail
   // was updated. False means either the URL wasn't known to us, or we felt

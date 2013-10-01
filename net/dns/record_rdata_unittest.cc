@@ -10,6 +10,11 @@
 
 namespace net {
 
+base::StringPiece MakeStringPiece(const uint8* data, unsigned size) {
+  const char* data_cc = reinterpret_cast<const char*>(data);
+  return base::StringPiece(data_cc, size);
+}
+
 TEST(RecordRdataTest, ParseSrvRecord) {
   scoped_ptr<SrvRecordRdata> record1_obj;
   scoped_ptr<SrvRecordRdata> record2_obj;
@@ -17,7 +22,7 @@ TEST(RecordRdataTest, ParseSrvRecord) {
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
 
-  const char record[] = {
+  const uint8 record[] = {
     0x00, 0x01,
     0x00, 0x02,
     0x00, 0x50,
@@ -34,8 +39,9 @@ TEST(RecordRdataTest, ParseSrvRecord) {
 
   DnsRecordParser parser(record, sizeof(record), 0);
   const unsigned first_record_len = 22;
-  base::StringPiece record1_strpiece(record, first_record_len);
-  base::StringPiece record2_strpiece(
+  base::StringPiece record1_strpiece = MakeStringPiece(
+      record, first_record_len);
+  base::StringPiece record2_strpiece = MakeStringPiece(
       record + first_record_len, sizeof(record) - first_record_len);
 
   record1_obj = SrvRecordRdata::Create(record1_strpiece, parser);
@@ -64,12 +70,12 @@ TEST(RecordRdataTest, ParseARecord) {
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
 
-  const char record[] = {
+  const uint8 record[] = {
     0x7F, 0x00, 0x00, 0x01  // 127.0.0.1
   };
 
   DnsRecordParser parser(record, sizeof(record), 0);
-  base::StringPiece record_strpiece(record, sizeof(record));
+  base::StringPiece record_strpiece = MakeStringPiece(record, sizeof(record));
 
   record_obj = ARecordRdata::Create(record_strpiece, parser);
   ASSERT_TRUE(record_obj != NULL);
@@ -85,7 +91,7 @@ TEST(RecordRdataTest, ParseAAAARecord) {
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
 
-  const char record[] = {
+  const uint8 record[] = {
     0x12, 0x34, 0x56, 0x78,
     0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00,
@@ -93,7 +99,7 @@ TEST(RecordRdataTest, ParseAAAARecord) {
   };
 
   DnsRecordParser parser(record, sizeof(record), 0);
-  base::StringPiece record_strpiece(record, sizeof(record));
+  base::StringPiece record_strpiece = MakeStringPiece(record, sizeof(record));
 
   record_obj = AAAARecordRdata::Create(record_strpiece, parser);
   ASSERT_TRUE(record_obj != NULL);
@@ -110,7 +116,7 @@ TEST(RecordRdataTest, ParseCnameRecord) {
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
 
-  const char record[] = {
+  const uint8 record[] = {
     0x03, 'w', 'w', 'w',
     0x06, 'g', 'o', 'o', 'g', 'l', 'e',
     0x03, 'c', 'o', 'm',
@@ -118,7 +124,7 @@ TEST(RecordRdataTest, ParseCnameRecord) {
   };
 
   DnsRecordParser parser(record, sizeof(record), 0);
-  base::StringPiece record_strpiece(record, sizeof(record));
+  base::StringPiece record_strpiece = MakeStringPiece(record, sizeof(record));
 
   record_obj = CnameRecordRdata::Create(record_strpiece, parser);
   ASSERT_TRUE(record_obj != NULL);
@@ -134,7 +140,7 @@ TEST(RecordRdataTest, ParsePtrRecord) {
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
 
-  const char record[] = {
+  const uint8 record[] = {
     0x03, 'w', 'w', 'w',
     0x06, 'g', 'o', 'o', 'g', 'l', 'e',
     0x03, 'c', 'o', 'm',
@@ -142,7 +148,7 @@ TEST(RecordRdataTest, ParsePtrRecord) {
   };
 
   DnsRecordParser parser(record, sizeof(record), 0);
-  base::StringPiece record_strpiece(record, sizeof(record));
+  base::StringPiece record_strpiece = MakeStringPiece(record, sizeof(record));
 
   record_obj = PtrRecordRdata::Create(record_strpiece, parser);
   ASSERT_TRUE(record_obj != NULL);
@@ -158,14 +164,14 @@ TEST(RecordRdataTest, ParseTxtRecord) {
   // These are just the rdata portions of the DNS records, rather than complete
   // records, but it works well enough for this test.
 
-  const char record[] = {
+  const uint8 record[] = {
     0x03, 'w', 'w', 'w',
     0x06, 'g', 'o', 'o', 'g', 'l', 'e',
     0x03, 'c', 'o', 'm'
   };
 
   DnsRecordParser parser(record, sizeof(record), 0);
-  base::StringPiece record_strpiece(record, sizeof(record));
+  base::StringPiece record_strpiece = MakeStringPiece(record, sizeof(record));
 
   record_obj = TxtRecordRdata::Create(record_strpiece, parser);
   ASSERT_TRUE(record_obj != NULL);
@@ -179,5 +185,38 @@ TEST(RecordRdataTest, ParseTxtRecord) {
 
   ASSERT_TRUE(record_obj->IsEqual(record_obj.get()));
 }
+
+TEST(RecordRdataTest, ParseNsecRecord) {
+  scoped_ptr<NsecRecordRdata> record_obj;
+
+  // These are just the rdata portions of the DNS records, rather than complete
+  // records, but it works well enough for this test.
+
+  const uint8 record[] = {
+    0x03, 'w', 'w', 'w',
+    0x06, 'g', 'o', 'o', 'g', 'l', 'e',
+    0x03, 'c', 'o', 'm',
+    0x00,
+    0x00, 0x02, 0x40, 0x01
+  };
+
+  DnsRecordParser parser(record, sizeof(record), 0);
+  base::StringPiece record_strpiece = MakeStringPiece(record, sizeof(record));
+
+  record_obj = NsecRecordRdata::Create(record_strpiece, parser);
+  ASSERT_TRUE(record_obj != NULL);
+
+  ASSERT_EQ(16u, record_obj->bitmap_length());
+
+  EXPECT_FALSE(record_obj->GetBit(0));
+  EXPECT_TRUE(record_obj->GetBit(1));
+  for (int i = 2; i < 15; i++) {
+    EXPECT_FALSE(record_obj->GetBit(i));
+  }
+  EXPECT_TRUE(record_obj->GetBit(15));
+
+  ASSERT_TRUE(record_obj->IsEqual(record_obj.get()));
+}
+
 
 }  // namespace net

@@ -9,14 +9,12 @@
 
 #include "base/callback_forward.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
-#include "chrome/browser/google_apis/gdata_errorcode.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class Profile;
 
 namespace base {
 class FilePath;
-struct PlatformFileInfo;
 }
 
 namespace fileapi {
@@ -25,7 +23,7 @@ class FileSystemURL;
 
 namespace drive {
 
-class PlatformFileInfoProto;
+class FileSystemInterface;
 class ResourceEntry;
 
 namespace util {
@@ -42,12 +40,6 @@ const base::FilePath::CharType kCacheFileDirectory[] =
 // Name of the directory used to store temporary files.
 const base::FilePath::CharType kTemporaryFileDirectory[] =
     FILE_PATH_LITERAL("tmp");
-
-// The extension for dirty files. The file names look like
-// "<resource-id>.local".
-const base::FilePath::CharType kLocallyModifiedFileExtension[] =
-    FILE_PATH_LITERAL("local");
-const base::FilePath::CharType kWildCard[] = FILE_PATH_LITERAL("*");
 
 // Special resource IDs introduced to manage pseudo directory tree locally.
 // These strings are supposed to be different from any resource ID used on the
@@ -78,6 +70,16 @@ const base::FilePath& GetDriveMyDriveRootPath();
 
 // Returns the Drive mount point path, which looks like "/special/drive".
 const base::FilePath& GetDriveMountPointPath();
+
+// Returns a FileSystemInterface instance for the |profile_id|, or NULL
+// if the Profile for |profile_id| is destructed or Drive File System is
+// disabled for the profile.
+// Note: |profile_id| should be the pointer of the Profile instance if it is
+// alive. Considering timing issues due to task posting across threads,
+// this function can accept a dangling pointer as |profile_id| (and will return
+// NULL for such a case).
+// This function must be called on UI thread.
+FileSystemInterface* GetFileSystemByProfileId(void* profile_id);
 
 // Checks if the resource ID is a special one, which is effective only in our
 // implementation and is not supposed to be sent to the server.
@@ -141,13 +143,6 @@ std::string NormalizeFileName(const std::string& input);
 // profile.
 base::FilePath GetCacheRootPath(Profile* profile);
 
-// Extracts resource_id and md5 from cache path.
-// Example: path="/user/GCache/v1/tmp/pdf:a1b2.01234567" =>
-//          resource_id="pdf:a1b2", md5="01234567"
-void ParseCacheFilePath(const base::FilePath& path,
-                        std::string* resource_id,
-                        std::string* md5);
-
 // Migrates cache files from old "persistent" and "tmp" directories to the new
 // "files" directory (see crbug.com/248905).
 // TODO(hashimoto): Remove this function at some point.
@@ -184,19 +179,6 @@ void EnsureDirectoryExists(Profile* profile,
                            const base::FilePath& directory,
                            const FileOperationCallback& callback);
 
-// Converts GData error code into file platform error code.
-FileError GDataToFileError(google_apis::GDataErrorCode status);
-
-// Converts the resource entry to the platform file.
-void ConvertResourceEntryToPlatformFileInfo(
-    const PlatformFileInfoProto& entry,
-    base::PlatformFileInfo* file_info);
-
-// Converts the platform file info to the resource entry.
-void ConvertPlatformFileInfoToResourceEntry(
-    const base::PlatformFileInfo& file_info,
-    PlatformFileInfoProto* entry);
-
 // Does nothing with |error|. Used with functions taking FileOperationCallback.
 void EmptyFileOperationCallback(FileError error);
 
@@ -226,6 +208,10 @@ GURL ReadUrlFromGDocFile(const base::FilePath& file_path);
 
 // Reads resource ID from a GDoc file.
 std::string ReadResourceIdFromGDocFile(const base::FilePath& file_path);
+
+// Returns the (base-16 encoded) MD5 digest of the file content at |file_path|,
+// or an empty string if an error is found.
+std::string GetMd5Digest(const base::FilePath& file_path);
 
 }  // namespace util
 }  // namespace drive

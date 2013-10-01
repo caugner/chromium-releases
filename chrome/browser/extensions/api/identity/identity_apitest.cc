@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -13,21 +15,21 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/identity/oauth2_manifest_handler.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/id_util.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_mint_token_flow.h"
-#include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using testing::_;
 using testing::Return;
@@ -238,10 +240,15 @@ class WaitForGURLAndCloseWindow : public content::WindowedNotificationObserver {
 
 class MockGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
  public:
-  MockGetAuthTokenFunction() : login_ui_result_(true),
+  MockGetAuthTokenFunction() : login_access_token_result_(true),
+                               login_ui_result_(true),
                                scope_ui_result_(true),
                                login_ui_shown_(false),
                                scope_ui_shown_(false) {
+  }
+
+  void set_login_access_token_result(bool result) {
+    login_access_token_result_ = result;
   }
 
   void set_login_ui_result(bool result) {
@@ -267,11 +274,22 @@ class MockGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
     return scope_ui_shown_;
   }
 
+  virtual void StartLoginAccessTokenRequest() OVERRIDE {
+    if (login_access_token_result_) {
+      OnGetTokenSuccess(login_token_request_.get(), "access_token",
+          base::Time::Now() + base::TimeDelta::FromHours(1LL));
+    } else {
+      GoogleServiceAuthError error(
+          GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
+      OnGetTokenFailure(login_token_request_.get(), error);
+    }
+  }
+
   virtual void ShowLoginPopup() OVERRIDE {
     EXPECT_FALSE(login_ui_shown_);
     login_ui_shown_ = true;
     if (login_ui_result_)
-      SigninSuccess("fake_refresh_token");
+      SigninSuccess();
     else
       SigninFailed();
   }
@@ -293,10 +311,11 @@ class MockGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
 
   MOCK_CONST_METHOD0(HasLoginToken, bool());
   MOCK_METHOD1(CreateMintTokenFlow,
-               OAuth2MintTokenFlow* (OAuth2MintTokenFlow::Mode mode));
+               OAuth2MintTokenFlow* (const std::string& login_access_token));
 
  private:
   ~MockGetAuthTokenFunction() {}
+  bool login_access_token_result_;
   bool login_ui_result_;
   bool scope_ui_result_;
   GaiaWebAuthFlow::Failure scope_ui_failure_;
@@ -401,6 +420,18 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
 }
 
 IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
+                       NonInteractiveLoginAccessTokenFailure) {
+  scoped_refptr<MockGetAuthTokenFunction> func(new MockGetAuthTokenFunction());
+  func->set_extension(CreateExtension(CLIENT_ID | SCOPES));
+  EXPECT_CALL(*func.get(), HasLoginToken())
+      .WillOnce(Return(true));
+  func->set_login_access_token_result(false);
+  std::string error = utils::RunFunctionAndReturnError(
+      func.get(), "[{}]", browser());
+  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+}
+
+IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
                        NonInteractiveMintAdviceSuccess) {
   scoped_refptr<const Extension> extension(CreateExtension(CLIENT_ID | SCOPES));
   scoped_refptr<MockGetAuthTokenFunction> func(new MockGetAuthTokenFunction());
@@ -439,6 +470,12 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
 
 IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
                        NonInteractiveSuccess) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   scoped_refptr<MockGetAuthTokenFunction> func(new MockGetAuthTokenFunction());
   scoped_refptr<const Extension> extension(CreateExtension(CLIENT_ID | SCOPES));
   func->set_extension(extension.get());
@@ -512,6 +549,20 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
   TestOAuth2MintTokenFlow* flow = new TestOAuth2MintTokenFlow(
       TestOAuth2MintTokenFlow::MINT_TOKEN_FAILURE, func.get());
   EXPECT_CALL(*func.get(), CreateMintTokenFlow(_)).WillOnce(Return(flow));
+  std::string error = utils::RunFunctionAndReturnError(
+      func.get(), "[{\"interactive\": true}]", browser());
+  EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
+  EXPECT_TRUE(func->login_ui_shown());
+  EXPECT_FALSE(func->scope_ui_shown());
+}
+
+IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
+                       InteractiveLoginSuccessLoginAccessTokenFailure) {
+  scoped_refptr<MockGetAuthTokenFunction> func(new MockGetAuthTokenFunction());
+  func->set_extension(CreateExtension(CLIENT_ID | SCOPES));
+  EXPECT_CALL(*func.get(), HasLoginToken()).WillOnce(Return(false));
+  func->set_login_ui_result(true);
+  func->set_login_access_token_result(false);
   std::string error = utils::RunFunctionAndReturnError(
       func.get(), "[{\"interactive\": true}]", browser());
   EXPECT_TRUE(StartsWithASCII(error, errors::kAuthFailure, false));
@@ -1107,6 +1158,12 @@ IN_PROC_BROWSER_TEST_F(LaunchWebAuthFlowFunctionTest, LoadFailed) {
 }
 
 IN_PROC_BROWSER_TEST_F(LaunchWebAuthFlowFunctionTest, NonInteractiveSuccess) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   scoped_refptr<IdentityLaunchWebAuthFlowFunction> function(
       new IdentityLaunchWebAuthFlowFunction());
   scoped_refptr<Extension> empty_extension(
@@ -1128,6 +1185,12 @@ IN_PROC_BROWSER_TEST_F(LaunchWebAuthFlowFunctionTest, NonInteractiveSuccess) {
 
 IN_PROC_BROWSER_TEST_F(
     LaunchWebAuthFlowFunctionTest, InteractiveFirstNavigationSuccess) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   scoped_refptr<IdentityLaunchWebAuthFlowFunction> function(
       new IdentityLaunchWebAuthFlowFunction());
   scoped_refptr<Extension> empty_extension(

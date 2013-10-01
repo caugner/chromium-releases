@@ -2,14 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/test/test_simple_task_runner.h"
 #include "cc/output/output_surface.h"
+
+#include "base/test/test_simple_task_runner.h"
+#include "cc/output/managed_memory_policy.h"
 #include "cc/output/output_surface_client.h"
 #include "cc/output/software_output_device.h"
+#include "cc/test/fake_output_surface.h"
+#include "cc/test/fake_output_surface_client.h"
 #include "cc/test/scheduler_test_common.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/WebGraphicsMemoryAllocation.h"
+
+using WebKit::WebGraphicsMemoryAllocation;
 
 namespace cc {
 namespace {
@@ -32,6 +39,8 @@ class TestOutputSurface : public OutputSurface {
     return InitializeAndSetContext3D(new_context3d.Pass(),
                                      scoped_refptr<ContextProvider>());
   }
+
+  using OutputSurface::ReleaseGL;
 
   bool HasClientForTesting() {
     return HasClient();
@@ -73,53 +82,6 @@ class TestOutputSurface : public OutputSurface {
   }
 
   base::TimeDelta retroactive_begin_frame_period_;
-};
-
-class FakeOutputSurfaceClient : public OutputSurfaceClient {
- public:
-  FakeOutputSurfaceClient()
-      : begin_frame_count_(0),
-        deferred_initialize_result_(true),
-        deferred_initialize_called_(false),
-        did_lose_output_surface_called_(false) {}
-
-  virtual bool DeferredInitialize(
-      scoped_refptr<ContextProvider> offscreen_context_provider) OVERRIDE {
-    deferred_initialize_called_ = true;
-    return deferred_initialize_result_;
-  }
-  virtual void SetNeedsRedrawRect(gfx::Rect damage_rect) OVERRIDE {}
-  virtual void BeginFrame(const BeginFrameArgs& args) OVERRIDE {
-    begin_frame_count_++;
-  }
-  virtual void OnSwapBuffersComplete(const CompositorFrameAck* ack) OVERRIDE {}
-  virtual void DidLoseOutputSurface() OVERRIDE {
-    did_lose_output_surface_called_ = true;
-  }
-  virtual void SetExternalDrawConstraints(const gfx::Transform& transform,
-                                          gfx::Rect viewport) OVERRIDE {}
-
-  int begin_frame_count() {
-    return begin_frame_count_;
-  }
-
-  void set_deferred_initialize_result(bool result) {
-    deferred_initialize_result_ = result;
-  }
-
-  bool deferred_initialize_called() {
-    return deferred_initialize_called_;
-  }
-
-  bool did_lose_output_surface_called() {
-    return did_lose_output_surface_called_;
-  }
-
- private:
-  int begin_frame_count_;
-  bool deferred_initialize_result_;
-  bool deferred_initialize_called_;
-  bool did_lose_output_surface_called_;
 };
 
 TEST(OutputSurfaceTest, ClientPointerIndicatesBindToClientSuccess) {
@@ -197,6 +159,9 @@ TEST_F(InitializeNewContext3D, Success) {
   output_surface_.context3d()->loseContextCHROMIUM(
       GL_GUILTY_CONTEXT_RESET_ARB, GL_INNOCENT_CONTEXT_RESET_ARB);
   EXPECT_TRUE(client_.did_lose_output_surface_called());
+
+  output_surface_.ReleaseGL();
+  EXPECT_FALSE(output_surface_.context3d());
 }
 
 TEST_F(InitializeNewContext3D, Context3dMakeCurrentFails) {
@@ -350,6 +315,56 @@ TEST(OutputSurfaceTest, OptimisticAndRetroactiveBeginFrames) {
   // ...and retroactively triggered by OnSwapBuffersComplete
   output_surface.OnSwapBuffersCompleteForTesting();
   EXPECT_EQ(client.begin_frame_count(), 4);
+}
+
+TEST(OutputSurfaceTest, MemoryAllocation) {
+  scoped_ptr<TestWebGraphicsContext3D> scoped_context =
+      TestWebGraphicsContext3D::Create();
+  TestWebGraphicsContext3D* context = scoped_context.get();
+
+  TestOutputSurface output_surface(
+      scoped_context.PassAs<WebKit::WebGraphicsContext3D>());
+
+  FakeOutputSurfaceClient client;
+  EXPECT_TRUE(output_surface.BindToClient(&client));
+
+  WebGraphicsMemoryAllocation allocation;
+  allocation.suggestHaveBackbuffer = true;
+  allocation.bytesLimitWhenVisible = 1234;
+  allocation.priorityCutoffWhenVisible =
+      WebGraphicsMemoryAllocation::PriorityCutoffAllowVisibleOnly;
+  allocation.bytesLimitWhenNotVisible = 4567;
+  allocation.priorityCutoffWhenNotVisible =
+      WebGraphicsMemoryAllocation::PriorityCutoffAllowNothing;
+
+  context->SetMemoryAllocation(allocation);
+
+  EXPECT_EQ(1234u, client.memory_policy().bytes_limit_when_visible);
+  EXPECT_EQ(ManagedMemoryPolicy::CUTOFF_ALLOW_REQUIRED_ONLY,
+            client.memory_policy().priority_cutoff_when_visible);
+  EXPECT_EQ(4567u, client.memory_policy().bytes_limit_when_not_visible);
+  EXPECT_EQ(ManagedMemoryPolicy::CUTOFF_ALLOW_NOTHING,
+            client.memory_policy().priority_cutoff_when_not_visible);
+  EXPECT_FALSE(client.discard_backbuffer_when_not_visible());
+
+  allocation.suggestHaveBackbuffer = false;
+  context->SetMemoryAllocation(allocation);
+  EXPECT_TRUE(client.discard_backbuffer_when_not_visible());
+
+  allocation.priorityCutoffWhenVisible =
+      WebGraphicsMemoryAllocation::PriorityCutoffAllowEverything;
+  allocation.priorityCutoffWhenNotVisible =
+      WebGraphicsMemoryAllocation::PriorityCutoffAllowVisibleAndNearby;
+  context->SetMemoryAllocation(allocation);
+  EXPECT_EQ(ManagedMemoryPolicy::CUTOFF_ALLOW_EVERYTHING,
+            client.memory_policy().priority_cutoff_when_visible);
+  EXPECT_EQ(ManagedMemoryPolicy::CUTOFF_ALLOW_NICE_TO_HAVE,
+            client.memory_policy().priority_cutoff_when_not_visible);
+
+  // 0 bytes limit should be ignored.
+  allocation.bytesLimitWhenVisible = 0;
+  context->SetMemoryAllocation(allocation);
+  EXPECT_EQ(1234u, client.memory_policy().bytes_limit_when_visible);
 }
 
 }  // namespace

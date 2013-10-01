@@ -196,7 +196,7 @@ TEST_F(ExtensionInstallViewControllerTest, BasicsInline) {
   // No warnings should trigger skinny prompt.
   ExtensionInstallPrompt::Prompt inline_prompt(
       ExtensionInstallPrompt::INLINE_INSTALL_PROMPT);
-  inline_prompt.SetInlineInstallWebstoreData("1,000", 3.5, 200);
+  inline_prompt.SetInlineInstallWebstoreData("1,000", true, 3.5, 200);
   inline_prompt.set_extension(extension_.get());
   inline_prompt.set_icon(chrome::LoadInstallPromptIcon());
 
@@ -251,7 +251,7 @@ TEST_F(ExtensionInstallViewControllerTest, OAuthIssues) {
   chrome::MockExtensionInstallPromptDelegate delegate;
 
   ExtensionInstallPrompt::Prompt prompt =
-      chrome::BuildExtensionInstallPrompt(extension_);
+      chrome::BuildExtensionInstallPrompt(extension_.get());
   std::vector<string16> permissions;
   permissions.push_back(UTF8ToUTF16("warning 1"));
   prompt.SetPermissions(permissions);

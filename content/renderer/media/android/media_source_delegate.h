@@ -9,7 +9,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
+#include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
 #include "media/base/decryptor.h"
 #include "media/base/demuxer.h"
 #include "media/base/media_keys.h"
@@ -21,8 +22,10 @@
 namespace media {
 class ChunkDemuxer;
 class DecoderBuffer;
+class DecryptingDemuxerStream;
 class DemuxerStream;
 class MediaLog;
+struct MediaPlayerHostMsg_DemuxerReady_Params;
 struct MediaPlayerHostMsg_ReadFromDemuxerAck_Params;
 }
 
@@ -47,14 +50,18 @@ class MediaSourceDelegate : public media::DemuxerHost {
 
   MediaSourceDelegate(WebMediaPlayerProxyAndroid* proxy,
                       int player_id,
+                      const scoped_refptr<base::MessageLoopProxy>& media_loop,
                       media::MediaLog* media_log);
+
   // Initialize the MediaSourceDelegate. |media_source| will be owned by
   // this object after this call.
   void InitializeMediaSource(
       WebKit::WebMediaSource* media_source,
       const media::NeedKeyCB& need_key_cb,
+      const media::SetDecryptorReadyCB& set_decryptor_ready_cb,
       const UpdateNetworkStateCB& update_network_state_cb,
       const DurationChangeCB& duration_change_cb);
+
 #if defined(GOOGLE_TV)
   void InitializeMediaStream(
       media::Demuxer* demuxer,
@@ -67,15 +74,15 @@ class MediaSourceDelegate : public media::DemuxerHost {
   size_t AudioDecodedByteCount() const;
   size_t VideoDecodedByteCount() const;
 
-  void Seek(base::TimeDelta time);
-
-  void CancelPendingSeek();
+  // Seeks the demuxer and acknowledges the seek request with |seek_request_id|
+  // after the seek has been completed. This method can be called during pending
+  // seeks, in which case only the last seek request will be acknowledged.
+  void Seek(base::TimeDelta time, unsigned seek_request_id);
 
   void NotifyKeyAdded(const std::string& key_system);
 
   // Called when DemuxerStreamPlayer needs to read data from ChunkDemuxer.
-  // If it's the first request after the seek, |seek_done| will be true.
-  void OnReadFromDemuxer(media::DemuxerStream::Type type, bool seek_done);
+  void OnReadFromDemuxer(media::DemuxerStream::Type type);
 
   // Called when the player needs the new config data from ChunkDemuxer.
   void OnMediaConfigRequest();
@@ -84,6 +91,13 @@ class MediaSourceDelegate : public media::DemuxerHost {
   void Destroy();
 
  private:
+  typedef base::Callback<void(
+      scoped_ptr<media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params> params)>
+          ReadFromDemuxerAckCB;
+  typedef base::Callback<void(
+      scoped_ptr<media::MediaPlayerHostMsg_DemuxerReady_Params> params)>
+          DemuxerReadyCB;
+
   // This is private to enforce use of the Destroyer.
   virtual ~MediaSourceDelegate();
 
@@ -95,8 +109,33 @@ class MediaSourceDelegate : public media::DemuxerHost {
   virtual void SetDuration(base::TimeDelta duration) OVERRIDE;
   virtual void OnDemuxerError(media::PipelineStatus status) OVERRIDE;
 
-  // Callbacks for ChunkDemuxer.
+  // Callback for ChunkDemuxer initialization.
   void OnDemuxerInitDone(media::PipelineStatus status);
+
+  // Initializes DecryptingDemuxerStreams if audio/video stream is encrypted.
+  void InitAudioDecryptingDemuxerStream();
+  void InitVideoDecryptingDemuxerStream();
+
+  // Callbacks for DecryptingDemuxerStream::Initialize().
+  void OnAudioDecryptingDemuxerStreamInitDone(media::PipelineStatus status);
+  void OnVideoDecryptingDemuxerStreamInitDone(media::PipelineStatus status);
+
+  // Callback for Demuxer seek. It will call ResetAudioDecryptingDemuxerStream()
+  // as part of the reset callback chain.
+  void OnDemuxerSeekDone(unsigned seek_request_id,
+                         media::PipelineStatus status);
+
+  // Resets AudioDecryptingDemuxerStream if it exists. Then it will call
+  // ResetVideoDecryptingDemuxerStream() as part of the reset callback chain.
+  void ResetAudioDecryptingDemuxerStream();
+
+  // Resets VideoDecryptingDemuxerStream if it exists. Then it will call
+  // SendSeekRequestAck() as part of the reset callback chain.
+  void ResetVideoDecryptingDemuxerStream();
+
+  // Sends SeekRequestAck to the browser.
+  void SendSeekRequestAck();
+
   void OnDemuxerStopDone();
   void OnDemuxerOpened();
   void OnNeedKey(const std::string& type,
@@ -106,26 +145,56 @@ class MediaSourceDelegate : public media::DemuxerHost {
   scoped_ptr<media::TextTrack> OnAddTextTrack(media::TextKind kind,
                                               const std::string& label,
                                               const std::string& language);
-  void NotifyDemuxerReady(const std::string& key_system);
+  void NotifyDemuxerReady();
   bool CanNotifyDemuxerReady();
+  void SendDemuxerReady(
+      scoped_ptr<media::MediaPlayerHostMsg_DemuxerReady_Params> params);
 
+  void StopDemuxer();
+  void InitializeDemuxer();
+  void SeekInternal(base::TimeDelta time, unsigned seek_request_id);
+  void OnReadFromDemuxerInternal(media::DemuxerStream::Type type);
   // Reads an access unit from the demuxer stream |stream| and stores it in
   // the |index|th access unit in |params|.
   void ReadFromDemuxerStream(
-      media::DemuxerStream* stream,
-      media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params* params,
+      media::DemuxerStream::Type type,
+      scoped_ptr<media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params> params,
       size_t index);
   void OnBufferReady(
-      media::DemuxerStream* stream,
-      media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params* params,
+      media::DemuxerStream::Type type,
+      scoped_ptr<media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params> params,
       size_t index,
       media::DemuxerStream::Status status,
       const scoped_refptr<media::DecoderBuffer>& buffer);
 
+  void SendReadFromDemuxerAck(
+      scoped_ptr<media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params> params);
+
   // Helper function for calculating duration.
   int GetDurationMs();
 
-  base::WeakPtrFactory<MediaSourceDelegate> weak_this_;
+  bool HasEncryptedStream();
+
+  void SetSeeking(bool seeking);
+  bool IsSeeking() const;
+
+  // Weak pointer must be dereferenced and invalidated on the same thread.
+  base::WeakPtrFactory<MediaSourceDelegate> main_weak_this_;
+  base::WeakPtrFactory<MediaSourceDelegate> media_weak_this_;
+
+  // Message loop for main renderer thread.
+  const scoped_refptr<base::MessageLoopProxy> main_loop_;
+#if defined(GOOGLE_TV)
+  // Message loop for the media thread.
+  // When there is high load in the render thread, the reading from |demuxer_|
+  // and its read-callback loops run very slowly.  To improve the response time
+  // of the readings, we run tasks related to |demuxer_| in the media thread.
+  const scoped_refptr<base::MessageLoopProxy> media_loop_;
+
+  ReadFromDemuxerAckCB send_read_from_demuxer_ack_cb_;
+  base::Closure send_seek_request_ack_cb_;
+  DemuxerReadyCB send_demuxer_ready_cb_;
+#endif
 
   WebMediaPlayerProxyAndroid* proxy_;
   int player_id_;
@@ -137,6 +206,15 @@ class MediaSourceDelegate : public media::DemuxerHost {
   scoped_ptr<media::ChunkDemuxer> chunk_demuxer_;
   scoped_ptr<WebKit::WebMediaSource> media_source_;
   media::Demuxer* demuxer_;
+  bool is_demuxer_ready_;
+
+  media::SetDecryptorReadyCB set_decryptor_ready_cb_;
+
+  scoped_ptr<media::DecryptingDemuxerStream> audio_decrypting_demuxer_stream_;
+  scoped_ptr<media::DecryptingDemuxerStream> video_decrypting_demuxer_stream_;
+
+  media::DemuxerStream* audio_stream_;
+  media::DemuxerStream* video_stream_;
 
   media::PipelineStatistics statistics_;
   media::Ranges<base::TimeDelta> buffered_time_ranges_;
@@ -153,11 +231,16 @@ class MediaSourceDelegate : public media::DemuxerHost {
   // through GenerateKeyRequest() directly from WebKit.
   std::string init_data_type_;
 
-  scoped_ptr<media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params> audio_params_;
-  scoped_ptr<media::MediaPlayerHostMsg_ReadFromDemuxerAck_Params> video_params_;
-
+  // Lock used to serialize access for |seeking_|.
+  mutable base::Lock seeking_lock_;
   bool seeking_;
+
+  base::TimeDelta last_seek_time_;
+  unsigned last_seek_request_id_;
+
   bool key_added_;
+  std::string key_system_;
+
   size_t access_unit_size_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaSourceDelegate);

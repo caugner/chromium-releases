@@ -4,16 +4,18 @@
 
 #include "chrome/browser/chromeos/policy/network_configuration_updater_impl_cros.h"
 
+#include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/policy_service_impl.h"
-#include "chromeos/network/mock_certificate_handler.h"
+#include "chromeos/network/onc/mock_certificate_importer.h"
 #include "chromeos/network/onc/onc_constants.h"
 #include "chromeos/network/onc/onc_test_utils.h"
 #include "chromeos/network/onc/onc_utils.h"
@@ -77,6 +79,11 @@ ACTION_P(SetCertificateList, list) {
   return true;
 }
 
+ACTION_P(SetImportedCerts, map) {
+  *arg3 = map;
+  return true;
+}
+
 }  // namespace
 
 // Tests of NetworkConfigurationUpdaterImplCros
@@ -100,20 +107,20 @@ class NetworkConfigurationUpdaterTest : public testing::Test {
     scoped_ptr<base::DictionaryValue> fake_toplevel_onc =
         onc::ReadDictionaryFromJson(kFakeONC);
 
-    base::Value* network_configs_value = NULL;
+    scoped_ptr<base::Value> network_configs_value;
     base::ListValue* network_configs = NULL;
     fake_toplevel_onc->RemoveWithoutPathExpansion(
         onc::toplevel_config::kNetworkConfigurations,
         &network_configs_value);
-    network_configs_value->GetAsList(&network_configs);
+    network_configs_value.release()->GetAsList(&network_configs);
     fake_network_configs_.reset(network_configs);
 
-    base::Value* certs_value = NULL;
+    scoped_ptr<base::Value> certs_value;
     base::ListValue* certs = NULL;
     fake_toplevel_onc->RemoveWithoutPathExpansion(
         onc::toplevel_config::kCertificates,
         &certs_value);
-    certs_value->GetAsList(&certs);
+    certs_value.release()->GetAsList(&certs);
     fake_certificates_.reset(certs);
   }
 
@@ -166,23 +173,24 @@ TEST_F(NetworkConfigurationUpdaterTest, PolicyIsValidatedAndRepaired) {
 
   PolicyMap policy;
   policy.Set(key::kOpenNetworkConfiguration, POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER, Value::CreateStringValue(onc_policy));
+             POLICY_SCOPE_USER, Value::CreateStringValue(onc_policy), NULL);
   UpdateProviderPolicy(policy);
 
   EXPECT_CALL(network_library_, AddNetworkProfileObserver(_));
 
   // Ignore the device policy update.
   EXPECT_CALL(network_library_, LoadOncNetworks(_, _));
-  StrictMock<chromeos::MockCertificateHandler>* certificate_handler =
-      new StrictMock<chromeos::MockCertificateHandler>();
-  EXPECT_CALL(*certificate_handler, ImportCertificates(_, _, _));
+  StrictMock<chromeos::onc::MockCertificateImporter>* certificate_importer =
+      new StrictMock<chromeos::onc::MockCertificateImporter>();
+  EXPECT_CALL(*certificate_importer, ImportCertificates(_, _, _));
 
   NetworkConfigurationUpdaterImplCros updater(
       policy_service_.get(),
       &network_library_,
-      make_scoped_ptr<chromeos::CertificateHandler>(certificate_handler));
+      make_scoped_ptr<chromeos::onc::CertificateImporter>(
+          certificate_importer));
   Mock::VerifyAndClearExpectations(&network_library_);
-  Mock::VerifyAndClearExpectations(&certificate_handler);
+  Mock::VerifyAndClearExpectations(&certificate_importer);
 
   // After the user policy is initialized, we always push both policies to the
   // NetworkLibrary. Ignore the device policy.
@@ -191,7 +199,12 @@ TEST_F(NetworkConfigurationUpdaterTest, PolicyIsValidatedAndRepaired) {
   EXPECT_CALL(network_library_, LoadOncNetworks(
       IsEqualTo(network_configs_repaired),
       onc::ONC_SOURCE_USER_POLICY));
-  EXPECT_CALL(*certificate_handler, ImportCertificates(_, _, _)).Times(2);
+  EXPECT_CALL(*certificate_importer,
+              ImportCertificates(_, chromeos::onc::ONC_SOURCE_DEVICE_POLICY,
+                                 _));
+  EXPECT_CALL(*certificate_importer,
+              ImportCertificates(_, chromeos::onc::ONC_SOURCE_USER_POLICY,
+                                 _));
 
   EXPECT_CALL(network_library_, RemoveNetworkProfileObserver(_));
 
@@ -207,7 +220,7 @@ class NetworkConfigurationUpdaterTestWithParam
 TEST_P(NetworkConfigurationUpdaterTestWithParam, InitialUpdates) {
   PolicyMap policy;
   policy.Set(GetParam(), POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             Value::CreateStringValue(kFakeONC));
+             Value::CreateStringValue(kFakeONC), NULL);
   UpdateProviderPolicy(policy);
 
   EXPECT_CALL(network_library_, AddNetworkProfileObserver(_));
@@ -232,28 +245,29 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam, InitialUpdates) {
 
   EXPECT_CALL(network_library_, LoadOncNetworks(
       IsEqualTo(device_networks), onc::ONC_SOURCE_DEVICE_POLICY));
-  StrictMock<chromeos::MockCertificateHandler>* certificate_handler =
-      new StrictMock<chromeos::MockCertificateHandler>();
-  EXPECT_CALL(*certificate_handler, ImportCertificates(
+  StrictMock<chromeos::onc::MockCertificateImporter>* certificate_importer =
+      new StrictMock<chromeos::onc::MockCertificateImporter>();
+  EXPECT_CALL(*certificate_importer, ImportCertificates(
       IsEqualTo(device_certs), onc::ONC_SOURCE_DEVICE_POLICY, _));
 
   NetworkConfigurationUpdaterImplCros updater(
       policy_service_.get(),
       &network_library_,
-      make_scoped_ptr<chromeos::CertificateHandler>(certificate_handler));
+      make_scoped_ptr<chromeos::onc::CertificateImporter>(
+          certificate_importer));
   Mock::VerifyAndClearExpectations(&network_library_);
-  Mock::VerifyAndClearExpectations(&certificate_handler);
+  Mock::VerifyAndClearExpectations(&certificate_importer);
 
   // After the user policy is initialized, we always push both policies to the
   // NetworkLibrary.
   EXPECT_CALL(network_library_, LoadOncNetworks(
       IsEqualTo(device_networks), onc::ONC_SOURCE_DEVICE_POLICY));
-  EXPECT_CALL(*certificate_handler, ImportCertificates(
+  EXPECT_CALL(*certificate_importer, ImportCertificates(
       IsEqualTo(device_certs), onc::ONC_SOURCE_DEVICE_POLICY, _));
 
   EXPECT_CALL(network_library_, LoadOncNetworks(
       IsEqualTo(user_networks), onc::ONC_SOURCE_USER_POLICY));
-  EXPECT_CALL(*certificate_handler, ImportCertificates(
+  EXPECT_CALL(*certificate_importer, ImportCertificates(
       IsEqualTo(user_certs), onc::ONC_SOURCE_USER_POLICY, _));
 
   EXPECT_CALL(network_library_, RemoveNetworkProfileObserver(_));
@@ -277,14 +291,15 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam,
   ASSERT_EQ(1u, cert_list.size());
 
   EXPECT_CALL(network_library_, LoadOncNetworks(_, _)).Times(AnyNumber());
-  StrictMock<chromeos::MockCertificateHandler>* certificate_handler =
-      new StrictMock<chromeos::MockCertificateHandler>();
-  EXPECT_CALL(*certificate_handler, ImportCertificates(_, _, _))
+  StrictMock<chromeos::onc::MockCertificateImporter>* certificate_importer =
+      new StrictMock<chromeos::onc::MockCertificateImporter>();
+  EXPECT_CALL(*certificate_importer, ImportCertificates(_, _, _))
       .WillRepeatedly(SetCertificateList(empty_cert_list));
   NetworkConfigurationUpdaterImplCros updater(
       policy_service_.get(),
       &network_library_,
-      make_scoped_ptr<chromeos::CertificateHandler>(certificate_handler));
+      make_scoped_ptr<chromeos::onc::CertificateImporter>(
+          certificate_importer));
   net::CertTrustAnchorProvider* trust_provider =
       updater.GetCertTrustAnchorProvider();
   ASSERT_TRUE(trust_provider);
@@ -296,17 +311,17 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam,
   updater.SetUserPolicyService(false, "hash", policy_service_.get());
   content::RunAllPendingInMessageLoop(content::BrowserThread::IO);
   Mock::VerifyAndClearExpectations(&network_library_);
-  Mock::VerifyAndClearExpectations(&certificate_handler);
+  Mock::VerifyAndClearExpectations(&certificate_importer);
   EXPECT_TRUE(trust_provider->GetAdditionalTrustAnchors().empty());
 
   // Certificates with the "Web" trust flag set should be forwarded to the
   // trust provider.
   EXPECT_CALL(network_library_, LoadOncNetworks(_, _));
-  EXPECT_CALL(*certificate_handler, ImportCertificates(_, _, _))
+  EXPECT_CALL(*certificate_importer, ImportCertificates(_, _, _))
       .WillRepeatedly(SetCertificateList(empty_cert_list));
   onc::ONCSource current_source = NameToONCSource(GetParam());
   EXPECT_CALL(network_library_, LoadOncNetworks(_, current_source));
-  EXPECT_CALL(*certificate_handler, ImportCertificates(_, current_source, _))
+  EXPECT_CALL(*certificate_importer, ImportCertificates(_, current_source, _))
       .WillRepeatedly(SetCertificateList(cert_list));
   // Trigger a new policy load, and spin the IO message loop to pass the
   // certificates to the |trust_provider| on the IO thread.
@@ -314,7 +329,7 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam,
   base::RunLoop loop;
   loop.RunUntilIdle();
   Mock::VerifyAndClearExpectations(&network_library_);
-  Mock::VerifyAndClearExpectations(&certificate_handler);
+  Mock::VerifyAndClearExpectations(&certificate_importer);
 
   // Certificates are only provided as trust anchors if they come from user
   // policy.
@@ -334,46 +349,47 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam, PolicyChange) {
   // Ignore the initial updates.
   EXPECT_CALL(network_library_, LoadOncNetworks(_, _))
       .Times(AnyNumber());
-  StrictMock<chromeos::MockCertificateHandler>* certificate_handler =
-      new StrictMock<chromeos::MockCertificateHandler>();
-  EXPECT_CALL(*certificate_handler, ImportCertificates(_, _, _))
+  StrictMock<chromeos::onc::MockCertificateImporter>* certificate_importer =
+      new StrictMock<chromeos::onc::MockCertificateImporter>();
+  EXPECT_CALL(*certificate_importer, ImportCertificates(_, _, _))
       .Times(AnyNumber());
   NetworkConfigurationUpdaterImplCros updater(
       policy_service_.get(),
       &network_library_,
-      make_scoped_ptr<chromeos::CertificateHandler>(certificate_handler));
+      make_scoped_ptr<chromeos::onc::CertificateImporter>(
+          certificate_importer));
   updater.SetUserPolicyService(false, "hash", policy_service_.get());
   Mock::VerifyAndClearExpectations(&network_library_);
-  Mock::VerifyAndClearExpectations(&certificate_handler);
+  Mock::VerifyAndClearExpectations(&certificate_importer);
 
   // We should update if policy changes.
   EXPECT_CALL(network_library_, LoadOncNetworks(
       IsEqualTo(fake_network_configs_.get()), NameToONCSource(GetParam())));
-  EXPECT_CALL(*certificate_handler, ImportCertificates(
+  EXPECT_CALL(*certificate_importer, ImportCertificates(
       IsEqualTo(fake_certificates_.get()), NameToONCSource(GetParam()), _));
 
   // In the current implementation, we always apply both policies.
   EXPECT_CALL(network_library_, LoadOncNetworks(
       IsEqualTo(empty_network_configs_.get()),
       Ne(NameToONCSource(GetParam()))));
-  EXPECT_CALL(*certificate_handler, ImportCertificates(
+  EXPECT_CALL(*certificate_importer, ImportCertificates(
       IsEqualTo(empty_certificates_.get()),
       Ne(NameToONCSource(GetParam())),
       _));
 
   PolicyMap policy;
   policy.Set(GetParam(), POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             Value::CreateStringValue(kFakeONC));
+             Value::CreateStringValue(kFakeONC), NULL);
   UpdateProviderPolicy(policy);
   Mock::VerifyAndClearExpectations(&network_library_);
-  Mock::VerifyAndClearExpectations(&certificate_handler);
+  Mock::VerifyAndClearExpectations(&certificate_importer);
 
   // Another update is expected if the policy goes away. In the current
   // implementation, we always apply both policies.
   EXPECT_CALL(network_library_, LoadOncNetworks(
       IsEqualTo(empty_network_configs_.get()),
       onc::ONC_SOURCE_DEVICE_POLICY));
-  EXPECT_CALL(*certificate_handler, ImportCertificates(
+  EXPECT_CALL(*certificate_importer, ImportCertificates(
       IsEqualTo(empty_certificates_.get()),
       onc::ONC_SOURCE_DEVICE_POLICY,
       _));
@@ -381,7 +397,7 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam, PolicyChange) {
   EXPECT_CALL(network_library_, LoadOncNetworks(
       IsEqualTo(empty_network_configs_.get()),
       onc::ONC_SOURCE_USER_POLICY));
-  EXPECT_CALL(*certificate_handler, ImportCertificates(
+  EXPECT_CALL(*certificate_importer, ImportCertificates(
       IsEqualTo(empty_certificates_.get()),
       onc::ONC_SOURCE_USER_POLICY,
       _));

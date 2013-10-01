@@ -8,7 +8,7 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/prefs/pref_registry_simple.h"
-#include "base/process_util.h"
+#include "base/process/process_metrics.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
@@ -41,7 +41,7 @@
 #include "content/public/common/result_codes.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_resources.h"
-#include "third_party/icu/public/i18n/unicode/coll.h"
+#include "third_party/icu/source/i18n/unicode/coll.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/bytes_formatting.h"
@@ -107,6 +107,7 @@ bool IsSharedByGroup(int col_id) {
     case IDS_TASK_MANAGER_CPU_COLUMN:
     case IDS_TASK_MANAGER_PROCESS_ID_COLUMN:
     case IDS_TASK_MANAGER_JAVASCRIPT_MEMORY_ALLOCATED_COLUMN:
+    case IDS_TASK_MANAGER_VIDEO_MEMORY_COLUMN:
     case IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN:
     case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
     case IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN:
@@ -503,9 +504,7 @@ string16 TaskManagerModel::GetResourceVideoMemory(int index) const {
   if (!GetVideoMemory(index, &video_memory, &has_duplicates) || !video_memory)
     return ASCIIToUTF16("N/A");
   if (has_duplicates) {
-    return ASCIIToUTF16("(") +
-        GetMemCellText(video_memory) +
-        ASCIIToUTF16(")");
+    return GetMemCellText(video_memory) + ASCIIToUTF16("*");
   }
   return GetMemCellText(video_memory);
 }

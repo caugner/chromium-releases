@@ -8,7 +8,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "chrome/browser/ui/user_data_dir_dialog.h"
 #include "chrome/browser/user_data_dir_extractor.h"
 #include "chrome/common/chrome_paths.h"
@@ -45,7 +45,7 @@ base::FilePath GetUserDataDir(const content::MainFunctionParams& parameters) {
   // prompt the user to pick a different directory, and restart chrome with
   // the new dir.
   // http://code.google.com/p/chromium/issues/detail?id=11510
-  if (!file_util::PathExists(user_data_dir)) {
+  if (!base::PathExists(user_data_dir)) {
 #if defined(USE_AURA)
     // TODO(beng):
     NOTIMPLEMENTED();

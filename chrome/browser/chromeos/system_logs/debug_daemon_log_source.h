@@ -10,14 +10,14 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/system_logs/system_logs_fetcher.h"
+#include "chrome/browser/chromeos/system_logs/system_logs_fetcher_base.h"
 
 namespace chromeos {
 
 // Gathers log data from Debug Daemon.
 class DebugDaemonLogSource : public SystemLogsSource {
  public:
-  DebugDaemonLogSource();
+  explicit DebugDaemonLogSource(bool scrub);
   virtual ~DebugDaemonLogSource();
 
   // SystemLogsSource override:
@@ -33,6 +33,7 @@ class DebugDaemonLogSource : public SystemLogsSource {
   void OnGetRoutes(bool succeeded, const std::vector<std::string>& routes);
   void OnGetNetworkStatus(bool succeeded, const std::string& status);
   void OnGetModemStatus(bool succeeded, const std::string& status);
+  void OnGetWiMaxStatus(bool succeeded, const std::string& status);
   void OnGetLogs(bool succeeded,
                  const KeyValueMap& logs);
   void OnGetUserLogFiles(bool succeeded,
@@ -48,6 +49,7 @@ class DebugDaemonLogSource : public SystemLogsSource {
   scoped_ptr<SystemLogsResponse> response_;
   SysLogsSourceCallback callback_;
   int num_pending_requests_;
+  bool scrub_;
   base::WeakPtrFactory<DebugDaemonLogSource> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DebugDaemonLogSource);

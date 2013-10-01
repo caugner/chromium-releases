@@ -29,8 +29,8 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
-#include "base/time.h"
+#include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
 
 #include "gpu/tools/compositor_model_bench/render_model_utils.h"
 #include "gpu/tools/compositor_model_bench/render_models.h"
@@ -39,9 +39,9 @@
 
 using base::TimeTicks;
 using file_util::CloseFile;
-using file_util::DirectoryExists;
+using base::DirectoryExists;
 using file_util::OpenFile;
-using file_util::PathExists;
+using base::PathExists;
 using std::queue;
 using std::string;
 

@@ -7,7 +7,7 @@
 
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/aura/window_observer.h"
@@ -72,10 +72,6 @@ class ImmersiveModeControllerAsh : public ImmersiveModeController,
       const gfx::Size& top_container_size) const OVERRIDE;
   virtual ImmersiveRevealedLock* GetRevealedLock(
       AnimateReveal animate_reveal) OVERRIDE WARN_UNUSED_RESULT;
-  virtual void AnchorWidgetToTopContainer(views::Widget* widget,
-                                          int y_offset) OVERRIDE;
-  virtual void UnanchorWidgetFromTopContainer(views::Widget* widget) OVERRIDE;
-  virtual void OnTopContainerBoundsChanged() OVERRIDE;
   virtual void OnFindBarVisibleBoundsChanged(
       const gfx::Rect& new_visible_bounds_in_screen) OVERRIDE;
 
@@ -108,8 +104,10 @@ class ImmersiveModeControllerAsh : public ImmersiveModeController,
   virtual void OnWindowPropertyChanged(aura::Window* window,
                                        const void* key,
                                        intptr_t old) OVERRIDE;
-  virtual void OnWindowAddedToRootWindow(aura::Window* window) OVERRIDE;
-  virtual void OnWindowRemovingFromRootWindow(aura::Window* window) OVERRIDE;
+  virtual void OnAddTransientChild(aura::Window* window,
+                                   aura::Window* transient) OVERRIDE;
+  virtual void OnRemoveTransientChild(aura::Window* window,
+                                      aura::Window* transient) OVERRIDE;
 
   // Testing interface.
   void SetForceHideTabIndicatorsForTest(bool force);
@@ -120,6 +118,10 @@ class ImmersiveModeControllerAsh : public ImmersiveModeController,
  private:
   friend class ImmersiveModeControllerAshTest;
 
+  enum AllowRevealWhileClosing {
+    ALLOW_REVEAL_WHILE_CLOSING_YES,
+    ALLOW_REVEAL_WHILE_CLOSING_NO
+  };
   enum Animate {
     ANIMATE_NO,
     ANIMATE_SLOW,
@@ -158,7 +160,12 @@ class ImmersiveModeControllerAsh : public ImmersiveModeController,
   // Updates |located_event_revealed_lock_| based on the current mouse state and
   // the current touch state.
   // |event| is NULL if the source event is not known.
-  void UpdateLocatedEventRevealedLock(ui::LocatedEvent* event);
+  // |allow_reveal_while_closing| indicates whether the mouse and touch
+  // are allowed to initiate a reveal while the top-of-window views are sliding
+  // closed.
+  void UpdateLocatedEventRevealedLock(
+      ui::LocatedEvent* event,
+      AllowRevealWhileClosing allow_reveal_while_closing);
 
   // Acquires |located_event_revealed_lock_| if it is not already held.
   void AcquireLocatedEventRevealedLock();
@@ -213,17 +220,30 @@ class ImmersiveModeControllerAsh : public ImmersiveModeController,
   // Returns the type of swipe given |event|.
   SwipeType GetSwipeType(ui::GestureEvent* event) const;
 
+  // Returns true if a mouse event at |location_in_screen| should be ignored.
+  // Ignored mouse events should not contribute to revealing or unrevealing the
+  // top-of-window views.
+  bool ShouldIgnoreMouseEventAtLocation(
+      const gfx::Point& location_in_screen) const;
+
   // True when |location| is "near" to the top container. When the top container
   // is not closed "near" means within the displayed bounds or above it. When
   // the top container is closed "near" means either within the displayed
   // bounds, above it, or within a few pixels below it. This allow the container
   // to steal enough pixels to detect a swipe in and handles the case that there
   // is a bezel sensor above the top container.
-  bool ShouldHandleEvent(const gfx::Point& location) const;
+  bool ShouldHandleGestureEvent(const gfx::Point& location) const;
 
-  // Call Add/RemovePreTargerHandler since either the RootWindow has changed or
-  // the enabled state of observing has changed.
-  void UpdatePreTargetHandler();
+  // Recreate |bubble_manager_| and start observing any bubbles anchored to a
+  // child of |top_container_|.
+  void RecreateBubbleManager();
+
+  // Shrinks or expands the touch hit test by updating insets for the render
+  // window depending on if top_inset is positive or negative respectively.
+  // Used to ensure that touch events at the top of the screen go to the top
+  // container so a slide gesture can be generated when the content window is
+  // consuming all touch events sent to it.
+  void SetRenderWindowTopInsetsForTouch(int top_inset);
 
   // Injected dependencies. Not owned.
   Delegate* delegate_;
@@ -248,9 +268,9 @@ class ImmersiveModeControllerAsh : public ImmersiveModeController,
   // Timer to track cursor being held at the top edge of the screen.
   base::OneShotTimer<ImmersiveModeController> top_edge_hover_timer_;
 
-  // The cursor x position in root coordinates when the cursor first hit
-  // the top edge of the screen.
-  int mouse_x_when_hit_top_;
+  // The cursor x position in screen coordinates when the cursor first hit the
+  // top edge of the screen.
+  int mouse_x_when_hit_top_in_screen_;
 
   // Tracks if the controller has seen a ET_GESTURE_SCROLL_BEGIN, without the
   // following events.
@@ -280,9 +300,9 @@ class ImmersiveModeControllerAsh : public ImmersiveModeController,
   // Whether the animations are disabled for testing.
   bool animations_disabled_for_test_;
 
-  // Manages widgets which are anchored to the top-of-window views.
-  class AnchoredWidgetManager;
-  scoped_ptr<AnchoredWidgetManager> anchored_widget_manager_;
+  // Manages bubbles which are anchored to a child of |top_container_|.
+  class BubbleManager;
+  scoped_ptr<BubbleManager> bubble_manager_;
 
   content::NotificationRegistrar registrar_;
 

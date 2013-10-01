@@ -11,8 +11,11 @@
 #include "base/files/file_path.h"
 #include "base/platform_file.h"
 #include "base/strings/string16.h"
+#include "base/tuple.h"
 #include "base/values.h"
 #include "chrome/common/extensions/update_manifest.h"
+#include "chrome/common/media_galleries/itunes_library.h"
+#include "chrome/common/media_galleries/picasa_types.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
@@ -22,6 +25,13 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 
 #define IPC_MESSAGE_START ChromeUtilityMsgStart
+
+#ifndef CHROME_COMMON_CHROME_UTILITY_MESSAGES_H_
+#define CHROME_COMMON_CHROME_UTILITY_MESSAGES_H_
+
+typedef std::vector<Tuple2<SkBitmap, base::FilePath> > DecodedImages;
+
+#endif  // CHROME_COMMON_CHROME_UTILITY_MESSAGES_H_
 
 IPC_STRUCT_TRAITS_BEGIN(printing::PageRange)
   IPC_STRUCT_TRAITS_MEMBER(from)
@@ -52,6 +62,35 @@ IPC_STRUCT_TRAITS_BEGIN(safe_browsing::zip_analyzer::Results)
   IPC_STRUCT_TRAITS_MEMBER(success)
   IPC_STRUCT_TRAITS_MEMBER(has_executable)
   IPC_STRUCT_TRAITS_MEMBER(has_archive)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(itunes::parser::Track)
+  IPC_STRUCT_TRAITS_MEMBER(id)
+  IPC_STRUCT_TRAITS_MEMBER(location)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(picasa::AlbumInfo)
+  IPC_STRUCT_TRAITS_MEMBER(name)
+  IPC_STRUCT_TRAITS_MEMBER(timestamp)
+  IPC_STRUCT_TRAITS_MEMBER(uid)
+  IPC_STRUCT_TRAITS_MEMBER(path)
+IPC_STRUCT_TRAITS_END()
+
+// These files are opened read-only. Please see the constructor for
+// picasa::AlbumTableFiles for details.
+IPC_STRUCT_TRAITS_BEGIN(picasa::AlbumTableFilesForTransit)
+  IPC_STRUCT_TRAITS_MEMBER(indicator_file)
+  IPC_STRUCT_TRAITS_MEMBER(category_file)
+  IPC_STRUCT_TRAITS_MEMBER(date_file)
+  IPC_STRUCT_TRAITS_MEMBER(filename_file)
+  IPC_STRUCT_TRAITS_MEMBER(name_file)
+  IPC_STRUCT_TRAITS_MEMBER(token_file)
+  IPC_STRUCT_TRAITS_MEMBER(uid_file)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(picasa::FolderINIContents)
+  IPC_STRUCT_TRAITS_MEMBER(folder_path)
+  IPC_STRUCT_TRAITS_MEMBER(ini_contents)
 IPC_STRUCT_TRAITS_END()
 
 //------------------------------------------------------------------------------
@@ -132,6 +171,34 @@ IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_ParseITunesPrefXml,
                      std::string /* XML to parse */)
 #endif  // defined(OS_WIN)
 
+#if defined(OS_WIN) || defined(OS_MACOSX)
+// Tell the utility process to parse the iTunes library XML file and
+// return the parse result as well as the iTunes library as an itunes::Library.
+IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_ParseITunesLibraryXmlFile,
+                     IPC::PlatformFileForTransit /* XML file to parse */)
+
+// Tells the utility process to parse the Picasa PMP database and return a
+// listing of the user's Picasa albums and folders, along with metadata.
+IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_ParsePicasaPMPDatabase,
+                     picasa::AlbumTableFilesForTransit /* album_table_files */)
+
+// Tells the utility process to index the Picasa user-created Album contents
+// by parsing all the INI files in Picasa Folders.
+IPC_MESSAGE_CONTROL2(ChromeUtilityMsg_IndexPicasaAlbumsContents,
+                     picasa::AlbumUIDSet /* album_uids */,
+                     std::vector<picasa::FolderINIContents> /* folders_inis */)
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+// Tell the utility process to attempt to validate the passed media file. The
+// file will undergo basic sanity checks and will be decoded for up to
+// |milliseconds_of_decoding| wall clock time. It is still not safe to decode
+// the file in the browser process after this check.
+IPC_MESSAGE_CONTROL2(ChromeUtilityMsg_CheckMediaFile,
+                     int64 /* milliseconds_of_decoding */,
+                     IPC::PlatformFileForTransit /* Media file to parse */)
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+
 //------------------------------------------------------------------------------
 // Utility process host messages:
 // These are messages from the utility process to the browser.
@@ -139,8 +206,10 @@ IPC_MESSAGE_CONTROL1(ChromeUtilityMsg_ParseITunesPrefXml,
 // Reply when the utility process is done unpacking an extension.  |manifest|
 // is the parsed manifest.json file.
 // The unpacker should also have written out files containing the decoded
-// images and message catalogs from the extension. See extensions::Unpacker for
-// details.
+// images and message catalogs from the extension. The data is written into a
+// DecodedImages struct into a file named kDecodedImagesFilename in the
+// directory that was passed in. This is done because the data is too large to
+// pass over IPC.
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_UnpackExtension_Succeeded,
                      base::DictionaryValue /* manifest */)
 
@@ -198,7 +267,7 @@ IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ParseJSON_Succeeded,
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ParseJSON_Failed,
                      std::string /* error message, if any*/)
 
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
 // Reply when the utility process has succeeded in obtaining the printer
 // capabilities and defaults.
 IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_GetPrinterCapsAndDefaults_Succeeded,
@@ -233,3 +302,30 @@ IPC_MESSAGE_CONTROL1(
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_GotITunesDirectory,
                      base::FilePath /* Path to iTunes library */)
 #endif  // defined(OS_WIN)
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
+// Reply after parsing the iTunes library XML file with the parser result and
+// an itunes::Library data structure.
+IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_GotITunesLibrary,
+                     bool /* Parser result */,
+                     itunes::parser::Library /* iTunes library */)
+
+// Reply after parsing the Picasa PMP Database with the parser result and a
+// listing of the user's Picasa albums and folders, along with metadata.
+IPC_MESSAGE_CONTROL3(ChromeUtilityHostMsg_ParsePicasaPMPDatabase_Finished,
+                     bool /* parse_success */,
+                     std::vector<picasa::AlbumInfo> /* albums */,
+                     std::vector<picasa::AlbumInfo> /* folders */)
+
+// Reply after indexing the Picasa user-created Album contents by parsing all
+// the INI files in Picasa Folders.
+IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_IndexPicasaAlbumsContents_Finished,
+                     picasa::AlbumImagesMap /* albums_images */)
+#endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+// Reply after checking the passed media file. A true result indicates that
+// the file appears to be a well formed media file.
+IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_CheckMediaFile_Finished,
+                     bool /* passed_checks */)
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)

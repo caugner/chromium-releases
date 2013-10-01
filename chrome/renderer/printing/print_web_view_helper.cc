@@ -10,9 +10,9 @@
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/process_util.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -304,14 +304,16 @@ void ComputeWebKitPrintParamsInDesiredDpi(
                   print_params.desired_dpi);
 }
 
+WebKit::WebPlugin* GetPlugin(const WebKit::WebFrame* frame) {
+  return frame->document().isPluginDocument() ?
+         frame->document().to<WebKit::WebPluginDocument>().plugin() : NULL;
+}
+
 bool PrintingNodeOrPdfFrame(const WebKit::WebFrame* frame,
                             const WebKit::WebNode& node) {
   if (!node.isNull())
     return true;
-  if (!frame->document().isPluginDocument())
-    return false;
-  WebKit::WebPlugin* plugin =
-      frame->document().to<WebKit::WebPluginDocument>().plugin();
+  WebKit::WebPlugin* plugin = GetPlugin(frame);
   return plugin && plugin->supportsPaginatedPrint();
 }
 
@@ -741,13 +743,19 @@ PrintWebViewHelper::PrintWebViewHelper(content::RenderView* render_view)
       is_scripted_printing_blocked_(false),
       notify_browser_of_print_failure_(true),
       print_for_preview_(false),
-      print_node_in_progress_(false) {
+      print_node_in_progress_(false),
+      is_loading_(false),
+      is_scripted_preview_delayed_(false),
+      weak_ptr_factory_(this) {
 }
 
 PrintWebViewHelper::~PrintWebViewHelper() {}
 
 bool PrintWebViewHelper::IsScriptInitiatedPrintAllowed(
     WebKit::WebFrame* frame, bool user_initiated) {
+#if defined(OS_ANDROID)
+  return false;
+#endif  // defined(OS_ANDROID)
   if (is_scripted_printing_blocked_)
     return false;
   // If preview is enabled, then the print dialog is tab modal, and the user
@@ -759,6 +767,15 @@ bool PrintWebViewHelper::IsScriptInitiatedPrintAllowed(
       !user_initiated)
     return !IsScriptInitiatedPrintTooFrequent(frame);
   return true;
+}
+
+void PrintWebViewHelper::DidStartLoading() {
+  is_loading_ = true;
+}
+
+void PrintWebViewHelper::DidStopLoading() {
+  is_loading_ = false;
+  ShowScriptedPrintPreview();
 }
 
 // Prints |frame| which called window.print().
@@ -858,15 +875,15 @@ void PrintWebViewHelper::OnPrintForPrintPreview(
 
 bool PrintWebViewHelper::GetPrintFrame(WebKit::WebFrame** frame) {
   DCHECK(frame);
-  DCHECK(render_view()->GetWebView());
-  if (!render_view()->GetWebView())
+  WebKit::WebView* webView = render_view()->GetWebView();
+  DCHECK(webView);
+  if (!webView)
     return false;
 
   // If the user has selected text in the currently focused frame we print
   // only that frame (this makes print selection work for multiple frames).
-  *frame = render_view()->GetWebView()->focusedFrame()->hasSelection() ?
-      render_view()->GetWebView()->focusedFrame() :
-      render_view()->GetWebView()->mainFrame();
+  WebKit::WebFrame* focusedFrame = webView->focusedFrame();
+  *frame = focusedFrame->hasSelection() ? focusedFrame : webView->mainFrame();
   return true;
 }
 
@@ -1311,7 +1328,7 @@ void PrintWebViewHelper::PrintPages() {
   const PrintMsg_PrintPages_Params& params = *print_pages_params_;
   const PrintMsg_Print_Params& print_params = params.params;
 
-#if !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
   // TODO(vitalybuka): should be page_count or valid pages from params.pages.
   // See http://crbug.com/161576
   Send(new PrintHostMsg_DidGetPrintedPagesCount(routing_id(),
@@ -1664,6 +1681,15 @@ void PrintWebViewHelper::IncrementScriptedPrintCount() {
   last_cancelled_script_print_ = base::Time::Now();
 }
 
+
+void PrintWebViewHelper::ShowScriptedPrintPreview() {
+  if (is_scripted_preview_delayed_) {
+    is_scripted_preview_delayed_ = false;
+    Send(new PrintHostMsg_ShowScriptedPrintPreview(routing_id(),
+            print_preview_context_.IsModifiable()));
+  }
+}
+
 void PrintWebViewHelper::RequestPrintPreview(PrintPreviewRequestType type) {
   const bool is_modifiable = print_preview_context_.IsModifiable();
   const bool has_selection = print_preview_context_.HasSelection();
@@ -1673,10 +1699,27 @@ void PrintWebViewHelper::RequestPrintPreview(PrintPreviewRequestType type) {
   params.has_selection = has_selection;
   switch (type) {
     case PRINT_PREVIEW_SCRIPTED: {
+      // Shows scripted print preview in two stages.
+      // 1. PrintHostMsg_SetupScriptedPrintPreview blocks this call and JS by
+      //    pumping messages here.
+      // 2. PrintHostMsg_ShowScriptedPrintPreview shows preview once the
+      //    document has been loaded.
+      is_scripted_preview_delayed_ = true;
+      if (is_loading_ && GetPlugin(print_preview_context_.source_frame())) {
+        // Wait for DidStopLoading. Plugins may not know the correct
+        // |is_modifiable| value until they are fully loaded, which occurs when
+        // DidStopLoading() is called. Defer showing the preview until then.
+      } else {
+        base::MessageLoop::current()->PostTask(
+            FROM_HERE,
+            base::Bind(&PrintWebViewHelper::ShowScriptedPrintPreview,
+                       weak_ptr_factory_.GetWeakPtr()));
+      }
       IPC::SyncMessage* msg =
-          new PrintHostMsg_ScriptedPrintPreview(routing_id(), is_modifiable);
+          new PrintHostMsg_SetupScriptedPrintPreview(routing_id());
       msg->EnableMessagePumping();
       Send(msg);
+      is_scripted_preview_delayed_ = false;
       return;
     }
     case PRINT_PREVIEW_USER_INITIATED_ENTIRE_FRAME: {

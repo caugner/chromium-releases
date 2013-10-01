@@ -2,17 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "native_client/src/trusted/plugin/local_temp_file.h"
+#include "ppapi/native_client/src/trusted/plugin/local_temp_file.h"
 
 #include "native_client/src/include/portability_io.h"
 #include "native_client/src/shared/platform/nacl_check.h"
-#include "native_client/src/trusted/plugin/plugin.h"
-#include "native_client/src/trusted/plugin/utility.h"
 
 #include "ppapi/c/ppb_file_io.h"
 #include "ppapi/cpp/file_io.h"
 #include "ppapi/cpp/file_ref.h"
 #include "ppapi/cpp/file_system.h"
+
+#include "ppapi/native_client/src/trusted/plugin/plugin.h"
+#include "ppapi/native_client/src/trusted/plugin/utility.h"
 
 //////////////////////////////////////////////////////////////////////
 //  Local temporary file access.
@@ -83,7 +84,7 @@ void LocalTempFile::Initialize() {
       pp::Module::Get()->GetBrowserInterface(PPB_FILEIOTRUSTED_INTERFACE));
   ++next_identifier;
   SNPRINTF(reinterpret_cast<char *>(identifier_), sizeof identifier_,
-           "%"NACL_PRIu32, next_identifier);
+           "%" NACL_PRIu32, next_identifier);
 }
 
 LocalTempFile::~LocalTempFile() {
@@ -115,7 +116,7 @@ void LocalTempFile::OpenWrite(const pp::CompletionCallback& cb) {
 int32_t LocalTempFile::GetFD(int32_t pp_error,
                              const pp::Resource& resource,
                              bool is_writable) {
-  PLUGIN_PRINTF(("LocalTempFile::GetFD (pp_error=%"NACL_PRId32
+  PLUGIN_PRINTF(("LocalTempFile::GetFD (pp_error=%" NACL_PRId32
                  ", is_writable=%d)\n", pp_error, is_writable));
   if (pp_error != PP_OK) {
     PLUGIN_PRINTF(("LocalTempFile::GetFD pp_error != PP_OK\n"));

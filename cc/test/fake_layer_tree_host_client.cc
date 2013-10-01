@@ -17,7 +17,8 @@ FakeLayerTreeHostClient::FakeLayerTreeHostClient(RendererOptions options)
 
 FakeLayerTreeHostClient::~FakeLayerTreeHostClient() {}
 
-scoped_ptr<OutputSurface> FakeLayerTreeHostClient::CreateOutputSurface() {
+scoped_ptr<OutputSurface> FakeLayerTreeHostClient::CreateOutputSurface(
+    bool fallback) {
   if (use_software_rendering_) {
     if (use_delegating_renderer_) {
       return FakeOutputSurface::CreateDelegatingSoftware(
@@ -28,18 +29,10 @@ scoped_ptr<OutputSurface> FakeLayerTreeHostClient::CreateOutputSurface() {
         make_scoped_ptr(new SoftwareOutputDevice)).PassAs<OutputSurface>();
   }
 
-  WebKit::WebGraphicsContext3D::Attributes attrs;
-  if (use_delegating_renderer_) {
-    return FakeOutputSurface::CreateDelegating3d(
-        TestWebGraphicsContext3D::Create(attrs)
-            .PassAs<WebKit::WebGraphicsContext3D>())
-        .PassAs<OutputSurface>();
-  }
+  if (use_delegating_renderer_)
+    return FakeOutputSurface::CreateDelegating3d().PassAs<OutputSurface>();
 
-  return FakeOutputSurface::Create3d(
-      TestWebGraphicsContext3D::Create(attrs)
-          .PassAs<WebKit::WebGraphicsContext3D>())
-      .PassAs<OutputSurface>();
+  return CreateFakeOutputSurface();
 }
 
 scoped_refptr<cc::ContextProvider> FakeLayerTreeHostClient::

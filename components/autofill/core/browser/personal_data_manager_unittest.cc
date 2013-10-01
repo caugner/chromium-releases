@@ -7,10 +7,9 @@
 #include "base/basictypes.h"
 #include "base/guid.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/autofill/core/browser/autofill_common_test.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
@@ -21,11 +20,6 @@
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/webdata/encryptor/encryptor.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
-#include "content/public/test/mock_notification_observer.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -113,8 +107,6 @@ class PersonalDataManagerTest : public testing::Test {
   content::TestBrowserThread db_thread_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<PersonalDataManager> personal_data_;
-  content::NotificationRegistrar registrar_;
-  content::MockNotificationObserver observer_;
   PersonalDataLoadedObserverMock personal_data_observer_;
 };
 
@@ -2140,7 +2132,7 @@ TEST_F(PersonalDataManagerTest, SaveImportedCreditCardWithVerifiedData) {
 
 TEST_F(PersonalDataManagerTest, GetNonEmptyTypes) {
   // Check that there are no available types with no profiles stored.
-  FieldTypeSet non_empty_types;
+  ServerFieldTypeSet non_empty_types;
   personal_data_->GetNonEmptyTypes(&non_empty_types);
   EXPECT_EQ(0U, non_empty_types.size());
 

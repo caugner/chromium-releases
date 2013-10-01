@@ -4,11 +4,11 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/managed_mode/managed_mode_url_filter.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 class ManagedModeURLFilterTest : public ::testing::Test,
                                  public ManagedModeURLFilter::Observer {

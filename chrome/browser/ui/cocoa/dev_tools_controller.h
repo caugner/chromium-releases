@@ -10,6 +10,7 @@
 #include "base/mac/scoped_nsobject.h"
 #include "chrome/browser/devtools/devtools_window.h"
 
+@class FocusTracker;
 @class GraySplitView;
 class Profile;
 
@@ -30,6 +31,8 @@ class WebContents;
   // Docked devtools window instance. NULL when current tab is not inspected
   // or is inspected with undocked version of DevToolsWindow.
   DevToolsWindow* devToolsWindow_;
+
+  base::scoped_nsobject<FocusTracker> focusTracker_;
 }
 
 - (id)init;
@@ -46,9 +49,6 @@ class WebContents;
 // the actual resize).
 - (void)updateDevToolsForWebContents:(content::WebContents*)contents
                          withProfile:(Profile*)profile;
-
-- (CGFloat)topContentOffset;
-- (void)setTopContentOffset:(CGFloat)offset;
 
 @end
 

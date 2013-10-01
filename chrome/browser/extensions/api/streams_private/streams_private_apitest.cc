@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop.h"
+#include "base/command_line.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -14,6 +15,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/mime_types_handler.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -51,7 +53,7 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
   // For relative path "/doc_path.doc", return success response with MIME type
   // "application/msword".
   if (request.relative_url == "/doc_path.doc") {
-    response->set_code(net::test_server::SUCCESS);
+    response->set_code(net::HTTP_OK);
     response->set_content_type("application/msword");
     return response.PassAs<HttpResponse>();
   }
@@ -60,7 +62,7 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
   // MIME type "plain/text" and content "txt content". Also, set content
   // disposition to be attachment.
   if (request.relative_url == "/text_path_attch.txt") {
-    response->set_code(net::test_server::SUCCESS);
+    response->set_code(net::HTTP_OK);
     response->set_content("txt content");
     response->set_content_type("plain/text");
     response->AddCustomHeader("Content-Disposition",
@@ -70,7 +72,7 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
   // For relative path "/test_path_attch.txt", return success response with
   // MIME type "plain/text" and content "txt content".
   if (request.relative_url == "/text_path.txt") {
-    response->set_code(net::test_server::SUCCESS);
+    response->set_code(net::HTTP_OK);
     response->set_content("txt content");
     response->set_content_type("plain/text");
     return response.PassAs<HttpResponse>();
@@ -78,7 +80,7 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
 
   // No other requests should be handled in the tests.
   EXPECT_TRUE(false) << "NOTREACHED!";
-  response->set_code(net::test_server::NOT_FOUND);
+  response->set_code(net::HTTP_NOT_FOUND);
   return response.PassAs<HttpResponse>();
 }
 
@@ -202,6 +204,12 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
 // installed, white-listed extension invokes the extension's
 // onExecuteContentHandler event (and does not start a download).
 IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, Navigate) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   ASSERT_TRUE(LoadTestExtension()) << message_;
 
   ResultCatcher catcher;

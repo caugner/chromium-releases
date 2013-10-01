@@ -13,7 +13,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/autocomplete_match_type.h"
 #include "content/public/common/page_transition_types.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class AutocompleteProvider;
 class Profile;
@@ -214,6 +214,20 @@ struct AutocompleteMatch {
   void RecordAdditionalInfo(const std::string& property,
                             const base::Time& value);
 
+  // Returns the value recorded for |property| in the |additional_info|
+  // dictionary.  Returns the empty string if no such value exists.
+  std::string GetAdditionalInfo(const std::string& property) const;
+
+  // Returns whether this match is a "verbatim" match: a URL navigation directly
+  // to the user's input, a search for the user's input with the default search
+  // engine, or a "keyword mode" search for the query portion of the user's
+  // input.  Note that rare or unusual types that could be considered verbatim,
+  // such as keyword engine matches or extension-provided matches, aren't
+  // detected by this IsVerbatimType, as the user will not be able to infer
+  // what will happen when he or she presses enter in those cases if the match
+  // is not shown.
+  bool IsVerbatimType() const;
+
   // The provider of this match, used to remember which provider the user had
   // selected when the input changes. This may be NULL, in which case there is
   // no provider (or memory of the user's selection).
@@ -242,10 +256,20 @@ struct AutocompleteMatch {
   // for search suggestions, this would just be the search terms.
   string16 fill_into_edit;
 
-  // The position within fill_into_edit from which we'll display the inline
-  // autocomplete string.  This will be string16::npos if this match should
-  // not be inline autocompleted.
-  size_t inline_autocomplete_offset;
+  // The inline autocompletion to display after the user's typing in the
+  // omnibox, if this match becomes the default match.  It may be empty.
+  string16 inline_autocompletion;
+
+  // If false, the omnibox should prevent this match from being the
+  // default match.  Providers should set this to true only if the
+  // user's input, plus any inline autocompletion on this match, would
+  // lead the user to expect a navigation to this match's destination.
+  // For example, with input "foo", a search for "bar" or navigation
+  // to "bar.com" should not set this flag; a navigation to "foo.com"
+  // should only set this flag if ".com" will be inline autocompleted;
+  // and a navigation to "foo/" (an intranet host) or search for "foo"
+  // should set this flag.
+  bool allowed_to_be_default_match;
 
   // The URL to actually load when the autocomplete item is selected. This URL
   // should be canonical so we can compare URLs with strcmp to avoid dupes.

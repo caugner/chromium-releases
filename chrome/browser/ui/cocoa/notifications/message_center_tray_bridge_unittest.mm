@@ -4,8 +4,8 @@
 
 #import "chrome/browser/ui/cocoa/notifications/message_center_tray_bridge.h"
 
-#include "base/mac/scoped_nsobject.h"
-#include "base/message_loop.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #import "ui/base/test/ui_cocoa_test_helper.h"
@@ -38,7 +38,7 @@ class MessageCenterTrayBridgeTest : public ui::CocoaTest {
   scoped_ptr<MessageCenterTrayBridge> bridge_;
 };
 
-TEST_F(MessageCenterTrayBridgeTest, StatusItemOnlyWithNotifications) {
+TEST_F(MessageCenterTrayBridgeTest, StatusItemOnlyAfterFirstNotification) {
   EXPECT_FALSE(status_item());
 
   message_center::RichNotificationData data;
@@ -65,5 +65,5 @@ TEST_F(MessageCenterTrayBridgeTest, StatusItemOnlyWithNotifications) {
 
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_FALSE(status_item());
+  EXPECT_TRUE(status_item());
 }

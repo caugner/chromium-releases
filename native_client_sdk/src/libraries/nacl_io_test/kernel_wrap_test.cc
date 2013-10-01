@@ -1,21 +1,26 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include <string>
 #include <vector>
+
 #include "gtest/gtest.h"
-#include "nacl_io/kernel_proxy.h"
+#include "kernel_proxy_mock.h"
 #include "nacl_io/kernel_intercept.h"
 #include "nacl_io/kernel_wrap.h"
-#include "kernel_proxy_mock.h"
+#include "nacl_io/ossocket.h"
+#include "nacl_io/ostermios.h"
+
+using namespace nacl_io;
 
 using ::testing::_;
 using ::testing::Return;
 using ::testing::StrEq;
 
 namespace {
+
+static const int DUMMY_FD = 5678;
 
 #define COMPARE_FIELD(f) \
   if (arg->f != statbuf->f) { \
@@ -73,6 +78,9 @@ void MakeDummyStatbuf(struct stat* statbuf) {
   statbuf->st_ctime = 11;
 }
 
+const uid_t kDummyUid = 1001;
+const gid_t kDummyGid = 1002;
+
 class KernelWrapTest : public ::testing::Test {
  public:
   KernelWrapTest() {
@@ -114,29 +122,43 @@ TEST_F(KernelWrapTest, chmod) {
   chmod("chmod", 23);
 }
 
+TEST_F(KernelWrapTest, chown) {
+  uid_t uid = kDummyUid;
+  gid_t gid = kDummyGid;
+  EXPECT_CALL(mock, chown(StrEq("chown"), uid, gid)).Times(1);
+  chown("chown", uid, gid);
+}
+
 TEST_F(KernelWrapTest, close) {
   EXPECT_CALL(mock, close(34)).Times(1);
   close(34);
 }
 
 TEST_F(KernelWrapTest, dup) {
-  EXPECT_CALL(mock, dup(123)).Times(1);
-  dup(123);
+  EXPECT_CALL(mock, dup(DUMMY_FD)).Times(1);
+  dup(DUMMY_FD);
 }
 
 TEST_F(KernelWrapTest, dup2) {
-  EXPECT_CALL(mock, dup2(123, 234)).Times(1);
-  dup2(123, 234);
+  EXPECT_CALL(mock, dup2(DUMMY_FD, 234)).Times(1);
+  dup2(DUMMY_FD, 234);
+}
+
+TEST_F(KernelWrapTest, fchown) {
+  uid_t uid = kDummyUid;
+  gid_t gid = kDummyGid;
+  EXPECT_CALL(mock, fchown(DUMMY_FD, uid, gid)).Times(1);
+  fchown(DUMMY_FD, uid, gid);
 }
 
 TEST_F(KernelWrapTest, fstat) {
   struct stat in_statbuf;
   MakeDummyStatbuf(&in_statbuf);
-  EXPECT_CALL(mock, fstat(234, _))
+  EXPECT_CALL(mock, fstat(DUMMY_FD, _))
       .Times(1)
       .WillOnce(SetStat(&in_statbuf));
   struct stat out_statbuf;
-  fstat(234, &out_statbuf);
+  fstat(DUMMY_FD, &out_statbuf);
   EXPECT_THAT(&in_statbuf, IsEqualToStatbuf(&out_statbuf));
 }
 
@@ -174,9 +196,22 @@ TEST_F(KernelWrapTest, getwd) {
 #pragma GCC diagnostic warning "-Wdeprecated-declarations"
 #endif
 
+TEST_F(KernelWrapTest, ioctl) {
+  char buffer[] = "ioctl";
+  EXPECT_CALL(mock, ioctl(012, 345, StrEq("ioctl"))).Times(1);
+  ioctl(012, 345, buffer);
+}
+
 TEST_F(KernelWrapTest, isatty) {
   EXPECT_CALL(mock, isatty(678)).Times(1);
   isatty(678);
+}
+
+TEST_F(KernelWrapTest, lchown) {
+  uid_t uid = kDummyUid;
+  gid_t gid = kDummyGid;
+  EXPECT_CALL(mock, lchown(StrEq("lchown"), uid, gid)).Times(1);
+  lchown("lchown", uid, gid);
 }
 
 TEST_F(KernelWrapTest, lseek) {
@@ -232,6 +267,18 @@ TEST_F(KernelWrapTest, stat) {
   EXPECT_THAT(&in_statbuf, IsEqualToStatbuf(&out_statbuf));
 }
 
+TEST_F(KernelWrapTest, tcgetattr) {
+  struct termios term;
+  EXPECT_CALL(mock, tcgetattr(DUMMY_FD, &term)).Times(1);
+  tcgetattr(DUMMY_FD, &term);
+}
+
+TEST_F(KernelWrapTest, tcsetattr) {
+  struct termios term;
+  EXPECT_CALL(mock, tcsetattr(DUMMY_FD, 0, &term)).Times(1);
+  tcsetattr(DUMMY_FD, 0, &term);
+}
+
 TEST_F(KernelWrapTest, umount) {
   EXPECT_CALL(mock, umount(StrEq("umount"))).Times(1);
   umount("umount");
@@ -242,7 +289,117 @@ TEST_F(KernelWrapTest, unlink) {
   unlink("unlink");
 }
 
+TEST_F(KernelWrapTest, utime) {
+  const struct utimbuf* times = NULL;
+  EXPECT_CALL(mock, utime(StrEq("utime"), times));
+  utime("utime", times);
+}
+
 TEST_F(KernelWrapTest, write) {
   EXPECT_CALL(mock, write(6789, NULL, 7891)).Times(1);
   write(6789, NULL, 7891);
 }
+
+#ifdef PROVIDES_SOCKET_API
+TEST_F(KernelWrapTest, poll) {
+  EXPECT_CALL(mock, poll(NULL, 5, -1));
+  poll(NULL, 5, -1);
+}
+
+TEST_F(KernelWrapTest, select) {
+  EXPECT_CALL(mock, select(123, NULL, NULL, NULL, NULL));
+  select(123, NULL, NULL, NULL, NULL);
+}
+
+// Socket Functions
+TEST_F(KernelWrapTest, accept) {
+  EXPECT_CALL(mock, accept(DUMMY_FD, NULL, NULL)).Times(1);
+  accept(DUMMY_FD, NULL, NULL);
+}
+
+TEST_F(KernelWrapTest, bind) {
+  EXPECT_CALL(mock, bind(DUMMY_FD, NULL, 456)).Times(1);
+  bind(DUMMY_FD, NULL, 456);
+}
+
+TEST_F(KernelWrapTest, connect) {
+  EXPECT_CALL(mock, connect(DUMMY_FD, NULL, 456)).Times(1);
+  connect(DUMMY_FD, NULL, 456);
+}
+
+TEST_F(KernelWrapTest, gethostbyname) {
+  EXPECT_CALL(mock, gethostbyname(NULL)).Times(1);
+  gethostbyname(NULL);
+}
+
+TEST_F(KernelWrapTest, getpeername) {
+  EXPECT_CALL(mock, getpeername(DUMMY_FD, NULL, NULL)).Times(1);
+  getpeername(DUMMY_FD, NULL, NULL);
+}
+
+TEST_F(KernelWrapTest, getsockname) {
+  EXPECT_CALL(mock, getsockname(DUMMY_FD, NULL, NULL)).Times(1);
+  getsockname(DUMMY_FD, NULL, NULL);
+}
+
+TEST_F(KernelWrapTest, getsockopt) {
+  EXPECT_CALL(mock, getsockopt(DUMMY_FD, 456, 789, NULL, NULL)).Times(1);
+  getsockopt(DUMMY_FD, 456, 789, NULL, NULL);
+}
+
+TEST_F(KernelWrapTest, listen) {
+  EXPECT_CALL(mock, listen(DUMMY_FD, 456)).Times(1);
+  listen(DUMMY_FD, 456);
+}
+
+TEST_F(KernelWrapTest, recv) {
+  EXPECT_CALL(mock, recv(DUMMY_FD, NULL, 456, 789)).Times(1);
+  recv(DUMMY_FD, NULL, 456, 789);
+}
+
+TEST_F(KernelWrapTest, recvfrom) {
+  EXPECT_CALL(mock, recvfrom(DUMMY_FD, NULL, 456, 789, NULL, NULL)).Times(1);
+  recvfrom(DUMMY_FD, NULL, 456, 789, NULL, NULL);
+}
+
+TEST_F(KernelWrapTest, recvmsg) {
+  EXPECT_CALL(mock, recvmsg(DUMMY_FD, NULL, 456)).Times(1);
+  recvmsg(DUMMY_FD, NULL, 456);
+}
+
+TEST_F(KernelWrapTest, send) {
+  EXPECT_CALL(mock, send(DUMMY_FD, NULL, 456, 789)).Times(1);
+  send(DUMMY_FD, NULL, 456, 789);
+}
+
+TEST_F(KernelWrapTest, sendto) {
+  EXPECT_CALL(mock, sendto(DUMMY_FD, NULL, 456, 789, NULL, 314)).Times(1);
+  sendto(DUMMY_FD, NULL, 456, 789, NULL, 314);
+}
+
+TEST_F(KernelWrapTest, sendmsg) {
+  EXPECT_CALL(mock, sendmsg(DUMMY_FD, NULL, 456)).Times(1);
+  sendmsg(DUMMY_FD, NULL, 456);
+}
+
+TEST_F(KernelWrapTest, setsockopt) {
+  EXPECT_CALL(mock, setsockopt(DUMMY_FD, 456, 789, NULL, 314)).Times(1);
+  setsockopt(DUMMY_FD, 456, 789, NULL, 314);
+}
+
+TEST_F(KernelWrapTest, shutdown) {
+  EXPECT_CALL(mock, shutdown(DUMMY_FD, 456)).Times(1);
+  shutdown(DUMMY_FD, 456);
+}
+
+TEST_F(KernelWrapTest, socket) {
+  EXPECT_CALL(mock, socket(DUMMY_FD, 456, 789)).Times(1);
+  socket(DUMMY_FD, 456, 789);
+}
+
+TEST_F(KernelWrapTest, socketpair) {
+  EXPECT_CALL(mock, socketpair(DUMMY_FD, 456, 789, NULL)).Times(1);
+  socketpair(DUMMY_FD, 456, 789, NULL);
+}
+
+#endif // PROVIDES_SOCKET_API

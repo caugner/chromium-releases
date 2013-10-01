@@ -16,7 +16,6 @@
 
 #if defined(ENABLE_MANAGED_USERS)
 #include "chrome/browser/managed_mode/managed_mode_navigation_observer.h"
-#include "chrome/browser/managed_mode/managed_user_service.h"
 #endif
 
 using content::NavigationEntry;
@@ -25,7 +24,7 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(TabContentsSyncedTabDelegate);
 
 TabContentsSyncedTabDelegate::TabContentsSyncedTabDelegate(
     content::WebContents* web_contents)
-        : web_contents_(web_contents) {}
+    : web_contents_(web_contents), sync_session_id_(0) {}
 
 TabContentsSyncedTabDelegate::~TabContentsSyncedTabDelegate() {}
 
@@ -76,11 +75,7 @@ NavigationEntry* TabContentsSyncedTabDelegate::GetActiveEntry() const {
 }
 
 bool TabContentsSyncedTabDelegate::ProfileIsManaged() const {
-#if defined(ENABLE_MANAGED_USERS)
-  return ManagedUserService::ProfileIsManaged(profile());
-#else
-  return false;
-#endif
+  return profile()->IsManaged();
 }
 
 const std::vector<const content::NavigationEntry*>*
@@ -105,3 +100,11 @@ bool TabContentsSyncedTabDelegate::IsPinned() const {
 }
 
 bool TabContentsSyncedTabDelegate::HasWebContents() const { return true; }
+
+int TabContentsSyncedTabDelegate::GetSyncId() const {
+  return sync_session_id_;
+}
+
+void TabContentsSyncedTabDelegate::SetSyncId(int sync_id) {
+  sync_session_id_ = sync_id;
+}

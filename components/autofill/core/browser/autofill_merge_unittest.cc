@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <map>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/files/file_path.h"
+#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_common_test.h"
@@ -14,9 +16,9 @@
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/common/form_data.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
+#include "url/gurl.h"
 
 namespace autofill {
 
@@ -29,7 +31,7 @@ const char kFieldSeparator[] = ": ";
 const char kProfileSeparator[] = "---";
 const size_t kFieldOffset = arraysize(kFieldSeparator) - 1;
 
-const AutofillFieldType kProfileFieldTypes[] = {
+const ServerFieldType kProfileFieldTypes[] = {
   NAME_FIRST,
   NAME_MIDDLE,
   NAME_LAST,
@@ -44,6 +46,17 @@ const AutofillFieldType kProfileFieldTypes[] = {
   PHONE_HOME_WHOLE_NUMBER
 };
 
+const base::FilePath& GetTestDataDir() {
+  CR_DEFINE_STATIC_LOCAL(base::FilePath, dir, ());
+  if (dir.empty()) {
+    PathService::Get(base::DIR_SOURCE_ROOT, &dir);
+    dir = dir.AppendASCII("components");
+    dir = dir.AppendASCII("test");
+    dir = dir.AppendASCII("data");
+  }
+  return dir;
+}
+
 // Serializes the |profiles| into a string.
 std::string SerializeProfiles(const std::vector<AutofillProfile*>& profiles) {
   std::string result;
@@ -51,11 +64,11 @@ std::string SerializeProfiles(const std::vector<AutofillProfile*>& profiles) {
     result += kProfileSeparator;
     result += "\n";
     for (size_t j = 0; j < arraysize(kProfileFieldTypes); ++j) {
-      AutofillFieldType type = kProfileFieldTypes[j];
+      ServerFieldType type = kProfileFieldTypes[j];
       std::vector<base::string16> values;
       profiles[i]->GetRawMultiInfo(type, &values);
       for (size_t k = 0; k < values.size(); ++k) {
-        result += AutofillType::FieldTypeToString(type);
+        result += AutofillType(type).ToString();
         result += kFieldSeparator;
         result += UTF16ToUTF8(values[k]);
         result += "\n";
@@ -131,13 +144,22 @@ class AutofillMergeTest : public testing::Test,
   // sequentially, and fills |merged_profiles| with the serialized result.
   void MergeProfiles(const std::string& profiles, std::string* merged_profiles);
 
+  // Deserializes |str| into a field type.
+  ServerFieldType StringToFieldType(const std::string& str);
+
   PersonalDataManagerMock personal_data_;
 
  private:
+  std::map<std::string, ServerFieldType> string_to_field_type_map_;
+
   DISALLOW_COPY_AND_ASSIGN(AutofillMergeTest);
 };
 
-AutofillMergeTest::AutofillMergeTest() : DataDrivenTest() {
+AutofillMergeTest::AutofillMergeTest() : DataDrivenTest(GetTestDataDir()) {
+  for (size_t i = NO_SERVER_DATA; i < MAX_VALID_FIELD_TYPE; ++i) {
+    ServerFieldType field_type = static_cast<ServerFieldType>(i);
+    string_to_field_type_map_[AutofillType(field_type).ToString()] = field_type;
+  }
 }
 
 AutofillMergeTest::~AutofillMergeTest() {
@@ -197,8 +219,7 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
         // into the field's name.
         AutofillField* field =
             const_cast<AutofillField*>(form_structure.field(i));
-        AutofillFieldType type =
-            AutofillType::StringToFieldType(UTF16ToUTF8(field->name));
+        ServerFieldType type = StringToFieldType(UTF16ToUTF8(field->name));
         field->set_heuristic_type(type);
       }
 
@@ -213,6 +234,10 @@ void AutofillMergeTest::MergeProfiles(const std::string& profiles,
   }
 
   *merged_profiles = SerializeProfiles(personal_data_.web_profiles());
+}
+
+ServerFieldType AutofillMergeTest::StringToFieldType(const std::string& str) {
+  return string_to_field_type_map_[str];
 }
 
 TEST_F(AutofillMergeTest, DataDrivenMergeProfiles) {

@@ -8,7 +8,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class HostContentSettingsMap;
 class InfoBarService;
@@ -25,7 +25,7 @@ class PepperBrokerInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   // Determines whether the broker setting is allow, deny, or ask.  In the first
   // two cases, runs the callback directly.  In the third, creates a pepper
-  // broker delegate and adds it to the InfoBarService associated with
+  // broker infobar delegate and adds it to the InfoBarService associated with
   // |web_contents|.
   static void Create(content::WebContents* web_contents,
                      const GURL& url,
@@ -33,20 +33,18 @@ class PepperBrokerInfoBarDelegate : public ConfirmInfoBarDelegate {
                      const base::Callback<void(bool)>& callback);
 
  private:
-  PepperBrokerInfoBarDelegate(
-      InfoBarService* infobar_service,
-      const GURL& url,
-      const base::FilePath& plugin_path,
-      const std::string& languages,
-      HostContentSettingsMap* content_settings,
-      TabSpecificContentSettings* tab_content_settings,
-      const base::Callback<void(bool)>& callback);
+  PepperBrokerInfoBarDelegate(InfoBarService* infobar_service,
+                              const GURL& url,
+                              const base::FilePath& plugin_path,
+                              const std::string& languages,
+                              HostContentSettingsMap* content_settings,
+                              TabSpecificContentSettings* tab_content_settings,
+                              const base::Callback<void(bool)>& callback);
   virtual ~PepperBrokerInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
   virtual int GetIconID() const OVERRIDE;
   virtual string16 GetMessageText() const OVERRIDE;
-  virtual int GetButtons() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;

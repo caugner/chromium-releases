@@ -46,8 +46,6 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
   SyncBackendHostForProfileSyncTest(
       Profile* profile,
       const base::WeakPtr<SyncPrefs>& sync_prefs,
-      const base::WeakPtr<invalidation::InvalidatorStorage>&
-          invalidator_storage,
       syncer::TestIdFactory& id_factory,
       base::Closure& callback,
       bool set_initial_sync_ended_on_init,
@@ -81,12 +79,8 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
 
   static void SetHistoryServiceExpectations(ProfileMock* profile);
 
-  void EmitOnInvalidatorStateChange(syncer::InvalidatorState state);
-  void EmitOnIncomingInvalidation(
-      const syncer::ObjectIdInvalidationMap& invalidation_map);
-
  protected:
-  virtual void InitCore(const DoInitializeOptions& options) OVERRIDE;
+  virtual void InitCore(scoped_ptr<DoInitializeOptions> options) OVERRIDE;
 
  private:
   void ContinueInitialization(
@@ -180,6 +174,12 @@ class TestProfileSyncService : public ProfileSyncService {
  protected:
   virtual void CreateBackend() OVERRIDE;
 
+  // Return NULL handle to use in backend initialization to avoid receiving
+  // js messages on UI loop when it's being destroyed, which are not deleted
+  // and cause memory leak in test.
+  virtual syncer::WeakHandle<syncer::JsEventHandler> GetJsEventHandler()
+      OVERRIDE;
+
  private:
   syncer::TestIdFactory id_factory_;
 
@@ -199,9 +199,6 @@ class TestProfileSyncService : public ProfileSyncService {
 
 class FakeOAuth2TokenService : public ProfileOAuth2TokenService {
  public:
-  explicit FakeOAuth2TokenService(net::URLRequestContextGetter* getter)
-      : ProfileOAuth2TokenService(getter) {}
-
   virtual scoped_ptr<OAuth2TokenService::Request> StartRequest(
       const OAuth2TokenService::ScopeSet& scopes,
       OAuth2TokenService::Consumer* consumer) OVERRIDE;

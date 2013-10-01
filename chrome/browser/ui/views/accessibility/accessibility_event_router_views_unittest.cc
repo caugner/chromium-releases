@@ -4,12 +4,12 @@
 
 #include <string>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/views/accessibility/accessibility_event_router_views.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"

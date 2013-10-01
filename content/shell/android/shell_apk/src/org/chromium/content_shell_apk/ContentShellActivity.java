@@ -18,7 +18,7 @@ import org.chromium.base.MemoryPressureListener;
 import org.chromium.content.app.LibraryLoader;
 import org.chromium.content.browser.ActivityContentVideoViewClient;
 import org.chromium.content.browser.AndroidBrowserProcess;
-import org.chromium.content.browser.ContentVideoView;
+import org.chromium.content.browser.BrowserStartupConfig;
 import org.chromium.content.browser.ContentVideoViewClient;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewClient;
@@ -36,7 +36,7 @@ import org.chromium.ui.WindowAndroid;
 public class ContentShellActivity extends ChromiumActivity {
 
     public static final String COMMAND_LINE_FILE = "/data/local/tmp/content-shell-command-line";
-    private static final String TAG = ContentShellActivity.class.getName();
+    private static final String TAG = "ContentShellActivity";
 
     private static final String ACTIVE_SHELL_URL_KEY = "activeUrl";
     private static final String ACTION_START_TRACE =
@@ -92,24 +92,45 @@ public class ContentShellActivity extends ChromiumActivity {
             if (!TextUtils.isEmpty(startupUrl)) {
                 mShellManager.setStartupUrl(Shell.sanitizeUrl(startupUrl));
             }
+
+            if (!CommandLine.getInstance().hasSwitch(CommandLine.DUMP_RENDER_TREE)) {
+                BrowserStartupConfig.setAsync(new BrowserStartupConfig.StartupCallback() {
+
+                    @Override
+                    public void run(int startupResult) {
+                        if (startupResult > 0) {
+                            // TODO: Show error message.
+                            Log.e(TAG, "ContentView initialization failed.");
+                            finish();
+                        } else {
+                            finishInitialization();
+                        }
+                    }
+                });
+            }
+
             if (!AndroidBrowserProcess.init(this, AndroidBrowserProcess.MAX_RENDERERS_LIMIT)) {
                 String shellUrl = ShellManager.DEFAULT_SHELL_URL;
                 if (savedInstanceState != null
-                    && savedInstanceState.containsKey(ACTIVE_SHELL_URL_KEY)) {
+                        && savedInstanceState.containsKey(ACTIVE_SHELL_URL_KEY)) {
                     shellUrl = savedInstanceState.getString(ACTIVE_SHELL_URL_KEY);
                 }
                 mShellManager.launchShell(shellUrl);
+                finishInitialization();
             }
-            getActiveContentView().setContentViewClient(new ContentViewClient() {
-                @Override
-                public ContentVideoViewClient getContentVideoViewClient() {
-                    return new ActivityContentVideoViewClient(ContentShellActivity.this);
-                }
-            });
         } catch (ProcessInitException e) {
             Log.e(TAG, "ContentView initialization failed.", e);
             finish();
         }
+    }
+
+    private void finishInitialization() {
+        getActiveContentView().setContentViewClient(new ContentViewClient() {
+            @Override
+            public ContentVideoViewClient getContentVideoViewClient() {
+                return new ActivityContentVideoViewClient(ContentShellActivity.this);
+            }
+        });
     }
 
     @Override

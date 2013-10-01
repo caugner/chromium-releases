@@ -17,8 +17,9 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
+#include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/predictors/logged_in_predictor_table.h"
 #include "chrome/browser/prerender/prerender_config.h"
 #include "chrome/browser/prerender/prerender_contents.h"
@@ -27,8 +28,8 @@
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "googleurl/src/gurl.h"
 #include "net/cookies/cookie_monster.h"
+#include "url/gurl.h"
 
 class Profile;
 struct ChromeCookieDetails;
@@ -78,7 +79,8 @@ class PrerenderTracker;
 class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                          public base::NonThreadSafe,
                          public content::NotificationObserver,
-                         public BrowserContextKeyedService {
+                         public BrowserContextKeyedService,
+                         public MediaCaptureDevicesDispatcher::Observer {
  public:
   // NOTE: New values need to be appended, since they are used in histograms.
   enum PrerenderManagerMode {
@@ -242,6 +244,10 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Returns true iff the scheme of the URL given is valid for prerendering.
   static bool DoesURLHaveValidScheme(const GURL& url);
 
+  // Returns true iff the scheme of the subresource URL given is valid for
+  // prerendering.
+  static bool DoesSubresourceURLHaveValidScheme(const GURL& url);
+
   // Returns a Value object containing the active pages being prerendered, and
   // a history of pages which were prerendered. The caller is responsible for
   // deleting the return value.
@@ -273,6 +279,10 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // MediaCaptureDevicesDispatcher::Observer
+  virtual void OnCreatingAudioStream(int render_process_id,
+                                     int render_view_id) OVERRIDE;
 
   const Config& config() const { return config_; }
   Config& mutable_config() { return config_; }

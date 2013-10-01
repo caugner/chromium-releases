@@ -6,12 +6,12 @@
 
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/browser/ui/webui/extensions/extensions_ui.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/url_constants.h"
@@ -210,14 +210,12 @@ void UberFrameUI::Observe(int type, const content::NotificationSource& source,
     case chrome::NOTIFICATION_EXTENSION_LOADED:
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
       Profile* profile = Profile::FromWebUI(web_ui());
-      bool overridesHistory = HasExtensionType(profile,
-          chrome::kChromeUIHistoryHost);
-      scoped_ptr<Value> controlsValue(
-          Value::CreateStringValue(chrome::kChromeUIHistoryHost));
-      scoped_ptr<Value> overrideValue(
-          Value::CreateStringValue(overridesHistory ? "yes" : "no"));
+      bool overrides_history =
+          HasExtensionType(profile, chrome::kChromeUIHistoryHost);
       web_ui()->CallJavascriptFunction(
-          "uber_frame.setNavigationOverride", *controlsValue, *overrideValue);
+          "uber_frame.setNavigationOverride",
+          base::StringValue(chrome::kChromeUIHistoryHost),
+          base::StringValue(overrides_history ? "yes" : "no"));
       break;
     }
     default:

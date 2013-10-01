@@ -11,7 +11,6 @@
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/immersive_fullscreen_configuration.h"
-#include "chrome/browser/ui/views/avatar_label.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -124,6 +123,12 @@ gfx::Rect BrowserNonClientFrameViewAsh::GetBoundsForTabStrip(
     views::View* tabstrip) const {
   if (!tabstrip)
     return gfx::Rect();
+
+  // When the tab strip is painted in the immersive fullscreen light bar style,
+  // the caption buttons and the avatar button are not visible. However, their
+  // bounds are still used to compute the tab strip bounds so that the tabs have
+  // the same horizontal position when the tab strip is painted in the immersive
+  // light bar style as when the top-of-window views are revealed.
   TabStripInsets insets(GetTabStripInsets(false));
   return gfx::Rect(insets.left, insets.top,
                    std::max(0, width() - insets.left - insets.right),
@@ -135,10 +140,6 @@ BrowserNonClientFrameViewAsh::GetTabStripInsets(bool force_restored) const {
   int left = avatar_button() ? kAvatarSideSpacing +
       browser_view()->GetOTRAvatarIcon().width() + kAvatarSideSpacing :
       kTabstripLeftSpacing;
-  if (avatar_label()) {
-    left += avatar_label()->GetPreferredSize().width() +
-            views::kRelatedControlHorizontalSpacing;
-  }
   int right = frame_painter_->GetRightInset() + kTabstripRightSpacing;
   return TabStripInsets(NonClientTopBorderHeight(force_restored), left, right);
 }
@@ -190,21 +191,12 @@ void BrowserNonClientFrameViewAsh::GetWindowMask(const gfx::Size& size,
 }
 
 void BrowserNonClientFrameViewAsh::ResetWindowControls() {
-  if (ImmersiveFullscreenConfiguration::UseImmersiveFullscreen()) {
-    // Hide the caption buttons in immersive mode because it's confusing when
-    // the user hovers or clicks in the top-right of the screen and hits one.
-    // Only show them during a reveal.
-    ImmersiveModeController* controller =
-        browser_view()->immersive_mode_controller();
-    if (controller->IsEnabled()) {
-      bool revealed = controller->IsRevealed();
-      size_button_->SetVisible(revealed);
-      close_button_->SetVisible(revealed);
-    } else {
-      size_button_->SetVisible(true);
-      close_button_->SetVisible(true);
-    }
-  }
+  // Hide the caption buttons in immersive fullscreen when the tab light bar
+  // is visible because it's confusing when the user hovers or clicks in the
+  // top-right of the screen and hits one.
+  bool button_visibility = !UseImmersiveLightbarHeaderStyle();
+  size_button_->SetVisible(button_visibility);
+  close_button_->SetVisible(button_visibility);
 
   size_button_->SetState(views::CustomButton::STATE_NORMAL);
   // The close button isn't affected by this constraint.
@@ -217,7 +209,7 @@ void BrowserNonClientFrameViewAsh::UpdateWindowIcon() {
 
 void BrowserNonClientFrameViewAsh::UpdateWindowTitle() {
   if (!frame()->IsFullscreen())
-    frame_painter_->SchedulePaintForTitle(this, BrowserFrame::GetTitleFont());
+    frame_painter_->SchedulePaintForTitle(BrowserFrame::GetTitleFont());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -226,6 +218,12 @@ void BrowserNonClientFrameViewAsh::UpdateWindowTitle() {
 void BrowserNonClientFrameViewAsh::OnPaint(gfx::Canvas* canvas) {
   if (!ShouldPaint())
     return;
+
+  if (UseImmersiveLightbarHeaderStyle()) {
+    PaintImmersiveLightbarStyleHeader(canvas);
+    return;
+  }
+
   // The primary header image changes based on window activation state and
   // theme, so we look it up for each paint.
   int theme_frame_image_id = GetThemeFrameImageId();
@@ -269,28 +267,50 @@ const char* BrowserNonClientFrameViewAsh::GetClassName() const {
 }
 
 bool BrowserNonClientFrameViewAsh::HitTestRect(const gfx::Rect& rect) const {
+  if (!views::View::HitTestRect(rect)) {
+    // |rect| is outside BrowserNonClientFrameViewAsh's bounds.
+    return false;
+  }
   // If the rect is outside the bounds of the client area, claim it.
-  if (NonClientFrameView::HitTestRect(rect))
+  // TODO(tdanderson): Implement View::ConvertRectToTarget().
+  gfx::Point rect_in_client_view_coords_origin(rect.origin());
+  View::ConvertPointToTarget(this, frame()->client_view(),
+      &rect_in_client_view_coords_origin);
+  gfx::Rect rect_in_client_view_coords(
+      rect_in_client_view_coords_origin, rect.size());
+  if (!frame()->client_view()->HitTestRect(rect_in_client_view_coords))
     return true;
 
-  // Otherwise claim it only if it's in a non-tab portion of the tabstrip.
-  if (!browser_view()->tabstrip())
-    return false;
-  gfx::Rect tabstrip_bounds(browser_view()->tabstrip()->bounds());
-  gfx::Point tabstrip_origin(tabstrip_bounds.origin());
-  View::ConvertPointToTarget(frame()->client_view(), this, &tabstrip_origin);
-  tabstrip_bounds.set_origin(tabstrip_origin);
-  if (rect.bottom() > tabstrip_bounds.bottom())
+  // Otherwise, claim |rect| only if it is above the bottom of the tabstrip in
+  // a non-tab portion.
+  TabStrip* tabstrip = browser_view()->tabstrip();
+  if (!tabstrip || !browser_view()->IsTabStripVisible())
     return false;
 
-  // We convert from our parent's coordinates since we assume we fill its bounds
-  // completely. We need to do this since we're not a parent of the tabstrip,
-  // meaning ConvertPointToTarget would otherwise return something bogus.
-  // TODO(tdanderson): Initialize |browser_view_point| using |rect| instead of
-  // its center point once GetEventHandlerForRect() is implemented.
-  gfx::Point browser_view_point(rect.CenterPoint());
-  View::ConvertPointToTarget(parent(), browser_view(), &browser_view_point);
-  return browser_view()->IsPositionInWindowCaption(browser_view_point);
+  gfx::Point rect_in_tabstrip_coords_origin(rect.origin());
+  View::ConvertPointToTarget(this, tabstrip,
+      &rect_in_tabstrip_coords_origin);
+  gfx::Rect rect_in_tabstrip_coords(rect_in_tabstrip_coords_origin,
+      rect.size());
+
+  if (rect_in_tabstrip_coords.bottom() > tabstrip->GetLocalBounds().bottom()) {
+    // |rect| is below the tabstrip.
+    return false;
+  }
+
+  if (tabstrip->HitTestRect(rect_in_tabstrip_coords)) {
+    // Claim |rect| if it is in a non-tab portion of the tabstrip.
+    // TODO(tdanderson): Pass |rect_in_tabstrip_coords| instead of its center
+    // point to TabStrip::IsPositionInWindowCaption() once
+    // GetEventHandlerForRect() is implemented.
+    return tabstrip->IsPositionInWindowCaption(
+        rect_in_tabstrip_coords.CenterPoint());
+  }
+
+  // We claim |rect| because it is above the bottom of the tabstrip, but
+  // not in the tabstrip. In particular, the window controls are right of
+  // the tabstrip.
+  return true;
 }
 
 void BrowserNonClientFrameViewAsh::GetAccessibleState(
@@ -375,7 +395,7 @@ int BrowserNonClientFrameViewAsh::NonClientTopBorderHeight(
     bool force_restored) const {
   if (force_restored)
     return kTabstripTopSpacingTall;
-  if (frame()->IsFullscreen())
+  if (!ShouldPaint() || UseImmersiveLightbarHeaderStyle())
     return 0;
   // Windows with tab strips need a smaller non-client area.
   if (browser_view()->IsTabStripVisible()) {
@@ -391,7 +411,8 @@ int BrowserNonClientFrameViewAsh::NonClientTopBorderHeight(
 bool BrowserNonClientFrameViewAsh::UseShortHeader() const {
   // Restored browser -> tall header
   // Maximized browser -> short header
-  // Fullscreen browser (header shows with immersive reveal) -> short header
+  // Fullscreen browser, no immersive reveal -> hidden or super short light bar
+  // Fullscreen browser, immersive reveal -> short header
   // Popup&App window -> tall header
   // Panel -> short header
   // Dialogs use short header and are handled via CustomFrameViewAsh.
@@ -407,24 +428,17 @@ bool BrowserNonClientFrameViewAsh::UseShortHeader() const {
   }
 }
 
+bool BrowserNonClientFrameViewAsh::UseImmersiveLightbarHeaderStyle() const {
+  ImmersiveModeController* immersive_controller =
+      browser_view()->immersive_mode_controller();
+  return immersive_controller->IsEnabled() &&
+      !immersive_controller->IsRevealed() &&
+      !immersive_controller->ShouldHideTabIndicators();
+}
+
 void BrowserNonClientFrameViewAsh::LayoutAvatar() {
   DCHECK(avatar_button());
   gfx::ImageSkia incognito_icon = browser_view()->GetOTRAvatarIcon();
-
-  if (frame()->IsFullscreen()) {
-    ImmersiveModeController* immersive_controller =
-        browser_view()->immersive_mode_controller();
-    // Hide the incognito icon when the top-of-window views are closed in
-    // immersive mode as the tab indicators are too short for the incognito
-    // icon to still be recongizable.
-    if (immersive_controller->IsEnabled() &&
-        !immersive_controller->IsRevealed()) {
-      avatar_button()->SetBoundsRect(gfx::Rect());
-      if (avatar_label())
-        avatar_label()->SetBoundsRect(gfx::Rect());
-      return;
-    }
-  }
 
   int avatar_bottom = GetTabStripInsets(false).top +
       browser_view()->GetTabStripHeight() - kAvatarBottomSpacing;
@@ -432,27 +446,43 @@ void BrowserNonClientFrameViewAsh::LayoutAvatar() {
   int avatar_y = (frame()->IsMaximized() || frame()->IsFullscreen()) ?
       NonClientTopBorderHeight(false) + kContentShadowHeight :
       avatar_restored_y;
+
+  // Hide the incognito icon in immersive fullscreen when the tab light bar is
+  // visible because the header is too short for the icognito icon to be
+  // recognizable.
+  bool avatar_visible = !UseImmersiveLightbarHeaderStyle();
+  int avatar_height = avatar_visible ? avatar_bottom - avatar_y : 0;
+
   gfx::Rect avatar_bounds(kAvatarSideSpacing,
                           avatar_y,
                           incognito_icon.width(),
-                          avatar_bottom - avatar_y);
+                          avatar_height);
   avatar_button()->SetBoundsRect(avatar_bounds);
-  if (avatar_label()) {
-    gfx::Size size = avatar_label()->GetPreferredSize();
-    int label_height = std::min(avatar_bounds.height(), size.height());
-    gfx::Rect label_bounds(
-        avatar_bounds.right() + views::kRelatedControlHorizontalSpacing,
-        avatar_y + (avatar_bounds.height() - label_height) / 2,
-        size.width(),
-        size.height());
-    avatar_label()->SetBoundsRect(label_bounds);
-  }
+  avatar_button()->SetVisible(avatar_visible);
 }
 
 bool BrowserNonClientFrameViewAsh::ShouldPaint() const {
-  // Immersive mode windows are fullscreen, but need to paint during a reveal.
-  return !frame()->IsFullscreen() ||
-      browser_view()->immersive_mode_controller()->IsRevealed();
+  if (!frame()->IsFullscreen())
+    return true;
+
+  // There is nothing to paint for traditional (tab) fullscreen.
+  ImmersiveModeController* immersive_controller =
+      browser_view()->immersive_mode_controller();
+  if (!immersive_controller->IsEnabled())
+    return false;
+
+  // Need to paint during an immersive fullscreen reveal or when the immersive
+  // light bar is visible.
+  return immersive_controller->IsRevealed() ||
+      !immersive_controller->ShouldHideTabIndicators();
+}
+
+void BrowserNonClientFrameViewAsh::PaintImmersiveLightbarStyleHeader(
+    gfx::Canvas* canvas) {
+  // The light bar header is not themed because theming it does not look good.
+  gfx::ImageSkia* frame_image = GetThemeProvider()->GetImageSkiaNamed(
+      IDR_AURA_WINDOW_HEADER_BASE_MINIMAL);
+  canvas->TileImageInt(*frame_image, 0, 0, width(), frame_image->height());
 }
 
 void BrowserNonClientFrameViewAsh::PaintToolbarBackground(gfx::Canvas* canvas) {

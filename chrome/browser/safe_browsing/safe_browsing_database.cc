@@ -9,16 +9,17 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/stats_counters.h"
-#include "base/process_util.h"
-#include "base/time.h"
+#include "base/process/process.h"
+#include "base/process/process_metrics.h"
+#include "base/time/time.h"
 #include "chrome/browser/safe_browsing/prefix_set.h"
 #include "chrome/browser/safe_browsing/safe_browsing_store_file.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/sha2.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -69,6 +70,12 @@ const size_t kMaxWhitelistSize = 5000;
 // lookups to this whitelist will be considered a match.
 const char kWhitelistKillSwitchUrl[] =
     "sb-ssl.google.com/safebrowsing/csd/killswitch";  // Don't change this!
+
+// If the hash of this exact expression is on a whitelist then the
+// malware IP blacklisting feature will be disabled in csd.
+// Don't change this!
+const char kMalwareIPKillSwitchUrl[] =
+    "sb-ssl.google.com/safebrowsing/csd/killswitch_malware";
 
 // To save space, the incoming |chunk_id| and |list_id| are combined
 // into an |encoded_chunk_id| for storage by shifting the |list_id|
@@ -1486,7 +1493,7 @@ void SafeBrowsingDatabaseNew::LoadPrefixSet() {
   // TODO(shess): Track failure to delete?
   base::FilePath bloom_filter_filename =
       BloomFilterForFilename(browse_filename_);
-  file_util::Delete(bloom_filter_filename, false);
+  base::DeleteFile(bloom_filter_filename, false);
 
   const base::TimeTicks before = base::TimeTicks::Now();
   browse_prefix_set_.reset(safe_browsing::PrefixSet::LoadFile(
@@ -1522,24 +1529,24 @@ bool SafeBrowsingDatabaseNew::Delete() {
 
   base::FilePath bloom_filter_filename =
       BloomFilterForFilename(browse_filename_);
-  const bool r5 = file_util::Delete(bloom_filter_filename, false);
+  const bool r5 = base::DeleteFile(bloom_filter_filename, false);
   if (!r5)
     RecordFailure(FAILURE_DATABASE_FILTER_DELETE);
 
-  const bool r6 = file_util::Delete(browse_prefix_set_filename_, false);
+  const bool r6 = base::DeleteFile(browse_prefix_set_filename_, false);
   if (!r6)
     RecordFailure(FAILURE_BROWSE_PREFIX_SET_DELETE);
 
-  const bool r7 = file_util::Delete(extension_blacklist_filename_, false);
+  const bool r7 = base::DeleteFile(extension_blacklist_filename_, false);
   if (!r7)
     RecordFailure(FAILURE_EXTENSION_BLACKLIST_DELETE);
 
-  const bool r8 = file_util::Delete(side_effect_free_whitelist_filename_,
+  const bool r8 = base::DeleteFile(side_effect_free_whitelist_filename_,
                                     false);
   if (!r8)
     RecordFailure(FAILURE_SIDE_EFFECT_FREE_WHITELIST_DELETE);
 
-  const bool r9 = file_util::Delete(
+  const bool r9 = base::DeleteFile(
       side_effect_free_whitelist_prefix_set_filename_,
       false);
   if (!r9)
@@ -1604,4 +1611,13 @@ void SafeBrowsingDatabaseNew::LoadWhitelist(
     whitelist->second = false;
     whitelist->first.swap(new_whitelist);
   }
+}
+
+bool SafeBrowsingDatabaseNew::IsMalwareIPMatchKillSwitchOn() {
+  SBFullHash malware_kill_switch;
+  crypto::SHA256HashString(kMalwareIPKillSwitchUrl, &malware_kill_switch,
+                           sizeof(malware_kill_switch));
+  std::vector<SBFullHash> full_hashes;
+  full_hashes.push_back(malware_kill_switch);
+  return ContainsWhitelistedHashes(csd_whitelist_, full_hashes);
 }

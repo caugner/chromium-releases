@@ -6,16 +6,15 @@
 
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_context.h"
-#include "webkit/plugins/npapi/plugin_list.h"
 
 using content::BrowserThread;
 using content::PluginService;
@@ -43,7 +42,7 @@ void ChromePluginServiceFilter::OverridePluginForTab(
     int render_process_id,
     int render_view_id,
     const GURL& url,
-    const webkit::WebPluginInfo& plugin) {
+    const content::WebPluginInfo& plugin) {
   base::AutoLock auto_lock(lock_);
   ProcessDetails* details = GetOrRegisterProcess(render_process_id);
   OverriddenPlugin overridden_plugin;
@@ -59,8 +58,7 @@ void ChromePluginServiceFilter::RestrictPluginToProfileAndOrigin(
     const GURL& origin) {
   base::AutoLock auto_lock(lock_);
   restricted_plugins_[plugin_path] =
-      std::make_pair(PluginPrefs::GetForProfile(profile),
-                     origin);
+      std::make_pair(PluginPrefs::GetForProfile(profile).get(), origin);
 }
 
 void ChromePluginServiceFilter::UnrestrictPlugin(
@@ -75,7 +73,7 @@ bool ChromePluginServiceFilter::IsPluginAvailable(
     const void* context,
     const GURL& url,
     const GURL& policy_url,
-    webkit::WebPluginInfo* plugin) {
+    content::WebPluginInfo* plugin) {
   base::AutoLock auto_lock(lock_);
   const ProcessDetails* details = GetProcess(render_process_id);
 

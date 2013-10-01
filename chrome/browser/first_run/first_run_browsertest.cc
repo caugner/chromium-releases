@@ -93,7 +93,7 @@ class FirstRunMasterPrefsBrowserTestBase : public InProcessBrowserTest {
   }
 
   virtual void TearDown() OVERRIDE {
-    EXPECT_TRUE(file_util::Delete(prefs_file_, false));
+    EXPECT_TRUE(base::DeleteFile(prefs_file_, false));
     InProcessBrowserTest::TearDown();
   }
 
@@ -137,7 +137,7 @@ class FirstRunMasterPrefsBrowserTestT
 // bot configurations do not have another profile (browser) to import from and
 // thus the import must not be expected to have occurred.
 int MaskExpectedImportState(int expected_import_state) {
-  scoped_refptr<ImporterList> importer_list(new ImporterList(NULL));
+  scoped_refptr<ImporterList> importer_list(new ImporterList());
   importer_list->DetectSourceProfilesHack(
       g_browser_process->GetApplicationLocale());
   int source_profile_count = importer_list->count();
@@ -146,7 +146,7 @@ int MaskExpectedImportState(int expected_import_state) {
   // Internet Explorer always exists and always has something to import.
   EXPECT_GT(source_profile_count, 0);
 #endif
-  if (source_profile_count == 0)
+  if (source_profile_count == 1)
     return expected_import_state & ~first_run::AUTO_IMPORT_PROFILE_IMPORTED;
 
   return expected_import_state;

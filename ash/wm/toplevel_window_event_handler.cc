@@ -11,7 +11,7 @@
 #include "ash/wm/window_resizer.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/snap_sizer.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
@@ -215,6 +215,25 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
     return;
 
   switch (event->type()) {
+    case ui::ET_GESTURE_TAP_DOWN: {
+      int component =
+          target->delegate()->GetNonClientComponent(event->location());
+      if (!(WindowResizer::GetBoundsChangeForWindowComponent(component) &
+            WindowResizer::kBoundsChange_Resizes))
+        return;
+      internal::ResizeShadowController* controller =
+          Shell::GetInstance()->resize_shadow_controller();
+      if (controller)
+        controller->ShowShadow(target, component);
+      return;
+    }
+    case ui::ET_GESTURE_END: {
+      internal::ResizeShadowController* controller =
+          Shell::GetInstance()->resize_shadow_controller();
+      if (controller)
+        controller->HideShadow(target);
+      return;
+    }
     case ui::ET_GESTURE_SCROLL_BEGIN: {
       if (in_gesture_drag_)
         return;
@@ -324,11 +343,13 @@ aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
     aura::Window::ConvertPointToTarget(
         root_window, source->parent(), &drag_location);
   }
-  CreateScopedWindowResizer(source, drag_location, HTCAPTION, move_source);
+  // Set the cursor before calling CreateScopedWindowResizer(), as that will
+  // eventually call LockCursor() and prevent the cursor from changing.
   aura::client::CursorClient* cursor_client =
       aura::client::GetCursorClient(root_window);
   if (cursor_client)
     cursor_client->SetCursor(ui::kCursorPointer);
+  CreateScopedWindowResizer(source, drag_location, HTCAPTION, move_source);
   bool destroyed = false;
   destroyed_ = &destroyed;
 #if !defined(OS_MACOSX)
@@ -479,7 +500,7 @@ void ToplevelWindowEventHandler::HandleMouseMoved(
     if (event->flags() & ui::EF_IS_NON_CLIENT) {
       int component =
           target->delegate()->GetNonClientComponent(event->location());
-        controller->ShowShadow(target, component);
+      controller->ShowShadow(target, component);
     } else {
       controller->HideShadow(target);
     }

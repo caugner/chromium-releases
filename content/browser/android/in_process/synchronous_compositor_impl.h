@@ -16,6 +16,7 @@
 
 namespace cc {
 class InputHandler;
+struct DidOverscrollParams;
 }
 
 namespace WebKit {
@@ -47,11 +48,14 @@ class SynchronousCompositorImpl
   // SynchronousCompositor
   virtual void SetClient(SynchronousCompositorClient* compositor_client)
       OVERRIDE;
-  virtual bool InitializeHwDraw() OVERRIDE;
+  virtual bool InitializeHwDraw(
+      scoped_refptr<gfx::GLSurface> surface) OVERRIDE;
+  virtual void ReleaseHwDraw() OVERRIDE;
   virtual bool DemandDrawHw(
       gfx::Size view_size,
       const gfx::Transform& transform,
-      gfx::Rect clip) OVERRIDE;
+      gfx::Rect clip,
+      bool stencil_enabled) OVERRIDE;
   virtual bool DemandDrawSw(SkCanvas* canvas) OVERRIDE;
   virtual void DidChangeRootLayerScrollOffset() OVERRIDE;
 
@@ -63,12 +67,14 @@ class SynchronousCompositorImpl
   virtual void SetContinuousInvalidate(bool enable) OVERRIDE;
   virtual void UpdateFrameMetaData(
       const cc::CompositorFrameMetadata& frame_info) OVERRIDE;
+  virtual void DidActivatePendingTree() OVERRIDE;
 
   // LayerScrollOffsetDelegate
   virtual void SetTotalScrollOffset(gfx::Vector2dF new_value) OVERRIDE;
   virtual gfx::Vector2dF GetTotalScrollOffset() OVERRIDE;
 
   void SetInputHandler(cc::InputHandler* input_handler);
+  void DidOverscroll(const cc::DidOverscrollParams& params);
 
  private:
   explicit SynchronousCompositorImpl(WebContents* contents);

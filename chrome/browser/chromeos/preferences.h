@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "ash/shell_observer.h"
 #include "base/compiler_specific.h"
 #include "base/prefs/pref_member.h"
 #include "chrome/browser/chromeos/language_preferences.h"
@@ -16,6 +17,8 @@
 class PrefRegistrySimple;
 class PrefService;
 class PrefServiceSyncable;
+
+class TracingManager;
 
 namespace user_prefs {
 class PrefRegistrySyncable;
@@ -31,7 +34,8 @@ class InputMethodManager;
 // is first initialized, it will initialize the OS settings to what's stored in
 // the preferences. These include touchpad settings, etc.
 // When the preferences change, we change the settings to reflect the new value.
-class Preferences : public PrefServiceSyncableObserver {
+class Preferences : public PrefServiceSyncableObserver,
+                    public ash::ShellObserver {
  public:
   Preferences();
   explicit Preferences(
@@ -40,7 +44,7 @@ class Preferences : public PrefServiceSyncableObserver {
 
   // These method will register the prefs associated with Chrome OS settings.
   static void RegisterPrefs(PrefRegistrySimple* registry);
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // This method will initialize Chrome OS settings to values in user prefs.
   void Init(PrefServiceSyncable* prefs);
@@ -106,14 +110,18 @@ class Preferences : public PrefServiceSyncableObserver {
   // PrefServiceSyncableObserver implementation.
   virtual void OnIsSyncingChanged() OVERRIDE;
 
+  // Overriden from ash::ShellObserver.
+  virtual void OnTouchHudProjectionToggled(bool enabled) OVERRIDE;
+
   PrefServiceSyncable* prefs_;
 
   input_method::InputMethodManager* input_method_manager_;
+  scoped_ptr<TracingManager> tracing_manager_;
 
+  BooleanPrefMember performance_tracing_enabled_;
   BooleanPrefMember tap_to_click_enabled_;
   BooleanPrefMember tap_dragging_enabled_;
   BooleanPrefMember three_finger_click_enabled_;
-  BooleanPrefMember three_finger_swipe_enabled_;
   BooleanPrefMember natural_scroll_;
   BooleanPrefMember vert_edge_scroll_enabled_;
   BooleanPrefMember a11y_spoken_feedback_enabled_;
@@ -132,6 +140,7 @@ class Preferences : public PrefServiceSyncableObserver {
   FilePathPrefMember download_default_directory_;
   FilePathPrefMember select_file_last_directory_;
   FilePathPrefMember save_file_default_directory_;
+  BooleanPrefMember touch_hud_projection_enabled_;
 
   // Input method preferences.
   StringPrefMember preferred_languages_;
@@ -165,28 +174,7 @@ class Preferences : public PrefServiceSyncableObserver {
   IntegerPrefMember xkb_auto_repeat_delay_pref_;
   IntegerPrefMember xkb_auto_repeat_interval_pref_;
 
-  BooleanPrefMember enable_screen_lock_;
-
   BooleanPrefMember enable_drm_;
-
-  // Power-management-related preferences.
-  IntegerPrefMember power_ac_screen_dim_delay_ms_;
-  IntegerPrefMember power_ac_screen_off_delay_ms_;
-  IntegerPrefMember power_ac_screen_lock_delay_ms_;
-  IntegerPrefMember power_ac_idle_warning_delay_ms_;
-  IntegerPrefMember power_ac_idle_delay_ms_;
-  IntegerPrefMember power_battery_screen_dim_delay_ms_;
-  IntegerPrefMember power_battery_screen_off_delay_ms_;
-  IntegerPrefMember power_battery_screen_lock_delay_ms_;
-  IntegerPrefMember power_battery_idle_warning_delay_ms_;
-  IntegerPrefMember power_battery_idle_delay_ms_;
-  IntegerPrefMember power_idle_action_;
-  IntegerPrefMember power_lid_closed_action_;
-  BooleanPrefMember power_use_audio_activity_;
-  BooleanPrefMember power_use_video_activity_;
-  BooleanPrefMember power_allow_screen_wake_locks_;
-  DoublePrefMember power_presentation_screen_dim_delay_factor_;
-  DoublePrefMember power_user_activity_screen_dim_delay_factor_;
 
   DISALLOW_COPY_AND_ASSIGN(Preferences);
 };

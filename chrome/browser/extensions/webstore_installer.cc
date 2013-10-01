@@ -14,17 +14,21 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_prefs.h"
+#include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/crx_installer.h"
+#include "chrome/browser/extensions/install_tracker.h"
+#include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/omaha_query_params/omaha_query_params.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
@@ -38,8 +42,8 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
+#include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -64,7 +68,8 @@ const char kDownloadDirectoryError[] = "Could not create download directory";
 const char kDownloadCanceledError[] = "Download canceled";
 const char kInstallCanceledError[] = "Install canceled";
 const char kDownloadInterruptedError[] = "Download interrupted";
-const char kInvalidDownloadError[] = "Download was not a CRX";
+const char kInvalidDownloadError[] =
+    "Download was not a valid extension or user script";
 const char kInlineInstallSource[] = "inline";
 const char kDefaultInstallSource[] = "ondemand";
 
@@ -85,7 +90,7 @@ void GetDownloadFilePath(
 
   // Ensure the download directory exists. TODO(asargent) - make this use
   // common code from the downloads system.
-  if (!file_util::DirectoryExists(directory)) {
+  if (!base::DirectoryExists(directory)) {
     if (!file_util::CreateDirectory(directory)) {
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                               base::Bind(callback, base::FilePath()));
@@ -158,7 +163,8 @@ WebstoreInstaller::Approval::Approval()
     : profile(NULL),
       use_app_installed_bubble(false),
       skip_post_install_ui(false),
-      skip_install_dialog(false) {
+      skip_install_dialog(false),
+      enable_launcher(false) {
 }
 
 scoped_ptr<WebstoreInstaller::Approval>
@@ -230,6 +236,17 @@ void WebstoreInstaller::Start() {
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&GetDownloadFilePath, download_path, id_,
                  base::Bind(&WebstoreInstaller::StartDownload, this)));
+
+  std::string name;
+  if (!approval_->manifest->value()->GetString(extension_manifest_keys::kName,
+                                               &name)) {
+    NOTREACHED();
+  }
+  extensions::InstallTracker* tracker =
+      extensions::InstallTrackerFactory::GetForProfile(profile_);
+  tracker->OnBeginExtensionInstall(
+      id_, name, approval_->installing_icon, approval_->manifest->is_app(),
+      approval_->manifest->is_platform_app());
 }
 
 void WebstoreInstaller::Observe(int type,
@@ -323,15 +340,27 @@ void WebstoreInstaller::OnDownloadUpdated(DownloadItem* download) {
       break;
     case DownloadItem::COMPLETE:
       // Wait for other notifications if the download is really an extension.
-      if (!download_crx_util::IsExtensionDownload(*download))
+      if (!download_crx_util::IsExtensionDownload(*download)) {
         ReportFailure(kInvalidDownloadError, FAILURE_REASON_OTHER);
-      else if (delegate_)
-        delegate_->OnExtensionDownloadProgress(id_, download);
+      } else {
+        if (delegate_)
+          delegate_->OnExtensionDownloadProgress(id_, download);
+
+        extensions::InstallTracker* tracker =
+            extensions::InstallTrackerFactory::GetForProfile(profile_);
+        tracker->OnDownloadProgress(id_, 100);
+      }
       break;
-    case DownloadItem::IN_PROGRESS:
+    case DownloadItem::IN_PROGRESS: {
       if (delegate_)
         delegate_->OnExtensionDownloadProgress(id_, download);
+
+      extensions::InstallTracker* tracker =
+          extensions::InstallTrackerFactory::GetForProfile(profile_);
+      tracker->OnDownloadProgress(id_, download->PercentComplete());
+
       break;
+    }
     default:
       // Continue listening if the download is not in one of the above states.
       break;
@@ -393,8 +422,7 @@ void WebstoreInstaller::StartDownload(const base::FilePath& file) {
   // The download url for the given extension is contained in |download_url_|.
   // We will navigate the current tab to this url to start the download. The
   // download system will then pass the crx to the CrxInstaller.
-  download_util::RecordDownloadSource(
-      download_util::INITIATED_BY_WEBSTORE_INSTALLER);
+  RecordDownloadSource(DOWNLOAD_INITIATED_BY_WEBSTORE_INSTALLER);
   int render_process_host_id =
     controller_->GetWebContents()->GetRenderProcessHost()->GetID();
   int render_view_host_routing_id =
@@ -421,6 +449,10 @@ void WebstoreInstaller::ReportFailure(const std::string& error,
     delegate_->OnExtensionInstallFailure(id_, error, reason);
     delegate_ = NULL;
   }
+
+  extensions::InstallTracker* tracker =
+      extensions::InstallTrackerFactory::GetForProfile(profile_);
+  tracker->OnInstallFailure(id_);
 
   Release();  // Balanced in Start().
 }

@@ -23,11 +23,11 @@
 #include "ash/shell_window_ids.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/wm/gestures/shelf_gesture_handler.h"
+#include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/property_util.h"
-#include "ash/wm/window_cycle_controller.h"
+#include "ash/wm/window_animations.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/workspace/workspace_animations.h"
 #include "ash/wm/workspace_controller.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
@@ -36,6 +36,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "ui/aura/client/activation_client.h"
+#include "ui/aura/client/cursor_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_handler.h"
@@ -60,6 +61,21 @@ const int kAutoHideDelayMS = 200;
 // keep the shelf from hiding.
 const int kNotificationBubbleGapHeight = 6;
 
+// The maximum size of the region on the display opposing the shelf managed by
+// this ShelfLayoutManager which can trigger showing the shelf.
+// For instance:
+// - Primary display is left of secondary display.
+// - Shelf is left aligned
+// - This ShelfLayoutManager manages the shelf for the secondary display.
+// |kMaxAutoHideShowShelfRegionSize| refers to the maximum size of the region
+// from the right edge of the primary display which can trigger showing the
+// auto hidden shelf. The region is used to make it easier to trigger showing
+// the auto hidden shelf when the shelf is on the boundary between displays.
+const int kMaxAutoHideShowShelfRegionSize = 10;
+
+// Const inset from the edget of the shelf to the edget of the status area.
+const int kStatusAreaInset = 3;
+
 ui::Layer* GetLayer(views::Widget* widget) {
   return widget->GetNativeView()->layer();
 }
@@ -68,11 +84,6 @@ bool IsDraggingTrayEnabled() {
   static bool dragging_tray_allowed = CommandLine::ForCurrentProcess()->
       HasSwitch(ash::switches::kAshEnableTrayDragging);
   return dragging_tray_allowed;
-}
-
-int GetPreferredShelfSize() {
-  return ash::switches::UseAlternateShelfLayout() ?
-      ShelfLayoutManager::kShelfSize : kLauncherPreferredSize;
 }
 
 }  // namespace
@@ -88,6 +99,11 @@ const int ShelfLayoutManager::kAutoHideSize = 3;
 
 // static
 const int ShelfLayoutManager::kShelfSize = 47;
+
+int ShelfLayoutManager::GetPreferredShelfSize() {
+  return ash::switches::UseAlternateShelfLayout() ?
+      ShelfLayoutManager::kShelfSize : kLauncherPreferredSize;
+}
 
 // ShelfLayoutManager::AutoHideEventFilter -------------------------------------
 
@@ -187,6 +203,7 @@ ShelfLayoutManager::ShelfLayoutManager(ShelfWidget* shelf)
       shelf_(shelf),
       workspace_controller_(NULL),
       window_overlaps_shelf_(false),
+      mouse_over_shelf_when_auto_hide_timer_started_(false),
       bezel_event_filter_(new ShelfBezelEventFilter(this)),
       gesture_drag_status_(GESTURE_DRAG_NONE),
       gesture_drag_amount_(0.f),
@@ -211,13 +228,22 @@ void ShelfLayoutManager::SetAutoHideBehavior(ShelfAutoHideBehavior behavior) {
   auto_hide_behavior_ = behavior;
   UpdateVisibilityState();
   FOR_EACH_OBSERVER(ShelfLayoutManagerObserver, observers_,
-                    OnAutoHideStateChanged(state_.auto_hide_state));
-  FOR_EACH_OBSERVER(ShelfLayoutManagerObserver, observers_,
-                    OnAutoHideBehaviorChanged(auto_hide_behavior_));
+                    OnAutoHideBehaviorChanged(root_window_,
+                                              auto_hide_behavior_));
+}
+
+void ShelfLayoutManager::PrepareForShutdown() {
+  // Clear all event filters, otherwise sometimes those filters may catch
+  // synthesized mouse event and cause crashes during the shutdown.
+  set_workspace_controller(NULL);
+  auto_hide_event_filter_.reset();
+  bezel_event_filter_.reset();
 }
 
 bool ShelfLayoutManager::IsVisible() const {
-  return shelf_->status_area_widget()->IsVisible() &&
+  // status_area_widget() may be NULL during the shutdown.
+  return shelf_->status_area_widget() &&
+      shelf_->status_area_widget()->IsVisible() &&
       (state_.visibility_state == SHELF_VISIBLE ||
        (state_.visibility_state == SHELF_AUTO_HIDE &&
         state_.auto_hide_state == SHELF_AUTO_HIDE_SHOWN));
@@ -258,7 +284,8 @@ void ShelfLayoutManager::LayoutShelf() {
   if (shelf_->launcher())
     shelf_->launcher()->SetLauncherViewBounds(
         target_bounds.launcher_bounds_in_shelf);
-  GetLayer(shelf_->status_area_widget())->SetOpacity(target_bounds.opacity);
+  GetLayer(shelf_->status_area_widget())->SetOpacity(
+      target_bounds.status_opacity);
   // TODO(harrym): Once status area widget is a child view of shelf
   // this can be simplified.
   gfx::Rect status_bounds = target_bounds.status_bounds_in_shelf;
@@ -322,20 +349,19 @@ void ShelfLayoutManager::UpdateAutoHideState() {
     if (auto_hide_state == SHELF_AUTO_HIDE_HIDDEN) {
       // Hides happen immediately.
       SetState(state_.visibility_state);
-      FOR_EACH_OBSERVER(ShelfLayoutManagerObserver, observers_,
-                        OnAutoHideStateChanged(auto_hide_state));
     } else {
-      auto_hide_timer_.Stop();
+      if (!auto_hide_timer_.IsRunning()) {
+        mouse_over_shelf_when_auto_hide_timer_started_ =
+            shelf_->GetWindowBoundsInScreen().Contains(
+                Shell::GetScreen()->GetCursorScreenPoint());
+      }
       auto_hide_timer_.Start(
           FROM_HERE,
           base::TimeDelta::FromMilliseconds(kAutoHideDelayMS),
           this, &ShelfLayoutManager::UpdateAutoHideStateNow);
-      FOR_EACH_OBSERVER(ShelfLayoutManagerObserver, observers_,
-          OnAutoHideStateChanged(
-              CalculateAutoHideState(state_.visibility_state)));
     }
   } else {
-    auto_hide_timer_.Stop();
+    StopAutoHideTimer();
   }
 }
 
@@ -518,7 +544,7 @@ bool ShelfLayoutManager::FullscreenWithMinimalChrome() const {
   RootWindowController* controller = GetRootWindowController(root_window_);
   if (!controller)
     return false;
-  aura::Window* window = controller->GetFullscreenWindow();
+  const aura::Window* window = controller->GetFullscreenWindow();
   if (!window)
     return false;
   if (!window->GetProperty(kFullscreenUsesMinimalChromeKey))
@@ -547,15 +573,8 @@ void ShelfLayoutManager::SetState(ShelfVisibilityState visibility_state) {
   state.auto_hide_state = CalculateAutoHideState(visibility_state);
   state.is_screen_locked =
       Shell::GetInstance()->session_state_delegate()->IsScreenLocked();
-
-  // It's possible for SetState() when a window becomes maximized but the state
-  // won't have changed value. Do the dimming check before the early exit.
-  if (workspace_controller_) {
-    shelf_->SetDimsShelf(
-        (state.visibility_state == SHELF_VISIBLE) &&
-          workspace_controller_->GetWindowState() ==
-              WORKSPACE_WINDOW_STATE_MAXIMIZED);
-  }
+  state.window_state = workspace_controller_ ?
+      workspace_controller_->GetWindowState() : WORKSPACE_WINDOW_STATE_DEFAULT;
 
   if (state_.Equals(state))
     return;  // Nothing changed.
@@ -572,16 +591,7 @@ void ShelfLayoutManager::SetState(ShelfVisibilityState visibility_state) {
     auto_hide_event_filter_.reset(NULL);
   }
 
-  auto_hide_timer_.Stop();
-
-  // Animating the background when transitioning from auto-hide & hidden to
-  // visible is janky. Update the background immediately in this case.
-  BackgroundAnimator::ChangeType change_type =
-      (state_.visibility_state == SHELF_AUTO_HIDE &&
-       state_.auto_hide_state == SHELF_AUTO_HIDE_HIDDEN &&
-       state.visibility_state == SHELF_VISIBLE) ?
-      BackgroundAnimator::CHANGE_IMMEDIATE : BackgroundAnimator::CHANGE_ANIMATE;
-  StopAnimating();
+  StopAutoHideTimer();
 
   State old_state = state_;
   state_ = state;
@@ -591,39 +601,58 @@ void ShelfLayoutManager::SetState(ShelfVisibilityState visibility_state) {
   ui::ScopedLayerAnimationSettings launcher_animation_setter(
       GetLayer(shelf_)->GetAnimator());
   launcher_animation_setter.SetTransitionDuration(
-      base::TimeDelta::FromMilliseconds(kWorkspaceSwitchTimeMS));
+      base::TimeDelta::FromMilliseconds(kCrossFadeDurationMS));
   launcher_animation_setter.SetTweenType(ui::Tween::EASE_OUT);
+  launcher_animation_setter.SetPreemptionStrategy(
+      ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
   GetLayer(shelf_)->SetBounds(
       target_bounds.shelf_bounds_in_root);
   GetLayer(shelf_)->SetOpacity(target_bounds.opacity);
   ui::ScopedLayerAnimationSettings status_animation_setter(
       GetLayer(shelf_->status_area_widget())->GetAnimator());
   status_animation_setter.SetTransitionDuration(
-      base::TimeDelta::FromMilliseconds(kWorkspaceSwitchTimeMS));
+      base::TimeDelta::FromMilliseconds(kCrossFadeDurationMS));
   status_animation_setter.SetTweenType(ui::Tween::EASE_OUT);
+  status_animation_setter.SetPreemptionStrategy(
+      ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
 
-  // Delay updating the background when going from SHELF_AUTO_HIDE_SHOWN to
-  // SHELF_AUTO_HIDE_HIDDEN until the shelf animates out. Otherwise during the
-  // animation you see the background change.
-  // Also delay the animation when the shelf was hidden, and has just been made
-  // visible (e.g. using a gesture-drag).
-  bool delay_shelf_update =
-      state.visibility_state == SHELF_AUTO_HIDE &&
-      state.auto_hide_state == SHELF_AUTO_HIDE_HIDDEN &&
-      old_state.visibility_state == SHELF_AUTO_HIDE;
+  BackgroundAnimator::ChangeType change_type =
+      BackgroundAnimator::CHANGE_ANIMATE;
+  bool delay_background_change = false;
 
+  // Do not animate the background when:
+  // - Going from a hidden / auto hidden shelf in fullscreen to a visible shelf
+  //   in maximized mode.
+  // - Going from an auto hidden shelf in maximized mode to a visible shelf in
+  //   maximized mode.
   if (state.visibility_state == SHELF_VISIBLE &&
-      old_state.visibility_state == SHELF_AUTO_HIDE &&
-      old_state.auto_hide_state == SHELF_AUTO_HIDE_HIDDEN)
-    delay_shelf_update = true;
+      state.window_state == WORKSPACE_WINDOW_STATE_MAXIMIZED &&
+      old_state.visibility_state != SHELF_VISIBLE) {
+    change_type = BackgroundAnimator::CHANGE_IMMEDIATE;
+  } else {
+    // Delay the animation when the shelf was hidden, and has just been made
+    // visible (e.g. using a gesture-drag).
+    if (state.visibility_state == SHELF_VISIBLE &&
+        old_state.visibility_state == SHELF_AUTO_HIDE &&
+        old_state.auto_hide_state == SHELF_AUTO_HIDE_HIDDEN) {
+      delay_background_change = true;
+    }
+  }
 
-  if (delay_shelf_update) {
+  if (delay_background_change) {
     if (update_shelf_observer_)
       update_shelf_observer_->Detach();
     // UpdateShelfBackground deletes itself when the animation is done.
     update_shelf_observer_ = new UpdateShelfObserver(this);
     status_animation_setter.AddObserver(update_shelf_observer_);
+  } else {
+    UpdateShelfBackground(change_type);
   }
+
+  shelf_->SetDimsShelf(
+      state.visibility_state == SHELF_VISIBLE &&
+      state.window_state == WORKSPACE_WINDOW_STATE_MAXIMIZED);
+
   ui::Layer* layer = GetLayer(shelf_->status_area_widget());
   // TODO(harrym): Remove when status_area is view (crbug.com/180422).
   gfx::Rect status_bounds = target_bounds.status_bounds_in_shelf;
@@ -636,8 +665,16 @@ void ShelfLayoutManager::SetState(ShelfVisibilityState visibility_state) {
   Shell::GetInstance()->SetDisplayWorkAreaInsets(
       root_window_, target_bounds.work_area_insets);
   UpdateHitTestBounds();
-  if (!delay_shelf_update)
-    UpdateShelfBackground(change_type);
+
+  // OnAutoHideStateChanged Should be emitted when:
+  //  - firstly state changed to auto-hide from other state
+  //  - or, auto_hide_state has changed
+  if ((old_state.visibility_state != state_.visibility_state &&
+       state_.visibility_state == SHELF_AUTO_HIDE) ||
+      old_state.auto_hide_state != state_.auto_hide_state) {
+    FOR_EACH_OBSERVER(ShelfLayoutManagerObserver, observers_,
+                      OnAutoHideStateChanged(state_.auto_hide_state));
+  }
 }
 
 void ShelfLayoutManager::StopAnimating() {
@@ -707,6 +744,9 @@ void ShelfLayoutManager::CalculateTargetBounds(
   int status_inset = std::max(0, GetPreferredShelfSize() -
       PrimaryAxisValue(status_size.height(), status_size.width()));
 
+  if (ash::switches::UseAlternateShelfLayout())
+    status_inset = kStatusAreaInset;
+
   target_bounds->status_bounds_in_shelf = SelectValueForShelfAlignment(
       gfx::Rect(base::i18n::IsRTL() ? 0 : shelf_width - status_size.width(),
                     status_inset, status_size.width(), status_size.height()),
@@ -725,13 +765,22 @@ void ShelfLayoutManager::CalculateTargetBounds(
       gfx::Insets(0, 0, 0, GetWorkAreaSize(state, shelf_width)),
       gfx::Insets(GetWorkAreaSize(state, shelf_height), 0, 0, 0));
 
+  // TODO(varkha): The functionality of managing insets for display areas
+  // should probably be pushed to a separate component. This would simplify or
+  // remove entirely the dependency on keyboard and dock.
+
   // Also push in the work area inset for the keyboard if it is visible.
   if (!keyboard_bounds_.IsEmpty()) {
-    target_bounds->work_area_insets.Set(
-        target_bounds->work_area_insets.top(),
-        target_bounds->work_area_insets.left(),
-        target_bounds->work_area_insets.bottom() + keyboard_bounds_.height(),
-        target_bounds->work_area_insets.right());
+    gfx::Insets keyboard_insets(0, 0, keyboard_bounds_.height(), 0);
+    target_bounds->work_area_insets += keyboard_insets;
+  }
+
+  // Also push in the work area inset for the dock if it is visible.
+  if (!dock_bounds_.IsEmpty()) {
+    gfx::Insets dock_insets(
+        0, (dock_bounds_.x() > 0 ? 0 : dock_bounds_.width()),
+        0, (dock_bounds_.x() > 0 ? dock_bounds_.width() : 0));
+    target_bounds->work_area_insets += dock_insets;
   }
 
   target_bounds->opacity =
@@ -740,7 +789,8 @@ void ShelfLayoutManager::CalculateTargetBounds(
        state.visibility_state == SHELF_AUTO_HIDE) ? 1.0f : 0.0f;
   target_bounds->status_opacity =
       (state.visibility_state == SHELF_AUTO_HIDE &&
-       state.auto_hide_state == SHELF_AUTO_HIDE_HIDDEN) ?
+       state.auto_hide_state == SHELF_AUTO_HIDE_HIDDEN &&
+       gesture_drag_status_ != GESTURE_DRAG_IN_PROGRESS) ?
       0.0f : target_bounds->opacity;
 
   if (gesture_drag_status_ == GESTURE_DRAG_IN_PROGRESS)
@@ -806,12 +856,16 @@ void ShelfLayoutManager::UpdateTargetBoundsForGesture(
           available_bounds.bottom() - shelf_height);
     }
 
-    // The statusbar should be in the center of the shelf.
-    gfx::Rect status_y = target_bounds->shelf_bounds_in_root;
-    status_y.set_y(0);
-    status_y.ClampToCenteredSize(
-        target_bounds->status_bounds_in_shelf.size());
-    target_bounds->status_bounds_in_shelf.set_y(status_y.y());
+    if (ash::switches::UseAlternateShelfLayout()) {
+      target_bounds->status_bounds_in_shelf.set_y(kStatusAreaInset);
+    } else {
+      // The statusbar should be in the center of the shelf.
+      gfx::Rect status_y = target_bounds->shelf_bounds_in_root;
+      status_y.set_y(0);
+      status_y.ClampToCenteredSize(
+          target_bounds->status_bounds_in_shelf.size());
+      target_bounds->status_bounds_in_shelf.set_y(status_y.y());
+    }
   } else {
     // Move and size the launcher with the gesture.
     int shelf_width = target_bounds->shelf_bounds_in_root.width();
@@ -826,38 +880,80 @@ void ShelfLayoutManager::UpdateTargetBoundsForGesture(
           available_bounds.right() - shelf_width);
     }
 
-    // The statusbar should be in the center of the shelf.
-    gfx::Rect status_x = target_bounds->shelf_bounds_in_root;
-    status_x.set_x(0);
-    status_x.ClampToCenteredSize(
-        target_bounds->status_bounds_in_shelf.size());
-    target_bounds->status_bounds_in_shelf.set_x(status_x.x());
+    if (ash::switches::UseAlternateShelfLayout()) {
+      if (alignment_ == SHELF_ALIGNMENT_RIGHT) {
+        target_bounds->shelf_bounds_in_root.set_x(
+            available_bounds.right() - shelf_width + kStatusAreaInset);
+      } else {
+        target_bounds->shelf_bounds_in_root.set_x(kStatusAreaInset);
+      }
+    } else {
+      // The statusbar should be in the center of the shelf.
+      gfx::Rect status_x = target_bounds->shelf_bounds_in_root;
+      status_x.set_x(0);
+      status_x.ClampToCenteredSize(
+          target_bounds->status_bounds_in_shelf.size());
+      target_bounds->status_bounds_in_shelf.set_x(status_x.x());
+    }
   }
 }
 
 void ShelfLayoutManager::UpdateShelfBackground(
     BackgroundAnimator::ChangeType type) {
-  bool launcher_paints = GetLauncherPaintsBackground();
-  shelf_->SetPaintsBackground(launcher_paints, type);
+  shelf_->SetPaintsBackground(GetShelfBackgroundType(), type);
 }
 
-bool ShelfLayoutManager::GetLauncherPaintsBackground() const {
-  return gesture_drag_status_ == GESTURE_DRAG_IN_PROGRESS ||
+ShelfBackgroundType ShelfLayoutManager::GetShelfBackgroundType() const {
+  if (state_.visibility_state != SHELF_AUTO_HIDE &&
+      state_.window_state == WORKSPACE_WINDOW_STATE_MAXIMIZED) {
+    return SHELF_BACKGROUND_MAXIMIZED;
+  }
+
+  if (gesture_drag_status_ == GESTURE_DRAG_IN_PROGRESS ||
       (!state_.is_screen_locked && window_overlaps_shelf_) ||
-      (state_.visibility_state == SHELF_AUTO_HIDE);
+      (state_.visibility_state == SHELF_AUTO_HIDE)) {
+    return SHELF_BACKGROUND_OVERLAP;
+  }
+
+  return SHELF_BACKGROUND_DEFAULT;
 }
 
 void ShelfLayoutManager::UpdateAutoHideStateNow() {
   SetState(state_.visibility_state);
+
+  // If the state did not change, the auto hide timer may still be running.
+  StopAutoHideTimer();
+}
+
+void ShelfLayoutManager::StopAutoHideTimer() {
+  auto_hide_timer_.Stop();
+  mouse_over_shelf_when_auto_hide_timer_started_ = false;
+}
+
+gfx::Rect ShelfLayoutManager::GetAutoHideShowShelfRegionInScreen() const {
+  gfx::Rect shelf_bounds_in_screen = shelf_->GetWindowBoundsInScreen();
+  gfx::Vector2d offset = SelectValueForShelfAlignment(
+      gfx::Vector2d(0, shelf_bounds_in_screen.height()),
+      gfx::Vector2d(-kMaxAutoHideShowShelfRegionSize, 0),
+      gfx::Vector2d(shelf_bounds_in_screen.width(), 0),
+      gfx::Vector2d(0, -kMaxAutoHideShowShelfRegionSize));
+
+  gfx::Rect show_shelf_region_in_screen = shelf_bounds_in_screen;
+  show_shelf_region_in_screen += offset;
+  if (IsHorizontalAlignment())
+    show_shelf_region_in_screen.set_height(kMaxAutoHideShowShelfRegionSize);
+  else
+    show_shelf_region_in_screen.set_width(kMaxAutoHideShowShelfRegionSize);
+
+  // TODO: Figure out if we need any special handling when the keyboard is
+  // visible.
+  return show_shelf_region_in_screen;
 }
 
 ShelfAutoHideState ShelfLayoutManager::CalculateAutoHideState(
     ShelfVisibilityState visibility_state) const {
   if (visibility_state != SHELF_AUTO_HIDE || !shelf_)
     return SHELF_AUTO_HIDE_HIDDEN;
-
-  if (gesture_drag_status_ == GESTURE_DRAG_COMPLETE_IN_PROGRESS)
-    return gesture_drag_auto_hide_state_;
 
   Shell* shell = Shell::GetInstance();
   if (shell->GetAppListTargetVisibility())
@@ -876,8 +972,34 @@ ShelfAutoHideState ShelfLayoutManager::CalculateAutoHideState(
   if (shelf_->IsActive() || shelf_->status_area_widget()->IsActive())
     return SHELF_AUTO_HIDE_SHOWN;
 
+  const std::vector<aura::Window*> windows =
+      ash::MruWindowTracker::BuildWindowList(false);
+
+  // Process the window list and check if there are any visible windows.
+  bool visible_window = false;
+  for (size_t i = 0; i < windows.size(); ++i) {
+    if (windows[i] && windows[i]->IsVisible() &&
+        !ash::wm::IsWindowMinimized(windows[i]) &&
+        root_window_ == windows[i]->GetRootWindow()) {
+      visible_window = true;
+      break;
+    }
+  }
+  // If there are no visible windows do not hide the shelf.
+  if (!visible_window)
+    return SHELF_AUTO_HIDE_SHOWN;
+
+  if (gesture_drag_status_ == GESTURE_DRAG_COMPLETE_IN_PROGRESS)
+    return gesture_drag_auto_hide_state_;
+
   // Don't show if the user is dragging the mouse.
   if (auto_hide_event_filter_.get() && auto_hide_event_filter_->in_mouse_drag())
+    return SHELF_AUTO_HIDE_HIDDEN;
+
+  // Ignore the mouse position if mouse events are disabled.
+  aura::client::CursorClient* cursor_client = aura::client::GetCursorClient(
+      shelf_->GetNativeWindow()->GetRootWindow());
+  if (!cursor_client->IsMouseEventsEnabled())
     return SHELF_AUTO_HIDE_HIDDEN;
 
   gfx::Rect shelf_region = shelf_->GetWindowBoundsInScreen();
@@ -896,22 +1018,31 @@ ShelfAutoHideState ShelfLayoutManager::CalculateAutoHideState(
                            -kNotificationBubbleGapHeight : 0);
   }
 
-  if (shelf_region.Contains(Shell::GetScreen()->GetCursorScreenPoint()))
+  gfx::Point cursor_position_in_screen =
+      Shell::GetScreen()->GetCursorScreenPoint();
+  if (shelf_region.Contains(cursor_position_in_screen))
     return SHELF_AUTO_HIDE_SHOWN;
 
-  const std::vector<aura::Window*> windows =
-      ash::WindowCycleController::BuildWindowList(NULL, false);
-
-  // Process the window list and check if there are any visible windows.
-  for (size_t i = 0; i < windows.size(); ++i) {
-    if (windows[i] && windows[i]->IsVisible() &&
-        !ash::wm::IsWindowMinimized(windows[i]) &&
-        root_window_ == windows[i]->GetRootWindow())
-      return SHELF_AUTO_HIDE_HIDDEN;
+  // When the shelf is auto hidden and the shelf is on the boundary between two
+  // displays, it is hard to trigger showing the shelf. For instance, if a
+  // user's primary display is left of their secondary display, it is hard to
+  // unautohide a left aligned shelf on the secondary display.
+  // It is hard because:
+  // - It is hard to stop the cursor in the shelf "light bar" and not overshoot.
+  // - The cursor is warped to the other display if the cursor gets to the edge
+  //   of the display.
+  // Show the shelf if the cursor started on the shelf and the user overshot the
+  // shelf slightly to make it easier to show the shelf in this situation. We
+  // do not check |auto_hide_timer_|.IsRunning() because it returns false when
+  // the timer's task is running.
+  if ((state_.auto_hide_state == SHELF_AUTO_HIDE_SHOWN ||
+       mouse_over_shelf_when_auto_hide_timer_started_) &&
+      GetAutoHideShowShelfRegionInScreen().Contains(
+          cursor_position_in_screen)) {
+    return SHELF_AUTO_HIDE_SHOWN;
   }
 
-  // If there are no visible windows do not hide the shelf.
-  return SHELF_AUTO_HIDE_SHOWN;
+  return SHELF_AUTO_HIDE_HIDDEN;
 }
 
 void ShelfLayoutManager::UpdateHitTestBounds() {
@@ -960,6 +1091,14 @@ void ShelfLayoutManager::OnKeyboardBoundsChanging(
     const gfx::Rect& keyboard_bounds) {
   keyboard_bounds_ = keyboard_bounds;
   OnWindowResized();
+}
+
+void ShelfLayoutManager::OnDockBoundsChanging(
+    const gfx::Rect& dock_bounds) {
+  if (dock_bounds_ != dock_bounds) {
+    dock_bounds_ = dock_bounds;
+    OnWindowResized();
+  }
 }
 
 gfx::Insets ShelfLayoutManager::GetInsetsForAlignment(int distance) const {

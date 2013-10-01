@@ -4,7 +4,9 @@
 
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
 
+#include "base/callback.h"
 #include "base/prefs/pref_value_map.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/policy_error_map.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
@@ -13,6 +15,32 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace policy {
+
+namespace {
+
+const char kLoginScreenPowerManagementPolicy[] =
+    "{"
+    "  \"AC\": {"
+    "    \"Delays\": {"
+    "      \"ScreenDim\": 5000,"
+    "      \"ScreenOff\": 7000,"
+    "      \"Idle\": 9000"
+    "    },"
+    "    \"IdleAction\": \"DoNothing\""
+    "  },"
+    "  \"Battery\": {"
+    "    \"Delays\": {"
+    "      \"ScreenDim\": 1000,"
+    "      \"ScreenOff\": 3000,"
+    "      \"Idle\": 4000"
+    "    },"
+    "    \"IdleAction\": \"DoNothing\""
+    "  },"
+    "  \"LidCloseAction\": \"DoNothing\","
+    "  \"UserActivityScreenDimDelayScale\": 300"
+    "}";
+
+}  // namespace
 
 TEST(NetworkConfigurationPolicyHandlerTest, Empty) {
   PolicyMap policy_map;
@@ -42,7 +70,8 @@ TEST(NetworkConfigurationPolicyHandlerTest, ValidONC) {
   policy_map.Set(key::kOpenNetworkConfiguration,
                  POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER,
-                 Value::CreateStringValue(kTestONC));
+                 Value::CreateStringValue(kTestONC),
+                 NULL);
   scoped_ptr<NetworkConfigurationPolicyHandler> handler(
       NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   PolicyErrorMap errors;
@@ -55,7 +84,8 @@ TEST(NetworkConfigurationPolicyHandlerTest, WrongType) {
   policy_map.Set(key::kOpenNetworkConfiguration,
                  POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER,
-                 Value::CreateBooleanValue(false));
+                 Value::CreateBooleanValue(false),
+                 NULL);
   scoped_ptr<NetworkConfigurationPolicyHandler> handler(
       NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   PolicyErrorMap errors;
@@ -69,7 +99,8 @@ TEST(NetworkConfigurationPolicyHandlerTest, JSONParseError) {
   policy_map.Set(key::kOpenNetworkConfiguration,
                  POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER,
-                 Value::CreateStringValue(kTestONC));
+                 Value::CreateStringValue(kTestONC),
+                 NULL);
   scoped_ptr<NetworkConfigurationPolicyHandler> handler(
       NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   PolicyErrorMap errors;
@@ -96,7 +127,8 @@ TEST(NetworkConfigurationPolicyHandlerTest, Sanitization) {
   policy_map.Set(key::kOpenNetworkConfiguration,
                  POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER,
-                 Value::CreateStringValue(kTestONC));
+                 Value::CreateStringValue(kTestONC),
+                 NULL);
   scoped_ptr<NetworkConfigurationPolicyHandler> handler(
       NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   PolicyErrorMap errors;
@@ -118,7 +150,7 @@ TEST(PinnedLauncherAppsPolicyHandler, PrefTranslation) {
   PinnedLauncherAppsPolicyHandler handler;
 
   policy_map.Set(key::kPinnedLauncherApps, POLICY_LEVEL_MANDATORY,
-                 POLICY_SCOPE_USER, list.DeepCopy());
+                 POLICY_SCOPE_USER, list.DeepCopy(), NULL);
   handler.ApplyPolicySettings(policy_map, &prefs);
   EXPECT_TRUE(prefs.GetValue(prefs::kPinnedLauncherApps, &value));
   EXPECT_TRUE(base::Value::Equals(&expected_pinned_apps, value));
@@ -129,11 +161,61 @@ TEST(PinnedLauncherAppsPolicyHandler, PrefTranslation) {
   expected_pinned_apps.Append(entry1_dict);
   list.Append(entry1.DeepCopy());
   policy_map.Set(key::kPinnedLauncherApps, POLICY_LEVEL_MANDATORY,
-                 POLICY_SCOPE_USER, list.DeepCopy());
+                 POLICY_SCOPE_USER, list.DeepCopy(), NULL);
   prefs.Clear();
   handler.ApplyPolicySettings(policy_map, &prefs);
   EXPECT_TRUE(prefs.GetValue(prefs::kPinnedLauncherApps, &value));
   EXPECT_TRUE(base::Value::Equals(&expected_pinned_apps, value));
+}
+
+TEST(LoginScreenPowerManagementPolicyHandlerTest, Empty) {
+  PolicyMap policy_map;
+  LoginScreenPowerManagementPolicyHandler handler;
+  PolicyErrorMap errors;
+  EXPECT_TRUE(handler.CheckPolicySettings(policy_map, &errors));
+  EXPECT_TRUE(errors.GetErrors(key::kDeviceLoginScreenPowerManagement).empty());
+}
+
+TEST(LoginScreenPowerManagementPolicyHandlerTest, ValidPolicy) {
+  PolicyMap policy_map;
+  policy_map.Set(key::kDeviceLoginScreenPowerManagement,
+                 POLICY_LEVEL_MANDATORY,
+                 POLICY_SCOPE_USER,
+                 Value::CreateStringValue(kLoginScreenPowerManagementPolicy),
+                 NULL);
+  LoginScreenPowerManagementPolicyHandler handler;
+  PolicyErrorMap errors;
+  EXPECT_TRUE(handler.CheckPolicySettings(policy_map, &errors));
+  EXPECT_TRUE(errors.GetErrors(key::kDeviceLoginScreenPowerManagement).empty());
+}
+
+TEST(LoginScreenPowerManagementPolicyHandlerTest, WrongType) {
+  PolicyMap policy_map;
+  policy_map.Set(key::kDeviceLoginScreenPowerManagement,
+                 POLICY_LEVEL_MANDATORY,
+                 POLICY_SCOPE_USER,
+                 Value::CreateBooleanValue(false),
+                 NULL);
+  LoginScreenPowerManagementPolicyHandler handler;
+  PolicyErrorMap errors;
+  EXPECT_FALSE(handler.CheckPolicySettings(policy_map, &errors));
+  EXPECT_FALSE(
+      errors.GetErrors(key::kDeviceLoginScreenPowerManagement).empty());
+}
+
+TEST(LoginScreenPowerManagementPolicyHandlerTest, JSONParseError) {
+  const std::string policy("I'm not proper JSON!");
+  PolicyMap policy_map;
+  policy_map.Set(key::kDeviceLoginScreenPowerManagement,
+                 POLICY_LEVEL_MANDATORY,
+                 POLICY_SCOPE_USER,
+                 Value::CreateStringValue(policy),
+                 NULL);
+  LoginScreenPowerManagementPolicyHandler handler;
+  PolicyErrorMap errors;
+  EXPECT_FALSE(handler.CheckPolicySettings(policy_map, &errors));
+  EXPECT_FALSE(
+      errors.GetErrors(key::kDeviceLoginScreenPowerManagement).empty());
 }
 
 }  // namespace policy

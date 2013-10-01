@@ -215,6 +215,10 @@ TEST_PPAPI_IN_PROCESS(Core)
 TEST_PPAPI_OUT_OF_PROCESS(Core)
 TEST_PPAPI_NACL(Core)
 
+TEST_PPAPI_IN_PROCESS(TraceEvent)
+TEST_PPAPI_OUT_OF_PROCESS(TraceEvent)
+TEST_PPAPI_NACL(TraceEvent)
+
 TEST_PPAPI_IN_PROCESS(InputEvent)
 TEST_PPAPI_OUT_OF_PROCESS(InputEvent)
 TEST_PPAPI_NACL(InputEvent)
@@ -230,9 +234,13 @@ TEST_PPAPI_IN_PROCESS(MAYBE_ImeInputEvent)
 TEST_PPAPI_OUT_OF_PROCESS(MAYBE_ImeInputEvent)
 TEST_PPAPI_NACL(MAYBE_ImeInputEvent)
 
+// "Instance" tests are really InstancePrivate tests. InstancePrivate is not
+// supported in NaCl, so these tests are only run trusted.
+// Also note that these tests are run separately on purpose (versus collapsed
+// in to one IN_PROC_BROWSER_TEST_F macro), because some of them have leaks
+// on purpose that will look like failures to tests that are run later.
 TEST_PPAPI_IN_PROCESS(Instance_ExecuteScript);
 TEST_PPAPI_OUT_OF_PROCESS(Instance_ExecuteScript)
-// ExecuteScript isn't supported by NaCl.
 
 // We run and reload the RecursiveObjects test to ensure that the InstanceObject
 // (and others) are properly cleaned up after the first run.
@@ -247,8 +255,25 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest,
 }
 TEST_PPAPI_IN_PROCESS(Instance_LeakedObjectDestructors);
 TEST_PPAPI_OUT_OF_PROCESS(Instance_LeakedObjectDestructors);
-// ScriptableObjects aren't supported in NaCl, so Instance_RecursiveObjects and
-// Instance_TestLeakedObjectDestructors don't make sense for NaCl.
+
+IN_PROC_BROWSER_TEST_F(PPAPITest,
+                       Instance_ExecuteScriptAtInstanceShutdown) {
+  // In other tests, we use one call to RunTest so that the tests can all run
+  // in one plugin instance. This saves time on loading the plugin (especially
+  // for NaCl). Here, we actually want to destroy the Instance, to test whether
+  // the destructor can run ExecuteScript successfully. That's why we have two
+  // separate calls to RunTest; the second one forces a navigation which
+  // destroys the instance from the prior RunTest.
+  // See test_instance_deprecated.cc for more information.
+  RunTest("Instance_SetupExecuteScriptAtInstanceShutdown");
+  RunTest("Instance_ExecuteScriptAtInstanceShutdown");
+}
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest,
+                       Instance_ExecuteScriptAtInstanceShutdown) {
+  // (See the comment for the in-process version of this test above)
+  RunTest("Instance_SetupExecuteScriptAtInstanceShutdown");
+  RunTest("Instance_ExecuteScriptAtInstanceShutdown");
+}
 
 TEST_PPAPI_IN_PROCESS(Graphics2D)
 TEST_PPAPI_OUT_OF_PROCESS(Graphics2D)
@@ -384,7 +409,6 @@ TEST_PPAPI_NACL_DISALLOWED_SOCKETS(TCPServerSocketPrivateDisallowed)
 TEST_PPAPI_NACL_DISALLOWED_SOCKETS(TCPSocketPrivateDisallowed)
 TEST_PPAPI_NACL_DISALLOWED_SOCKETS(UDPSocketPrivateDisallowed)
 
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(TCPServerSocketPrivate)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(TCPServerSocketPrivate)
 TEST_PPAPI_NACL(TCPServerSocketPrivate)
 
@@ -594,6 +618,9 @@ TEST_PPAPI_NACL(DISABLED_URLRequest_SetProperty)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_AppendDataToBody)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_AppendDataToBody)
 TEST_PPAPI_NACL(URLRequest_AppendDataToBody)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_AppendFileToBody)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_AppendFileToBody)
+TEST_PPAPI_NACL(URLRequest_AppendFileToBody)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLRequest_Stress)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLRequest_Stress)
 TEST_PPAPI_NACL(URLRequest_Stress)
@@ -652,7 +679,14 @@ IN_PROC_BROWSER_TEST_F(PPAPITest, PostMessage) {
       LIST_TEST(PostMessage_ExtraParam)
   );
 }
-IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, PostMessage) {
+
+// Flaky: crbug.com/269530
+#if defined(OS_WIN)
+#define MAYBE_PostMessage DISABLED_PostMessage
+#else
+#define MAYBE_PostMessage PostMessage
+#endif
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, MAYBE_PostMessage) {
   RunTestViaHTTP(
       LIST_TEST(PostMessage_SendInInit)
       LIST_TEST(PostMessage_SendingData)
@@ -802,10 +836,42 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, FileIO) {
   );
 }
 
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileRef)
+IN_PROC_BROWSER_TEST_F(PPAPITest, FileRef) {
+  RunTestViaHTTP(
+      LIST_TEST(FileRef_Create)
+      LIST_TEST(FileRef_GetFileSystemType)
+      LIST_TEST(FileRef_GetName)
+      LIST_TEST(FileRef_GetPath)
+      LIST_TEST(FileRef_GetParent)
+      LIST_TEST(FileRef_MakeDirectory)
+      LIST_TEST(FileRef_QueryAndTouchFile)
+      LIST_TEST(FileRef_DeleteFileAndDirectory)
+      LIST_TEST(FileRef_RenameFileAndDirectory)
+      // TODO(teravest): Add in-process support.
+      // LIST_TEST(FileRef_Query)
+      LIST_TEST(FileRef_FileNameEscaping)
+      // TODO(teravest): Add in-process support.
+      // LIST_TEST(FileRef_ReadDirectoryEntries)
+  );
+}
 // OutOfProcessPPAPITest.FileRef times out fairly often.
 // http://crbug.com/241646
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(DISABLED_FileRef)
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, FileRef) {
+  RunTestViaHTTP(
+      LIST_TEST(FileRef_Create)
+      LIST_TEST(FileRef_GetFileSystemType)
+      LIST_TEST(FileRef_GetName)
+      LIST_TEST(FileRef_GetPath)
+      LIST_TEST(FileRef_GetParent)
+      LIST_TEST(FileRef_MakeDirectory)
+      LIST_TEST(FileRef_QueryAndTouchFile)
+      LIST_TEST(FileRef_DeleteFileAndDirectory)
+      LIST_TEST(FileRef_RenameFileAndDirectory)
+      LIST_TEST(FileRef_Query)
+      LIST_TEST(FileRef_FileNameEscaping)
+      LIST_TEST(DISABLED_FileRef_ReadDirectoryEntries)
+  );
+}
 IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, FileRef) {
   RunTestViaHTTP(
       LIST_TEST(FileRef_Create)

@@ -18,10 +18,10 @@
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "googleurl/src/gurl.h"
 #include "third_party/WebKit/public/web/WebNotificationPresenter.h"
 #include "third_party/WebKit/public/web/WebTextDirection.h"
 #include "ui/message_center/notifier_settings.h"
+#include "url/gurl.h"
 
 class ContentSettingsPattern;
 class Notification;
@@ -53,7 +53,7 @@ class DesktopNotificationService : public BrowserContextKeyedService,
   };
 
   // Register profile-specific prefs of notifications.
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* prefs);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* prefs);
 
   DesktopNotificationService(Profile* profile,
                              NotificationUIManager* ui_manager);
@@ -74,7 +74,9 @@ class DesktopNotificationService : public BrowserContextKeyedService,
   // other parameters supplied by the worker or page.
   bool ShowDesktopNotification(
       const content::ShowDesktopNotificationHostMsgParams& params,
-      int process_id, int route_id, DesktopNotificationSource source);
+      int process_id,
+      int route_id,
+      DesktopNotificationSource source);
 
   // Cancels a notification.  If it has already been shown, it will be
   // removed from the screen.  If it hasn't been shown yet, it won't be
@@ -152,21 +154,13 @@ class DesktopNotificationService : public BrowserContextKeyedService,
   WebKit::WebNotificationPresenter::Permission
       HasPermission(const GURL& origin);
 
-  // Returns true if the extension of the specified |id| is allowed to send
+  // Returns true if the notifier with |notifier_id| is allowed to send
   // notifications.
-  bool IsExtensionEnabled(const std::string& id);
+  bool IsNotifierEnabled(const message_center::NotifierId& notifier_id);
 
-  // Updates the availability of the extension to send notifications.
-  void SetExtensionEnabled(const std::string& id, bool enabled);
-
-  // Returns true if the system component of the specified |id| is allowed to
-  // send notifications.
-  bool IsSystemComponentEnabled(
-      message_center::Notifier::SystemComponentNotifierType type);
-
-  // Updates the availability of the system component to send notifications.
-  void SetSystemComponentEnabled(
-      message_center::Notifier::SystemComponentNotifierType type, bool enabled);
+  // Updates the availability of the notifier.
+  void SetNotifierEnabled(const message_center::NotifierId& notifier_id,
+                          bool enabled);
 
  private:
   // Takes a notification object and shows it in the UI.
@@ -182,13 +176,20 @@ class DesktopNotificationService : public BrowserContextKeyedService,
 
   NotificationUIManager* GetUIManager();
 
+  // Called when the string list pref has been changed.
+  void OnStringListPrefChanged(
+      const char* pref_name, std::set<std::string>* ids_field);
+
   // Called when the disabled_extension_id pref has been changed.
   void OnDisabledExtensionIdsChanged();
 
   // Called when the disabled_system_component_id pref has been changed.
   void OnDisabledSystemComponentIdsChanged();
 
-  // content::NotificationObserver override.
+  // Called when the enabled_sync_notifier_id pref has been changed.
+  void OnEnabledSyncNotifierIdsChanged();
+
+  // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
@@ -203,14 +204,20 @@ class DesktopNotificationService : public BrowserContextKeyedService,
   // Prefs listener for disabled_extension_id.
   StringListPrefMember disabled_extension_id_pref_;
 
-  // Prefs listener for disabled_extension_id.
+  // Prefs listener for disabled_system_component_id.
   StringListPrefMember disabled_system_component_id_pref_;
+
+  // Prefs listener for enabled_sync_notifier_id.
+  StringListPrefMember enabled_sync_notifier_id_pref_;
 
   // On-memory data for the availability of extensions.
   std::set<std::string> disabled_extension_ids_;
 
   // On-memory data for the availability of system_component.
   std::set<std::string> disabled_system_component_ids_;
+
+  // On-memory data for the availability of sync notifiers.
+  std::set<std::string> enabled_sync_notifier_ids_;
 
   // Registrar for the other kind of notifications (event signaling).
   content::NotificationRegistrar registrar_;

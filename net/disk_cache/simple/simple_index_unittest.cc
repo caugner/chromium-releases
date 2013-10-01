@@ -11,7 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/task_runner.h"
 #include "base/threading/platform_thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "net/disk_cache/simple/simple_index.h"
 #include "net/disk_cache/simple/simple_index_file.h"
 #include "net/disk_cache/simple/simple_util.h"
@@ -23,6 +23,9 @@ const int64 kTestLastUsedTimeInternal = 12345;
 const base::Time kTestLastUsedTime =
     base::Time::FromInternalValue(kTestLastUsedTimeInternal);
 const uint64 kTestEntrySize = 789;
+const uint64 kKey1Hash = disk_cache::simple_util::GetEntryHashKey("key1");
+const uint64 kKey2Hash = disk_cache::simple_util::GetEntryHashKey("key2");
+const uint64 kKey3Hash = disk_cache::simple_util::GetEntryHashKey("key3");
 
 }  // namespace
 
@@ -40,23 +43,23 @@ class EntryMetadataTest  : public testing::Test {
   }
 };
 
-class TestSimpleIndexFile : public SimpleIndexFile,
-                            public base::SupportsWeakPtr<TestSimpleIndexFile> {
+class MockSimpleIndexFile : public SimpleIndexFile,
+                            public base::SupportsWeakPtr<MockSimpleIndexFile> {
  public:
-  TestSimpleIndexFile()
+  MockSimpleIndexFile()
       : SimpleIndexFile(NULL, NULL, base::FilePath()),
-        get_index_entries_calls_(0),
+        load_result_(NULL),
+        load_index_entries_calls_(0),
         doom_entry_set_calls_(0),
-        last_response_thread_(NULL),
         disk_writes_(0) {}
 
   virtual void LoadIndexEntries(
-      scoped_refptr<base::SingleThreadTaskRunner> response_thread,
-      const SimpleIndexFile::IndexCompletionCallback&
-          completion_callback) OVERRIDE {
-    last_response_thread_ = response_thread.get();
-    completion_callback_ = completion_callback;
-    ++get_index_entries_calls_;
+      base::Time cache_last_modified,
+      const base::Closure& callback,
+      SimpleIndexLoadResult* out_load_result) OVERRIDE {
+    load_callback_ = callback;
+    load_result_ = out_load_result;
+    ++load_index_entries_calls_;
   }
 
   virtual void WriteToDisk(const SimpleIndex::EntrySet& entry_set,
@@ -79,10 +82,9 @@ class TestSimpleIndexFile : public SimpleIndexFile,
     entry_set->swap(disk_write_entry_set_);
   }
 
-  const SimpleIndexFile::IndexCompletionCallback& completion_callback() const {
-    return completion_callback_;
-  }
-  int get_index_entries_calls() const { return get_index_entries_calls_; }
+  const base::Closure& load_callback() const { return load_callback_; }
+  SimpleIndexLoadResult* load_result() const { return load_result_; }
+  int load_index_entries_calls() const { return load_index_entries_calls_; }
   int disk_writes() const { return disk_writes_; }
   const std::vector<uint64>& last_doom_entry_hashes() const {
     return last_doom_entry_hashes_;
@@ -90,11 +92,11 @@ class TestSimpleIndexFile : public SimpleIndexFile,
   int doom_entry_set_calls() const { return doom_entry_set_calls_; }
 
  private:
-  SimpleIndexFile::IndexCompletionCallback completion_callback_;
-  int get_index_entries_calls_;
+  base::Closure load_callback_;
+  SimpleIndexLoadResult* load_result_;
+  int load_index_entries_calls_;
   std::vector<uint64> last_doom_entry_hashes_;
   int doom_entry_set_calls_;
-  base::SingleThreadTaskRunner* last_response_thread_;
   base::Callback<void(int)> last_doom_reply_callback_;
   int disk_writes_;
   SimpleIndex::EntrySet disk_write_entry_set_;
@@ -103,12 +105,12 @@ class TestSimpleIndexFile : public SimpleIndexFile,
 class SimpleIndexTest  : public testing::Test {
  public:
   virtual void SetUp() OVERRIDE {
-    scoped_ptr<TestSimpleIndexFile> index_file(new TestSimpleIndexFile());
+    scoped_ptr<MockSimpleIndexFile> index_file(new MockSimpleIndexFile());
     index_file_ = index_file->AsWeakPtr();
     index_.reset(new SimpleIndex(NULL, base::FilePath(),
                                  index_file.PassAs<SimpleIndexFile>()));
 
-    index_->Initialize();
+    index_->Initialize(base::Time());
   }
 
   void WaitForTimeChange() {
@@ -133,24 +135,22 @@ class SimpleIndexTest  : public testing::Test {
                                  base::Time last_used_time,
                                  uint64 entry_size) {
     uint64 hash_key(simple_util::GetEntryHashKey(key));
-    index_file_return_map_.insert(std::make_pair(
+    index_file_->load_result()->entries.insert(std::make_pair(
         hash_key, EntryMetadata(last_used_time, entry_size)));
   }
 
   void ReturnIndexFile() {
-    scoped_ptr<SimpleIndex::EntrySet> map(new SimpleIndex::EntrySet);
-    map->swap(index_file_return_map_);
-    index_file_->completion_callback().Run(map.Pass(), false);
+    index_file_->load_result()->did_load = true;
+    index_file_->load_callback().Run();
   }
 
   // Non-const for timer manipulation.
   SimpleIndex* index() { return index_.get(); }
-  const TestSimpleIndexFile* index_file() const { return index_file_.get(); }
+  const MockSimpleIndexFile* index_file() const { return index_file_.get(); }
 
  protected:
-  SimpleIndex::EntrySet index_file_return_map_;
   scoped_ptr<SimpleIndex> index_;
-  base::WeakPtr<TestSimpleIndexFile> index_file_;
+  base::WeakPtr<MockSimpleIndexFile> index_file_;
 };
 
 TEST_F(EntryMetadataTest, Basics) {
@@ -189,18 +189,23 @@ TEST_F(SimpleIndexTest, IndexSizeCorrectOnMerge) {
   index()->UpdateEntrySize("seven", 7);
   EXPECT_EQ(14U, index()->cache_size_);
   {
-    scoped_ptr<EntrySet> entries(new EntrySet());
-    index()->MergeInitializingSet(entries.Pass(), false);
+    scoped_ptr<SimpleIndexLoadResult> result(new SimpleIndexLoadResult());
+    result->did_load = true;
+    index()->MergeInitializingSet(result.Pass());
   }
   EXPECT_EQ(14U, index()->cache_size_);
   {
-    scoped_ptr<EntrySet> entries(new EntrySet());
-    const uint64 hash_key = simple_util::GetEntryHashKey("eleven");
-    entries->insert(
-        std::make_pair(hash_key, EntryMetadata(base::Time::Now(), 11)));
-    index()->MergeInitializingSet(entries.Pass(), false);
+    scoped_ptr<SimpleIndexLoadResult> result(new SimpleIndexLoadResult());
+    result->did_load = true;
+    const uint64 new_hash_key = simple_util::GetEntryHashKey("eleven");
+    result->entries.insert(
+        std::make_pair(new_hash_key, EntryMetadata(base::Time::Now(), 11)));
+    const uint64 redundant_hash_key = simple_util::GetEntryHashKey("seven");
+    result->entries.insert(std::make_pair(redundant_hash_key,
+                                          EntryMetadata(base::Time::Now(), 7)));
+    index()->MergeInitializingSet(result.Pass());
   }
-  EXPECT_EQ(25U, index()->cache_size_);
+  EXPECT_EQ(2U + 5U + 7U + 11U, index()->cache_size_);
 }
 
 // State of index changes as expected with an insert and a remove.
@@ -229,29 +234,29 @@ TEST_F(SimpleIndexTest, BasicInsertRemove) {
 TEST_F(SimpleIndexTest, Has) {
   // Confirm the base index has dispatched the request for index entries.
   EXPECT_TRUE(index_file_.get());
-  EXPECT_EQ(1, index_file_->get_index_entries_calls());
+  EXPECT_EQ(1, index_file_->load_index_entries_calls());
 
   // Confirm "Has()" always returns true before the callback is called.
-  EXPECT_TRUE(index()->Has("key1"));
+  EXPECT_TRUE(index()->Has(kKey1Hash));
   index()->Insert("key1");
-  EXPECT_TRUE(index()->Has("key1"));
+  EXPECT_TRUE(index()->Has(kKey1Hash));
   index()->Remove("key1");
   // TODO(rdsmith): Maybe return false on explicitly removed entries?
-  EXPECT_TRUE(index()->Has("key1"));
+  EXPECT_TRUE(index()->Has(kKey1Hash));
 
   ReturnIndexFile();
 
   // Confirm "Has() returns conditionally now.
-  EXPECT_FALSE(index()->Has("key1"));
+  EXPECT_FALSE(index()->Has(kKey1Hash));
   index()->Insert("key1");
-  EXPECT_TRUE(index()->Has("key1"));
+  EXPECT_TRUE(index()->Has(kKey1Hash));
   index()->Remove("key1");
 }
 
 TEST_F(SimpleIndexTest, UseIfExists) {
   // Confirm the base index has dispatched the request for index entries.
   EXPECT_TRUE(index_file_.get());
-  EXPECT_EQ(1, index_file_->get_index_entries_calls());
+  EXPECT_EQ(1, index_file_->load_index_entries_calls());
 
   // Confirm "UseIfExists()" always returns true before the callback is called
   // and updates mod time if the entry was really there.
@@ -364,7 +369,7 @@ TEST_F(SimpleIndexTest, RemoveBeforeInit) {
                             10u);
   ReturnIndexFile();
 
-  EXPECT_FALSE(index()->Has("key1"));
+  EXPECT_FALSE(index()->Has(kKey1Hash));
 }
 
 // Insert something that's going to come in from the loaded index; correct
@@ -395,7 +400,7 @@ TEST_F(SimpleIndexTest, InsertRemoveBeforeInit) {
                             10u);
   ReturnIndexFile();
 
-  EXPECT_FALSE(index()->Has("key1"));
+  EXPECT_FALSE(index()->Has(kKey1Hash));
 }
 
 // Insert and Remove something that's going to come in from the loaded index.
@@ -445,7 +450,7 @@ TEST_F(SimpleIndexTest, AllInitConflicts) {
 
   ReturnIndexFile();
 
-  EXPECT_FALSE(index()->Has("key1"));
+  EXPECT_FALSE(index()->Has(kKey1Hash));
 
   EntryMetadata metadata;
   EXPECT_TRUE(GetEntryForTesting("key2", &metadata));
@@ -453,7 +458,7 @@ TEST_F(SimpleIndexTest, AllInitConflicts) {
   EXPECT_GT(now + base::TimeDelta::FromMinutes(1), metadata.GetLastUsedTime());
   EXPECT_EQ(0ul, metadata.GetEntrySize());
 
-  EXPECT_FALSE(index()->Has("key3"));
+  EXPECT_FALSE(index()->Has(kKey3Hash));
 
   EXPECT_TRUE(GetEntryForTesting("key4", &metadata));
   EXPECT_LT(now - base::TimeDelta::FromMinutes(1), metadata.GetLastUsedTime());
@@ -481,9 +486,9 @@ TEST_F(SimpleIndexTest, BasicEviction) {
   // Confirm index is as expected: No eviction, everything there.
   EXPECT_EQ(3, index()->GetEntryCount());
   EXPECT_EQ(0, index_file()->doom_entry_set_calls());
-  EXPECT_TRUE(index()->Has("key1"));
-  EXPECT_TRUE(index()->Has("key2"));
-  EXPECT_TRUE(index()->Has("key3"));
+  EXPECT_TRUE(index()->Has(kKey1Hash));
+  EXPECT_TRUE(index()->Has(kKey2Hash));
+  EXPECT_TRUE(index()->Has(kKey3Hash));
 
   // Trigger an eviction, and make sure the right things are tossed.
   // TODO(rdsmith): This is dependent on the innards of the implementation
@@ -492,9 +497,9 @@ TEST_F(SimpleIndexTest, BasicEviction) {
   index()->UpdateEntrySize("key3", 475);
   EXPECT_EQ(1, index_file()->doom_entry_set_calls());
   EXPECT_EQ(1, index()->GetEntryCount());
-  EXPECT_FALSE(index()->Has("key1"));
-  EXPECT_FALSE(index()->Has("key2"));
-  EXPECT_TRUE(index()->Has("key3"));
+  EXPECT_FALSE(index()->Has(kKey1Hash));
+  EXPECT_FALSE(index()->Has(kKey2Hash));
+  EXPECT_TRUE(index()->Has(kKey3Hash));
   ASSERT_EQ(2u, index_file_->last_doom_entry_hashes().size());
 }
 

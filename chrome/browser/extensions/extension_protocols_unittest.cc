@@ -5,7 +5,7 @@
 #include <string>
 
 #include "base/file_util.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_info_map.h"
@@ -86,7 +86,8 @@ scoped_refptr<Extension> CreateTestResponseHeaderExtension() {
 class ExtensionProtocolTest : public testing::Test {
  public:
   ExtensionProtocolTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
+    : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+      resource_context_(&test_url_request_context_) {}
 
   virtual void SetUp() OVERRIDE {
     testing::Test::SetUp();
@@ -128,6 +129,7 @@ class ExtensionProtocolTest : public testing::Test {
   net::URLRequestJobFactoryImpl job_factory_;
   const net::URLRequestJobFactory* old_factory_;
   net::TestDelegate test_delegate_;
+  net::TestURLRequestContext test_url_request_context_;
   content::MockResourceContext resource_context_;
 };
 

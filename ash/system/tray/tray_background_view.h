@@ -26,6 +26,8 @@ class TrayBackground;
 class ASH_EXPORT TrayBackgroundView : public ActionableView,
                                       public BackgroundAnimatorDelegate {
  public:
+  static const char kViewClassName[];
+
   // Base class for tray containers. Sets the border and layout. The container
   // auto-resizes the widget when necessary.
   class TrayContainer : public views::View {
@@ -63,6 +65,7 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
   virtual void Initialize();
 
   // Overridden from views::View.
+  virtual const char* GetClassName() const OVERRIDE;
   virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
   virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
@@ -137,6 +140,9 @@ class ASH_EXPORT TrayBackgroundView : public ActionableView,
 
   // Updates the arrow visibilty based on the launcher visibilty.
   void UpdateBubbleViewArrow(views::TrayBubbleView* bubble_view);
+
+  // Provides the background with a function to query for pressed state.
+  virtual bool IsPressed();
 
  private:
   class TrayWidgetObserver;

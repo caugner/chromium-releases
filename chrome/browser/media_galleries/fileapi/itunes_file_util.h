@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_MEDIA_GALLERIES_FILEAPI_ITUNES_FILE_UTIL_H_
 #define CHROME_BROWSER_MEDIA_GALLERIES_FILEAPI_ITUNES_FILE_UTIL_H_
 
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/media_galleries/fileapi/native_media_file_util.h"
 
@@ -16,23 +17,28 @@ namespace itunes {
 
 class ITunesDataProvider;
 
-class ItunesFileUtil : public chrome::NativeMediaFileUtil {
+extern const char kITunesLibraryXML[];
+extern const char kITunesMediaDir[];
+extern const char kITunesMusicDir[];
+extern const char kITunesAutoAddDir[];
+
+class ITunesFileUtil : public chrome::NativeMediaFileUtil {
  public:
-  ItunesFileUtil();
-  virtual ~ItunesFileUtil();
+  explicit ITunesFileUtil(chrome::MediaPathFilter* media_path_filter);
+  virtual ~ITunesFileUtil();
 
  protected:
   // NativeMediaFileUtil overrides.
   virtual void GetFileInfoOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const GetFileInfoCallback& callback) OVERRIDE;
   virtual void ReadDirectoryOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const ReadDirectoryCallback& callback) OVERRIDE;
   virtual void CreateSnapshotFileOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const CreateSnapshotFileCallback& callback) OVERRIDE;
   virtual base::PlatformFileError GetFileInfoSync(
@@ -57,28 +63,28 @@ class ItunesFileUtil : public chrome::NativeMediaFileUtil {
 
  private:
   void GetFileInfoWithFreshDataProvider(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const GetFileInfoCallback& callback,
       bool valid_parse);
   void ReadDirectoryWithFreshDataProvider(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const ReadDirectoryCallback& callback,
       bool valid_parse);
   virtual void CreateSnapshotFileWithFreshDataProvider(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const CreateSnapshotFileCallback& callback,
       bool valid_parse);
 
-  ITunesDataProvider* GetDataProvider();
+  virtual ITunesDataProvider* GetDataProvider();
 
-  base::WeakPtrFactory<ItunesFileUtil> weak_factory_;
+  base::WeakPtrFactory<ITunesFileUtil> weak_factory_;
 
   chrome::ImportedMediaGalleryRegistry* imported_registry_;
 
-  DISALLOW_COPY_AND_ASSIGN(ItunesFileUtil);
+  DISALLOW_COPY_AND_ASSIGN(ITunesFileUtil);
 };
 
 }  // namespace itunes

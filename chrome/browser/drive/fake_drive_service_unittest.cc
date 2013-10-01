@@ -59,18 +59,18 @@ class FakeDriveServiceTest : public testing::Test {
   // Returns true if the resource identified by |resource_id| exists.
   bool Exists(const std::string& resource_id) {
     scoped_ptr<ResourceEntry> resource_entry = FindEntry(resource_id);
-    return resource_entry;
+    return resource_entry && !resource_entry->deleted();
   }
 
   // Adds a new directory at |parent_resource_id| with the given name.
   // Returns true on success.
   bool AddNewDirectory(const std::string& parent_resource_id,
-                       const std::string& directory_name) {
+                       const std::string& directory_title) {
     GDataErrorCode error = GDATA_OTHER_ERROR;
     scoped_ptr<ResourceEntry> resource_entry;
     fake_service_.AddNewDirectory(
         parent_resource_id,
-        directory_name,
+        directory_title,
         test_util::CreateCopyResultCallback(&error, &resource_entry));
     base::RunLoop().RunUntilIdle();
     return error == HTTP_CREATED;
@@ -110,7 +110,7 @@ void AppendProgressCallbackResult(std::vector<int64>* values, int64 progress) {
 
 TEST_F(FakeDriveServiceTest, GetAllResourceList) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceList> resource_list;
@@ -127,7 +127,7 @@ TEST_F(FakeDriveServiceTest, GetAllResourceList) {
 
 TEST_F(FakeDriveServiceTest, GetAllResourceList_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -142,7 +142,7 @@ TEST_F(FakeDriveServiceTest, GetAllResourceList_Offline) {
 
 TEST_F(FakeDriveServiceTest, GetResourceListInDirectory_InRootDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceList> resource_list;
@@ -160,7 +160,7 @@ TEST_F(FakeDriveServiceTest, GetResourceListInDirectory_InRootDirectory) {
 
 TEST_F(FakeDriveServiceTest, GetResourceListInDirectory_InNonRootDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceList> resource_list;
@@ -179,7 +179,7 @@ TEST_F(FakeDriveServiceTest, GetResourceListInDirectory_InNonRootDirectory) {
 
 TEST_F(FakeDriveServiceTest, GetResourceListInDirectory_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -195,7 +195,7 @@ TEST_F(FakeDriveServiceTest, GetResourceListInDirectory_Offline) {
 
 TEST_F(FakeDriveServiceTest, Search) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceList> resource_list;
@@ -213,7 +213,7 @@ TEST_F(FakeDriveServiceTest, Search) {
 
 TEST_F(FakeDriveServiceTest, Search_WithAttribute) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceList> resource_list;
@@ -231,7 +231,7 @@ TEST_F(FakeDriveServiceTest, Search_WithAttribute) {
 
 TEST_F(FakeDriveServiceTest, Search_MultipleQueries) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceList> resource_list;
@@ -258,7 +258,7 @@ TEST_F(FakeDriveServiceTest, Search_MultipleQueries) {
 
 TEST_F(FakeDriveServiceTest, Search_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -272,9 +272,34 @@ TEST_F(FakeDriveServiceTest, Search_Offline) {
   EXPECT_FALSE(resource_list);
 }
 
+TEST_F(FakeDriveServiceTest, Search_Deleted) {
+  ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
+      "gdata/root_feed.json"));
+
+  GDataErrorCode error = GDATA_OTHER_ERROR;
+  fake_service_.DeleteResource("file:2_file_resource_id",
+                               std::string(),  // etag
+                               test_util::CreateCopyResultCallback(&error));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(HTTP_SUCCESS, error);
+
+  error = GDATA_OTHER_ERROR;
+  scoped_ptr<ResourceList> resource_list;
+  fake_service_.Search(
+      "File",  // search_query
+      test_util::CreateCopyResultCallback(&error, &resource_list));
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(HTTP_SUCCESS, error);
+  ASSERT_TRUE(resource_list);
+  // Do some sanity check. There are 4 entries that contain "File" in their
+  // titles and one of them is deleted.
+  EXPECT_EQ(3U, resource_list->entries().size());
+}
+
 TEST_F(FakeDriveServiceTest, SearchByTitle) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceList> resource_list;
@@ -293,7 +318,7 @@ TEST_F(FakeDriveServiceTest, SearchByTitle) {
 
 TEST_F(FakeDriveServiceTest, SearchByTitle_EmptyDirectoryResourceId) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceList> resource_list;
@@ -312,7 +337,7 @@ TEST_F(FakeDriveServiceTest, SearchByTitle_EmptyDirectoryResourceId) {
 
 TEST_F(FakeDriveServiceTest, SearchByTitle_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -329,11 +354,11 @@ TEST_F(FakeDriveServiceTest, SearchByTitle_Offline) {
 
 TEST_F(FakeDriveServiceTest, GetChangeList_NoNewEntries) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   // Load the account_metadata.json as well to add the largest changestamp
   // (654321) to the existing entries.
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceList> resource_list;
@@ -344,6 +369,8 @@ TEST_F(FakeDriveServiceTest, GetChangeList_NoNewEntries) {
 
   EXPECT_EQ(HTTP_SUCCESS, error);
   ASSERT_TRUE(resource_list);
+  EXPECT_EQ(fake_service_.largest_changestamp(),
+            resource_list->largest_changestamp());
   // This should be empty as the latest changestamp was passed to
   // GetResourceList(), hence there should be no new entries.
   EXPECT_EQ(0U, resource_list->entries().size());
@@ -353,11 +380,11 @@ TEST_F(FakeDriveServiceTest, GetChangeList_NoNewEntries) {
 
 TEST_F(FakeDriveServiceTest, GetChangeList_WithNewEntry) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   // Load the account_metadata.json as well to add the largest changestamp
   // (654321) to the existing entries.
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
   // Add a new directory in the root directory. The new directory will have
   // the changestamp of 654322.
   ASSERT_TRUE(AddNewDirectory(
@@ -373,6 +400,8 @@ TEST_F(FakeDriveServiceTest, GetChangeList_WithNewEntry) {
 
   EXPECT_EQ(HTTP_SUCCESS, error);
   ASSERT_TRUE(resource_list);
+  EXPECT_EQ(fake_service_.largest_changestamp(),
+            resource_list->largest_changestamp());
   // The result should only contain the newly created directory.
   ASSERT_EQ(1U, resource_list->entries().size());
   EXPECT_EQ("new directory", resource_list->entries()[0]->title());
@@ -381,7 +410,7 @@ TEST_F(FakeDriveServiceTest, GetChangeList_WithNewEntry) {
 
 TEST_F(FakeDriveServiceTest, GetChangeList_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -395,9 +424,48 @@ TEST_F(FakeDriveServiceTest, GetChangeList_Offline) {
   EXPECT_FALSE(resource_list);
 }
 
+TEST_F(FakeDriveServiceTest, GetChangeList_DeletedEntry) {
+  ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
+      "gdata/root_feed.json"));
+  // Load the account_metadata.json as well to add the largest changestamp
+  // (654321) to the existing entries.
+  ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
+      "gdata/account_metadata.json"));
+  // Add a new directory in the root directory. The new directory will have
+  // the changestamp of 654322.
+  ASSERT_TRUE(Exists("file:2_file_resource_id"));
+
+  GDataErrorCode error = GDATA_OTHER_ERROR;
+  fake_service_.DeleteResource("file:2_file_resource_id",
+                               std::string(),  // etag
+                               test_util::CreateCopyResultCallback(&error));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_EQ(HTTP_SUCCESS, error);
+  ASSERT_FALSE(Exists("file:2_file_resource_id"));
+
+  // Get the resource list newer than 654321.
+  error = GDATA_OTHER_ERROR;
+  scoped_ptr<ResourceList> resource_list;
+  fake_service_.GetChangeList(
+      654321 + 1,  // start_changestamp
+      test_util::CreateCopyResultCallback(&error, &resource_list));
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(HTTP_SUCCESS, error);
+  ASSERT_TRUE(resource_list);
+  EXPECT_EQ(fake_service_.largest_changestamp(),
+            resource_list->largest_changestamp());
+  // The result should only contain the newly created directory.
+  ASSERT_EQ(1U, resource_list->entries().size());
+  const ResourceEntry& entry = *resource_list->entries()[0];
+  EXPECT_EQ("file:2_file_resource_id", entry.resource_id());
+  EXPECT_TRUE(entry.deleted());
+  EXPECT_EQ(1, fake_service_.change_list_load_count());
+}
+
 TEST_F(FakeDriveServiceTest, ContinueGetResourceList_GetAllResourceList) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_default_max_results(6);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -456,7 +524,7 @@ TEST_F(FakeDriveServiceTest, ContinueGetResourceList_GetAllResourceList) {
 TEST_F(FakeDriveServiceTest,
        ContinueGetResourceList_GetResourceListInDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_default_max_results(3);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -515,7 +583,7 @@ TEST_F(FakeDriveServiceTest,
 
 TEST_F(FakeDriveServiceTest, ContinueGetResourceList_Search) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_default_max_results(2);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -554,13 +622,13 @@ TEST_F(FakeDriveServiceTest, ContinueGetResourceList_Search) {
 
 TEST_F(FakeDriveServiceTest, ContinueGetResourceList_GetChangeList) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_default_max_results(2);
 
   // Load the account_metadata.json as well to add the largest changestamp
   // (654321) to the existing entries.
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
   // Add 5 new directory in the root directory. The new directory will have
   // the changestamp of 654326.
   for (int i = 0; i < 5; ++i) {
@@ -625,7 +693,7 @@ TEST_F(FakeDriveServiceTest, ContinueGetResourceList_GetChangeList) {
 
 TEST_F(FakeDriveServiceTest, GetAboutResource) {
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<AboutResource> about_resource;
@@ -644,7 +712,7 @@ TEST_F(FakeDriveServiceTest, GetAboutResource) {
 
 TEST_F(FakeDriveServiceTest, GetAboutResource_Offline) {
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -659,7 +727,7 @@ TEST_F(FakeDriveServiceTest, GetAboutResource_Offline) {
 
 TEST_F(FakeDriveServiceTest, GetAppList) {
   ASSERT_TRUE(fake_service_.LoadAppListForDriveApi(
-      "chromeos/drive/applist.json"));
+      "drive/applist.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<AppList> app_list;
@@ -670,11 +738,12 @@ TEST_F(FakeDriveServiceTest, GetAppList) {
   EXPECT_EQ(HTTP_SUCCESS, error);
 
   ASSERT_TRUE(app_list);
+  EXPECT_EQ(1, fake_service_.app_list_load_count());
 }
 
 TEST_F(FakeDriveServiceTest, GetAppList_Offline) {
   ASSERT_TRUE(fake_service_.LoadAppListForDriveApi(
-      "chromeos/drive/applist.json"));
+      "drive/applist.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -689,7 +758,7 @@ TEST_F(FakeDriveServiceTest, GetAppList_Offline) {
 
 TEST_F(FakeDriveServiceTest, GetResourceEntry_ExistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "file:2_file_resource_id";
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -707,7 +776,7 @@ TEST_F(FakeDriveServiceTest, GetResourceEntry_ExistingFile) {
 
 TEST_F(FakeDriveServiceTest, GetResourceEntry_NonexistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "file:nonexisting_resource_id";
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -723,7 +792,7 @@ TEST_F(FakeDriveServiceTest, GetResourceEntry_NonexistingFile) {
 
 TEST_F(FakeDriveServiceTest, GetResourceEntry_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   const std::string kResourceId = "file:2_file_resource_id";
@@ -738,9 +807,26 @@ TEST_F(FakeDriveServiceTest, GetResourceEntry_Offline) {
   EXPECT_FALSE(resource_entry);
 }
 
+TEST_F(FakeDriveServiceTest, GetShareUrl) {
+  ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
+      "gdata/root_feed.json"));
+
+  const std::string kResourceId = "file:2_file_resource_id";
+  GDataErrorCode error = GDATA_OTHER_ERROR;
+  GURL share_url;
+  fake_service_.GetShareUrl(
+      kResourceId,
+      GURL(),  // embed origin
+      test_util::CreateCopyResultCallback(&error, &share_url));
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(HTTP_SUCCESS, error);
+  EXPECT_FALSE(share_url.is_empty());
+}
+
 TEST_F(FakeDriveServiceTest, DeleteResource_ExistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   // Resource "file:2_file_resource_id" should now exist.
   ASSERT_TRUE(Exists("file:2_file_resource_id"));
@@ -754,11 +840,19 @@ TEST_F(FakeDriveServiceTest, DeleteResource_ExistingFile) {
   EXPECT_EQ(HTTP_SUCCESS, error);
   // Resource "file:2_file_resource_id" should be gone now.
   EXPECT_FALSE(Exists("file:2_file_resource_id"));
+
+  error = GDATA_OTHER_ERROR;
+  fake_service_.DeleteResource("file:2_file_resource_id",
+                               std::string(),  // etag
+                               test_util::CreateCopyResultCallback(&error));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(HTTP_NOT_FOUND, error);
+  EXPECT_FALSE(Exists("file:2_file_resource_id"));
 }
 
 TEST_F(FakeDriveServiceTest, DeleteResource_NonexistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   fake_service_.DeleteResource("file:nonexisting_resource_id",
@@ -771,7 +865,7 @@ TEST_F(FakeDriveServiceTest, DeleteResource_NonexistingFile) {
 
 TEST_F(FakeDriveServiceTest, DeleteResource_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -785,14 +879,13 @@ TEST_F(FakeDriveServiceTest, DeleteResource_Offline) {
 
 TEST_F(FakeDriveServiceTest, DownloadFile_ExistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   std::vector<test_util::ProgressInfo> download_progress_values;
 
-  const GURL kContentUrl("https://file_content_url/");
   const base::FilePath kOutputFilePath =
       temp_dir.path().AppendASCII("whatever.txt");
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -800,7 +893,7 @@ TEST_F(FakeDriveServiceTest, DownloadFile_ExistingFile) {
   test_util::TestGetContentCallback get_content_callback;
   fake_service_.DownloadFile(
       kOutputFilePath,
-      kContentUrl,
+      "file:2_file_resource_id",
       test_util::CreateCopyResultCallback(&error, &output_file_path),
       get_content_callback.callback(),
       base::Bind(&test_util::AppendProgressCallbackResult,
@@ -822,19 +915,18 @@ TEST_F(FakeDriveServiceTest, DownloadFile_ExistingFile) {
 
 TEST_F(FakeDriveServiceTest, DownloadFile_NonexistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  const GURL kContentUrl("https://non_existing_content_url/");
   const base::FilePath kOutputFilePath =
       temp_dir.path().AppendASCII("whatever.txt");
   GDataErrorCode error = GDATA_OTHER_ERROR;
   base::FilePath output_file_path;
   fake_service_.DownloadFile(
       kOutputFilePath,
-      kContentUrl,
+      "file:non_existent_file_resource_id",
       test_util::CreateCopyResultCallback(&error, &output_file_path),
       GetContentCallback(),
       ProgressCallback());
@@ -845,20 +937,19 @@ TEST_F(FakeDriveServiceTest, DownloadFile_NonexistingFile) {
 
 TEST_F(FakeDriveServiceTest, DownloadFile_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  const GURL kContentUrl("https://file_content_url/");
   const base::FilePath kOutputFilePath =
       temp_dir.path().AppendASCII("whatever.txt");
   GDataErrorCode error = GDATA_OTHER_ERROR;
   base::FilePath output_file_path;
   fake_service_.DownloadFile(
       kOutputFilePath,
-      kContentUrl,
+      "file:2_file_resource_id",
       test_util::CreateCopyResultCallback(&error, &output_file_path),
       GetContentCallback(),
       ProgressCallback());
@@ -869,9 +960,9 @@ TEST_F(FakeDriveServiceTest, DownloadFile_Offline) {
 
 TEST_F(FakeDriveServiceTest, CopyResource) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -882,7 +973,7 @@ TEST_F(FakeDriveServiceTest, CopyResource) {
   fake_service_.CopyResource(
       kResourceId,
       kParentResourceId,
-      "new name",
+      "new title",
       test_util::CreateCopyResultCallback(&error, &resource_entry));
   base::RunLoop().RunUntilIdle();
 
@@ -890,7 +981,7 @@ TEST_F(FakeDriveServiceTest, CopyResource) {
   ASSERT_TRUE(resource_entry);
   // The copied entry should have the new resource ID and the title.
   EXPECT_EQ(kResourceId + "_copied", resource_entry->resource_id());
-  EXPECT_EQ("new name", resource_entry->title());
+  EXPECT_EQ("new title", resource_entry->title());
   EXPECT_TRUE(HasParent(kResourceId, kParentResourceId));
   // Should be incremented as a new hosted document was created.
   EXPECT_EQ(old_largest_change_id + 1, fake_service_.largest_changestamp());
@@ -899,7 +990,7 @@ TEST_F(FakeDriveServiceTest, CopyResource) {
 
 TEST_F(FakeDriveServiceTest, CopyResource_NonExisting) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "document:nonexisting_resource_id";
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -907,7 +998,7 @@ TEST_F(FakeDriveServiceTest, CopyResource_NonExisting) {
   fake_service_.CopyResource(
       kResourceId,
       "folder:1_folder_resource_id",
-      "new name",
+      "new title",
       test_util::CreateCopyResultCallback(&error, &resource_entry));
   base::RunLoop().RunUntilIdle();
 
@@ -916,9 +1007,9 @@ TEST_F(FakeDriveServiceTest, CopyResource_NonExisting) {
 
 TEST_F(FakeDriveServiceTest, CopyResource_EmptyParentResourceId) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -928,7 +1019,7 @@ TEST_F(FakeDriveServiceTest, CopyResource_EmptyParentResourceId) {
   fake_service_.CopyResource(
       kResourceId,
       std::string(),
-      "new name",
+      "new title",
       test_util::CreateCopyResultCallback(&error, &resource_entry));
   base::RunLoop().RunUntilIdle();
 
@@ -936,7 +1027,7 @@ TEST_F(FakeDriveServiceTest, CopyResource_EmptyParentResourceId) {
   ASSERT_TRUE(resource_entry);
   // The copied entry should have the new resource ID and the title.
   EXPECT_EQ(kResourceId + "_copied", resource_entry->resource_id());
-  EXPECT_EQ("new name", resource_entry->title());
+  EXPECT_EQ("new title", resource_entry->title());
   EXPECT_TRUE(HasParent(kResourceId, fake_service_.GetRootResourceId()));
   // Should be incremented as a new hosted document was created.
   EXPECT_EQ(old_largest_change_id + 1, fake_service_.largest_changestamp());
@@ -945,7 +1036,7 @@ TEST_F(FakeDriveServiceTest, CopyResource_EmptyParentResourceId) {
 
 TEST_F(FakeDriveServiceTest, CopyResource_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   const std::string kResourceId = "file:2_file_resource_id";
@@ -954,7 +1045,7 @@ TEST_F(FakeDriveServiceTest, CopyResource_Offline) {
   fake_service_.CopyResource(
       kResourceId,
       "folder:1_folder_resource_id",
-      "new name",
+      "new title",
       test_util::CreateCopyResultCallback(&error, &resource_entry));
   base::RunLoop().RunUntilIdle();
 
@@ -964,9 +1055,9 @@ TEST_F(FakeDriveServiceTest, CopyResource_Offline) {
 
 TEST_F(FakeDriveServiceTest, CopyHostedDocument_Existing) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -975,7 +1066,7 @@ TEST_F(FakeDriveServiceTest, CopyHostedDocument_Existing) {
   scoped_ptr<ResourceEntry> resource_entry;
   fake_service_.CopyHostedDocument(
       kResourceId,
-      "new name",
+      "new title",
       test_util::CreateCopyResultCallback(&error, &resource_entry));
   base::RunLoop().RunUntilIdle();
 
@@ -983,7 +1074,7 @@ TEST_F(FakeDriveServiceTest, CopyHostedDocument_Existing) {
   ASSERT_TRUE(resource_entry);
   // The copied entry should have the new resource ID and the title.
   EXPECT_EQ(kResourceId + "_copied", resource_entry->resource_id());
-  EXPECT_EQ("new name", resource_entry->title());
+  EXPECT_EQ("new title", resource_entry->title());
   // Should be incremented as a new hosted document was created.
   EXPECT_EQ(old_largest_change_id + 1, fake_service_.largest_changestamp());
   EXPECT_EQ(old_largest_change_id + 1, GetLargestChangeByAboutResource());
@@ -991,14 +1082,14 @@ TEST_F(FakeDriveServiceTest, CopyHostedDocument_Existing) {
 
 TEST_F(FakeDriveServiceTest, CopyHostedDocument_NonExisting) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "document:nonexisting_resource_id";
   GDataErrorCode error = GDATA_OTHER_ERROR;
   scoped_ptr<ResourceEntry> resource_entry;
   fake_service_.CopyHostedDocument(
       kResourceId,
-      "new name",
+      "new title",
       test_util::CreateCopyResultCallback(&error, &resource_entry));
   base::RunLoop().RunUntilIdle();
 
@@ -1007,7 +1098,7 @@ TEST_F(FakeDriveServiceTest, CopyHostedDocument_NonExisting) {
 
 TEST_F(FakeDriveServiceTest, CopyHostedDocument_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   const std::string kResourceId = "document:5_document_resource_id";
@@ -1015,7 +1106,7 @@ TEST_F(FakeDriveServiceTest, CopyHostedDocument_Offline) {
   scoped_ptr<ResourceEntry> resource_entry;
   fake_service_.CopyHostedDocument(
       kResourceId,
-      "new name",
+      "new title",
       test_util::CreateCopyResultCallback(&error, &resource_entry));
   base::RunLoop().RunUntilIdle();
 
@@ -1025,9 +1116,9 @@ TEST_F(FakeDriveServiceTest, CopyHostedDocument_Offline) {
 
 TEST_F(FakeDriveServiceTest, RenameResource_ExistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1035,7 +1126,7 @@ TEST_F(FakeDriveServiceTest, RenameResource_ExistingFile) {
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   fake_service_.RenameResource(kResourceId,
-                               "new name",
+                               "new title",
                                test_util::CreateCopyResultCallback(&error));
   base::RunLoop().RunUntilIdle();
 
@@ -1043,7 +1134,7 @@ TEST_F(FakeDriveServiceTest, RenameResource_ExistingFile) {
 
   scoped_ptr<ResourceEntry> resource_entry = FindEntry(kResourceId);
   ASSERT_TRUE(resource_entry);
-  EXPECT_EQ("new name", resource_entry->title());
+  EXPECT_EQ("new title", resource_entry->title());
   // Should be incremented as a file was renamed.
   EXPECT_EQ(old_largest_change_id + 1, fake_service_.largest_changestamp());
   EXPECT_EQ(old_largest_change_id + 1, GetLargestChangeByAboutResource());
@@ -1051,13 +1142,13 @@ TEST_F(FakeDriveServiceTest, RenameResource_ExistingFile) {
 
 TEST_F(FakeDriveServiceTest, RenameResource_NonexistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "file:nonexisting_file";
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   fake_service_.RenameResource(kResourceId,
-                               "new name",
+                               "new title",
                                test_util::CreateCopyResultCallback(&error));
   base::RunLoop().RunUntilIdle();
 
@@ -1066,14 +1157,14 @@ TEST_F(FakeDriveServiceTest, RenameResource_NonexistingFile) {
 
 TEST_F(FakeDriveServiceTest, RenameResource_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   const std::string kResourceId = "file:2_file_resource_id";
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   fake_service_.RenameResource(kResourceId,
-                               "new name",
+                               "new title",
                                test_util::CreateCopyResultCallback(&error));
   base::RunLoop().RunUntilIdle();
 
@@ -1082,9 +1173,9 @@ TEST_F(FakeDriveServiceTest, RenameResource_Offline) {
 
 TEST_F(FakeDriveServiceTest, TouchResource_ExistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1117,7 +1208,7 @@ TEST_F(FakeDriveServiceTest, TouchResource_ExistingFile) {
 
 TEST_F(FakeDriveServiceTest, TouchResource_NonexistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "file:nonexisting_file";
   const base::Time::Exploded kModifiedDate = {2012, 7, 0, 19, 15, 59, 13, 123};
@@ -1138,7 +1229,7 @@ TEST_F(FakeDriveServiceTest, TouchResource_NonexistingFile) {
 
 TEST_F(FakeDriveServiceTest, TouchResource_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   const std::string kResourceId = "file:2_file_resource_id";
@@ -1160,9 +1251,9 @@ TEST_F(FakeDriveServiceTest, TouchResource_Offline) {
 
 TEST_F(FakeDriveServiceTest, AddResourceToDirectory_FileInRootDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1193,9 +1284,9 @@ TEST_F(FakeDriveServiceTest, AddResourceToDirectory_FileInRootDirectory) {
 
 TEST_F(FakeDriveServiceTest, AddResourceToDirectory_FileInNonRootDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1226,7 +1317,7 @@ TEST_F(FakeDriveServiceTest, AddResourceToDirectory_FileInNonRootDirectory) {
 
 TEST_F(FakeDriveServiceTest, AddResourceToDirectory_NonexistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "file:nonexisting_file";
   const std::string kNewParentResourceId = "folder:1_folder_resource_id";
@@ -1243,9 +1334,9 @@ TEST_F(FakeDriveServiceTest, AddResourceToDirectory_NonexistingFile) {
 
 TEST_F(FakeDriveServiceTest, AddResourceToDirectory_OrphanFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1275,7 +1366,7 @@ TEST_F(FakeDriveServiceTest, AddResourceToDirectory_OrphanFile) {
 
 TEST_F(FakeDriveServiceTest, AddResourceToDirectory_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   const std::string kResourceId = "file:2_file_resource_id";
@@ -1293,9 +1384,9 @@ TEST_F(FakeDriveServiceTest, AddResourceToDirectory_Offline) {
 
 TEST_F(FakeDriveServiceTest, RemoveResourceFromDirectory_ExistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1330,7 +1421,7 @@ TEST_F(FakeDriveServiceTest, RemoveResourceFromDirectory_ExistingFile) {
 
 TEST_F(FakeDriveServiceTest, RemoveResourceFromDirectory_NonexistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "file:nonexisting_file";
   const std::string kParentResourceId = "folder:1_folder_resource_id";
@@ -1347,7 +1438,7 @@ TEST_F(FakeDriveServiceTest, RemoveResourceFromDirectory_NonexistingFile) {
 
 TEST_F(FakeDriveServiceTest, RemoveResourceFromDirectory_OrphanFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "file:1_orphanfile_resource_id";
   const std::string kParentResourceId = fake_service_.GetRootResourceId();
@@ -1364,7 +1455,7 @@ TEST_F(FakeDriveServiceTest, RemoveResourceFromDirectory_OrphanFile) {
 
 TEST_F(FakeDriveServiceTest, RemoveResourceFromDirectory_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   const std::string kResourceId = "file:subdirectory_file_1_id";
@@ -1382,9 +1473,9 @@ TEST_F(FakeDriveServiceTest, RemoveResourceFromDirectory_Offline) {
 
 TEST_F(FakeDriveServiceTest, AddNewDirectory_ToRootDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1410,9 +1501,9 @@ TEST_F(FakeDriveServiceTest, AddNewDirectory_ToRootDirectory) {
 
 TEST_F(FakeDriveServiceTest, AddNewDirectory_ToRootDirectoryOnEmptyFileSystem) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/empty_feed.json"));
+      "gdata/empty_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1438,9 +1529,9 @@ TEST_F(FakeDriveServiceTest, AddNewDirectory_ToRootDirectoryOnEmptyFileSystem) {
 
 TEST_F(FakeDriveServiceTest, AddNewDirectory_ToNonRootDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1467,7 +1558,7 @@ TEST_F(FakeDriveServiceTest, AddNewDirectory_ToNonRootDirectory) {
 
 TEST_F(FakeDriveServiceTest, AddNewDirectory_ToNonexistingDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kParentResourceId = "folder:nonexisting_resource_id";
 
@@ -1485,7 +1576,7 @@ TEST_F(FakeDriveServiceTest, AddNewDirectory_ToNonexistingDirectory) {
 
 TEST_F(FakeDriveServiceTest, AddNewDirectory_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -1502,7 +1593,7 @@ TEST_F(FakeDriveServiceTest, AddNewDirectory_Offline) {
 
 TEST_F(FakeDriveServiceTest, InitiateUploadNewFile_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -1521,7 +1612,7 @@ TEST_F(FakeDriveServiceTest, InitiateUploadNewFile_Offline) {
 
 TEST_F(FakeDriveServiceTest, InitiateUploadNewFile_NotFound) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   GURL upload_location;
@@ -1539,7 +1630,7 @@ TEST_F(FakeDriveServiceTest, InitiateUploadNewFile_NotFound) {
 
 TEST_F(FakeDriveServiceTest, InitiateUploadNewFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   GURL upload_location;
@@ -1559,7 +1650,7 @@ TEST_F(FakeDriveServiceTest, InitiateUploadNewFile) {
 
 TEST_F(FakeDriveServiceTest, InitiateUploadExistingFile_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
@@ -1578,7 +1669,7 @@ TEST_F(FakeDriveServiceTest, InitiateUploadExistingFile_Offline) {
 
 TEST_F(FakeDriveServiceTest, InitiateUploadExistingFile_NotFound) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   GURL upload_location;
@@ -1596,7 +1687,7 @@ TEST_F(FakeDriveServiceTest, InitiateUploadExistingFile_NotFound) {
 
 TEST_F(FakeDriveServiceTest, InitiateUploadExistingFile_WrongETag) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   GURL upload_location;
@@ -1614,7 +1705,7 @@ TEST_F(FakeDriveServiceTest, InitiateUploadExistingFile_WrongETag) {
 
 TEST_F(FakeDriveServiceTest, InitiateUpload_ExistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   GURL upload_location;
@@ -1632,7 +1723,7 @@ TEST_F(FakeDriveServiceTest, InitiateUpload_ExistingFile) {
 
 TEST_F(FakeDriveServiceTest, ResumeUpload_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   GURL upload_location;
@@ -1667,7 +1758,7 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_Offline) {
 
 TEST_F(FakeDriveServiceTest, ResumeUpload_NotFound) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   GURL upload_location;
@@ -1704,7 +1795,7 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_ExistingFile) {
   ASSERT_TRUE(test_util::WriteStringToFile(local_file_path, contents));
 
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   GURL upload_location;
@@ -1770,7 +1861,7 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_NewFile) {
   ASSERT_TRUE(test_util::WriteStringToFile(local_file_path, contents));
 
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   GDataErrorCode error = GDATA_OTHER_ERROR;
   GURL upload_location;
@@ -1831,9 +1922,9 @@ TEST_F(FakeDriveServiceTest, ResumeUpload_NewFile) {
 
 TEST_F(FakeDriveServiceTest, AddNewFile_ToRootDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1870,9 +1961,9 @@ TEST_F(FakeDriveServiceTest, AddNewFile_ToRootDirectory) {
 
 TEST_F(FakeDriveServiceTest, AddNewFile_ToRootDirectoryOnEmptyFileSystem) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/empty_feed.json"));
+      "gdata/empty_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1909,9 +2000,9 @@ TEST_F(FakeDriveServiceTest, AddNewFile_ToRootDirectoryOnEmptyFileSystem) {
 
 TEST_F(FakeDriveServiceTest, AddNewFile_ToNonRootDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   int64 old_largest_change_id = GetLargestChangeByAboutResource();
 
@@ -1948,7 +2039,7 @@ TEST_F(FakeDriveServiceTest, AddNewFile_ToNonRootDirectory) {
 
 TEST_F(FakeDriveServiceTest, AddNewFile_ToNonexistingDirectory) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kContentType = "text/plain";
   const std::string kContentData = "This is some test content.";
@@ -1972,7 +2063,7 @@ TEST_F(FakeDriveServiceTest, AddNewFile_ToNonexistingDirectory) {
 
 TEST_F(FakeDriveServiceTest, AddNewFile_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   const std::string kContentType = "text/plain";
@@ -1996,9 +2087,9 @@ TEST_F(FakeDriveServiceTest, AddNewFile_Offline) {
 
 TEST_F(FakeDriveServiceTest, AddNewFile_SharedWithMeLabel) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   ASSERT_TRUE(fake_service_.LoadAccountMetadataForWapi(
-      "chromeos/gdata/account_metadata.json"));
+      "gdata/account_metadata.json"));
 
   const std::string kContentType = "text/plain";
   const std::string kContentData = "This is some test content.";
@@ -2037,7 +2128,7 @@ TEST_F(FakeDriveServiceTest, AddNewFile_SharedWithMeLabel) {
 
 TEST_F(FakeDriveServiceTest, SetLastModifiedTime_ExistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "file:2_file_resource_id";
   base::Time time;
@@ -2058,7 +2149,7 @@ TEST_F(FakeDriveServiceTest, SetLastModifiedTime_ExistingFile) {
 
 TEST_F(FakeDriveServiceTest, SetLastModifiedTime_NonexistingFile) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
 
   const std::string kResourceId = "file:nonexisting_resource_id";
   base::Time time;
@@ -2078,7 +2169,7 @@ TEST_F(FakeDriveServiceTest, SetLastModifiedTime_NonexistingFile) {
 
 TEST_F(FakeDriveServiceTest, SetLastModifiedTime_Offline) {
   ASSERT_TRUE(fake_service_.LoadResourceListForWapi(
-      "chromeos/gdata/root_feed.json"));
+      "gdata/root_feed.json"));
   fake_service_.set_offline(true);
 
   const std::string kResourceId = "file:2_file_resource_id";

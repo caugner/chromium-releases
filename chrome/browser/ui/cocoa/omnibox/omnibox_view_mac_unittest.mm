@@ -13,7 +13,6 @@
 #include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 #include "testing/platform_test.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/rect.h"
 
 namespace {
 
@@ -98,7 +97,6 @@ class TestingOmniboxEditController : public OmniboxEditController {
   virtual content::WebContents* GetWebContents() const OVERRIDE {
     return NULL;
   }
-  virtual gfx::Rect GetOmniboxBounds() const OVERRIDE { return gfx::Rect(); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestingOmniboxEditController);
@@ -144,7 +142,7 @@ TEST_F(OmniboxViewMacTest, TabToAutocomplete) {
   EXPECT_EQ(-1, model->up_or_down_count());
 }
 
-TEST_F(OmniboxViewMacTest, SetInstantSuggestion) {
+TEST_F(OmniboxViewMacTest, SetGrayTextAutocompletion) {
   const NSRect frame = NSMakeRect(0, 0, 50, 30);
   base::scoped_nsobject<AutocompleteTextField> field(
       [[AutocompleteTextField alloc] initWithFrame:frame]);
@@ -164,13 +162,13 @@ TEST_F(OmniboxViewMacTest, SetInstantSuggestion) {
 
   view.SetUserText(ASCIIToUTF16("Alfred"));
   EXPECT_EQ("Alfred", UTF16ToUTF8(view.GetText()));
-  view.SetInstantSuggestion(ASCIIToUTF16(" Hitchcock"));
+  view.SetGrayTextAutocompletion(ASCIIToUTF16(" Hitchcock"));
   EXPECT_EQ("Alfred", UTF16ToUTF8(view.GetText()));
-  EXPECT_EQ(" Hitchcock", UTF16ToUTF8(view.GetInstantSuggestion()));
+  EXPECT_EQ(" Hitchcock", UTF16ToUTF8(view.GetGrayTextAutocompletion()));
 
   view.SetUserText(string16());
   EXPECT_EQ(string16(), view.GetText());
-  EXPECT_EQ(string16(), view.GetInstantSuggestion());
+  EXPECT_EQ(string16(), view.GetGrayTextAutocompletion());
 }
 
 TEST_F(OmniboxViewMacTest, UpDownArrow) {

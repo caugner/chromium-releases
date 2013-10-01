@@ -6,23 +6,22 @@
 #include <map>
 
 #include "base/bind.h"
+#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/google_apis/auth_service.h"
+#include "chrome/browser/google_apis/dummy_auth_service.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_requests.h"
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
 #include "chrome/browser/google_apis/request_sender.h"
 #include "chrome/browser/google_apis/test_util.h"
-#include "chrome/test/base/testing_profile.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/escape.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
@@ -34,31 +33,24 @@ namespace google_apis {
 
 namespace {
 
-const char kTestGDataAuthToken[] = "testtoken";
 const char kTestUserAgent[] = "test-user-agent";
 const char kTestETag[] = "test_etag";
+const char kTestDownloadPathPrefix[] = "/download/";
 
 class GDataWapiRequestsTest : public testing::Test {
  public:
   GDataWapiRequestsTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD),
-        test_server_(content::BrowserThread::GetMessageLoopProxyForThread(
-            content::BrowserThread::IO)) {
+      : test_server_(message_loop_.message_loop_proxy()) {
   }
 
   virtual void SetUp() OVERRIDE {
-    profile_.reset(new TestingProfile);
-
     request_context_getter_ = new net::TestURLRequestContextGetter(
-        content::BrowserThread::GetMessageLoopProxyForThread(
-            content::BrowserThread::IO));
+        message_loop_.message_loop_proxy());
 
-    request_sender_.reset(new RequestSender(profile_.get(),
+    request_sender_.reset(new RequestSender(new DummyAuthService,
                                             request_context_getter_.get(),
-                                            std::vector<std::string>(),
+                                            message_loop_.message_loop_proxy(),
                                             kTestUserAgent));
-    request_sender_->auth_service()->set_access_token_for_testing(
-        kTestGDataAuthToken);
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
@@ -79,17 +71,16 @@ class GDataWapiRequestsTest : public testing::Test {
     test_server_.RegisterRequestHandler(
         base::Bind(&GDataWapiRequestsTest::HandleUploadRequest,
                    base::Unretained(this)));
+    test_server_.RegisterRequestHandler(
+        base::Bind(&GDataWapiRequestsTest::HandleDownloadRequest,
+                   base::Unretained(this)));
 
+    GURL test_base_url = test_util::GetBaseUrlForTesting(test_server_.port());
     url_generator_.reset(new GDataWapiUrlGenerator(
-        test_util::GetBaseUrlForTesting(test_server_.port())));
+        test_base_url, test_base_url.Resolve(kTestDownloadPathPrefix)));
 
     received_bytes_ = 0;
     content_length_ = 0;
-  }
-
-  virtual void TearDown() OVERRIDE {
-    EXPECT_TRUE(test_server_.ShutdownAndWaitUntilComplete());
-    request_context_getter_ = NULL;
   }
 
  protected:
@@ -107,7 +98,7 @@ class GDataWapiRequestsTest : public testing::Test {
       // copied document but for now, just return "file_entry.json"
       scoped_ptr<net::test_server::BasicHttpResponse> result(
           test_util::CreateHttpResponseFromFile(
-              test_util::GetTestFilePath("chromeos/gdata/file_entry.json")));
+              test_util::GetTestFilePath("gdata/file_entry.json")));
       return result.PassAs<net::test_server::HttpResponse>();
     }
 
@@ -121,7 +112,7 @@ class GDataWapiRequestsTest : public testing::Test {
       // Process the default feed.
       scoped_ptr<net::test_server::BasicHttpResponse> result(
           test_util::CreateHttpResponseFromFile(
-              test_util::GetTestFilePath("chromeos/gdata/root_feed.json")));
+              test_util::GetTestFilePath("gdata/root_feed.json")));
       return result.PassAs<net::test_server::HttpResponse>();
     } else {
       // Process a feed for a single resource ID.
@@ -130,7 +121,7 @@ class GDataWapiRequestsTest : public testing::Test {
       if (resource_id == "file:2_file_resource_id") {
         scoped_ptr<net::test_server::BasicHttpResponse> result(
             test_util::CreateHttpResponseFromFile(
-                test_util::GetTestFilePath("chromeos/gdata/file_entry.json")));
+                test_util::GetTestFilePath("gdata/file_entry.json")));
         return result.PassAs<net::test_server::HttpResponse>();
       } else if (resource_id == "folder:root/contents" &&
                  request.method == net::test_server::METHOD_POST) {
@@ -140,7 +131,7 @@ class GDataWapiRequestsTest : public testing::Test {
         scoped_ptr<net::test_server::BasicHttpResponse> result(
             test_util::CreateHttpResponseFromFile(
                 test_util::GetTestFilePath(
-                    "chromeos/gdata/directory_entry.json")));
+                    "gdata/directory_entry.json")));
         return result.PassAs<net::test_server::HttpResponse>();
       } else if (resource_id ==
                  "folder:root/contents/file:2_file_resource_id" &&
@@ -151,7 +142,7 @@ class GDataWapiRequestsTest : public testing::Test {
         // matter.
         scoped_ptr<net::test_server::BasicHttpResponse> result(
             test_util::CreateHttpResponseFromFile(
-                test_util::GetTestFilePath("chromeos/gdata/testfile.txt")));
+                test_util::GetTestFilePath("gdata/testfile.txt")));
         return result.PassAs<net::test_server::HttpResponse>();
       } else if (resource_id == "invalid_resource_id") {
         // Check if this is an authorization request for an app.
@@ -160,7 +151,7 @@ class GDataWapiRequestsTest : public testing::Test {
             request.content.find("<docs:authorizedApp>") != std::string::npos) {
           scoped_ptr<net::test_server::BasicHttpResponse> result(
               test_util::CreateHttpResponseFromFile(
-                  test_util::GetTestFilePath("chromeos/gdata/testfile.txt")));
+                  test_util::GetTestFilePath("gdata/testfile.txt")));
           return result.PassAs<net::test_server::HttpResponse>();
         }
       }
@@ -181,7 +172,7 @@ class GDataWapiRequestsTest : public testing::Test {
     scoped_ptr<net::test_server::BasicHttpResponse> result(
         test_util::CreateHttpResponseFromFile(
             test_util::GetTestFilePath(
-                "chromeos/gdata/account_metadata.json")));
+                "gdata/account_metadata.json")));
     if (absolute_url.query().find("include-installed-apps=true") ==
         string::npos) {
       // Exclude the list of installed apps.
@@ -222,7 +213,7 @@ class GDataWapiRequestsTest : public testing::Test {
       if (found != request.headers.end() &&
           found->second != "*" &&
           found->second != kTestETag) {
-        http_response->set_code(net::test_server::PRECONDITION);
+        http_response->set_code(net::HTTP_PRECONDITION_FAILED);
         return http_response.PassAs<net::test_server::HttpResponse>();
       }
 
@@ -235,7 +226,7 @@ class GDataWapiRequestsTest : public testing::Test {
       }
       received_bytes_ = 0;
 
-      http_response->set_code(net::test_server::SUCCESS);
+      http_response->set_code(net::HTTP_OK);
       GURL upload_url;
       // POST is used for a new file, and PUT is used for an existing file.
       if (request.method == net::test_server::METHOD_POST) {
@@ -267,11 +258,11 @@ class GDataWapiRequestsTest : public testing::Test {
     // file, but for now, just return file_entry.json.
     scoped_ptr<net::test_server::BasicHttpResponse> response =
         test_util::CreateHttpResponseFromFile(
-            test_util::GetTestFilePath("chromeos/gdata/file_entry.json"));
+            test_util::GetTestFilePath("gdata/file_entry.json"));
     // response.code() is set to SUCCESS. Change it to CREATED if it's a new
     // file.
     if (absolute_url.path() == "/upload_new_file")
-      response->set_code(net::test_server::CREATED);
+      response->set_code(net::HTTP_CREATED);
 
     // Check if the Content-Range header is present. This must be present if
     // the request body is not empty.
@@ -306,14 +297,35 @@ class GDataWapiRequestsTest : public testing::Test {
 
     // Change the code to RESUME_INCOMPLETE if upload is not complete.
     if (received_bytes_ < content_length_)
-      response->set_code(net::test_server::RESUME_INCOMPLETE);
+      response->set_code(static_cast<net::HttpStatusCode>(308));
 
     return response.PassAs<net::test_server::HttpResponse>();
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  // Handles a request for downloading a file.
+  scoped_ptr<net::test_server::HttpResponse> HandleDownloadRequest(
+      const net::test_server::HttpRequest& request) {
+    http_request_ = request;
+
+    const GURL absolute_url = test_server_.GetURL(request.relative_url);
+    std::string id;
+    if (!test_util::RemovePrefix(absolute_url.path(),
+                                 kTestDownloadPathPrefix,
+                                 &id)) {
+      return scoped_ptr<net::test_server::HttpResponse>();
+    }
+
+    // For testing, returns a text with |id| repeated 3 times.
+    scoped_ptr<net::test_server::BasicHttpResponse> response(
+        new net::test_server::BasicHttpResponse);
+    response->set_code(net::HTTP_OK);
+    response->set_content(id + id + id);
+    response->set_content_type("text/plain");
+    return response.PassAs<net::test_server::HttpResponse>();
+  }
+
+  base::MessageLoopForIO message_loop_;  // Test server needs IO thread.
   net::test_server::EmbeddedTestServer test_server_;
-  scoped_ptr<TestingProfile> profile_;
   scoped_ptr<RequestSender> request_sender_;
   scoped_ptr<GDataWapiUrlGenerator> url_generator_;
   scoped_refptr<net::TestURLRequestContextGetter> request_context_getter_;
@@ -343,7 +355,6 @@ TEST_F(GDataWapiRequestsTest, GetResourceListRequest_DefaultFeed) {
     base::RunLoop run_loop;
     GetResourceListRequest* request = new GetResourceListRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         GURL(),         // Pass an empty URL to use the default feed
         0,              // start changestamp
@@ -365,7 +376,7 @@ TEST_F(GDataWapiRequestsTest, GetResourceListRequest_DefaultFeed) {
   // Sanity check of the result.
   scoped_ptr<ResourceList> expected(
       ResourceList::ExtractAndParse(
-          *test_util::LoadJSONFile("chromeos/gdata/root_feed.json")));
+          *test_util::LoadJSONFile("gdata/root_feed.json")));
   ASSERT_TRUE(result_data);
   EXPECT_EQ(expected->title(), result_data->title());
 }
@@ -378,9 +389,8 @@ TEST_F(GDataWapiRequestsTest, GetResourceListRequest_ValidFeed) {
     base::RunLoop run_loop;
     GetResourceListRequest* request = new GetResourceListRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
-        test_server_.GetURL("/files/chromeos/gdata/root_feed.json"),
+        test_server_.GetURL("/files/gdata/root_feed.json"),
         0,              // start changestamp
         std::string(),  // search string
         std::string(),  // directory resource ID
@@ -393,13 +403,13 @@ TEST_F(GDataWapiRequestsTest, GetResourceListRequest_ValidFeed) {
 
   EXPECT_EQ(HTTP_SUCCESS, result_code);
   EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/files/chromeos/gdata/root_feed.json?v=3&alt=json&showroot=true&"
+  EXPECT_EQ("/files/gdata/root_feed.json?v=3&alt=json&showroot=true&"
             "showfolders=true&include-shared=true&max-results=500",
             http_request_.relative_url);
 
   scoped_ptr<ResourceList> expected(
       ResourceList::ExtractAndParse(
-          *test_util::LoadJSONFile("chromeos/gdata/root_feed.json")));
+          *test_util::LoadJSONFile("gdata/root_feed.json")));
   ASSERT_TRUE(result_data);
   EXPECT_EQ(expected->title(), result_data->title());
 }
@@ -414,9 +424,8 @@ TEST_F(GDataWapiRequestsTest, GetResourceListRequest_InvalidFeed) {
     base::RunLoop run_loop;
     GetResourceListRequest* request = new GetResourceListRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
-        test_server_.GetURL("/files/chromeos/gdata/testfile.txt"),
+        test_server_.GetURL("/files/gdata/testfile.txt"),
         0,              // start changestamp
         std::string(),  // search string
         std::string(),  // directory resource ID
@@ -429,7 +438,7 @@ TEST_F(GDataWapiRequestsTest, GetResourceListRequest_InvalidFeed) {
 
   EXPECT_EQ(GDATA_PARSE_ERROR, result_code);
   EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/files/chromeos/gdata/testfile.txt?v=3&alt=json&showroot=true&"
+  EXPECT_EQ("/files/gdata/testfile.txt?v=3&alt=json&showroot=true&"
             "showfolders=true&include-shared=true&max-results=500",
             http_request_.relative_url);
   EXPECT_FALSE(result_data);
@@ -443,7 +452,6 @@ TEST_F(GDataWapiRequestsTest, SearchByTitleRequest) {
     base::RunLoop run_loop;
     SearchByTitleRequest* request = new SearchByTitleRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         "search-title",
         std::string(),  // directory resource id
@@ -471,9 +479,9 @@ TEST_F(GDataWapiRequestsTest, GetResourceEntryRequest_ValidResourceId) {
     base::RunLoop run_loop;
     GetResourceEntryRequest* request = new GetResourceEntryRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         "file:2_file_resource_id",  // resource ID
+        GURL(),  // embed origin
         test_util::CreateQuitCallback(
             &run_loop,
             test_util::CreateCopyResultCallback(&result_code, &result_data)));
@@ -487,7 +495,7 @@ TEST_F(GDataWapiRequestsTest, GetResourceEntryRequest_ValidResourceId) {
             "?v=3&alt=json&showroot=true",
             http_request_.relative_url);
   EXPECT_TRUE(test_util::VerifyJsonData(
-      test_util::GetTestFilePath("chromeos/gdata/file_entry.json"),
+      test_util::GetTestFilePath("gdata/file_entry.json"),
       result_data.get()));
 }
 
@@ -499,9 +507,9 @@ TEST_F(GDataWapiRequestsTest, GetResourceEntryRequest_InvalidResourceId) {
     base::RunLoop run_loop;
     GetResourceEntryRequest* request = new GetResourceEntryRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         "<invalid>",  // resource ID
+        GURL(),  // embed origin
         test_util::CreateQuitCallback(
             &run_loop,
             test_util::CreateCopyResultCallback(&result_code, &result_data)));
@@ -525,7 +533,6 @@ TEST_F(GDataWapiRequestsTest, GetAccountMetadataRequest) {
     base::RunLoop run_loop;
     GetAccountMetadataRequest* request = new GetAccountMetadataRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -543,7 +550,7 @@ TEST_F(GDataWapiRequestsTest, GetAccountMetadataRequest) {
 
   scoped_ptr<AccountMetadata> expected(
       AccountMetadata::CreateFrom(
-          *test_util::LoadJSONFile("chromeos/gdata/account_metadata.json")));
+          *test_util::LoadJSONFile("gdata/account_metadata.json")));
 
   ASSERT_TRUE(result_data.get());
   EXPECT_EQ(expected->largest_changestamp(),
@@ -567,7 +574,6 @@ TEST_F(GDataWapiRequestsTest,
     base::RunLoop run_loop;
     GetAccountMetadataRequest* request = new GetAccountMetadataRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -584,7 +590,7 @@ TEST_F(GDataWapiRequestsTest,
 
   scoped_ptr<AccountMetadata> expected(
       AccountMetadata::CreateFrom(
-          *test_util::LoadJSONFile("chromeos/gdata/account_metadata.json")));
+          *test_util::LoadJSONFile("gdata/account_metadata.json")));
 
   ASSERT_TRUE(result_data.get());
   EXPECT_EQ(expected->largest_changestamp(),
@@ -605,7 +611,6 @@ TEST_F(GDataWapiRequestsTest, DeleteResourceRequest) {
     base::RunLoop run_loop;
     DeleteResourceRequest* request = new DeleteResourceRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -633,7 +638,6 @@ TEST_F(GDataWapiRequestsTest, DeleteResourceRequestWithETag) {
     base::RunLoop run_loop;
     DeleteResourceRequest* request = new DeleteResourceRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -663,7 +667,6 @@ TEST_F(GDataWapiRequestsTest, CreateDirectoryRequest) {
     base::RunLoop run_loop;
     CreateDirectoryRequest* request = new CreateDirectoryRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -701,7 +704,6 @@ TEST_F(GDataWapiRequestsTest, CopyHostedDocumentRequest) {
     base::RunLoop run_loop;
     CopyHostedDocumentRequest* request = new CopyHostedDocumentRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -736,7 +738,6 @@ TEST_F(GDataWapiRequestsTest, RenameResourceRequest) {
     base::RunLoop run_loop;
     RenameResourceRequest* request = new RenameResourceRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -774,7 +775,6 @@ TEST_F(GDataWapiRequestsTest, AuthorizeAppRequest_ValidFeed) {
     base::RunLoop run_loop;
     AuthorizeAppRequest* request = new AuthorizeAppRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -814,7 +814,6 @@ TEST_F(GDataWapiRequestsTest, AuthorizeAppRequest_NotFound) {
     base::RunLoop run_loop;
     AuthorizeAppRequest* request = new AuthorizeAppRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -852,7 +851,6 @@ TEST_F(GDataWapiRequestsTest, AuthorizeAppRequest_InvalidFeed) {
     base::RunLoop run_loop;
     AuthorizeAppRequest* request = new AuthorizeAppRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         *url_generator_,
         test_util::CreateQuitCallback(
             &run_loop,
@@ -890,7 +888,6 @@ TEST_F(GDataWapiRequestsTest, AddResourceToDirectoryRequest) {
     AddResourceToDirectoryRequest* request =
         new AddResourceToDirectoryRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             test_util::CreateQuitCallback(
                 &run_loop,
@@ -928,7 +925,6 @@ TEST_F(GDataWapiRequestsTest, RemoveResourceFromDirectoryRequest) {
     RemoveResourceFromDirectoryRequest* request =
         new RemoveResourceFromDirectoryRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             test_util::CreateQuitCallback(
                 &run_loop,
@@ -967,7 +963,6 @@ TEST_F(GDataWapiRequestsTest, UploadNewFile) {
     InitiateUploadNewFileRequest* initiate_request =
         new InitiateUploadNewFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             test_util::CreateQuitCallback(
                 &run_loop,
@@ -1009,7 +1004,6 @@ TEST_F(GDataWapiRequestsTest, UploadNewFile) {
     base::RunLoop run_loop;
     ResumeUploadRequest* resume_request = new ResumeUploadRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         test_util::CreateQuitCallback(
             &run_loop,
             test_util::CreateCopyResultCallback(&response, &new_entry)),
@@ -1069,7 +1063,6 @@ TEST_F(GDataWapiRequestsTest, UploadNewLargeFile) {
     InitiateUploadNewFileRequest* initiate_request =
         new InitiateUploadNewFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             test_util::CreateQuitCallback(
                 &run_loop,
@@ -1116,7 +1109,6 @@ TEST_F(GDataWapiRequestsTest, UploadNewLargeFile) {
       GetUploadStatusRequest* get_upload_status_request =
           new GetUploadStatusRequest(
               request_sender_.get(),
-              request_context_getter_.get(),
               test_util::CreateQuitCallback(
                   &run_loop,
                   test_util::CreateCopyResultCallback(&response, &new_entry)),
@@ -1163,7 +1155,6 @@ TEST_F(GDataWapiRequestsTest, UploadNewLargeFile) {
       base::RunLoop run_loop;
       ResumeUploadRequest* resume_request = new ResumeUploadRequest(
           request_sender_.get(),
-          request_context_getter_.get(),
           test_util::CreateQuitCallback(
               &run_loop,
               test_util::CreateCopyResultCallback(&response, &new_entry)),
@@ -1214,7 +1205,6 @@ TEST_F(GDataWapiRequestsTest, UploadNewLargeFile) {
       GetUploadStatusRequest* get_upload_status_request =
           new GetUploadStatusRequest(
               request_sender_.get(),
-              request_context_getter_.get(),
               test_util::CreateQuitCallback(
                   &run_loop,
                   test_util::CreateCopyResultCallback(&response, &new_entry)),
@@ -1264,7 +1254,6 @@ TEST_F(GDataWapiRequestsTest, UploadNewEmptyFile) {
     InitiateUploadNewFileRequest* initiate_request =
         new InitiateUploadNewFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             test_util::CreateQuitCallback(
                 &run_loop,
@@ -1306,7 +1295,6 @@ TEST_F(GDataWapiRequestsTest, UploadNewEmptyFile) {
     base::RunLoop run_loop;
     ResumeUploadRequest* resume_request = new ResumeUploadRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         test_util::CreateQuitCallback(
             &run_loop,
             test_util::CreateCopyResultCallback(&response, &new_entry)),
@@ -1356,7 +1344,6 @@ TEST_F(GDataWapiRequestsTest, UploadExistingFile) {
     InitiateUploadExistingFileRequest* initiate_request =
         new InitiateUploadExistingFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             test_util::CreateQuitCallback(
                 &run_loop,
@@ -1397,7 +1384,6 @@ TEST_F(GDataWapiRequestsTest, UploadExistingFile) {
     base::RunLoop run_loop;
     ResumeUploadRequest* resume_request = new ResumeUploadRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         test_util::CreateQuitCallback(
             &run_loop,
             test_util::CreateCopyResultCallback(&response, &new_entry)),
@@ -1450,7 +1436,6 @@ TEST_F(GDataWapiRequestsTest, UploadExistingFileWithETag) {
     InitiateUploadExistingFileRequest* initiate_request =
         new InitiateUploadExistingFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             test_util::CreateQuitCallback(
                 &run_loop,
@@ -1491,7 +1476,6 @@ TEST_F(GDataWapiRequestsTest, UploadExistingFileWithETag) {
     base::RunLoop run_loop;
     ResumeUploadRequest* resume_request = new ResumeUploadRequest(
         request_sender_.get(),
-        request_context_getter_.get(),
         test_util::CreateQuitCallback(
             &run_loop,
             test_util::CreateCopyResultCallback(&response, &new_entry)),
@@ -1539,7 +1523,6 @@ TEST_F(GDataWapiRequestsTest, UploadExistingFileWithETagConflict) {
     InitiateUploadExistingFileRequest* initiate_request =
         new InitiateUploadExistingFileRequest(
             request_sender_.get(),
-            request_context_getter_.get(),
             *url_generator_,
             test_util::CreateQuitCallback(
                 &run_loop,
@@ -1570,6 +1553,43 @@ TEST_F(GDataWapiRequestsTest, UploadExistingFileWithETagConflict) {
   EXPECT_TRUE(http_request_.has_content);
   EXPECT_EQ("", http_request_.content);
   EXPECT_EQ(kWrongETag, http_request_.headers["If-Match"]);
+}
+
+TEST_F(GDataWapiRequestsTest, DownloadFileRequest) {
+  const base::FilePath kDownloadedFilePath =
+      temp_dir_.path().AppendASCII("cache_file");
+  const std::string kTestIdWithTypeLabel("file:dummyId");
+  const std::string kTestId("dummyId");
+
+  GDataErrorCode result_code = GDATA_OTHER_ERROR;
+  base::FilePath temp_file;
+  {
+    base::RunLoop run_loop;
+    DownloadFileRequest* request = new DownloadFileRequest(
+        request_sender_.get(),
+        *url_generator_,
+        test_util::CreateQuitCallback(
+            &run_loop,
+            test_util::CreateCopyResultCallback(&result_code, &temp_file)),
+        GetContentCallback(),
+        ProgressCallback(),
+        kTestIdWithTypeLabel,
+        kDownloadedFilePath);
+    request_sender_->StartRequestWithRetry(request);
+    run_loop.Run();
+  }
+
+  std::string contents;
+  file_util::ReadFileToString(temp_file, &contents);
+  base::DeleteFile(temp_file, false);
+
+  EXPECT_EQ(HTTP_SUCCESS, result_code);
+  EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
+  EXPECT_EQ(kTestDownloadPathPrefix + kTestId, http_request_.relative_url);
+  EXPECT_EQ(kDownloadedFilePath, temp_file);
+
+  const std::string expected_contents = kTestId + kTestId + kTestId;
+  EXPECT_EQ(expected_contents, contents);
 }
 
 }  // namespace google_apis

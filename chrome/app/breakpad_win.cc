@@ -17,7 +17,6 @@
 #include "base/command_line.h"
 #include "base/debug/crash_logging.h"
 #include "base/environment.h"
-#include "base/file_version_info.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_split.h"
@@ -32,14 +31,9 @@
 #include "chrome/app/breakpad_field_trial_win.h"
 #include "chrome/app/hard_error_handler_win.h"
 #include "chrome/common/child_process_logging.h"
-#include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_result_codes.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/crash_keys.h"
-#include "chrome/common/env_vars.h"
-#include "chrome/installer/util/google_chrome_sxs_distribution.h"
-#include "chrome/installer/util/google_update_settings.h"
-#include "chrome/installer/util/install_util.h"
+#include "components/breakpad/breakpad_client.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/common/result_codes.h"
 #include "policy/policy_constants.h"
 #include "sandbox/win/src/nt_internals.h"
 #include "sandbox/win/src/sidestep/preamble_patcher.h"
@@ -94,10 +88,6 @@ const wchar_t kChromePipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
 
 // This is the well known SID for the system principal.
 const wchar_t kSystemPrincipalSid[] =L"S-1-5-18";
-
-// This is the minimum version of google update that is required for deferred
-// crash uploads to work.
-const char kMinUpdateVersion[] = "1.3.21.115";
 
 google_breakpad::ExceptionHandler* g_breakpad = NULL;
 google_breakpad::ExceptionHandler* g_dumphandler_no_crash = NULL;
@@ -320,18 +310,11 @@ static bool MetricsReportingControlledByPolicy(bool* result) {
 // Appends the breakpad dump path to |g_custom_entries|.
 void SetBreakpadDumpPath() {
   DCHECK(g_custom_entries);
-  // By setting the BREAKPAD_DUMP_LOCATION environment variable, an alternate
-  // location to write breakpad crash dumps can be set.
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-  std::string alternate_crash_dump_location;
   base::FilePath crash_dumps_dir_path;
-  if (env->GetVar("BREAKPAD_DUMP_LOCATION", &alternate_crash_dump_location)) {
-    crash_dumps_dir_path = base::FilePath::FromUTF8Unsafe(
-        alternate_crash_dump_location);
-    g_custom_entries->push_back(
-        google_breakpad::CustomInfoEntry(
-            L"breakpad-dump-location",
-            crash_dumps_dir_path.value().c_str()));
+  if (breakpad::GetBreakpadClient()->GetAlternativeCrashDumpLocation(
+          &crash_dumps_dir_path)) {
+    g_custom_entries->push_back(google_breakpad::CustomInfoEntry(
+        L"breakpad-dump-location", crash_dumps_dir_path.value().c_str()));
   }
 }
 
@@ -367,33 +350,16 @@ std::wstring GetProfileType() {
 // Returns the custom info structure based on the dll in parameter and the
 // process type.
 google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
-                                                 const std::wstring& type,
-                                                 const std::wstring& channel) {
-  scoped_ptr<FileVersionInfo>
-      version_info(FileVersionInfo::CreateFileVersionInfo(
-          base::FilePath(exe_path)));
-
-  std::wstring version, product;
-  std::wstring special_build;
-  if (version_info.get()) {
-    // Get the information from the file.
-    version = version_info->product_version();
-    if (!version_info->is_official_build())
-      version.append(L"-devel");
-
-    const CommandLine& command = *CommandLine::ForCurrentProcess();
-    if (command.HasSwitch(switches::kChromeFrame)) {
-      product = L"ChromeFrame";
-    } else {
-      product = version_info->product_short_name();
-    }
-
-    special_build = version_info->special_build();
-  } else {
-    // No version info found. Make up the values.
-     product = L"Chrome";
-     version = L"0.0.0.0-devel";
-  }
+                                                 const std::wstring& type) {
+  base::string16 version, product;
+  base::string16 special_build;
+  base::string16 channel_name;
+  breakpad::GetBreakpadClient()->GetProductNameAndVersion(
+      base::FilePath(exe_path),
+      &product,
+      &version,
+      &special_build,
+      &channel_name);
 
   // We only expect this method to be called once per process.
   DCHECK(!g_custom_entries);
@@ -401,26 +367,25 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
 
   // Common g_custom_entries.
   g_custom_entries->push_back(
-      google_breakpad::CustomInfoEntry(L"ver", version.c_str()));
+      google_breakpad::CustomInfoEntry(L"ver", UTF16ToWide(version).c_str()));
   g_custom_entries->push_back(
-      google_breakpad::CustomInfoEntry(L"prod", product.c_str()));
+      google_breakpad::CustomInfoEntry(L"prod", UTF16ToWide(product).c_str()));
   g_custom_entries->push_back(
       google_breakpad::CustomInfoEntry(L"plat", L"Win32"));
   g_custom_entries->push_back(
       google_breakpad::CustomInfoEntry(L"ptype", type.c_str()));
-  g_custom_entries->push_back(
-      google_breakpad::CustomInfoEntry(L"channel", channel.c_str()));
-  g_custom_entries->push_back(
-      google_breakpad::CustomInfoEntry(L"profile-type",
-                                       GetProfileType().c_str()));
+  g_custom_entries->push_back(google_breakpad::CustomInfoEntry(
+      L"channel", base::UTF16ToWide(channel_name).c_str()));
+  g_custom_entries->push_back(google_breakpad::CustomInfoEntry(
+      L"profile-type", GetProfileType().c_str()));
 
   if (g_deferred_crash_uploads)
     g_custom_entries->push_back(
         google_breakpad::CustomInfoEntry(L"deferred-upload", L"true"));
 
   if (!special_build.empty())
-    g_custom_entries->push_back(
-        google_breakpad::CustomInfoEntry(L"special", special_build.c_str()));
+    g_custom_entries->push_back(google_breakpad::CustomInfoEntry(
+        L"special", UTF16ToWide(special_build).c_str()));
 
   g_num_of_extensions_offset = g_custom_entries->size();
   g_custom_entries->push_back(
@@ -461,8 +426,8 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
   // Read the id from registry. If reporting has never been enabled
   // the result will be empty string. Its OK since when user enables reporting
   // we will insert the new value at this location.
-  std::wstring guid;
-  GoogleUpdateSettings::GetMetricsId(&guid);
+  std::wstring guid =
+      base::UTF16ToWide(breakpad::GetBreakpadClient()->GetCrashGUID());
   g_client_id_offset = g_custom_entries->size();
   g_custom_entries->push_back(
       google_breakpad::CustomInfoEntry(L"guid", guid.c_str()));
@@ -519,10 +484,10 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
   bool controlled_by_policy =
       MetricsReportingControlledByPolicy(&crash_reporting_enabled);
   const CommandLine& command = *CommandLine::ForCurrentProcess();
-  bool use_crash_service = !controlled_by_policy &&
-      ((command.HasSwitch(switches::kNoErrorDialogs) ||
-      GetEnvironmentVariable(
-          ASCIIToWide(env_vars::kHeadless).c_str(), NULL, 0)));
+  bool use_crash_service =
+      !controlled_by_policy &&
+      (command.HasSwitch(switches::kNoErrorDialogs) ||
+       breakpad::GetBreakpadClient()->IsRunningUnattended());
   if (use_crash_service)
     SetBreakpadDumpPath();
 
@@ -543,7 +508,7 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
 
   // Create space for dynamic ad-hoc keys. The names and values are set using
   // the API defined in base/debug/crash_logging.h.
-  g_dynamic_entries_count = crash_keys::RegisterChromeCrashKeys();
+  g_dynamic_entries_count = breakpad::GetBreakpadClient()->RegisterCrashKeys();
   g_dynamic_keys_offset = g_custom_entries->size();
   for (size_t i = 0; i < g_dynamic_entries_count; ++i) {
     // The names will be mutated as they are set. Un-numbered since these are
@@ -585,13 +550,9 @@ bool DumpDoneCallback(const wchar_t*, const wchar_t*, void*,
   if (HardErrorHandler(ex_info))
     return true;
 
-  // We set CHROME_CRASHED env var. If the CHROME_RESTART is present.
-  // This signals the child process to show the 'chrome has crashed' dialog.
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-  if (!env->HasVar(env_vars::kRestartInfo)) {
+  if (!breakpad::GetBreakpadClient()->AboutToRestart())
     return true;
-  }
-  env->SetVar(env_vars::kShowRestart, "1");
+
   // Now we just start chrome browser with the same command line.
   STARTUPINFOW si = {sizeof(si)};
   PROCESS_INFORMATION pi;
@@ -806,7 +767,7 @@ namespace testing {
 
 // Access to namespace protected functions for testing purposes.
 void InitCustomInfoEntries() {
-  GetCustomInfo(L"", L"", L"");
+  GetCustomInfo(L"", L"");
 }
 
 }  // namespace testing
@@ -820,8 +781,9 @@ bool WrapMessageBoxWithSEH(const wchar_t* text, const wchar_t* caption,
     *exit_now = (IDOK != ::MessageBoxW(NULL, text, caption, flags));
   } __except(EXCEPTION_EXECUTE_HANDLER) {
     // Its not safe to continue executing, exit silently here.
-    ::TerminateProcess(::GetCurrentProcess(),
-                       chrome::RESULT_CODE_RESPAWN_FAILED);
+    ::TerminateProcess(
+        ::GetCurrentProcess(),
+        breakpad::GetBreakpadClient()->GetResultCodeRespawnFailed());
   }
 
   return true;
@@ -831,11 +793,6 @@ bool WrapMessageBoxWithSEH(const wchar_t* text, const wchar_t* caption,
 // spawned and basically just shows the 'chrome has crashed' dialog if
 // the CHROME_CRASHED environment variable is present.
 bool ShowRestartDialogIfCrashed(bool* exit_now) {
-  if (!::GetEnvironmentVariableW(ASCIIToWide(env_vars::kShowRestart).c_str(),
-                                 NULL, 0)) {
-    return false;
-  }
-
   // If we are being launched in metro mode don't try to show the dialog.
   if (base::win::IsMetroProcess())
     return false;
@@ -844,36 +801,27 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
-  if (!process_type.empty()) {
+  if (!process_type.empty())
+    return false;
+
+  base::string16 message;
+  base::string16 title;
+  bool is_rtl_locale;
+  if (!breakpad::GetBreakpadClient()->ShouldShowRestartDialog(
+          &title, &message, &is_rtl_locale)) {
     return false;
   }
-
-  DWORD len = ::GetEnvironmentVariableW(
-      ASCIIToWide(env_vars::kRestartInfo).c_str(), NULL, 0);
-  if (!len)
-    return true;
-
-  wchar_t* restart_data = new wchar_t[len + 1];
-  ::GetEnvironmentVariableW(ASCIIToWide(env_vars::kRestartInfo).c_str(),
-                            restart_data, len);
-  restart_data[len] = 0;
-  // The CHROME_RESTART var contains the dialog strings separated by '|'.
-  // See ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment()
-  // for details.
-  std::vector<std::wstring> dlg_strings;
-  base::SplitString(restart_data, L'|', &dlg_strings);
-  delete[] restart_data;
-  if (dlg_strings.size() < 3)
-    return true;
 
   // If the UI layout is right-to-left, we need to pass the appropriate MB_XXX
   // flags so that an RTL message box is displayed.
   UINT flags = MB_OKCANCEL | MB_ICONWARNING;
-  if (dlg_strings[2] == ASCIIToWide(env_vars::kRtlLocale))
+  if (is_rtl_locale)
     flags |= MB_RIGHT | MB_RTLREADING;
 
-  return WrapMessageBoxWithSEH(dlg_strings[1].c_str(), dlg_strings[0].c_str(),
-                               flags, exit_now);
+  return WrapMessageBoxWithSEH(base::UTF16ToWide(message).c_str(),
+                               base::UTF16ToWide(title).c_str(),
+                               flags,
+                               exit_now);
 }
 
 // Crashes the process after generating a dump for the provided exception. Note
@@ -896,18 +844,6 @@ extern "C" int __declspec(dllexport) CrashForException(
     }
   }
   return EXCEPTION_CONTINUE_SEARCH;
-}
-
-// Check whether the installed version of google update supports deferred
-// uploads of crash reports.
-static bool DeferredUploadsSupported(bool system_install) {
-  Version update_version =
-      GoogleUpdateSettings::GetGoogleUpdateVersion(system_install);
-  if (!update_version.IsValid() ||
-      update_version.IsOlderThan(std::string(kMinUpdateVersion)))
-    return false;
-
-  return true;
 }
 
 NTSTATUS WINAPI HookNtTerminateProcess(HANDLE ProcessHandle,
@@ -989,10 +925,10 @@ static void InitPipeNameEnvVar(bool is_per_user_install) {
       MetricsReportingControlledByPolicy(&crash_reporting_enabled);
 
   const CommandLine& command = *CommandLine::ForCurrentProcess();
-  bool use_crash_service = !controlled_by_policy &&
-      ((command.HasSwitch(switches::kNoErrorDialogs) ||
-      GetEnvironmentVariable(
-          ASCIIToWide(env_vars::kHeadless).c_str(), NULL, 0)));
+  bool use_crash_service =
+      !controlled_by_policy &&
+      (command.HasSwitch(switches::kNoErrorDialogs) ||
+       breakpad::GetBreakpadClient()->IsRunningUnattended());
 
   std::wstring pipe_name;
   if (use_crash_service) {
@@ -1002,15 +938,19 @@ static void InitPipeNameEnvVar(bool is_per_user_install) {
     // We want to use the Google Update crash reporting. We need to check if the
     // user allows it first (in case the administrator didn't already decide
     // via policy).
-    if (!controlled_by_policy)
-      crash_reporting_enabled = GoogleUpdateSettings::GetCollectStatsConsent();
+    if (!controlled_by_policy) {
+      crash_reporting_enabled =
+          breakpad::GetBreakpadClient()->GetCollectStatsConsent();
+    }
 
     if (!crash_reporting_enabled) {
       if (!controlled_by_policy &&
-          DeferredUploadsSupported(!is_per_user_install))
+          breakpad::GetBreakpadClient()->GetDeferredUploadsSupported(
+              is_per_user_install)) {
         g_deferred_crash_uploads = true;
-      else
+      } else {
         return;
+      }
     }
 
     // Build the pipe name. It can be either:
@@ -1048,17 +988,14 @@ void InitCrashReporter() {
   exe_path[0] = 0;
   GetModuleFileNameW(NULL, exe_path, MAX_PATH);
 
-  bool is_per_user_install = InstallUtil::IsPerUserInstall(exe_path);
-
-  std::wstring channel_string;
-  GoogleUpdateSettings::GetChromeChannelAndModifiers(!is_per_user_install,
-                                                     &channel_string);
+  bool is_per_user_install = breakpad::GetBreakpadClient()->GetIsPerUserInstall(
+      base::FilePath(exe_path));
 
   base::debug::SetCrashKeyReportingFunctions(
       &SetCrashKeyValue, &ClearCrashKeyValue);
 
   google_breakpad::CustomClientInfo* custom_info =
-      GetCustomInfo(exe_path, process_type, channel_string);
+      GetCustomInfo(exe_path, process_type);
 
   google_breakpad::ExceptionHandler::MinidumpCallback callback = NULL;
   LPTOP_LEVEL_EXCEPTION_FILTER default_filter = NULL;
@@ -1104,17 +1041,11 @@ void InitCrashReporter() {
 
   MINIDUMP_TYPE dump_type = kSmallDumpType;
   // Capture full memory if explicitly instructed to.
-  if (command.HasSwitch(switches::kFullMemoryCrashReport)) {
+  if (command.HasSwitch(switches::kFullMemoryCrashReport))
     dump_type = kFullDumpType;
-  } else {
-    std::wstring channel_name(
-        GoogleUpdateSettings::GetChromeChannel(!is_per_user_install));
-
-    // Capture more detail in crash dumps for beta and dev channel builds.
-    if (channel_name == L"dev" || channel_name == L"beta" ||
-        channel_name == GoogleChromeSxSDistribution::ChannelName())
-      dump_type = kLargerDumpType;
-  }
+  else if (breakpad::GetBreakpadClient()->GetShouldDumpLargerDumps(
+               is_per_user_install))
+    dump_type = kLargerDumpType;
 
   g_breakpad = new google_breakpad::ExceptionHandler(temp_dir, &FilterCallback,
                    callback, NULL,
@@ -1140,8 +1071,8 @@ void InitCrashReporter() {
 
 #ifndef _WIN64
     std::string headless;
-    if (process_type != L"browser" && !GetEnvironmentVariable(
-            ASCIIToWide(env_vars::kHeadless).c_str(), NULL, 0)) {
+    if (process_type != L"browser" &&
+        !breakpad::GetBreakpadClient()->IsRunningUnattended()) {
       // Initialize the hook TerminateProcess to catch unexpected exits.
       InitTerminateProcessHooks();
     }

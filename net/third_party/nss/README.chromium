@@ -1,6 +1,6 @@
 Name: Network Security Services (NSS)
 URL: http://www.mozilla.org/projects/security/pki/nss/
-Version: 3.15 Beta 2
+Version: 3.15.1
 Security Critical: Yes
 License: MPL 2
 License File: NOT_SHIPPED
@@ -11,7 +11,7 @@ This directory includes a copy of NSS's libssl from the hg repo at:
 The same module appears in crypto/third_party/nss (and third_party/nss on some
 platforms), so we don't repeat the license file here.
 
-The snapshot was updated to the hg tag: NSS_3_15_BETA2
+The snapshot was updated to the hg tag: NSS_3_15_1_RTM
 
 Patches:
 
@@ -75,10 +75,6 @@ Patches:
     patches/cbc.patch
     https://code.google.com/p/chromium/issues/detail?id=172658#c12
 
-  * Define AES_256_KEY_LENGTH if the system blapit.h header doesn't define it.
-    Remove this patch when all system NSS packages are NSS 3.12.10 or later.
-    patches/aes256keylength.patch
-
   * Change ssl3_SuiteBOnly to always return PR_TRUE. The softoken in NSS
     versions older than 3.15 report an EC key size range of 112 bits to 571
     bits, even when it is compiled to support only the NIST P-256, P-384, and
@@ -91,24 +87,20 @@ Patches:
     NSS packages are NSS 3.15 or later.
     patches/secitemarray.patch
 
-  * Remove unused variables in ssl3_SendCertificateStatus.
-    patches/unusedvariables.patch
-    https://bugzilla.mozilla.org/show_bug.cgi?id=866949
-
-  * Fix bugs in the code in ssl3_HandleHandshakeMessage that handles a
-    CertificateStatus message.
-    patches/handlecertstatus.patch
-    https://bugzilla.mozilla.org/show_bug.cgi?id=867795
-
-  * Implement TLS 1.2.
-    patches/tls12.patch
-    patches/tls12certrequest.patch
-    patches/tls12hmacsha256.patch
-    patches/tls12handshakehashes.patch
-    https://bugzilla.mozilla.org/show_bug.cgi?id=480514
-
   * Update Chromium-specific code for TLS 1.2.
     patches/tls12chromium.patch
+
+  * Add the Application Layer Protocol Negotiation extension.
+    patches/alpn.patch
+
+  * Fix an issue with allocating an SSL socket when under memory pressure.
+    https://bugzilla.mozilla.org/show_bug.cgi?id=903565
+    patches/sslsock_903565.patch
+
+  * Prefer to generate SHA-1 signatures for TLS 1.2 client authentication if
+    the client private key is in a CAPI service provider on Windows or if the
+    client private key is a 1024-bit RSA or DSA key.
+    patches/tls12backuphash.patch
 
 Apply the patches to NSS by running the patches/applypatches.sh script.  Read
 the comments at the top of patches/applypatches.sh for instructions.

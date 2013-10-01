@@ -9,9 +9,9 @@
 #include "base/android/jni_string.h"
 #include "base/callback.h"
 #include "content/public/browser/browser_thread.h"
-#include "googleurl/src/gurl.h"
 #include "jni/AwContentsClientBridge_jni.h"
 #include "net/cert/x509_certificate.h"
+#include "url/gurl.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
@@ -161,12 +161,15 @@ void AwContentsClientBridge::ConfirmJsResult(JNIEnv* env,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   content::JavaScriptDialogManager::DialogClosedCallback* callback =
       pending_js_dialog_callbacks_.Lookup(id);
+  if (!callback) {
+    LOG(WARNING) << "Unexpected JS dialog confirm. " << id;
+    return;
+  }
   string16 prompt_text;
   if (prompt) {
     prompt_text = ConvertJavaStringToUTF16(env, prompt);
   }
-  if (callback)
-    callback->Run(true, prompt_text);
+  callback->Run(true, prompt_text);
   pending_js_dialog_callbacks_.Remove(id);
 }
 
@@ -174,8 +177,11 @@ void AwContentsClientBridge::CancelJsResult(JNIEnv*, jobject, int id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   content::JavaScriptDialogManager::DialogClosedCallback* callback =
       pending_js_dialog_callbacks_.Lookup(id);
-  if (callback)
-    callback->Run(false, string16());
+  if (!callback) {
+    LOG(WARNING) << "Unexpected JS dialog cancel. " << id;
+    return;
+  }
+  callback->Run(false, string16());
   pending_js_dialog_callbacks_.Remove(id);
 }
 

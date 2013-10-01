@@ -14,6 +14,7 @@
 #include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/debug/debugger.h"
 #include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
@@ -24,8 +25,7 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/pref_value_store.h"
-#include "base/process_info.h"
-#include "base/process_util.h"
+#include "base/process/process_info.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -34,7 +34,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
 #include "base/threading/platform_thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/about_flags.h"
@@ -61,13 +61,15 @@
 #include "chrome/browser/gpu/chrome_gpu_util.h"
 #include "chrome/browser/gpu/gl_string_manager.h"
 #include "chrome/browser/jankometer.h"
-#include "chrome/browser/managed_mode/managed_mode.h"
+#include "chrome/browser/language_usage_metrics.h"
+#include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/metrics/field_trial_synchronizer.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/metrics/tracking_synchronizer.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
+#include "chrome/browser/nacl_host/nacl_browser_delegate_impl.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
@@ -80,18 +82,15 @@
 #include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
+#include "chrome/browser/prefs/pref_metrics_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/renderer_host/chrome_render_view_host_observer.h"
-#include "chrome/browser/search_engines/search_engine_type.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
-#include "chrome/browser/search_engines/template_url_service.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/three_d_api_observer.h"
@@ -151,7 +150,6 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chromeos/chromeos_switches.h"
@@ -169,8 +167,8 @@
 #include "chrome/browser/chrome_browser_main_win.h"
 #include "chrome/browser/first_run/try_chrome_dialog_view.h"
 #include "chrome/browser/first_run/upgrade_util_win.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/network_profile_bubble.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
@@ -187,20 +185,12 @@
 #include "chrome/browser/mac/keystone_glue.h"
 #endif
 
-#if defined(ENABLE_LANGUAGE_DETECTION)
-#include "chrome/browser/language_usage_metrics.h"
-#endif
-
 #if defined(ENABLE_RLZ)
 #include "chrome/browser/rlz/rlz.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/views/focus/accelerator_handler.h"
-#endif
-
-#if defined(USE_X11)
-#include "chrome/browser/chrome_browser_main_x11.h"
 #endif
 
 using content::BrowserThread;
@@ -235,20 +225,19 @@ void AddFirstRunNewTabs(StartupBrowserCreator* browser_creator,
 // |local_state_task_runner| must be a shutdown-blocking task runner.
 PrefService* InitializeLocalState(
     base::SequencedTaskRunner* local_state_task_runner,
-    const CommandLine& parsed_command_line,
-    bool is_first_run) {
+    const CommandLine& parsed_command_line) {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::InitializeLocalState")
   base::FilePath local_state_path;
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
-  bool local_state_file_exists = file_util::PathExists(local_state_path);
+  bool local_state_file_exists = base::PathExists(local_state_path);
 
   // Load local state.  This includes the application locale so we know which
   // locale dll to load.  This also causes local state prefs to be registered.
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
 
-  if (is_first_run) {
 #if defined(OS_WIN)
+  if (first_run::IsChromeFirstRun()) {
     // During first run we read the google_update registry key to find what
     // language the user selected when downloading the installer. This
     // becomes our default language in the prefs.
@@ -258,8 +247,8 @@ PrefService* InitializeLocalState(
       local_state->SetString(prefs::kApplicationLocale,
                              WideToASCII(install_lang));
     }
-#endif  // defined(OS_WIN)
   }
+#endif  // defined(OS_WIN)
 
   // If the local state file for the current profile doesn't exist and the
   // parent profile command line flag is present, then we should inherit some
@@ -334,7 +323,7 @@ Profile* CreateProfile(const content::MainFunctionParams& parameters,
                        const base::FilePath& user_data_dir,
                        const CommandLine& parsed_command_line) {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::CreateProfile")
-  if (ProfileManager::IsMultipleProfilesEnabled() &&
+  if (profiles::IsMultipleProfilesEnabled() &&
       parsed_command_line.HasSwitch(switches::kProfileDirectory)) {
     g_browser_process->local_state()->SetString(prefs::kProfileLastUsed,
         parsed_command_line.GetSwitchValueASCII(switches::kProfileDirectory));
@@ -427,9 +416,15 @@ bool ProcessSingletonNotificationCallback(
         command_line.GetSwitchValueASCII(switches::kOriginalProcessStartTime);
     int64 remote_start_time;
     if (base::StringToInt64(start_time_string, &remote_start_time)) {
-      UMA_HISTOGRAM_LONG_TIMES(
-          "Startup.WarmStartTimeFromRemoteProcessStart",
-          base::Time::Now() - base::Time::FromInternalValue(remote_start_time));
+      base::TimeDelta elapsed =
+          base::Time::Now() - base::Time::FromInternalValue(remote_start_time);
+      if (command_line.HasSwitch(switches::kFastStart)) {
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Startup.WarmStartTimeFromRemoteProcessStartFast", elapsed);
+      } else {
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Startup.WarmStartTimeFromRemoteProcessStart", elapsed);
+      }
     }
   }
 
@@ -551,12 +546,10 @@ ChromeBrowserMainParts::ChromeBrowserMainParts(
       startup_timer_(new performance_monitor::StartupTimer()),
       browser_field_trials_(parameters.command_line),
       rvh_callback_(base::Bind(&RenderViewHostCreated)),
-      record_search_engine_(false),
       translate_manager_(NULL),
       profile_(NULL),
       run_message_loop_(true),
       notify_result_(ProcessSingleton::PROCESS_NONE),
-      do_first_run_tasks_(false),
       local_state_(NULL),
       restart_last_session_(false) {
   // If we're running tests (ui_task is non-null).
@@ -610,11 +603,13 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   // Ensure any field trials specified on the command line are initialized.
   // Also stop the metrics service so that we don't pollute UMA.
   if (command_line->HasSwitch(switches::kForceFieldTrials)) {
-    std::string persistent = command_line->GetSwitchValueASCII(
-        switches::kForceFieldTrials);
-    bool ret = base::FieldTrialList::CreateTrialsFromString(persistent);
-    CHECK(ret) << "Invalid --" << switches::kForceFieldTrials <<
-                  " list specified.";
+    // Create field trials without activating them, so that this behaves in a
+    // consistent manner with field trials created from the server.
+    bool result = base::FieldTrialList::CreateTrialsFromString(
+        command_line->GetSwitchValueASCII(switches::kForceFieldTrials),
+        base::FieldTrialList::DONT_ACTIVATE_TRIALS);
+    CHECK(result) << "Invalid --" << switches::kForceFieldTrials
+                  << " list specified.";
   }
 
   chrome_variations::VariationsService* variations_service =
@@ -685,6 +680,67 @@ bool ChromeBrowserMainParts::IsMetricsReportingEnabled() {
   return enabled;
 }
 
+void ChromeBrowserMainParts::RecordBrowserStartupTime() {
+  // Don't record any metrics if UI was displayed before this point e.g.
+  // warning dialogs.
+  if (startup_metric_utils::WasNonBrowserUIDisplayed())
+    return;
+
+  bool is_first_run = first_run::IsChromeFirstRun();
+
+// CurrentProcessInfo::CreationTime() is currently only implemented on some
+// platforms.
+#if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
+  const base::Time process_creation_time =
+      base::CurrentProcessInfo::CreationTime();
+
+  if (!is_first_run && !process_creation_time.is_null()) {
+    RecordPreReadExperimentTime("Startup.BrowserMessageLoopStartTime",
+        base::Time::Now() - process_creation_time);
+  }
+#endif  // defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
+
+  // Record collected startup metrics.
+  startup_metric_utils::OnBrowserStartupComplete(is_first_run);
+
+  // Deletes self.
+  new LoadCompleteListener();
+}
+
+// This code is specific to the Windows-only PreReadExperiment field-trial.
+void ChromeBrowserMainParts::RecordPreReadExperimentTime(const char* name,
+                                                         base::TimeDelta time) {
+  DCHECK(name != NULL);
+
+  // This gets called with different histogram names, so we don't want to use
+  // the UMA_HISTOGRAM_CUSTOM_TIMES macro--it uses a static variable, and the
+  // first call wins.
+  AddPreReadHistogramTime(name, time);
+
+#if defined(OS_WIN)
+#if defined(GOOGLE_CHROME_BUILD)
+  // The pre-read experiment is Windows and Google Chrome specific.
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+
+  // Only record the sub-histogram result if the experiment is running
+  // (environment variable is set, and valid).
+  std::string pre_read_percentage;
+  if (env->GetVar(chrome::kPreReadEnvironmentVariable, &pre_read_percentage)) {
+    std::string uma_name(name);
+
+    // We want XP to record a separate histogram, as the loader on XP
+    // is very different from the Vista and Win7 loaders.
+    if (base::win::GetVersion() <= base::win::VERSION_XP)
+      uma_name += "_XP";
+
+    uma_name += "_PreRead_";
+    uma_name += pre_read_percentage;
+    AddPreReadHistogramTime(uma_name.c_str(), time);
+  }
+#endif
+#endif
+}
+
 // -----------------------------------------------------------------------------
 // TODO(viettrungluu): move more/rest of BrowserMain() into BrowserMainParts.
 
@@ -708,9 +764,6 @@ DLLEXPORT void __cdecl RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
 // content::BrowserMainParts implementation ------------------------------------
 
 void ChromeBrowserMainParts::PreEarlyInitialization() {
-#if defined(USE_X11)
-  SetBrowserX11ErrorHandlersPreEarlyInitialization();
-#endif
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PreEarlyInitialization");
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PreEarlyInitialization();
@@ -738,17 +791,14 @@ void ChromeBrowserMainParts::PostMainMessageLoopStart() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PostMainMessageLoopStart");
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PostMainMessageLoopStart();
-#if defined(USE_X11)
-  SetBrowserX11ErrorHandlersPostMainMessageLoopStart();
-#endif
 }
 
 int ChromeBrowserMainParts::PreCreateThreads() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PreCreateThreads");
   result_code_ = PreCreateThreadsImpl();
   // These members must be initialized before returning from this function.
-  DCHECK(master_prefs_.get());
 #if !defined(OS_ANDROID)
+  DCHECK(master_prefs_.get());
   DCHECK(browser_creator_.get());
 #endif
 
@@ -769,22 +819,16 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
     user_data_dir_ = chrome::GetUserDataDir(parameters());
   }
 
-  // Whether this is First Run. |do_first_run_tasks_| should be prefered to this
-  // unless the desire is actually to know whether this is really First Run
-  // (i.e., even if --no-first-run is passed).
-  bool is_first_run = false;
+  // Force MediaCaptureDevicesDispatcher to be created on UI thread.
+  MediaCaptureDevicesDispatcher::GetInstance();
+
   // Android's first run is done in Java instead of native.
 #if !defined(OS_ANDROID)
   process_singleton_.reset(new ChromeProcessSingleton(
       user_data_dir_, base::Bind(&ProcessSingletonNotificationCallback)));
 
-  bool force_first_run =
-      parsed_command_line().HasSwitch(switches::kForceFirstRun);
-  bool force_skip_first_run_tasks =
-      (!force_first_run &&
-       parsed_command_line().HasSwitch(switches::kNoFirstRun));
-
-  is_first_run = force_first_run || first_run::IsChromeFirstRun();
+  // Cache first run state early.
+  first_run::IsChromeFirstRun();
 #endif
 
   scoped_refptr<base::SequencedTaskRunner> local_state_task_runner =
@@ -822,22 +866,24 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
   }
 
   local_state_ = InitializeLocalState(
-      local_state_task_runner.get(), parsed_command_line(), is_first_run);
-
-  // These members must be initialized before returning from this function.
-  master_prefs_.reset(new first_run::MasterPrefs);
+      local_state_task_runner.get(), parsed_command_line());
 
 #if !defined(OS_ANDROID)
+  // These members must be initialized before returning from this function.
+  master_prefs_.reset(new first_run::MasterPrefs);
   // Android doesn't use StartupBrowserCreator.
   browser_creator_.reset(new StartupBrowserCreator);
   // TODO(yfriedman): Refactor Android to re-use UMABrowsingActivityObserver
   chrome::UMABrowsingActivityObserver::Init();
 #endif
 
+#if !defined(OS_CHROMEOS)
   // Convert active labs into switches. This needs to be done before
   // ResourceBundle::InitSharedInstanceWithLocale as some loaded resources are
   // affected by experiment flags (--touch-optimized-ui in particular). Not
   // needed on Android as there aren't experimental flags.
+  // On ChromeOS system level flags are applied from the device settings from
+  // the session manager.
   {
     TRACE_EVENT0("startup",
         "ChromeBrowserMainParts::PreCreateThreadsImpl:ConvertFlags");
@@ -846,6 +892,7 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
     about_flags::ConvertFlagsToSwitches(&flags_storage_,
                                         CommandLine::ForCurrentProcess());
   }
+#endif
 
   local_state_->UpdateCommandLinePrefStore(
       new CommandLinePrefStore(CommandLine::ForCurrentProcess()));
@@ -868,6 +915,10 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
 #else
     const std::string locale =
         local_state_->GetString(prefs::kApplicationLocale);
+
+#if defined(OS_WIN)
+    ui::EnableHighDPISupport();
+#endif
 
     // On a POSIX OS other than ChromeOS, the parameter that is passed to the
     // method InitSharedInstance is ignored.
@@ -903,70 +954,52 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
 #endif
 
   // Android does first run in Java instead of native.
-#if !defined(OS_ANDROID)
+  // Chrome OS has its own out-of-box-experience code.
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   // On first run, we need to process the predictor preferences before the
   // browser's profile_manager object is created, but after ResourceBundle
   // is initialized.
-  if (is_first_run) {
+  if (first_run::IsChromeFirstRun()) {
     first_run::ProcessMasterPreferencesResult pmp_result =
         first_run::ProcessMasterPreferences(user_data_dir_,
                                             master_prefs_.get());
     if (pmp_result == first_run::EULA_EXIT_NOW)
       return chrome::RESULT_CODE_EULA_REFUSED;
 
-    // Do first run tasks unless:
-    //  - Explicitly forced not to by |force_skip_first_run_tasks| or
-    //    |pmp_result|.
-    //  - Running in App (or App Launcher) mode, where showing the importer
-    //    (first run) UI is undesired.
-    do_first_run_tasks_ = (
-        !force_skip_first_run_tasks &&
-        pmp_result != first_run::SKIP_FIRST_RUN_TASKS &&
-        !parsed_command_line().HasSwitch(switches::kApp) &&
+    if (!parsed_command_line().HasSwitch(switches::kApp) &&
         !parsed_command_line().HasSwitch(switches::kAppId) &&
-        !parsed_command_line().HasSwitch(switches::kShowAppList));
-
-    if (do_first_run_tasks_) {
+        !parsed_command_line().HasSwitch(switches::kShowAppList)) {
       AddFirstRunNewTabs(browser_creator_.get(), master_prefs_->new_tabs);
-
-      // TODO(macourteau): refactor preferences that are copied from
-      // master_preferences into local_state, as a "local_state" section in
-      // master preferences. If possible, a generic solution would be prefered
-      // over a copy one-by-one of specific preferences. Also see related TODO
-      // in first_run.h.
-
-      // Store the initial VariationsService seed in local state, if it exists
-      // in master prefs.
-      if (!master_prefs_->variations_seed.empty()) {
-        local_state_->SetString(prefs::kVariationsSeed,
-                                master_prefs_->variations_seed);
-        // Set the variation seed date to the current system time. If the user's
-        // clock is incorrect, this may cause some field trial expiry checks to
-        // not do the right thing until the next seed update from the server,
-        // when this value will be updated.
-        local_state_->SetInt64(prefs::kVariationsSeedDate,
-                               base::Time::Now().ToInternalValue());
-      }
-
-      if (!master_prefs_->suppress_default_browser_prompt_for_version.empty()) {
-        local_state_->SetString(
-            prefs::kBrowserSuppressDefaultBrowserPrompt,
-            master_prefs_->suppress_default_browser_prompt_for_version);
-      }
     }
 
-    if (do_first_run_tasks_ ||
-        parsed_command_line().HasSwitch(switches::kNoFirstRun)) {
-      // Create the First Run sentinel whether first run tasks are executed
-      // or not.
-      first_run::CreateSentinel();
+    // TODO(macourteau): refactor preferences that are copied from
+    // master_preferences into local_state, as a "local_state" section in
+    // master preferences. If possible, a generic solution would be prefered
+    // over a copy one-by-one of specific preferences. Also see related TODO
+    // in first_run.h.
+
+    // Store the initial VariationsService seed in local state, if it exists
+    // in master prefs.
+    if (!master_prefs_->variations_seed.empty()) {
+      local_state_->SetString(prefs::kVariationsSeed,
+                              master_prefs_->variations_seed);
+      // Set the variation seed date to the current system time. If the user's
+      // clock is incorrect, this may cause some field trial expiry checks to
+      // not do the right thing until the next seed update from the server,
+      // when this value will be updated.
+      local_state_->SetInt64(prefs::kVariationsSeedDate,
+                             base::Time::Now().ToInternalValue());
     }
+
+    if (!master_prefs_->suppress_default_browser_prompt_for_version.empty()) {
+      local_state_->SetString(
+          prefs::kBrowserSuppressDefaultBrowserPrompt,
+          master_prefs_->suppress_default_browser_prompt_for_version);
+    }
+
+    AppListService::Get()->HandleFirstRun();
   }
 #endif
-
-  // TODO(viettrungluu): why don't we run this earlier?
-  if (!parsed_command_line().HasSwitch(switches::kNoErrorDialogs))
-    WarnAboutMinimumSystemRequirements();
 
 #if defined(OS_LINUX) || defined(OS_OPENBSD) || defined(OS_MACOSX)
   // Set the product channel for crash reports.
@@ -1069,10 +1102,8 @@ void ChromeBrowserMainParts::PostBrowserStart() {
 #if !defined(OS_ANDROID)
 void ChromeBrowserMainParts::RunPageCycler() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  // We assume a native desktop for tests, but we will need to find a way to
-  // get the proper host desktop type once we start running these tests in ASH.
-  Browser* browser = chrome::FindBrowserWithProfile(
-      profile_, chrome::HOST_DESKTOP_TYPE_NATIVE);
+  Browser* browser = chrome::FindBrowserWithProfile(profile_,
+                                                    chrome::GetActiveDesktop());
   DCHECK(browser);
   PageCycler* page_cycler = NULL;
   base::FilePath input_file =
@@ -1205,6 +1236,8 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
         NOTREACHED();
     }
   }
+
+  first_run::CreateSentinelIfNeeded();
 #endif  // !defined(OS_ANDROID)
 
   // Desktop construction occurs here, (required before profile creation).
@@ -1242,12 +1275,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   }
 
   // Profile creation ----------------------------------------------------------
-
-  if (do_first_run_tasks_) {
-    // Warn the ProfileManager that an import process will run, possibly
-    // locking the WebDataService directory of the next Profile created.
-    browser_process_->profile_manager()->SetWillImport();
-  }
 
   // Called before CreateProfile because creating the profile can trigger
   // calls to GetDefaultProfile().
@@ -1287,11 +1314,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   translate_manager_ = TranslateManager::GetInstance();
   DCHECK(translate_manager_ != NULL);
 
-#if !defined(OS_ANDROID)
-  // Initialize Managed Mode.
-  ManagedMode::Init(profile_);
-#endif
-
   // Needs to be done before PostProfileInit, since login manager on CrOS is
   // called inside PostProfileInit.
   content::WebUIControllerFactory::RegisterFactory(
@@ -1309,13 +1331,13 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // Create an instance of GpuModeManager to watch gpu mode pref change.
   g_browser_process->gpu_mode_manager();
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   // Show the First Run UI if this is the first time Chrome has been run on
   // this computer, or we're being compelled to do so by a command line flag.
   // Note that this be done _after_ the PrefService is initialized and all
   // preferences are registered, since some of the code that the importer
   // touches reads preferences.
-  if (do_first_run_tasks_) {
+  if (first_run::IsChromeFirstRun()) {
     first_run::AutoImport(profile_,
                           master_prefs_->homepage_defined,
                           master_prefs_->do_import_items,
@@ -1325,16 +1347,14 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     // Note: this can pop the first run consent dialog on linux.
     first_run::DoPostImportTasks(profile_, master_prefs_->make_chrome_default);
 
-    browser_process_->profile_manager()->OnImportFinished(profile_);
-
     if (!master_prefs_->suppress_first_run_default_browser_prompt) {
       browser_creator_->set_show_main_browser_window(
           !chrome::ShowFirstRunDefaultBrowserPrompt(profile_));
     } else {
       browser_creator_->set_is_default_browser_dialog_suppressed(true);
     }
-  }  // if (do_first_run_tasks_)
-#endif  // !defined(OS_ANDROID)
+  }
+#endif  // !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
   // Sets things up so that if we crash from this point on, a dialog will
@@ -1367,12 +1387,12 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // file thread to be run sometime later. If this is the first run we record
   // the installation event.
   PrefService* pref_service = profile_->GetPrefs();
-  int ping_delay = do_first_run_tasks_ ? master_prefs_->ping_delay :
+  int ping_delay = first_run::IsChromeFirstRun() ? master_prefs_->ping_delay :
       pref_service->GetInteger(first_run::GetPingDelayPrefName().c_str());
   // Negative ping delay means to send ping immediately after a first search is
   // recorded.
   RLZTracker::InitRlzFromProfileDelayed(
-      profile_, do_first_run_tasks_, ping_delay < 0,
+      profile_, first_run::IsChromeFirstRun(), ping_delay < 0,
       base::TimeDelta::FromMilliseconds(abs(ping_delay)));
 #endif  // defined(ENABLE_RLZ) && !defined(OS_CHROMEOS)
 
@@ -1414,13 +1434,13 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 #endif
 
   HandleTestParameters(parsed_command_line());
-  RecordBreakpadStatusUMA(browser_process_->metrics_service());
-#if defined(ENABLE_LANGUAGE_DETECTION)
+  browser_process_->metrics_service()->RecordBreakpadHasDebugger(
+      base::debug::BeingDebugged());
+
   LanguageUsageMetrics::RecordAcceptLanguages(
       profile_->GetPrefs()->GetString(prefs::kAcceptLanguages));
   LanguageUsageMetrics::RecordApplicationLanguage(
       browser_process_->GetApplicationLocale());
-#endif
 
   // The extension service may be available at this point. If the command line
   // specifies --uninstall-extension, attempt the uninstall extension startup
@@ -1446,19 +1466,13 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   MetricsService::LogNeedForCleanShutdown();
 #endif
 
-#if defined(OS_WIN)
-  // We check this here because if the profile is OTR (chromeos possibility)
-  // it won't still be accessible after browser is destroyed.
-  record_search_engine_ = do_first_run_tasks_ && !profile_->IsOffTheRecord();
-#endif
-
+#if defined(ENABLE_FULL_PRINTING)
   // Create the instance of the cloud print proxy service so that it can launch
   // the service process if needed. This is needed because the service process
   // might have shutdown because an update was available.
   // TODO(torne): this should maybe be done with
   // BrowserContextKeyedServiceFactory::ServiceIsCreatedWithBrowserContext()
   // instead?
-#if !defined(OS_ANDROID)
   CloudPrintProxyServiceFactory::GetForProfile(profile_);
 #endif
 
@@ -1471,8 +1485,11 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
                           parsed_command_line().GetSwitchValuePath(
                               switches::kPnaclDir));
   }
-  NaClProcessHost::EarlyStartup();
+  NaClProcessHost::EarlyStartup(new NaClBrowserDelegateImpl);
 #endif
+
+  // Make sure initial prefs are recorded
+  PrefMetricsService::Factory::GetForProfile(profile_);
 
   PreBrowserStart();
 
@@ -1598,7 +1615,7 @@ bool ChromeBrowserMainParts::MainMessageLoopRun(int* result_code) {
   // These should be invoked as close to the start of the browser's
   // UI thread message loop as possible to get a stable measurement
   // across versions.
-  RecordBrowserStartupTime(do_first_run_tasks_);
+  RecordBrowserStartupTime();
   startup_timer_->SignalStartupComplete(
       performance_monitor::StartupTimer::STARTUP_NORMAL);
 
@@ -1629,13 +1646,6 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
   NOTREACHED();
 #else
 
-#if defined(USE_X11)
-  // Unset the X11 error handlers. The X11 error handlers log the errors using a
-  // |PostTask()| on the message-loop. But since the message-loop is in the
-  // process of terminating, this can cause errors.
-  UnsetBrowserX11ErrorHandlers();
-#endif
-
   // Start watching for jank during shutdown. It gets disarmed when
   // |shutdown_watcher_| object is destructed.
   shutdown_watcher_->Arm(base::TimeDelta::FromSeconds(300));
@@ -1645,25 +1655,6 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
 
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PostMainMessageLoopRun();
-
-#if defined(OS_WIN)
-  // Log the search engine chosen on first run. Do this at shutdown, after any
-  // changes are made from the first run bubble link, etc.
-  if (record_search_engine_) {
-    TemplateURLService* url_service =
-        TemplateURLServiceFactory::GetForProfile(profile_);
-    const TemplateURL* default_search_engine =
-        url_service->GetDefaultSearchProvider();
-    // The default engine can be NULL if the administrator has disabled
-    // default search.
-    SearchEngineType search_engine_type =
-        TemplateURLPrepopulateData::GetEngineType(default_search_engine ?
-            default_search_engine->url() : std::string());
-    // Record the search engine chosen.
-    UMA_HISTOGRAM_ENUMERATION("Chrome.SearchSelectExempt", search_engine_type,
-                              SEARCH_ENGINE_MAX);
-  }
-#endif
 
   // Some tests don't set parameters.ui_task, so they started translate
   // language fetch that was never completed so we need to cleanup here
@@ -1715,64 +1706,4 @@ void ChromeBrowserMainParts::PostDestroyThreads() {
 
 void ChromeBrowserMainParts::AddParts(ChromeBrowserMainExtraParts* parts) {
   chrome_extra_parts_.push_back(parts);
-}
-
-// Misc ------------------------------------------------------------------------
-
-void RecordBrowserStartupTime(bool is_first_run) {
-  // Don't record any metrics if UI was displayed before this point e.g.
-  // warning dialogs.
-  if (startup_metric_utils::WasNonBrowserUIDisplayed())
-    return;
-
-// CurrentProcessInfo::CreationTime() is currently only implemented on Mac and
-// Windows.
-#if defined(OS_MACOSX) || defined(OS_WIN)
-  const base::Time* process_creation_time =
-      base::CurrentProcessInfo::CreationTime();
-
-  if (!is_first_run && process_creation_time) {
-    RecordPreReadExperimentTime("Startup.BrowserMessageLoopStartTime",
-        base::Time::Now() - *process_creation_time);
-  }
-#endif  // defined(OS_MACOSX) || defined(OS_WIN)
-
-  // Record collected startup metrics.
-  startup_metric_utils::OnBrowserStartupComplete(is_first_run);
-
-  // Deletes self.
-  new LoadCompleteListener();
-}
-
-// This code is specific to the Windows-only PreReadExperiment field-trial.
-void RecordPreReadExperimentTime(const char* name, base::TimeDelta time) {
-  DCHECK(name != NULL);
-
-  // This gets called with different histogram names, so we don't want to use
-  // the UMA_HISTOGRAM_CUSTOM_TIMES macro--it uses a static variable, and the
-  // first call wins.
-  AddPreReadHistogramTime(name, time);
-
-#if defined(OS_WIN)
-#if defined(GOOGLE_CHROME_BUILD)
-  // The pre-read experiment is Windows and Google Chrome specific.
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-
-  // Only record the sub-histogram result if the experiment is running
-  // (environment variable is set, and valid).
-  std::string pre_read_percentage;
-  if (env->GetVar(chrome::kPreReadEnvironmentVariable, &pre_read_percentage)) {
-    std::string uma_name(name);
-
-    // We want XP to record a separate histogram, as the loader on XP
-    // is very different from the Vista and Win7 loaders.
-    if (base::win::GetVersion() <= base::win::VERSION_XP)
-      uma_name += "_XP";
-
-    uma_name += "_PreRead_";
-    uma_name += pre_read_percentage;
-    AddPreReadHistogramTime(uma_name.c_str(), time);
-  }
-#endif
-#endif
 }

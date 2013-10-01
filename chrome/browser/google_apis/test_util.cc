@@ -7,47 +7,23 @@
 #include "base/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_reader.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/pending_task.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_requests.h"
-#include "content/public/browser/browser_thread.h"
-#include "googleurl/src/gurl.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "url/gurl.h"
 
 namespace google_apis {
 namespace test_util {
-
-// This class is used to monitor if any task is posted to a message loop.
-class TaskObserver : public base::MessageLoop::TaskObserver {
- public:
-  TaskObserver() : posted_(false) {}
-  virtual ~TaskObserver() {}
-
-  // MessageLoop::TaskObserver overrides.
-  virtual void WillProcessTask(const base::PendingTask& pending_task) OVERRIDE {
-  }
-  virtual void DidProcessTask(const base::PendingTask& pending_task) OVERRIDE {
-    posted_ = true;
-  }
-
-  // Returns true if any task was posted.
-  bool posted() const { return posted_; }
-
- private:
-  bool posted_;
-  DISALLOW_COPY_AND_ASSIGN(TaskObserver);
-};
 
 bool RemovePrefix(const std::string& input,
                   const std::string& prefix,
@@ -72,19 +48,6 @@ base::FilePath GetTestFilePath(const std::string& relative_path) {
 
 GURL GetBaseUrlForTesting(int port) {
   return GURL(base::StringPrintf("http://127.0.0.1:%d/", port));
-}
-
-void RunBlockingPoolTask() {
-  while (true) {
-    content::BrowserThread::GetBlockingPool()->FlushForTesting();
-
-    TaskObserver task_observer;
-    base::MessageLoop::current()->AddTaskObserver(&task_observer);
-    base::RunLoop().RunUntilIdle();
-    base::MessageLoop::current()->RemoveTaskObserver(&task_observer);
-    if (!task_observer.posted())
-      break;
-  }
 }
 
 void RunAndQuit(base::RunLoop* run_loop, const base::Closure& closure) {
@@ -139,7 +102,7 @@ scoped_ptr<net::test_server::BasicHttpResponse> CreateHttpResponseFromFile(
 
   scoped_ptr<net::test_server::BasicHttpResponse> http_response(
       new net::test_server::BasicHttpResponse);
-  http_response->set_code(net::test_server::SUCCESS);
+  http_response->set_code(net::HTTP_OK);
   http_response->set_content(content);
   http_response->set_content_type(content_type);
   return http_response.Pass();

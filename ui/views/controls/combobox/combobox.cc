@@ -13,6 +13,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/combobox/combobox_listener.h"
 #include "ui/views/controls/native/native_view_host.h"
+#include "ui/views/controls/prefix_selector.h"
+#include "ui/views/ime/input_method.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -71,6 +73,28 @@ void Combobox::SetInvalid(bool invalid) {
     native_wrapper_->ValidityStateChanged();
 }
 
+ui::TextInputClient* Combobox::GetTextInputClient() {
+  if (!selector_)
+    selector_.reset(new PrefixSelector(this));
+  return selector_.get();
+}
+
+int Combobox::GetRowCount() {
+  return model()->GetItemCount();
+}
+
+int Combobox::GetSelectedRow() {
+  return selected_index_;
+}
+
+void Combobox::SetSelectedRow(int row) {
+  SetSelectedIndex(row);
+}
+
+string16 Combobox::GetTextForRow(int row) {
+  return model()->GetItemAt(row);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Combobox, View overrides:
 
@@ -117,6 +141,7 @@ bool Combobox::OnKeyReleased(const ui::KeyEvent& e) {
 }
 
 void Combobox::OnFocus() {
+  GetInputMethod()->OnFocus();
   // Forward the focus to the wrapper.
   if (native_wrapper_) {
     native_wrapper_->SetFocus();
@@ -128,6 +153,9 @@ void Combobox::OnFocus() {
 }
 
 void Combobox::OnBlur() {
+  GetInputMethod()->OnBlur();
+  if (selector_)
+    selector_->OnViewBlur();
   if (native_wrapper_)
     native_wrapper_->HandleBlur();
 }

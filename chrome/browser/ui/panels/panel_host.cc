@@ -6,7 +6,8 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
@@ -15,7 +16,6 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
@@ -27,7 +27,6 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/view_type_utils.h"
-#include "ui/gfx/image/image.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 #include "ui/gfx/image/image.h"
@@ -201,7 +200,7 @@ void PanelHost::RenderViewCreated(content::RenderViewHost* render_view_host) {
       render_view_host->GetRoutingID(), window->GetWindowId()));
 }
 
-void PanelHost::RenderViewGone(base::TerminationStatus status) {
+void PanelHost::RenderProcessGone(base::TerminationStatus status) {
   CloseContents(web_contents_.get());
 }
 

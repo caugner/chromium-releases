@@ -46,7 +46,7 @@ var privateHelpers = {
     chrome.networkingPrivate.onNetworksChanged.addListener(
         this.onNetworkChange);
   },
-  listListener: function(network, expected, done) {
+  listListener: function(expected, done) {
     var self = this;
     this.listenForChanges = function(list) {
       assertEq(expected, list);
@@ -71,7 +71,7 @@ var availableTests = [
   function startConnectNonexistent() {
     chrome.networkingPrivate.startConnect(
       "nonexistent_path",
-      callbackFail("not-found"));
+      callbackFail("configure-failed"));
   },
   function startDisconnectNonexistent() {
     chrome.networkingPrivate.startDisconnect(
@@ -105,6 +105,15 @@ var availableTests = [
                     }
                   },
                   {
+                    "ConnectionState": "Connected",
+                    "GUID": "stub_vpn1",
+                    "Name": "vpn1",
+                    "Type": "VPN",
+                    "VPN": {
+                      "AutoConnect": false
+                    }
+                  },
+                  {
                     "ConnectionState": "NotConnected",
                     "GUID": "stub_wifi2",
                     "Name": "wifi2_PSK",
@@ -126,15 +135,6 @@ var availableTests = [
                     "GUID": "stub_cellular1",
                     "Name": "cellular1",
                     "Type": "Cellular"
-                  },
-                  {
-                    "ConnectionState": "Connected",
-                    "GUID": "stub_vpn1",
-                    "Name": "vpn1",
-                    "Type": "VPN",
-                    "VPN": {
-                      "AutoConnect": false
-                    }
                   }], result);
       }));
   },
@@ -168,14 +168,14 @@ var availableTests = [
       }));
   },
   function requestNetworkScan() {
-    var network = "stub_wifi2";
+    // Connected or Connecting networks should be listed first, sorted by type.
     var expected = ["stub_ethernet",
                     "stub_wifi1",
+                    "stub_vpn1",
                     "stub_wifi2",
-                    "stub_cellular1",
-                    "stub_vpn1"];
+                    "stub_cellular1"];
     var done = chrome.test.callbackAdded();
-    var listener = new privateHelpers.listListener(network, expected, done);
+    var listener = new privateHelpers.listListener(expected, done);
     chrome.networkingPrivate.onNetworkListChanged.addListener(
       listener.listenForChanges);
     chrome.networkingPrivate.requestNetworkScan();
@@ -190,6 +190,8 @@ var availableTests = [
                    "Name": "wifi2_PSK",
                    "Type": "WiFi",
                    "WiFi": {
+                     "Frequency": 5000,
+                     "FrequencyList": [2400, 5000],
                      "SSID": "stub_wifi2",
                      "Security": "WPA-PSK",
                      "SignalStrength": 80
@@ -221,6 +223,14 @@ var availableTests = [
                      "AutoConnect": {
                        "Active": false,
                        "UserEditable": true
+                     },
+                     "Frequency" : {
+                       "Active": 5000,
+                       "Effective": "Unmanaged"
+                     },
+                     "FrequencyList" : {
+                       "Active": [2400, 5000],
+                       "Effective": "Unmanaged"
                      },
                      "Passphrase": {
                        "Effective": "UserSetting",
@@ -279,6 +289,11 @@ var availableTests = [
         }, result);
       }));
   },
+  function getStateNonExistent() {
+    chrome.networkingPrivate.getState(
+      'non_existent',
+      callbackFail('Error.InvalidParameter'));
+  },
   function onNetworksChangedEventConnect() {
     var network = "stub_wifi2";
     var done = chrome.test.callbackAdded();
@@ -296,16 +311,18 @@ var availableTests = [
     chrome.networkingPrivate.startDisconnect(network, callbackPass());
   },
   function onNetworkListChangedEvent() {
-    var network = "stub_wifi2";
-    var expected = ["stub_wifi2",
-                    "stub_ethernet",
+    // Connecting to wifi2 should set wifi1 to offline. Connected or Connecting
+    // networks should be listed first, sorted by type.
+    var expected = ["stub_ethernet",
+                    "stub_wifi2",
+                    "stub_vpn1",
                     "stub_wifi1",
-                    "stub_cellular1",
-                    "stub_vpn1"];
+                    "stub_cellular1"];
     var done = chrome.test.callbackAdded();
-    var listener = new privateHelpers.listListener(network, expected, done);
+    var listener = new privateHelpers.listListener(expected, done);
     chrome.networkingPrivate.onNetworkListChanged.addListener(
       listener.listenForChanges);
+    var network = "stub_wifi2";
     chrome.networkingPrivate.startConnect(network, callbackPass());
   },
   function verifyDestination() {

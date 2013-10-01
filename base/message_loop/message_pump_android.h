@@ -7,6 +7,7 @@
 
 #include <jni.h>
 
+#include "base/android/scoped_java_ref.h"
 #include "base/base_export.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop/message_pump.h"
@@ -21,6 +22,7 @@ class TimeTicks;
 class BASE_EXPORT MessagePumpForUI : public MessagePump {
  public:
   MessagePumpForUI();
+  virtual ~MessagePumpForUI();
 
   virtual void Run(Delegate* delegate) OVERRIDE;
   virtual void Quit() OVERRIDE;
@@ -31,11 +33,9 @@ class BASE_EXPORT MessagePumpForUI : public MessagePump {
 
   static bool RegisterBindings(JNIEnv* env);
 
- protected:
-  virtual ~MessagePumpForUI();
-
  private:
   RunLoop* run_loop_;
+  base::android::ScopedJavaGlobalRef<jobject> system_message_handler_obj_;
 
   DISALLOW_COPY_AND_ASSIGN(MessagePumpForUI);
 };

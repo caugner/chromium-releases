@@ -10,7 +10,7 @@
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
-#include "sync/util/data_encryption_win.h"
+#include "components/webdata/encryptor/encryptor.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::win::RegKey;
@@ -91,7 +91,8 @@ void EncryptAndWrite(RegKey* key, const ValueDescription* value) {
   data.resize(data_size);
   memcpy(&data[0], value->value, data_size);
 
-  std::vector<uint8> encrypted_data = syncer::EncryptData(data);
+  std::string encrypted_data;
+  Encryptor::EncryptString(data, &encrypted_data);
   EXPECT_EQ(ERROR_SUCCESS, key->WriteValue(value->value_name,
       &encrypted_data[0], encrypted_data.size(), REG_BINARY));
 }
@@ -169,9 +170,11 @@ TEST_F(AutofillIeToolbarImportTest, TestAutofillImport) {
   EXPECT_EQ(profile1[3].value, profiles[1].GetRawInfo(EMAIL_ADDRESS));
   EXPECT_EQ(profile1[4].value, profiles[1].GetRawInfo(COMPANY_NAME));
   EXPECT_EQ(profile1[7].value,
-            profiles[1].GetInfo(PHONE_HOME_COUNTRY_CODE, "US"));
-  EXPECT_EQ(profile1[6].value, profiles[1].GetInfo(PHONE_HOME_CITY_CODE, "US"));
-  EXPECT_EQ(L"5555555", profiles[1].GetInfo(PHONE_HOME_NUMBER, "US"));
+            profiles[1].GetInfo(AutofillType(PHONE_HOME_COUNTRY_CODE), "US"));
+  EXPECT_EQ(profile1[6].value,
+            profiles[1].GetInfo(AutofillType(PHONE_HOME_CITY_CODE), "US"));
+  EXPECT_EQ(L"5555555",
+            profiles[1].GetInfo(AutofillType(PHONE_HOME_NUMBER), "US"));
   EXPECT_EQ(L"+1 650-555-5555",
             profiles[1].GetRawInfo(PHONE_HOME_WHOLE_NUMBER));
 

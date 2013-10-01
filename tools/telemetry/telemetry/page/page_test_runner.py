@@ -36,8 +36,9 @@ class PageTestRunner(object):
     return 'test'
 
   def Run(self, base_dir, page_set_filenames):
-    test, ps = self.ParseCommandLine(sys.argv, base_dir, page_set_filenames)
-    results = page_runner.Run(test, ps, self._options)
+    test, ps, expectations = self.ParseCommandLine(sys.argv, base_dir,
+        page_set_filenames)
+    results = page_runner.Run(test, ps, expectations, self._options)
     results.PrintSummary()
     return min(255, len(results.failures + results.errors))
 
@@ -127,7 +128,7 @@ class PageTestRunner(object):
 
   def ParseCommandLine(self, args, base_dir, page_set_filenames):
     # Need to collect profile creators before creating command line parser.
-    profile_types.FindProfileCreators(base_dir)
+    profile_types.FindProfileCreators(base_dir, base_dir)
 
     self._options = browser_options.BrowserOptions()
     self._parser = self._options.CreateParser(
@@ -162,13 +163,15 @@ class PageTestRunner(object):
 
     if isinstance(test, test_module.Test):
       ps = test.CreatePageSet(self._options)
+      expectations = test.CreateExpectations(ps)
     else:
       ps = self.GetPageSet(test, page_set_filenames)
+      expectations = test.CreateExpectations(ps)
 
     if len(self._args) > 2:
       self.PrintParseError('Too many arguments.')
 
-    return page_test, ps
+    return page_test, ps, expectations
 
   def PrintParseError(self, message):
     self._parser.error(message)

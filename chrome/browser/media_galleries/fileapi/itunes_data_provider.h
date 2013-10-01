@@ -13,9 +13,11 @@
 #include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
-#include "chrome/browser/media_galleries/fileapi/itunes_library_parser.h"
+#include "chrome/browser/media_galleries/fileapi/safe_itunes_library_parser.h"
 
 namespace itunes {
+
+class TestITunesDataProvider;
 
 // This class is the holder for iTunes parsed data. Given a path to the iTunes
 // library XML file it will read it in, parse the data, and provide convenient
@@ -27,16 +29,20 @@ class ITunesDataProvider {
   typedef std::string AlbumName;
   typedef std::string TrackName;
   typedef std::map<TrackName, base::FilePath> Album;
+  typedef base::Callback<void(bool)> ReadyCallback;
 
   explicit ITunesDataProvider(const base::FilePath& library_path);
-  ~ITunesDataProvider();
+  virtual ~ITunesDataProvider();
 
   // Ask the data provider to refresh the data if necessary. |ready_callback|
   // will be called with the result; false if unable to parse the XML file.
-  void RefreshData(const base::Callback<void(bool)>& ready_callback);
+  virtual void RefreshData(const ReadyCallback& ready_callback);
 
   // Get the platform path for the library XML file.
   const base::FilePath& library_path() const;
+
+  // Get the platform path for the auto-add directory.
+  virtual const base::FilePath& auto_add_path() const;
 
   // Returns true if |artist| exists in the library.
   bool KnownArtist(const ArtistName& artist) const;
@@ -60,6 +66,8 @@ class ITunesDataProvider {
   Album GetAlbum(const ArtistName& artist, const AlbumName& album) const;
 
  private:
+  friend class TestITunesDataProvider;
+
   typedef std::map<AlbumName, Album> Artist;
   typedef std::map<ArtistName, Artist> Library;
 
@@ -70,18 +78,27 @@ class ITunesDataProvider {
   static void OnLibraryWatchStartedCallback(
       scoped_ptr<base::FilePathWatcher> library_watcher);
   static void OnLibraryChangedCallback(const base::FilePath& path, bool error);
-
-  bool ParseLibrary();
+  static void OnLibraryParsedCallback(const ReadyCallback& ready_callback,
+                                      bool result,
+                                      const parser::Library& library);
 
   // Called when the FilePathWatcher for |library_path_| has tried to add an
   // watch.
   void OnLibraryWatchStarted(scoped_ptr<base::FilePathWatcher> library_watcher);
 
-  // Called when |library_path_| has changed.
-  void OnLibraryChanged(const base::FilePath& path, bool error);
+  // Called when |library_path_| has changed. Virtual for testing.
+  virtual void OnLibraryChanged(const base::FilePath& path, bool error);
+
+  // Called when the utility process finishes parsing the library XML file.
+  void OnLibraryParsed(const ReadyCallback& ready_callback,
+                       bool result,
+                       const parser::Library& library);
 
   // Path to the library XML file.
   const base::FilePath library_path_;
+
+  // Path to the auto-add directory.
+  const base::FilePath auto_add_path_;
 
   // The parsed and uniquified data.
   Library library_;
@@ -95,6 +112,8 @@ class ITunesDataProvider {
 
   // A watcher on the library xml file.
   scoped_ptr<base::FilePathWatcher> library_watcher_;
+
+  scoped_refptr<SafeITunesLibraryParser> xml_parser_;
 
   DISALLOW_COPY_AND_ASSIGN(ITunesDataProvider);
 };

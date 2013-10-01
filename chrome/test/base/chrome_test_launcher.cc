@@ -7,11 +7,12 @@
 #include <stack>
 
 #include "base/command_line.h"
+#include "base/debug/leak_annotations.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
-#include "base/process_util.h"
+#include "base/process/process_metrics.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/test/test_file_util.h"
@@ -45,6 +46,10 @@
 
 #if defined(OS_CHROMEOS)
 #include "ash/test/ui_controls_factory_ash.h"
+#endif
+
+#if defined(OS_LINUX) || defined(OS_ANDROID)
+#include "chrome/app/chrome_breakpad_client.h"
 #endif
 
 class ChromeTestLauncherDelegate : public content::TestLauncherDelegate {
@@ -149,6 +154,15 @@ int main(int argc, char** argv) {
   ui_controls::InstallUIControlsAura(aura::test::CreateUIControlsAura(NULL));
 #endif
 
+#endif
+
+#if defined(OS_LINUX) || defined(OS_ANDROID)
+  // We leak this pointer intentionally. The breakpad client needs to outlive
+  // all other code.
+  chrome::ChromeBreakpadClient* breakpad_client =
+      new chrome::ChromeBreakpadClient();
+  ANNOTATE_LEAKING_OBJECT_PTR(breakpad_client);
+  breakpad::SetBreakpadClient(breakpad_client);
 #endif
 
   ChromeTestLauncherDelegate launcher_delegate;

@@ -20,12 +20,13 @@
 #include "native_client/src/shared/srpc/nacl_srpc.h"
 #include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
 #include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
-#include "native_client/src/trusted/plugin/utility.h"
 #include "native_client/src/trusted/reverse_service/reverse_service.h"
 #include "native_client/src/trusted/weak_ref/weak_ref.h"
 
 #include "ppapi/c/trusted/ppb_file_io_trusted.h"
 #include "ppapi/cpp/completion_callback.h"
+
+#include "ppapi/native_client/src/trusted/plugin/utility.h"
 
 struct NaClFileInfo;
 
@@ -45,6 +46,33 @@ class Plugin;
 class PnaclCoordinator;
 class SrpcClient;
 class ServiceRuntime;
+
+// Struct of params used by StartSelLdr.  Use a struct so that callback
+// creation templates aren't overwhelmed with too many parameters.
+struct SelLdrStartParams {
+  SelLdrStartParams(const nacl::string& url,
+                    ErrorInfo* error_info,
+                    bool uses_irt,
+                    bool uses_ppapi,
+                    bool enable_dev_interfaces,
+                    bool enable_dyncode_syscalls,
+                    bool enable_exception_handling)
+      : url(url),
+        error_info(error_info),
+        uses_irt(uses_irt),
+        uses_ppapi(uses_ppapi),
+        enable_dev_interfaces(enable_dev_interfaces),
+        enable_dyncode_syscalls(enable_dyncode_syscalls),
+        enable_exception_handling(enable_exception_handling) {
+  }
+  nacl::string url;
+  ErrorInfo* error_info;
+  bool uses_irt;
+  bool uses_ppapi;
+  bool enable_dev_interfaces;
+  bool enable_dyncode_syscalls;
+  bool enable_exception_handling;
+};
 
 // Callback resources are essentially our continuation state.
 
@@ -232,19 +260,27 @@ class ServiceRuntime {
   // The destructor terminates the sel_ldr process.
   ~ServiceRuntime();
 
-  // Spawn a sel_ldr instance and establish an SrpcClient to it.  The nexe
-  // to be started is passed through |nacl_file_desc|.  On success, returns
-  // true.  On failure, returns false and |error_string| is set to something
+  // Spawn the sel_ldr instance. On success, returns true.
+  // On failure, returns false and |error_string| is set to something
   // describing the error.
-  bool Start(nacl::DescWrapper* nacl_file_desc,
-             ErrorInfo* error_info,
-             const nacl::string& url,
-             bool uses_irt,
-             bool uses_ppapi,
-             bool enable_ppapi_dev,
-             bool enable_dyncode_syscalls,
-             bool enable_exception_handling,
-             pp::CompletionCallback crash_cb);
+  bool StartSelLdr(const SelLdrStartParams& params);
+
+  // If starting sel_ldr from a background thread, wait for sel_ldr to
+  // actually start.
+  void WaitForSelLdrStart();
+
+  // Signal to waiting threads that StartSelLdr is complete.
+  // Done externally, in case external users want to write to shared
+  // memory that is yet to be fenced.
+  void SignalStartSelLdrDone();
+
+  // Establish an SrpcClient to the sel_ldr instance and load the nexe.
+  // The nexe to be started is passed through |nacl_file_desc|.
+  // On success, returns true. On failure, returns false and |error_string|
+  // is set to something describing the error.
+  bool LoadNexeAndStart(nacl::DescWrapper* nacl_file_desc,
+                        ErrorInfo* error_info,
+                        const pp::CompletionCallback& crash_cb);
 
   // Starts the application channel to the nexe.
   SrpcClient* SetupAppChannel();
@@ -280,8 +316,13 @@ class ServiceRuntime {
 
   PluginReverseInterface* rev_interface_;
 
+  // Mutex to protect exit_status_.
+  // Also, in conjunction with cond_ it is used to signal when
+  // StartSelLdr is complete with either success or error.
   NaClMutex mu_;
+  NaClCondVar cond_;
   int exit_status_;
+  bool start_sel_ldr_done_;
 };
 
 }  // namespace plugin

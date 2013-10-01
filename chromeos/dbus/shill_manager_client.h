@@ -58,17 +58,16 @@ class CHROMEOS_EXPORT ShillManagerClient {
     // Used to reset all properties; does not notify observers.
     virtual void ClearProperties() = 0;
 
-    // Move an existing service to a different index, e.g. to simulate the
-    // result of a successful connect.
-    virtual void MoveServiceToIndex(const std::string& service_path,
-                                    size_t index,
-                                    bool add_to_watch_list) = 0;
-
     // Add/Remove/ClearService should only be called from ShillServiceClient.
     virtual void AddManagerService(const std::string& service_path,
+                                   bool add_to_visible_list,
                                    bool add_to_watch_list) = 0;
     virtual void RemoveManagerService(const std::string& service_path) = 0;
     virtual void ClearManagerServices() = 0;
+
+    // Called by ShillServiceClient when a service's State property changes.
+    // Services are sorted first by Active vs. Inactive State, then by Type.
+    virtual void SortManagerServices() = 0;
 
    protected:
     virtual ~TestInterface() {}
@@ -124,14 +123,6 @@ class CHROMEOS_EXPORT ShillManagerClient {
   // Calls GetProperties method.
   // |callback| is called after the method call succeeds.
   virtual void GetProperties(const DictionaryValueCallback& callback) = 0;
-
-  // DEPRECATED DO NOT USE: Calls GetProperties method and blocks until the
-  // method call finishes.  The caller is responsible to delete the result.
-  // Thie method returns NULL when method call fails.
-  //
-  // TODO(hashimoto): Refactor blocking calls and remove this method.
-  // crosbug.com/29902
-  virtual base::DictionaryValue* CallGetPropertiesAndBlock() = 0;
 
   // Calls GetNetworksForGeolocation method.
   // |callback| is called after the method call succeeds.

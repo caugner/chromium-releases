@@ -6,18 +6,19 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/browser/fileapi/async_file_test_helper.h"
 #include "webkit/browser/fileapi/copy_or_move_file_validator.h"
 #include "webkit/browser/fileapi/external_mount_points.h"
+#include "webkit/browser/fileapi/file_system_backend.h"
 #include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_mount_point_provider.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 #include "webkit/browser/fileapi/isolated_context.h"
 #include "webkit/browser/fileapi/mock_file_system_context.h"
-#include "webkit/browser/fileapi/test_mount_point_provider.h"
+#include "webkit/browser/fileapi/test_file_system_backend.h"
 #include "webkit/browser/quota/mock_special_storage_policy.h"
+#include "webkit/common/blob/shareable_file_reference.h"
 #include "webkit/common/fileapi/file_system_util.h"
 
 namespace fileapi {
@@ -27,7 +28,9 @@ namespace {
 const FileSystemType kNoValidatorType = kFileSystemTypeTemporary;
 const FileSystemType kWithValidatorType = kFileSystemTypeTest;
 
-void ExpectOk(base::PlatformFileError error) {
+void ExpectOk(const GURL& origin_url,
+              const std::string& name,
+              base::PlatformFileError error) {
   ASSERT_EQ(base::PLATFORM_FILE_OK, error);
 }
 
@@ -52,16 +55,16 @@ class CopyOrMoveFileValidatorTestHelper {
 
     file_system_context_ = CreateFileSystemContextForTesting(NULL, base_dir);
 
-    // Set up TestMountPointProvider to require CopyOrMoveFileValidator.
-    FileSystemMountPointProvider* test_mount_point_provider =
-        file_system_context_->GetMountPointProvider(kWithValidatorType);
-    static_cast<TestMountPointProvider*>(test_mount_point_provider)->
+    // Set up TestFileSystemBackend to require CopyOrMoveFileValidator.
+    FileSystemBackend* test_file_system_backend =
+        file_system_context_->GetFileSystemBackend(kWithValidatorType);
+    static_cast<TestFileSystemBackend*>(test_file_system_backend)->
         set_require_copy_or_move_validator(true);
 
     // Sets up source.
-    FileSystemMountPointProvider* src_mount_point_provider =
-        file_system_context_->GetMountPointProvider(src_type_);
-    src_mount_point_provider->OpenFileSystem(
+    FileSystemBackend* src_file_system_backend =
+        file_system_context_->GetFileSystemBackend(src_type_);
+    src_file_system_backend->OpenFileSystem(
         origin_, src_type_,
         OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
         base::Bind(&ExpectOk));
@@ -88,9 +91,9 @@ class CopyOrMoveFileValidatorTestHelper {
 
   void SetMediaCopyOrMoveFileValidatorFactory(
       scoped_ptr<CopyOrMoveFileValidatorFactory> factory) {
-    TestMountPointProvider* provider = static_cast<TestMountPointProvider*>(
-        file_system_context_->GetMountPointProvider(kWithValidatorType));
-    provider->InitializeCopyOrMoveFileValidatorFactory(factory.Pass());
+    TestFileSystemBackend* backend = static_cast<TestFileSystemBackend*>(
+        file_system_context_->GetFileSystemBackend(kWithValidatorType));
+    backend->InitializeCopyOrMoveFileValidatorFactory(factory.Pass());
   }
 
   void CopyTest(base::PlatformFileError expected) {
@@ -177,50 +180,71 @@ class CopyOrMoveFileValidatorTestHelper {
   DISALLOW_COPY_AND_ASSIGN(CopyOrMoveFileValidatorTestHelper);
 };
 
+// For TestCopyOrMoveFileValidatorFactory
+enum Validity {
+  VALID,
+  PRE_WRITE_INVALID,
+  POST_WRITE_INVALID
+};
+
 class TestCopyOrMoveFileValidatorFactory
     : public CopyOrMoveFileValidatorFactory {
  public:
   // A factory that creates validators that accept everything or nothing.
-  explicit TestCopyOrMoveFileValidatorFactory(bool all_valid)
-      : all_valid_(all_valid) {}
+  // TODO(gbillock): switch args to enum or something
+  explicit TestCopyOrMoveFileValidatorFactory(Validity validity)
+      : validity_(validity) {}
   virtual ~TestCopyOrMoveFileValidatorFactory() {}
 
   virtual CopyOrMoveFileValidator* CreateCopyOrMoveFileValidator(
       const FileSystemURL& /*src_url*/,
       const base::FilePath& /*platform_path*/) OVERRIDE {
-    return new TestCopyOrMoveFileValidator(all_valid_);
+    return new TestCopyOrMoveFileValidator(validity_);
   }
 
  private:
   class TestCopyOrMoveFileValidator : public CopyOrMoveFileValidator {
    public:
-    explicit TestCopyOrMoveFileValidator(bool all_valid)
-        : result_(all_valid ? base::PLATFORM_FILE_OK
-                            : base::PLATFORM_FILE_ERROR_SECURITY) {
+    explicit TestCopyOrMoveFileValidator(Validity validity)
+        : result_(validity == VALID || validity == POST_WRITE_INVALID
+                  ? base::PLATFORM_FILE_OK
+                  : base::PLATFORM_FILE_ERROR_SECURITY),
+          write_result_(validity == VALID || validity == PRE_WRITE_INVALID
+                        ? base::PLATFORM_FILE_OK
+                        : base::PLATFORM_FILE_ERROR_SECURITY) {
     }
     virtual ~TestCopyOrMoveFileValidator() {}
 
-    virtual void StartValidation(
+    virtual void StartPreWriteValidation(
         const ResultCallback& result_callback) OVERRIDE {
       // Post the result since a real validator must do work asynchronously.
       base::MessageLoop::current()->PostTask(
           FROM_HERE, base::Bind(result_callback, result_));
     }
 
+    virtual void StartPostWriteValidation(
+        const base::FilePath& dest_platform_path,
+        const ResultCallback& result_callback) OVERRIDE {
+      // Post the result since a real validator must do work asynchronously.
+      base::MessageLoop::current()->PostTask(
+          FROM_HERE, base::Bind(result_callback, write_result_));
+    }
+
    private:
     base::PlatformFileError result_;
+    base::PlatformFileError write_result_;
 
     DISALLOW_COPY_AND_ASSIGN(TestCopyOrMoveFileValidator);
   };
 
-  bool all_valid_;
+  Validity validity_;
 
   DISALLOW_COPY_AND_ASSIGN(TestCopyOrMoveFileValidatorFactory);
 };
 
 }  // namespace
 
-TEST(CopyOrMoveFileValidatorTest, NoValidatorWithin6ameFSType) {
+TEST(CopyOrMoveFileValidatorTest, NoValidatorWithinSameFSType) {
   // Within a file system type, validation is not expected, so it should
   // work for kWithValidatorType without a validator set.
   CopyOrMoveFileValidatorTestHelper helper(GURL("http://foo"),
@@ -233,7 +257,7 @@ TEST(CopyOrMoveFileValidatorTest, NoValidatorWithin6ameFSType) {
 
 TEST(CopyOrMoveFileValidatorTest, MissingValidator) {
   // Copying or moving into a kWithValidatorType requires a file
-  // validator.  An error is expect if copy is attempted without a validator.
+  // validator.  An error is expected if copy is attempted without a validator.
   CopyOrMoveFileValidatorTestHelper helper(GURL("http://foo"),
                                            kNoValidatorType,
                                            kWithValidatorType);
@@ -248,7 +272,7 @@ TEST(CopyOrMoveFileValidatorTest, AcceptAll) {
                                            kWithValidatorType);
   helper.SetUp();
   scoped_ptr<CopyOrMoveFileValidatorFactory> factory(
-      new TestCopyOrMoveFileValidatorFactory(true /*accept_all*/));
+      new TestCopyOrMoveFileValidatorFactory(VALID));
   helper.SetMediaCopyOrMoveFileValidatorFactory(factory.Pass());
 
   helper.CopyTest(base::PLATFORM_FILE_OK);
@@ -261,7 +285,7 @@ TEST(CopyOrMoveFileValidatorTest, AcceptNone) {
                                            kWithValidatorType);
   helper.SetUp();
   scoped_ptr<CopyOrMoveFileValidatorFactory> factory(
-      new TestCopyOrMoveFileValidatorFactory(false /*accept_all*/));
+      new TestCopyOrMoveFileValidatorFactory(PRE_WRITE_INVALID));
   helper.SetMediaCopyOrMoveFileValidatorFactory(factory.Pass());
 
   helper.CopyTest(base::PLATFORM_FILE_ERROR_SECURITY);
@@ -275,12 +299,25 @@ TEST(CopyOrMoveFileValidatorTest, OverrideValidator) {
                                            kWithValidatorType);
   helper.SetUp();
   scoped_ptr<CopyOrMoveFileValidatorFactory> reject_factory(
-      new TestCopyOrMoveFileValidatorFactory(false /*accept_all*/));
+      new TestCopyOrMoveFileValidatorFactory(PRE_WRITE_INVALID));
   helper.SetMediaCopyOrMoveFileValidatorFactory(reject_factory.Pass());
 
   scoped_ptr<CopyOrMoveFileValidatorFactory> accept_factory(
-      new TestCopyOrMoveFileValidatorFactory(true /*accept_all*/));
+      new TestCopyOrMoveFileValidatorFactory(VALID));
   helper.SetMediaCopyOrMoveFileValidatorFactory(accept_factory.Pass());
+
+  helper.CopyTest(base::PLATFORM_FILE_ERROR_SECURITY);
+  helper.MoveTest(base::PLATFORM_FILE_ERROR_SECURITY);
+}
+
+TEST(CopyOrMoveFileValidatorTest, RejectPostWrite) {
+  CopyOrMoveFileValidatorTestHelper helper(GURL("http://foo"),
+                                           kNoValidatorType,
+                                           kWithValidatorType);
+  helper.SetUp();
+  scoped_ptr<CopyOrMoveFileValidatorFactory> factory(
+      new TestCopyOrMoveFileValidatorFactory(POST_WRITE_INVALID));
+  helper.SetMediaCopyOrMoveFileValidatorFactory(factory.Pass());
 
   helper.CopyTest(base::PLATFORM_FILE_ERROR_SECURITY);
   helper.MoveTest(base::PLATFORM_FILE_ERROR_SECURITY);

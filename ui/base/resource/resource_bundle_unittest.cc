@@ -83,7 +83,8 @@ class MockResourceBundleDelegate : public ui::ResourceBundle::Delegate {
     *value = GetLocalizedStringMock(message_id);
     return true;
   }
-  MOCK_METHOD1(GetFontMock, gfx::Font*(ui::ResourceBundle::FontStyle style));
+  MOCK_METHOD1(GetFontMock,
+               gfx::Font*(ui::ResourceBundle::FontStyle style));
   virtual scoped_ptr<gfx::Font> GetFont(
       ui::ResourceBundle::FontStyle style) OVERRIDE {
     return scoped_ptr<gfx::Font>(GetFontMock(style));
@@ -265,8 +266,7 @@ TEST_F(ResourceBundleTest, DelegateLoadDataResourceBytes) {
   ui::ScaleFactor scale_factor = ui::SCALE_FACTOR_NONE;
 
   EXPECT_CALL(delegate, LoadDataResourceBytes(resource_id, scale_factor))
-      .Times(1)
-      .WillOnce(Return(static_memory));
+      .Times(1).WillOnce(Return(static_memory.get()));
 
   scoped_refptr<base::RefCountedStaticMemory> result =
       resource_bundle->LoadDataResourceBytesForScale(resource_id, scale_factor);
@@ -308,7 +308,7 @@ TEST_F(ResourceBundleTest, DelegateGetLocalizedString) {
   EXPECT_EQ(data, result);
 }
 
-TEST_F(ResourceBundleTest, DelegateGetFont) {
+TEST_F(ResourceBundleTest, DelegateGetFontList) {
   MockResourceBundleDelegate delegate;
   ResourceBundle* resource_bundle = CreateResourceBundle(&delegate);
 
@@ -318,6 +318,10 @@ TEST_F(ResourceBundleTest, DelegateGetFont) {
   EXPECT_CALL(delegate, GetFontMock(_))
       .Times(8)
       .WillRepeatedly(Return(test_font));
+
+  const gfx::FontList* font_list =
+      &resource_bundle->GetFontList(ui::ResourceBundle::BaseFont);
+  EXPECT_TRUE(font_list);
 
   const gfx::Font* font =
       &resource_bundle->GetFont(ui::ResourceBundle::BaseFont);

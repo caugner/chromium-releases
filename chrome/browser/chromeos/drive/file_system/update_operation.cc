@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/drive/file_system/update_operation.h"
 
+#include "base/platform_file.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_observer.h"
@@ -18,29 +19,51 @@ using content::BrowserThread;
 namespace drive {
 namespace file_system {
 
+struct UpdateOperation::LocalState {
+  LocalState() : content_is_same(false) {
+  }
+
+  ResourceEntry entry;
+  base::FilePath drive_file_path;
+  base::FilePath cache_file_path;
+  bool content_is_same;
+};
+
 namespace {
 
 // Gets locally stored information about the specified file.
 FileError GetFileLocalState(internal::ResourceMetadata* metadata,
                             internal::FileCache* cache,
                             const std::string& resource_id,
-                            ResourceEntry* entry,
-                            base::FilePath* drive_file_path,
-                            base::FilePath* cache_file_path) {
-  FileError error = metadata->GetResourceEntryById(resource_id, entry);
+                            UpdateOperation::ContentCheckMode check,
+                            UpdateOperation::LocalState* local_state) {
+  FileError error = metadata->GetResourceEntryById(resource_id,
+                                                   &local_state->entry);
   if (error != FILE_ERROR_OK)
     return error;
 
-  if (entry->file_info().is_directory())
+  if (local_state->entry.file_info().is_directory())
     return FILE_ERROR_NOT_A_FILE;
 
-  *drive_file_path = metadata->GetFilePath(resource_id);
-  if (drive_file_path->empty())
+  local_state->drive_file_path = metadata->GetFilePath(resource_id);
+  if (local_state->drive_file_path.empty())
     return FILE_ERROR_NOT_FOUND;
 
-  return cache->GetFile(resource_id,
-                        entry->file_specific_info().md5(),
-                        cache_file_path);
+  error = cache->GetFile(resource_id, &local_state->cache_file_path);
+  if (error != FILE_ERROR_OK)
+    return error;
+
+  if (check == UpdateOperation::RUN_CONTENT_CHECK) {
+    const std::string& md5 = util::GetMd5Digest(local_state->cache_file_path);
+    local_state->content_is_same =
+        (md5 == local_state->entry.file_specific_info().md5());
+    if (local_state->content_is_same)
+      cache->ClearDirty(resource_id, md5);
+  } else {
+    local_state->content_is_same = false;
+  }
+
+  return FILE_ERROR_OK;
 }
 
 // Updates locally stored information about the specified file.
@@ -49,8 +72,8 @@ FileError UpdateFileLocalState(
     internal::FileCache* cache,
     scoped_ptr<google_apis::ResourceEntry> resource_entry,
     base::FilePath* drive_file_path) {
-  const ResourceEntry& entry = ConvertToResourceEntry(*resource_entry);
-  if (entry.resource_id().empty())
+  ResourceEntry entry;
+  if (!ConvertToResourceEntry(*resource_entry, &entry))
     return FILE_ERROR_NOT_A_FILE;
 
   FileError error = metadata->RefreshEntry(entry);
@@ -90,13 +113,12 @@ UpdateOperation::~UpdateOperation() {
 void UpdateOperation::UpdateFileByResourceId(
     const std::string& resource_id,
     const ClientContext& context,
+    ContentCheckMode check,
     const FileOperationCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  ResourceEntry* entry = new ResourceEntry;
-  base::FilePath* drive_file_path = new base::FilePath;
-  base::FilePath* cache_file_path = new base::FilePath;
+  LocalState* local_state = new LocalState;
   base::PostTaskAndReplyWithResult(
       blocking_task_runner_.get(),
       FROM_HERE,
@@ -104,38 +126,33 @@ void UpdateOperation::UpdateFileByResourceId(
                  metadata_,
                  cache_,
                  resource_id,
-                 entry,
-                 drive_file_path,
-                 cache_file_path),
+                 check,
+                 local_state),
       base::Bind(&UpdateOperation::UpdateFileAfterGetLocalState,
                  weak_ptr_factory_.GetWeakPtr(),
                  context,
                  callback,
-                 base::Owned(entry),
-                 base::Owned(drive_file_path),
-                 base::Owned(cache_file_path)));
+                 base::Owned(local_state)));
 }
 
 void UpdateOperation::UpdateFileAfterGetLocalState(
     const ClientContext& context,
     const FileOperationCallback& callback,
-    const ResourceEntry* entry,
-    const base::FilePath* drive_file_path,
-    const base::FilePath* cache_file_path,
+    const LocalState* local_state,
     FileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  if (error != FILE_ERROR_OK) {
+  if (error != FILE_ERROR_OK || local_state->content_is_same) {
     callback.Run(error);
     return;
   }
 
   scheduler_->UploadExistingFile(
-      entry->resource_id(),
-      *drive_file_path,
-      *cache_file_path,
-      entry->file_specific_info().content_mime_type(),
+      local_state->entry.resource_id(),
+      local_state->drive_file_path,
+      local_state->cache_file_path,
+      local_state->entry.file_specific_info().content_mime_type(),
       "",  // etag
       context,
       base::Bind(&UpdateOperation::UpdateFileAfterUpload,
@@ -150,7 +167,7 @@ void UpdateOperation::UpdateFileAfterUpload(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  FileError drive_error = util::GDataToFileError(error);
+  FileError drive_error = GDataToFileError(error);
   if (drive_error != FILE_ERROR_OK) {
     callback.Run(drive_error);
     return;

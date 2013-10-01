@@ -6,13 +6,13 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
@@ -25,7 +25,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/controls/textfield/textfield.h"
 
@@ -40,7 +40,7 @@ using content::RenderViewHost;
 
 namespace {
 
-const char kTestingPage[] = "files/keyevents_test.html";
+const char kTestingPage[] = "/keyevents_test.html";
 const char kSuppressEventJS[] =
     "window.domAutomationController.send(setDefaultAction('%ls', %ls));";
 const char kGetResultJS[] =
@@ -368,10 +368,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_NormalKeyEvents) {
         "U 65 0 false false false false" } },
   };
 
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = test_server()->GetURL(kTestingPage);
+  GURL url = embedded_test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
@@ -405,8 +405,9 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_NormalKeyEvents) {
 
 #if defined(OS_WIN) || defined(OS_LINUX)
 
-#if defined(OS_LINUX)
-// http://crbug.com/129235
+#if defined(OS_LINUX) || (defined(OS_WIN) && defined(USE_AURA))
+// Linux: http://crbug.com/129235
+// Win Aura: crbug.com/269564
 #define MAYBE_CtrlKeyEvents DISABLED_CtrlKeyEvents
 #else
 #define MAYBE_CtrlKeyEvents CtrlKeyEvents
@@ -461,10 +462,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_CtrlKeyEvents) {
       "U 17 0 true false false false" }
   };
 
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = test_server()->GetURL(kTestingPage);
+  GURL url = embedded_test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
@@ -507,10 +508,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_CommandKeyEvents) {
       "U 91 0 false false false true" }
   };
 
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = test_server()->GetURL(kTestingPage);
+  GURL url = embedded_test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
@@ -607,10 +608,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
 #endif
 #endif
 
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = test_server()->GetURL(kTestingPage);
+  GURL url = embedded_test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   content::RunAllPendingInMessageLoop();
@@ -681,10 +682,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
 #define MAYBE_ReservedAccelerators ReservedAccelerators
 #endif
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = test_server()->GetURL(kTestingPage);
+  GURL url = embedded_test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
@@ -783,10 +784,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, EditorKeyBindings) {
       "U 17 0 true false false false" }
   };
 
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = test_server()->GetURL(kTestingPage);
+  GURL url = embedded_test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
@@ -821,10 +822,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_PageUpDownKeys) {
       "U 34 0 false false false false" }
   };
 
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = test_server()->GetURL(kTestingPage);
+  GURL url = embedded_test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));
@@ -863,10 +864,10 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FocusMenuBarByAltKey) {
       "U 17 0 true false false false" }
   };
 
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  GURL url = test_server()->GetURL(kTestingPage);
+  GURL url = embedded_test_server()->GetURL(kTestingPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_NO_FATAL_FAILURE(ClickOnView(VIEW_ID_TAB_CONTAINER));

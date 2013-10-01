@@ -110,13 +110,14 @@ class XModifierStateWatcher{
 
 #if defined(USE_XI2_MT)
 // Detects if a touch event is a driver-generated 'special event'.
-// A 'special event' is a touch release or move event with maximum radius and
-// pressure at location (0, 0).
+// A 'special event' is a touch event with maximum radius and pressure at
+// location (0, 0).
 // This needs to be done in a cleaner way: http://crbug.com/169256
 bool TouchEventIsGeneratedHack(const base::NativeEvent& native_event) {
   XIDeviceEvent* event =
       static_cast<XIDeviceEvent*>(native_event->xcookie.data);
-  CHECK(event->evtype == XI_TouchUpdate ||
+  CHECK(event->evtype == XI_TouchBegin ||
+        event->evtype == XI_TouchUpdate ||
         event->evtype == XI_TouchEnd);
 
   // Force is normalized to [0, 1].
@@ -149,6 +150,8 @@ int GetEventFlagsFromXState(unsigned int state) {
     flags |= ui::EF_ALT_DOWN;
   if (state & LockMask)
     flags |= ui::EF_CAPS_LOCK_DOWN;
+  if (state & Mod5Mask)
+    flags |= ui::EF_ALTGR_DOWN;
   if (state & Button1Mask)
     flags |= ui::EF_LEFT_MOUSE_BUTTON;
   if (state & Button2Mask)
@@ -197,7 +200,8 @@ ui::EventType GetTouchEventType(const base::NativeEvent& native_event) {
 #if defined(USE_XI2_MT)
   switch(event->evtype) {
     case XI_TouchBegin:
-      return ui::ET_TOUCH_PRESSED;
+      return TouchEventIsGeneratedHack(native_event) ? ui::ET_UNKNOWN :
+                                                       ui::ET_TOUCH_PRESSED;
     case XI_TouchUpdate:
       return TouchEventIsGeneratedHack(native_event) ? ui::ET_UNKNOWN :
                                                        ui::ET_TOUCH_MOVED;
@@ -309,7 +313,10 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
         return ET_MOUSE_DRAGGED;
       return ET_MOUSE_MOVED;
     case EnterNotify:
-      return ET_MOUSE_ENTERED;
+      // The standard on Windows is to send a MouseMove event when the mouse
+      // first enters a window instead of sending a special mouse enter event.
+      // To be consistent we follow the same style.
+      return ET_MOUSE_MOVED;
     case LeaveNotify:
       return ET_MOUSE_EXITED;
     case GenericEvent: {
@@ -611,6 +618,22 @@ gfx::Vector2d GetMouseWheelOffset(const base::NativeEvent& native_event) {
   }
 }
 
+void ClearTouchIdIfReleased(const base::NativeEvent& xev) {
+#if defined(USE_XI2_MT)
+  ui::EventType type = ui::EventTypeFromNative(xev);
+  if (type == ui::ET_TOUCH_CANCELLED ||
+      type == ui::ET_TOUCH_RELEASED) {
+    ui::TouchFactory* factory = ui::TouchFactory::GetInstance();
+    ui::DeviceDataManager* manager = ui::DeviceDataManager::GetInstance();
+    double tracking_id;
+    if (manager->GetEventData(
+        *xev, ui::DeviceDataManager::DT_TOUCH_TRACKING_ID, &tracking_id)) {
+      factory->ReleaseSlotForTrackingID(tracking_id);
+    }
+  }
+#endif
+}
+
 int GetTouchId(const base::NativeEvent& xev) {
   double slot = 0;
   ui::TouchFactory* factory = ui::TouchFactory::GetInstance();
@@ -627,14 +650,9 @@ int GetTouchId(const base::NativeEvent& xev) {
   double tracking_id;
   if (!manager->GetEventData(
       *xev, ui::DeviceDataManager::DT_TOUCH_TRACKING_ID, &tracking_id)) {
-    LOG(ERROR) << "Could not get the slot ID for the event. Using 0.";
+    LOG(ERROR) << "Could not get the tracking ID for the event. Using 0.";
   } else {
     slot = factory->GetSlotForTrackingID(tracking_id);
-    ui::EventType type = ui::EventTypeFromNative(xev);
-    if (type == ui::ET_TOUCH_CANCELLED ||
-        type == ui::ET_TOUCH_RELEASED) {
-      factory->ReleaseSlotForTrackingID(tracking_id);
-    }
   }
 #else
   if (!manager->GetEventData(

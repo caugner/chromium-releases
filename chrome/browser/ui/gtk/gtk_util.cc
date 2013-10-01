@@ -23,6 +23,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
@@ -31,13 +32,12 @@
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "googleurl/src/gurl.h"
 #include "grit/chrome_unscaled_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/accelerators/menu_label_accelerator_util_linux.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_screen_util.h"
-#include "ui/base/gtk/menu_label_accelerator_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
@@ -45,6 +45,7 @@
 #include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/pango_util.h"
+#include "url/gurl.h"
 
 // These conflict with base/tracked_objects.h, so need to come last.
 #include <gdk/gdkx.h>  // NOLINT
@@ -151,7 +152,7 @@ GdkPixbuf* GetAvatarIcon(Profile* profile) {
   const ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
 
-  if (!ProfileManager::IsMultipleProfilesEnabled() ||
+  if (!profiles::IsMultipleProfilesEnabled() ||
       cache.GetNumberOfProfiles() < 2)
     return NULL;
 
@@ -654,7 +655,6 @@ std::string BuildTooltipTitleFor(string16 title, const GURL& url) {
   std::string escaped_url(escaped_url_cstr);
   g_free(escaped_url_cstr);
 
-  std::string tooltip;
   if (url_str == title_str || title.empty()) {
     return escaped_url;
   } else {
@@ -804,18 +804,18 @@ bool GrabAllInput(GtkWidget* widget) {
     return false;
 
   GdkWindow* gdk_window = gtk_widget_get_window(widget);
-  if (!gdk_pointer_grab(gdk_window,
-                        TRUE,
-                        GdkEventMask(GDK_BUTTON_PRESS_MASK |
-                                     GDK_BUTTON_RELEASE_MASK |
-                                     GDK_ENTER_NOTIFY_MASK |
-                                     GDK_LEAVE_NOTIFY_MASK |
-                                     GDK_POINTER_MOTION_MASK),
-                        NULL, NULL, time) == 0) {
+  if (gdk_pointer_grab(gdk_window,
+                       TRUE,
+                       GdkEventMask(GDK_BUTTON_PRESS_MASK |
+                                    GDK_BUTTON_RELEASE_MASK |
+                                    GDK_ENTER_NOTIFY_MASK |
+                                    GDK_LEAVE_NOTIFY_MASK |
+                                    GDK_POINTER_MOTION_MASK),
+                       NULL, NULL, time) != 0) {
     return false;
   }
 
-  if (!gdk_keyboard_grab(gdk_window, TRUE, time) == 0) {
+  if (gdk_keyboard_grab(gdk_window, TRUE, time) != 0) {
     gdk_display_pointer_ungrab(gdk_drawable_get_display(gdk_window), time);
     return false;
   }

@@ -13,8 +13,9 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/process.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
+#include "base/process/process.h"
 #include "base/strings/string16.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_comptr.h"
@@ -43,7 +44,7 @@ bool RegisterTestDefaultBrowser() {
   base::FilePath chrome_exe(dir.Append(kChromeExe));
   base::FilePath registrar(dir.Append(kRegistrar));
 
-  if (!file_util::PathExists(chrome_exe) || !file_util::PathExists(registrar)) {
+  if (!base::PathExists(chrome_exe) || !base::PathExists(registrar)) {
     LOG(ERROR) << "Could not locate " << kChromeExe << " or " << kRegistrar;
     return false;
   }

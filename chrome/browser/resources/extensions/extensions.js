@@ -21,42 +21,55 @@ cr.define('extensions', function() {
 
   // Implements the DragWrapper handler interface.
   var dragWrapperHandler = {
-    // @inheritdoc
+    /** @override */
     shouldAcceptDrag: function(e) {
       // We can't access filenames during the 'dragenter' event, so we have to
       // wait until 'drop' to decide whether to do something with the file or
       // not.
       // See: http://www.w3.org/TR/2011/WD-html5-20110113/dnd.html#concept-dnd-p
-      return e.dataTransfer.types.indexOf('Files') > -1;
+      return (e.dataTransfer.types &&
+              e.dataTransfer.types.indexOf('Files') > -1);
     },
-    // @inheritdoc
+    /** @override */
     doDragEnter: function() {
       chrome.send('startDrag');
       ExtensionSettings.showOverlay(null);
       ExtensionSettings.showOverlay($('dropTargetOverlay'));
     },
-    // @inheritdoc
+    /** @override */
     doDragLeave: function() {
       ExtensionSettings.showOverlay(null);
       chrome.send('stopDrag');
     },
-    // @inheritdoc
+    /** @override */
     doDragOver: function(e) {
       e.preventDefault();
     },
-    // @inheritdoc
+    /** @override */
     doDrop: function(e) {
       ExtensionSettings.showOverlay(null);
+      if (e.dataTransfer.files.length != 1)
+        return;
 
+      var toSend = null;
+      // Files lack a check if they're a directory, but we can find out through
+      // its item entry.
+      for (var i = 0; i < e.dataTransfer.items.length; ++i) {
+        if (e.dataTransfer.items[i].kind == 'file' &&
+            e.dataTransfer.items[i].webkitGetAsEntry().isDirectory) {
+          toSend = 'installDroppedDirectory';
+          break;
+        }
+      }
       // Only process files that look like extensions. Other files should
       // navigate the browser normally.
-      if (!e.dataTransfer.files.length ||
-          !/\.(crx|user\.js)$/.test(e.dataTransfer.files[0].name)) {
-        return;
-      }
+      if (!toSend && /\.(crx|user\.js)$/i.test(e.dataTransfer.files[0].name))
+        toSend = 'installDroppedFile';
 
-      chrome.send('installDroppedFile');
-      e.preventDefault();
+      if (toSend) {
+        e.preventDefault();
+        chrome.send(toSend);
+      }
     }
   };
 
@@ -76,7 +89,7 @@ cr.define('extensions', function() {
      */
     initialize: function() {
       uber.onContentFrameLoaded();
-
+      cr.ui.FocusOutlineManager.forDocument(document);
       measureCheckboxStrings();
 
       // Set the title.
@@ -91,6 +104,8 @@ cr.define('extensions', function() {
           this.handleToggleDevMode_.bind(this));
       $('dev-controls').addEventListener('webkitTransitionEnd',
           this.handleDevControlsTransitionEnd_.bind(this));
+      $('open-apps-dev-tools').addEventListener('click',
+          this.handleOpenAppsDevTools_.bind(this));
 
       // Set up the three dev mode buttons (load unpacked, pack and update).
       $('load-unpacked').addEventListener('click',
@@ -132,6 +147,7 @@ cr.define('extensions', function() {
       }
 
       cr.ui.overlay.setupOverlay($('dropTargetOverlay'));
+      cr.ui.overlay.globalInitialization();
 
       extensions.ExtensionFocusManager.getInstance().initialize();
 
@@ -153,11 +169,6 @@ cr.define('extensions', function() {
      */
     handleLoadUnpackedExtension_: function(e) {
       chrome.send('extensionSettingsLoadUnpackedExtension');
-
-      // TODO(jhawkins): Refactor metrics support out of options and use it
-      // in extensions.html.
-      chrome.send('coreOptionsUserMetricsAction',
-                  ['Options_LoadUnpackedExtension']);
     },
 
     /**
@@ -167,7 +178,7 @@ cr.define('extensions', function() {
      */
     handlePackExtension_: function(e) {
       ExtensionSettings.showOverlay($('packExtensionOverlay'));
-      chrome.send('coreOptionsUserMetricsAction', ['Options_PackExtension']);
+      chrome.send('metricsHandler:recordAction', ['Options_PackExtension']);
     },
 
     /**
@@ -177,7 +188,7 @@ cr.define('extensions', function() {
      */
     showExtensionCommandsConfigUi_: function(e) {
       ExtensionSettings.showOverlay($('extensionCommandsOverlay'));
-      chrome.send('coreOptionsUserMetricsAction',
+      chrome.send('metricsHandler:recordAction',
                   ['Options_ExtensionCommands']);
     },
 
@@ -227,6 +238,17 @@ cr.define('extensions', function() {
           !$('extension-settings').classList.contains('dev-mode')) {
         $('dev-controls').hidden = true;
       }
+    },
+
+    /**
+     * Called when the user clicked on the button to launch Apps Developer
+     * Tools.
+     * @param {!Event} e A click event.
+     * @private
+     */
+    handleOpenAppsDevTools_: function(e) {
+      chrome.send('extensionSettingsLaunch',
+                  ['lphgohfeebnhcpiohjndkgbhhkoapkjc']);
     },
   };
 
@@ -287,6 +309,9 @@ cr.define('extensions', function() {
       $('toggle-dev-on').checked = false;
     }
 
+    if (extensionsData.appsDevToolsEnabled)
+      pageDiv.classList.add('apps-dev-tools-mode');
+
     $('load-unpacked').disabled = extensionsData.loadUnpackedDisabled;
 
     ExtensionsList.prototype.data_ = extensionsData;
@@ -337,6 +362,12 @@ cr.define('extensions', function() {
 
     if (node)
       node.classList.add('showing');
+
+    var pages = document.querySelectorAll('.page');
+    for (var i = 0; i < pages.length; i++) {
+      pages[i].setAttribute('aria-hidden', node ? 'true' : 'false');
+    }
+
     overlay.hidden = !node;
     uber.invokeMethodOnParent(node ? 'beginInterceptingEvents' :
                                      'stopInterceptingEvents');

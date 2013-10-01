@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/json/json_reader.h"
 #include "base/memory/linked_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/test/values_test_util.h"
 #include "base/values.h"
@@ -33,11 +33,12 @@ const char kRuleId3[] = "rule3";
 const char kRuleId4[] = "rule4";
 }  // namespace
 
+using extension_test_util::LoadManifest;
+using extension_test_util::LoadManifestUnchecked;
+
 namespace extensions {
 
 using base::Value;
-using extension_test_util::LoadManifest;
-using extension_test_util::LoadManifestUnchecked;
 using testing::HasSubstr;
 
 namespace helpers = extension_web_request_api_helpers;

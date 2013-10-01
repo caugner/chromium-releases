@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/public/web/WebPermissionClient.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace WebKit {
 
@@ -37,6 +38,7 @@ class AwRenderViewExt : public content::RenderViewObserver,
                                         bool is_new_navigation) OVERRIDE;
   virtual void FocusedNodeChanged(const WebKit::WebNode& node) OVERRIDE;
   virtual void DidCommitCompositorFrame() OVERRIDE;
+  virtual void Navigate(const GURL& url) OVERRIDE;
 
   void OnDocumentHasImagesRequest(int id);
 
@@ -47,6 +49,7 @@ class AwRenderViewExt : public content::RenderViewObserver,
   void OnResetScrollAndScaleState();
 
   void OnSetInitialPageScale(double page_scale_factor);
+  void OnSetBackgroundColor(SkColor c);
 
   void UpdatePageScaleFactor();
 

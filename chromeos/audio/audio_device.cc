@@ -82,6 +82,8 @@ namespace chromeos {
 AudioDevice::AudioDevice()
     : is_input(false),
       id(0),
+      display_name(""),
+      type(AUDIO_TYPE_OTHER),
       priority(0),
       active(false),
       plugged_time(0) {
@@ -95,6 +97,7 @@ AudioDevice::AudioDevice(const AudioNode& node) {
     display_name = node.name;
   else
     display_name = node.device_name;
+  device_name = node.device_name;
   priority = GetDevicePriority(type);
   active = node.active;
   plugged_time = node.plugged_time;
@@ -106,11 +109,14 @@ std::string AudioDevice::ToString() const {
                       "is_input = %s ",
                       is_input ? "true" : "false");
   base::StringAppendF(&result,
-                      "id = %s ",
-                      base::Uint64ToString(id).c_str());
+                      "id = 0x%" PRIx64 " ",
+                      id);
   base::StringAppendF(&result,
                       "display_name = %s ",
                       display_name.c_str());
+  base::StringAppendF(&result,
+                      "device_name = %s ",
+                      device_name.c_str());
   base::StringAppendF(&result,
                       "type = %s ",
                       GetTypeString(type).c_str());

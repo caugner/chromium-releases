@@ -6,9 +6,11 @@
 
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/ui/app_list/search/chrome_search_result.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/common/metrics/proto/omnibox_event.pb.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -92,6 +94,10 @@ class OmniboxResult : public ChromeSearchResult {
         new OmniboxResult(profile_, match_)).Pass();
   }
 
+  virtual ChromeSearchResultType GetType() OVERRIDE {
+    return OMNIBOX_SEARCH_RESULT;
+  }
+
  private:
   void UpdateIcon() {
     int resource_id = match_.starred ?
@@ -139,6 +145,7 @@ void OmniboxProvider::Start(const base::string16& query) {
                                        base::string16::npos,
                                        base::string16(),
                                        GURL(),
+                                       AutocompleteInput::INVALID_SPEC,
                                        false,
                                        false,
                                        true,

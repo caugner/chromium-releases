@@ -29,34 +29,37 @@ class ASH_EXPORT TrayDisplay : public SystemTrayItem,
   explicit TrayDisplay(SystemTray* system_tray);
   virtual ~TrayDisplay();
 
+  // Overridden from DisplayControllerObserver:
+  virtual void OnDisplayConfigurationChanged() OVERRIDE;
+
  private:
   friend class TrayDisplayTest;
 
   typedef std::map<int64, DisplayInfo> DisplayInfoMap;
 
-  // Checks the current display settings and determine what message should be
-  // shown for notification.
-  base::string16 GetDisplayMessageForNotification();
+  // Scans the current display info and updates |display_info_|. Sets the
+  // previous data to |old_info| if it's not NULL.
+  void UpdateDisplayInfo(DisplayInfoMap* old_info);
+
+  // Compares the current display settings with |old_info| and determine what
+  // message should be shown for notification. Returns true if there's a
+  // meaningful change. Note that it's possible to return true and set |message|
+  // to empty, which means the notification should be removed.
+  bool GetDisplayMessageForNotification(
+      base::string16* message,
+      const DisplayInfoMap& old_info);
 
   // Overridden from SystemTrayItem.
   virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateNotificationView(
-      user::LoginStatus status) OVERRIDE;
   virtual void DestroyDefaultView() OVERRIDE;
-  virtual void DestroyNotificationView() OVERRIDE;
-  virtual bool ShouldShowLauncher() const OVERRIDE;
-
-  // Overridden from DisplayControllerObserver:
-  virtual void OnDisplayConfigurationChanged() OVERRIDE;
 
   // Test accessors.
   base::string16 GetDefaultViewMessage();
+  base::string16 GetNotificationMessage();
+  void CloseNotificationForTest();
   views::View* default_view() { return default_; }
-  const string16& current_message() const { return current_message_; }
 
   views::View* default_;
-  DisplayNotificationView* notification_;
-  string16 current_message_;
   DisplayInfoMap display_info_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayDisplay);

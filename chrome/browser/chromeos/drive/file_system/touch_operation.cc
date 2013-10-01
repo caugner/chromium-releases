@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/sequenced_task_runner.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_observer.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -92,9 +92,16 @@ void TouchOperation::TouchFileAfterServerTimeStampUpdated(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  FileError error = util::GDataToFileError(gdata_error);
+  FileError error = GDataToFileError(gdata_error);
   if (error != FILE_ERROR_OK) {
     callback.Run(error);
+    return;
+  }
+
+  DCHECK(resource_entry);
+  ResourceEntry entry;
+  if (!ConvertToResourceEntry(*resource_entry, &entry)) {
+    callback.Run(FILE_ERROR_NOT_A_FILE);
     return;
   }
 
@@ -103,7 +110,7 @@ void TouchOperation::TouchFileAfterServerTimeStampUpdated(
       FROM_HERE,
       base::Bind(&internal::ResourceMetadata::RefreshEntry,
                  base::Unretained(metadata_),
-                 ConvertToResourceEntry(*resource_entry)),
+                 entry),
       base::Bind(&TouchOperation::TouchFileAfterRefreshMetadata,
                  weak_ptr_factory_.GetWeakPtr(),
                  file_path,

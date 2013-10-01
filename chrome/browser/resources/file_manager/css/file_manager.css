@@ -2,6 +2,23 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
+/* Special attribute used in HTML to hide elements. */
+body[type='folder'] [invisibleif~='folder'],
+body[type='upload-folder'] [invisibleif~='upload-folder'],
+body[type='saveas-file'] [invisibleif~='saveas-file'],
+body[type='open-file'] [invisibleif~='open-file'],
+body[type='open-multi-file'] [invisibleif~='open-multi-file'],
+body[type='full-page'] [invisibleif~='full-page'],
+
+body[type='folder'] [visibleif]:not([visibleif~='folder']),
+body[type='upload-folder'] [visibleif]:not([visibleif~='upload-folder']),
+body[type='saveas-file'] [visibleif]:not([visibleif~='saveas-file']),
+body[type='open-file'] [visibleif]:not([visibleif~='open-file']),
+body[type='open-multi-file'] [visibleif]:not([visibleif~='open-multi-file']),
+body[type='full-page'] [visibleif]:not([visibleif~='full-page']) {
+  display: none !important;
+}
+
 html {
   height: 100%;
 }
@@ -162,7 +179,7 @@ body {
   min-width: 100px;
   overflow: hidden;
   position: relative;
-  width: 200px;
+  width: 150px;
 }
 
 .dialog-sidebar-header {
@@ -371,13 +388,6 @@ div.splitter {
   opacity: 1;
 }
 
-#directory-tree .tree-row > div.root-eject[hidden] {
-  /* [hidden] has alredy set in dialog.css, but it is overridden by the
-   * selector '.tree-item > .tree-row > * 'in tree.js, hence we need to
-   * override it again. */
-  display: none;
-}
-
 #directory-tree .tree-row > div.root-eject:hover {
   opacity: 1;
 }
@@ -419,25 +429,20 @@ div.splitter {
 
 .dialog-header #gear-button {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/topbar_button_settings.png') 1x,
-    url('../images/files/ui/new-ui/2x/topbar_button_settings.png') 2x);
+    url('../images/files/ui/topbar_button_settings.png') 1x,
+    url('../images/files/ui/2x/topbar_button_settings.png') 2x);
 }
 
 .dialog-header #maximize-button {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/topbar_button_maximize.png') 1x,
-    url('../images/files/ui/new-ui/2x/topbar_button_maximize.png') 2x);
+    url('../images/files/ui/topbar_button_maximize.png') 1x,
+    url('../images/files/ui/2x/topbar_button_maximize.png') 2x);
 }
 
 .dialog-header #close-button {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/topbar_button_close.png') 1x,
-    url('../images/files/ui/new-ui/2x/topbar_button_close.png') 2x);
-}
-
-body:not([type='full-page']) .dialog-header #close-button,
-body:not([type='full-page']) .dialog-header #maximize-button {
-  display: none;
+    url('../images/files/ui/topbar_button_close.png') 1x,
+    url('../images/files/ui/2x/topbar_button_close.png') 2x);
 }
 
 /* Container for the detail and thumbnail list views. */
@@ -471,21 +476,23 @@ body:not([type='full-page']) .dialog-header #maximize-button {
   -webkit-box-orient: horizontal;
   border-top: 1px solid rgb(225, 225, 225);
   display: -webkit-box;
+  outline: none;
   padding: 10px;
 }
 
-.dialog-footer:not([progress]) .progress-bar,
-.dialog-footer:not([progress]) .preparing-label {
+.progressable:not([progress]) .progress-bar,
+.progressable:not([progress]) .preparing-label {
   display: none;
 }
 
-.dialog-footer[progress] .ok,
-.dialog-footer[progress] #filename-input-box,
-.dialog-footer[progress] #file-type {
+.progressable[progress] .ok,
+.progressable[progress] #filename-input-box,
+.progressable[progress] #preview-lines,
+.progressable[progress] .file-type {
   display: none;
 }
 
-.dialog-footer .progress-bar {
+.progressable .progress-bar {
   -webkit-box-flex: 1;
   -webkit-margin-end: 20px;
   -webkit-margin-start: 20px;
@@ -563,10 +570,6 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
   white-space: nowrap;
 }
 
-.breadcrumb-path:hover {
-  color: #666;
-}
-
 /* The final breadcrumb, representing the current directory. */
 #search-breadcrumbs .breadcrumb-path.breadcrumb-last {
   color: #141414;
@@ -622,10 +625,11 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
 
 #search-box,
 #filename-input-box input {
-  border: 1px solid #d9d9d9;
+  border: 1px solid #c8c8c8;
   border-radius: 1px;
-  border-top: 1px solid #c0c0c0;
   box-sizing: border-box;
+  height: 31px;  /* border-box */
+  margin-right: 30px;
 }
 
 #search-box {
@@ -657,10 +661,6 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
   pointer-events: auto;
 }
 
-#search-box[hidden] {
-  display: none;  /* Required, since overriden by #search-box. */
-}
-
 #search-box::-webkit-search-cancel-button {
   -webkit-appearance: none;
 }
@@ -675,8 +675,8 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
   -webkit-margin-start: 10px;
   -webkit-order: -1;
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/search_icon_inactive.png') 1x,
-    url('../images/files/ui/new-ui/2x/search_icon_inactive.png') 2x);
+    url('../images/files/ui/search_icon_inactive.png') 1x,
+    url('../images/files/ui/2x/search_icon_inactive.png') 2x);
   background-position: center;
   background-repeat: no-repeat;
   height: 32px;
@@ -688,16 +688,16 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
 #search-box:focus + #search-icon,
 .has-text #search-icon {
   background: -webkit-image-set(
-    url('../images/files/ui/new-ui/search_icon_active.png') 1x,
-    url('../images/files/ui/new-ui/2x/search_icon_active.png') 2x);
+    url('../images/files/ui/search_icon_active.png') 1x,
+    url('../images/files/ui/2x/search_icon_active.png') 2x);
 }
 
 #search-clear-button {
   -webkit-margin-end: 30px;
   -webkit-margin-start: 10px;
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/search_clear.png') 1x,
-    url('../images/files/ui/new-ui/2x/search_clear.png') 2x);
+    url('../images/files/ui/search_clear.png') 1x,
+    url('../images/files/ui/2x/search_clear.png') 2x);
   background-position: center;
   background-repeat: no-repeat;
   display: none;
@@ -715,14 +715,14 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
 
 #search-clear-button:hover {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/search_clear_hover.png') 1x,
-    url('../images/files/ui/new-ui/2x/search_clear_hover.png') 2x);
+    url('../images/files/ui/search_clear_hover.png') 1x,
+    url('../images/files/ui/2x/search_clear_hover.png') 2x);
 }
 
 #search-clear-button:active {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/search_clear_pressed.png') 1x,
-    url('../images/files/ui/new-ui/2x/search_clear_pressed.png') 2x);
+    url('../images/files/ui/search_clear_pressed.png') 1x,
+    url('../images/files/ui/2x/search_clear_pressed.png') 2x);
 }
 
 .filelist-panel {
@@ -772,7 +772,8 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
   width: 22px;
 }
 
-#spinner-container {
+#spinner-container,
+.spinner-container {
   -webkit-box-align: center;
   -webkit-box-pack: center;
   bottom: 0;
@@ -792,6 +793,8 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
   min-width: 22px;
   opacity: 0.6;
   padding-left: 26px;
+  position: relative;
+  z-index: 10;
 }
 
 .downloads-warning {
@@ -813,6 +816,7 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
 }
 
 .downloads-warning[hidden] {
+  display: -webkit-box !important;  /* Overrides [hidden] for animation. */
   height: 0;
 }
 
@@ -841,9 +845,6 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
 
 .volume-warning[hidden] {
   border-top-width: 0;
-  /* [hidden] has already set in dialog.css, but it is overridden by the
-   * selector ".volume-warning", hence we need to override it again. */
-  display: none;
   height: 0;
 }
 
@@ -878,31 +879,13 @@ body[type='full-page'] .detail-name .detail-icon {
   cursor: pointer;
 }
 
-.breadcrumb-path:not(.breadcrumb-last):hover,
-.breadcrumb-path.accepts {
-  color: rgb(17, 85, 204);
-  text-decoration: underline;
-}
-
-.breadcrumb-path.accepts {
-  -webkit-animation: acceptsBlinkText 200ms linear 1s 3;
-}
-
-@-webkit-keyframes acceptsBlinkText {
-  0% {
-    color: white;
-  }
-  50% {
-  }
-}
-
 .img-container > img {
   -webkit-user-drag: none;
   position: absolute;
 }
 
 .img-container > img:not(.cached):not(.drag-thumbnail) {
-  -webkit-animation: fadeIn 500ms ease-in;
+  -webkit-animation: fadeIn 250ms linear;
 }
 
 .thumbnail-bottom {
@@ -1118,6 +1101,27 @@ input.rename {
   opacity: 0;
 }
 
+.preview-panel > .left,
+.dialog-footer > .left {
+  -webkit-box-align: center;
+  -webkit-box-flex: 1;
+  -webkit-box-orient: horizontal;
+  display: -webkit-box;
+}
+
+.preview-panel > .right,
+.dialog-footer > .right {
+  -webkit-box-pack: end;
+}
+
+.preview-panel .preparing-label {
+  -webkit-margin-start: 30px;
+}
+
+.preview-panel .progress-bar {
+  -webkit-box-flex: 1;
+}
+
 .preview-thumbnails {
   -webkit-box-orient: horizontal;
   display: -webkit-box;
@@ -1189,8 +1193,8 @@ input.rename {
 /* Table splitter element */
 .table-header-splitter {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/vertical_separator.png') 1x,
-    url('../images/files/ui/new-ui/2x/vertical_separator.png') 2x);
+    url('../images/files/ui/vertical_separator.png') 1x,
+    url('../images/files/ui/2x/vertical_separator.png') 2x);
   background-position: center;
   background-repeat: repeat-y;
   height: 20px;
@@ -1293,8 +1297,8 @@ input.rename {
 #list-container li.table-row .file-checkbox {
   -webkit-appearance: none;
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/select_checkbox.png') 1x,
-    url('../images/files/ui/new-ui/2x/select_checkbox.png') 2x);
+    url('../images/files/ui/select_checkbox.png') 1x,
+    url('../images/files/ui/2x/select_checkbox.png') 2x);
   background-position: center;
   background-repeat: no-repeat;
   border-style: none;
@@ -1314,8 +1318,8 @@ input.rename {
 #list-container .table-header #select-all-checkbox:checked,
 #list-container li.table-row .file-checkbox:checked {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/select_checkbox_checked.png') 1x,
-    url('../images/files/ui/new-ui/2x/select_checkbox_checked.png') 2x);
+    url('../images/files/ui/select_checkbox_checked.png') 1x,
+    url('../images/files/ui/2x/select_checkbox_checked.png') 2x);
 }
 
 #list-container .table-header #select-all-checkbox:checked,
@@ -1361,10 +1365,11 @@ input.rename {
 
 #delete-button {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/onbutton_trash.png') 1x,
-    url('../images/files/ui/new-ui/2x/onbutton_trash.png') 2x);
+    url('../images/files/ui/onbutton_trash.png') 1x,
+    url('../images/files/ui/2x/onbutton_trash.png') 2x);
   background-position: center;
   background-repeat: no-repeat;
+  display: -webkit-box;
   min-width: 21px;  /* overrride */
   padding: 0;  /* overrride */
   width: 21px;
@@ -1379,8 +1384,8 @@ input.rename {
   padding-left: 32px;
 }
 
-menu[showShortcuts] > menuitem[selected]:not([disabled])::after {
-  color: white;
+#share-button {
+  min-width: 0;  /* overrride */
 }
 
 #preview-lines {
@@ -1452,13 +1457,6 @@ body:not([type='saveas-file']) #filename-input-box {
   display: none;
 }
 
-/* A horizontal spring. */
-.horizontal-spacer {
-  -webkit-box-flex: 1;
-  -webkit-box-orient: horizontal;
-  display: -webkit-box;
-}
-
 /* A vertical spring. */
 .vertical-spacer {
   -webkit-box-flex: 1;
@@ -1469,6 +1467,7 @@ body:not([type='saveas-file']) #filename-input-box {
 /* Dimmed items */
 
 body[type='folder'] .file,
+body[type='upload-folder'] .file,
 body[drive] .dialog-container[connection='offline'] .dim-offline {
   opacity: 0.4;
 }
@@ -1551,13 +1550,6 @@ menu.file-context-menu {
 menu.chrome-menu hr {
   color: transparent;
   font-size: 0;
-}
-
-input.common.pin[type='checkbox']:checked::after {
-  background-image: -webkit-image-set(
-    url('../images/files/ui/pin.png') 1x,
-    url('../images/files/ui/2x/pin.png') 2x);
-  background-position: 4px 0;
 }
 
 div.offline {
@@ -1649,20 +1641,6 @@ body[drive='error'] #unmounted-panel > .error,
   color: rgb(17, 85, 204);
   cursor: pointer;
   text-decoration: none;
-}
-
-body[type='folder'] [invisibleif~='folder'],
-body[type='saveas-file'] [invisibleif~='saveas-file'],
-body[type='open-file'] [invisibleif~='open-file'],
-body[type='open-multi-file'] [invisibleif~='open-multi-file'],
-body[type='full-page'] [invisibleif~='full-page'],
-
-body[type='folder'] [visibleif]:not([visibleif~='folder']),
-body[type='saveas-file'] [visibleif]:not([visibleif~='saveas-file']),
-body[type='open-file'] [visibleif]:not([visibleif~='open-file']),
-body[type='open-multi-file'] [visibleif]:not([visibleif~='open-multi-file']),
-body[type='full-page'] [visibleif]:not([visibleif~='full-page']) {
-  display: none;
 }
 
 .buttonbar > * {
@@ -1831,8 +1809,8 @@ list.autocomplete-suggestions > li > div.detail-text em {
 
 list.autocomplete-suggestions > li > div[search-icon] {
   background: -webkit-image-set(
-    url('../images/files/ui/new-ui/search_icon_active.png') 1x,
-    url('../images/files/ui/new-ui/2x/search_icon_active.png') 2x);
+    url('../images/files/ui/search_icon_active.png') 1x,
+    url('../images/files/ui/2x/search_icon_active.png') 2x);
   background-position: center;
   background-repeat: no-repeat;
 }
@@ -1865,28 +1843,28 @@ list.autocomplete-suggestions > [lead] > div.detail-text em {
 
 menuitem#detail-view {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/button_list_view.png') 1x,
-    url('../images/files/ui/new-ui/2x/button_list_view.png') 2x);
+    url('../images/files/ui/button_list_view.png') 1x,
+    url('../images/files/ui/2x/button_list_view.png') 2x);
 }
 
 menuitem#detail-view[selected]:not([disabled]),
 menuitem#detail-view[lead]:not([disabled]) {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/button_list_view_white.png') 1x,
-    url('../images/files/ui/new-ui/2x/button_list_view_white.png') 2x);
+    url('../images/files/ui/button_list_view_white.png') 1x,
+    url('../images/files/ui/2x/button_list_view_white.png') 2x);
 }
 
 menuitem#thumbnail-view {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/button_mosaic_view.png') 1x,
-    url('../images/files/ui/new-ui/2x/button_mosaic_view.png') 2x);
+    url('../images/files/ui/button_mosaic_view.png') 1x,
+    url('../images/files/ui/2x/button_mosaic_view.png') 2x);
 }
 
 menuitem#thumbnail-view[selected]:not([disabled]),
 menuitem#thumbnail-view[lead]:not([disabled]) {
   background-image: -webkit-image-set(
-    url('../images/files/ui/new-ui/button_mosaic_view_white.png') 1x,
-    url('../images/files/ui/new-ui/2x/button_mosaic_view_white.png') 2x);
+    url('../images/files/ui/button_mosaic_view_white.png') 1x,
+    url('../images/files/ui/2x/button_mosaic_view_white.png') 2x);
 }
 
 #iframe-drag-area {
@@ -1924,4 +1902,31 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
 
 .error-dialog-frame .cr-dialog-text {
   text-align: center;
+}
+
+.cr-dialog-frame.share-dialog-frame {
+  background-color: white;
+  width: auto;
+}
+
+.share-dialog-webview-wrapper {
+  height: 100px;
+  margin-top: 10px;
+  min-width: 300px;
+  overflow: hidden;
+  transition: height 200ms ease;
+}
+
+.share-dialog-webview {
+  height: 100%;
+  width: 100%;
+}
+
+.share-dialog-webview-wrapper:not(.loaded) .share-dialog-webview {
+  visibility: hidden;
+}
+
+.share-dialog-frame .cr-dialog-text,
+.share-dialog-frame .cr-dialog-buttons {
+  display: none;
 }

@@ -11,6 +11,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Picture;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.net.http.SslCertificate;
 import android.os.AsyncTask;
 import android.os.Build;
@@ -26,10 +27,12 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.webkit.GeolocationPermissions;
 import android.webkit.ValueCallback;
+import android.widget.OverScroller;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -54,6 +57,9 @@ import java.io.File;
 import java.lang.annotation.Annotation;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.concurrent.Callable;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Exposes the native AwContents class, and together these classes wrap the ContentViewCore
@@ -65,7 +71,7 @@ import java.net.URL;
  */
 @JNINamespace("android_webview")
 public class AwContents {
-    private static final String TAG = AwContents.class.getSimpleName();
+    private static final String TAG = "AwContents";
 
     private static final String WEB_ARCHIVE_EXTENSION = ".mht";
 
@@ -100,9 +106,28 @@ public class AwContents {
         void onScrollChanged(int lPix, int tPix, int oldlPix, int oldtPix);
 
         /**
+         * @see View#overScrollBy(int, int, int, int, int, int, int, int, boolean);
+         */
+        void overScrollBy(int deltaX, int deltaY,
+                int scrollX, int scrollY,
+                int scrollRangeX, int scrollRangeY,
+                int maxOverScrollX, int maxOverScrollY,
+                boolean isTouchEvent);
+
+        /**
+         * @see View#scrollTo(int, int)
+         */
+        void super_scrollTo(int scrollX, int scrollY);
+
+        /**
          * @see View#setMeasuredDimension(int, int)
          */
         void setMeasuredDimension(int measuredWidth, int measuredHeight);
+
+        /**
+         * @see View#getScrollBarStyle()
+         */
+        int super_getScrollBarStyle();
 
         /**
          * Requests a callback on the native DrawGL method (see getAwDrawGLFunction)
@@ -127,30 +152,37 @@ public class AwContents {
     private final InterceptNavigationDelegateImpl mInterceptNavigationDelegate;
     private final InternalAccessDelegate mInternalAccessAdapter;
     private final AwLayoutSizer mLayoutSizer;
-    private final AwScrollOffsetManager mScrollOffsetManager;
     private final AwZoomControls mZoomControls;
+    private final AwScrollOffsetManager mScrollOffsetManager;
+    private OverScrollGlow mOverScrollGlow;
     // This can be accessed on any thread after construction. See AwContentsIoThreadClient.
     private final AwSettings mSettings;
 
     private boolean mIsPaused;
-    private boolean mIsVisible;  // Equivalent to windowVisible && viewVisible && !mIsPaused.
+    private boolean mIsViewVisible;
+    private boolean mIsWindowVisible;
+    private boolean mIsAttachedToWindow;
     private Bitmap mFavicon;
     private boolean mHasRequestedVisitedHistoryFromClient;
     // TODO(boliu): This should be in a global context, not per webview.
     private final double mDIPScale;
+
+    // The base background color, i.e. not accounting for any CSS body from the current page.
+    private int mBaseBackgroundColor = Color.WHITE;
 
     // Must call nativeUpdateLastHitTestData first to update this before use.
     private final HitTestData mPossiblyStaleHitTestData = new HitTestData();
 
     private DefaultVideoPosterRequestHandler mDefaultVideoPosterRequestHandler;
 
-    private boolean mNewPictureInvalidationOnly;
-
-    private int mLastGlobalVisibleWidth;
-    private int mLastGlobalVisibleHeight;
+    // Bound method for suppling Picture instances to the AwContentsClient. Will be null if the
+    // picture listener API has not yet been enabled, or if it is using invalidation-only mode.
+    private Callable<Picture> mPictureListenerContentProvider;
 
     private boolean mContainerViewFocused;
     private boolean mWindowFocused;
+
+    private AwAutofillManagerDelegate mAwAutofillManagerDelegate;
 
     private static final class DestroyRunnable implements Runnable {
         private int mNativeAwContents;
@@ -159,11 +191,20 @@ public class AwContents {
         }
         @Override
         public void run() {
+            // This is a no-op if not currently attached.
+            nativeOnDetachedFromWindow(mNativeAwContents);
             nativeDestroy(mNativeAwContents);
         }
     }
 
+    // Reference to the active mNativeAwContents pointer while it is active use
+    // (ie before it is destroyed).
     private CleanupReference mCleanupReference;
+
+    // A list of references to native pointers where the Java counterpart has been
+    // destroyed, but are held here because they are waiting for onDetachFromWindow
+    // to release GL resources. This is cleared inside onDetachFromWindow.
+    private List<CleanupReference> mPendingDetachCleanupReferences;
 
     //--------------------------------------------------------------------------------------------
     private class IoThreadClientImpl implements AwContentsIoThreadClient {
@@ -242,8 +283,24 @@ public class AwContents {
         @Override
         public boolean shouldIgnoreNavigation(NavigationParams navigationParams) {
             final String url = navigationParams.url;
+            final int transitionType = navigationParams.pageTransitionType;
+            final boolean isLoadUrl =
+                    (transitionType & PageTransitionTypes.PAGE_TRANSITION_FROM_API) != 0;
+            final boolean isBackForward =
+                    (transitionType & PageTransitionTypes.PAGE_TRANSITION_FORWARD_BACK) != 0;
+            final boolean isReload =
+                    (transitionType & PageTransitionTypes.PAGE_TRANSITION_CORE_MASK) ==
+                    PageTransitionTypes.PAGE_TRANSITION_RELOAD;
+            final boolean isRedirect = navigationParams.isRedirect;
+
             boolean ignoreNavigation = false;
-            if (mLastLoadUrlAddress != null && mLastLoadUrlAddress.equals(url)) {
+
+            // Any navigation from loadUrl, goBack/Forward, or reload, are considered application
+            // initiated and hence will not yield a shouldOverrideUrlLoading() callback.
+            // TODO(joth): Using PageTransitionTypes should be sufficient to determine all app
+            // initiated navigations, and so mLastLoadUrlAddress should be removed.
+            if ((isLoadUrl && !isRedirect) || isBackForward || isReload ||
+                    mLastLoadUrlAddress != null && mLastLoadUrlAddress.equals(url)) {
                 // Support the case where the user clicks on a link that takes them back to the
                 // same page.
                 mLastLoadUrlAddress = null;
@@ -290,15 +347,38 @@ public class AwContents {
     }
 
     //--------------------------------------------------------------------------------------------
+    // NOTE: This content size change notification comes from the compositor and reflects the size
+    // of the content on screen (but not neccessarily in the renderer main thread).
+    private class AwContentUpdateFrameInfoListener
+                implements ContentViewCore.UpdateFrameInfoListener {
+        @Override
+        public void onFrameInfoUpdated(float widthCss, float heightCss, float pageScaleFactor) {
+            if (mNativeAwContents == 0) return;
+            int widthPix = (int) Math.floor(widthCss * mDIPScale * pageScaleFactor);
+            int heightPix = (int) Math.floor(heightCss * mDIPScale * pageScaleFactor);
+            mScrollOffsetManager.setContentSize(widthPix, heightPix);
+
+            nativeSetDisplayedPageScaleFactor(mNativeAwContents, pageScaleFactor);
+        }
+    }
+
+    //--------------------------------------------------------------------------------------------
     private class AwScrollOffsetManagerDelegate implements AwScrollOffsetManager.Delegate {
         @Override
-        public boolean scrollContainerViewTo(int x, int y) {
-            mContainerView.scrollTo(x, y);
-            return (x == mContainerView.getScrollX() && y == mContainerView.getScrollY());
+        public void overScrollContainerViewBy(int deltaX, int deltaY, int scrollX, int scrollY,
+                int scrollRangeX, int scrollRangeY, boolean isTouchEvent) {
+            mInternalAccessAdapter.overScrollBy(deltaX, deltaY, scrollX, scrollY,
+                    scrollRangeX, scrollRangeY, 0, 0, isTouchEvent);
+        }
+
+        @Override
+        public void scrollContainerViewTo(int x, int y) {
+            mInternalAccessAdapter.super_scrollTo(x, y);
         }
 
         @Override
         public void scrollNativeTo(int x, int y) {
+            if (mNativeAwContents == 0) return;
             nativeScrollTo(mNativeAwContents, x, y);
         }
 
@@ -311,10 +391,15 @@ public class AwContents {
         public int getContainerViewScrollY() {
             return mContainerView.getScrollY();
         }
+
+        @Override
+        public void invalidate() {
+            mContainerView.invalidate();
+        }
     }
 
     //--------------------------------------------------------------------------------------------
-    private class AwPinchGestureStateListener implements ContentViewCore.PinchGestureStateListener {
+    private class AwGestureStateListener implements ContentViewCore.GestureStateListener {
         @Override
         public void onPinchGestureStart() {
             // While it's possible to re-layout the view during a pinch gesture, the effect is very
@@ -326,24 +411,27 @@ public class AwContents {
             mLayoutSizer.freezeLayoutRequests();
         }
 
+        @Override
         public void onPinchGestureEnd() {
             mLayoutSizer.unfreezeLayoutRequests();
         }
-    }
 
-    //--------------------------------------------------------------------------------------------
-    private class ScrollChangeListener implements ViewTreeObserver.OnScrollChangedListener {
         @Override
-        public void onScrollChanged() {
-            // We do this to cover the case that when the view hierarchy is scrolled,
-            // more of the containing view  becomes visible (i.e. a containing view
-            // with a width/height of "wrap_content" and dimensions greater than
-            // that of the screen).
-            AwContents.this.updatePhysicalBackingSizeIfNeeded();
-         }
-    };
+        public void onFlingStartGesture(int velocityX, int velocityY) {
+            mScrollOffsetManager.onFlingStartGesture(velocityX, velocityY);
+        }
 
-    private ScrollChangeListener mScrollChangeListener;
+
+        @Override
+        public void onFlingCancelGesture() {
+            mScrollOffsetManager.onFlingCancelGesture();
+        }
+
+        @Override
+        public void onUnhandledFlingStartEvent() {
+            mScrollOffsetManager.onUnhandledFlingStartEvent();
+        }
+    }
 
     /**
      * @param browserContext the browsing context to associate this view contents with.
@@ -361,9 +449,16 @@ public class AwContents {
                 isAccessFromFileURLsGrantedByDefault, new AwLayoutSizer());
     }
 
+    public AwContents(AwBrowserContext browserContext, ViewGroup containerView,
+            InternalAccessDelegate internalAccessAdapter, AwContentsClient contentsClient,
+            boolean isAccessFromFileURLsGrantedByDefault, AwLayoutSizer layoutSizer) {
+        this(browserContext, containerView, internalAccessAdapter, contentsClient,
+                isAccessFromFileURLsGrantedByDefault, layoutSizer, false);
+    }
+
     private static ContentViewCore createAndInitializeContentViewCore(ViewGroup containerView,
             InternalAccessDelegate internalDispatcher, int nativeWebContents,
-            ContentViewCore.PinchGestureStateListener pinchGestureStateListener,
+            ContentViewCore.GestureStateListener pinchGestureStateListener,
             ContentViewClient contentViewClient,
             ContentViewCore.ZoomControlsDelegate zoomControlsDelegate) {
       ContentViewCore contentViewCore = new ContentViewCore(containerView.getContext());
@@ -371,7 +466,7 @@ public class AwContents {
       // compositor, not because input events are delivered immediately.
       contentViewCore.initialize(containerView, internalDispatcher, nativeWebContents, null,
                 ContentViewCore.INPUT_EVENTS_DELIVERED_IMMEDIATELY);
-      contentViewCore.setPinchGestureStateListener(pinchGestureStateListener);
+      contentViewCore.setGestureStateListener(pinchGestureStateListener);
       contentViewCore.setContentViewClient(contentViewClient);
       contentViewCore.setZoomControlsDelegate(zoomControlsDelegate);
       return contentViewCore;
@@ -385,7 +480,8 @@ public class AwContents {
      */
     public AwContents(AwBrowserContext browserContext, ViewGroup containerView,
             InternalAccessDelegate internalAccessAdapter, AwContentsClient contentsClient,
-            boolean isAccessFromFileURLsGrantedByDefault, AwLayoutSizer layoutSizer) {
+            boolean isAccessFromFileURLsGrantedByDefault, AwLayoutSizer layoutSizer,
+            boolean supportsLegacyQuirks) {
         mBrowserContext = browserContext;
         mContainerView = containerView;
         mInternalAccessAdapter = internalAccessAdapter;
@@ -395,7 +491,7 @@ public class AwContents {
         mLayoutSizer.setDelegate(new AwLayoutSizerDelegate());
         mLayoutSizer.setDIPScale(mDIPScale);
         mWebContentsDelegate = new AwWebContentsDelegateAdapter(contentsClient,
-                mLayoutSizer.getPreferredSizeChangedListener());
+                mLayoutSizer.getPreferredSizeChangedListener(), mContainerView);
         mContentsClientBridge = new AwContentsClientBridge(contentsClient);
         mZoomControls = new AwZoomControls(this);
         mIoThreadClient = new IoThreadClientImpl();
@@ -408,17 +504,23 @@ public class AwContents {
         AwSettings.ZoomSupportChangeListener zoomListener =
                 new AwSettings.ZoomSupportChangeListener() {
                     @Override
-                    public void onMultiTouchZoomSupportChanged(boolean supportsMultiTouchZoom) {
-                        mContentViewCore.updateMultiTouchZoomSupport(supportsMultiTouchZoom);
+                    public void onGestureZoomSupportChanged(boolean supportsGestureZoom) {
+                        mContentViewCore.updateMultiTouchZoomSupport(supportsGestureZoom);
+                        mContentViewCore.updateDoubleTapDragSupport(supportsGestureZoom);
                     }
+
                 };
-        mSettings = new AwSettings(hasInternetPermission, zoomListener,
-                isAccessFromFileURLsGrantedByDefault, mDIPScale);
+        mSettings = new AwSettings(mContainerView.getContext(), hasInternetPermission, zoomListener,
+                isAccessFromFileURLsGrantedByDefault, mDIPScale, supportsLegacyQuirks);
         mDefaultVideoPosterRequestHandler = new DefaultVideoPosterRequestHandler(mContentsClient);
         mSettings.setDefaultVideoPosterURL(
                 mDefaultVideoPosterRequestHandler.getDefaultVideoPosterURL());
         mContentsClient.setDIPScale(mDIPScale);
-        mScrollOffsetManager = new AwScrollOffsetManager(new AwScrollOffsetManagerDelegate());
+        mScrollOffsetManager = new AwScrollOffsetManager(new AwScrollOffsetManagerDelegate(),
+                new OverScroller(mContainerView.getContext()));
+
+        setOverScrollMode(mContainerView.getOverScrollMode());
+        setScrollBarStyle(mInternalAccessAdapter.super_getScrollBarStyle());
 
         setNewAwContents(nativeInit(browserContext));
     }
@@ -450,13 +552,18 @@ public class AwContents {
         int nativeWebContents = nativeGetWebContents(mNativeAwContents);
         mContentViewCore = createAndInitializeContentViewCore(
                 mContainerView, mInternalAccessAdapter, nativeWebContents,
-                new AwPinchGestureStateListener(), mContentsClient.getContentViewClient(),
+                new AwGestureStateListener(), mContentsClient.getContentViewClient(),
                 mZoomControls);
         nativeSetJavaPeers(mNativeAwContents, this, mWebContentsDelegate, mContentsClientBridge,
                 mIoThreadClient, mInterceptNavigationDelegate);
         mContentsClient.installWebContentsObserver(mContentViewCore);
+        mContentViewCore.setUpdateFrameInfoListener(new AwContentUpdateFrameInfoListener());
         mSettings.setWebContents(nativeWebContents);
         nativeSetDipScale(mNativeAwContents, (float) mDIPScale);
+        updateGlobalVisibleRect();
+
+        // The only call to onShow. onHide should never be called.
+        mContentViewCore.onShow();
    }
 
     /**
@@ -481,26 +588,67 @@ public class AwContents {
     // Recap: supplyContentsForPopup() is called on the parent window's content, this method is
     // called on the popup window's content.
     private void receivePopupContents(int popupNativeAwContents) {
+        // Save existing view state.
+        final boolean wasAttached = mIsAttachedToWindow;
+        final boolean wasViewVisible = mIsViewVisible;
+        final boolean wasWindowVisible = mIsWindowVisible;
+        final boolean wasPaused = mIsPaused;
+        final boolean wasFocused = mContainerViewFocused;
+        final boolean wasWindowFocused = mWindowFocused;
+
+        // Properly clean up existing mContentViewCore and mNativeAwContents.
+        if (wasFocused) onFocusChanged(false, 0, null);
+        if (wasWindowFocused) onWindowFocusChanged(false);
+        if (wasViewVisible) setViewVisibilityInternal(false);
+        if (wasWindowVisible) setWindowVisibilityInternal(false);
+        if (!wasPaused) onPause();
+        // Not calling onDetachedFromWindow here because native code requires GL context to release
+        // GL resources. This case is properly handled when destroy is called while still attached
+        // to window.
+
         setNewAwContents(popupNativeAwContents);
 
-        // Finally refresh view size and visibility, to poke new values into ContentViewCore.
-        mLastGlobalVisibleWidth = 0;
-        mLastGlobalVisibleHeight = 0;
+        // Finally refresh all view state for mContentViewCore and mNativeAwContents.
+        if (!wasPaused) onResume();
+        if (wasAttached) onAttachedToWindow();
         onSizeChanged(mContainerView.getWidth(), mContainerView.getHeight(), 0, 0);
-        updateVisibilityStateForced();
-        onWindowFocusChanged(mWindowFocused);
+        if (wasWindowVisible) setWindowVisibilityInternal(true);
+        if (wasViewVisible) setViewVisibilityInternal(true);
+        if (wasWindowFocused) onWindowFocusChanged(wasWindowFocused);
+        if (wasFocused) onFocusChanged(true, 0, null);
     }
 
+    /**
+     * Deletes the native counterpart of this object. Normally happens immediately,
+     * but maybe deferred until the appropriate time for GL resource cleanup. Either way
+     * this is transparent to the caller: after this function returns the object is
+     * effectively dead and methods are no-ops.
+     */
     public void destroy() {
-        mContentViewCore.destroy();
-        // We explicitly do not null out the mContentViewCore reference here
-        // because ContentViewCore already has code to deal with the case
-        // methods are called on it after it's been destroyed, and other
-        // code relies on AwContents.mContentViewCore to be non-null.
+        if (mCleanupReference != null) {
+            // We explicitly do not null out the mContentViewCore reference here
+            // because ContentViewCore already has code to deal with the case
+            // methods are called on it after it's been destroyed, and other
+            // code relies on AwContents.mContentViewCore to be non-null.
+            mContentViewCore.destroy();
+            mNativeAwContents = 0;
 
-        if (mCleanupReference != null) mCleanupReference.cleanupNow();
-        mNativeAwContents = 0;
-        mCleanupReference = null;
+            // We cannot destroy immediately if we are still attached to the window.
+            // Instead if we make sure to null out the native pointer so there is no more native
+            // calls, and delay the actual destroy until onDetachedFromWindow.
+            if (mIsAttachedToWindow) {
+                if (mPendingDetachCleanupReferences == null) {
+                    mPendingDetachCleanupReferences = new ArrayList<CleanupReference>();
+                }
+                mPendingDetachCleanupReferences.add(mCleanupReference);
+            } else {
+                mCleanupReference.cleanupNow();
+            }
+            mCleanupReference = null;
+        }
+
+        assert !mContentViewCore.isAlive();
+        assert mNativeAwContents == 0;
     }
 
     @VisibleForTesting
@@ -535,28 +683,29 @@ public class AwContents {
     }
 
     public int getAwDrawGLViewContext() {
+        // Only called during early construction, so client should not have had a chance to
+        // call destroy yet.
+        assert mNativeAwContents != 0;
+
         // Using the native pointer as the returned viewContext. This is matched by the
         // reinterpret_cast back to BrowserViewRenderer pointer in the native DrawGLFunction.
         return nativeGetAwDrawGLViewContext(mNativeAwContents);
     }
 
-    // Only valid within updatePhysicalBackingSizeIfNeeded().
-    private final Rect mGlobalVisibleBoundsTemporary = new Rect();
+    // This is only to avoid heap allocations inside updateGLobalVisibleRect. It should treated
+    // as a local variable in the function and not used anywhere else.
+    private static final Rect sLocalGlobalVisibleRect = new Rect();
 
-    private void updatePhysicalBackingSizeIfNeeded() {
-        // We musn't let the physical backing size get too big, otherwise we
-        // will try to allocate a SurfaceTexture beyond what the GL driver can
-        // cope with. In most cases, limiting the SurfaceTexture size to that
-        // of the visible bounds of the WebView will be good enough i.e. the maximum
-        // SurfaceTexture dimensions will match the screen dimensions).
-        mContainerView.getGlobalVisibleRect(mGlobalVisibleBoundsTemporary);
-        int width = mGlobalVisibleBoundsTemporary.width();
-        int height = mGlobalVisibleBoundsTemporary.height();
-        if (width != mLastGlobalVisibleWidth || height != mLastGlobalVisibleHeight) {
-            mLastGlobalVisibleWidth = width;
-            mLastGlobalVisibleHeight = height;
-            mContentViewCore.onPhysicalBackingSizeChanged(width, height);
+    @CalledByNative
+    private void updateGlobalVisibleRect() {
+        if (mNativeAwContents == 0) return;
+        if (!mContainerView.getGlobalVisibleRect(sLocalGlobalVisibleRect)) {
+            sLocalGlobalVisibleRect.setEmpty();
         }
+
+        nativeSetGlobalVisibleRect(mNativeAwContents, sLocalGlobalVisibleRect.left,
+                sLocalGlobalVisibleRect.top, sLocalGlobalVisibleRect.right,
+                sLocalGlobalVisibleRect.bottom);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -567,16 +716,26 @@ public class AwContents {
     private final Rect mClipBoundsTemporary = new Rect();
 
     public void onDraw(Canvas canvas) {
-        if (mNativeAwContents == 0) return;
+        if (mNativeAwContents == 0) {
+            canvas.drawColor(getEffectiveBackgroundColor());
+            return;
+        }
+
+        mScrollOffsetManager.syncScrollOffsetFromOnDraw();
 
         canvas.getClipBounds(mClipBoundsTemporary);
         if (!nativeOnDraw(mNativeAwContents, canvas, canvas.isHardwareAccelerated(),
                     mContainerView.getScrollX(), mContainerView.getScrollY(),
                     mClipBoundsTemporary.left, mClipBoundsTemporary.top,
-                    mClipBoundsTemporary.right, mClipBoundsTemporary.bottom )) {
+                    mClipBoundsTemporary.right, mClipBoundsTemporary.bottom)) {
             Log.w(TAG, "nativeOnDraw failed; clearing to background color.");
-            int c = mContentViewCore.getBackgroundColor();
-            canvas.drawRGB(Color.red(c), Color.green(c), Color.blue(c));
+            canvas.drawColor(getEffectiveBackgroundColor());
+        }
+
+        if (mOverScrollGlow != null && mOverScrollGlow.drawEdgeGlows(canvas,
+                    mScrollOffsetManager.computeMaximumHorizontalScrollOffset(),
+                    mScrollOffsetManager.computeMaximumVerticalScrollOffset())) {
+            mContainerView.invalidate();
         }
     }
 
@@ -592,24 +751,30 @@ public class AwContents {
         return (int) Math.ceil(mContentViewCore.getContentWidthCss());
     }
 
-    /**
-     * Called by the embedder when the scroll offset of the containing view has changed.
-     */
-    public void onContainerViewScrollChanged(int l, int t, int oldl, int oldt) {
-        mScrollOffsetManager.onContainerViewScrollChanged(l, t);
-    }
-
     public Picture capturePicture() {
-        return nativeCapturePicture(mNativeAwContents);
+        if (mNativeAwContents == 0) return null;
+        return new AwPicture(nativeCapturePicture(mNativeAwContents,
+                    mScrollOffsetManager.computeHorizontalScrollRange(),
+                    mScrollOffsetManager.computeVerticalScrollRange()));
     }
 
     /**
-     * Enable the OnNewPicture callback.
+     * Enable the onNewPicture callback.
      * @param enabled Flag to enable the callback.
      * @param invalidationOnly Flag to call back only on invalidation without providing a picture.
      */
     public void enableOnNewPicture(boolean enabled, boolean invalidationOnly) {
-        mNewPictureInvalidationOnly = invalidationOnly;
+        if (mNativeAwContents == 0) return;
+        if (invalidationOnly) {
+            mPictureListenerContentProvider = null;
+        } else if (enabled && mPictureListenerContentProvider == null) {
+            mPictureListenerContentProvider = new Callable<Picture>() {
+                @Override
+                public Picture call() {
+                    return capturePicture();
+                }
+            };
+        }
         nativeEnableOnNewPicture(mNativeAwContents, enabled);
     }
 
@@ -678,6 +843,8 @@ public class AwContents {
             params.getTransitionType() == PageTransitionTypes.PAGE_TRANSITION_LINK) {
             params.setTransitionType(PageTransitionTypes.PAGE_TRANSITION_RELOAD);
         }
+        params.setTransitionType(
+                params.getTransitionType() | PageTransitionTypes.PAGE_TRANSITION_FROM_API);
 
         // For WebView, always use the user agent override, which is set
         // every time the user agent in AwSettings is modified.
@@ -716,13 +883,29 @@ public class AwContents {
     }
 
     public void requestFocus() {
+        if (mNativeAwContents == 0) return;
         if (!mContainerView.isInTouchMode() && mSettings.shouldFocusFirstNode()) {
             nativeFocusFirstNode(mNativeAwContents);
         }
     }
 
+    public void setBackgroundColor(int color) {
+        mBaseBackgroundColor = color;
+        if (mNativeAwContents != 0) nativeSetBackgroundColor(mNativeAwContents, color);
+    }
+
+    private int getEffectiveBackgroundColor() {
+        // Do not ask the ContentViewCore for the background color, as it will always
+        // report white prior to initial navigation or post destruction,  whereas we want
+        // to use the client supplied base value in those cases.
+        if (mNativeAwContents == 0 || !mContentsClient.isCachedRendererBackgroundColorValid()) {
+            return mBaseBackgroundColor;
+        }
+        return mContentsClient.getCachedRendererBackgroundColor();
+    }
+
     public boolean isMultiTouchZoomSupported() {
-        return mSettings.supportsMultiTouchZoom();
+        return mSettings.supportsGestureZoom();
     }
 
     public View getZoomControlsForTest() {
@@ -737,38 +920,140 @@ public class AwContents {
     }
 
     /**
-     * @see ContentViewCore#computeHorizontalScrollRange()
+     * @see View#setOverScrollMode(int)
+     */
+    public void setOverScrollMode(int mode) {
+        if (mode != View.OVER_SCROLL_NEVER) {
+            mOverScrollGlow = new OverScrollGlow(mContainerView);
+        } else {
+            mOverScrollGlow = null;
+        }
+    }
+
+    // TODO(mkosiba): In WebViewClassic these appear in some of the scroll extent calculation
+    // methods but toggling them has no visiual effect on the content (in other words the scrolling
+    // code behaves as if the scrollbar-related padding is in place but the onDraw code doesn't
+    // take that into consideration).
+    // http://crbug.com/269032
+    private boolean mOverlayHorizontalScrollbar = true;
+    private boolean mOverlayVerticalScrollbar = false;
+
+    /**
+     * @see View#setScrollBarStyle(int)
+     */
+    public void setScrollBarStyle(int style) {
+        if (style == View.SCROLLBARS_INSIDE_OVERLAY
+                || style == View.SCROLLBARS_OUTSIDE_OVERLAY) {
+            mOverlayHorizontalScrollbar = mOverlayVerticalScrollbar = true;
+        } else {
+            mOverlayHorizontalScrollbar = mOverlayVerticalScrollbar = false;
+        }
+    }
+
+    /**
+     * @see View#setHorizontalScrollbarOverlay(boolean)
+     */
+    public void setHorizontalScrollbarOverlay(boolean overlay) {
+        mOverlayHorizontalScrollbar = overlay;
+    }
+
+    /**
+     * @see View#setVerticalScrollbarOverlay(boolean)
+     */
+    public void setVerticalScrollbarOverlay(boolean overlay) {
+        mOverlayVerticalScrollbar = overlay;
+    }
+
+    /**
+     * @see View#overlayHorizontalScrollbar()
+     */
+    public boolean overlayHorizontalScrollbar() {
+        return mOverlayHorizontalScrollbar;
+    }
+
+    /**
+     * @see View#overlayVerticalScrollbar()
+     */
+    public boolean overlayVerticalScrollbar() {
+        return mOverlayVerticalScrollbar;
+    }
+
+    /**
+     * Called by the embedder when the scroll offset of the containing view has changed.
+     * @see View#onScrollChanged(int,int)
+     */
+    public void onContainerViewScrollChanged(int l, int t, int oldl, int oldt) {
+        mScrollOffsetManager.onContainerViewScrollChanged(l, t);
+    }
+
+    /**
+     * Called by the embedder when the containing view is to be scrolled or overscrolled.
+     * @see View#onOverScrolled(int,int,int,int)
+     */
+    public void onContainerViewOverScrolled(int scrollX, int scrollY, boolean clampedX,
+            boolean clampedY) {
+        int oldX = mContainerView.getScrollX();
+        int oldY = mContainerView.getScrollY();
+
+        mScrollOffsetManager.onContainerViewOverScrolled(scrollX, scrollY, clampedX, clampedY);
+
+        if (mOverScrollGlow != null) {
+            mOverScrollGlow.pullGlow(mContainerView.getScrollX(), mContainerView.getScrollY(),
+                    oldX, oldY,
+                    mScrollOffsetManager.computeMaximumHorizontalScrollOffset(),
+                    mScrollOffsetManager.computeMaximumVerticalScrollOffset());
+        }
+    }
+
+    /**
+     * @see WebView#requestChildRectangleOnScreen(View, Rect, boolean)
+     */
+    public boolean requestChildRectangleOnScreen(View child, Rect rect, boolean immediate) {
+        return mScrollOffsetManager.requestChildRectangleOnScreen(
+                child.getLeft() - child.getScrollX(), child.getTop() - child.getScrollY(),
+                rect, immediate);
+    }
+
+    /**
+     * @see View.computeScroll()
+     */
+    public void computeScroll() {
+        mScrollOffsetManager.computeScrollAndAbsorbGlow(mOverScrollGlow);
+    }
+
+    /**
+     * @see View#computeHorizontalScrollRange()
      */
     public int computeHorizontalScrollRange() {
-        return mContentViewCore.computeHorizontalScrollRange();
+        return mScrollOffsetManager.computeHorizontalScrollRange();
     }
 
     /**
-     * @see ContentViewCore#computeHorizontalScrollOffset()
+     * @see View#computeHorizontalScrollOffset()
      */
     public int computeHorizontalScrollOffset() {
-        return mContentViewCore.computeHorizontalScrollOffset();
+        return mScrollOffsetManager.computeHorizontalScrollOffset();
     }
 
     /**
-     * @see ContentViewCore#computeVerticalScrollRange()
+     * @see View#computeVerticalScrollRange()
      */
     public int computeVerticalScrollRange() {
-        return mContentViewCore.computeVerticalScrollRange();
+        return mScrollOffsetManager.computeVerticalScrollRange();
     }
 
     /**
-     * @see ContentViewCore#computeVerticalScrollOffset()
+     * @see View#computeVerticalScrollOffset()
      */
     public int computeVerticalScrollOffset() {
-        return mContentViewCore.computeVerticalScrollOffset();
+        return mScrollOffsetManager.computeVerticalScrollOffset();
     }
 
     /**
-     * @see ContentViewCore#computeVerticalScrollExtent()
+     * @see View#computeVerticalScrollExtent()
      */
     public int computeVerticalScrollExtent() {
-        return mContentViewCore.computeVerticalScrollExtent();
+        return mScrollOffsetManager.computeVerticalScrollExtent();
     }
 
     /**
@@ -836,7 +1121,6 @@ public class AwContents {
     /**
      * @see android.webkit.WebView#pauseTimers()
      */
-    // TODO(kristianm): Remove
     public void pauseTimers() {
         ContentViewStatics.setWebKitSharedTimersSuspended(true);
     }
@@ -844,7 +1128,6 @@ public class AwContents {
     /**
      * @see android.webkit.WebView#resumeTimers()
      */
-    // TODO(kristianm): Remove
     public void resumeTimers() {
         ContentViewStatics.setWebKitSharedTimersSuspended(false);
     }
@@ -853,16 +1136,18 @@ public class AwContents {
      * @see android.webkit.WebView#onPause()
      */
     public void onPause() {
+        if (mIsPaused || mNativeAwContents == 0) return;
         mIsPaused = true;
-        updateVisibilityState();
+        nativeSetIsPaused(mNativeAwContents, mIsPaused);
     }
 
     /**
      * @see android.webkit.WebView#onResume()
      */
     public void onResume() {
+        if (!mIsPaused || mNativeAwContents == 0) return;
         mIsPaused = false;
-        updateVisibilityState();
+        nativeSetIsPaused(mNativeAwContents, mIsPaused);
     }
 
     /**
@@ -961,13 +1246,13 @@ public class AwContents {
     }
 
     public String[] getHttpAuthUsernamePassword(String host, String realm) {
-        return HttpAuthDatabase.getInstance(mContentViewCore.getContext())
+        return mBrowserContext.getHttpAuthDatabase(mContentViewCore.getContext())
                 .getHttpAuthUsernamePassword(host, realm);
     }
 
     public void setHttpAuthUsernamePassword(String host, String realm, String username,
             String password) {
-        HttpAuthDatabase.getInstance(mContentViewCore.getContext())
+        mBrowserContext.getHttpAuthDatabase(mContentViewCore.getContext())
                 .setHttpAuthUsernamePassword(host, realm, username, password);
     }
 
@@ -1006,7 +1291,11 @@ public class AwContents {
 
         nativeUpdateLastHitTestData(mNativeAwContents);
         Bundle data = msg.getData();
-        data.putString("url", mPossiblyStaleHitTestData.href);
+
+        // In order to maintain compatibility with the old WebView's implementation,
+        // the absolute (full) url is passed in the |url| field, not only the href attribute.
+        // Note: HitTestData could be cleaned up at this point. See http://crbug.com/290992.
+        data.putString("url", mPossiblyStaleHitTestData.hitTestResultExtraData);
         data.putString("title", mPossiblyStaleHitTestData.anchorText);
         data.putString("src", mPossiblyStaleHitTestData.imgSrc);
         msg.setData(data);
@@ -1039,22 +1328,22 @@ public class AwContents {
     /**
      * @see android.webkit.WebView#flingScroll(int, int)
      */
-    public void flingScroll(int vx, int vy) {
-        mContentViewCore.flingScroll(vx, vy);
+    public void flingScroll(int velocityX, int velocityY) {
+        mScrollOffsetManager.flingScroll(velocityX, velocityY);
     }
 
     /**
      * @see android.webkit.WebView#pageUp(boolean)
      */
     public boolean pageUp(boolean top) {
-        return mContentViewCore.pageUp(top);
+        return mScrollOffsetManager.pageUp(top);
     }
 
     /**
      * @see android.webkit.WebView#pageDown(boolean)
      */
     public boolean pageDown(boolean bottom) {
-        return mContentViewCore.pageDown(bottom);
+        return mScrollOffsetManager.pageDown(bottom);
     }
 
     /**
@@ -1092,6 +1381,30 @@ public class AwContents {
         mContentViewCore.invokeZoomPicker();
     }
 
+    /**
+     * @see ContentViewCore.evaluateJavaScript(String, ContentViewCore.JavaScriptCallback)
+     */
+    public void evaluateJavaScript(String script, final ValueCallback<String> callback) {
+        ContentViewCore.JavaScriptCallback jsCallback = null;
+        if (callback != null) {
+            jsCallback = new ContentViewCore.JavaScriptCallback() {
+                @Override
+                public void handleJavaScriptResult(String jsonResult) {
+                    callback.onReceiveValue(jsonResult);
+                }
+            };
+        }
+
+        mContentViewCore.evaluateJavaScript(script, jsCallback);
+    }
+
+    /**
+     * @see ContentViewCore.evaluateJavaScriptEvenIfNotYetNavigated(String)
+     */
+    public void evaluateJavaScriptEvenIfNotYetNavigated(String script) {
+        mContentViewCore.evaluateJavaScriptEvenIfNotYetNavigated(script);
+    }
+
     //--------------------------------------------------------------------------------------------
     //  View and ViewGroup method implementations
     //--------------------------------------------------------------------------------------------
@@ -1101,7 +1414,10 @@ public class AwContents {
      */
     public boolean onTouchEvent(MotionEvent event) {
         if (mNativeAwContents == 0) return false;
+
+        mScrollOffsetManager.setProcessingTouchEvent(true);
         boolean rv = mContentViewCore.onTouchEvent(event);
+        mScrollOffsetManager.setProcessingTouchEvent(false);
 
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
             int actionIndex = event.getActionIndex();
@@ -1110,6 +1426,10 @@ public class AwContents {
             nativeRequestNewHitTestDataAt(mNativeAwContents,
                                           (int)Math.round(event.getX(actionIndex) / mDIPScale),
                                           (int)Math.round(event.getY(actionIndex) / mDIPScale));
+        }
+
+        if (mOverScrollGlow != null && event.getActionMasked() == MotionEvent.ACTION_UP) {
+            mOverScrollGlow.releaseAll();
         }
 
         return rv;
@@ -1138,38 +1458,36 @@ public class AwContents {
 
     /**
      * @see android.view.View#onAttachedToWindow()
+     *
+     * Note that this is also called from receivePopupContents.
      */
     public void onAttachedToWindow() {
-        if (mScrollChangeListener == null) {
-            mScrollChangeListener = new ScrollChangeListener();
-        }
-        mContainerView.getViewTreeObserver().addOnScrollChangedListener(mScrollChangeListener);
+        if (mNativeAwContents == 0) return;
+        mIsAttachedToWindow = true;
 
         mContentViewCore.onAttachedToWindow();
         nativeOnAttachedToWindow(mNativeAwContents, mContainerView.getWidth(),
                 mContainerView.getHeight());
-
-        // This is for the case where this is created by restoreState, which
-        // needs to call to NavigationController::LoadIfNecessary to actually
-        // load the restored page.
-        if (!mIsPaused) onResume();
     }
 
     /**
      * @see android.view.View#onDetachedFromWindow()
      */
     public void onDetachedFromWindow() {
+        mIsAttachedToWindow = false;
+        hideAutofillPopup();
         if (mNativeAwContents != 0) {
             nativeOnDetachedFromWindow(mNativeAwContents);
         }
 
-        if (mScrollChangeListener != null) {
-            mContainerView.getViewTreeObserver().removeOnScrollChangedListener(
-                    mScrollChangeListener);
-            mScrollChangeListener = null;
-        }
-
         mContentViewCore.onDetachedFromWindow();
+
+        if (mPendingDetachCleanupReferences != null) {
+            for (int i = 0; i < mPendingDetachCleanupReferences.size(); ++i) {
+                mPendingDetachCleanupReferences.get(i).cleanupNow();
+            }
+            mPendingDetachCleanupReferences = null;
+        }
     }
 
     /**
@@ -1177,7 +1495,7 @@ public class AwContents {
      */
     public void onWindowFocusChanged(boolean hasWindowFocus) {
         mWindowFocused = hasWindowFocus;
-        mContentViewCore.onFocusChanged(mContainerViewFocused && mWindowFocused);
+        mContentViewCore.onWindowFocusChanged(hasWindowFocus);
     }
 
     /**
@@ -1185,7 +1503,7 @@ public class AwContents {
      */
     public void onFocusChanged(boolean focused, int direction, Rect previouslyFocusedRect) {
         mContainerViewFocused = focused;
-        mContentViewCore.onFocusChanged(mContainerViewFocused && mWindowFocused);
+        mContentViewCore.onFocusChanged(focused);
     }
 
     /**
@@ -1193,7 +1511,8 @@ public class AwContents {
      */
     public void onSizeChanged(int w, int h, int ow, int oh) {
         if (mNativeAwContents == 0) return;
-        updatePhysicalBackingSizeIfNeeded();
+        mScrollOffsetManager.setContainerViewSize(w, h);
+        mContentViewCore.onPhysicalBackingSizeChanged(w, h);
         mContentViewCore.onSizeChanged(w, h, ow, oh);
         nativeOnSizeChanged(mNativeAwContents, w, h, ow, oh);
     }
@@ -1202,41 +1521,31 @@ public class AwContents {
      * @see android.view.View#onVisibilityChanged()
      */
     public void onVisibilityChanged(View changedView, int visibility) {
-        updateVisibilityState();
+        boolean viewVisible = mContainerView.getVisibility() == View.VISIBLE;
+        if (mIsViewVisible == viewVisible) return;
+        setViewVisibilityInternal(viewVisible);
     }
 
     /**
      * @see android.view.View#onWindowVisibilityChanged()
      */
     public void onWindowVisibilityChanged(int visibility) {
-        updateVisibilityState();
+        boolean windowVisible = visibility == View.VISIBLE;
+        if (mIsWindowVisible == windowVisible) return;
+        setWindowVisibilityInternal(windowVisible);
     }
 
-    private void updateVisibilityState() {
-        doUpdateVisibilityState(false);
-    }
-
-    private void updateVisibilityStateForced() {
-        doUpdateVisibilityState(true);
-    }
-
-    private void doUpdateVisibilityState(boolean forced) {
+    private void setViewVisibilityInternal(boolean visible) {
+        mIsViewVisible = visible;
         if (mNativeAwContents == 0) return;
-        boolean windowVisible = mContainerView.getWindowVisibility() == View.VISIBLE;
-        boolean viewVisible = mContainerView.getVisibility() == View.VISIBLE;
-
-        boolean visible = windowVisible && viewVisible && !mIsPaused;
-        if (mIsVisible == visible && !forced) return;
-
-        mIsVisible = visible;
-        if (mIsVisible) {
-            mContentViewCore.onShow();
-        } else {
-            mContentViewCore.onHide();
-        }
-        nativeSetVisibility(mNativeAwContents, mIsVisible);
+        nativeSetViewVisibility(mNativeAwContents, mIsViewVisible);
     }
 
+    private void setWindowVisibilityInternal(boolean visible) {
+        mIsWindowVisible = visible;
+        if (mNativeAwContents == 0) return;
+        nativeSetWindowVisibility(mNativeAwContents, mIsWindowVisible);
+    }
 
     /**
      * Key for opaque state in bundle. Note this is only public for tests.
@@ -1248,7 +1557,7 @@ public class AwContents {
      * @return False if saving state failed.
      */
     public boolean saveState(Bundle outState) {
-        if (outState == null) return false;
+        if (mNativeAwContents == 0 || outState == null) return false;
 
         byte[] state = nativeGetOpaqueState(mNativeAwContents);
         if (state == null) return false;
@@ -1263,7 +1572,7 @@ public class AwContents {
      * @return False if restoring state failed.
      */
     public boolean restoreState(Bundle inState) {
-        if (inState == null) return false;
+        if (mNativeAwContents == 0 || inState == null) return false;
 
         byte[] state = inState.getByteArray(SAVE_RESTORE_STATE_KEY);
         if (state == null) return false;
@@ -1295,6 +1604,16 @@ public class AwContents {
     }
 
     /**
+     * If native accessibility (not script injection) is enabled, and if this is
+     * running on JellyBean or later, returns an AccessibilityNodeProvider that
+     * implements native accessibility for this view. Returns null otherwise.
+     * @return The AccessibilityNodeProvider, if available, or null otherwise.
+     */
+    public AccessibilityNodeProvider getAccessibilityNodeProvider() {
+        return mContentViewCore.getAccessibilityNodeProvider();
+    }
+
+    /**
      * @see android.webkit.WebView#onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo)
      */
     public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
@@ -1317,6 +1636,19 @@ public class AwContents {
      */
     public boolean performAccessibilityAction(int action, Bundle arguments) {
         return mContentViewCore.performAccessibilityAction(action, arguments);
+    }
+
+    /**
+     * @see android.webkit.WebView#clearFormData()
+     */
+    public void hideAutofillPopup() {
+        if (mAwAutofillManagerDelegate != null)
+            mAwAutofillManagerDelegate.hideAutofillPopup();
+    }
+
+    public void setNetworkAvailable(boolean networkUp) {
+        if (mNativeAwContents == 0) return;
+        nativeSetJsOnlineProperty(mNativeAwContents, networkUp);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -1367,6 +1699,7 @@ public class AwContents {
                             mBrowserContext.getGeolocationPermissions().deny(origin);
                         }
                     }
+                    if (mNativeAwContents == 0) return;
                     nativeInvokeGeolocationCallback(mNativeAwContents, allow, origin);
                 }
             });
@@ -1375,6 +1708,7 @@ public class AwContents {
 
     @CalledByNative
     private void onGeolocationPermissionsShowPrompt(String origin) {
+        if (mNativeAwContents == 0) return;
         AwGeolocationPermissions permissions = mBrowserContext.getGeolocationPermissions();
         // Reject if geoloaction is disabled, or the origin has a retained deny
         if (!mSettings.getGeolocationEnabled()) {
@@ -1404,7 +1738,10 @@ public class AwContents {
 
     @CalledByNative
     public void onNewPicture() {
-        mContentsClient.onNewPicture(mNewPictureInvalidationOnly ? null : capturePicture());
+        // Don't call capturePicture() here but instead defer it until the posted task runs within
+        // the callback helper, to avoid doubling back into the renderer compositor in the middle
+        // of the notification it is sending up to here.
+        mContentsClient.getCallbackHelper().postOnNewPicture(mPictureListenerContentProvider);
     }
 
     // Called as a result of nativeUpdateLastHitTestData.
@@ -1436,11 +1773,6 @@ public class AwContents {
     }
 
     @CalledByNative
-    private boolean performLongClick() {
-        return mContainerView.performLongClick();
-    }
-
-    @CalledByNative
     private int[] getLocationOnScreen() {
         int[] result = new int[2];
         mContainerView.getLocationOnScreen(result);
@@ -1448,14 +1780,33 @@ public class AwContents {
     }
 
     @CalledByNative
-    private void onPageScaleFactorChanged(float pageScaleFactor) {
+    private void onWebLayoutPageScaleFactorChanged(float webLayoutPageScaleFactor) {
         // This change notification comes from the renderer thread, not from the cc/ impl thread.
-        mLayoutSizer.onPageScaleChanged(pageScaleFactor);
+        mLayoutSizer.onPageScaleChanged(webLayoutPageScaleFactor);
     }
 
     @CalledByNative
     private void scrollContainerViewTo(int x, int y) {
         mScrollOffsetManager.scrollContainerViewTo(x, y);
+    }
+
+    @CalledByNative
+    private void setAwAutofillManagerDelegate(AwAutofillManagerDelegate delegate) {
+        mAwAutofillManagerDelegate = delegate;
+        delegate.init(mContentViewCore);
+    }
+
+    @CalledByNative
+    private void didOverscroll(int deltaX, int deltaY) {
+        if (mOverScrollGlow != null) {
+            mOverScrollGlow.setOverScrollDeltas(deltaX, deltaY);
+        }
+
+        mScrollOffsetManager.overScrollBy(deltaX, deltaY);
+
+        if (mOverScrollGlow != null && mOverScrollGlow.isAnimating()) {
+            mContainerView.invalidate();
+        }
     }
 
     // -------------------------------------------------------------------------------------------
@@ -1534,6 +1885,8 @@ public class AwContents {
     private native boolean nativeOnDraw(int nativeAwContents, Canvas canvas,
             boolean isHardwareAccelerated, int scrollX, int ScrollY,
             int clipLeft, int clipTop, int clipRight, int clipBottom);
+    private native void nativeSetGlobalVisibleRect(int nativeAwContents, int visibleLeft,
+            int visibleTop, int visibleRight, int visibleBottom);
     private native void nativeFindAllAsync(int nativeAwContents, String searchString);
     private native void nativeFindNext(int nativeAwContents, boolean forward);
     private native void nativeClearMatches(int nativeAwContents);
@@ -1546,10 +1899,14 @@ public class AwContents {
 
     private native void nativeOnSizeChanged(int nativeAwContents, int w, int h, int ow, int oh);
     private native void nativeScrollTo(int nativeAwContents, int x, int y);
-    private native void nativeSetVisibility(int nativeAwContents, boolean visible);
+    private native void nativeSetViewVisibility(int nativeAwContents, boolean visible);
+    private native void nativeSetWindowVisibility(int nativeAwContents, boolean visible);
+    private native void nativeSetIsPaused(int nativeAwContents, boolean paused);
     private native void nativeOnAttachedToWindow(int nativeAwContents, int w, int h);
-    private native void nativeOnDetachedFromWindow(int nativeAwContents);
+    private static native void nativeOnDetachedFromWindow(int nativeAwContents);
     private native void nativeSetDipScale(int nativeAwContents, float dipScale);
+    private native void nativeSetDisplayedPageScaleFactor(int nativeAwContents,
+            float pageScaleFactor);
 
     // Returns null if save state fails.
     private native byte[] nativeGetOpaqueState(int nativeAwContents);
@@ -1559,11 +1916,14 @@ public class AwContents {
 
     private native int nativeReleasePopupAwContents(int nativeAwContents);
     private native void nativeFocusFirstNode(int nativeAwContents);
+    private native void nativeSetBackgroundColor(int nativeAwContents, int color);
 
     private native int nativeGetAwDrawGLViewContext(int nativeAwContents);
-    private native Picture nativeCapturePicture(int nativeAwContents);
+    private native int nativeCapturePicture(int nativeAwContents, int width, int height);
     private native void nativeEnableOnNewPicture(int nativeAwContents, boolean enabled);
 
     private native void nativeInvokeGeolocationCallback(
             int nativeAwContents, boolean value, String requestingFrame);
+
+    private native void nativeSetJsOnlineProperty(int nativeAwContents, boolean networkUp);
 }

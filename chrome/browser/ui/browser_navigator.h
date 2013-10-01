@@ -7,15 +7,17 @@
 
 #include <string>
 
+#include "base/memory/ref_counted.h"
+#include "base/memory/ref_counted_memory.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
-#include "googleurl/src/gurl.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 class Browser;
 class Profile;
@@ -62,6 +64,15 @@ struct NavigateParams {
   // The URL/referrer to be loaded. Ignored if |target_contents| is non-NULL.
   GURL url;
   content::Referrer referrer;
+
+  // Indicates whether this navigation will be sent using POST.
+  // The POST method is limited support for basic POST data by leveraging
+  // NavigationController::LOAD_TYPE_BROWSER_INITIATED_HTTP_POST.
+  // It is not for things like file uploads.
+  bool uses_post;
+
+  // The post data when the navigation uses POST.
+  scoped_refptr<base::RefCountedMemory> browser_initiated_post_data;
 
   // Extra headers to add to the request for this page.  Headers are
   // represented as "<name>: <value>" and separated by \r\n.  The entire string
@@ -208,9 +219,13 @@ struct NavigateParams {
   // explicitly or inferred from an existing Browser instance.
   chrome::HostDesktopType host_desktop_type;
 
-  // Indicates whether this navigation involves a cross-process redirect,
-  // in which case it should replace the current navigation entry.
-  bool is_cross_site_redirect;
+  // Indicates whether this navigation  should replace the current
+  // navigation entry.
+  bool should_replace_current_entry;
+
+  // Indicates whether |source_contents| should be set as opener when creating
+  // |target_contents|.
+  bool should_set_opener;
 
  private:
   NavigateParams();

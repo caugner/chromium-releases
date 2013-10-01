@@ -21,6 +21,8 @@
 
 namespace {
 
+const char kJsScreenPath[] = "login.ResetScreen";
+
 // Reset screen id.
 const char kResetScreen[] = "reset";
 
@@ -29,7 +31,9 @@ const char kResetScreen[] = "reset";
 namespace chromeos {
 
 ResetScreenHandler::ResetScreenHandler()
-    : delegate_(NULL), show_on_init_(false) {
+    : BaseScreenHandler(kJsScreenPath),
+      delegate_(NULL),
+      show_on_init_(false) {
 }
 
 ResetScreenHandler::~ResetScreenHandler() {
@@ -66,7 +70,8 @@ void ResetScreenHandler::DeclareLocalizedValues(
                 IDS_RESET_SCREEN_WARNING_MSG,
                 IDS_SHORT_PRODUCT_NAME);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kFirstBoot)) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kFirstExecAfterBoot)) {
     builder->AddF("resetWarningDetails",
                   IDS_RESET_SCREEN_WARNING_DETAILS,
                   IDS_SHORT_PRODUCT_NAME);
@@ -100,7 +105,8 @@ void ResetScreenHandler::HandleOnCancel() {
 }
 
 void ResetScreenHandler::HandleOnReset() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kFirstBoot)) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kFirstExecAfterBoot)) {
     chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
         StartDeviceWipe();
   } else {

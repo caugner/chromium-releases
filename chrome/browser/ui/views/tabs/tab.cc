@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "chrome/browser/ui/views/theme_image_mapper.h"
+#include "chrome/browser/ui/views/touch_uma/touch_uma.h"
 #include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -236,6 +237,10 @@ const int kImmersiveBarHeight = 2;
 // which for active tabs is 230, 230, 230 and for inactive is 184, 184, 184.
 const SkColor kImmersiveActiveTabColor = SkColorSetRGB(235, 235, 235);
 const SkColor kImmersiveInactiveTabColor = SkColorSetRGB(190, 190, 190);
+
+// The minimum opacity (out of 1) when a tab (either active or inactive) is
+// throbbing in the immersive mode light strip.
+const double kImmersiveTabMinThrobOpacity = 0.66;
 
 // Number of steps in the immersive mode loading animation.
 const int kImmersiveLoadingStepCount = 32;
@@ -457,6 +462,7 @@ Tab::Tab(TabController* controller)
       immersive_loading_step_(0),
       should_display_crashed_favicon_(false),
       theme_provider_(NULL),
+      tab_activated_with_last_gesture_begin_(false),
       hover_controller_(this),
       showing_icon_(false),
       showing_close_button_(false),
@@ -711,6 +717,8 @@ void Tab::ButtonPressed(views::Button* sender, const ui::Event& event) {
       CLOSE_TAB_FROM_TOUCH;
   DCHECK_EQ(close_button_, sender);
   controller()->CloseTab(this, source);
+  if (event.type() == ui::ET_GESTURE_TAP)
+    TouchUMA::RecordGestureAction(TouchUMA::GESTURE_TABCLOSE_TAP);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1028,6 +1036,7 @@ void Tab::OnGestureEvent(ui::GestureEvent* event) {
                                        parent());
       ui::ListSelectionModel original_selection;
       original_selection.Copy(controller()->GetSelectionModel());
+      tab_activated_with_last_gesture_begin_ = !IsActive();
       if (!IsSelected())
         controller()->SelectTab(this);
       gfx::Point loc(event->location());
@@ -1110,9 +1119,13 @@ void Tab::PaintTab(gfx::Canvas* canvas) {
 
 void Tab::PaintImmersiveTab(gfx::Canvas* canvas) {
   // Use transparency for the draw-attention animation.
-  int alpha = (tab_animation_ && tab_animation_->is_animating())
-                  ? static_cast<int>(GetThrobValue() * 255)
-                  : 255;
+  int alpha = 255;
+  if (tab_animation_ &&
+      tab_animation_->is_animating() &&
+      !data().mini) {
+    alpha = tab_animation_->CurrentValueBetween(
+        255, static_cast<int>(255 * kImmersiveTabMinThrobOpacity));
+  }
 
   // Draw a gray rectangle to represent the tab. This works for mini-tabs as
   // well as regular ones. The active tab has a brigher bar.
@@ -1315,11 +1328,11 @@ void Tab::PaintInactiveTabBackgroundUsingResourceId(gfx::Canvas* canvas,
   // rectangle. And again, don't draw over the toolbar.
   background_canvas.TileImageInt(*tab_bg,
      offset + tab_image->l_width,
-     bg_offset_y + drop_shadow_height() + tab_image->y_offset,
+     bg_offset_y + drop_shadow_height(),
      tab_image->l_width,
-     drop_shadow_height() + tab_image->y_offset,
+     drop_shadow_height(),
      width() - tab_image->l_width - tab_image->r_width,
-     height() - drop_shadow_height() - kToolbarOverlap - tab_image->y_offset);
+     height() - drop_shadow_height() - kToolbarOverlap);
 
   canvas->DrawImageInt(
       gfx::ImageSkia(background_canvas.ExtractImageRep()), 0, 0);
@@ -1368,11 +1381,11 @@ void Tab::PaintActiveTabBackground(gfx::Canvas* canvas) {
   // by incrementing by GetDropShadowHeight(), since it's a simple rectangle.
   canvas->TileImageInt(*tab_background,
      offset + tab_image->l_width,
-     drop_shadow_height() + tab_image->y_offset,
+     drop_shadow_height(),
      tab_image->l_width,
-     drop_shadow_height() + tab_image->y_offset,
+     drop_shadow_height(),
      width() - tab_image->l_width - tab_image->r_width,
-     height() - drop_shadow_height() - tab_image->y_offset);
+     height() - drop_shadow_height());
 
   // Now draw the highlights/shadows around the tab edge.
   canvas->DrawImageInt(*tab_image->image_l, 0, 0);

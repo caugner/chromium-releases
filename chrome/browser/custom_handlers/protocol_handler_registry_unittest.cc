@@ -7,11 +7,11 @@
 #include <set>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -290,6 +290,9 @@ class TestMessageLoop : public base::MessageLoop {
         return BrowserThread::CurrentlyOn(BrowserThread::UI);
       case base::MessageLoop::TYPE_IO:
         return BrowserThread::CurrentlyOn(BrowserThread::IO);
+#if defined(OS_ANDROID)
+      case base::MessageLoop::TYPE_JAVA: // fall-through
+#endif // defined(OS_ANDROID)
       case base::MessageLoop::TYPE_DEFAULT:
         return !BrowserThread::CurrentlyOn(BrowserThread::UI) &&
                !BrowserThread::CurrentlyOn(BrowserThread::IO);

@@ -14,12 +14,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
@@ -29,7 +30,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_content_client.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -52,8 +52,8 @@
 
 using content::PluginService;
 using content::WebContents;
+using content::WebPluginInfo;
 using content::WebUIMessageHandler;
-using webkit::WebPluginInfo;
 
 namespace {
 
@@ -167,7 +167,7 @@ class PluginsDOMHandler : public WebUIMessageHandler,
   void LoadPlugins();
 
   // Called on the UI thread when the plugin information is ready.
-  void PluginsLoaded(const std::vector<webkit::WebPluginInfo>& plugins);
+  void PluginsLoaded(const std::vector<WebPluginInfo>& plugins);
 
   content::NotificationRegistrar registrar_;
 
@@ -329,7 +329,7 @@ void PluginsDOMHandler::LoadPlugins() {
 }
 
 void PluginsDOMHandler::PluginsLoaded(
-    const std::vector<webkit::WebPluginInfo>& plugins) {
+    const std::vector<WebPluginInfo>& plugins) {
   Profile* profile = Profile::FromWebUI(web_ui());
   PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile).get();
 
@@ -371,7 +371,7 @@ void PluginsDOMHandler::PluginsLoaded(
       plugin_file->SetString("type", PluginTypeToString(group_plugin.type));
 
       ListValue* mime_types = new ListValue();
-      const std::vector<webkit::WebPluginMimeType>& plugin_mime_types =
+      const std::vector<content::WebPluginMimeType>& plugin_mime_types =
           group_plugin.mime_types;
       for (size_t k = 0; k < plugin_mime_types.size(); ++k) {
         DictionaryValue* mime_type = new DictionaryValue();
@@ -491,7 +491,8 @@ base::RefCountedMemory* PluginsUI::GetFaviconResourceBytes(
 }
 
 // static
-void PluginsUI::RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+void PluginsUI::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
       prefs::kPluginsShowDetails,
       false,

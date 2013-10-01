@@ -5,8 +5,9 @@
 #import "chrome/browser/ui/cocoa/profile_menu_controller.h"
 
 #include "base/mac/scoped_nsobject.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/profiles/avatar_menu_model.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
@@ -197,8 +198,7 @@ TEST_F(ProfileMenuControllerTest, SetActiveAndRemove) {
   ASSERT_EQ(7, [menu numberOfItems]);
 
   // Create a browser and "show" it.
-  Browser::CreateParams profile2_params(profile2,
-                                        chrome::HOST_DESKTOP_TYPE_NATIVE);
+  Browser::CreateParams profile2_params(profile2, chrome::GetActiveDesktop());
   scoped_ptr<Browser> p2_browser(
       chrome::CreateBrowserWithTestWindowForParams(&profile2_params));
   BrowserList::SetLastActive(p2_browser.get());
@@ -209,8 +209,7 @@ TEST_F(ProfileMenuControllerTest, SetActiveAndRemove) {
   VerifyProfileNamedIsActive(@"Profile 2", __LINE__);
 
   // Open a new browser and make sure it takes effect.
-  Browser::CreateParams profile3_params(profile3,
-                                        chrome::HOST_DESKTOP_TYPE_NATIVE);
+  Browser::CreateParams profile3_params(profile3, chrome::GetActiveDesktop());
   scoped_ptr<Browser> p3_browser(
       chrome::CreateBrowserWithTestWindowForParams(&profile3_params));
   BrowserList::SetLastActive(p3_browser.get());
@@ -243,3 +242,46 @@ TEST_F(ProfileMenuControllerTest, DeleteActiveProfile) {
   base::ThreadRestrictions::SetIOAllowed(io_was_allowed);
 }
 
+TEST_F(ProfileMenuControllerTest, ManagedProfile) {
+  TestingProfileManager* manager = testing_profile_manager();
+  TestingProfile* managed_profile =
+      manager->CreateTestingProfile("test1",
+                                    scoped_ptr<PrefServiceSyncable>(),
+                                    ASCIIToUTF16("Supervised User"),
+                                    0,
+                                    "TEST_ID");
+  BrowserList::SetLastActive(browser());
+
+  NSMenu* menu = [controller() menu];
+  ASSERT_EQ(6, [menu numberOfItems]);
+  NSMenuItem* item = [menu itemAtIndex:0];
+  ASSERT_EQ(@selector(switchToProfileFromMenu:), [item action]);
+  EXPECT_TRUE([controller() validateMenuItem:item]);
+
+  item = [menu itemAtIndex:1];
+  ASSERT_EQ(@selector(switchToProfileFromMenu:), [item action]);
+  EXPECT_TRUE([controller() validateMenuItem:item]);
+
+  item = [menu itemAtIndex:5];
+  ASSERT_EQ(@selector(newProfile:), [item action]);
+  EXPECT_TRUE([controller() validateMenuItem:item]);
+
+  // Open a new browser for the managed user and switch to it.
+  Browser::CreateParams managed_profile_params(
+      managed_profile, chrome::HOST_DESKTOP_TYPE_NATIVE);
+  scoped_ptr<Browser> managed_browser(
+      chrome::CreateBrowserWithTestWindowForParams(&managed_profile_params));
+  BrowserList::SetLastActive(managed_browser.get());
+
+  item = [menu itemAtIndex:0];
+  ASSERT_EQ(@selector(switchToProfileFromMenu:), [item action]);
+  EXPECT_FALSE([controller() validateMenuItem:item]);
+
+  item = [menu itemAtIndex:1];
+  ASSERT_EQ(@selector(switchToProfileFromMenu:), [item action]);
+  EXPECT_TRUE([controller() validateMenuItem:item]);
+
+  item = [menu itemAtIndex:5];
+  ASSERT_EQ(@selector(newProfile:), [item action]);
+  EXPECT_FALSE([controller() validateMenuItem:item]);
+}

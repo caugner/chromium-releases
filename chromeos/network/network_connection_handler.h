@@ -12,10 +12,10 @@
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
+#include "chromeos/cert_loader.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/login/login_state.h"
-#include "chromeos/network/cert_loader.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_handler_callbacks.h"
 #include "chromeos/network/network_state_handler_observer.h"
@@ -48,16 +48,40 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
       public base::SupportsWeakPtr<NetworkConnectionHandler> {
  public:
   // Constants for |error_name| from |error_callback| for Connect.
+
+  //  No network matching |service_path| is found (hidden networks must be
+  //  configured before connecting).
   static const char kErrorNotFound[];
+
+  // Already connected to the network.
   static const char kErrorConnected[];
+
+  // Already connecting to the network.
   static const char kErrorConnecting[];
+
+  // The passphrase is missing or invalid.
   static const char kErrorPassphraseRequired[];
+
   static const char kErrorActivationRequired[];
+
+  // The network requires a cert and none exists.
   static const char kErrorCertificateRequired[];
+
+  // The network had an authentication error, indicating that additional or
+  // different authentication information is required.
+  static const char kErrorAuthenticationRequired[];
+
+  // Additional configuration is required.
   static const char kErrorConfigurationRequired[];
+
+  // Configuration failed during the configure stage of the connect flow.
+  static const char kErrorConfigureFailed[];
+
+  // For Disconnect or Activate, an unexpected DBus or Shill error occurred.
   static const char kErrorShillError[];
-  static const char kErrorConnectFailed[];
-  static const char kErrorUnknown[];
+
+  // A new network connect request canceled this one.
+  static const char kErrorConnectCanceled[];
 
   // Constants for |error_name| from |error_callback| for Disconnect.
   static const char kErrorNotConnected[];
@@ -66,24 +90,20 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
 
   // ConnectToNetwork() will start an asynchronous connection attempt.
   // On success, |success_callback| will be called.
-  // On failure, |error_callback| will be called with |error_name| one of:
-  //  kErrorNotFound if no network matching |service_path| is found
-  //    (hidden networks must be configured before connecting).
-  //  kErrorConnected if already connected to the network.
-  //  kErrorConnecting if already connecting to the network.
-  //  kErrorCertificateRequired if the network requires a cert and none exists.
-  //  kErrorPassphraseRequired if passphrase only is required.
-  //  kErrorConfigurationRequired if additional configuration is required.
-  //  kErrorShillError if a DBus or Shill error occurred.
+  // On failure, |error_callback| will be called with |error_name| one of the
+  //   constants defined above, or flimflam::kErrorConnectFailed or
+  //   flimflam::kErrorBadPassphrase if the Shill Error property (from a
+  //   previous connect attempt) was set to one of those.
   // |error_message| will contain an additional error string for debugging.
-  // If |ignore_error_state| is true, error state for the network is ignored
-  //  (e.g. for repeat attempts).
+  // If |check_error_state| is true, the current state of the network is
+  //  checked for errors, otherwise current state is ignored (e.g. for recently
+  //  configured networks or repeat attempts).
   void ConnectToNetwork(const std::string& service_path,
                         const base::Closure& success_callback,
                         const network_handler::ErrorCallback& error_callback,
-                        bool ignore_error_state);
+                        bool check_error_state);
 
-  // DisconnectToNetwork() will send a Disconnect request to Shill.
+  // DisconnectNetwork() will send a Disconnect request to Shill.
   // On success, |success_callback| will be called.
   // On failure, |error_callback| will be called with |error_name| one of:
   //  kErrorNotFound if no network matching |service_path| is found.
@@ -93,6 +113,18 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
   void DisconnectNetwork(const std::string& service_path,
                          const base::Closure& success_callback,
                          const network_handler::ErrorCallback& error_callback);
+
+  // ActivateNetwork() will start an asynchronous activation attempt.
+  // |carrier| may be empty or may specify a carrier to activate.
+  // On success, |success_callback| will be called.
+  // On failure, |error_callback| will be called with |error_name| one of:
+  //  kErrorNotFound if no network matching |service_path| is found.
+  //  kErrorShillError if a DBus or Shill error occurred.
+  // TODO(stevenjb/armansito): Move this to a separate NetworkActivationHandler.
+  void ActivateNetwork(const std::string& service_path,
+                       const std::string& carrier,
+                       const base::Closure& success_callback,
+                       const network_handler::ErrorCallback& error_callback);
 
   // Returns true if ConnectToNetwork has been called with |service_path| and
   // has not completed (i.e. success or error callback has been called).
@@ -117,17 +149,18 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
 
   NetworkConnectionHandler();
 
-  void Init(CertLoader* cert_loader,
-            NetworkStateHandler* network_state_handler,
+  void Init(NetworkStateHandler* network_state_handler,
             NetworkConfigurationHandler* network_configuration_handler);
 
-  ConnectRequest* pending_request(const std::string& service_path);
+  ConnectRequest* GetPendingRequest(const std::string& service_path);
 
   // Callback from Shill.Service.GetProperties. Parses |properties| to verify
   // whether or not the network appears to be configured. If configured,
   // attempts a connection, otherwise invokes error_callback from
-  // pending_requests_[service_path].
-  void VerifyConfiguredAndConnect(const std::string& service_path,
+  // pending_requests_[service_path]. |check_error_state| is passed from
+  // ConnectToNetwork(), see comment for info.
+  void VerifyConfiguredAndConnect(bool check_error_state,
+                                  const std::string& service_path,
                                   const base::DictionaryValue& properties);
 
   // Calls Shill.Manager.Connect asynchronously.
@@ -147,7 +180,10 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
 
   void CheckPendingRequest(const std::string service_path);
   void CheckAllPendingRequests();
-  bool CertificateIsConfigured(NetworkUIData* ui_data, std::string* pkcs11_id);
+
+  // Returns the PKCS#11 ID of a cert matching the certificate pattern in
+  // |ui_data|. Returns empty string otherwise.
+  std::string CertificateIsConfigured(NetworkUIData* ui_data);
   void ErrorCallbackForPendingRequest(const std::string& service_path,
                                       const std::string& error_name);
 
@@ -157,14 +193,20 @@ class CHROMEOS_EXPORT NetworkConnectionHandler
       const base::Closure& success_callback,
       const network_handler::ErrorCallback& error_callback);
 
-  // Handle success or failure from Shill.Service.Disconnect.
+  // Handle success from Shill.Service.Disconnect.
   void HandleShillDisconnectSuccess(const std::string& service_path,
                                     const base::Closure& success_callback);
-  void HandleShillDisconnectFailure(
+
+  // Calls Shill.Manager.Activate asynchronously.
+  void CallShillActivate(
       const std::string& service_path,
-      const network_handler::ErrorCallback& error_callback,
-      const std::string& error_name,
-      const std::string& error_message);
+      const std::string& carrier,
+      const base::Closure& success_callback,
+      const network_handler::ErrorCallback& error_callback);
+
+  // Handle success from Shill.Service.ActivateCellularModem.
+  void HandleShillActivateSuccess(const std::string& service_path,
+                                  const base::Closure& success_callback);
 
   // Local references to the associated handler instances.
   CertLoader* cert_loader_;

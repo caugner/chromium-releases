@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/strings/string_util.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/search/instant_service.h"
+#include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
@@ -10,11 +13,10 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/search/instant_ntp.h"
-#include "chrome/browser/ui/search/instant_overlay.h"
+#include "chrome/browser/ui/search/instant_ntp_prerenderer.h"
 #include "chrome/browser/ui/search/instant_test_utils.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/omnibox_focus_state.h"
 #include "chrome/common/search_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -26,9 +28,9 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/network_change_notifier.h"
 #include "net/dns/mock_host_resolver.h"
+#include "url/gurl.h"
 
 // !!! IMPORTANT !!!
 // These tests are run against a mock GWS using the web-page-replay system.
@@ -59,7 +61,7 @@ class InstantExtendedManualTest : public InProcessBrowserTest,
         testing::UnitTest::GetInstance()->current_test_info();
     ASSERT_TRUE(StartsWithASCII(test_info->name(), "MANUAL_", true) ||
                 StartsWithASCII(test_info->name(), "DISABLED_", true));
-    // Make IsOffline() return false so we don't try to use the local overlay.
+    // Make IsOffline() return false so we don't try to use the local NTP.
     disable_network_change_notifier_.reset(
         new net::NetworkChangeNotifier::DisableForTest());
   }
@@ -75,47 +77,6 @@ class InstantExtendedManualTest : public InProcessBrowserTest,
 
   content::WebContents* active_tab() {
     return browser()->tab_strip_model()->GetActiveWebContents();
-  }
-
-  bool PressBackspace() {
-    return ui_test_utils::SendKeyPressSync(browser(), ui::VKEY_BACK,
-                                           false, false, false, false);
-  }
-
-  bool PressBackspaceAndWaitForSuggestions() {
-    content::WindowedNotificationObserver observer(
-        chrome::NOTIFICATION_INSTANT_SET_SUGGESTION,
-        content::NotificationService::AllSources());
-    bool result = PressBackspace();
-    observer.Wait();
-    return result;
-  }
-
-  bool PressBackspaceAndWaitForOverlayToShow() {
-    InstantTestModelObserver observer(
-        instant()->model(), SearchMode::MODE_SEARCH_SUGGESTIONS);
-    return PressBackspace() && observer.WaitForExpectedOverlayState() ==
-        SearchMode::MODE_SEARCH_SUGGESTIONS;
-  }
-
-  bool PressEnterAndWaitForNavigationWithTitle(content::WebContents* contents,
-                                               const string16& title) {
-    content::TitleWatcher title_watcher(contents, title);
-    content::WindowedNotificationObserver nav_observer(
-        content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-        content::NotificationService::AllSources());
-    browser()->window()->GetLocationBar()->AcceptInput();
-    nav_observer.Wait();
-    return title_watcher.WaitAndGetTitle() == title;
-  }
-
-  GURL GetActiveTabURL() {
-    return active_tab()->GetController().GetActiveEntry()->GetURL();
-  }
-
-  bool GetSelectionState(bool* selected) {
-    return GetBoolFromJS(instant()->GetOverlayContents(),
-                         "google.ac.gs().api.i()", selected);
   }
 
   bool IsGooglePage(content::WebContents* contents) {
@@ -134,16 +95,79 @@ class InstantExtendedManualTest : public InProcessBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(InstantExtendedManualTest, MANUAL_ShowsGoogleNTP) {
   set_browser(browser());
-  instant()->SetInstantEnabled(false, true);
-  instant()->SetInstantEnabled(true, false);
-  FocusOmniboxAndWaitForInstantNTPSupport();
+  InstantService* instant_service =
+      InstantServiceFactory::GetForProfile(browser()->profile());
+  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
+  instant_service->ntp_prerenderer()->ReloadStaleNTP();
 
+  FocusOmniboxAndWaitForInstantNTPSupport();
+  content::WindowedNotificationObserver observer(
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+      content::NotificationService::AllSources());
   ui_test_utils::NavigateToURLWithDisposition(
       browser(),
       GURL(chrome::kChromeUINewTabURL),
-      NEW_FOREGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
+      CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  observer.Wait();
   content::WebContents* active_tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_TRUE(IsGooglePage(active_tab));
+}
+
+IN_PROC_BROWSER_TEST_F(InstantExtendedManualTest, MANUAL_SearchesFromFakebox) {
+  set_browser(browser());
+  InstantService* instant_service =
+      InstantServiceFactory::GetForProfile(browser()->profile());
+  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
+  instant_service->ntp_prerenderer()->ReloadStaleNTP();
+
+  FocusOmniboxAndWaitForInstantNTPSupport();
+  // Open a new tab page.
+  content::WindowedNotificationObserver observer(
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+      content::NotificationService::AllSources());
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(),
+      GURL(chrome::kChromeUINewTabURL),
+      CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  observer.Wait();
+  content::WebContents* active_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(IsGooglePage(active_tab));
+
+  // Click in the fakebox and expect invisible focus.
+  ui_test_utils::ClickOnView(browser(), VIEW_ID_TAB_CONTAINER);
+  bool fakebox_is_present = false;
+  content::WindowedNotificationObserver focus_observer(
+      chrome::NOTIFICATION_OMNIBOX_FOCUS_CHANGED,
+      content::NotificationService::AllSources());
+  ASSERT_TRUE(GetBoolFromJS(active_tab, "!!document.querySelector('#fkbx')",
+                            &fakebox_is_present));
+  ASSERT_TRUE(fakebox_is_present);
+  ASSERT_TRUE(content::ExecuteScript(
+      active_tab, "document.querySelector('#fkbx').click()"));
+  focus_observer.Wait();
+  EXPECT_EQ(OMNIBOX_FOCUS_INVISIBLE, omnibox()->model()->focus_state());
+
+  // Type "test".
+  const ui::KeyboardCode query[] = {
+    ui::VKEY_T, ui::VKEY_E, ui::VKEY_S, ui::VKEY_T,
+    ui::VKEY_UNKNOWN
+  };
+  for (size_t i = 0; query[i] != ui::VKEY_UNKNOWN; i++) {
+    ASSERT_TRUE(ui_test_utils::SendKeyPressSync(browser(), query[i],
+                                                false, false, false, false));
+  }
+
+  // The omnibox should say "test" and have visible focus.
+  EXPECT_EQ("test", GetOmniboxText());
+  EXPECT_EQ(OMNIBOX_FOCUS_VISIBLE, omnibox()->model()->focus_state());
+
+  // Pressing enter should search for [test].
+  const string16& search_title = ASCIIToUTF16("test - Google Search");
+  content::TitleWatcher title_watcher(active_tab, search_title);
+  PressEnterAndWaitForNavigation();
+  EXPECT_EQ(search_title, title_watcher.WaitAndGetTitle());
 }

@@ -51,20 +51,26 @@ void VideoCaptureDevice::GetDeviceNames(Names* device_names) {
     ScopedJavaLocalRef<jobject> ci =
         Java_ChromiumCameraInfo_getAt(env, camera_id);
 
-    Name name;
-    name.unique_id = base::StringPrintf(
-        "%d", Java_ChromiumCameraInfo_getId(env, ci.obj()));
-    name.device_name = base::android::ConvertJavaStringToUTF8(
-        Java_ChromiumCameraInfo_getDeviceName(env, ci.obj()));
+    Name name(
+        base::android::ConvertJavaStringToUTF8(
+            Java_ChromiumCameraInfo_getDeviceName(env, ci.obj())),
+        base::StringPrintf("%d", Java_ChromiumCameraInfo_getId(env, ci.obj())));
     device_names->push_back(name);
 
     DVLOG(1) << "VideoCaptureDevice::GetDeviceNames: camera device_name="
-             << name.device_name
+             << name.name()
              << ", unique_id="
-             << name.unique_id
+             << name.id()
              << ", orientation "
              << Java_ChromiumCameraInfo_getOrientation(env, ci.obj());
   }
+}
+
+const std::string VideoCaptureDevice::Name::GetModel() const {
+  // Android cameras are not typically USB devices, and this method is currently
+  // only used for USB model identifiers, so this implementation just indicates
+  // an unknown device model.
+  return "";
 }
 
 // static
@@ -99,7 +105,7 @@ VideoCaptureDeviceAndroid::~VideoCaptureDeviceAndroid() {
 
 bool VideoCaptureDeviceAndroid::Init() {
   int id;
-  if (!base::StringToInt(device_name_.unique_id, &id))
+  if (!base::StringToInt(device_name_.id(), &id))
     return false;
 
   JNIEnv* env = AttachCurrentThread();
@@ -116,9 +122,7 @@ const VideoCaptureDevice::Name& VideoCaptureDeviceAndroid::device_name() {
 }
 
 void VideoCaptureDeviceAndroid::Allocate(
-    int width,
-    int height,
-    int frame_rate,
+    const VideoCaptureCapability& capture_format,
     EventHandler* observer) {
   {
     base::AutoLock lock(lock_);
@@ -132,9 +136,9 @@ void VideoCaptureDeviceAndroid::Allocate(
 
   jboolean ret = Java_VideoCapture_allocate(env,
                                             j_capture_.obj(),
-                                            width,
-                                            height,
-                                            frame_rate);
+                                            capture_format.width,
+                                            capture_format.height,
+                                            capture_format.frame_rate);
   if (!ret) {
     SetErrorState("failed to allocate");
     return;

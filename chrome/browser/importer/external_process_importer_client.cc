@@ -6,15 +6,12 @@
 
 #include "base/bind.h"
 #include "base/strings/string_number_conversions.h"
-#include "chrome/browser/bookmarks/imported_bookmark_entry.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/importer/external_process_importer_host.h"
-#include "chrome/browser/importer/firefox_importer_utils.h"
-#include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/in_process_importer_bridge.h"
-#include "chrome/browser/importer/profile_import_process_messages.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/common/importer/firefox_importer_utils.h"
+#include "chrome/common/importer/imported_bookmark_entry.h"
+#include "chrome/common/importer/profile_import_process_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
 #include "grit/generated_resources.h"
@@ -103,6 +100,12 @@ bool ExternalProcessImporterClient::OnMessageReceived(
                         OnPasswordFormImportReady)
     IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_NotifyKeywordsReady,
                         OnKeywordsImportReady)
+    IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_NotifyFirefoxSearchEngData,
+                        OnFirefoxSearchEngineDataReceived)
+#if defined(OS_WIN)
+    IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_NotifyIE7PasswordInfo,
+                        OnIE7PasswordReceived)
+#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -156,7 +159,7 @@ void ExternalProcessImporterClient::OnHistoryImportStart(
 }
 
 void ExternalProcessImporterClient::OnHistoryImportGroup(
-    const history::URLRows& history_rows_group,
+    const std::vector<ImporterURLRow>& history_rows_group,
     int visit_source) {
   if (cancelled_)
     return;
@@ -165,7 +168,7 @@ void ExternalProcessImporterClient::OnHistoryImportGroup(
                        history_rows_group.end());
   if (history_rows_.size() == total_history_rows_count_)
     bridge_->SetHistoryItems(history_rows_,
-                             static_cast<history::VisitSource>(visit_source));
+                             static_cast<importer::VisitSource>(visit_source));
 }
 
 void ExternalProcessImporterClient::OnHomePageImportReady(
@@ -229,14 +232,28 @@ void ExternalProcessImporterClient::OnPasswordFormImportReady(
 }
 
 void ExternalProcessImporterClient::OnKeywordsImportReady(
-    const std::vector<TemplateURL*>& template_urls,
+    const std::vector<importer::URLKeywordInfo>& url_keywords,
     bool unique_on_host_and_path) {
   if (cancelled_)
     return;
-
-  bridge_->SetKeywords(template_urls, unique_on_host_and_path);
-  // The pointers in |template_urls| have now been deleted.
+  bridge_->SetKeywords(url_keywords, unique_on_host_and_path);
 }
+
+void ExternalProcessImporterClient::OnFirefoxSearchEngineDataReceived(
+    const std::vector<std::string> search_engine_data) {
+  if (cancelled_)
+    return;
+  bridge_->SetFirefoxSearchEnginesXMLData(search_engine_data);
+}
+
+#if defined(OS_WIN)
+void ExternalProcessImporterClient::OnIE7PasswordReceived(
+    const importer::ImporterIE7PasswordInfo& importer_password_info) {
+  if (cancelled_)
+    return;
+  bridge_->AddIE7PasswordInfo(importer_password_info);
+}
+#endif
 
 ExternalProcessImporterClient::~ExternalProcessImporterClient() {}
 
@@ -279,6 +296,9 @@ void ExternalProcessImporterClient::StartProcessOnIOThread(
   // in the external process.
   DictionaryValue localized_strings;
   localized_strings.SetString(
+      base::IntToString(IDS_BOOKMARK_GROUP),
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_GROUP));
+  localized_strings.SetString(
       base::IntToString(IDS_BOOKMARK_GROUP_FROM_FIREFOX),
       l10n_util::GetStringUTF8(IDS_BOOKMARK_GROUP_FROM_FIREFOX));
   localized_strings.SetString(
@@ -288,8 +308,8 @@ void ExternalProcessImporterClient::StartProcessOnIOThread(
       base::IntToString(IDS_IMPORT_FROM_FIREFOX),
       l10n_util::GetStringUTF8(IDS_IMPORT_FROM_FIREFOX));
   localized_strings.SetString(
-      base::IntToString(IDS_IMPORT_FROM_GOOGLE_TOOLBAR),
-      l10n_util::GetStringUTF8(IDS_IMPORT_FROM_GOOGLE_TOOLBAR));
+      base::IntToString(IDS_IMPORT_FROM_ICEWEASEL),
+      l10n_util::GetStringUTF8(IDS_IMPORT_FROM_ICEWEASEL));
   localized_strings.SetString(
       base::IntToString(IDS_IMPORT_FROM_SAFARI),
       l10n_util::GetStringUTF8(IDS_IMPORT_FROM_SAFARI));

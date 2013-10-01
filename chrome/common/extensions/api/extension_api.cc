@@ -18,14 +18,14 @@
 #include "base/values.h"
 #include "chrome/common/extensions/api/generated_schemas.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/features/base_feature_provider.h"
-#include "chrome/common/extensions/features/simple_feature.h"
+#include "chrome/common/extensions/features/feature.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
-#include "googleurl/src/gurl.h"
+#include "extensions/common/features/feature_provider.h"
 #include "grit/common_resources.h"
 #include "grit/extensions_api_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "url/gurl.h"
 
 namespace extensions {
 
@@ -204,10 +204,9 @@ void ExtensionAPI::LoadSchema(const std::string& name,
   while (!schema_list->empty()) {
     base::DictionaryValue* schema = NULL;
     {
-      base::Value* value = NULL;
+      scoped_ptr<base::Value> value;
       schema_list->Remove(schema_list->GetSize() - 1, &value);
-      CHECK(value->IsType(base::Value::TYPE_DICTIONARY));
-      schema = static_cast<base::DictionaryValue*>(value);
+      CHECK(value.release()->GetAsDictionary(&schema));
     }
 
     CHECK(schema->GetString("namespace", &schema_namespace));
@@ -226,11 +225,11 @@ ExtensionAPI::~ExtensionAPI() {
 
 void ExtensionAPI::InitDefaultConfiguration() {
   RegisterDependencyProvider(
-      "api", BaseFeatureProvider::GetByName("api"));
+      "api", FeatureProvider::GetByName("api"));
   RegisterDependencyProvider(
-      "manifest", BaseFeatureProvider::GetByName("manifest"));
+      "manifest", FeatureProvider::GetByName("manifest"));
   RegisterDependencyProvider(
-      "permission", BaseFeatureProvider::GetByName("permission"));
+      "permission", FeatureProvider::GetByName("permission"));
 
   // Schemas to be loaded from resources.
   CHECK(unloaded_schemas_.empty());
@@ -253,7 +252,6 @@ void ExtensionAPI::InitDefaultConfiguration() {
       IDR_EXTENSION_API_JSON_FILEBROWSERHANDLER);
   RegisterSchemaResource("fileBrowserPrivate",
       IDR_EXTENSION_API_JSON_FILEBROWSERPRIVATE);
-  RegisterSchemaResource("input.ime", IDR_EXTENSION_API_JSON_INPUT_IME);
   RegisterSchemaResource("inputMethodPrivate",
       IDR_EXTENSION_API_JSON_INPUTMETHODPRIVATE);
   RegisterSchemaResource("pageAction", IDR_EXTENSION_API_JSON_PAGEACTION);
@@ -266,6 +264,7 @@ void ExtensionAPI::InitDefaultConfiguration() {
   RegisterSchemaResource("ttsEngine", IDR_EXTENSION_API_JSON_TTSENGINE);
   RegisterSchemaResource("tts", IDR_EXTENSION_API_JSON_TTS);
   RegisterSchemaResource("types", IDR_EXTENSION_API_JSON_TYPES);
+  RegisterSchemaResource("types.private", IDR_EXTENSION_API_JSON_TYPES_PRIVATE);
   RegisterSchemaResource("webRequestInternal",
       IDR_EXTENSION_API_JSON_WEBREQUESTINTERNAL);
   RegisterSchemaResource("webstore", IDR_EXTENSION_API_JSON_WEBSTORE);
@@ -309,10 +308,6 @@ Feature::Availability ExtensionAPI::IsAvailable(const std::string& full_name,
                                                 const Extension* extension,
                                                 Feature::Context context,
                                                 const GURL& url) {
-  std::string feature_type;
-  std::string feature_name;
-  SplitDependencyName(full_name, &feature_type, &feature_name);
-
   Feature* feature = GetFeatureDependency(full_name);
   CHECK(feature) << full_name;
 

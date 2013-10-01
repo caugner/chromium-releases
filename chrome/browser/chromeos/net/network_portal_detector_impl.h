@@ -16,14 +16,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/captive_portal/captive_portal_detector.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chromeos/network/network_state_handler_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "googleurl/src/gurl.h"
 #include "net/url_request/url_fetcher.h"
+#include "url/gurl.h"
 
 namespace net {
 class URLRequestContextGetter;
@@ -138,7 +138,13 @@ class NetworkPortalDetectorImpl
 
   // Returns current number of portal detection attempts.
   // Used by unit tests.
-  int attempt_count_for_testing() { return attempt_count_; }
+  int attempt_count_for_testing() const { return attempt_count_; }
+
+  // Sets current number of detection attempts.
+  // Used by unit tests.
+  void set_attempt_count_for_testing(int attempt_count) {
+    attempt_count_ = attempt_count;
+  }
 
   // Sets minimum time between consecutive portal checks for the same
   // network. Used by unit tests.
@@ -159,7 +165,7 @@ class NetworkPortalDetectorImpl
   }
 
   // Returns delay before next portal check. Used by unit tests.
-  const base::TimeDelta& next_attempt_delay_for_testing() {
+  const base::TimeDelta& next_attempt_delay_for_testing() const {
     return next_attempt_delay_;
   }
 

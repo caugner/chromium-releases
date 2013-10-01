@@ -13,8 +13,9 @@ var util = {};
  * Returns a function that console.log's its arguments, prefixed by |msg|.
  *
  * @param {string} msg The message prefix to use in the log.
- * @param {function=} opt_callback A function to invoke after logging.
- * @return {function} Function that logs.
+ * @param {function(...string)=} opt_callback A function to invoke after
+ *     logging.
+ * @return {function(...string)} Function that logs.
  */
 util.flog = function(msg, opt_callback) {
   return function() {
@@ -30,7 +31,7 @@ util.flog = function(msg, opt_callback) {
  * prefixed by |msg|.
  *
  * @param {string} msg The message prefix to use in the exception.
- * @return {function} Function that throws.
+ * @return {function(...string)} Function that throws.
  */
 util.ferr = function(msg) {
   return function() {
@@ -386,8 +387,8 @@ util.resolvePath = function(root, path, resultCallback, errorCallback) {
  * itself if necessary.
  * @param {DirEntry} root The root entry.
  * @param {string} path The file path.
- * @param {function} successCallback The callback.
- * @param {function} errorCallback The callback.
+ * @param {function(FileEntry)} successCallback The callback.
+ * @param {function(FileError)} errorCallback The callback.
  */
 util.getOrCreateFile = function(root, path, successCallback, errorCallback) {
   var dirname = null;
@@ -419,8 +420,8 @@ util.getOrCreateFile = function(root, path, successCallback, errorCallback) {
  * way.
  * @param {DirEntry} root The root entry.
  * @param {string} path The directory path.
- * @param {function} successCallback The callback.
- * @param {function} errorCallback The callback.
+ * @param {function(FileEntry)} successCallback The callback.
+ * @param {function(FileError)} errorCallback The callback.
  */
 util.getOrCreateDirectory = function(root, path, successCallback,
                                      errorCallback) {
@@ -445,14 +446,76 @@ util.getOrCreateDirectory = function(root, path, successCallback,
 /**
  * Remove a file or a directory.
  * @param {Entry} entry The entry to remove.
- * @param {function} onSuccess The success callback.
- * @param {function} onError The error callback.
+ * @param {function()} onSuccess The success callback.
+ * @param {function(FileError)} onError The error callback.
  */
 util.removeFileOrDirectory = function(entry, onSuccess, onError) {
   if (entry.isDirectory)
     entry.removeRecursively(onSuccess, onError);
   else
     entry.remove(onSuccess, onError);
+};
+
+/**
+ * Checks if an entry exists at |relativePath| in |dirEntry|.
+ * If exists, tries to deduplicate the path by inserting parenthesized number,
+ * such as " (1)", before the extension. If it still exists, tries the
+ * deduplication again by increasing the number up to 10 times.
+ * For example, suppose "file.txt" is given, "file.txt", "file (1).txt",
+ * "file (2).txt", ..., "file (9).txt" will be tried.
+ *
+ * @param {DirectoryEntry} dirEntry The target directory entry.
+ * @param {string} relativePath The path to be deduplicated.
+ * @param {function(string)} onSuccess Called with the deduplicated path on
+ *     success.
+ * @param {function(FileError)} onError Called on error.
+ */
+util.deduplicatePath = function(dirEntry, relativePath, onSuccess, onError) {
+  // The trial is up to 10.
+  var MAX_RETRY = 10;
+
+  // Crack the path into three part. The parenthesized number (if exists) will
+  // be replaced by incremented number for retry. For example, suppose
+  // |relativePath| is "file (10).txt", the second check path will be
+  // "file (11).txt".
+  var match = /^(.*?)(?: \((\d+)\))?(\.[^.]*?)?$/.exec(relativePath);
+  var prefix = match[1];
+  var copyNumber = match[2] ? parseInt(match[2], 10) : 0;
+  var ext = match[3] ? match[3] : '';
+
+  // The path currently checking the existence.
+  var trialPath = relativePath;
+
+  var onNotResolved = function(err) {
+    // We expect to be unable to resolve the target file, since we're going
+    // to create it during the copy.  However, if the resolve fails with
+    // anything other than NOT_FOUND, that's trouble.
+    if (err.code != FileError.NOT_FOUND_ERR) {
+      onError(err);
+      return;
+    }
+
+    // Found a path that doesn't exist.
+    onSuccess(trialPath);
+  }
+
+  var numRetry = MAX_RETRY;
+  var onResolved = function(entry) {
+    if (--numRetry == 0) {
+      // Hit the limit of the number of retrial.
+      // Note that we cannot create FileError object directly, so here we use
+      // Object.create instead.
+      onError(util.createFileError(FileError.PATH_EXISTS_ERR));
+      return;
+    }
+
+    ++copyNumber;
+    trialPath = prefix + ' (' + copyNumber + ')' + ext;
+    util.resolvePath(dirEntry, trialPath, onResolved, onNotResolved);
+  };
+
+  // Check to see if the target exists.
+  util.resolvePath(dirEntry, trialPath, onResolved, onNotResolved);
 };
 
 /**
@@ -535,7 +598,8 @@ util.readFileBytes = function(file, begin, end, callback, onError) {
  * Truncates the file first, so the previous content is fully overwritten.
  * @param {FileEntry} entry File entry.
  * @param {Blob} blob The blob to write.
- * @param {function} onSuccess Completion callback.
+ * @param {function(Event)} onSuccess Completion callback. The first argument is
+ *     a 'writeend' event.
  * @param {function(FileError)} onError Error handler.
  */
 util.writeBlobToFile = function(entry, blob, onSuccess, onError) {
@@ -755,7 +819,8 @@ function strf(id, var_args) {
  */
 util.platform = {
   /**
-   * @return {boolean} True if Files.app is running via "chrome://files".
+   * @return {boolean} True if Files.app is running via "chrome://files", open
+   * files or select folder dialog. False otherwise.
    */
   runningInBrowser: function() {
     return !window.appID;
@@ -781,7 +846,7 @@ util.platform = {
   /**
    * @param {string} key Preference name.
    * @param {string|Object} value Preference value.
-   * @param {function=} opt_callback Completion callback.
+   * @param {function()=} opt_callback Completion callback.
    */
   setPreference: function(key, value, opt_callback) {
     if (typeof value != 'string')
@@ -795,7 +860,7 @@ util.platform = {
 
 /**
  * Attach page load handler.
- * @param {function} handler Application-specific load handler.
+ * @param {function()} handler Application-specific load handler.
  */
 util.addPageLoadHandler = function(handler) {
   document.addEventListener('DOMContentLoaded', function() {
@@ -1069,4 +1134,68 @@ util.toggleFullScreen = function(appWindow, enabled) {
 
   console.error(
       'App window not passed. Unable to toggle the full screen mode.');
+};
+
+/**
+ * The type of a file operation error.
+ * @enum {number}
+ */
+util.FileOperationErrorType = {
+  UNEXPECTED_SOURCE_FILE: 0,
+  TARGET_EXISTS: 1,
+  FILESYSTEM_ERROR: 2,
+};
+
+/**
+ * The type of an entry changed event.
+ * @enum {number}
+ */
+util.EntryChangedType = {
+  CREATED: 0,
+  DELETED: 1,
+};
+
+/**
+ * @param {DirectoryEntry|Object} entry DirectoryEntry to be checked.
+ * @return {boolean} True if the given entry is fake.
+ */
+util.isFakeDirectoryEntry = function(entry) {
+  // Currently, fake entry doesn't support createReader.
+  return !('createReader' in entry);
+};
+
+/**
+ * Creates a FileError instance with given code.
+ * Note that we cannot create FileError instance by "new FileError(code)",
+ * unfortunately, so here we use Object.create.
+ * @param {number} code Error code for the FileError.
+ * @return {FileError} FileError instance
+ */
+util.createFileError = function(code) {
+  return Object.create(FileError.prototype, {
+    code: { get: function() { return code; } }
+  });
+};
+
+/**
+ * @param {Entry|Object} entry1 The entry to be compared. Can be a fake.
+ * @param {Entry|Object} entry2 The entry to be compared. Can be a fake.
+ * @return {boolean} True if the both entry represents a same file or directory.
+ */
+util.isSameEntry = function(entry1, entry2) {
+  // Currently, we can assume there is only one root.
+  // When we support multi-file system, we need to look at filesystem, too.
+  return entry1.fullPath == entry2.fullPath;
+};
+
+/**
+ * @param {Entry|Object} parent The parent entry. Can be a fake.
+ * @param {Entry|Object} child The child entry. Can be a fake.
+ * @return {boolean} True if parent entry is actualy the parent of the child
+ *     entry.
+ */
+util.isParentEntry = function(parent, child) {
+  // Currently, we can assume there is only one root.
+  // When we support multi-file system, we need to look at filesystem, too.
+  return PathUtil.isParentPath(parent.fullPath, child.fullPath);
 };

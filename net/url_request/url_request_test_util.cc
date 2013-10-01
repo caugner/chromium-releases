@@ -6,7 +6,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "net/base/host_port_pair.h"
@@ -83,7 +83,7 @@ void TestURLRequestContext::Init() {
   }
   if (!http_server_properties()) {
     context_storage_.set_http_server_properties(
-        new HttpServerPropertiesImpl);
+        scoped_ptr<HttpServerProperties>(new HttpServerPropertiesImpl()));
   }
   if (!transport_security_state()) {
     context_storage_.set_transport_security_state(

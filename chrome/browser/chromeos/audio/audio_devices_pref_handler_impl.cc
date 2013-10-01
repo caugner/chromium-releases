@@ -12,8 +12,8 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/audio/audio_device.h"
 #include "chromeos/audio/cras_audio_handler.h"
@@ -21,7 +21,7 @@
 namespace {
 
 std::string GetDeviceIdString(const chromeos::AudioDevice& device) {
-  return device.display_name + " : " +
+  return device.device_name + " : " +
          base::Uint64ToString(device.id & static_cast<uint64>(0xffffffff));
 }
 
@@ -45,7 +45,6 @@ double AudioDevicesPrefHandlerImpl::GetVolumeGainValue(
 
 void AudioDevicesPrefHandlerImpl::SetVolumeGainValue(
     const AudioDevice& device, double value) {
-  value = std::min(std::max(value, 0.0), 100.0);
   device_volume_settings_->SetDouble(GetDeviceIdString(device), value);
 
   SaveDevicesVolumePref();
@@ -175,9 +174,16 @@ void AudioDevicesPrefHandlerImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(prefs::kAudioDevicesVolumePercent);
   registry->RegisterDictionaryPref(prefs::kAudioDevicesMute);
 
-  // TODO(jennyz,rkc): Move the rest of the preferences registered by
-  // AudioPrefHandlerImpl::RegisterPrefs here once we remove the old audio
-  // handler code.
+  // Register the prefs backing the audio muting policies.
+  registry->RegisterBooleanPref(prefs::kAudioOutputAllowed, true);
+  // This pref has moved to the media subsystem but we should verify it is there
+  // before we use it.
+  registry->RegisterBooleanPref(::prefs::kAudioCaptureAllowed, true);
+
+  // Register the legacy audio prefs for migration.
+  registry->RegisterDoublePref(prefs::kAudioVolumePercent,
+                               kDefaultVolumeGainPercent);
+  registry->RegisterIntegerPref(prefs::kAudioMute, kPrefMuteOff);
 }
 
 // static

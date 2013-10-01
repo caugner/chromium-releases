@@ -2,7 +2,6 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-
 #ifndef PPAPI_SIMPLE_PS_INTERFACE_H_
 #define PPAPI_SIMPLE_PS_INTERFACE_H_
 
@@ -53,6 +52,7 @@ const PPB_Graphics2D* PSInterfaceGraphics2D();
 const PPB_Graphics3D* PSInterfaceGraphics3D();
 const PPB_ImageData* PSInterfaceImageData();
 const PPB_Instance* PSInterfaceInstance();
+const PPB_Messaging* PSInterfaceMessaging();
 const PPB_MessageLoop* PSInterfaceMessageLoop();
 const PPB_MouseCursor* PSInterfaceMouseCursor();
 const PPB_URLLoader* PSInterfaceURLLoader();
@@ -68,4 +68,5 @@ const PPB_WebSocket* PSInterfaceWebSocket();
 void PSInterfaceInit();
 
 EXTERN_C_END
+
 #endif  /* PPAPI_SIMPLE_PS_INTERFACE_H */

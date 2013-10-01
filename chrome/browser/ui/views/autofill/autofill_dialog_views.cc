@@ -9,8 +9,9 @@
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_sign_in_delegate.h"
+#include "chrome/browser/ui/autofill/autofill_dialog_view_delegate.h"
+#include "chrome/browser/ui/views/autofill/decorated_textfield.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "components/autofill/content/browser/wallet/wallet_service_url.h"
 #include "components/autofill/core/browser/autofill_type.h"
@@ -23,7 +24,6 @@
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/multi_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/combobox_model.h"
@@ -34,6 +34,9 @@
 #include "ui/gfx/skia_util.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
+#include "ui/views/bubble/bubble_border.h"
+#include "ui/views/bubble/bubble_frame_view.h"
+#include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/label_button.h"
@@ -67,30 +70,24 @@ const int kMinimumContentsHeight = 100;
 // Horizontal padding between text and other elements (in pixels).
 const int kAroundTextPadding = 4;
 
-// Padding around icons inside DecoratedTextfields.
-const size_t kTextfieldIconPadding = 3;
-
-// Size of the triangular mark that indicates an invalid textfield (in pixels).
-const size_t kDogEarSize = 10;
-
 // The space between the edges of a notification bar and the text within (in
 // pixels).
-const size_t kNotificationPadding = 14;
+const int kNotificationPadding = 17;
 
 // Vertical padding above and below each detail section (in pixels).
-const size_t kDetailSectionInset = 10;
+const int kDetailSectionVerticalPadding = 10;
 
-const size_t kAutocheckoutStepsAreaPadding = 28;
-const size_t kAutocheckoutStepInset = 20;
+const int kAutocheckoutStepsAreaPadding = 28;
+const int kAutocheckoutStepInset = 20;
 
-const size_t kAutocheckoutProgressBarWidth = 375;
-const size_t kAutocheckoutProgressBarHeight = 15;
+const int kAutocheckoutProgressBarWidth = 375;
+const int kAutocheckoutProgressBarHeight = 15;
 
-const size_t kArrowHeight = 7;
-const size_t kArrowWidth = 2 * kArrowHeight;
+const int kArrowHeight = 7;
+const int kArrowWidth = 2 * kArrowHeight;
 
-// The padding around the edges of the legal documents text, in pixels.
-const size_t kLegalDocPadding = 20;
+// The padding inside the edges of the dialog, in pixels.
+const int kDialogEdgePadding = 20;
 
 // Slight shading for mouse hover and legal document background.
 SkColor kShadingColor = SkColorSetARGB(7, 0, 0, 0);
@@ -98,125 +95,51 @@ SkColor kShadingColor = SkColorSetARGB(7, 0, 0, 0);
 // A border color for the legal document view.
 SkColor kSubtleBorderColor = SkColorSetARGB(10, 0, 0, 0);
 
-// The top padding, in pixels, for the suggestions menu dropdown arrows.
-const size_t kMenuButtonTopOffset = 5;
+// The top and bottom padding, in pixels, for the suggestions menu dropdown
+// arrows.
+const int kMenuButtonTopInset = 3;
+const int kMenuButtonBottomInset = 6;
 
-// The side padding, in pixels, for the suggestions menu dropdown arrows.
-const size_t kMenuButtonHorizontalPadding = 20;
+// Spacing between lines of text in the overlay view.
+const int kOverlayTextInterlineSpacing = 10;
 
-const char kDecoratedTextfieldClassName[] = "autofill/DecoratedTextfield";
+// Spacing below image and above text messages in overlay view.
+const int kOverlayImageBottomMargin = 50;
+
+// A dimmer text color used in various parts of the dialog. TODO(estade): should
+// this be part of NativeTheme? Currently the value is duplicated in several
+// places.
+const SkColor kGreyTextColor = SkColorSetRGB(102, 102, 102);
+
 const char kNotificationAreaClassName[] = "autofill/NotificationArea";
-
-views::Border* CreateLabelAlignmentBorder() {
-  // TODO(estade): this should be made to match the native textfield top
-  // inset. It's hard to get at, so for now it's hard-coded.
-  return views::Border::CreateEmptyBorder(4, 0, 0, 0);
-}
-
-// Returns a label that describes a details section.
-views::Label* CreateDetailsSectionLabel(const string16& text) {
-  views::Label* label = new views::Label(text);
-  label->SetHorizontalAlignment(gfx::ALIGN_RIGHT);
-  label->SetFont(label->font().DeriveFont(0, gfx::Font::BOLD));
-  label->set_border(CreateLabelAlignmentBorder());
-  return label;
-}
-
-// Draws an arrow at the top of |canvas| pointing to |tip_x|.
-void DrawArrow(gfx::Canvas* canvas, int tip_x, const SkColor& color) {
-  const int arrow_half_width = kArrowWidth / 2.0f;
-  const int arrow_middle = tip_x - arrow_half_width;
-
-  SkPath arrow;
-  arrow.moveTo(arrow_middle - arrow_half_width, kArrowHeight);
-  arrow.lineTo(arrow_middle + arrow_half_width, kArrowHeight);
-  arrow.lineTo(arrow_middle, 0);
-  arrow.close();
-  canvas->ClipPath(arrow);
-  canvas->DrawColor(color);
-}
+const char kOverlayViewClassName[] = "autofill/OverlayView";
 
 typedef ui::MultiAnimation::Part Part;
 typedef ui::MultiAnimation::Parts Parts;
 
-class OverlayView : public views::View,
-                    public ui::AnimationDelegate {
- public:
-  OverlayView() {
-    SetLayoutManager(new views::FillLayout());
+// Draws an arrow at the top of |canvas| pointing to |tip_x|.
+void DrawArrow(gfx::Canvas* canvas,
+               int tip_x,
+               const SkColor& fill_color,
+               const SkColor& stroke_color) {
+  const int arrow_half_width = kArrowWidth / 2.0f;
 
-    set_background(views::Background::CreateSolidBackground(GetNativeTheme()->
-        GetSystemColor(ui::NativeTheme::kColorId_DialogBackground)));
+  SkPath arrow;
+  arrow.moveTo(tip_x - arrow_half_width, kArrowHeight);
+  arrow.lineTo(tip_x, 0);
+  arrow.lineTo(tip_x + arrow_half_width, kArrowHeight);
 
-    Parts parts;
-    // For this part of the animation, simply show the splash image.
-    parts.push_back(Part(kSplashDisplayDurationMs, ui::Tween::ZERO));
-    // For this part of the animation, fade out the splash image.
-    parts.push_back(Part(kSplashFadeOutDurationMs, ui::Tween::EASE_IN));
-    // For this part of the animation, fade out |this| (fade in the dialog).
-    parts.push_back(Part(kSplashFadeInDialogDurationMs, ui::Tween::EASE_OUT));
-    fade_out_.reset(
-        new ui::MultiAnimation(parts,
-                               ui::MultiAnimation::GetDefaultTimerInterval()));
-    fade_out_->set_delegate(this);
-    fade_out_->set_continuous(false);
-    fade_out_->Start();
+  SkPaint fill_paint;
+  fill_paint.setColor(fill_color);
+  canvas->DrawPath(arrow, fill_paint);
+
+  if (stroke_color != SK_ColorTRANSPARENT) {
+    SkPaint stroke_paint;
+    stroke_paint.setColor(stroke_color);
+    stroke_paint.setStyle(SkPaint::kStroke_Style);
+    canvas->DrawPath(arrow, stroke_paint);
   }
-
-  virtual ~OverlayView() {}
-
-  // ui::AnimationDelegate implementation:
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE {
-    DCHECK_EQ(animation, fade_out_.get());
-    if (fade_out_->current_part_index() != 0)
-      SchedulePaint();
-  }
-
-  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE {
-    DCHECK_EQ(animation, fade_out_.get());
-    SetVisible(false);
-  }
-
-  // views::View implementation:
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    // BubbleFrameView doesn't mask the window, it just draws the border via
-    // image assets. Match that rounding here.
-    static const SkScalar kCornerRadius = SkIntToScalar(2);
-    gfx::Rect rect =
-        GetWidget()->non_client_view()->frame_view()->GetLocalBounds();
-    rect.Inset(12, 12, 12, 12);
-    gfx::Path window_mask;
-    window_mask.addRoundRect(gfx::RectToSkRect(rect),
-                             kCornerRadius, kCornerRadius);
-    canvas->ClipPath(window_mask);
-
-    if (fade_out_->current_part_index() == 2) {
-      canvas->SaveLayerAlpha((1 - fade_out_->GetCurrentValue()) * 255);
-      views::View::OnPaint(canvas);
-      canvas->Restore();
-    } else {
-      views::View::OnPaint(canvas);
-    }
-  }
-
-  virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE {
-    if (fade_out_->current_part_index() == 0) {
-      views::View::PaintChildren(canvas);
-    } else if (fade_out_->current_part_index() == 1) {
-      canvas->SaveLayerAlpha((1 - fade_out_->GetCurrentValue()) * 255);
-      views::View::PaintChildren(canvas);
-      canvas->Restore();
-    }
-  }
-
- private:
-  // This MultiAnimation is used to first fade out the contents of the overlay,
-  // then fade out the background of the overlay (revealing the dialog behind
-  // the overlay). This avoids cross-fade.
-  scoped_ptr<ui::MultiAnimation> fade_out_;
-
-  DISALLOW_COPY_AND_ASSIGN(OverlayView);
-};
+}
 
 // This class handles layout for the first row of a SuggestionView.
 // It exists to circumvent shortcomings of GridLayout and BoxLayout (namely that
@@ -229,8 +152,20 @@ class SectionRowView : public views::View {
 
   // views::View implementation:
   virtual gfx::Size GetPreferredSize() OVERRIDE {
-    // Only the height matters anyway.
-    return child_at(2)->GetPreferredSize();
+    int height = 0;
+    int width = 0;
+    for (int i = 0; i < child_count(); ++i) {
+      if (child_at(i)->visible()) {
+        if (width > 0)
+          width += kAroundTextPadding;
+
+        gfx::Size size = child_at(i)->GetPreferredSize();
+        height = std::max(height, size.height());
+        width += size.width();
+      }
+    }
+
+    return gfx::Size(width, height);
   }
 
   virtual void Layout() OVERRIDE {
@@ -272,9 +207,9 @@ class SectionRowView : public views::View {
 // This view is used for the contents of the error bubble widget.
 class ErrorBubbleContents : public views::View {
  public:
-  explicit ErrorBubbleContents(const string16& message)
+  explicit ErrorBubbleContents(const base::string16& message)
       : color_(kWarningColor) {
-    set_border(views::Border::CreateEmptyBorder(kArrowHeight, 0, 0, 0));
+    set_border(views::Border::CreateEmptyBorder(kArrowHeight - 3, 0, 0, 0));
 
     views::Label* label = new views::Label();
     label->SetText(message);
@@ -291,7 +226,7 @@ class ErrorBubbleContents : public views::View {
 
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
     views::View::OnPaint(canvas);
-    DrawArrow(canvas, width() / 2.0f, color_);
+    DrawArrow(canvas, width() / 2.0f, color_, SK_ColorTRANSPARENT);
   }
 
  private:
@@ -340,7 +275,7 @@ class LayoutPropagationView : public views::View {
 // Autocheckout flow.
 class AutocheckoutStepProgressView : public views::View {
  public:
-  AutocheckoutStepProgressView(const string16& description,
+  AutocheckoutStepProgressView(const base::string16& description,
                                const gfx::Font& font,
                                const SkColor color,
                                const bool is_icon_visible) {
@@ -349,14 +284,14 @@ class AutocheckoutStepProgressView : public views::View {
     const int kColumnSetId = 0;
     views::ColumnSet* columns = layout->AddColumnSet(kColumnSetId);
     columns->AddColumn(views::GridLayout::LEADING,
-                       views::GridLayout::LEADING,
+                       views::GridLayout::CENTER,
                        0,
                        views::GridLayout::USE_PREF,
                        0,
                        0);
     columns->AddPaddingColumn(0, 8);
     columns->AddColumn(views::GridLayout::LEADING,
-                       views::GridLayout::LEADING,
+                       views::GridLayout::CENTER,
                        0,
                        views::GridLayout::USE_PREF,
                        0,
@@ -384,58 +319,136 @@ class AutocheckoutStepProgressView : public views::View {
   DISALLOW_COPY_AND_ASSIGN(AutocheckoutStepProgressView);
 };
 
-}  // namespace
+// A tooltip icon (just an ImageView with a tooltip). Looks like (?).
+class TooltipIcon : public views::ImageView {
+ public:
+  explicit TooltipIcon(const base::string16& tooltip) : tooltip_(tooltip) {
+    SetImage(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+        IDR_AUTOFILL_TOOLTIP_ICON).ToImageSkia());
+  }
+  virtual ~TooltipIcon() {}
 
-// AutofillDialogViews::SizeLimitedScrollView ----------------------------------
-
-AutofillDialogViews::SizeLimitedScrollView::SizeLimitedScrollView(
-    views::View* scroll_contents)
-    : max_height_(-1) {
-  set_hide_horizontal_scrollbar(true);
-  SetContents(scroll_contents);
-}
-
-AutofillDialogViews::SizeLimitedScrollView::~SizeLimitedScrollView() {}
-
-void AutofillDialogViews::SizeLimitedScrollView::Layout() {
-  contents()->SizeToPreferredSize();
-  ScrollView::Layout();
-}
-
-gfx::Size AutofillDialogViews::SizeLimitedScrollView::GetPreferredSize() {
-  gfx::Size size = contents()->GetPreferredSize();
-  if (contents()->visible()) {
-    if (max_height_ >= 0 && max_height_ < size.height())
-      size.set_height(max_height_);
-  } else {
-    // When we hide detailed steps we want to remove the excess vertical
-    // space left in their absence, but keep the width so that the dialog
-    // doesn't appear too 'elastic' in its dimensions.
-    size.set_height(0);
+  // views::View implementation
+  virtual bool GetTooltipText(const gfx::Point& p,
+                              base::string16* tooltip) const OVERRIDE {
+    *tooltip = tooltip_;
+    return !tooltip_.empty();
   }
 
-  return size;
-}
+ private:
+  base::string16 tooltip_;
 
-void AutofillDialogViews::SizeLimitedScrollView::SetMaximumHeight(
-    int max_height) {
-  int old_max = max_height_;
-  max_height_ = max_height;
+  DISALLOW_COPY_AND_ASSIGN(TooltipIcon);
+};
 
-  if (max_height_ < height() || old_max <= height())
-    PreferredSizeChanged();
-}
+// A View for a single notification banner.
+class NotificationView : public views::View {
+ public:
+  explicit NotificationView(const DialogNotification& data) : checkbox_(NULL) {
+    scoped_ptr<views::View> label_view;
+    if (data.HasCheckbox()) {
+      scoped_ptr<views::Checkbox> checkbox(
+          new views::Checkbox(base::string16()));
+      if (!data.interactive())
+        checkbox->SetState(views::Button::STATE_DISABLED);
+      checkbox->SetText(data.display_text());
+      checkbox->SetTextMultiLine(true);
+      checkbox->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+      checkbox->SetTextColor(views::Button::STATE_NORMAL,
+                             data.GetTextColor());
+      checkbox->SetTextColor(views::Button::STATE_HOVERED,
+                             data.GetTextColor());
+      checkbox->SetChecked(data.checked());
+      checkbox_ = checkbox.get();
+      label_view.reset(checkbox.release());
+    } else {
+      scoped_ptr<views::Label> label(new views::Label());
+      label->SetText(data.display_text());
+      label->SetMultiLine(true);
+      label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+      label->SetAutoColorReadabilityEnabled(false);
+      label->SetEnabledColor(data.GetTextColor());
+      label_view.reset(label.release());
+    }
+
+    AddChildView(label_view.release());
+
+    if (!data.tooltip_text().empty())
+      AddChildView(new TooltipIcon(data.tooltip_text()));
+
+    set_background(
+       views::Background::CreateSolidBackground(data.GetBackgroundColor()));
+    set_border(views::Border::CreateSolidSidedBorder(1, 0, 1, 0,
+                                                     data.GetBorderColor()));
+  }
+
+  virtual ~NotificationView() {}
+
+  views::Checkbox* checkbox() {
+    return checkbox_;
+  }
+
+  // views::View implementation
+  virtual gfx::Insets GetInsets() const OVERRIDE {
+    int vertical_padding = kNotificationPadding;
+    if (checkbox_)
+      vertical_padding -= 3;
+    return gfx::Insets(vertical_padding, kDialogEdgePadding,
+                       vertical_padding, kDialogEdgePadding);
+  }
+
+  virtual int GetHeightForWidth(int width) OVERRIDE {
+    int label_width = width - GetInsets().width();
+    if (child_count() > 1) {
+      views::View* tooltip_icon = child_at(1);
+      label_width -= tooltip_icon->GetPreferredSize().width() +
+          kDialogEdgePadding;
+    }
+
+    return child_at(0)->GetHeightForWidth(label_width) + GetInsets().height();
+  }
+
+  virtual void Layout() OVERRIDE {
+    // Surprisingly, GetContentsBounds() doesn't consult GetInsets().
+    gfx::Rect bounds = GetLocalBounds();
+    bounds.Inset(GetInsets());
+    int right_bound = bounds.right();
+
+    if (child_count() > 1) {
+      // The icon takes up the entire vertical space and an extra 20px on
+      // each side. This increases the hover target for the tooltip.
+      views::View* tooltip_icon = child_at(1);
+      gfx::Size icon_size = tooltip_icon->GetPreferredSize();
+      int icon_width = icon_size.width() + kDialogEdgePadding;
+      right_bound -= icon_width;
+      tooltip_icon->SetBounds(
+          right_bound, 0,
+          icon_width + kDialogEdgePadding, GetLocalBounds().height());
+    }
+
+    child_at(0)->SetBounds(bounds.x(), bounds.y(),
+                           right_bound - bounds.x(), bounds.height());
+  }
+
+ private:
+  // The checkbox associated with this notification, or NULL if there is none.
+  views::Checkbox* checkbox_;
+
+  DISALLOW_COPY_AND_ASSIGN(NotificationView);
+};
+
+}  // namespace
 
 // AutofillDialogViews::ErrorBubble --------------------------------------------
 
 AutofillDialogViews::ErrorBubble::ErrorBubble(views::View* anchor,
-                                              const string16& message)
+                                              const base::string16& message)
     : anchor_(anchor),
       contents_(new ErrorBubbleContents(message)),
       observer_(this) {
   widget_ = new views::Widget;
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
-  params.transparent = true;
+  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   views::Widget* anchor_widget = anchor->GetWidget();
   DCHECK(anchor_widget);
   params.parent = anchor_widget->GetNativeView();
@@ -487,95 +500,15 @@ gfx::Rect AutofillDialogViews::ErrorBubble::GetBoundsForWidget() {
   return bubble_bounds;
 }
 
-// AutofillDialogViews::DecoratedTextfield -------------------------------------
-
-AutofillDialogViews::DecoratedTextfield::DecoratedTextfield(
-    const string16& default_value,
-    const string16& placeholder,
-    views::TextfieldController* controller)
-    : border_(new views::FocusableBorder()),
-      invalid_(false) {
-  set_border(border_);
-  // Removes the border from |native_wrapper_|.
-  RemoveBorder();
-  set_placeholder_text(placeholder);
-  SetText(default_value);
-  SetController(controller);
-  SetHorizontalMargins(0, 0);
-}
-
-AutofillDialogViews::DecoratedTextfield::~DecoratedTextfield() {}
-
-void AutofillDialogViews::DecoratedTextfield::SetInvalid(bool invalid) {
-  invalid_ = invalid;
-  if (invalid)
-    border_->SetColor(kWarningColor);
-  else
-    border_->UseDefaultColor();
-  SchedulePaint();
-}
-
-void AutofillDialogViews::DecoratedTextfield::SetIcon(const gfx::Image& icon) {
-  int icon_space = icon.IsEmpty() ? 0 :
-                                    icon.Width() + 2 * kTextfieldIconPadding;
-  int left = base::i18n::IsRTL() ? icon_space : 0;
-  int right = base::i18n::IsRTL() ? 0 : icon_space;
-  SetHorizontalMargins(left, right);
-  icon_ = icon;
-
-  PreferredSizeChanged();
-  SchedulePaint();
-}
-
-const char* AutofillDialogViews::DecoratedTextfield::GetClassName() const {
-  return kDecoratedTextfieldClassName;
-}
-
-void AutofillDialogViews::DecoratedTextfield::PaintChildren(
-    gfx::Canvas* canvas) {}
-
-void AutofillDialogViews::DecoratedTextfield::OnPaint(gfx::Canvas* canvas) {
-  // Draw the textfield first.
-  views::View::PaintChildren(canvas);
-
-  border_->set_has_focus(HasFocus());
-  OnPaintBorder(canvas);
-
-  if (!icon_.IsEmpty()) {
-    gfx::Rect bounds = GetContentsBounds();
-    int x = base::i18n::IsRTL() ?
-        kTextfieldIconPadding :
-        bounds.right() - icon_.Width() - kTextfieldIconPadding;
-    canvas->DrawImageInt(icon_.AsImageSkia(), x,
-                         bounds.y() + (bounds.height() - icon_.Height()) / 2);
-  }
-
-  // Then draw extra stuff on top.
-  if (invalid_) {
-    if (base::i18n::IsRTL()) {
-      canvas->Translate(gfx::Vector2d(width(), 0));
-      canvas->Scale(-1, 1);
-    }
-
-    SkPath dog_ear;
-    dog_ear.moveTo(width() - kDogEarSize, 0);
-    dog_ear.lineTo(width(), 0);
-    dog_ear.lineTo(width(), kDogEarSize);
-    dog_ear.close();
-    canvas->ClipPath(dog_ear);
-    canvas->DrawColor(kWarningColor);
-  }
-}
-
 // AutofillDialogViews::AccountChooser -----------------------------------------
 
 AutofillDialogViews::AccountChooser::AccountChooser(
-    AutofillDialogController* controller)
+    AutofillDialogViewDelegate* delegate)
     : image_(new views::ImageView()),
       label_(new views::Label()),
       arrow_(new views::ImageView()),
       link_(new views::Link()),
-      controller_(controller) {
+      delegate_(delegate) {
   SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0,
                            kAroundTextPadding));
@@ -593,14 +526,16 @@ AutofillDialogViews::AccountChooser::AccountChooser(
 AutofillDialogViews::AccountChooser::~AccountChooser() {}
 
 void AutofillDialogViews::AccountChooser::Update() {
-  gfx::Image icon = controller_->AccountChooserImage();
-  image_->SetImage(icon.AsImageSkia());
-  label_->SetText(controller_->AccountChooserText());
+  SetVisible(!delegate_->ShouldShowSpinner());
 
-  bool show_link = !controller_->MenuModelForAccountChooser();
+  gfx::Image icon = delegate_->AccountChooserImage();
+  image_->SetImage(icon.AsImageSkia());
+  label_->SetText(delegate_->AccountChooserText());
+
+  bool show_link = !delegate_->MenuModelForAccountChooser();
   label_->SetVisible(!show_link);
   arrow_->SetVisible(!show_link);
-  link_->SetText(controller_->SignInLinkText());
+  link_->SetText(delegate_->SignInLinkText());
   link_->SetVisible(show_link);
 
   menu_runner_.reset();
@@ -611,7 +546,7 @@ void AutofillDialogViews::AccountChooser::Update() {
 bool AutofillDialogViews::AccountChooser::OnMousePressed(
     const ui::MouseEvent& event) {
   // Return true so we get the release event.
-  if (controller_->MenuModelForAccountChooser())
+  if (delegate_->MenuModelForAccountChooser())
     return event.IsOnlyLeftMouseButton();
 
   return false;
@@ -622,7 +557,7 @@ void AutofillDialogViews::AccountChooser::OnMouseReleased(
   if (!HitTestPoint(event.location()))
     return;
 
-  ui::MenuModel* model = controller_->MenuModelForAccountChooser();
+  ui::MenuModel* model = delegate_->MenuModelForAccountChooser();
   if (!model)
     return;
 
@@ -638,62 +573,229 @@ void AutofillDialogViews::AccountChooser::OnMouseReleased(
 
 void AutofillDialogViews::AccountChooser::LinkClicked(views::Link* source,
                                                       int event_flags) {
-  controller_->SignInLinkClicked();
+  delegate_->SignInLinkClicked();
 }
 
-// AutofillDialogViews::ShieldableContentsView ---------------------------------
+// AutofillDialogViews::OverlayView --------------------------------------------
 
-AutofillDialogViews::ShieldableContentsView::ShieldableContentsView()
-    : contents_(new views::View),
-      contents_shield_(new views::Label) {
-  contents_->SetLayoutManager(
+AutofillDialogViews::OverlayView::OverlayView(views::ButtonListener* listener)
+    : image_view_(new views::ImageView()),
+      message_stack_(new views::View()),
+      button_(new views::BlueButton(listener, base::string16())) {
+  set_background(views::Background::CreateSolidBackground(GetNativeTheme()->
+      GetSystemColor(ui::NativeTheme::kColorId_DialogBackground)));
+
+  AddChildView(image_view_);
+
+  AddChildView(message_stack_);
+  message_stack_->SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kVertical, 0, 0,
-                           views::kRelatedControlVerticalSpacing));
-  contents_shield_->SetVisible(false);
-  contents_shield_->set_background(views::Background::CreateSolidBackground(
-      GetNativeTheme()->GetSystemColor(
-          ui::NativeTheme::kColorId_DialogBackground)));
-  contents_shield_->SetFont(ui::ResourceBundle::GetSharedInstance().GetFont(
-      ui::ResourceBundle::BaseFont).DeriveFont(15));
+                           kOverlayTextInterlineSpacing));
+  message_stack_->set_border(views::Border::CreateEmptyBorder(
+      kDialogEdgePadding, kDialogEdgePadding, 0, kDialogEdgePadding));
 
-  AddChildView(contents_);
-  AddChildView(contents_shield_);
+  AddChildView(button_);
+  button_->set_focusable(true);
 }
 
-AutofillDialogViews::ShieldableContentsView::~ShieldableContentsView() {}
+AutofillDialogViews::OverlayView::~OverlayView() {}
 
-void AutofillDialogViews::ShieldableContentsView::AddToContents(
-    views::View* view) {
-  contents_->AddChildView(view);
+int AutofillDialogViews::OverlayView::GetHeightForContentsForWidth(int width) {
+  // In this case, 0 means "no preference".
+  if (!message_stack_->visible())
+    return 0;
+
+  return kOverlayImageBottomMargin +
+      views::kButtonVEdgeMarginNew +
+      message_stack_->GetHeightForWidth(width) +
+      image_view_->GetHeightForWidth(width) +
+      (button_->visible() ? button_->GetHeightForWidth(width) +
+          views::kButtonVEdgeMarginNew : 0);
 }
 
-void AutofillDialogViews::ShieldableContentsView::ObscureContents(
-    const base::string16& message) {
-  if (message == contents_shield_->text())
+void AutofillDialogViews::OverlayView::SetState(
+    const DialogOverlayState& state,
+    views::ButtonListener* listener) {
+  // Don't update anything if we're still fading out the old state.
+  if (fade_out_)
     return;
 
-  contents_shield_->SetVisible(!message.empty());
-  contents_shield_->SetText(message);
-  SchedulePaint();
+  if (state.image.IsEmpty()) {
+    SetVisible(false);
+    return;
+  }
+
+  image_view_->SetImage(state.image.ToImageSkia());
+
+  message_stack_->RemoveAllChildViews(true);
+  for (size_t i = 0; i < state.strings.size(); ++i) {
+    views::Label* label = new views::Label();
+    label->SetAutoColorReadabilityEnabled(false);
+    label->SetMultiLine(true);
+    label->SetText(state.strings[i].text);
+    label->SetFont(state.strings[i].font);
+    label->SetEnabledColor(state.strings[i].text_color);
+    label->SetHorizontalAlignment(state.strings[i].alignment);
+    message_stack_->AddChildView(label);
+  }
+  message_stack_->SetVisible(message_stack_->child_count() > 0);
+
+  button_->SetVisible(!state.button_text.empty());
+  if (!state.button_text.empty())
+    button_->SetText(state.button_text);
+
+  SetVisible(true);
+  if (parent())
+    parent()->Layout();
 }
 
-void AutofillDialogViews::ShieldableContentsView::Layout() {
-  contents_->SetBoundsRect(bounds());
-  contents_shield_->SetBoundsRect(bounds());
+void AutofillDialogViews::OverlayView::BeginFadeOut() {
+  Parts parts;
+  // For this part of the animation, simply show the splash image.
+  parts.push_back(Part(kSplashDisplayDurationMs, ui::Tween::ZERO));
+  // For this part of the animation, fade out the splash image.
+  parts.push_back(Part(kSplashFadeOutDurationMs, ui::Tween::EASE_IN));
+  // For this part of the animation, fade out |this| (fade in the dialog).
+  parts.push_back(Part(kSplashFadeInDialogDurationMs, ui::Tween::EASE_OUT));
+  fade_out_.reset(
+      new ui::MultiAnimation(parts,
+                             ui::MultiAnimation::GetDefaultTimerInterval()));
+  fade_out_->set_delegate(this);
+  fade_out_->set_continuous(false);
+  fade_out_->Start();
 }
 
-gfx::Size AutofillDialogViews::ShieldableContentsView::GetPreferredSize() {
-  return contents_->GetPreferredSize();
+void AutofillDialogViews::OverlayView::AnimationProgressed(
+    const ui::Animation* animation) {
+  DCHECK_EQ(animation, fade_out_.get());
+  if (fade_out_->current_part_index() != 0)
+    SchedulePaint();
+}
+
+void AutofillDialogViews::OverlayView::AnimationEnded(
+    const ui::Animation* animation) {
+  DCHECK_EQ(animation, fade_out_.get());
+  SetVisible(false);
+  fade_out_.reset();
+}
+
+gfx::Insets AutofillDialogViews::OverlayView::GetInsets() const {
+  return gfx::Insets(12, 12, 12, 12);
+}
+
+void AutofillDialogViews::OverlayView::Layout() {
+  gfx::Rect bounds = ContentBoundsSansBubbleBorder();
+  if (!message_stack_->visible()) {
+    image_view_->SetBoundsRect(bounds);
+    return;
+  }
+
+  int y = bounds.bottom() - views::kButtonVEdgeMarginNew;
+  if (button_->visible()) {
+    button_->SizeToPreferredSize();
+    y -= button_->height();
+    button_->SetPosition(gfx::Point(
+        bounds.CenterPoint().x() - button_->width() / 2, y));
+    y -= views::kButtonVEdgeMarginNew;
+  }
+
+  int message_height = message_stack_->GetHeightForWidth(bounds.width());
+  y -= message_height;
+  message_stack_->SetBounds(bounds.x(), y, bounds.width(), message_height);
+
+  gfx::Size image_size = image_view_->GetPreferredSize();
+  y -= image_size.height() + kOverlayImageBottomMargin;
+  image_view_->SetBounds(bounds.x(), y, bounds.width(), image_size.height());
+}
+
+const char* AutofillDialogViews::OverlayView::GetClassName() const {
+  return kOverlayViewClassName;
+}
+
+void AutofillDialogViews::OverlayView::OnPaint(gfx::Canvas* canvas) {
+  // BubbleFrameView doesn't mask the window, it just draws the border via
+  // image assets. Match that rounding here.
+  gfx::Rect rect = ContentBoundsSansBubbleBorder();
+  const SkScalar kCornerRadius = SkIntToScalar(
+      GetBubbleBorder() ? GetBubbleBorder()->GetBorderCornerRadius() : 2);
+  gfx::Path window_mask;
+  window_mask.addRoundRect(gfx::RectToSkRect(rect),
+                           kCornerRadius, kCornerRadius);
+  canvas->ClipPath(window_mask);
+
+  // Fade out background (i.e. fade in what's behind |this|).
+  if (fade_out_ && fade_out_->current_part_index() == 2)
+    canvas->SaveLayerAlpha((1 - fade_out_->GetCurrentValue()) * 255);
+
+  OnPaintBackground(canvas);
+
+  // Draw the arrow, border, and fill for the bottom area.
+  if (message_stack_->visible()) {
+    const int arrow_half_width = kArrowWidth / 2.0f;
+    SkPath arrow;
+    int y = message_stack_->y() - 1;
+    // Note that we purposely draw slightly outside of |rect| so that the
+    // stroke is hidden on the sides.
+    arrow.moveTo(rect.x() - 1, y);
+    arrow.rLineTo(rect.width() / 2 - arrow_half_width, 0);
+    arrow.rLineTo(arrow_half_width, -kArrowHeight);
+    arrow.rLineTo(arrow_half_width, kArrowHeight);
+    arrow.lineTo(rect.right() + 1, y);
+    arrow.lineTo(rect.right() + 1, rect.bottom() + 1);
+    arrow.lineTo(rect.x() - 1, rect.bottom() + 1);
+    arrow.close();
+
+    SkPaint paint;
+    paint.setColor(kShadingColor);
+    paint.setStyle(SkPaint::kFill_Style);
+    canvas->DrawPath(arrow, paint);
+    paint.setColor(kSubtleBorderColor);
+    paint.setStyle(SkPaint::kStroke_Style);
+    canvas->DrawPath(arrow, paint);
+  }
+
+  PaintChildren(canvas);
+}
+
+void AutofillDialogViews::OverlayView::PaintChildren(gfx::Canvas* canvas) {
+  // Don't draw children.
+  if (fade_out_ && fade_out_->current_part_index() == 2)
+    return;
+
+  // Fade out children.
+  if (fade_out_ && fade_out_->current_part_index() == 1)
+    canvas->SaveLayerAlpha((1 - fade_out_->GetCurrentValue()) * 255);
+
+  views::View::PaintChildren(canvas);
+}
+
+views::BubbleBorder* AutofillDialogViews::OverlayView::GetBubbleBorder() {
+  views::View* frame = GetWidget()->non_client_view()->frame_view();
+  std::string bubble_frame_view_name(views::BubbleFrameView::kViewClassName);
+  if (frame->GetClassName() == bubble_frame_view_name)
+    return static_cast<views::BubbleFrameView*>(frame)->bubble_border();
+  NOTREACHED();
+  return NULL;
+}
+
+gfx::Rect AutofillDialogViews::OverlayView::ContentBoundsSansBubbleBorder() {
+  gfx::Rect bounds = GetContentsBounds();
+  int bubble_width = 5;
+  if (GetBubbleBorder())
+    bubble_width = GetBubbleBorder()->GetBorderThickness();
+  bounds.Inset(bubble_width, bubble_width, bubble_width, bubble_width);
+  return bounds;
 }
 
 // AutofillDialogViews::NotificationArea ---------------------------------------
 
 AutofillDialogViews::NotificationArea::NotificationArea(
-    AutofillDialogController* controller)
-    : controller_(controller),
+    AutofillDialogViewDelegate* delegate)
+    : delegate_(delegate),
       checkbox_(NULL) {
   // Reserve vertical space for the arrow (regardless of whether one exists).
-  set_border(views::Border::CreateEmptyBorder(kArrowHeight, 0, 0, 0));
+  // The -1 accounts for the border.
+  set_border(views::Border::CreateEmptyBorder(kArrowHeight - 1, 0, 0, 0));
 
   views::BoxLayout* box_layout =
       new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0);
@@ -714,46 +816,15 @@ void AutofillDialogViews::NotificationArea::SetNotifications(
 
   for (size_t i = 0; i < notifications_.size(); ++i) {
     const DialogNotification& notification = notifications_[i];
+    scoped_ptr<NotificationView> view(new NotificationView(notification));
+    if (view->checkbox())
+      checkbox_ = view->checkbox();
 
-    scoped_ptr<views::View> view;
-    if (notification.HasCheckbox()) {
-      scoped_ptr<views::Checkbox> checkbox(new views::Checkbox(string16()));
-      checkbox_ = checkbox.get();
-      // We have to do this instead of using set_border() because a border
-      // is being used to draw the check square.
-      static_cast<views::LabelButtonBorder*>(checkbox->border())->
-          set_insets(gfx::Insets(kNotificationPadding,
-                                 kNotificationPadding,
-                                 kNotificationPadding,
-                                 kNotificationPadding));
-      if (!notification.interactive())
-        checkbox->SetState(views::Button::STATE_DISABLED);
-      checkbox->SetText(notification.display_text());
-      checkbox->SetTextMultiLine(true);
-      checkbox->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-      checkbox->SetTextColor(views::Button::STATE_NORMAL,
-                             notification.GetTextColor());
-      checkbox->SetTextColor(views::Button::STATE_HOVERED,
-                             notification.GetTextColor());
-      checkbox->SetChecked(notification.checked());
-      checkbox->set_listener(this);
-      view.reset(checkbox.release());
-    } else {
-      scoped_ptr<views::Label> label(new views::Label());
-      label->SetText(notification.display_text());
-      label->SetMultiLine(true);
-      label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-      label->SetAutoColorReadabilityEnabled(false);
-      label->SetEnabledColor(notification.GetTextColor());
-      label->set_border(views::Border::CreateSolidBorder(
-          kNotificationPadding, notification.GetBackgroundColor()));
-      view.reset(label.release());
-    }
-
-    view->set_background(views::Background::CreateSolidBackground(
-        notification.GetBackgroundColor()));
     AddChildView(view.release());
   }
+
+  if (checkbox_)
+    checkbox_->set_listener(this);
 
   PreferredSizeChanged();
 }
@@ -769,14 +840,19 @@ const char* AutofillDialogViews::NotificationArea::GetClassName() const {
   return kNotificationAreaClassName;
 }
 
+void AutofillDialogViews::NotificationArea::PaintChildren(
+    gfx::Canvas* canvas) {}
+
 void AutofillDialogViews::NotificationArea::OnPaint(gfx::Canvas* canvas) {
   views::View::OnPaint(canvas);
+  views::View::PaintChildren(canvas);
 
   if (HasArrow()) {
     DrawArrow(
         canvas,
         GetMirroredXInView(width() - arrow_centering_anchor_->width() / 2.0f),
-        notifications_[0].GetBackgroundColor());
+        notifications_[0].GetBackgroundColor(),
+        notifications_[0].GetBorderColor());
   }
 }
 
@@ -786,20 +862,13 @@ void AutofillDialogViews::OnWidgetClosing(views::Widget* widget) {
 
 void AutofillDialogViews::OnWidgetBoundsChanged(views::Widget* widget,
                                                 const gfx::Rect& new_bounds) {
-  int non_scrollable_height = window_->GetContentsView()->bounds().height() -
-      scrollable_area_->bounds().height();
-  int browser_window_height = widget->GetContentsView()->bounds().height();
-
-  scrollable_area_->SetMaximumHeight(
-      std::max(kMinimumContentsHeight,
-               (browser_window_height - non_scrollable_height) * 8 / 10));
   ContentsPreferredSizeChanged();
 }
 
 void AutofillDialogViews::NotificationArea::ButtonPressed(
     views::Button* sender, const ui::Event& event) {
   DCHECK_EQ(sender, checkbox_);
-  controller_->NotificationCheckboxStateChanged(notifications_.front().type(),
+  delegate_->NotificationCheckboxStateChanged(notifications_.front().type(),
                                                 checkbox_->checked());
 }
 
@@ -811,38 +880,47 @@ bool AutofillDialogViews::NotificationArea::HasArrow() {
 // AutofillDialogViews::SectionContainer ---------------------------------------
 
 AutofillDialogViews::SectionContainer::SectionContainer(
-    const string16& label,
+    const base::string16& label,
     views::View* controls,
     views::Button* proxy_button)
     : proxy_button_(proxy_button),
       forward_mouse_events_(false) {
   set_notify_enter_exit_on_child(true);
 
-  views::GridLayout* layout = new views::GridLayout(this);
-  layout->SetInsets(kDetailSectionInset, 0, kDetailSectionInset, 0);
-  SetLayoutManager(layout);
+  set_border(views::Border::CreateEmptyBorder(kDetailSectionVerticalPadding,
+                                              kDialogEdgePadding,
+                                              kDetailSectionVerticalPadding,
+                                              kDialogEdgePadding));
 
+  // TODO(estade): this label should be semi-bold.
+  views::Label* label_view = new views::Label(label);
+  label_view->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+
+  views::View* label_bar = new views::View();
+  views::GridLayout* label_bar_layout = new views::GridLayout(label_bar);
+  label_bar->SetLayoutManager(label_bar_layout);
   const int kColumnSetId = 0;
-  views::ColumnSet* column_set = layout->AddColumnSet(kColumnSetId);
-  // TODO(estade): pull out these constants, and figure out better values
-  // for them.
-  column_set->AddColumn(views::GridLayout::FILL,
-                        views::GridLayout::LEADING,
-                        0,
-                        views::GridLayout::FIXED,
-                        180,
-                        0);
-  column_set->AddPaddingColumn(0, 30);
-  column_set->AddColumn(views::GridLayout::FILL,
-                        views::GridLayout::LEADING,
-                        0,
-                        views::GridLayout::FIXED,
-                        300,
-                        0);
+  views::ColumnSet* columns = label_bar_layout->AddColumnSet(kColumnSetId);
+  // TODO(estade): do something about this '480'.
+  columns->AddColumn(views::GridLayout::LEADING,
+                     views::GridLayout::LEADING,
+                     0,
+                     views::GridLayout::FIXED,
+                     480,
+                     0);
+  columns->AddColumn(views::GridLayout::LEADING,
+                     views::GridLayout::LEADING,
+                     0,
+                     views::GridLayout::USE_PREF,
+                     0,
+                     0);
+  label_bar_layout->StartRow(0, kColumnSetId);
+  label_bar_layout->AddView(label_view);
+  label_bar_layout->AddView(proxy_button);
 
-  layout->StartRow(0, kColumnSetId);
-  layout->AddView(CreateDetailsSectionLabel(label));
-  layout->AddView(controls);
+  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0));
+  AddChildView(label_bar);
+  AddChildView(controls);
 }
 
 AutofillDialogViews::SectionContainer::~SectionContainer() {}
@@ -920,45 +998,115 @@ ui::MouseEvent AutofillDialogViews::SectionContainer::ProxyEvent(
 // AutofilDialogViews::SuggestionView ------------------------------------------
 
 AutofillDialogViews::SuggestionView::SuggestionView(
-    const string16& edit_label,
     AutofillDialogViews* autofill_dialog)
     : label_(new views::Label()),
       label_line_2_(new views::Label()),
       icon_(new views::ImageView()),
-      label_container_(new SectionRowView()),
       decorated_(
-          new DecoratedTextfield(string16(), string16(), autofill_dialog)) {
-  // Label and icon.
-  label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  label_->set_border(CreateLabelAlignmentBorder());
-  label_container_->AddChildView(icon_);
-  label_container_->AddChildView(label_);
-  label_container_->AddChildView(decorated_);
-  decorated_->SetVisible(false);
-  // TODO(estade): get the sizing and spacing right on this textfield.
-  decorated_->set_default_width_in_chars(10);
-  AddChildView(label_container_);
+          new DecoratedTextfield(base::string16(),
+                                 base::string16(),
+                                 autofill_dialog)) {
+  // TODO(estade): Make this the correct color.
+  set_border(
+      views::Border::CreateSolidSidedBorder(1, 0, 0, 0, SK_ColorLTGRAY));
 
+  SectionRowView* label_container = new SectionRowView();
+  AddChildView(label_container);
+
+  // Label and icon.
+  label_container->AddChildView(icon_);
+  label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  label_container->AddChildView(label_);
+
+  // TODO(estade): get the sizing and spacing right on this textfield.
+  decorated_->SetVisible(false);
+  decorated_->set_default_width_in_chars(10);
+  label_container->AddChildView(decorated_);
+
+  // TODO(estade): need to get the line height right.
   label_line_2_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label_line_2_->SetVisible(false);
   label_line_2_->SetMultiLine(true);
   AddChildView(label_line_2_);
 
-  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0));
+  // TODO(estade): do something about this '2'.
+  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical, 0, 2, 0));
 }
 
 AutofillDialogViews::SuggestionView::~SuggestionView() {}
 
-void AutofillDialogViews::SuggestionView::SetSuggestionText(
-    const string16& text,
-    gfx::Font::FontStyle text_style) {
-  label_->SetFont(ui::ResourceBundle::GetSharedInstance().GetFont(
-      ui::ResourceBundle::BaseFont).DeriveFont(0, text_style));
+gfx::Size AutofillDialogViews::SuggestionView::GetPreferredSize() {
+  // There's no preferred width. The parent's layout should get the preferred
+  // height from GetHeightForWidth().
+  return gfx::Size();
+}
 
+int AutofillDialogViews::SuggestionView::GetHeightForWidth(int width) {
+  int height = 0;
+  CanUseVerticallyCompactText(width, &height);
+  return height;
+}
+
+bool AutofillDialogViews::SuggestionView::CanUseVerticallyCompactText(
+    int available_width,
+    int* resulting_height) {
+  // This calculation may be costly, avoid doing it more than once per width.
+  if (!calculated_heights_.count(available_width)) {
+    // Changing the state of |this| now will lead to extra layouts and
+    // paints we don't want, so create another SuggestionView to calculate
+    // which label we have room to show.
+    SuggestionView sizing_view(NULL);
+    sizing_view.SetLabelText(state_.vertically_compact_text);
+    sizing_view.SetIcon(state_.icon);
+    sizing_view.SetTextfield(state_.extra_text, state_.extra_icon);
+
+    // Shortcut |sizing_view|'s GetHeightForWidth() to avoid an infinite loop.
+    // Its BoxLayout must do these calculations for us.
+    views::LayoutManager* layout = sizing_view.GetLayoutManager();
+    if (layout->GetPreferredSize(&sizing_view).width() <= available_width) {
+      calculated_heights_[available_width] = std::make_pair(
+          true,
+          layout->GetPreferredHeightForWidth(&sizing_view, available_width));
+    } else {
+      sizing_view.SetLabelText(state_.horizontally_compact_text);
+      calculated_heights_[available_width] = std::make_pair(
+          false,
+          layout->GetPreferredHeightForWidth(&sizing_view, available_width));
+    }
+  }
+
+  const std::pair<bool, int>& values = calculated_heights_[available_width];
+  *resulting_height = values.second;
+  return values.first;
+}
+
+void AutofillDialogViews::SuggestionView::OnBoundsChanged(
+    const gfx::Rect& previous_bounds) {
+  int unused;
+  SetLabelText(CanUseVerticallyCompactText(width(), &unused) ?
+      state_.vertically_compact_text :
+      state_.horizontally_compact_text);
+}
+
+void AutofillDialogViews::SuggestionView::SetState(
+    const SuggestionState& state) {
+  calculated_heights_.clear();
+  state_ = state;
+  SetVisible(state_.visible);
+  // Set to the more compact text for now. |this| will optionally switch to
+  // the more vertically expanded view when the bounds are set.
+  SetLabelText(state_.vertically_compact_text);
+  SetIcon(state_.icon);
+  SetTextfield(state_.extra_text, state_.extra_icon);
+  PreferredSizeChanged();
+}
+
+void AutofillDialogViews::SuggestionView::SetLabelText(
+    const base::string16& text) {
   // TODO(estade): does this localize well?
-  string16 line_return(ASCIIToUTF16("\n"));
+  base::string16 line_return(ASCIIToUTF16("\n"));
   size_t position = text.find(line_return);
-  if (position == string16::npos) {
+  if (position == base::string16::npos) {
     label_->SetText(text);
     label_line_2_->SetVisible(false);
   } else {
@@ -968,21 +1116,18 @@ void AutofillDialogViews::SuggestionView::SetSuggestionText(
   }
 }
 
-void AutofillDialogViews::SuggestionView::SetSuggestionIcon(
+void AutofillDialogViews::SuggestionView::SetIcon(
     const gfx::Image& image) {
   icon_->SetVisible(!image.IsEmpty());
   icon_->SetImage(image.AsImageSkia());
 }
 
-void AutofillDialogViews::SuggestionView::ShowTextfield(
-    const string16& placeholder_text,
+void AutofillDialogViews::SuggestionView::SetTextfield(
+    const base::string16& placeholder_text,
     const gfx::Image& icon) {
   decorated_->set_placeholder_text(placeholder_text);
   decorated_->SetIcon(icon);
-  decorated_->SetVisible(true);
-  // The textfield will increase the height of the first row and cause the
-  // label to be aligned properly, so the border is not necessary.
-  label_->set_border(NULL);
+  decorated_->SetVisible(!placeholder_text.empty());
 }
 
 // AutofillDialogViews::AutocheckoutStepsArea ---------------------------------
@@ -1025,25 +1170,26 @@ gfx::Size AutofillDialogViews::AutocheckoutProgressBar::GetPreferredSize() {
 
 // static
 AutofillDialogView* AutofillDialogView::Create(
-    AutofillDialogController* controller) {
-  return new AutofillDialogViews(controller);
+    AutofillDialogViewDelegate* delegate) {
+  return new AutofillDialogViews(delegate);
 }
 
 // AutofillDialogViews ---------------------------------------------------------
 
-AutofillDialogViews::AutofillDialogViews(AutofillDialogController* controller)
-    : controller_(controller),
+AutofillDialogViews::AutofillDialogViews(AutofillDialogViewDelegate* delegate)
+    : delegate_(delegate),
       window_(NULL),
-      contents_(NULL),
       notification_area_(NULL),
       account_chooser_(NULL),
       sign_in_webview_(NULL),
-      main_container_(NULL),
       scrollable_area_(NULL),
       details_container_(NULL),
+      loading_shield_(NULL),
       overlay_view_(NULL),
       button_strip_extra_view_(NULL),
       save_in_chrome_checkbox_(NULL),
+      save_in_chrome_checkbox_container_(NULL),
+      button_strip_image_(NULL),
       autocheckout_steps_area_(NULL),
       autocheckout_progress_bar_view_(NULL),
       autocheckout_progress_bar_(NULL),
@@ -1051,7 +1197,7 @@ AutofillDialogViews::AutofillDialogViews(AutofillDialogController* controller)
       legal_document_view_(NULL),
       focus_manager_(NULL),
       observer_(this) {
-  DCHECK(controller);
+  DCHECK(delegate);
   detail_groups_.insert(std::make_pair(SECTION_EMAIL,
                                        DetailsGroup(SECTION_EMAIL)));
   detail_groups_.insert(std::make_pair(SECTION_CC,
@@ -1072,38 +1218,35 @@ void AutofillDialogViews::Show() {
   InitChildViews();
   UpdateAccountChooser();
   UpdateNotificationArea();
-  UpdateSaveInChromeCheckbox();
+  UpdateButtonStripExtraView();
 
   // Ownership of |contents_| is handed off by this call. The widget will take
   // care of deleting itself after calling DeleteDelegate().
   WebContentsModalDialogManager* web_contents_modal_dialog_manager =
       WebContentsModalDialogManager::FromWebContents(
-          controller_->web_contents());
+          delegate_->GetWebContents());
   window_ = CreateWebContentsModalDialogViews(
       this,
-      controller_->web_contents()->GetView()->GetNativeView(),
+      delegate_->GetWebContents()->GetView()->GetNativeView(),
       web_contents_modal_dialog_manager->delegate()->
           GetWebContentsModalDialogHost());
   web_contents_modal_dialog_manager->ShowDialog(window_->GetNativeView());
   focus_manager_ = window_->GetFocusManager();
   focus_manager_->AddFocusChangeListener(this);
 
-#if defined(OS_WIN) && !defined(USE_AURA)
-  // On non-Aura Windows a standard accelerator gets registered that will
-  // navigate on a backspace. Override that here.
-  // TODO(abodenha): Remove this when no longer needed. See
-  // http://crbug.com/242584.
-  ui::Accelerator backspace(ui::VKEY_BACK, ui::EF_NONE);
-  focus_manager_->RegisterAccelerator(
-      backspace, ui::AcceleratorManager::kNormalPriority, this);
-#endif
-
   // Listen for size changes on the browser.
   views::Widget* browser_widget =
       views::Widget::GetTopLevelWidgetForNativeView(
-          controller_->web_contents()->GetView()->GetNativeView());
+          delegate_->GetWebContents()->GetView()->GetNativeView());
   observer_.Add(browser_widget);
-  OnWidgetBoundsChanged(browser_widget, gfx::Rect());
+
+  gfx::Image splash_image = delegate_->SplashPageImage();
+  if (!splash_image.IsEmpty()) {
+    DialogOverlayState state;
+    state.image = splash_image;
+    overlay_view_->SetState(state, NULL);
+    overlay_view_->BeginFadeOut();
+  }
 }
 
 void AutofillDialogViews::Hide() {
@@ -1115,17 +1258,22 @@ void AutofillDialogViews::UpdateAccountChooser() {
   account_chooser_->Update();
   // TODO(estade): replace this with a better loading image/animation.
   // See http://crbug.com/230932
-  main_container_->ObscureContents(controller_->ShouldShowSpinner() ?
+  base::string16 new_loading_message = (delegate_->ShouldShowSpinner() ?
       ASCIIToUTF16("Loading...") : base::string16());
+  if (new_loading_message != loading_shield_->text()) {
+    loading_shield_->SetText(new_loading_message);
+    loading_shield_->SetVisible(!new_loading_message.empty());
+    Layout();
+  }
 
   // Update legal documents for the account.
   if (footnote_view_) {
-    const string16 text = controller_->LegalDocumentsText();
+    const base::string16 text = delegate_->LegalDocumentsText();
     legal_document_view_->SetText(text);
 
     if (!text.empty()) {
       const std::vector<ui::Range>& link_ranges =
-          controller_->LegalDocumentLinks();
+          delegate_->LegalDocumentLinks();
       for (size_t i = 0; i < link_ranges.size(); ++i) {
         legal_document_view_->AddStyleRange(
             link_ranges[i],
@@ -1139,22 +1287,23 @@ void AutofillDialogViews::UpdateAccountChooser() {
 }
 
 void AutofillDialogViews::UpdateAutocheckoutStepsArea() {
-  autocheckout_steps_area_->SetSteps(controller_->CurrentAutocheckoutSteps());
+  autocheckout_steps_area_->SetSteps(delegate_->CurrentAutocheckoutSteps());
   ContentsPreferredSizeChanged();
 }
 
 void AutofillDialogViews::UpdateButtonStrip() {
   button_strip_extra_view_->SetVisible(
       GetDialogButtons() != ui::DIALOG_BUTTON_NONE);
-  UpdateSaveInChromeCheckbox();
-  autocheckout_progress_bar_view_->SetVisible(
-      controller_->ShouldShowProgressBar());
+  UpdateButtonStripExtraView();
   GetDialogClientView()->UpdateDialogButtons();
+
+  overlay_view_->SetState(delegate_->GetDialogOverlay(), this);
+
   ContentsPreferredSizeChanged();
 }
 
 void AutofillDialogViews::UpdateDetailArea() {
-  details_container_->SetVisible(controller_->ShouldShowDetailArea());
+  scrollable_area_->SetVisible(delegate_->ShouldShowDetailArea());
   ContentsPreferredSizeChanged();
 }
 
@@ -1164,7 +1313,7 @@ void AutofillDialogViews::UpdateForErrors() {
 
 void AutofillDialogViews::UpdateNotificationArea() {
   DCHECK(notification_area_);
-  notification_area_->SetNotifications(controller_->CurrentNotifications());
+  notification_area_->SetNotifications(delegate_->CurrentNotifications());
   ContentsPreferredSizeChanged();
 }
 
@@ -1179,17 +1328,16 @@ void AutofillDialogViews::FillSection(DialogSection section,
   TextfieldMap::iterator text_mapping =
       group->textfields.find(&originating_input);
   if (text_mapping != group->textfields.end())
-    text_mapping->second->SetText(string16());
+    text_mapping->second->SetText(base::string16());
 
   // If the Autofill data comes from a credit card, make sure to overwrite the
   // CC comboboxes (even if they already have something in them). If the
   // Autofill data comes from an AutofillProfile, leave the comboboxes alone.
   if ((section == SECTION_CC || section == SECTION_CC_BILLING) &&
-      AutofillType(originating_input.type).group() ==
-              AutofillType::CREDIT_CARD) {
+      AutofillType(originating_input.type).group() == CREDIT_CARD) {
     for (ComboboxMap::const_iterator it = group->comboboxes.begin();
          it != group->comboboxes.end(); ++it) {
-      if (AutofillType(it->first->type).group() == AutofillType::CREDIT_CARD)
+      if (AutofillType(it->first->type).group() == CREDIT_CARD)
         it->second->SetSelectedIndex(it->second->model()->GetDefaultIndex());
     }
   }
@@ -1211,8 +1359,8 @@ void AutofillDialogViews::GetUserInput(DialogSection section,
   }
 }
 
-string16 AutofillDialogViews::GetCvc() {
-  DialogSection billing_section = controller_->SectionIsActive(SECTION_CC) ?
+base::string16 AutofillDialogViews::GetCvc() {
+  DialogSection billing_section = delegate_->SectionIsActive(SECTION_CC) ?
       SECTION_CC : SECTION_CC_BILLING;
   return GroupForSection(billing_section)->suggested_info->
       decorated_textfield()->text();
@@ -1229,8 +1377,8 @@ const content::NavigationController* AutofillDialogViews::ShowSignIn() {
 
   sign_in_webview_->LoadInitialURL(wallet::GetSignInUrl());
 
-  main_container_->SetVisible(false);
   sign_in_webview_->SetVisible(true);
+  sign_in_webview_->RequestFocus();
   UpdateButtonStrip();
   ContentsPreferredSizeChanged();
   return &sign_in_webview_->web_contents()->GetController();
@@ -1238,7 +1386,6 @@ const content::NavigationController* AutofillDialogViews::ShowSignIn() {
 
 void AutofillDialogViews::HideSignIn() {
   sign_in_webview_->SetVisible(false);
-  main_container_->SetVisible(true);
   UpdateButtonStrip();
   ContentsPreferredSizeChanged();
 }
@@ -1270,11 +1417,11 @@ void AutofillDialogViews::SubmitForTesting() {
 }
 
 void AutofillDialogViews::CancelForTesting() {
-  if (Cancel())
-    Hide();
+  GetDialogClientView()->CancelWindow();
 }
 
-string16 AutofillDialogViews::GetTextContentsOfInput(const DetailInput& input) {
+base::string16 AutofillDialogViews::GetTextContentsOfInput(
+    const DetailInput& input) {
   views::Textfield* textfield = TextfieldForInput(input);
   if (textfield)
     return textfield->text();
@@ -1284,11 +1431,12 @@ string16 AutofillDialogViews::GetTextContentsOfInput(const DetailInput& input) {
     return combobox->model()->GetItemAt(combobox->selected_index());
 
   NOTREACHED();
-  return string16();
+  return base::string16();
 }
 
-void AutofillDialogViews::SetTextContentsOfInput(const DetailInput& input,
-                                                 const string16& contents) {
+void AutofillDialogViews::SetTextContentsOfInput(
+    const DetailInput& input,
+    const base::string16& contents) {
   views::Textfield* textfield = TextfieldForInput(input);
   if (textfield) {
     TextfieldForInput(input)->SetText(contents);
@@ -1326,20 +1474,107 @@ gfx::Size AutofillDialogViews::GetSize() const {
   return GetWidget() ? GetWidget()->GetRootView()->size() : gfx::Size();
 }
 
-bool AutofillDialogViews::AcceleratorPressed(
-    const ui::Accelerator& accelerator) {
-  ui::KeyboardCode key = accelerator.key_code();
-  if (key == ui::VKEY_BACK)
-    return true;
-  return false;
+gfx::Size AutofillDialogViews::GetPreferredSize() {
+  gfx::Insets insets = GetInsets();
+  gfx::Size scroll_size = scrollable_area_->contents()->GetPreferredSize();
+  int width = scroll_size.width() + insets.width();
+
+  if (sign_in_webview_->visible()) {
+    gfx::Size size = static_cast<views::View*>(sign_in_webview_)->
+        GetPreferredSize();
+    return gfx::Size(width, size.height() + insets.height());
+  }
+
+  int base_height = insets.height();
+  int notification_height = notification_area_->
+      GetHeightForWidth(scroll_size.width());
+  if (notification_height > 0)
+    base_height += notification_height + views::kRelatedControlVerticalSpacing;
+
+  int steps_height = autocheckout_steps_area_->
+      GetHeightForWidth(scroll_size.width());
+  if (steps_height > 0)
+    base_height += steps_height + views::kRelatedControlVerticalSpacing;
+
+  gfx::Size preferred_size;
+  // When the scroll area isn't visible, it still sets the width but doesn't
+  // factor into height.
+  if (!scrollable_area_->visible()) {
+    preferred_size.SetSize(width, base_height);
+  } else {
+    // Show as much of the scroll view as is possible without going past the
+    // bottom of the browser window.
+    views::Widget* widget =
+        views::Widget::GetTopLevelWidgetForNativeView(
+            delegate_->GetWebContents()->GetView()->GetNativeView());
+    int browser_window_height =
+        widget ? widget->GetContentsView()->bounds().height() : INT_MAX;
+    const int kWindowDecorationHeight = 200;
+    int height = base_height + std::min(
+        scroll_size.height(),
+        std::max(kMinimumContentsHeight,
+                 browser_window_height - base_height -
+                     kWindowDecorationHeight));
+    preferred_size.SetSize(width, height);
+  }
+
+  if (!overlay_view_->visible())
+    return preferred_size;
+
+  int height_of_overlay =
+      overlay_view_->GetHeightForContentsForWidth(preferred_size.width());
+  if (height_of_overlay > 0)
+    preferred_size.set_height(height_of_overlay);
+
+  return preferred_size;
 }
 
-bool AutofillDialogViews::CanHandleAccelerators() const {
-  return true;
+void AutofillDialogViews::Layout() {
+  gfx::Rect content_bounds = GetContentsBounds();
+  if (sign_in_webview_->visible()) {
+    sign_in_webview_->SetBoundsRect(content_bounds);
+    return;
+  }
+
+  const int x = content_bounds.x();
+  const int y = content_bounds.y();
+  const int width = content_bounds.width();
+  // Layout notification area at top of dialog.
+  int notification_height = notification_area_->GetHeightForWidth(width);
+  notification_area_->SetBounds(x, y, width, notification_height);
+
+  // Layout Autocheckout steps at bottom of dialog.
+  int steps_height = autocheckout_steps_area_->GetHeightForWidth(width);
+  autocheckout_steps_area_->SetBounds(x, content_bounds.bottom() - steps_height,
+                                      width, steps_height);
+
+  // The rest (the |scrollable_area_|) takes up whatever's left.
+  if (scrollable_area_->visible()) {
+    int scroll_y = y;
+    if (notification_height > 0)
+      scroll_y += notification_height + views::kRelatedControlVerticalSpacing;
+
+    int scroll_bottom = content_bounds.bottom();
+    if (steps_height > 0)
+      scroll_bottom -= steps_height + views::kRelatedControlVerticalSpacing;
+
+    scrollable_area_->contents()->SizeToPreferredSize();
+    scrollable_area_->SetBounds(x, scroll_y, width, scroll_bottom - scroll_y);
+  }
+
+  if (loading_shield_->visible())
+    loading_shield_->SetBoundsRect(bounds());
+
+  if (error_bubble_)
+    error_bubble_->UpdatePosition();
 }
 
-string16 AutofillDialogViews::GetWindowTitle() const {
-  return controller_->DialogTitle();
+void AutofillDialogViews::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  sign_in_delegate_->SetMinWidth(GetContentsBounds().width());
+}
+
+base::string16 AutofillDialogViews::GetWindowTitle() const {
+  return delegate_->DialogTitle();
 }
 
 void AutofillDialogViews::WindowClosing() {
@@ -1348,37 +1583,29 @@ void AutofillDialogViews::WindowClosing() {
 
 void AutofillDialogViews::DeleteDelegate() {
   window_ = NULL;
-  // |this| belongs to |controller_|.
-  controller_->ViewClosed();
-}
-
-views::Widget* AutofillDialogViews::GetWidget() {
-  return contents_->GetWidget();
-}
-
-const views::Widget* AutofillDialogViews::GetWidget() const {
-  return contents_->GetWidget();
-}
-
-views::View* AutofillDialogViews::GetContentsView() {
-  return contents_;
+  // |this| belongs to the controller (|delegate_|).
+  delegate_->ViewClosed();
 }
 
 int AutofillDialogViews::GetDialogButtons() const {
   if (sign_in_webview_->visible())
     return ui::DIALOG_BUTTON_NONE;
 
-  return controller_->GetDialogButtons();
+  return delegate_->GetDialogButtons();
 }
 
-string16 AutofillDialogViews::GetDialogButtonLabel(ui::DialogButton button)
-    const {
+base::string16 AutofillDialogViews::GetDialogButtonLabel(
+    ui::DialogButton button) const {
   return button == ui::DIALOG_BUTTON_OK ?
-      controller_->ConfirmButtonText() : controller_->CancelButtonText();
+      delegate_->ConfirmButtonText() : delegate_->CancelButtonText();
+}
+
+bool AutofillDialogViews::ShouldDefaultButtonBeBlue() const {
+  return true;
 }
 
 bool AutofillDialogViews::IsDialogButtonEnabled(ui::DialogButton button) const {
-  return controller_->IsDialogButtonEnabled(button);
+  return delegate_->IsDialogButtonEnabled(button);
 }
 
 views::View* AutofillDialogViews::CreateExtraView() {
@@ -1393,15 +1620,19 @@ views::View* AutofillDialogViews::CreateFootnoteView() {
   footnote_view_ = new LayoutPropagationView();
   footnote_view_->SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kVertical,
-                           kLegalDocPadding,
-                           kLegalDocPadding,
+                           kDialogEdgePadding,
+                           kDialogEdgePadding,
                            0));
   footnote_view_->set_border(
       views::Border::CreateSolidSidedBorder(1, 0, 0, 0, kSubtleBorderColor));
   footnote_view_->set_background(
       views::Background::CreateSolidBackground(kShadingColor));
 
-  legal_document_view_ = new views::StyledLabel(string16(), this);
+  legal_document_view_ = new views::StyledLabel(base::string16(), this);
+  views::StyledLabel::RangeStyleInfo default_style;
+  default_style.color = kGreyTextColor;
+  legal_document_view_->SetDefaultStyle(default_style);
+
   footnote_view_->AddChildView(legal_document_view_);
   footnote_view_->SetVisible(false);
 
@@ -1409,30 +1640,19 @@ views::View* AutofillDialogViews::CreateFootnoteView() {
 }
 
 views::View* AutofillDialogViews::CreateOverlayView() {
-  gfx::Image splash_image = controller_->SplashPageImage();
-  if (splash_image.IsEmpty())
-    return NULL;
-
-  overlay_view_ = new OverlayView();
-  views::ImageView* image = new views::ImageView();
-  image->SetImage(splash_image.ToImageSkia());
-  overlay_view_->AddChildView(image);
-
   return overlay_view_;
 }
 
 bool AutofillDialogViews::Cancel() {
-  controller_->OnCancel();
-  return true;
+  return delegate_->OnCancel();
 }
 
 bool AutofillDialogViews::Accept() {
   if (ValidateForm())
-    controller_->OnAccept();
-  else if (!validity_map_.empty())
-    validity_map_.begin()->first->RequestFocus();
+    return delegate_->OnAccept();
 
-  // |controller_| decides when to hide the dialog.
+  if (!validity_map_.empty())
+    validity_map_.begin()->first->RequestFocus();
   return false;
 }
 
@@ -1442,11 +1662,16 @@ views::NonClientFrameView* AutofillDialogViews::CreateNonClientFrameView(
     views::Widget* widget) {
   return CreateConstrainedStyleNonClientFrameView(
       widget,
-      controller_->web_contents()->GetBrowserContext());
+      delegate_->GetWebContents()->GetBrowserContext());
 }
 
 void AutofillDialogViews::ButtonPressed(views::Button* sender,
                                         const ui::Event& event) {
+  if (sender->GetAncestorWithClassName(kOverlayViewClassName)) {
+    delegate_->OverlayButtonPressed();
+    return;
+  }
+
   // TODO(estade): Should the menu be shown on mouse down?
   DetailsGroup* group = NULL;
   for (DetailGroupMap::iterator iter = detail_groups_.begin();
@@ -1462,7 +1687,7 @@ void AutofillDialogViews::ButtonPressed(views::Button* sender,
     return;
 
   menu_runner_.reset(new views::MenuRunner(
-                         controller_->MenuModelForSection(group->section)));
+                         delegate_->MenuModelForSection(group->section)));
 
   group->container->SetActive(true);
   views::Button::ButtonState state = group->suggested_button->state();
@@ -1482,7 +1707,7 @@ void AutofillDialogViews::ButtonPressed(views::Button* sender,
 }
 
 void AutofillDialogViews::ContentsChanged(views::Textfield* sender,
-                                          const string16& new_contents) {
+                                          const base::string16& new_contents) {
   TextfieldEditedOrActivated(sender, true);
 }
 
@@ -1494,7 +1719,7 @@ bool AutofillDialogViews::HandleKeyEvent(views::Textfield* sender,
 #else
   content::NativeWebKeyboardEvent event(copy.get());
 #endif
-  return controller_->HandleKeyPressEventInInput(event);
+  return delegate_->HandleKeyPressEventInInput(event);
 }
 
 bool AutofillDialogViews::HandleMouseEvent(views::Textfield* sender,
@@ -1512,7 +1737,7 @@ bool AutofillDialogViews::HandleMouseEvent(views::Textfield* sender,
 void AutofillDialogViews::OnWillChangeFocus(
     views::View* focused_before,
     views::View* focused_now) {
-  controller_->FocusMoved();
+  delegate_->FocusMoved();
   error_bubble_.reset();
 }
 
@@ -1527,8 +1752,10 @@ void AutofillDialogViews::OnDidChangeFocus(
   }
 
   // Show an error bubble when the user focuses the input.
-  if (focused_now)
+  if (focused_now) {
+    focused_now->ScrollRectToVisible(focused_now->GetLocalBounds());
     ShowErrorBubbleForViewIfNecessary(focused_now);
+  }
 }
 
 void AutofillDialogViews::OnSelectedIndexChanged(views::Combobox* combobox) {
@@ -1538,7 +1765,7 @@ void AutofillDialogViews::OnSelectedIndexChanged(views::Combobox* combobox) {
 
 void AutofillDialogViews::StyledLabelLinkClicked(const ui::Range& range,
                                                  int event_flags) {
-  controller_->LegalDocumentLinkClicked(range);
+  delegate_->LegalDocumentLinkClicked(range);
 }
 
 void AutofillDialogViews::InitChildViews() {
@@ -1546,48 +1773,71 @@ void AutofillDialogViews::InitChildViews() {
   button_strip_extra_view_->SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
 
+  save_in_chrome_checkbox_container_ = new views::View();
+  save_in_chrome_checkbox_container_->SetLayoutManager(
+      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 7));
+  button_strip_extra_view_->AddChildView(save_in_chrome_checkbox_container_);
+
   save_in_chrome_checkbox_ =
-      new views::Checkbox(controller_->SaveLocallyText());
+      new views::Checkbox(delegate_->SaveLocallyText());
   save_in_chrome_checkbox_->SetChecked(true);
-  button_strip_extra_view_->AddChildView(save_in_chrome_checkbox_);
+  save_in_chrome_checkbox_container_->AddChildView(save_in_chrome_checkbox_);
+
+  save_in_chrome_checkbox_container_->AddChildView(
+      new TooltipIcon(delegate_->SaveLocallyTooltip()));
+
+  button_strip_image_ = new views::ImageView();
+  button_strip_extra_view_->AddChildView(button_strip_image_);
 
   autocheckout_progress_bar_view_ = new views::View();
-  autocheckout_progress_bar_view_->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical, 0, 15, 0));
+  views::GridLayout* progress_bar_layout =
+      new views::GridLayout(autocheckout_progress_bar_view_);
+  autocheckout_progress_bar_view_->SetLayoutManager(progress_bar_layout);
+  const int kColumnSetId = 0;
+  views::ColumnSet* columns = progress_bar_layout->AddColumnSet(kColumnSetId);
+  columns->AddColumn(views::GridLayout::LEADING,
+                     views::GridLayout::CENTER,
+                     0,
+                     views::GridLayout::USE_PREF,
+                     0,
+                     0);
+  progress_bar_layout->StartRow(1.0, kColumnSetId);
 
   autocheckout_progress_bar_ = new AutocheckoutProgressBar();
-  autocheckout_progress_bar_view_->AddChildView(autocheckout_progress_bar_);
-
+  progress_bar_layout->AddView(autocheckout_progress_bar_);
   button_strip_extra_view_->AddChildView(autocheckout_progress_bar_view_);
-  autocheckout_progress_bar_view_->SetVisible(false);
 
-  contents_ = new views::View();
-  contents_->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
-  contents_->AddChildView(CreateMainContainer());
-  sign_in_webview_ = new views::WebView(controller_->profile());
+  account_chooser_ = new AccountChooser(delegate_);
+  notification_area_ = new NotificationArea(delegate_);
+  notification_area_->set_arrow_centering_anchor(account_chooser_->AsWeakPtr());
+  AddChildView(notification_area_);
+
+  scrollable_area_ = new views::ScrollView();
+  scrollable_area_->set_hide_horizontal_scrollbar(true);
+  scrollable_area_->SetContents(CreateDetailsContainer());
+  AddChildView(scrollable_area_);
+
+  autocheckout_steps_area_ = new AutocheckoutStepsArea();
+  AddChildView(autocheckout_steps_area_);
+
+  loading_shield_ = new views::Label();
+  loading_shield_->SetVisible(false);
+  loading_shield_->set_background(views::Background::CreateSolidBackground(
+      GetNativeTheme()->GetSystemColor(
+          ui::NativeTheme::kColorId_DialogBackground)));
+  loading_shield_->SetFont(ui::ResourceBundle::GetSharedInstance().GetFont(
+      ui::ResourceBundle::BaseFont).DeriveFont(15));
+  AddChildView(loading_shield_);
+
+  sign_in_webview_ = new views::WebView(delegate_->profile());
   sign_in_webview_->SetVisible(false);
-  contents_->AddChildView(sign_in_webview_);
+  AddChildView(sign_in_webview_);
   sign_in_delegate_.reset(
       new AutofillDialogSignInDelegate(this,
                                        sign_in_webview_->GetWebContents()));
-}
 
-views::View* AutofillDialogViews::CreateMainContainer() {
-  main_container_ = new ShieldableContentsView();
-
-  account_chooser_ = new AccountChooser(controller_);
-  notification_area_ = new NotificationArea(controller_);
-  notification_area_->set_arrow_centering_anchor(account_chooser_->AsWeakPtr());
-  main_container_->AddToContents(notification_area_);
-
-  scrollable_area_ = new SizeLimitedScrollView(CreateDetailsContainer());
-  main_container_->AddToContents(scrollable_area_);
-
-  autocheckout_steps_area_ = new AutocheckoutStepsArea();
-  main_container_->AddToContents(autocheckout_steps_area_);
-
-  return main_container_;
+  overlay_view_ = new OverlayView(this);
+  overlay_view_->SetVisible(false);
 }
 
 views::View* AutofillDialogViews::CreateDetailsContainer() {
@@ -1613,34 +1863,14 @@ void AutofillDialogViews::CreateDetailsSection(DialogSection section) {
   DetailsGroup* group = GroupForSection(section);
   // Container (holds label + inputs).
   group->container = new SectionContainer(
-      controller_->LabelForSection(section),
+      delegate_->LabelForSection(section),
       inputs_container,
       group->suggested_button);
+  DCHECK(group->suggested_button->parent());
   UpdateDetailsGroupState(*group);
 }
 
 views::View* AutofillDialogViews::CreateInputsContainer(DialogSection section) {
-  views::View* inputs_container = new views::View();
-  views::GridLayout* layout = new views::GridLayout(inputs_container);
-  inputs_container->SetLayoutManager(layout);
-
-  int kColumnSetId = 0;
-  views::ColumnSet* column_set = layout->AddColumnSet(kColumnSetId);
-  column_set->AddColumn(views::GridLayout::FILL,
-                        views::GridLayout::LEADING,
-                        1,
-                        views::GridLayout::USE_PREF,
-                        0,
-                        0);
-  // A column for the menu button.
-  column_set->AddColumn(views::GridLayout::CENTER,
-                        views::GridLayout::LEADING,
-                        0,
-                        views::GridLayout::USE_PREF,
-                        0,
-                        0);
-  layout->StartRow(0, kColumnSetId);
-
   // The |info_view| holds |manual_inputs| and |suggested_info|, allowing the
   // dialog to toggle which is shown.
   views::View* info_view = new views::View();
@@ -1649,11 +1879,11 @@ views::View* AutofillDialogViews::CreateInputsContainer(DialogSection section) {
 
   views::View* manual_inputs = InitInputsView(section);
   info_view->AddChildView(manual_inputs);
-  SuggestionView* suggested_info =
-      new SuggestionView(controller_->EditSuggestionText(), this);
+  SuggestionView* suggested_info = new SuggestionView(this);
   info_view->AddChildView(suggested_info);
-  layout->AddView(info_view);
 
+  // TODO(estade): It might be slightly more OO if this button were created
+  // and listened to by the section container.
   views::ImageButton* menu_button = new views::ImageButton(this);
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   menu_button->SetImage(views::Button::STATE_NORMAL,
@@ -1665,23 +1895,22 @@ views::View* AutofillDialogViews::CreateInputsContainer(DialogSection section) {
   menu_button->SetImage(views::Button::STATE_DISABLED,
       rb.GetImageSkiaNamed(IDR_AUTOFILL_DIALOG_MENU_BUTTON_D));
   menu_button->set_border(views::Border::CreateEmptyBorder(
-      kMenuButtonTopOffset,
-      kMenuButtonHorizontalPadding,
-      0,
-      kMenuButtonHorizontalPadding));
-  layout->AddView(menu_button);
+      kMenuButtonTopInset,
+      kDialogEdgePadding,
+      kMenuButtonBottomInset,
+      0));
 
   DetailsGroup* group = GroupForSection(section);
   group->suggested_button = menu_button;
   group->manual_input = manual_inputs;
   group->suggested_info = suggested_info;
-  return inputs_container;
+  return info_view;
 }
 
 // TODO(estade): we should be using Chrome-style constrained window padding
 // values.
 views::View* AutofillDialogViews::InitInputsView(DialogSection section) {
-  const DetailInputs& inputs = controller_->RequestedFieldsForSection(section);
+  const DetailInputs& inputs = delegate_->RequestedFieldsForSection(section);
   TextfieldMap* textfields = &GroupForSection(section)->textfields;
   ComboboxMap* comboboxes = &GroupForSection(section)->comboboxes;
 
@@ -1692,7 +1921,42 @@ views::View* AutofillDialogViews::InitInputsView(DialogSection section) {
   for (DetailInputs::const_iterator it = inputs.begin();
        it != inputs.end(); ++it) {
     const DetailInput& input = *it;
+    ui::ComboboxModel* input_model =
+        delegate_->ComboboxModelForAutofillType(input.type);
+    scoped_ptr<views::View> view_to_add;
+    if (input_model) {
+      views::Combobox* combobox = new views::Combobox(input_model);
+      combobox->set_listener(this);
+      comboboxes->insert(std::make_pair(&input, combobox));
+
+      for (int i = 0; i < input_model->GetItemCount(); ++i) {
+        if (input.initial_value == input_model->GetItemAt(i)) {
+          combobox->SetSelectedIndex(i);
+          break;
+        }
+      }
+
+      view_to_add.reset(combobox);
+    } else {
+      DecoratedTextfield* field = new DecoratedTextfield(
+          input.initial_value,
+          l10n_util::GetStringUTF16(input.placeholder_text_rid),
+          this);
+
+      gfx::Image icon =
+          delegate_->IconForField(input.type, input.initial_value);
+      field->SetIcon(icon);
+
+      textfields->insert(std::make_pair(&input, field));
+      view_to_add.reset(field);
+    }
+
     int kColumnSetId = input.row_id;
+    if (kColumnSetId < 0) {
+      other_owned_views_.push_back(view_to_add.release());
+      continue;
+    }
+
     views::ColumnSet* column_set = layout->GetColumnSet(kColumnSetId);
     if (!column_set) {
       // Create a new column set and row.
@@ -1710,46 +1974,17 @@ views::View* AutofillDialogViews::InitInputsView(DialogSection section) {
 
     float expand = input.expand_weight;
     column_set->AddColumn(views::GridLayout::FILL,
-                          views::GridLayout::BASELINE,
+                          views::GridLayout::FILL,
                           expand ? expand : 1.0,
                           views::GridLayout::USE_PREF,
                           0,
                           0);
 
-    ui::ComboboxModel* input_model =
-        controller_->ComboboxModelForAutofillType(input.type);
-    views::View* view_to_add = NULL;
-    if (input_model) {
-      views::Combobox* combobox = new views::Combobox(input_model);
-      combobox->set_listener(this);
-      comboboxes->insert(std::make_pair(&input, combobox));
-
-      for (int i = 0; i < input_model->GetItemCount(); ++i) {
-        if (input.initial_value == input_model->GetItemAt(i)) {
-          combobox->SetSelectedIndex(i);
-          break;
-        }
-      }
-      view_to_add = combobox;
-    } else {
-      DecoratedTextfield* field = new DecoratedTextfield(
-          input.initial_value,
-          l10n_util::GetStringUTF16(input.placeholder_text_rid),
-          this);
-
-      gfx::Image icon =
-          controller_->IconForField(input.type, input.initial_value);
-      field->SetIcon(icon);
-
-      textfields->insert(std::make_pair(&input, field));
-      view_to_add = field;
-    }
-
     // This is the same as AddView(view_to_add), except that 1 is used for the
     // view's preferred width. Thus the width of the column completely depends
     // on |expand|.
-    layout->AddView(view_to_add, 1, 1,
-                    views::GridLayout::FILL, views::GridLayout::BASELINE,
+    layout->AddView(view_to_add.release(), 1, 1,
+                    views::GridLayout::FILL, views::GridLayout::FILL,
                     1, 0);
   }
 
@@ -1760,7 +1995,7 @@ void AutofillDialogViews::UpdateSectionImpl(
     DialogSection section,
     bool clobber_inputs) {
   const DetailInputs& updated_inputs =
-      controller_->RequestedFieldsForSection(section);
+      delegate_->RequestedFieldsForSection(section);
   DetailsGroup* group = GroupForSection(section);
 
   for (DetailInputs::const_iterator iter = updated_inputs.begin();
@@ -1774,7 +2009,7 @@ void AutofillDialogViews::UpdateSectionImpl(
       if (decorated->text().empty() || clobber_inputs) {
         decorated->SetText(iter->initial_value);
         decorated->SetIcon(
-            controller_->IconForField(input.type, decorated->text()));
+            delegate_->IconForField(input.type, decorated->text()));
       }
     }
 
@@ -1799,33 +2034,21 @@ void AutofillDialogViews::UpdateSectionImpl(
 
 void AutofillDialogViews::UpdateDetailsGroupState(const DetailsGroup& group) {
   const SuggestionState& suggestion_state =
-      controller_->SuggestionStateForSection(group.section);
-  bool show_suggestions = !suggestion_state.text.empty();
-  group.suggested_info->SetVisible(show_suggestions);
-  group.suggested_info->SetSuggestionText(suggestion_state.text,
-                                          suggestion_state.text_style);
-  group.suggested_info->SetSuggestionIcon(suggestion_state.icon);
+      delegate_->SuggestionStateForSection(group.section);
+  group.suggested_info->SetState(suggestion_state);
+  group.manual_input->SetVisible(!suggestion_state.visible);
 
-  if (!suggestion_state.extra_text.empty()) {
-    group.suggested_info->ShowTextfield(
-        suggestion_state.extra_text,
-        suggestion_state.extra_icon);
-  }
+  UpdateButtonStripExtraView();
 
-  group.manual_input->SetVisible(!show_suggestions);
-
-  // Show or hide the "Save in chrome" checkbox. If nothing is in editing mode,
-  // hide. If the controller tells us not to show it, likewise hide.
-  UpdateSaveInChromeCheckbox();
-
-  const bool has_menu = !!controller_->MenuModelForSection(group.section);
+  const bool has_menu = !!delegate_->MenuModelForSection(group.section);
 
   if (group.suggested_button)
     group.suggested_button->SetVisible(has_menu);
 
   if (group.container) {
-    group.container->SetForwardMouseEvents(has_menu && show_suggestions);
-    group.container->SetVisible(controller_->SectionIsActive(group.section));
+    group.container->SetForwardMouseEvents(
+        has_menu && suggestion_state.visible);
+    group.container->SetVisible(delegate_->SectionIsActive(group.section));
     if (group.container->visible())
       ValidateGroup(group, VALIDATE_EDIT);
   }
@@ -1836,7 +2059,7 @@ void AutofillDialogViews::UpdateDetailsGroupState(const DetailsGroup& group) {
 template<class T>
 void AutofillDialogViews::SetValidityForInput(
     T* input,
-    const string16& message) {
+    const base::string16& message) {
   bool invalid = !message.empty();
   input->SetInvalid(invalid);
 
@@ -1856,50 +2079,64 @@ void AutofillDialogViews::ShowErrorBubbleForViewIfNecessary(views::View* view) {
   if (!view->GetWidget())
     return;
 
-  if (error_bubble_ && error_bubble_->anchor() == view)
-    return;
-
-  std::map<views::View*, string16>::iterator error_message =
+  std::map<views::View*, base::string16>::iterator error_message =
       validity_map_.find(view);
-  if (error_message != validity_map_.end())
-    error_bubble_.reset(new ErrorBubble(view, error_message->second));
+  if (error_message != validity_map_.end()) {
+    view->ScrollRectToVisible(view->GetLocalBounds());
+
+    if (!error_bubble_ || error_bubble_->anchor() != view)
+      error_bubble_.reset(new ErrorBubble(view, error_message->second));
+  }
 }
 
 void AutofillDialogViews::MarkInputsInvalid(DialogSection section,
                                             const ValidityData& validity_data) {
-  DetailsGroup group = *GroupForSection(section);
-  DCHECK(group.container->visible());
+  DetailsGroup* group = GroupForSection(section);
+  DCHECK(group->container->visible());
 
-  typedef std::map<AutofillFieldType,
+  typedef std::map<ServerFieldType,
       base::Callback<void(const base::string16&)> > FieldMap;
   FieldMap field_map;
 
-  if (group.manual_input->visible()) {
-    for (TextfieldMap::const_iterator iter = group.textfields.begin();
-         iter != group.textfields.end(); ++iter) {
+  if (group->manual_input->visible()) {
+    for (TextfieldMap::const_iterator iter = group->textfields.begin();
+         iter != group->textfields.end(); ++iter) {
       field_map[iter->first->type] = base::Bind(
           &AutofillDialogViews::SetValidityForInput<DecoratedTextfield>,
           base::Unretained(this),
           iter->second);
     }
-    for (ComboboxMap::const_iterator iter = group.comboboxes.begin();
-         iter != group.comboboxes.end(); ++iter) {
+    for (ComboboxMap::const_iterator iter = group->comboboxes.begin();
+         iter != group->comboboxes.end(); ++iter) {
       field_map[iter->first->type] = base::Bind(
           &AutofillDialogViews::SetValidityForInput<views::Combobox>,
           base::Unretained(this),
           iter->second);
     }
-  } else if (section == SECTION_CC) {
-    field_map[CREDIT_CARD_VERIFICATION_CODE] = base::Bind(
-        &AutofillDialogViews::SetValidityForInput<DecoratedTextfield>,
-        base::Unretained(this),
-        group.suggested_info->decorated_textfield());
+  } else {
+    // Purge invisible views from |validity_map_|.
+    std::map<views::View*, base::string16>::iterator it;
+    for (it = validity_map_.begin(); it != validity_map_.end();) {
+      DCHECK(GroupForView(it->first));
+      if (GroupForView(it->first) == group)
+        validity_map_.erase(it++);
+      else
+        ++it;
+    }
+
+    if (section == SECTION_CC) {
+      // Special case CVC as it's not part of |group->manual_input|.
+      field_map[CREDIT_CARD_VERIFICATION_CODE] = base::Bind(
+          &AutofillDialogViews::SetValidityForInput<DecoratedTextfield>,
+          base::Unretained(this),
+          group->suggested_info->decorated_textfield());
+    }
   }
 
   // Flag invalid fields, removing them from |field_map|.
   for (ValidityData::const_iterator iter = validity_data.begin();
        iter != validity_data.end(); ++iter) {
-    const string16& message = iter->second;
+    const base::string16& message = iter->second;
     field_map[iter->first].Run(message);
     field_map.erase(iter->first);
   }
@@ -1932,7 +2169,7 @@ bool AutofillDialogViews::ValidateGroup(const DetailsGroup& group,
         continue;
 
       views::Combobox* combobox = iter->second;
-      string16 item =
+      base::string16 item =
           combobox->model()->GetItemAt(combobox->selected_index());
       detail_outputs[iter->first] = item;
     }
@@ -1944,7 +2181,7 @@ bool AutofillDialogViews::ValidateGroup(const DetailsGroup& group,
     detail_outputs[cvc_input.get()] = decorated_cvc->text();
   }
 
-  ValidityData invalid_inputs = controller_->InputsAreValid(
+  ValidityData invalid_inputs = delegate_->InputsAreValid(
       group.section, detail_outputs, validation_type);
   MarkInputsInvalid(group.section, invalid_inputs);
 
@@ -1953,6 +2190,8 @@ bool AutofillDialogViews::ValidateGroup(const DetailsGroup& group,
 
 bool AutofillDialogViews::ValidateForm() {
   bool all_valid = true;
+  validity_map_.clear();
+
   for (DetailGroupMap::iterator iter = detail_groups_.begin();
        iter != detail_groups_.end(); ++iter) {
     const DetailsGroup& group = iter->second;
@@ -1972,8 +2211,8 @@ void AutofillDialogViews::TextfieldEditedOrActivated(
   DetailsGroup* group = GroupForView(textfield);
   DCHECK(group);
 
-  // Figure out the AutofillFieldType this textfield represents.
-  AutofillFieldType type = UNKNOWN_TYPE;
+  // Figure out the ServerFieldType this textfield represents.
+  ServerFieldType type = UNKNOWN_TYPE;
   DecoratedTextfield* decorated = NULL;
 
   // Look for the input in the manual inputs.
@@ -1982,7 +2221,7 @@ void AutofillDialogViews::TextfieldEditedOrActivated(
        ++iter) {
     decorated = iter->second;
     if (decorated == textfield) {
-      controller_->UserEditedOrActivatedInput(group->section,
+      delegate_->UserEditedOrActivatedInput(group->section,
                                               iter->first,
                                               GetWidget()->GetNativeView(),
                                               textfield->GetBoundsInScreen(),
@@ -2007,7 +2246,7 @@ void AutofillDialogViews::TextfieldEditedOrActivated(
   if (decorated->invalid() && was_edit) {
     SetValidityForInput<DecoratedTextfield>(
         decorated,
-        controller_->InputValidityMessage(group->section, type,
+        delegate_->InputValidityMessage(group->section, type,
                                           textfield->text()));
 
     // If the field transitioned from invalid to valid, re-validate the group,
@@ -2016,13 +2255,20 @@ void AutofillDialogViews::TextfieldEditedOrActivated(
       ValidateGroup(*group, VALIDATE_EDIT);
   }
 
-  gfx::Image icon = controller_->IconForField(type, textfield->text());
+  gfx::Image icon = delegate_->IconForField(type, textfield->text());
   decorated->SetIcon(icon);
 }
 
-void AutofillDialogViews::UpdateSaveInChromeCheckbox() {
-  save_in_chrome_checkbox_->SetVisible(
-      controller_->ShouldOfferToSaveInChrome());
+void AutofillDialogViews::UpdateButtonStripExtraView() {
+  save_in_chrome_checkbox_container_->SetVisible(
+      delegate_->ShouldOfferToSaveInChrome());
+
+  gfx::Image image = delegate_->ButtonStripImage();
+  button_strip_image_->SetVisible(!image.IsEmpty());
+  button_strip_image_->SetImage(image.AsImageSkia());
+
+  autocheckout_progress_bar_view_->SetVisible(
+      delegate_->ShouldShowProgressBar());
 }
 
 void AutofillDialogViews::ContentsPreferredSizeChanged() {
@@ -2030,10 +2276,7 @@ void AutofillDialogViews::ContentsPreferredSizeChanged() {
     GetWidget()->SetSize(GetWidget()->non_client_view()->GetPreferredSize());
     // If the above line does not cause the dialog's size to change, |contents_|
     // may not be laid out. This will trigger a layout only if it's needed.
-    contents_->SetBoundsRect(contents_->bounds());
-
-    if (error_bubble_)
-      error_bubble_->UpdatePosition();
+    SetBoundsRect(bounds());
   }
 }
 
@@ -2053,7 +2296,7 @@ AutofillDialogViews::DetailsGroup* AutofillDialogViews::GroupForView(
       return group;
 
     views::View* decorated =
-        view->GetAncestorWithClassName(kDecoratedTextfieldClassName);
+        view->GetAncestorWithClassName(DecoratedTextfield::kViewClassName);
 
     // Textfields need to check a second case, since they can be
     // suggested inputs instead of directly editable inputs. Those are

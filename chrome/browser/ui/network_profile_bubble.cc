@@ -17,7 +17,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -135,7 +135,7 @@ void NetworkProfileBubble::CheckNetworkProfile(
       } else {
         RecordUmaEvent(METRIC_CHECK_IO_FAILED);
       }
-      file_util::Delete(temp_file, false);
+      base::DeleteFile(temp_file, false);
     }
     if (profile_on_network) {
       RecordUmaEvent(METRIC_PROFILE_ON_NETWORK);
@@ -157,7 +157,7 @@ void NetworkProfileBubble::SetNotificationShown(bool shown) {
 }
 
 // static
-void NetworkProfileBubble::RegisterUserPrefs(
+void NetworkProfileBubble::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterIntegerPref(
       prefs::kNetworkProfileWarningsLeft,

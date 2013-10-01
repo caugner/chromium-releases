@@ -9,8 +9,8 @@
 #include "ash/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/volume_control_delegate.h"
-#include "base/message_loop.h"
-#include "base/time.h"
+#include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
 
 namespace ash {
 namespace test {
@@ -30,18 +30,6 @@ class TestVolumeControlDelegate : public VolumeControlDelegate {
   }
   virtual bool HandleVolumeUp(const ui::Accelerator& accelerator) OVERRIDE {
     return true;
-  }
-  virtual void SetVolumePercent(double percent) OVERRIDE {
-  }
-  virtual bool IsAudioMuted() const OVERRIDE {
-    return true;
-  }
-  virtual void SetAudioMuted(bool muted) OVERRIDE {
-  }
-  virtual float GetVolumeLevel() const OVERRIDE {
-    return 0.0;
-  }
-  virtual void SetVolumeLevel(float level) OVERRIDE {
   }
 
  private:
@@ -126,6 +114,10 @@ base::HourClockType TestSystemTrayDelegate::GetHourClockType() const {
 void TestSystemTrayDelegate::ShowSettings() {
 }
 
+bool TestSystemTrayDelegate::ShouldShowSettings() {
+  return true;
+}
+
 void TestSystemTrayDelegate::ShowDateSettings() {
 }
 
@@ -137,6 +129,9 @@ void TestSystemTrayDelegate::ShowBluetoothSettings() {
 }
 
 void TestSystemTrayDelegate::ShowDisplaySettings() {
+}
+
+void TestSystemTrayDelegate::ShowChromeSlow() {
 }
 
 bool TestSystemTrayDelegate::ShouldShowDisplayNotification() {
@@ -224,10 +219,12 @@ void TestSystemTrayDelegate::GetDriveOperationStatusList(
 void TestSystemTrayDelegate::ConfigureNetwork(const std::string& network_id) {
 }
 
-void TestSystemTrayDelegate::ConnectToNetwork(const std::string& network_id) {
+void TestSystemTrayDelegate::EnrollOrConfigureNetwork(
+    const std::string& network_id,
+    gfx::NativeWindow parent_window) {
 }
 
-void TestSystemTrayDelegate::AddBluetoothDevice() {
+void TestSystemTrayDelegate::ManageBluetoothDevices() {
 }
 
 void TestSystemTrayDelegate::ToggleBluetooth() {
@@ -239,6 +236,9 @@ bool TestSystemTrayDelegate::IsBluetoothDiscovering() {
 }
 
 void TestSystemTrayDelegate::ShowMobileSimDialog() {
+}
+
+void TestSystemTrayDelegate::ShowMobileSetup(const std::string& network_id) {
 }
 
 void TestSystemTrayDelegate::ShowOtherWifi() {

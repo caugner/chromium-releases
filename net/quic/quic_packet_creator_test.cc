@@ -30,8 +30,8 @@ namespace {
 class QuicPacketCreatorTest : public ::testing::TestWithParam<bool> {
  protected:
   QuicPacketCreatorTest()
-      : server_framer_(kQuicVersion1, QuicTime::Zero(), true),
-        client_framer_(kQuicVersion1, QuicTime::Zero(), false),
+      : server_framer_(QuicVersionMax(), QuicTime::Zero(), true),
+        client_framer_(QuicVersionMax(), QuicTime::Zero(), false),
         id_(1),
         sequence_number_(0),
         guid_(2),
@@ -177,10 +177,39 @@ TEST_F(QuicPacketCreatorTest, CreateStreamFrameFinOnly) {
   delete frame.stream_frame;
 }
 
+TEST_F(QuicPacketCreatorTest, CreateAllFreeBytesForStreamFrames) {
+  QuicStreamId kStreamId = 1u;
+  QuicStreamOffset kOffset = 1u;
+  for (int i = 0; i < 100; ++i) {
+    creator_.options()->max_packet_length = i;
+    const size_t max_plaintext_size = client_framer_.GetMaxPlaintextSize(i);
+    const bool should_have_room = max_plaintext_size >
+        (QuicFramer::GetMinStreamFrameSize(
+             client_framer_.version(), kStreamId, kOffset, true) +
+         GetPacketHeaderSize(creator_.options()->send_guid_length,
+                             kIncludeVersion,
+                             creator_.options()->send_sequence_number_length,
+                             NOT_IN_FEC_GROUP));
+    ASSERT_EQ(should_have_room,
+              creator_.HasRoomForStreamFrame(kStreamId, kOffset));
+    if (should_have_room) {
+      QuicFrame frame;
+      size_t bytes_consumed = creator_.CreateStreamFrame(
+          kStreamId, "testdata", kOffset, false, &frame);
+      EXPECT_LT(0u, bytes_consumed);
+      ASSERT_TRUE(creator_.AddSavedFrame(frame));
+      SerializedPacket serialized_packet = creator_.SerializePacket();
+      ASSERT_TRUE(serialized_packet.packet);
+      delete serialized_packet.packet;
+      delete serialized_packet.retransmittable_frames;
+    }
+  }
+}
+
 TEST_F(QuicPacketCreatorTest, SerializeVersionNegotiationPacket) {
   QuicPacketCreatorPeer::SetIsServer(&creator_, true);
-  QuicTagVector versions;
-  versions.push_back(kQuicVersion1);
+  QuicVersionVector versions;
+  versions.push_back(QuicVersionMax());
   scoped_ptr<QuicEncryptedPacket> encrypted(
       creator_.SerializeVersionNegotiationPacket(versions));
 
@@ -224,14 +253,18 @@ TEST_P(QuicPacketCreatorTest, CreateStreamFrameTooLarge) {
     creator_.StopSendingVersion();
   }
   // A string larger than fits into a frame.
+  size_t payload_length;
   creator_.options()->max_packet_length = GetPacketLengthForOneStream(
+      client_framer_.version(),
       QuicPacketCreatorPeer::SendVersionInPacket(&creator_),
-      NOT_IN_FEC_GROUP, 4);
+      NOT_IN_FEC_GROUP, &payload_length);
   QuicFrame frame;
-  size_t consumed = creator_.CreateStreamFrame(1u, "testTooLong", 0u, true,
-                                               &frame);
-  EXPECT_EQ(4u, consumed);
-  CheckStreamFrame(frame, 1u, "test", 0u, false);
+  const string too_long_payload(payload_length * 2, 'a');
+  size_t consumed = creator_.CreateStreamFrame(
+      1u, too_long_payload, 0u, true, &frame);
+  EXPECT_EQ(payload_length, consumed);
+  const string payload(payload_length, 'a');
+  CheckStreamFrame(frame, 1u, payload, 0u, false);
   delete frame.stream_frame;
 }
 

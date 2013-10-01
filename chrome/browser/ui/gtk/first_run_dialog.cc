@@ -8,8 +8,9 @@
 #include <vector>
 
 #include "base/i18n/rtl.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/app/breakpad_linux.h"
 #include "chrome/browser/first_run/first_run_dialog.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/process_singleton.h"
@@ -27,10 +28,6 @@
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-
-#if defined(USE_LINUX_BREAKPAD)
-#include "chrome/app/breakpad_linux.h"
-#endif
 
 #if defined(GOOGLE_CHROME_BUILD)
 #include "base/prefs/pref_service.h"
@@ -163,16 +160,11 @@ void FirstRunDialog::OnResponseDialog(GtkWidget* widget, int response) {
   if (dialog_)
     gtk_widget_hide_all(dialog_);
 
-  // Mark that first run has ran.
-  first_run::CreateSentinel();
-
   // Check if user has opted into reporting.
   if (report_crashes_ &&
       gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(report_crashes_))) {
-#if defined(USE_LINUX_BREAKPAD)
     if (GoogleUpdateSettings::SetCollectStatsConsent(true))
       InitCrashReporter();
-#endif
   } else {
     GoogleUpdateSettings::SetCollectStatsConsent(false);
   }

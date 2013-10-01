@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -42,6 +42,26 @@ TEST_F(OmniboxViewTest, TestStripSchemasUnsafeForPaste) {
     EXPECT_EQ(ASCIIToUTF16(expecteds[i]),
               OmniboxView::StripJavascriptSchemas(ASCIIToUTF16(urls[i])));
   }
+}
+
+TEST_F(OmniboxViewTest, SanitizeTextForPaste) {
+  // Broken URL has newlines stripped.
+  const string16 kWrappedURL(ASCIIToUTF16(
+      "http://www.chromium.org/developers/testing/chromium-\n"
+      "build-infrastructure/tour-of-the-chromium-buildbot"));
+
+  const string16 kFixedURL(ASCIIToUTF16(
+      "http://www.chromium.org/developers/testing/chromium-"
+      "build-infrastructure/tour-of-the-chromium-buildbot"));
+  EXPECT_EQ(kFixedURL, OmniboxView::SanitizeTextForPaste(kWrappedURL));
+
+  // Multi-line address is converted to a single-line address.
+  const string16 kWrappedAddress(ASCIIToUTF16(
+      "1600 Amphitheatre Parkway\nMountain View, CA"));
+
+  const string16 kFixedAddress(ASCIIToUTF16(
+      "1600 Amphitheatre Parkway Mountain View, CA"));
+  EXPECT_EQ(kFixedAddress, OmniboxView::SanitizeTextForPaste(kWrappedAddress));
 }
 
 TEST_F(OmniboxViewTest, GetClipboardText) {
@@ -107,34 +127,6 @@ TEST_F(OmniboxViewTest, GetClipboardText) {
     clipboard_writer.WriteHTML(kMarkup, kURL);
   }
   EXPECT_TRUE(OmniboxView::GetClipboardText().empty());
-
-  // Broken URL has newlines stripped.
-  {
-    const string16 kWrappedURL(ASCIIToUTF16(
-        "http://www.chromium.org/developers/testing/chromium-\n"
-        "build-infrastructure/tour-of-the-chromium-buildbot"));
-    ui::ScopedClipboardWriter clipboard_writer(clipboard,
-                                               ui::Clipboard::BUFFER_STANDARD);
-    clipboard_writer.WriteText(kWrappedURL);
-  }
-
-  const string16 kFixedURL(ASCIIToUTF16(
-        "http://www.chromium.org/developers/testing/chromium-"
-        "build-infrastructure/tour-of-the-chromium-buildbot"));
-  EXPECT_EQ(kFixedURL, OmniboxView::GetClipboardText());
-
-  // Multi-line address is converted to a single-line address.
-  {
-    const string16 kWrappedAddress(ASCIIToUTF16(
-        "1600 Amphitheatre Parkway\nMountain View, CA"));
-    ui::ScopedClipboardWriter clipboard_writer(clipboard,
-                                               ui::Clipboard::BUFFER_STANDARD);
-    clipboard_writer.WriteText(kWrappedAddress);
-  }
-
-  const string16 kFixedAddress(ASCIIToUTF16(
-      "1600 Amphitheatre Parkway Mountain View, CA"));
-  EXPECT_EQ(kFixedAddress, OmniboxView::GetClipboardText());
 }
 
 }  // namespace

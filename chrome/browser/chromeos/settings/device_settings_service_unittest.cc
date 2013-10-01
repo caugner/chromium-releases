@@ -97,7 +97,7 @@ TEST_F(DeviceSettingsServiceTest, LoadNoPolicy) {
 TEST_F(DeviceSettingsServiceTest, LoadValidationError) {
   device_policy_.policy().set_policy_data_signature("bad");
   device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
-  owner_key_util_->SetPublicKeyFromPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   ReloadDeviceSettings();
 
   EXPECT_EQ(DeviceSettingsService::STORE_VALIDATION_ERROR,
@@ -113,7 +113,7 @@ TEST_F(DeviceSettingsServiceTest, LoadValidationErrorFutureTimestamp) {
       (timestamp - base::Time::UnixEpoch()).InMilliseconds());
   device_policy_.Build();
   device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
-  owner_key_util_->SetPublicKeyFromPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   ReloadDeviceSettings();
 
   EXPECT_EQ(DeviceSettingsService::STORE_TEMP_VALIDATION_ERROR,
@@ -155,7 +155,7 @@ TEST_F(DeviceSettingsServiceTest, SignAndStoreFailure) {
   EXPECT_EQ(DeviceSettingsService::STORE_SUCCESS,
             device_settings_service_.status());
 
-  owner_key_util_->SetPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPrivateKey(device_policy_.GetSigningKey());
   device_settings_service_.SetUsername(device_policy_.policy_data().username());
   FlushDeviceSettings();
 
@@ -180,7 +180,7 @@ TEST_F(DeviceSettingsServiceTest, SignAndStoreSuccess) {
   EXPECT_EQ(DeviceSettingsService::STORE_SUCCESS,
             device_settings_service_.status());
 
-  owner_key_util_->SetPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPrivateKey(device_policy_.GetSigningKey());
   device_settings_service_.SetUsername(device_policy_.policy_data().username());
   FlushDeviceSettings();
 
@@ -226,7 +226,7 @@ TEST_F(DeviceSettingsServiceTest, StoreSuccess) {
   EXPECT_EQ(DeviceSettingsService::STORE_KEY_UNAVAILABLE,
             device_settings_service_.status());
 
-  owner_key_util_->SetPublicKeyFromPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   device_settings_service_.Store(
       device_policy_.GetCopy(),
       base::Bind(&DeviceSettingsServiceTest::SetOperationCompleted,
@@ -245,12 +245,12 @@ TEST_F(DeviceSettingsServiceTest, StoreRotation) {
 
   device_policy_.payload().mutable_device_policy_refresh_rate()->
       set_device_policy_refresh_rate(300);
-  device_policy_.set_new_signing_key(
-      policy::PolicyBuilder::CreateTestNewSigningKey());
+  device_policy_.SetDefaultNewSigningKey();
   device_policy_.Build();
   device_settings_service_.Store(device_policy_.GetCopy(), base::Closure());
   FlushDeviceSettings();
-  owner_key_util_->SetPublicKeyFromPrivateKey(device_policy_.new_signing_key());
+  owner_key_util_->SetPublicKeyFromPrivateKey(
+      *device_policy_.GetNewSigningKey());
   device_settings_service_.OwnerKeySet(true);
   FlushDeviceSettings();
   EXPECT_EQ(DeviceSettingsService::STORE_SUCCESS,
@@ -259,7 +259,7 @@ TEST_F(DeviceSettingsServiceTest, StoreRotation) {
 
   // Check the new key has been loaded.
   std::vector<uint8> key;
-  ASSERT_TRUE(device_policy_.new_signing_key()->ExportPublicKey(&key));
+  ASSERT_TRUE(device_policy_.GetNewSigningKey()->ExportPublicKey(&key));
   EXPECT_EQ(*device_settings_service_.GetOwnerKey()->public_key(), key);
 }
 
@@ -267,7 +267,7 @@ TEST_F(DeviceSettingsServiceTest, OwnershipStatus) {
   owner_key_util_->Clear();
 
   EXPECT_FALSE(device_settings_service_.HasPrivateOwnerKey());
-  EXPECT_FALSE(device_settings_service_.GetOwnerKey());
+  EXPECT_FALSE(device_settings_service_.GetOwnerKey().get());
   EXPECT_EQ(DeviceSettingsService::OWNERSHIP_UNKNOWN,
             device_settings_service_.GetOwnershipStatus());
 
@@ -276,7 +276,7 @@ TEST_F(DeviceSettingsServiceTest, OwnershipStatus) {
                  base::Unretained(this)));
   FlushDeviceSettings();
   EXPECT_FALSE(device_settings_service_.HasPrivateOwnerKey());
-  ASSERT_TRUE(device_settings_service_.GetOwnerKey());
+  ASSERT_TRUE(device_settings_service_.GetOwnerKey().get());
   EXPECT_FALSE(device_settings_service_.GetOwnerKey()->public_key());
   EXPECT_FALSE(device_settings_service_.GetOwnerKey()->private_key());
   EXPECT_EQ(DeviceSettingsService::OWNERSHIP_NONE,
@@ -284,17 +284,17 @@ TEST_F(DeviceSettingsServiceTest, OwnershipStatus) {
   EXPECT_FALSE(is_owner_);
   EXPECT_EQ(DeviceSettingsService::OWNERSHIP_NONE, ownership_status_);
 
-  owner_key_util_->SetPublicKeyFromPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   ReloadDeviceSettings();
   device_settings_service_.GetOwnershipStatusAsync(
       base::Bind(&DeviceSettingsServiceTest::SetOwnershipStatus,
                  base::Unretained(this)));
   FlushDeviceSettings();
   EXPECT_FALSE(device_settings_service_.HasPrivateOwnerKey());
-  ASSERT_TRUE(device_settings_service_.GetOwnerKey());
+  ASSERT_TRUE(device_settings_service_.GetOwnerKey().get());
   ASSERT_TRUE(device_settings_service_.GetOwnerKey()->public_key());
   std::vector<uint8> key;
-  ASSERT_TRUE(device_policy_.signing_key()->ExportPublicKey(&key));
+  ASSERT_TRUE(device_policy_.GetSigningKey()->ExportPublicKey(&key));
   EXPECT_EQ(*device_settings_service_.GetOwnerKey()->public_key(), key);
   EXPECT_FALSE(device_settings_service_.GetOwnerKey()->private_key());
   EXPECT_EQ(DeviceSettingsService::OWNERSHIP_TAKEN,
@@ -302,16 +302,16 @@ TEST_F(DeviceSettingsServiceTest, OwnershipStatus) {
   EXPECT_FALSE(is_owner_);
   EXPECT_EQ(DeviceSettingsService::OWNERSHIP_TAKEN, ownership_status_);
 
-  owner_key_util_->SetPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPrivateKey(device_policy_.GetSigningKey());
   device_settings_service_.SetUsername(device_policy_.policy_data().username());
   device_settings_service_.GetOwnershipStatusAsync(
       base::Bind(&DeviceSettingsServiceTest::SetOwnershipStatus,
                  base::Unretained(this)));
   FlushDeviceSettings();
   EXPECT_TRUE(device_settings_service_.HasPrivateOwnerKey());
-  ASSERT_TRUE(device_settings_service_.GetOwnerKey());
+  ASSERT_TRUE(device_settings_service_.GetOwnerKey().get());
   ASSERT_TRUE(device_settings_service_.GetOwnerKey()->public_key());
-  ASSERT_TRUE(device_policy_.signing_key()->ExportPublicKey(&key));
+  ASSERT_TRUE(device_policy_.GetSigningKey()->ExportPublicKey(&key));
   EXPECT_EQ(*device_settings_service_.GetOwnerKey()->public_key(), key);
   EXPECT_TRUE(device_settings_service_.GetOwnerKey()->private_key());
   EXPECT_EQ(DeviceSettingsService::OWNERSHIP_TAKEN,
@@ -332,7 +332,7 @@ TEST_F(DeviceSettingsServiceTest, Observer) {
 
   EXPECT_CALL(observer_, OwnershipStatusChanged()).Times(1);
   EXPECT_CALL(observer_, DeviceSettingsUpdated()).Times(1);
-  owner_key_util_->SetPublicKeyFromPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   ReloadDeviceSettings();
   Mock::VerifyAndClearExpectations(&observer_);
 

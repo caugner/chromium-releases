@@ -17,30 +17,21 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/web_contents.h"
-#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 #include "webkit/common/quota/quota_types.h"
 
-using content::BrowserThread;
-using content::QuotaPermissionContext;
-using content::WebContents;
 
 
 // RequestQuotaInfoBarDelegate ------------------------------------------------
 
 namespace {
 
-// If we requested larger quota than this threshold, show a different
-// message to the user.
-const int64 kRequestLargeQuotaThreshold = 5 * 1024 * 1024;
-
 class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  typedef QuotaPermissionContext::PermissionCallback PermissionCallback;
-
   // Creates a request quota infobar delegate and adds it to |infobar_service|.
   static void Create(
       InfoBarService* infobar_service,
@@ -48,7 +39,7 @@ class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
       const GURL& origin_url,
       int64 requested_quota,
       const std::string& display_languages,
-      const PermissionCallback& callback);
+      const content::QuotaPermissionContext::PermissionCallback& callback);
 
  private:
   RequestQuotaInfoBarDelegate(
@@ -57,13 +48,12 @@ class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
       const GURL& origin_url,
       int64 requested_quota,
       const std::string& display_languages,
-      const PermissionCallback& callback);
+      const content::QuotaPermissionContext::PermissionCallback& callback);
   virtual ~RequestQuotaInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
   virtual bool ShouldExpireInternal(
       const content::LoadCommittedDetails& details) const OVERRIDE;
-
   virtual string16 GetMessageText() const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
@@ -72,7 +62,7 @@ class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
   GURL origin_url_;
   std::string display_languages_;
   int64 requested_quota_;
-  PermissionCallback callback_;
+  content::QuotaPermissionContext::PermissionCallback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(RequestQuotaInfoBarDelegate);
 };
@@ -84,7 +74,7 @@ void RequestQuotaInfoBarDelegate::Create(
     const GURL& origin_url,
     int64 requested_quota,
     const std::string& display_languages,
-    const QuotaPermissionContext::PermissionCallback& callback) {
+    const content::QuotaPermissionContext::PermissionCallback& callback) {
   infobar_service->AddInfoBar(scoped_ptr<InfoBarDelegate>(
       new RequestQuotaInfoBarDelegate(infobar_service, context, origin_url,
                                       requested_quota, display_languages,
@@ -97,7 +87,7 @@ RequestQuotaInfoBarDelegate::RequestQuotaInfoBarDelegate(
     const GURL& origin_url,
     int64 requested_quota,
     const std::string& display_languages,
-    const PermissionCallback& callback)
+    const content::QuotaPermissionContext::PermissionCallback& callback)
     : ConfirmInfoBarDelegate(infobar_service),
       context_(context),
       origin_url_(origin_url),
@@ -110,7 +100,7 @@ RequestQuotaInfoBarDelegate::~RequestQuotaInfoBarDelegate() {
   if (!callback_.is_null()) {
     context_->DispatchCallbackOnIOThread(
         callback_,
-        QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_CANCELLED);
+        content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_CANCELLED);
   }
 }
 
@@ -120,6 +110,9 @@ bool RequestQuotaInfoBarDelegate::ShouldExpireInternal(
 }
 
 string16 RequestQuotaInfoBarDelegate::GetMessageText() const {
+  // If the site requested larger quota than this threshold, show a different
+  // message to the user.
+  const int64 kRequestLargeQuotaThreshold = 5 * 1024 * 1024;
   return l10n_util::GetStringFUTF16(
       (requested_quota_ > kRequestLargeQuotaThreshold ?
           IDS_REQUEST_LARGE_QUOTA_INFOBAR_QUESTION :
@@ -130,14 +123,14 @@ string16 RequestQuotaInfoBarDelegate::GetMessageText() const {
 bool RequestQuotaInfoBarDelegate::Accept() {
   context_->DispatchCallbackOnIOThread(
       callback_,
-      QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_ALLOW);
+      content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_ALLOW);
   return true;
 }
 
 bool RequestQuotaInfoBarDelegate::Cancel() {
   context_->DispatchCallbackOnIOThread(
       callback_,
-      QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_CANCELLED);
+      content::QuotaPermissionContext::QUOTA_PERMISSION_RESPONSE_CANCELLED);
   return true;
 }
 
@@ -146,7 +139,8 @@ bool RequestQuotaInfoBarDelegate::Cancel() {
 
 // ChromeQuotaPermissionContext -----------------------------------------------
 
-ChromeQuotaPermissionContext::ChromeQuotaPermissionContext() {}
+ChromeQuotaPermissionContext::ChromeQuotaPermissionContext() {
+}
 
 void ChromeQuotaPermissionContext::RequestQuotaPermission(
     const GURL& origin_url,
@@ -162,16 +156,16 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
     return;
   }
 
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+  if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
+    content::BrowserThread::PostTask(
+        content::BrowserThread::UI, FROM_HERE,
         base::Bind(&ChromeQuotaPermissionContext::RequestQuotaPermission, this,
                    origin_url, type, requested_quota, render_process_id,
                    render_view_id, callback));
     return;
   }
 
-  WebContents* web_contents =
+  content::WebContents* web_contents =
       tab_util::GetWebContentsByID(render_process_id, render_view_id);
   if (!web_contents) {
     // The tab may have gone away or the request may not be from a tab.
@@ -190,11 +184,10 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
     DispatchCallbackOnIOThread(callback, QUOTA_PERMISSION_RESPONSE_CANCELLED);
     return;
   }
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
   RequestQuotaInfoBarDelegate::Create(
       infobar_service, this, origin_url, requested_quota,
-      profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
+      Profile::FromBrowserContext(web_contents->GetBrowserContext())->
+          GetPrefs()->GetString(prefs::kAcceptLanguages),
       callback);
 }
 
@@ -203,9 +196,9 @@ void ChromeQuotaPermissionContext::DispatchCallbackOnIOThread(
     QuotaPermissionResponse response) {
   DCHECK_EQ(false, callback.is_null());
 
-  if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+  if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::IO)) {
+    content::BrowserThread::PostTask(
+        content::BrowserThread::IO, FROM_HERE,
         base::Bind(&ChromeQuotaPermissionContext::DispatchCallbackOnIOThread,
                    this, callback, response));
     return;

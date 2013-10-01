@@ -23,6 +23,7 @@
           'idl_object_types.idl',
           'objects.json',
           'simple_api.json',
+          'error_generation.json'
         ],
         'cc_dir': 'tools/json_schema_compiler/test',
         'root_namespace': 'test::api',
@@ -32,6 +33,8 @@
       ],
       'sources': [
         '<@(schema_files)',
+        'test_util.cc',
+        'test_util.h',
       ],
       'includes': ['../../../build/json_schema_compile.gypi'],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.

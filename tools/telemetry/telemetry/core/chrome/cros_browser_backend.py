@@ -7,10 +7,10 @@ import subprocess
 
 from telemetry.core import exceptions
 from telemetry.core import util
-from telemetry.core.chrome import browser_backend
-from telemetry.core.chrome import cros_util
+from telemetry.core.backends import browser_backend
+from telemetry.core.backends.chrome import chrome_browser_backend
 
-class CrOSBrowserBackend(browser_backend.BrowserBackend):
+class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   # Some developers' workflow includes running the Chrome process from
   # /usr/local/... instead of the default location. We have to check for both
   # paths in order to support this workflow.
@@ -18,8 +18,9 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
                   '/usr/local/opt/google/chrome/chrome ']
 
   def __init__(self, browser_type, options, cri, is_guest):
-    super(CrOSBrowserBackend, self).__init__(is_content_shell=False,
-        supports_extensions=not is_guest, options=options)
+    super(CrOSBrowserBackend, self).__init__(
+        is_content_shell=False, supports_extensions=not is_guest,
+        options=options)
     # Initialize fields so that an explosion during init doesn't break in Close.
     self._browser_type = browser_type
     self._options = options
@@ -28,6 +29,7 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
 
     self._remote_debugging_port = self._cri.GetRemotePort()
     self._port = self._remote_debugging_port
+    self._forwarder = None
 
     self._login_ext_dir = os.path.join(os.path.dirname(__file__),
                                        'chromeos_login_ext')
@@ -67,6 +69,103 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
       cri.PushFile(options.profile_dir + '/Default', profile_dir)
       cri.RunCmdOnDevice(['chown', '-R', 'chronos:chronos', profile_dir])
 
+  def GetBrowserStartupArgs(self):
+    self.webpagereplay_remote_http_port = self._cri.GetRemotePort()
+    self.webpagereplay_remote_https_port = self._cri.GetRemotePort()
+
+    args = super(CrOSBrowserBackend, self).GetBrowserStartupArgs()
+
+    args.extend([
+            '--enable-smooth-scrolling',
+            '--enable-threaded-compositing',
+            '--enable-per-tile-painting',
+            '--force-compositing-mode',
+            # Disables the start page, as well as other external apps that can
+            # steal focus or make measurements inconsistent.
+            '--disable-default-apps',
+            # Jump to the login screen, skipping network selection, eula, etc.
+            '--login-screen=login',
+            # Skip user image selection screen, and post login screens.
+            '--oobe-skip-postlogin',
+            # Skip hwid check, for VMs and pre-MP lab devices.
+            '--skip-hwid-check',
+            # Allow devtools to connect to chrome.
+            '--remote-debugging-port=%i' % self._remote_debugging_port,
+            # Open a maximized window.
+            '--start-maximized',
+            # Debug logging for login flake (crbug.com/263527).
+            '--vmodule=*/browser/automation/*=2,*/chromeos/net/*=2,' +
+                '*/chromeos/login/*=2'])
+
+    if not self._is_guest:
+      # This extension bypasses gaia and logs us in.
+      args.append('--auth-ext-path=%s' % self._login_ext_dir)
+
+    return args
+
+  def _GetSessionManagerPid(self, procs):
+    """Returns the pid of the session_manager process, given the list of
+    processes."""
+    for pid, process, _ in procs:
+      if process.startswith('/sbin/session_manager '):
+        return pid
+    return None
+
+  def _GetChromeProcess(self):
+    """Locates the the main chrome browser process.
+
+    Chrome on cros is usually in /opt/google/chrome, but could be in
+    /usr/local/ for developer workflows - debug chrome is too large to fit on
+    rootfs.
+
+    Chrome spawns multiple processes for renderers. pids wrap around after they
+    are exhausted so looking for the smallest pid is not always correct. We
+    locate the session_manager's pid, and look for the chrome process that's an
+    immediate child. This is the main browser process.
+    """
+    procs = self._cri.ListProcesses()
+    session_manager_pid = self._GetSessionManagerPid(procs)
+    if not session_manager_pid:
+      return None
+
+    # Find the chrome process that is the child of the session_manager.
+    for pid, process, ppid in procs:
+      if ppid != session_manager_pid:
+        continue
+      for path in self.CHROME_PATHS:
+        if process.startswith(path):
+          return {'pid': pid, 'path': path}
+    return None
+
+  @property
+  def pid(self):
+    result = self._GetChromeProcess()
+    if result and 'pid' in result:
+      return result['pid']
+    return None
+
+  @property
+  def browser_directory(self):
+    result = self._GetChromeProcess()
+    if result and 'path' in result:
+      return result['path']
+    return None
+
+  @property
+  def profile_directory(self):
+    return '/home/chronos/Default'
+
+  @property
+  def hwid(self):
+    return self._cri.RunCmdOnDevice(['/usr/bin/crossystem', 'hwid'])[0]
+
+  def GetRemotePort(self, _):
+    return self._cri.GetRemotePort()
+
+  def __del__(self):
+    self.Close()
+
+  def Start(self):
     # Escape all commas in the startup arguments we pass to Chrome
     # because dbus-send delimits array elements by commas
     startup_args = [a.replace(',', '\\,') for a in self.GetBrowserStartupArgs()]
@@ -79,16 +178,16 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
             'org.chromium.SessionManagerInterface.EnableChromeTesting',
             'boolean:true',
             'array:string:"%s"' % ','.join(startup_args)]
-    cri.RunCmdOnDevice(args)
+    self._cri.RunCmdOnDevice(args)
 
-    if not cri.local:
+    if not self._cri.local:
       # Find a free local port.
       self._port = util.GetAvailableLocalPort()
 
       # Forward the remote debugging port.
       logging.info('Forwarding remote debugging port')
       self._forwarder = SSHForwarder(
-        cri, 'L',
+        self._cri, 'L',
         util.PortPair(self._port, self._remote_debugging_port))
 
     # Wait for the browser to come up.
@@ -112,92 +211,15 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
 
     if self._is_guest:
       pid = self.pid
-      cros_util.NavigateGuestLogin(self, cri)
+      self._NavigateGuestLogin()
       # Guest browsing shuts down the current browser and launches an incognito
       # browser in a separate process, which we need to wait for.
       util.WaitFor(lambda: pid != self.pid, 10)
       self._WaitForBrowserToComeUp()
     else:
-      cros_util.NavigateLogin(self, cri)
+      self._NavigateLogin()
 
     logging.info('Browser is up!')
-
-  def GetBrowserStartupArgs(self):
-    self.webpagereplay_remote_http_port = self._cri.GetRemotePort()
-    self.webpagereplay_remote_https_port = self._cri.GetRemotePort()
-
-    args = super(CrOSBrowserBackend, self).GetBrowserStartupArgs()
-
-    args.extend([
-            '--enable-smooth-scrolling',
-            '--enable-threaded-compositing',
-            '--enable-per-tile-painting',
-            '--force-compositing-mode',
-            # Disables the start page, as well as other external apps that can
-            # steal focus or make measurements inconsistent.
-            '--disable-default-apps',
-            # Jump to the login screen, skipping network selection, eula, etc.
-            '--login-screen=login',
-            # Allow devtools to connect to chrome.
-            '--remote-debugging-port=%i' % self._remote_debugging_port,
-            # Open a maximized window.
-            '--start-maximized'])
-
-    if not self._is_guest:
-      # This extension bypasses gaia and logs us in.
-      args.append('--auth-ext-path=%s' % self._login_ext_dir)
-
-    # Skip hwid check on systems that don't have a hwid set, eg VMs.
-    if not self.hwid:
-      args.append('--skip-hwid-check')
-
-    return args
-
-
-  def _GetSessionManagerPid(self, procs):
-    """Returns the pid of the session_manager process, given the list of
-    processes."""
-    for pid, process, _ in procs:
-      if process.startswith('/sbin/session_manager '):
-        return pid
-    return None
-
-  @property
-  def pid(self):
-    """Locates the pid of the main chrome browser process.
-
-    Chrome on cros is usually in /opt/google/chrome, but could be in
-    /usr/local/ for developer workflows - debug chrome is too large to fit on
-    rootfs.
-
-    Chrome spawns multiple processes for renderers. pids wrap around after they
-    are exhausted so looking for the smallest pid is not always correct. We
-    locate the session_manager's pid, and look for the chrome process that's an
-    immediate child. This is the main browser process.
-    """
-    procs = self._cri.ListProcesses()
-    session_manager_pid = self._GetSessionManagerPid(procs)
-    if not session_manager_pid:
-      return None
-
-    # Find the chrome process that is the child of the session_manager.
-    for pid, process, ppid in procs:
-      if ppid != session_manager_pid:
-        continue
-      for path in self.CHROME_PATHS:
-        if process.startswith(path):
-          return pid
-    return None
-
-  @property
-  def hwid(self):
-    return self._cri.RunCmdOnDevice(['/usr/bin/crossystem', 'hwid'])[0]
-
-  def GetRemotePort(self, _):
-    return self._cri.GetRemotePort()
-
-  def __del__(self):
-    self.Close()
 
   def Close(self):
     super(CrOSBrowserBackend, self).Close()
@@ -224,6 +246,9 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
   def GetStandardOutput(self):
     return 'Cannot get standard output on CrOS'
 
+  def GetStackTrace(self):
+    return 'Cannot get stack trace on CrOS'
+
   def CreateForwarder(self, *port_pairs):
     assert self._cri
     return (browser_backend.DoNothingForwarder(*port_pairs) if self._cri.local
@@ -236,6 +261,110 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
         self._cri.RunCmdOnDevice(['restart', 'ui'])
       else:
         self._cri.RunCmdOnDevice(['start', 'ui'])
+
+  @property
+  def oobe(self):
+    return self.misc_web_contents_backend.GetOobe()
+
+  def _SigninUIState(self):
+    """Returns the signin ui state of the oobe. HIDDEN: 0, GAIA_SIGNIN: 1,
+    ACCOUNT_PICKER: 2, WRONG_HWID_WARNING: 3, MANAGED_USER_CREATION_FLOW: 4.
+    These values are in
+    chrome/browser/resources/chromeos/login/display_manager.js
+    """
+    return self.oobe.EvaluateJavaScript('''
+      loginHeader = document.getElementById('login-header-bar')
+      if (loginHeader) {
+        loginHeader.signinUIState_;
+      }
+    ''')
+
+  def _IsCryptohomeMounted(self):
+    """Returns True if a cryptohome vault is mounted at /home/chronos/user."""
+    return self._cri.FilesystemMountedAt('/home/chronos/user').startswith(
+        '/home/.shadow/')
+
+  def _HandleUserImageSelectionScreen(self):
+    """If we're stuck on the user image selection screen, we click the ok
+    button.
+    """
+    oobe = self.oobe
+    if oobe:
+      try:
+        oobe.EvaluateJavaScript("""
+            var ok = document.getElementById("ok-button");
+            if (ok) {
+              ok.click();
+            }
+        """)
+      except (exceptions.TabCrashException):
+        pass
+
+  def _IsLoggedIn(self):
+    """Returns True if we're logged in (cryptohome has mounted), and the oobe
+    has been dismissed."""
+    if self.chrome_branch_number <= 1547:
+      self._HandleUserImageSelectionScreen()
+    return self._IsCryptohomeMounted() and not self.oobe
+
+  def _StartupWindow(self):
+    """Closes the startup window, which is an extension on official builds,
+    and a webpage on chromiumos"""
+    startup_window_ext_id = 'honijodknafkokifofgiaalefdiedpko'
+    return (self.extension_dict_backend[startup_window_ext_id]
+        if startup_window_ext_id in self.extension_dict_backend
+        else self.tab_list_backend.Get(0, None))
+
+  def _WaitForAccountPicker(self):
+    """Waits for the oobe screen to be in the account picker state."""
+    util.WaitFor(lambda: self._SigninUIState() == 2, 20)
+
+  def _ClickBrowseAsGuest(self):
+    """Click the Browse As Guest button on the account picker screen. This will
+    restart the browser, and we could have a tab crash or a browser crash."""
+    try:
+      self.oobe.EvaluateJavaScript("""
+          var guest = document.getElementById("guest-user-button");
+          if (guest) {
+            guest.click();
+          }
+      """)
+    except (exceptions.TabCrashException,
+            exceptions.BrowserConnectionGoneException):
+      pass
+
+  def _WaitForGuestFsMounted(self):
+    """Waits for /home/chronos/user to be mounted as guestfs"""
+    util.WaitFor(lambda: (self._cri.FilesystemMountedAt('/home/chronos/user') ==
+                          'guestfs'), 20)
+
+  def _NavigateGuestLogin(self):
+    """Navigates through oobe login screen as guest"""
+    assert self.oobe
+    self._WaitForAccountPicker()
+    self._ClickBrowseAsGuest()
+    self._WaitForGuestFsMounted()
+
+  def _NavigateLogin(self):
+    """Navigates through oobe login screen"""
+    # Dismiss the user image selection screen.
+    try:
+      util.WaitFor(lambda: self._IsLoggedIn(), 60) # pylint: disable=W0108
+    except util.TimeoutException:
+      self._cri.TakeScreenShot('login-screen')
+      raise exceptions.LoginException(
+          'Timed out going through oobe screen. Make sure the custom auth '
+          'extension passed through --auth-ext-path is valid and belongs '
+          'to user "chronos".')
+
+    if self.chrome_branch_number < 1500:
+      # Wait for the startup window, then close it. Startup window doesn't exist
+      # post-M27. crrev.com/197900
+      util.WaitFor(lambda: self._StartupWindow() is not None, 20)
+      self._StartupWindow().Close()
+    else:
+      # Open a new window/tab.
+      self.tab_list_backend.New(15)
 
 
 class SSHForwarder(object):

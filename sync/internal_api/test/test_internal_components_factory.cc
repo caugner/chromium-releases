@@ -31,7 +31,7 @@ TestInternalComponentsFactory::BuildContext(
     ServerConnectionManager* connection_manager,
     syncable::Directory* directory,
     const std::vector<ModelSafeWorker*>& workers,
-    ExtensionsActivityMonitor* monitor,
+    ExtensionsActivity* monitor,
     const std::vector<SyncEngineEventListener*>& listeners,
     sessions::DebugInfoGetter* debug_info_getter,
     TrafficRecorder* traffic_recorder,
@@ -45,6 +45,8 @@ TestInternalComponentsFactory::BuildContext(
           empty_listeners, debug_info_getter,
           traffic_recorder,
           switches_.encryption_method == ENCRYPTION_KEYSTORE,
+          switches_.pre_commit_updates_policy ==
+              FORCE_ENABLE_PRE_COMMIT_UPDATE_AVOIDANCE,
           invalidator_client_id));
 
 }

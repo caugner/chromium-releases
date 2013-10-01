@@ -53,6 +53,10 @@ const char kAllowedConnectionTypesForUpdate[] =
 const char kSystemTimezone[] = "cros.system.timezone";
 const char kSystemTimezonePolicy[] = "cros.system.timezone_policy";
 
+// Value of kUse24HourClock user preference of device' owner.
+// ChromeOS device uses this setting on login screen.
+const char kSystemUse24HourClock[] = "cros.system.use_24hour_clock";
+
 const char kDeviceOwner[] = "cros.device.owner";
 
 const char kStatsReportingPref[] = "cros.metrics.reportingEnabled";
@@ -77,6 +81,11 @@ const char kReportDeviceBootMode[] = "cros.device_status.report_boot_mode";
 // A boolean pref that indicates whether the current location should be reported
 // along with device policy requests.
 const char kReportDeviceLocation[] = "cros.device_status.report_location";
+
+// Determines whether the device reports network interface types and addresses
+// in device status reports to the device management server.
+const char kReportDeviceNetworkInterfaces[] =
+    "cros.device_status.report_network_interfaces";
 
 // A list of dictionaries, each detailing one extension to install as part of
 // the AppPack and including the following fields:

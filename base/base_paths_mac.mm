@@ -32,7 +32,12 @@ void GetNSExecutablePath(base::FilePath* path) {
   int rv = _NSGetExecutablePath(WriteInto(&executable_path, executable_length),
                                 &executable_length);
   DCHECK_EQ(rv, 0);
-  *path = base::FilePath(executable_path);
+
+  // _NSGetExecutablePath may return paths containing ./ or ../ which makes
+  // FilePath::DirName() work incorrectly, convert it to absolute path so that
+  // paths such as DIR_SOURCE_ROOT can work, since we expect absolute paths to
+  // be returned here.
+  *path = base::MakeAbsoluteFilePath(base::FilePath(executable_path));
 }
 
 // Returns true if the module for |address| is found. |path| will contain
@@ -65,7 +70,7 @@ bool PathProviderMac(int key, base::FilePath* result) {
                                                  result);
 #if defined(OS_IOS)
       // On IOS, this directory does not exist unless it is created explicitly.
-      if (success && !file_util::PathExists(*result))
+      if (success && !base::PathExists(*result))
         success = file_util::CreateDirectory(*result);
 #endif  // defined(OS_IOS)
       return success;

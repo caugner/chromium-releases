@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/location.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/values.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
@@ -82,12 +82,12 @@ TEST_F(JsSyncManagerObserverTest, OnSyncCycleCompleted) {
       5,
       2,
       7,
-      sessions::SyncSourceInfo(),
       false,
       0,
       base::Time::Now(),
       std::vector<int>(MODEL_TYPE_COUNT, 0),
-      std::vector<int>(MODEL_TYPE_COUNT, 0));
+      std::vector<int>(MODEL_TYPE_COUNT, 0),
+      sync_pb::GetUpdatesCallerInfo::UNKNOWN);
   base::DictionaryValue expected_details;
   expected_details.Set("snapshot", snapshot.ToValue());
 

@@ -7,23 +7,33 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/stack_trace.h"
-#include "base/process_util.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "ui/compositor/compositor_switches.h"
+#include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_switches.h"
+
+#if defined(OS_POSIX)
+#include "base/process/process_handle.h"
+#endif
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
-#include "base/power_monitor/power_monitor.h"
+#include "base/power_monitor/power_monitor_device_source.h"
 #endif
 
 #if defined(OS_ANDROID)
 #include "base/threading/thread_restrictions.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_thread.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "base/chromeos/chromeos_version.h"
 #endif
 
 namespace content {
@@ -61,10 +71,12 @@ extern int BrowserMain(const MainFunctionParams&);
 BrowserTestBase::BrowserTestBase()
     : embedded_test_server_(
         new net::test_server::EmbeddedTestServer(
-            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO))) {
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO))),
+      allow_test_contexts_(true),
+      allow_osmesa_(true) {
 #if defined(OS_MACOSX)
   base::mac::SetOverrideAmIBundled(true);
-  base::PowerMonitor::AllocateSystemIOPorts();
+  base::PowerMonitorDeviceSource::AllocateSystemIOPorts();
 #endif
 
 #if defined(OS_POSIX)
@@ -94,6 +106,50 @@ void BrowserTestBase::SetUp() {
   params.ui_task =
       new base::Closure(
           base::Bind(&BrowserTestBase::ProxyRunTestOnMainThreadLoop, this));
+
+#if defined(USE_AURA)
+  // Use test contexts for browser tests unless they override and force us to
+  // use a real context.
+  if (allow_test_contexts_)
+    command_line->AppendSwitch(switches::kTestCompositor);
+#endif
+
+  // When using real GL contexts, we usually use OSMesa as this works on all
+  // bots. The command line can override this behaviour to use a real GPU.
+  if (command_line->HasSwitch(switches::kUseGpuInTests))
+    allow_osmesa_ = false;
+
+  // Some bots pass this flag when they want to use a real GPU.
+  if (command_line->HasSwitch("enable-gpu"))
+    allow_osmesa_ = false;
+
+#if defined(OS_MACOSX)
+  // On Mac we always use a real GPU.
+  allow_osmesa_ = false;
+#endif
+
+#if defined(OS_ANDROID)
+  // On Android we always use a real GPU.
+  allow_osmesa_ = false;
+#endif
+
+#if defined(OS_CHROMEOS)
+  // If the test is running on the chromeos envrionment (such as
+  // device or vm bots), the compositor will use real GL contexts, and
+  // we should use real GL bindings with it.
+  if (base::chromeos::IsRunningOnChromeOS())
+    allow_osmesa_ = false;
+#endif
+
+  if (command_line->HasSwitch(switches::kUseGL)) {
+    NOTREACHED() <<
+        "kUseGL should not be used with tests. Try kUseGpuInTests instead.";
+  }
+
+  if (allow_osmesa_) {
+    command_line->AppendSwitchASCII(
+        switches::kUseGL, gfx::kGLImplementationOSMesaName);
+  }
 
   SetUpInProcessBrowserTestFixture();
 #if defined(OS_ANDROID)

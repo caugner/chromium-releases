@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "content/public/browser/notification_observer.h"
@@ -33,7 +33,7 @@ class ForeignSessionHandler : public content::WebUIMessageHandler,
   ForeignSessionHandler();
   virtual ~ForeignSessionHandler() {}
 
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   static void OpenForeignSessionTab(content::WebUI* web_ui,
                                     const std::string& session_string_value,

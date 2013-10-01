@@ -19,20 +19,19 @@
         '../net/net.gyp:net',
         '../printing/printing.gyp:printing',
         '../skia/skia.gyp:skia',
+        '../third_party/WebKit/public/blink.gyp:blink',
         '../third_party/hunspell/hunspell.gyp:hunspell',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/npapi/npapi.gyp:npapi',
         '../third_party/re2/re2.gyp:re2',
-        '../third_party/WebKit/public/blink.gyp:blink',
         '../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
         '../ui/surface/surface.gyp:surface',
+        '../webkit/common/webkit_common.gyp:webkit_common',
+        '../webkit/support/webkit_support.gyp:glue_child',
+        '../webkit/renderer/webkit_renderer.gyp:webkit_renderer',
         '../webkit/support/webkit_support.gyp:glue',
-        '../webkit/support/webkit_support.gyp:glue_common',
-        '../webkit/support/webkit_support.gyp:glue_renderer',
-        '../webkit/support/webkit_support.gyp:plugins',
-        '../webkit/support/webkit_support.gyp:webkit_media',
-        '../webkit/support/webkit_support.gyp:webkit_resources',
+        '../webkit/webkit_resources.gyp:webkit_resources',
       ],
       'include_dirs': [
         '..',
@@ -50,6 +49,8 @@
       'sources': [
         'renderer/benchmarking_extension.cc',
         'renderer/benchmarking_extension.h',
+        'renderer/extensions/activity_log_converter_strategy.cc',
+        'renderer/extensions/activity_log_converter_strategy.h',
         'renderer/extensions/api_activity_logger.cc',
         'renderer/extensions/api_activity_logger.h',
         'renderer/extensions/api_definitions_natives.cc',
@@ -87,6 +88,8 @@
         'renderer/extensions/extension_groups.h',
         'renderer/extensions/extension_helper.cc',
         'renderer/extensions/extension_helper.h',
+        'renderer/extensions/extension_localization_peer.cc',
+        'renderer/extensions/extension_localization_peer.h',
         'renderer/extensions/feedback_private_custom_bindings.cc',
         'renderer/extensions/feedback_private_custom_bindings.h',
         'renderer/extensions/file_browser_handler_custom_bindings.cc',
@@ -101,8 +104,8 @@
         'renderer/extensions/logging_native_handler.h',
         'renderer/extensions/media_galleries_custom_bindings.cc',
         'renderer/extensions/media_galleries_custom_bindings.h',
-        'renderer/extensions/miscellaneous_bindings.cc',
-        'renderer/extensions/miscellaneous_bindings.h',
+        'renderer/extensions/messaging_bindings.cc',
+        'renderer/extensions/messaging_bindings.h',
         'renderer/extensions/module_system.cc',
         'renderer/extensions/module_system.h',
         'renderer/extensions/native_handler.cc',
@@ -154,8 +157,8 @@
         'renderer/isolated_world_ids.h',
         'renderer/loadtimes_extension_bindings.cc',
         'renderer/loadtimes_extension_bindings.h',
-        'renderer/media/webrtc_logging_handler_impl.cc',
-        'renderer/media/webrtc_logging_handler_impl.h',
+        'renderer/media/chrome_webrtc_log_message_delegate.cc',
+        'renderer/media/chrome_webrtc_log_message_delegate.h',
         'renderer/media/webrtc_logging_message_filter.cc',
         'renderer/media/webrtc_logging_message_filter.h',
         'renderer/net/net_error_helper.cc',
@@ -178,6 +181,7 @@
         'renderer/resources/extensions/app_window_custom_bindings.js',
         'renderer/resources/extensions/binding.js',
         'renderer/resources/extensions/browser_action_custom_bindings.js',
+        'renderer/resources/extensions/chrome_direct_setting.js',
         'renderer/resources/extensions/chrome_setting.js',
         'renderer/resources/extensions/content_setting.js',
         'renderer/resources/extensions/content_watcher.js',
@@ -195,7 +199,7 @@
         'renderer/resources/extensions/input.ime_custom_bindings.js',
         'renderer/resources/extensions/json_schema.js',
         'renderer/resources/extensions/last_error.js',
-        'renderer/resources/extensions/miscellaneous_bindings.js',
+        'renderer/resources/extensions/messaging.js',
         'renderer/resources/extensions/notifications_custom_bindings.js',
         'renderer/resources/extensions/omnibox_custom_bindings.js',
         'renderer/resources/extensions/page_action_custom_bindings.js',
@@ -230,8 +234,6 @@
         'renderer/external_extension.h',
         'renderer/page_load_histograms.cc',
         'renderer/page_load_histograms.h',
-        'renderer/pepper/chrome_ppapi_interfaces.cc',
-        'renderer/pepper/chrome_ppapi_interfaces.h',
         'renderer/pepper/chrome_renderer_pepper_host_factory.cc',
         'renderer/pepper/chrome_renderer_pepper_host_factory.h',
         'renderer/pepper/pepper_extensions_common_host.cc',
@@ -252,6 +254,8 @@
         'renderer/pepper/pepper_pdf_host.h',
         'renderer/pepper/pepper_shared_memory_message_filter.cc',
         'renderer/pepper/pepper_shared_memory_message_filter.h',
+        'renderer/pepper/pnacl_translation_resource_host.cc',
+        'renderer/pepper/pnacl_translation_resource_host.h',
         'renderer/pepper/ppb_nacl_private_impl.cc',
         'renderer/pepper/ppb_nacl_private_impl.h',
         'renderer/pepper/ppb_pdf_impl.cc',
@@ -268,12 +272,13 @@
         'renderer/prerender/prerender_extra_data.h',
         'renderer/prerender/prerender_helper.cc',
         'renderer/prerender/prerender_helper.h',
-        'renderer/prerender/prerender_webmediaplayer.cc',
-        'renderer/prerender/prerender_webmediaplayer.h',
+        'renderer/prerender/prerender_media_load_deferrer.cc',
+        'renderer/prerender/prerender_media_load_deferrer.h',
         'renderer/prerender/prerenderer_client.cc',
         'renderer/prerender/prerenderer_client.h',
         'renderer/printing/print_web_view_helper.cc',
         'renderer/printing/print_web_view_helper.h',
+        'renderer/printing/print_web_view_helper_android.cc',
         'renderer/printing/print_web_view_helper_linux.cc',
         'renderer/printing/print_web_view_helper_mac.mm',
         'renderer/printing/print_web_view_helper_win.cc',
@@ -324,8 +329,6 @@
         'renderer/tts_dispatcher.h',
         'renderer/translate/translate_helper.cc',
         'renderer/translate/translate_helper.h',
-        'renderer/translate/translate_helper_metrics.cc',
-        'renderer/translate/translate_helper_metrics.h',
         'renderer/validation_message_agent.cc',
         'renderer/validation_message_agent.h',
         'renderer/web_apps.cc',
@@ -336,7 +339,7 @@
       'conditions': [
         ['disable_nacl!=1', {
           'dependencies': [
-            'nacl',
+            '../components/nacl.gyp:nacl',
           ],
         }],
         ['enable_plugins==1', {
@@ -366,23 +369,23 @@
         }],
         ['enable_webrtc==0', {
           'sources!': [
-            'renderer/media/webrtc_logging_handler_impl.cc',
-            'renderer/media/webrtc_logging_handler_impl.h',
+            'renderer/media/chrome_webrtc_log_message_delegate.cc',
+            'renderer/media/chrome_webrtc_log_message_delegate.h',
             'renderer/media/webrtc_logging_message_filter.cc',
             'renderer/media/webrtc_logging_message_filter.h',
+          ],
+        }],
+        ['enable_spellcheck==0', {
+          'sources/': [
+            ['exclude', '^renderer/spellchecker/']
+          ],
+          'dependencies!': [
+            '../third_party/hunspell/hunspell.gyp:hunspell',
           ],
         }],
         ['OS=="mac"', {
           'dependencies': [
             '../third_party/mach_override/mach_override.gyp:mach_override',
-          ],
-        }],
-        ['enable_language_detection==1', {
-          'dependencies': [
-            '../third_party/cld/cld.gyp:cld',
-          ],
-          'include_dirs': [
-            '../third_party/cld',
           ],
         }],
         ['toolkit_uses_gtk == 1', {
@@ -396,11 +399,15 @@
             ['exclude', '^renderer/automation/']
           ]
         }],
+	['enable_printing==0', {
+          'sources/': [
+            ['exclude', '^renderer/printing/']
+          ]
+	}],
         ['OS=="android"', {
           'sources!': [
-            'renderer/prerender/prerender_webmediaplayer.cc',
-            'renderer/prerender/prerender_webmediaplayer.h',
-            'renderer/printing/print_web_view_helper.cc',
+            'renderer/prerender/prerender_media_load_deferrer.cc',
+            'renderer/prerender/prerender_media_load_deferrer.h',
           ],
           'defines': [
             'ENABLE_MOBILE_YOUTUBE_PLUGIN',

@@ -40,9 +40,6 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
   // username and password fields were filled, false otherwise.
   bool DidAcceptAutofillSuggestion(const WebKit::WebNode& node,
                                    const WebKit::WebString& value);
-  // A no-op.  No filling happens for selection.  But this method returns
-  // true when |node| is fillable by password Autofill.
-  bool DidSelectAutofillSuggestion(const WebKit::WebNode& node);
   // A no-op.  Password forms are not previewed, so they do not need to be
   // cleared when the selection changes.  However, this method returns
   // true when |node| is fillable by password Autofill.
@@ -80,8 +77,7 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
   virtual void FrameWillClose(WebKit::WebFrame* frame) OVERRIDE;
 
   // RenderView IPC handlers:
-  void OnFillPasswordForm(const PasswordFormFillData& form_data,
-                          bool disable_popup);
+  void OnFillPasswordForm(const PasswordFormFillData& form_data);
 
   // Scans the given frame for password forms and sends them up to the browser.
   // If |only_visible| is true, only forms visible in the layout are sent.
@@ -120,9 +116,6 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
 
   // The logins we have filled so far with their associated info.
   LoginToPasswordInfoMap login_to_password_info_;
-
-  // Used to disable and hide the popup.
-  bool disable_popup_;
 
   // Used for UMA stats.
   OtherPossibleUsernamesUsage usernames_usage_;

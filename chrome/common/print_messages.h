@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/shared_memory.h"
 #include "base/values.h"
-#include "base/shared_memory.h"
 #include "ipc/ipc_message_macros.h"
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
@@ -370,15 +370,16 @@ IPC_SYNC_MESSAGE_ROUTED1_1(PrintHostMsg_ScriptedPrint,
                            PrintMsg_PrintPages_Params
                                /* settings chosen by the user*/)
 
-#if defined(USE_X11)
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
 // Asks the browser to create a temporary file for the renderer to fill
 // in resulting NativeMetafile in printing.
-IPC_SYNC_MESSAGE_CONTROL0_2(PrintHostMsg_AllocateTempFileForPrinting,
+IPC_SYNC_MESSAGE_CONTROL1_2(PrintHostMsg_AllocateTempFileForPrinting,
+                            int /* render_view_id */,
                             base::FileDescriptor /* temp file fd */,
-                            int /* fd in browser*/)
+                            int /* fd in browser*/) // Used only by Chrome OS.
 IPC_MESSAGE_CONTROL2(PrintHostMsg_TempFileForPrintingWritten,
                      int /* render_view_id */,
-                     int /* fd in browser */)
+                     int /* fd in browser */) // Used only by Chrome OS.
 #endif
 
 // Asks the browser to do print preview.
@@ -435,8 +436,12 @@ IPC_MESSAGE_ROUTED1(PrintHostMsg_PrintPreviewInvalidPrinterSettings,
 
 // Run a nested message loop in the renderer until print preview for
 // window.print() finishes.
-IPC_SYNC_MESSAGE_ROUTED1_0(PrintHostMsg_ScriptedPrintPreview,
-                           bool /* is_modifiable */)
+IPC_SYNC_MESSAGE_ROUTED0_0(PrintHostMsg_SetupScriptedPrintPreview)
+
+// Tell the browser to show the print preview, when the document is sufficiently
+// loaded such that the renderer can determine whether it is modifiable or not.
+IPC_MESSAGE_ROUTED1(PrintHostMsg_ShowScriptedPrintPreview,
+                    bool /* is_modifiable */)
 
 // Notify the browser that the PDF in the initiator renderer has disabled print
 // scaling option.

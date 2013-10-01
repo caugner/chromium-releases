@@ -1,7 +1,7 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "nacl_io/kernel_object.h"
 
 #include <assert.h>
@@ -17,101 +17,150 @@
 #include "nacl_io/kernel_handle.h"
 #include "nacl_io/mount.h"
 #include "nacl_io/mount_node.h"
+
 #include "sdk_util/auto_lock.h"
+#include "sdk_util/ref_object.h"
+#include "sdk_util/scoped_ref.h"
+
+namespace nacl_io {
 
 KernelObject::KernelObject() {
-  pthread_mutex_init(&kernel_lock_, NULL);
-  pthread_mutex_init(&process_lock_, NULL);
+  cwd_ = "/";
 }
 
-KernelObject::~KernelObject() {
-  pthread_mutex_destroy(&process_lock_);
-  pthread_mutex_destroy(&kernel_lock_);
+KernelObject::~KernelObject() {};
+
+Error KernelObject::AttachMountAtPath(const ScopedMount& mnt,
+                                const std::string& path) {
+  std::string abs_path = GetAbsParts(path).Join();
+
+  AUTO_LOCK(mount_lock_);
+  if (mounts_.find(abs_path) != mounts_.end())
+    return EBUSY;
+
+  mounts_[abs_path] = mnt;
+  return 0;
+}
+
+Error KernelObject::DetachMountAtPath(const std::string& path) {
+  std::string abs_path = GetAbsParts(path).Join();
+
+  AUTO_LOCK(mount_lock_);
+  MountMap_t::iterator it = mounts_.find(abs_path);
+  if (mounts_.end() == it)
+    return EINVAL;
+
+  // It is only legal to unmount if there are no open references
+  if (it->second->RefCount() != 1)
+    return EBUSY;
+
+  mounts_.erase(it);
+  return 0;
 }
 
 // Uses longest prefix to find the mount for the give path, then
 // acquires the mount and returns it with a relative path.
-Error KernelObject::AcquireMountAndPath(const std::string& relpath,
-                                        Mount** out_mount,
-                                        Path* out_path) {
-  *out_mount = NULL;
-  *out_path = Path();
+Error KernelObject::AcquireMountAndRelPath(const std::string& path,
+                                           ScopedMount* out_mount,
+                                           Path* rel_parts) {
+  Path abs_parts = GetAbsParts(path);
 
-  Path abs_path;
-  {
-    AutoLock lock(&process_lock_);
-    abs_path = GetAbsPathLocked(relpath);
-  }
+  out_mount->reset(NULL);
+  *rel_parts = Path();
 
-  AutoLock lock(&kernel_lock_);
-  Mount* mount = NULL;
+  AUTO_LOCK(mount_lock_);
 
   // Find longest prefix
-  size_t max = abs_path.Size();
-  for (size_t len = 0; len < abs_path.Size(); len++) {
-    MountMap_t::iterator it = mounts_.find(abs_path.Range(0, max - len));
+  size_t max = abs_parts.Size();
+  for (size_t len = 0; len < abs_parts.Size(); len++) {
+    MountMap_t::iterator it = mounts_.find(abs_parts.Range(0, max - len));
     if (it != mounts_.end()) {
-      out_path->Set("/");
-      out_path->Append(abs_path.Range(max - len, max));
-      mount = it->second;
-      break;
+      rel_parts->Set("/");
+      rel_parts->Append(abs_parts.Range(max - len, max));
+
+      *out_mount = it->second;
+      return 0;
     }
   }
 
-  if (NULL == mount)
-    return ENOTDIR;
+  return ENOTDIR;
+}
 
-  // Acquire the mount while we hold the proxy lock
-  mount->Acquire();
-  *out_mount = mount;
+// Given a path, acquire the associated mount and node, creating the
+// node if needed based on the provided flags.
+Error KernelObject::AcquireMountAndNode(const std::string& path,
+                                        int oflags,
+                                        ScopedMount* out_mount,
+                                        ScopedMountNode* out_node) {
+  Path rel_parts;
+  out_mount->reset(NULL);
+  out_node->reset(NULL);
+  Error error = AcquireMountAndRelPath(path, out_mount, &rel_parts);
+  if (error)
+    return error;
+
+  error = (*out_mount)->Open(rel_parts, oflags, out_node);
+  if (error)
+    return error;
+
   return 0;
 }
 
-void KernelObject::ReleaseMount(Mount* mnt) {
-  AutoLock lock(&kernel_lock_);
-  mnt->Release();
+Path KernelObject::GetAbsParts(const std::string& path) {
+  AUTO_LOCK(cwd_lock_);
+
+  Path abs_parts(cwd_);
+  if (path[0] == '/') {
+    abs_parts = path;
+  } else {
+    abs_parts = cwd_;
+    abs_parts.Append(path);
+  }
+
+  return abs_parts;
 }
 
-Error KernelObject::AcquireHandle(int fd, KernelHandle** out_handle) {
-  *out_handle = NULL;
+std::string KernelObject::GetCWD() {
+  AUTO_LOCK(cwd_lock_);
+  std::string out = cwd_;
 
-  AutoLock lock(&process_lock_);
+  return out;
+}
+
+Error KernelObject::SetCWD(const std::string& path) {
+  std::string abs_path = GetAbsParts(path).Join();
+
+  ScopedMount mnt;
+  ScopedMountNode node;
+
+  Error error = AcquireMountAndNode(abs_path, O_RDONLY, &mnt, &node);
+  if (error)
+    return error;
+
+  if ((node->GetType() & S_IFDIR) == 0)
+    return ENOTDIR;
+
+  AUTO_LOCK(cwd_lock_);
+  cwd_ = abs_path;
+  return 0;
+}
+
+Error KernelObject::AcquireHandle(int fd, ScopedKernelHandle* out_handle) {
+  out_handle->reset(NULL);
+
+  AUTO_LOCK(handle_lock_);
   if (fd < 0 || fd >= static_cast<int>(handle_map_.size()))
     return EBADF;
 
-  KernelHandle* handle = handle_map_[fd];
-  if (NULL == handle)
-    return EBADF;
+  *out_handle = handle_map_[fd];
+  if (out_handle) return 0;
 
-  // Ref count while holding parent mutex
-  handle->Acquire();
-
-  lock.Unlock();
-  if (handle->node_)
-    handle->mount_->AcquireNode(handle->node_);
-
-  *out_handle = handle;
-  return 0;
+  return EBADF;
 }
 
-void KernelObject::ReleaseHandle(KernelHandle* handle) {
-  // The handle must already be held before taking the
-  // kernel lock.
-  if (handle->node_)
-    handle->mount_->ReleaseNode(handle->node_);
-
-  AutoLock lock(&process_lock_);
-  handle->Release();
-}
-
-int KernelObject::AllocateFD(KernelHandle* handle) {
-  AutoLock lock(&process_lock_);
+int KernelObject::AllocateFD(const ScopedKernelHandle& handle) {
+  AUTO_LOCK(handle_lock_);
   int id;
-
-  // Acquire the handle and its mount since we are about to track it with
-  // this FD.
-  handle->Acquire();
-  handle->mount_->Acquire();
 
   // If we can recycle and FD, use that first
   if (free_fds_.size()) {
@@ -127,56 +176,28 @@ int KernelObject::AllocateFD(KernelHandle* handle) {
   return id;
 }
 
-void KernelObject::FreeAndReassignFD(int fd, KernelHandle* handle) {
+void KernelObject::FreeAndReassignFD(int fd, const ScopedKernelHandle& handle) {
   if (NULL == handle) {
     FreeFD(fd);
   } else {
-    AutoLock lock(&process_lock_);
-
-    // Acquire the new handle first in case they are the same.
-    if (handle) {
-      handle->Acquire();
-      handle->mount_->Acquire();
-    }
+    AUTO_LOCK(handle_lock_);
 
     // If the required FD is larger than the current set, grow the set
-    if (fd >= handle_map_.size()) {
+    if (fd >= (int)handle_map_.size())
       handle_map_.resize(fd + 1);
-    } else {
-      KernelHandle* old_handle = handle_map_[fd];
-      if (NULL != old_handle) {
-        old_handle->mount_->Release();
-        old_handle->Release();
-      }
-    }
+
     handle_map_[fd] = handle;
   }
 }
 
 void KernelObject::FreeFD(int fd) {
-  AutoLock lock(&process_lock_);
+  AUTO_LOCK(handle_lock_);
 
-  // Release the mount and handle since we no longer
-  // track them with this FD.
-  KernelHandle* handle = handle_map_[fd];
-  handle->Release();
-  handle->mount_->Release();
-
-  handle_map_[fd] = NULL;
+  handle_map_[fd].reset(NULL);
   free_fds_.push_back(fd);
+
   // Force lower numbered FD to be available first.
   std::push_heap(free_fds_.begin(), free_fds_.end(), std::greater<int>());
 }
 
-Path KernelObject::GetAbsPathLocked(const std::string& path) {
-  // Generate absolute path
-  Path abs_path(cwd_);
-  if (path[0] == '/') {
-    abs_path = path;
-  } else {
-    abs_path = cwd_;
-    abs_path.Append(path);
-  }
-
-  return abs_path;
-}
+}  // namespace nacl_io

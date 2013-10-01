@@ -6,14 +6,14 @@
 #define CHROME_BROWSER_UI_BOOKMARKS_BOOKMARK_PROMPT_CONTROLLER_H_
 
 #include "base/basictypes.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class Browser;
 class PrefService;

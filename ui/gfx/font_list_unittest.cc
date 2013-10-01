@@ -4,6 +4,7 @@
 
 #include "ui/gfx/font_list.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -32,16 +33,27 @@ namespace gfx {
 TEST(FontListTest, FontDescString_FromDescString) {
   // Test init from font name style size string.
   FontList font_list = FontList("Droid Sans serif, Sans serif, 10px");
-  const std::string& font_str = font_list.GetFontDescriptionString();
-  EXPECT_EQ("Droid Sans serif, Sans serif, 10px", font_str);
+  EXPECT_EQ("Droid Sans serif, Sans serif, 10px",
+            font_list.GetFontDescriptionString());
+}
+
+TEST(FontListTest, FontDescString_FromFontNamesStyleAndSize) {
+  // Test init from font names, style and size.
+  std::vector<std::string> font_names;
+  font_names.push_back("Arial");
+  font_names.push_back("Droid Sans serif");
+  int font_style = Font::BOLD | Font::ITALIC;
+  int font_size = 11;
+  FontList font_list = FontList(font_names, font_style, font_size);
+  EXPECT_EQ("Arial,Droid Sans serif,Bold Italic 11px",
+            font_list.GetFontDescriptionString());
 }
 
 TEST(FontListTest, FontDescString_FromFont) {
   // Test init from Font.
   Font font("Arial", 8);
   FontList font_list = FontList(font);
-  const std::string& font_str = font_list.GetFontDescriptionString();
-  EXPECT_EQ("Arial,8px", font_str);
+  EXPECT_EQ("Arial,8px", font_list.GetFontDescriptionString());
 }
 
 TEST(FontListTest, FontDescString_FromFontWithNonNormalStyle) {
@@ -62,8 +74,7 @@ TEST(FontListTest, FontDescString_FromFontVector) {
   fonts.push_back(font.DeriveFont(0, Font::BOLD));
   fonts.push_back(font_1.DeriveFont(-2, Font::BOLD));
   FontList font_list = FontList(fonts);
-  const std::string& font_str = font_list.GetFontDescriptionString();
-  EXPECT_EQ("Arial,Sans serif,Bold 8px", font_str);
+  EXPECT_EQ("Arial,Sans serif,Bold 8px", font_list.GetFontDescriptionString());
 }
 
 TEST(FontListTest, Fonts_FromDescString) {
@@ -230,6 +241,78 @@ TEST(FontListTest, Fonts_DeriveFontListWithSize) {
   EXPECT_EQ(2U, derived_fonts.size());
   EXPECT_EQ("Arial|5", FontToString(derived_fonts[0]));
   EXPECT_EQ("Sans serif|5", FontToString(derived_fonts[1]));
+}
+
+TEST(FontListTest, FontDescString_DeriveFontListWithSizeDelta) {
+  FontList font_list = FontList("Arial,Sans serif,Bold 18px");
+
+  FontList derived = font_list.DeriveFontListWithSizeDelta(-8);
+  EXPECT_EQ("Arial,Sans serif,Bold 10px",
+            derived.GetFontDescriptionString());
+}
+
+TEST(FontListTest, Fonts_DeriveFontListWithSizeDelta) {
+  std::vector<Font> fonts;
+  fonts.push_back(gfx::Font("Arial", 18).DeriveFont(0, Font::ITALIC));
+  fonts.push_back(gfx::Font("Sans serif", 18).DeriveFont(0, Font::ITALIC));
+  FontList font_list = FontList(fonts);
+
+  FontList derived = font_list.DeriveFontListWithSizeDelta(-5);
+  const std::vector<Font>& derived_fonts = derived.GetFonts();
+
+  EXPECT_EQ(2U, derived_fonts.size());
+  EXPECT_EQ("Arial|13|italic", FontToString(derived_fonts[0]));
+  EXPECT_EQ("Sans serif|13|italic", FontToString(derived_fonts[1]));
+}
+
+TEST(FontListTest, FontDescString_DeriveFontListWithSizeDeltaAndStyle) {
+  FontList font_list = FontList("Arial,Sans serif,Bold Italic  8px");
+
+  FontList derived =
+      font_list.DeriveFontListWithSizeDeltaAndStyle(10, Font::ITALIC);
+  EXPECT_EQ("Arial,Sans serif,Italic 18px",
+            derived.GetFontDescriptionString());
+}
+
+TEST(FontListTest, Fonts_DeriveFontListWithSizeDeltaAndStyle) {
+  std::vector<Font> fonts;
+  fonts.push_back(gfx::Font("Arial", 8));
+  fonts.push_back(gfx::Font("Sans serif", 8));
+  FontList font_list = FontList(fonts);
+
+  FontList derived =
+      font_list.DeriveFontListWithSizeDeltaAndStyle(5, Font::BOLD);
+  const std::vector<Font>& derived_fonts = derived.GetFonts();
+
+  EXPECT_EQ(2U, derived_fonts.size());
+  EXPECT_EQ("Arial|13|bold", FontToString(derived_fonts[0]));
+  EXPECT_EQ("Sans serif|13|bold", FontToString(derived_fonts[1]));
+}
+
+TEST(FontListTest, Fonts_GetHeight_GetBaseline) {
+  // If a font list has only one font, the height and baseline must be the same.
+  Font font1("Arial", 16);
+  FontList font_list1("Arial, 16px");
+  EXPECT_EQ(font1.GetHeight(), font_list1.GetHeight());
+  EXPECT_EQ(font1.GetBaseline(), font_list1.GetBaseline());
+
+  // If there are two different fonts, the font list returns the max value
+  // for ascent and descent.
+  Font font2("Symbol", 16);
+  EXPECT_NE(font1.GetBaseline(), font2.GetBaseline());
+  EXPECT_NE(font1.GetHeight() - font1.GetBaseline(),
+            font2.GetHeight() - font2.GetBaseline());
+  std::vector<Font> fonts;
+  fonts.push_back(font1);
+  fonts.push_back(font2);
+  FontList font_list_mix(fonts);
+  // ascent of FontList == max(ascent of Fonts)
+  EXPECT_EQ(std::max(font1.GetHeight() - font1.GetBaseline(),
+                     font2.GetHeight() - font2.GetBaseline()),
+            font_list_mix.GetHeight() - font_list_mix.GetBaseline());
+  // descent of FontList == max(descent of Fonts)
+  EXPECT_EQ(std::max(font1.GetBaseline(), font2.GetBaseline()),
+            font_list_mix.GetBaseline());
 }
 
 }  // namespace gfx

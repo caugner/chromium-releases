@@ -223,6 +223,14 @@
     ]
   },
 
+  "RemoteAccessHostAllowClientPairing": {
+    "os": [],
+    "test_policy": { "RemoteAccessHostAllowClientPairing": true },
+    "pref_mappings": [
+      { "pref": "remote_access.host_allow_client_pairing" }
+    ]
+  },
+
   "PrintingEnabled": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "PrintingEnabled": false },
@@ -518,6 +526,16 @@
     ]
   },
 
+  "RequireOnlineRevocationChecksForLocalAnchors": {
+    "os": ["win", "linux", "chromeos"],
+    "test_policy": { "RequireOnlineRevocationChecksForLocalAnchors": true },
+    "pref_mappings": [
+      { "pref": "ssl.rev_checking.required_for_local_anchors",
+        "local_state": true
+      }
+    ]
+  },
+
   "AuthSchemes": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "AuthSchemes": "AuthSchemes" },
@@ -780,6 +798,46 @@
     "test_policy": { "DefaultSearchProviderSearchURL": "http://www.google.com/?q={searchTerms}", "DefaultSearchProviderSearchTermsReplacementKey": "espv" },
     "pref_mappings": [
       { "pref": "default_search_provider.search_terms_replacement_key" }
+    ]
+  },
+
+  "DefaultSearchProviderImageURL": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DefaultSearchProviderSearchURL": "http://www.google.com/?q={searchTerms}", "DefaultSearchProviderImageURL": "http://www.google.com/searchbyimage/upload" },
+    "pref_mappings": [
+      { "pref": "default_search_provider.image_url" }
+    ]
+  },
+
+  "DefaultSearchProviderSearchURLPostParams": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DefaultSearchProviderSearchURL": "http://www.google.com/?q={searchTerms}", "DefaultSearchProviderSearchURLPostParams": "" },
+    "pref_mappings": [
+      { "pref": "default_search_provider.search_url_post_params" }
+    ]
+  },
+
+  "DefaultSearchProviderSuggestURLPostParams": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DefaultSearchProviderSearchURL": "http://www.google.com/?q={searchTerms}", "DefaultSearchProviderSuggestURLPostParams": "" },
+    "pref_mappings": [
+      { "pref": "default_search_provider.suggest_url_post_params" }
+    ]
+  },
+
+  "DefaultSearchProviderInstantURLPostParams": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DefaultSearchProviderSearchURL": "http://www.google.com/?q={searchTerms}", "DefaultSearchProviderInstantURLPostParams": "" },
+    "pref_mappings": [
+      { "pref": "default_search_provider.instant_url_post_params" }
+    ]
+  },
+
+  "DefaultSearchProviderImageURLPostParams": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DefaultSearchProviderSearchURL": "http://www.google.com/?q={searchTerms}", "DefaultSearchProviderImageURLPostParams": "image_content={imageThumbnail},image_url={imageURL},sbisrc={imageSearchSource}" },
+    "pref_mappings": [
+      { "pref": "default_search_provider.image_url_post_params" }
     ]
   },
 
@@ -1496,6 +1554,12 @@
     ]
   },
 
+  "MaxInvalidationFetchDelay": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "PolicyRefreshRate": 15000 },
+    "pref_mappings": []
+  },
+
   "OpenNetworkConfiguration": {
   },
 
@@ -1667,7 +1731,24 @@
     "os": ["chromeos"],
     "test_policy": { "IdleAction": 0 },
     "pref_mappings": [
-      { "pref": "power.idle_action" }
+      { "pref": "power.ac_idle_action" },
+      { "pref": "power.battery_idle_action" }
+    ]
+  },
+
+  "IdleActionAC": {
+    "os": ["chromeos"],
+    "test_policy": { "IdleActionAC": 0 },
+    "pref_mappings": [
+      { "pref": "power.ac_idle_action" }
+    ]
+  },
+
+  "IdleActionBattery": {
+    "os": ["chromeos"],
+    "test_policy": { "IdleActionBattery": 0 },
+    "pref_mappings": [
+      { "pref": "power.battery_idle_action" }
     ]
   },
 
@@ -1816,6 +1897,9 @@
   "ContentPackManualBehaviorURLs": {
   },
 
+  "ManagedBookmarks": {
+  },
+
   "----- Chrome OS device policies ---------------------------------------": {},
 
   "DevicePolicyRefreshRate": {
@@ -1843,6 +1927,9 @@
   },
 
   "ReportDeviceBootMode": {
+  },
+
+  "ReportDeviceNetworkInterfaces": {
   },
 
   "DeviceAllowNewUsers": {
@@ -1915,6 +2002,9 @@
   "SystemTimezone": {
   },
 
+  "SystemUse24HourClock": {
+  },
+
   "DeviceLocalAccounts": {
   },
 
@@ -1925,6 +2015,9 @@
   },
 
   "DeviceLocalAccountAutoLoginBailoutEnabled": {
+  },
+
+  "DeviceLoginScreenPowerManagement": {
   },
 
   "DeviceAllowRedeemChromeOsRegistrationOffers": {
@@ -1958,6 +2051,9 @@
   },
 
   "SupervisedUsersEnabled": {
+  },
+
+  "SupervisedUserCreationEnabled": {
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

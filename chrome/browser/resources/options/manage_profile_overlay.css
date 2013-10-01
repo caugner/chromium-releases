@@ -61,17 +61,6 @@
   padding: 2px;
 }
 
-/* Adds a grey horizontal line below content area.  */
-#create-profile-content::after,
-#manage-profile-content::after {
-  background: #c0c0c0;
-  content: '';
-  display: block;
-  height: 1px;
-  margin-top: 25px;
-  width: 100%;
-}
-
 :-webkit-any(#create-profile-content, #manage-profile-content) >
     :not(:last-child) {
   margin-bottom: 10px;
@@ -120,7 +109,8 @@ html[dir='rtl'] #delete-profile-message {
   color: #999;
 }
 
-#create-profile-managed-not-signed-in-label {
+#create-profile-managed-not-signed-in-label,
+#create-profile-managed-account-details-out-of-date-label {
   white-space: pre-wrap;
   word-wrap: break-word;
 }

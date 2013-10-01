@@ -18,7 +18,7 @@ AutocheckoutBubbleController::AutocheckoutBubbleController(
     const gfx::RectF& anchor_rect,
     const gfx::NativeWindow& native_window,
     bool is_google_user,
-    const base::Callback<void(bool)>& callback)
+    const base::Callback<void(AutocheckoutBubbleState)>& callback)
     : anchor_rect_(gfx::ToEnclosingRect(anchor_rect)),
       native_window_(native_window),
       is_google_user_(is_google_user),
@@ -44,26 +44,20 @@ base::string16 AutocheckoutBubbleController::PromptText() {
                         IDS_AUTOCHECKOUT_BUBBLE_PROMPT_NOT_SIGNED_IN);
 }
 
+// TODO(ahutter): Change these functions back to not returning a "Buy With
+// Google" button after UX has finalized the non-Google user experience. See
+// http://crbug.com/253681.
 gfx::Image AutocheckoutBubbleController::NormalImage() {
-  if (!is_google_user_)
-    return gfx::Image();
-
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   return rb.GetImageNamed(IDR_BUY_WITH_GOOGLE_BUTTON);
 }
 
 gfx::Image AutocheckoutBubbleController::HoverImage() {
-  if (!is_google_user_)
-    return gfx::Image();
-
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   return rb.GetImageNamed(IDR_BUY_WITH_GOOGLE_BUTTON_H);
 }
 
 gfx::Image AutocheckoutBubbleController::PressedImage() {
-  if (!is_google_user_)
-    return gfx::Image();
-
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   return rb.GetImageNamed(IDR_BUY_WITH_GOOGLE_BUTTON_P);
 }
@@ -71,14 +65,14 @@ gfx::Image AutocheckoutBubbleController::PressedImage() {
 void AutocheckoutBubbleController::BubbleAccepted() {
   had_user_interaction_ = true;
   metric_logger_->LogAutocheckoutBubbleMetric(AutofillMetrics::BUBBLE_ACCEPTED);
-  callback_.Run(true);
+  callback_.Run(AUTOCHECKOUT_BUBBLE_ACCEPTED);
 }
 
 void AutocheckoutBubbleController::BubbleCanceled() {
   had_user_interaction_ = true;
   metric_logger_->LogAutocheckoutBubbleMetric(
       AutofillMetrics::BUBBLE_DISMISSED);
-  callback_.Run(false);
+  callback_.Run(AUTOCHECKOUT_BUBBLE_CANCELED);
 }
 
 void AutocheckoutBubbleController::BubbleCreated() const {
@@ -89,7 +83,7 @@ void AutocheckoutBubbleController::BubbleDestroyed() const {
   if (!had_user_interaction_) {
     metric_logger_->LogAutocheckoutBubbleMetric(
         AutofillMetrics::BUBBLE_IGNORED);
-    callback_.Run(false);
+    callback_.Run(AUTOCHECKOUT_BUBBLE_IGNORED);
   }
 }
 

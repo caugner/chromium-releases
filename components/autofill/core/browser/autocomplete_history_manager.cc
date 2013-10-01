@@ -36,8 +36,7 @@ bool IsTextField(const FormFieldData& field) {
       field.form_control_type == "search" ||
       field.form_control_type == "tel" ||
       field.form_control_type == "url" ||
-      field.form_control_type == "email" ||
-      field.form_control_type == "text";
+      field.form_control_type == "email";
 }
 
 }  // namespace
@@ -190,25 +189,11 @@ void AutocompleteHistoryManager::SendSuggestions(
     }
   }
 
-  if (external_delegate_) {
-    external_delegate_->OnSuggestionsReturned(
-        query_id_,
-        autofill_values_,
-        autofill_labels_,
-        autofill_icons_,
-        autofill_unique_ids_);
-  } else {
-    WebContents* web_contents = driver_->GetWebContents();
-    if (web_contents && send_ipc_) {
-      web_contents->Send(
-          new AutofillMsg_SuggestionsReturned(web_contents->GetRoutingID(),
-                                              query_id_,
-                                              autofill_values_,
-                                              autofill_labels_,
-                                              autofill_icons_,
-                                              autofill_unique_ids_));
-    }
-  }
+  external_delegate_->OnSuggestionsReturned(query_id_,
+                                            autofill_values_,
+                                            autofill_labels_,
+                                            autofill_icons_,
+                                            autofill_unique_ids_);
 
   query_id_ = 0;
   autofill_values_.clear();

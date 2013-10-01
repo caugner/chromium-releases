@@ -60,8 +60,8 @@ class TestContentRendererClient : public ContentRendererClient {
   }
   virtual ~TestContentRendererClient() {
   }
-  virtual bool AllowBrowserPlugin(WebKit::WebPluginContainer* container) const
-      OVERRIDE {
+  virtual bool AllowBrowserPlugin(
+      WebKit::WebPluginContainer* container) OVERRIDE {
     // Allow BrowserPlugin for tests.
     return true;
   }
@@ -192,7 +192,7 @@ TEST_F(BrowserPluginTest, InitialResize) {
   EXPECT_EQ(480, params.resize_guest_params.view_rect.height());
   ASSERT_TRUE(browser_plugin);
   // Now the browser plugin is expecting a UpdateRect resize.
-  int instance_id = browser_plugin->instance_id();
+  int instance_id = browser_plugin->guest_instance_id();
   EXPECT_TRUE(browser_plugin->pending_damage_buffer_.get());
 
   // Send the BrowserPlugin an UpdateRect equal to its container size with
@@ -289,7 +289,7 @@ TEST_F(BrowserPluginTest, ResizeFlowControl) {
   LoadHTML(GetHTMLForBrowserPluginObject().c_str());
   MockBrowserPlugin* browser_plugin = GetCurrentPlugin();
   ASSERT_TRUE(browser_plugin);
-  int instance_id = browser_plugin->instance_id();
+  int instance_id = browser_plugin->guest_instance_id();
   EXPECT_TRUE(browser_plugin->pending_damage_buffer_.get());
   // Send an UpdateRect to the BrowserPlugin to make it use the pending damage
   // buffer.
@@ -376,57 +376,6 @@ TEST_F(BrowserPluginTest, ResizeFlowControl) {
   }
 }
 
-TEST_F(BrowserPluginTest, GuestCrash) {
-  LoadHTML(GetHTMLForBrowserPluginObject().c_str());
-
-  MockBrowserPlugin* browser_plugin = GetCurrentPlugin();
-  ASSERT_TRUE(browser_plugin);
-
-  WebKit::WebCursorInfo cursor_info;
-  // Send an event and verify that the event is deported.
-  browser_plugin->handleInputEvent(WebKit::WebMouseEvent(),
-                                   cursor_info);
-  EXPECT_TRUE(browser_plugin_manager()->sink().GetUniqueMessageMatching(
-      BrowserPluginHostMsg_HandleInputEvent::ID));
-  browser_plugin_manager()->sink().ClearMessages();
-
-  const char* kAddEventListener =
-    "var msg;"
-    "function exitListener(e) {"
-    "  msg = JSON.parse(e.detail).reason;"
-    "}"
-    "document.getElementById('browserplugin')."
-    "    addEventListener('-internal-exit', exitListener);";
-
-  ExecuteJavaScript(kAddEventListener);
-
-  // Pretend that the guest has terminated normally.
-  {
-    BrowserPluginMsg_GuestGone msg(
-        0, 0, base::TERMINATION_STATUS_NORMAL_TERMINATION);
-    browser_plugin->OnMessageReceived(msg);
-  }
-
-  // Verify that our event listener has fired.
-  EXPECT_EQ("normal", ExecuteScriptAndReturnString("msg"));
-
-  // Pretend that the guest has crashed.
-  {
-    BrowserPluginMsg_GuestGone msg(
-        0, 0, base::TERMINATION_STATUS_PROCESS_CRASHED);
-    browser_plugin->OnMessageReceived(msg);
-  }
-
-  // Verify that our event listener has fired.
-  EXPECT_EQ("crashed", ExecuteScriptAndReturnString("msg"));
-
-  // Send an event and verify that events are no longer deported.
-  browser_plugin->handleInputEvent(WebKit::WebMouseEvent(),
-                                   cursor_info);
-  EXPECT_FALSE(browser_plugin_manager()->sink().GetUniqueMessageMatching(
-      BrowserPluginHostMsg_HandleInputEvent::ID));
-}
-
 TEST_F(BrowserPluginTest, RemovePlugin) {
   LoadHTML(GetHTMLForBrowserPluginObject().c_str());
   EXPECT_FALSE(browser_plugin_manager()->sink().GetUniqueMessageMatching(
@@ -452,72 +401,6 @@ TEST_F(BrowserPluginTest, RemovePluginBeforeNavigation) {
   EXPECT_FALSE(browser_plugin_manager()->sink().GetUniqueMessageMatching(
       BrowserPluginHostMsg_PluginDestroyed::ID));
 }
-
-TEST_F(BrowserPluginTest, CustomEvents) {
-  const char* kAddEventListener =
-    "var url;"
-    "function nav(e) {"
-    "  url = JSON.parse(e.detail).url;"
-    "}"
-    "document.getElementById('browserplugin')."
-    "    addEventListener('-internal-loadcommit', nav);";
-  const char* kRemoveEventListener =
-    "document.getElementById('browserplugin')."
-    "    removeEventListener('-internal-loadcommit', nav);";
-  const char* kGetSrc =
-      "document.getElementById('browserplugin').src";
-  const char* kGoogleURL = "http://www.google.com/";
-  const char* kGoogleNewsURL = "http://news.google.com/";
-
-  LoadHTML(GetHTMLForBrowserPluginObject().c_str());
-  ExecuteJavaScript(kAddEventListener);
-
-  MockBrowserPlugin* browser_plugin = GetCurrentPlugin();
-  ASSERT_TRUE(browser_plugin);
-  int instance_id = browser_plugin->instance_id();
-
-  {
-    BrowserPluginMsg_LoadCommit_Params navigate_params;
-    navigate_params.is_top_level = true;
-    navigate_params.url = GURL(kGoogleURL);
-    BrowserPluginMsg_LoadCommit msg(instance_id, navigate_params);
-    browser_plugin->OnMessageReceived(msg);
-    EXPECT_EQ(kGoogleURL, ExecuteScriptAndReturnString("url"));
-    EXPECT_EQ(kGoogleURL, ExecuteScriptAndReturnString(kGetSrc));
-  }
-  ExecuteJavaScript(kRemoveEventListener);
-  {
-    BrowserPluginMsg_LoadCommit_Params navigate_params;
-    navigate_params.is_top_level = false;
-    navigate_params.url = GURL(kGoogleNewsURL);
-    BrowserPluginMsg_LoadCommit msg(instance_id, navigate_params);
-    browser_plugin->OnMessageReceived(msg);
-    // The URL variable should not change because we've removed the event
-    // listener.
-    EXPECT_EQ(kGoogleURL, ExecuteScriptAndReturnString("url"));
-    // The src attribute should not change if this is a top-level navigation.
-    EXPECT_EQ(kGoogleURL, ExecuteScriptAndReturnString(kGetSrc));
-  }
-}
-
-TEST_F(BrowserPluginTest, StopMethod) {
-  const char* kCallStop =
-    "document.getElementById('browserplugin').stop();";
-  LoadHTML(GetHTMLForBrowserPluginObject().c_str());
-  ExecuteJavaScript(kCallStop);
-  EXPECT_TRUE(browser_plugin_manager()->sink().GetUniqueMessageMatching(
-      BrowserPluginHostMsg_Stop::ID));
-}
-
-TEST_F(BrowserPluginTest, ReloadMethod) {
-  const char* kCallReload =
-    "document.getElementById('browserplugin').reload();";
-  LoadHTML(GetHTMLForBrowserPluginObject().c_str());
-  ExecuteJavaScript(kCallReload);
-  EXPECT_TRUE(browser_plugin_manager()->sink().GetUniqueMessageMatching(
-      BrowserPluginHostMsg_Reload::ID));
-}
-
 
 // Verify that the 'partition' attribute on the browser plugin is parsed
 // correctly.
@@ -657,108 +540,6 @@ TEST_F(BrowserPluginTest, ImmutableAttributesAfterNavigation) {
   EXPECT_STREQ("storage", partition_value.c_str());
 }
 
-// This test verifies that we can mutate the event listener vector
-// within an event listener.
-TEST_F(BrowserPluginTest, RemoveEventListenerInEventListener) {
-  const char* kAddEventListener =
-    "var url;"
-    "function nav(e) {"
-    "  url = JSON.parse(e.detail).url;"
-    "  document.getElementById('browserplugin')."
-    "      removeEventListener('-internal-loadcommit', nav);"
-    "}"
-    "document.getElementById('browserplugin')."
-    "    addEventListener('-internal-loadcommit', nav);";
-  const char* kGoogleURL = "http://www.google.com/";
-  const char* kGoogleNewsURL = "http://news.google.com/";
-
-  LoadHTML(GetHTMLForBrowserPluginObject().c_str());
-  ExecuteJavaScript(kAddEventListener);
-
-  MockBrowserPlugin* browser_plugin = GetCurrentPlugin();
-  ASSERT_TRUE(browser_plugin);
-  int instance_id = browser_plugin->instance_id();
-
-  {
-    BrowserPluginMsg_LoadCommit_Params navigate_params;
-    navigate_params.url = GURL(kGoogleURL);
-    BrowserPluginMsg_LoadCommit msg(instance_id, navigate_params);
-    browser_plugin->OnMessageReceived(msg);
-    EXPECT_EQ(kGoogleURL, ExecuteScriptAndReturnString("url"));
-  }
-  {
-    BrowserPluginMsg_LoadCommit_Params navigate_params;
-    navigate_params.url = GURL(kGoogleNewsURL);
-    BrowserPluginMsg_LoadCommit msg(instance_id, navigate_params);
-    browser_plugin->OnMessageReceived(msg);
-    // The URL variable should not change because we've removed the event
-    // listener.
-    EXPECT_EQ(kGoogleURL, ExecuteScriptAndReturnString("url"));
-  }
-}
-
-// This test verifies that multiple event listeners fire that are registered
-// on a single event type.
-TEST_F(BrowserPluginTest, MultipleEventListeners) {
-  const char* kAddEventListener =
-    "var count = 0;"
-    "function nava(u) {"
-    "  count++;"
-    "}"
-    "function navb(u) {"
-    "  count++;"
-    "}"
-    "document.getElementById('browserplugin')."
-    "    addEventListener('-internal-loadcommit', nava);"
-    "document.getElementById('browserplugin')."
-    "    addEventListener('-internal-loadcommit', navb);";
-  const char* kGoogleURL = "http://www.google.com/";
-
-  LoadHTML(GetHTMLForBrowserPluginObject().c_str());
-  ExecuteJavaScript(kAddEventListener);
-
-  MockBrowserPlugin* browser_plugin = GetCurrentPlugin();
-  ASSERT_TRUE(browser_plugin);
-  int instance_id = browser_plugin->instance_id();
-
-  {
-    BrowserPluginMsg_LoadCommit_Params navigate_params;
-    navigate_params.url = GURL(kGoogleURL);
-    BrowserPluginMsg_LoadCommit msg(instance_id, navigate_params);
-    browser_plugin->OnMessageReceived(msg);
-    EXPECT_EQ(2, ExecuteScriptAndReturnInt("count"));
-  }
-}
-
-TEST_F(BrowserPluginTest, RemoveBrowserPluginOnExit) {
-  LoadHTML(GetHTMLForBrowserPluginObject().c_str());
-
-  MockBrowserPlugin* browser_plugin = GetCurrentPlugin();
-  ASSERT_TRUE(browser_plugin);
-  int instance_id = browser_plugin->instance_id();
-
-  const char* kAddEventListener =
-    "function exitListener(e) {"
-    "  if (JSON.parse(e.detail).reason == 'killed') {"
-    "    var bp = document.getElementById('browserplugin');"
-    "    bp.parentNode.removeChild(bp);"
-    "  }"
-    "}"
-    "document.getElementById('browserplugin')."
-    "    addEventListener('-internal-exit', exitListener);";
-
-  ExecuteJavaScript(kAddEventListener);
-
-  // Pretend that the guest has crashed.
-  BrowserPluginMsg_GuestGone msg(
-      instance_id, 0, base::TERMINATION_STATUS_PROCESS_WAS_KILLED);
-  browser_plugin->OnMessageReceived(msg);
-
-  ProcessPendingMessages();
-
-  EXPECT_EQ(NULL, browser_plugin_manager()->GetBrowserPlugin(instance_id));
-}
-
 TEST_F(BrowserPluginTest, AutoSizeAttributes) {
   std::string html = base::StringPrintf(kHTMLForSourcelessPluginObject,
                                         content::kBrowserPluginMimeType);
@@ -825,10 +606,12 @@ TEST_F(BrowserPluginTest, AutoSizeAttributes) {
     ASSERT_TRUE(auto_size_msg);
 
     int instance_id = 0;
+    bool needs_ack = false;
     BrowserPluginHostMsg_AutoSize_Params auto_size_params;
     BrowserPluginHostMsg_ResizeGuest_Params resize_params;
     BrowserPluginHostMsg_UpdateRect_ACK::Read(auto_size_msg,
                                               &instance_id,
+                                              &needs_ack,
                                               &auto_size_params,
                                               &resize_params);
     EXPECT_FALSE(auto_size_params.enable);

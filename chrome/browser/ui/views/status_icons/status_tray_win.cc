@@ -15,6 +15,15 @@
 
 static const UINT kStatusIconMessage = WM_APP + 1;
 
+namespace {
+// |kBaseIconId| is 2 to avoid conflicts with plugins that hard-code id 1.
+const UINT kBaseIconId = 2;
+
+UINT ReservedIconId(StatusTray::StatusIconType type) {
+  return kBaseIconId + static_cast<UINT>(type);
+}
+}  // namespace
+
 StatusTrayWin::StatusTrayWin()
     : next_icon_id_(1),
       atom_(0),
@@ -83,6 +92,12 @@ LRESULT CALLBACK StatusTrayWin::WndProc(HWND hwnd,
       }
     }
 
+    // It is possible for this procedure to be called with an obsolete icon
+    // id.  In that case we should just return early before handling any
+    // actions.
+    if (!win_icon)
+      return TRUE;
+
     switch (lparam) {
       case TB_INDETERMINATE:
         win_icon->HandleBalloonClickEvent();
@@ -110,12 +125,30 @@ StatusTrayWin::~StatusTrayWin() {
     UnregisterClass(MAKEINTATOM(atom_), instance_);
 }
 
-StatusIcon* StatusTrayWin::CreatePlatformStatusIcon() {
-  if (win8::IsSingleWindowMetroMode()) {
-    return new StatusIconMetro(next_icon_id_++);
-  } else {
-    return new StatusIconWin(next_icon_id_++, window_, kStatusIconMessage);
-  }
+StatusIcon* StatusTrayWin::CreatePlatformStatusIcon(
+    StatusTray::StatusIconType type,
+    const gfx::ImageSkia& image,
+    const string16& tool_tip) {
+  UINT next_icon_id;
+  if (type == StatusTray::OTHER_ICON)
+    next_icon_id = NextIconId();
+  else
+    next_icon_id = ReservedIconId(type);
+
+  StatusIcon* icon = NULL;
+  if (win8::IsSingleWindowMetroMode())
+    icon = new StatusIconMetro(next_icon_id);
+  else
+    icon = new StatusIconWin(next_icon_id, window_, kStatusIconMessage);
+
+  icon->SetImage(image);
+  icon->SetToolTip(tool_tip);
+  return icon;
+}
+
+UINT StatusTrayWin::NextIconId() {
+  UINT icon_id = next_icon_id_++;
+  return kBaseIconId + static_cast<UINT>(NAMED_STATUS_ICON_COUNT) + icon_id;
 }
 
 StatusTray* StatusTray::Create() {

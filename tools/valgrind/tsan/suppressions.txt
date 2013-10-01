@@ -134,12 +134,11 @@
   fun:uprv_malloc_46
 }
 
+# http://bugs.icu-project.org/trac/ticket/10295
 {
-  Two writes, same value (ICU gLibCleanupFunctions[UCLN_UPLUG])
+  Two writes, same value (ICU gLibCleanupFunctions[*])
   ThreadSanitizer:Race
   fun:ucln_registerCleanup_46
-  fun:uplug_init_46
-  fun:u_init_46
 }
 
 # Reading a pointer to a mutex being initialized in a concurrent thread.
@@ -1036,20 +1035,14 @@
 {
   bug_175467
   ThreadSanitizer:Race
-  fun:_getstream
-  fun:_getstream
-  fun:_wfsopen
-  fun:_wfsopen
-  fun:file_util::OpenFile
-  fun:file_util::OpenFile
-  fun:file_util::OpenFile
+  ...
   fun:file_util::OpenFile
   fun:visitedlink::VisitedLinkMaster::InitFromFile
   fun:visitedlink::VisitedLinkMaster::InitFromFile
   fun:visitedlink::VisitedLinkMaster::InitFromFile
   fun:visitedlink::VisitedLinkMaster::Init
-  fun:visitedlink::VisitedLinkEventsTest::SetUp
-  fun:testing::internal::HandleExceptionsInMethodIfSupported
+  fun:visitedlink::VisitedLinkEventsTest::CreateBrowserContext
+  fun:content::RenderViewHostTestHarness::SetUp
 }
 {
    bug_178433a
@@ -1101,33 +1094,45 @@
   fun:media::FFmpegVideoDecoder::Decode
 }
 {
-  bug_241939a
+  bug_256792
   ThreadSanitizer:Race
-  fun:CreateDialogParamW
-  fun:CharPrevW
-  fun:SystemParametersInfoW
-  fun:RegisterClassExW
-  fun:base::MessagePumpForUI::InitMessageWnd
-  fun:base::MessagePumpForUI::MessagePumpForUI
-  fun:base::MessageLoop::MessageLoop
-  fun:remoting::AutoThread::ThreadMain
+  fun:media::AudioManagerLinux::~AudioManagerLinux
+  fun:content::MockAudioManager::~MockAudioManager
+  fun:content::MockAudioManager::~MockAudioManager
+  fun:base::DefaultDeleter*
+  fun:base::internal::scoped_ptr_impl::~scoped_ptr_impl
+  fun:scoped_ptr::~scoped_ptr
+  fun:content::MediaStreamManagerTest::~MediaStreamManagerTest
+  fun:content::MediaStreamManagerTest_MakeAndCancelMediaAccessRequest_Test::~MediaStreamManagerTest_MakeAndCancelMediaAccessRequest_Test
+  fun:content::MediaStreamManagerTest_MakeAndCancelMediaAccessRequest_Test::~MediaStreamManagerTest_MakeAndCancelMediaAccessRequest_Test
+  fun:testing::Test::DeleteSelf_
+  fun:testing::internal::HandleSehExceptionsInMethodIfSupported
 }
 {
-  bug_241939b
+  bug_258935
   ThreadSanitizer:Race
-  fun:GetWindowLongW
-  fun:GetWindowLongW
-  fun:GetWindowLongW
-  fun:PostMessageW
-  fun:PostMessageW
-  fun:SetWindowTextW
-  fun:KiUserCallbackDispatcher
-  fun:LoadStringA
-  fun:LoadStringA
-  fun:LoadStringA
-  fun:CreateWindowExW
-  fun:base::MessagePumpForUI::InitMessageWnd
-  fun:base::MessagePumpForUI::MessagePumpForUI
-  fun:base::MessageLoop::MessageLoop
-  fun:remoting::AutoThread::ThreadMain
+  fun:base::Thread::StopSoon
+  fun:base::Thread::Stop
+  fun:content::UtilityMainThread::~UtilityMainThread
+  fun:content::UtilityMainThread::~UtilityMainThread
+  fun:base::DefaultDeleter::operator*
+  fun:base::internal::scoped_ptr_impl::~scoped_ptr_impl
+  fun:scoped_ptr::~scoped_ptr
+  fun:content::UtilityProcessHostImpl::~UtilityProcessHostImpl
+  fun:content::UtilityProcessHostImpl::~UtilityProcessHostImpl
+  fun:content::BrowserChildProcessHostImpl::OnChildDisconnected
+  fun:content::ChildProcessHostImpl::OnChannelError
+  fun:IPC::Channel::ChannelImpl::ClosePipeOnError
+  fun:IPC::Channel::ChannelImpl::OnFileCanReadWithoutBlocking
+  fun:base::MessagePumpLibevent::FileDescriptorWatcher::OnFileCanReadWithoutBlocking
+  fun:base::MessagePumpLibevent::OnLibeventNotification
+}
+{
+  bug_268924
+  ThreadSanitizer:Race
+  fun:base::PowerMonitor::PowerMonitor
+  fun:content::ChildThread::Init
+  fun:content::ChildThread::ChildThread
+  fun:content::UtilityThreadImpl::UtilityThreadImpl
+  fun:content::UtilityMainThread::InitInternal
 }

@@ -6,16 +6,14 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/time.h"
-#include "base/values.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/language_state.h"
@@ -36,7 +34,6 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
@@ -52,10 +49,8 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "net/base/load_flags.h"
 #include "net/base/url_util.h"
 #include "net/http/http_status_code.h"
-#include "ui/base/l10n/l10n_util.h"
 
 #ifdef FILE_MANAGER_EXTENSION
 #include "chrome/browser/chromeos/extensions/file_manager/file_manager_util.h"
@@ -337,6 +332,14 @@ void TranslateManager::InitiateTranslation(WebContents* web_contents,
     return;
   }
 
+  // MHTML pages currently cannot be translated.
+  // See bug: 217945.
+  if (web_contents->GetContentsMimeType() == "multipart/related") {
+    TranslateBrowserMetrics::ReportInitiationStatus(
+        TranslateBrowserMetrics::INITIATION_STATUS_MIME_TYPE_IS_NOT_SUPPORTED);
+    return;
+  }
+
   // Don't translate any Chrome specific page, e.g., New Tab Page, Download,
   // History, and so on.
   GURL page_url = web_contents->GetURL();
@@ -352,15 +355,10 @@ void TranslateManager::InitiateTranslation(WebContents* web_contents,
   CommandLine* command_line = CommandLine::ForCurrentProcess();
 
   // Don't translate similar languages (ex: en-US to en).
-  // When the flag --enable-translate-settings is on, the locale (|target_lang|)
-  // is not needed to be considered because the user can configure the languages
-  // in the settings UI.
-  if (!command_line->HasSwitch(switches::kEnableTranslateSettings)) {
-    if (language_code == target_lang) {
-      TranslateBrowserMetrics::ReportInitiationStatus(
-          TranslateBrowserMetrics::INITIATION_STATUS_SIMILAR_LANGUAGES);
-      return;
-    }
+  if (language_code == target_lang) {
+    TranslateBrowserMetrics::ReportInitiationStatus(
+        TranslateBrowserMetrics::INITIATION_STATUS_SIMILAR_LANGUAGES);
+    return;
   }
 
   // Don't translate any language the user configured as accepted languages.
@@ -423,7 +421,6 @@ void TranslateManager::InitiateTranslation(WebContents* web_contents,
       TranslateTabHelper::FromWebContents(web_contents);
   if (!translate_tab_helper)
     return;
-
   std::string auto_translate_to =
       translate_tab_helper->language_state().AutoTranslateTo();
   if (!auto_translate_to.empty()) {
@@ -438,14 +435,15 @@ void TranslateManager::InitiateTranslation(WebContents* web_contents,
   TranslateBrowserMetrics::ReportInitiationStatus(
       TranslateBrowserMetrics::INITIATION_STATUS_SHOW_INFOBAR);
   TranslateInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents), false,
-      TranslateInfoBarDelegate::BEFORE_TRANSLATE, TranslateErrors::NONE,
-      profile->GetPrefs(), ShortcutConfig(),
-      language_code, target_lang);
+      false, InfoBarService::FromWebContents(web_contents),
+      TranslateInfoBarDelegate::BEFORE_TRANSLATE, language_code, target_lang,
+      TranslateErrors::NONE, profile->GetPrefs(), ShortcutConfig());
 }
 
-void TranslateManager::InitiateTranslationPosted(
-    int process_id, int render_id, const std::string& page_lang, int attempt) {
+void TranslateManager::InitiateTranslationPosted(int process_id,
+                                                 int render_id,
+                                                 const std::string& page_lang,
+                                                 int attempt) {
   // The tab might have been closed.
   WebContents* web_contents =
       tab_util::GetWebContentsByID(process_id, render_id);
@@ -483,22 +481,20 @@ void TranslateManager::TranslatePage(WebContents* web_contents,
     return;
   }
 
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-
-  std::string source_lang(original_source_lang);
-
   // Translation can be kicked by context menu against unsupported languages.
   // Unsupported language strings should be replaced with
   // kUnknownLanguageCode in order to send a translation request with enabling
   // server side auto language detection.
+  std::string source_lang(original_source_lang);
   if (!IsSupportedLanguage(source_lang))
     source_lang = std::string(chrome::kUnknownLanguageCode);
 
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
   TranslateInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents), true,
-      TranslateInfoBarDelegate::TRANSLATING, TranslateErrors::NONE,
-      profile->GetPrefs(), ShortcutConfig(), source_lang, target_lang);
+      true, InfoBarService::FromWebContents(web_contents),
+      TranslateInfoBarDelegate::TRANSLATING, source_lang, target_lang,
+      TranslateErrors::NONE, profile->GetPrefs(), ShortcutConfig());
 
   DCHECK(script_.get() != NULL);
 
@@ -610,22 +606,21 @@ void TranslateManager::PageTranslated(WebContents* web_contents,
     details->error_type = TranslateErrors::UNSUPPORTED_LANGUAGE;
   }
 
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  PrefService* prefs = profile->GetPrefs();
+  PrefService* prefs = Profile::FromBrowserContext(
+      web_contents->GetBrowserContext())->GetPrefs();
   TranslateInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents), true,
+      true, InfoBarService::FromWebContents(web_contents),
       (details->error_type == TranslateErrors::NONE) ?
-      TranslateInfoBarDelegate::AFTER_TRANSLATE :
-      TranslateInfoBarDelegate::TRANSLATION_ERROR,
-      details->error_type, prefs, ShortcutConfig(), details->source_language,
-      details->target_language);
+          TranslateInfoBarDelegate::AFTER_TRANSLATE :
+          TranslateInfoBarDelegate::TRANSLATION_ERROR,
+      details->source_language, details->target_language, details->error_type,
+      prefs, ShortcutConfig());
 
   if (details->error_type != TranslateErrors::NONE &&
       !web_contents->GetBrowserContext()->IsOffTheRecord()) {
     TranslateErrorDetails error_details;
     error_details.time = base::Time::Now();
-    error_details.url = web_contents->GetActiveURL();
+    error_details.url = web_contents->GetLastCommittedURL();
     error_details.error = details->error_type;
     NotifyTranslateError(error_details);
   }
@@ -680,14 +675,10 @@ void TranslateManager::OnTranslateScriptFetchComplete(
       Profile* profile =
           Profile::FromBrowserContext(web_contents->GetBrowserContext());
       TranslateInfoBarDelegate::Create(
-          InfoBarService::FromWebContents(web_contents),
-          true,
-          TranslateInfoBarDelegate::TRANSLATION_ERROR,
-          TranslateErrors::NETWORK,
-          profile->GetPrefs(),
-          ShortcutConfig(),
-          request.source_lang,
-          request.target_lang);
+          true, InfoBarService::FromWebContents(web_contents),
+          TranslateInfoBarDelegate::TRANSLATION_ERROR, request.source_lang,
+          request.target_lang, TranslateErrors::NETWORK, profile->GetPrefs(),
+          ShortcutConfig());
 
       if (!web_contents->GetBrowserContext()->IsOffTheRecord()) {
         TranslateErrorDetails error_details;
@@ -730,8 +721,8 @@ std::string TranslateManager::GetTargetLanguage(PrefService* prefs) {
 ShortcutConfiguration TranslateManager::ShortcutConfig() {
   ShortcutConfiguration config;
 
-  // The android implementation does not offer a drop down for space
-  // reason so we are more aggressive showing the shortcuts for never translate.
+  // The android implementation does not offer a drop down (for space reasons),
+  // so we are more aggressive about showing the shortcut to never translate.
   #if defined(OS_ANDROID)
   config.never_translate_min_count = 1;
   #else

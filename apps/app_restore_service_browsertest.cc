@@ -5,11 +5,11 @@
 #include "apps/app_restore_service.h"
 #include "apps/app_restore_service_factory.h"
 #include "apps/saved_files_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
@@ -92,7 +92,14 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, FileAccessIsSavedToPrefs) {
   ASSERT_TRUE(file_entries.empty());
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, FileAccessIsRestored) {
+// Flaky: crbug.com/269613
+#if defined(OS_LINUX)
+#define MAYBE_FileAccessIsRestored DISABLED_FileAccessIsRestored
+#else
+#define MAYBE_FileAccessIsRestored FileAccessIsRestored
+#endif
+
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_FileAccessIsRestored) {
   content::WindowedNotificationObserver extension_suspended(
       chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
       content::NotificationService::AllSources());

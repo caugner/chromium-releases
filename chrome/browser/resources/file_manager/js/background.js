@@ -52,7 +52,7 @@ var LaunchType = {
  * @param {AsyncUtil.Queue} queue Queue for asynchronous window launches.
  * @param {string} url App window content url.
  * @param {string} id App window id.
- * @param {Object|function} options Options object or a function to create it.
+ * @param {Object|function()} options Options object or a function to create it.
  * @constructor
  */
 function AppWindowWrapper(queue, url, id, options) {
@@ -140,6 +140,8 @@ AppWindowWrapper.prototype.launch = function(appState, callback) {
       contentWindow.appID = this.id_;
       contentWindow.appState = this.appState_;
       contentWindow.appInitialURL = this.url_;
+      if (window.IN_TEST)
+        contentWindow.IN_TEST = true;
       appWindow.onClosed.addListener(function() {
         if (contentWindow.unload)
           contentWindow.unload();
@@ -195,7 +197,7 @@ AppWindowWrapper.prototype.enqueueLaunch = function(appState) {
  *
  * @param {AsyncUtil.Queue} queue Queue for asynchronous window launches.
  * @param {string} url App window content url.
- * @param {Object|function} options Options object or a function to return it.
+ * @param {Object|function()} options Options object or a function to return it.
  * @constructor
  */
 function SingletonAppWindowWrapper(queue, url, options) {
@@ -315,8 +317,12 @@ function launchFileManager(opt_appState, opt_id, opt_type, opt_callback) {
         // The isFocused() method should always be available, but in case
         // Files.app's failed on some error, wrap it with try catch.
         try {
-          if (appWindows[key].contentWindow.isFocused())
-            return key;
+          if (appWindows[key].contentWindow.isFocused()) {
+            if (opt_callback)
+              opt_callback(key);
+            onTaskCompleted();
+            return;
+          }
         } catch (e) {
           console.error(e.message);
         }
@@ -383,10 +389,12 @@ function reopenFileManagers() {
 }
 
 /**
+ * Executes a file browser task.
+ *
  * @param {string} action Task id.
  * @param {Object} details Details object.
  */
-function executeFileBrowserTask(action, details) {
+function onExecute(action, details) {
   var urls = details.entries.map(function(e) { return e.toURL() });
 
   switch (action) {
@@ -407,7 +415,7 @@ function executeFileBrowserTask(action, details) {
         defaultPath: details.entries[0].fullPath,
       };
       // For mounted devices just focus any Files.app window. The mounted
-      // volume will appear on the volume list.
+      // volume will appear on the navigation list.
       var type = action == 'auto-open' ? LaunchType.FOCUS_ANY_OR_CREATE :
           LaunchType.FOCUS_SAME_OR_CREATE;
       launchFileManager(appState,
@@ -465,9 +473,9 @@ function launchVideoPlayer(url) {
 }
 
 /**
- * Launch the app.
+ * Launches the app.
  */
-function launch() {
+function onLaunched() {
   if (nextFileManagerWindowID == 0) {
     // The app just launched. Remove window state records that are not needed
     // any more.
@@ -487,10 +495,38 @@ function launch() {
 /**
  * Restarted the app, restore windows.
  */
-function restart() {
+function onRestarted() {
   reopenFileManagers();
   audioPlayer.reopen();
   videoPlayer.reopen();
+}
+
+/**
+ * Handles clicks on a custom item on the launcher context menu.
+ * @param {OnClickData} info Event details.
+ */
+function onContextMenuClicked(info) {
+  if (info.menuItemId == 'new-window') {
+    // Find the focused window (if any) and use it's current path for the
+    // new window. If not found, then launch with the default path.
+    for (var key in appWindows) {
+      try {
+        if (appWindows[key].contentWindow.isFocused()) {
+          var appState = {
+            defaultPath: appWindows[key].contentWindow.appState.defaultPath
+          };
+          launchFileManager(appState);
+          return;
+        }
+      } catch (ignore) {
+        // The isFocused method may not be defined during initialization.
+        // Therefore, wrapped with a try-catch block.
+      }
+    }
+
+    // Launch with the default path.
+    launchFileManager();
+  }
 }
 
 /**
@@ -502,11 +538,42 @@ function maybeCloseBackgroundPage() {
     close();
 }
 
-chrome.app.runtime.onLaunched.addListener(launch);
-chrome.app.runtime.onRestarted.addListener(restart);
-
-function addExecuteHandler() {
-  chrome.fileBrowserHandler.onExecute.addListener(executeFileBrowserTask);
+/**
+ * Initializes the context menu. Recreates if already exists.
+ * @param {Object} strings Hash array of strings.
+ */
+function initContextMenu(strings) {
+  try {
+    chrome.contextMenus.remove('new-window');
+  } catch (ignore) {
+    // There is no way to detect if the context menu is already added, therefore
+    // try to recreate it every time.
+  }
+  chrome.contextMenus.create({
+    id: 'new-window',
+    contexts: ['launcher'],
+    title: strings['NEW_WINDOW_BUTTON_LABEL']
+  });
 }
 
-addExecuteHandler();
+/**
+ * Initializes the background page of Files.app.
+ */
+function initApp() {
+  // Initialize handlers.
+  chrome.fileBrowserHandler.onExecute.addListener(onExecute);
+  chrome.app.runtime.onLaunched.addListener(onLaunched);
+  chrome.app.runtime.onRestarted.addListener(onRestarted);
+  chrome.contextMenus.onClicked.addListener(onContextMenuClicked);
+
+  // Fetch strings and initialize the context menu.
+  queue.run(function(callback) {
+    chrome.fileBrowserPrivate.getStrings(function(strings) {
+      initContextMenu(strings);
+      chrome.storage.local.set({strings: strings}, callback);
+    });
+  });
+}
+
+// Initialize Files.app.
+initApp();

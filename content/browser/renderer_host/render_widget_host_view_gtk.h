@@ -11,8 +11,9 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
+#include "content/browser/renderer_host/gtk_plugin_container_manager.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_sender.h"
@@ -26,7 +27,6 @@
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "webkit/common/cursors/webcursor.h"
-#include "webkit/plugins/npapi/gtk_plugin_container_manager.h"
 
 typedef struct _GtkClipboard GtkClipboard;
 typedef struct _GtkSelectionData GtkSelectionData;
@@ -77,24 +77,22 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
   virtual void WasHidden() OVERRIDE;
   virtual void MovePluginWindows(
       const gfx::Vector2d& scroll_offset,
-      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
+      const std::vector<WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void Blur() OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
   virtual void TextInputTypeChanged(ui::TextInputType type,
-                                    bool can_compose_inline) OVERRIDE;
+                                    bool can_compose_inline,
+                                    ui::TextInputMode input_mode) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
-  virtual void ImeCompositionRangeChanged(
-      const ui::Range& range,
-      const std::vector<gfx::Rect>& character_bounds) OVERRIDE;
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect,
       const gfx::Vector2d& scroll_delta,
       const std::vector<gfx::Rect>& copy_rects,
       const ui::LatencyInfo& latency_info) OVERRIDE;
-  virtual void RenderViewGone(base::TerminationStatus status,
-                              int error_code) OVERRIDE;
+  virtual void RenderProcessGone(base::TerminationStatus status,
+                                 int error_code) OVERRIDE;
   virtual void Destroy() OVERRIDE;
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) {}
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
@@ -303,7 +301,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
   scoped_ptr<GtkKeyBindingsHandler> key_bindings_handler_;
 
   // Helper class that lets us allocate plugin containers and move them.
-  webkit::npapi::GtkPluginContainerManager plugin_container_manager_;
+  GtkPluginContainerManager plugin_container_manager_;
 
   // The size that we want the renderer to be.  We keep this in a separate
   // variable because resizing in GTK+ is async.

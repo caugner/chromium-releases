@@ -7,6 +7,8 @@
 
 #include <vector>
 
+#include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "ppapi/host/resource_host.h"
 #include "ppapi/proxy/resource_message_params.h"
@@ -21,7 +23,7 @@ class WebURLLoader;
 
 namespace content {
 
-class RendererPpapiHost;
+class RendererPpapiHostImpl;
 
 class PepperURLLoaderHost
     : public ppapi::host::ResourceHost,
@@ -29,7 +31,7 @@ class PepperURLLoaderHost
  public:
   // If main_document_loader is true, PP_Resource must be 0 since it will be
   // pending until the plugin resource attaches to it.
-  PepperURLLoaderHost(RendererPpapiHost* host,
+  PepperURLLoaderHost(RendererPpapiHostImpl* host,
                       bool main_document_loader,
                       PP_Instance instance,
                       PP_Resource resource);
@@ -76,12 +78,19 @@ class PepperURLLoaderHost
       ppapi::host::HostMessageContext* context);
 
   // Sends or queues an unsolicited message to the plugin resource. This
-  // handles the case where we have created a pending host resource and the
-  // plugin has not connected to us yet. Such messages will be queued until the
-  // plugin resource connects.
+  // handles cases where messages must be reordered for the plugin and
+  // the case where we have created a pending host resource and the
+  // plugin has not connected to us yet.
   //
   // Takes ownership of the given pointer.
   void SendUpdateToPlugin(IPC::Message* msg);
+
+  // Sends or queues an unsolicited message to the plugin resource. This is
+  // used inside SendUpdateToPlugin for messages that are already ordered
+  // properly.
+  //
+  // Takes ownership of the given pointer.
+  void SendOrderedUpdateToPlugin(IPC::Message* msg);
 
   void Close();
 
@@ -94,12 +103,13 @@ class PepperURLLoaderHost
 
   // Converts a WebURLResponse to a URLResponseInfo and saves it.
   void SaveResponse(const WebKit::WebURLResponse& response);
+  void DidDataFromWebURLResponse(const ppapi::URLResponseInfoData& data);
 
   // Sends the UpdateProgress message (if necessary) to the plugin.
   void UpdateProgress();
 
   // Non-owning pointer.
-  RendererPpapiHost* renderer_ppapi_host_;
+  RendererPpapiHostImpl* renderer_ppapi_host_;
 
   // If true, then the plugin instance is a full-frame plugin and we're just
   // wrapping the main document's loader (i.e. loader_ is null).
@@ -128,7 +138,15 @@ class PepperURLLoaderHost
   // Messages sent while the resource host is pending. These will be forwarded
   // to the plugin when the plugin side connects. The pointers are owned by
   // this object and must be deleted.
-  std::vector<IPC::Message*> pending_replies_;
+  ScopedVector<IPC::Message> pending_replies_;
+  ScopedVector<IPC::Message> out_of_order_replies_;
+
+  // True when there's a pending DataFromURLResponse call which will send a
+  // PpapiPluginMsg_URLLoader_ReceivedResponse to the plugin, which introduces
+  // ordering constraints on following messages to the plugin.
+  bool pending_response_;
+
+  base::WeakPtrFactory<PepperURLLoaderHost> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperURLLoaderHost);
 };

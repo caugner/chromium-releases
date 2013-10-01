@@ -16,7 +16,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/history/history_database.h"
@@ -25,7 +25,6 @@
 #include "chrome/browser/history/in_memory_url_index.h"
 #include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/scored_history_match.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
@@ -34,16 +33,17 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/autocomplete_match_type.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "googleurl/src/url_parse.h"
-#include "googleurl/src/url_util.h"
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "url/url_parse.h"
+#include "url/url_util.h"
 
 using history::InMemoryURLIndex;
 using history::ScoredHistoryMatch;
@@ -56,68 +56,7 @@ HistoryQuickProvider::HistoryQuickProvider(
     Profile* profile)
     : HistoryProvider(listener, profile,
           AutocompleteProvider::TYPE_HISTORY_QUICK),
-      languages_(profile_->GetPrefs()->GetString(prefs::kAcceptLanguages)),
-      reorder_for_inlining_(false) {
-  enum InliningOption {
-    INLINING_PROHIBITED = 0,
-    INLINING_ALLOWED = 1,
-    INLINING_AUTO_BUT_NOT_IN_FIELD_TRIAL = 2,
-    INLINING_FIELD_TRIAL_DEFAULT_GROUP = 3,
-    INLINING_FIELD_TRIAL_EXPERIMENT_GROUP = 4,
-    NUM_OPTIONS = 5
-  };
-  // should always be overwritten
-  InliningOption inlining_option = NUM_OPTIONS;
-
-  const std::string switch_value = CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kOmniboxInlineHistoryQuickProvider);
-  if (switch_value == switches::kOmniboxInlineHistoryQuickProviderAllowed) {
-    inlining_option = INLINING_ALLOWED;
-    always_prevent_inline_autocomplete_ = false;
-  } else if (switch_value ==
-             switches::kOmniboxInlineHistoryQuickProviderProhibited) {
-    inlining_option = INLINING_PROHIBITED;
-    always_prevent_inline_autocomplete_ = true;
-  } else {
-    // We'll assume any other flag means automatic.
-    // Automatic means eligible for the field trial.
-
-    // For the field trial stuff to work correctly, we must be running
-    // on the same thread as the thread that created the field trial,
-    // which happens via a call to OmniboxFieldTrial::Active in
-    // chrome_browser_main.cc on the main thread.  Let's check this to
-    // be sure.  We check "if we've heard of the UI thread then we'd better
-    // be on it."  The first part is necessary so unit tests pass.  (Many
-    // unit tests don't set up the threading naming system; hence
-    // CurrentlyOn(UI thread) will fail.)
-    DCHECK(!content::BrowserThread::IsWellKnownThread(
-               content::BrowserThread::UI) ||
-           content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-    if (OmniboxFieldTrial::InDisallowInlineHQPFieldTrial()) {
-      if (OmniboxFieldTrial::InDisallowInlineHQPFieldTrialExperimentGroup()) {
-        always_prevent_inline_autocomplete_ = true;
-        inlining_option = INLINING_FIELD_TRIAL_EXPERIMENT_GROUP;
-      } else {
-        always_prevent_inline_autocomplete_ = false;
-        inlining_option = INLINING_FIELD_TRIAL_DEFAULT_GROUP;
-      }
-    } else {
-      always_prevent_inline_autocomplete_ = false;
-      inlining_option = INLINING_AUTO_BUT_NOT_IN_FIELD_TRIAL;
-    }
-  }
-
-  // Add a beacon to the logs that'll allow us to identify later what
-  // inlining state a user is in.  Do this by incrementing a bucket in
-  // a histogram, where the bucket represents the user's inlining state.
-  UMA_HISTOGRAM_ENUMERATION(
-      "Omnibox.InlineHistoryQuickProviderFieldTrialBeacon",
-      inlining_option, NUM_OPTIONS);
-
-  reorder_for_inlining_ = CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::
-                          kOmniboxHistoryQuickProviderReorderForInlining) ==
-      switches::kOmniboxHistoryQuickProviderReorderForInliningEnabled;
+      languages_(profile_->GetPrefs()->GetString(prefs::kAcceptLanguages)) {
 }
 
 void HistoryQuickProvider::Start(const AutocompleteInput& input,
@@ -172,29 +111,6 @@ void HistoryQuickProvider::DoAutocomplete() {
       autocomplete_input_.cursor_position());
   if (matches.empty())
     return;
-
-  // If we're allowed to reorder results in order to get an inlineable
-  // result to appear first (and hence have a HistoryQuickProvider
-  // suggestion possibly appear first), find the first inlineable
-  // result and then swap it to the front.  Obviously, don't do this
-  // if we're told to prevent inline autocompletion.  (If we're told
-  // we're going to prevent inline autocompletion, we're going to
-  // later demote the score of all results so none will be inlined.
-  // Hence there's no need to reorder the results so an inlineable one
-  // appears first.)
-  if (reorder_for_inlining_ &&
-      !PreventInlineAutocomplete(autocomplete_input_)) {
-    for (ScoredHistoryMatches::iterator i(matches.begin());
-         (i != matches.end()) &&
-             (i->raw_score >= AutocompleteResult::kLowestDefaultScore);
-         ++i) {
-      if (i->can_inline) {  // this test is only true once because of the break
-        if (i != matches.begin())
-          std::rotate(matches.begin(), i, i + 1);
-        break;
-      }
-    }
-  }
 
   // Figure out if HistoryURL provider has a URL-what-you-typed match
   // that ought to go first and what its score will be.
@@ -292,7 +208,7 @@ void HistoryQuickProvider::DoAutocomplete() {
   // general or the current best suggestion isn't inlineable,
   // artificially reduce the starting |max_match_score| (which
   // therefore applies to all results) to something low enough that
-  // guarantees no result will be offered as an autocomplete
+  // guarantees no result will be offered as an inline autocomplete
   // suggestion.  Also do a similar reduction if we think there will be
   // a URL-what-you-typed match.  (We want URL-what-you-typed matches for
   // visited URLs to beat out any longer URLs, no matter how frequently
@@ -304,10 +220,13 @@ void HistoryQuickProvider::DoAutocomplete() {
       TemplateURLServiceFactory::GetForProfile(profile_);
   TemplateURL* template_url = template_url_service ?
       template_url_service->GetDefaultSearchProvider() : NULL;
-  int max_match_score = (PreventInlineAutocomplete(autocomplete_input_) ||
-      !matches.begin()->can_inline) ?
-      (AutocompleteResult::kLowestDefaultScore - 1) :
-      matches.begin()->raw_score;
+  int max_match_score =
+      (OmniboxFieldTrial::ReorderForLegalDefaultMatch(
+         autocomplete_input_.current_page_classification()) ||
+       (!PreventInlineAutocomplete(autocomplete_input_) &&
+        matches.begin()->can_inline)) ?
+      matches.begin()->raw_score :
+      (AutocompleteResult::kLowestDefaultScore - 1);
   if (will_have_url_what_you_typed_match_first) {
     max_match_score = std::min(max_match_score,
         url_what_you_typed_match_score - 1);
@@ -356,17 +275,20 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
   match.contents_class =
       SpansFromTermMatch(new_matches, match.contents.length(), true);
 
-  if (!history_match.can_inline) {
-    match.inline_autocomplete_offset = string16::npos;
-  } else {
+  match.allowed_to_be_default_match = history_match.can_inline &&
+      !PreventInlineAutocomplete(autocomplete_input_);
+  if (match.allowed_to_be_default_match) {
     DCHECK(!new_matches.empty());
-    match.inline_autocomplete_offset = new_matches[0].offset +
+    size_t inline_autocomplete_offset = new_matches[0].offset +
         new_matches[0].length;
-    // The following will happen if the user has typed an URL with a scheme
-    // and the last character typed is a slash because that slash is removed
-    // by the FormatURLWithOffsets call above.
-    if (match.inline_autocomplete_offset > match.fill_into_edit.length())
-      match.inline_autocomplete_offset = match.fill_into_edit.length();
+    // |inline_autocomplete_offset| may be beyond the end of the
+    // |fill_into_edit| if the user has typed an URL with a scheme and the
+    // last character typed is a slash.  That slash is removed by the
+    // FormatURLWithOffsets call above.
+    if (inline_autocomplete_offset < match.fill_into_edit.length()) {
+      match.inline_autocompletion =
+          match.fill_into_edit.substr(inline_autocomplete_offset);
+    }
   }
 
   // Format the description autocomplete presentation.

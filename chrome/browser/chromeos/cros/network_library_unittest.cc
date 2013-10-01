@@ -14,14 +14,14 @@
 #include "base/json/json_reader.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros/network_library_impl_stub.h"
+#include "chrome/browser/chromeos/enrollment_dialog_view.h"
 #include "chrome/browser/chromeos/login/mock_user_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/google_apis/test_util.h"
 #include "chrome/common/chrome_paths.h"
-#include "chromeos/network/onc/onc_certificate_importer.h"
+#include "chromeos/network/onc/onc_certificate_importer_impl.h"
 #include "chromeos/network/onc/onc_constants.h"
 #include "chromeos/network/onc/onc_test_utils.h"
 #include "chromeos/network/onc/onc_utils.h"
@@ -44,7 +44,7 @@ class StubEnrollmentDelegate : public EnrollmentDelegate {
       : did_enroll(false),
         correct_args(false) {}
 
-  virtual void Enroll(const std::vector<std::string>& uri_list,
+  virtual bool Enroll(const std::vector<std::string>& uri_list,
                       const base::Closure& closure) OVERRIDE {
     std::vector<std::string> expected_uri_list;
     expected_uri_list.push_back("http://youtu.be/dQw4w9WgXcQ");
@@ -54,6 +54,7 @@ class StubEnrollmentDelegate : public EnrollmentDelegate {
 
     did_enroll = true;
     closure.Run();
+    return true;
   }
 
   bool did_enroll;
@@ -138,8 +139,7 @@ class NetworkLibraryStubTest : public ::testing::Test {
 
  protected:
   virtual void SetUp() {
-    cros_ = static_cast<NetworkLibraryImplStub*>(
-        CrosLibrary::Get()->GetNetworkLibrary());
+    cros_ = static_cast<NetworkLibraryImplStub*>(NetworkLibrary::Get());
     ASSERT_TRUE(cros_) << "GetNetworkLibrary() Failed!";
   }
 
@@ -154,13 +154,15 @@ class NetworkLibraryStubTest : public ::testing::Test {
                                 std::string shill_json,
                                 onc::ONCSource source,
                                 bool expect_successful_import) {
-    MockUserManager* mock_user_manager = new MockUserManager;
+    MockUserManager* mock_user_manager =
+        new ::testing::StrictMock<MockUserManager>;
     // Takes ownership of |mock_user_manager|.
     ScopedUserManagerEnabler user_manager_enabler(mock_user_manager);
     mock_user_manager->SetActiveUser("madmax@my.domain.com");
     EXPECT_CALL(*mock_user_manager, IsUserLoggedIn())
         .Times(AnyNumber())
         .WillRepeatedly(Return(true));
+    EXPECT_CALL(*mock_user_manager, Shutdown());
 
     scoped_ptr<base::DictionaryValue> onc_blob =
         onc::test_utils::ReadTestDictionary(onc_file);
@@ -195,7 +197,7 @@ class NetworkLibraryStubTest : public ::testing::Test {
     }
   }
 
-  ScopedStubCrosEnabler cros_stub_;
+  ScopedStubNetworkLibraryEnabler cros_stub_;
   NetworkLibraryImplStub* cros_;
 
  protected:
@@ -289,14 +291,14 @@ TEST_F(NetworkLibraryStubTest, NetworkConnectWifi) {
 
 TEST_F(NetworkLibraryStubTest, NetworkConnectWifiWithCertPattern) {
   scoped_ptr<base::DictionaryValue> onc_root =
-      onc::test_utils::ReadTestDictionary("toplevel_wifi_eap_clientcert.onc");
+      onc::test_utils::ReadTestDictionary("certificate-client.onc");
   base::ListValue* certificates;
   onc_root->GetListWithoutPathExpansion(onc::toplevel_config::kCertificates,
                                         &certificates);
 
-  onc::CertificateImporter importer(true /* allow trust imports */);
-  ASSERT_EQ(onc::CertificateImporter::IMPORT_OK,
-            importer.ParseAndStoreCertificates(*certificates, NULL));
+  onc::CertificateImporterImpl importer;
+  ASSERT_TRUE(importer.ImportCertificates(
+      *certificates, onc::ONC_SOURCE_USER_IMPORT, NULL));
 
   WifiNetwork* wifi = cros_->FindWifiNetworkByPath("wifi_cert_pattern");
 
@@ -318,14 +320,14 @@ TEST_F(NetworkLibraryStubTest, NetworkConnectWifiWithCertPattern) {
 
 TEST_F(NetworkLibraryStubTest, NetworkConnectVPNWithCertPattern) {
   scoped_ptr<base::DictionaryValue> onc_root =
-      onc::test_utils::ReadTestDictionary("toplevel_openvpn_clientcert.onc");
+      onc::test_utils::ReadTestDictionary("certificate-client.onc");
   base::ListValue* certificates;
   onc_root->GetListWithoutPathExpansion(onc::toplevel_config::kCertificates,
                                         &certificates);
 
-  onc::CertificateImporter importer(true /* allow trust imports */);
-  ASSERT_EQ(onc::CertificateImporter::IMPORT_OK,
-            importer.ParseAndStoreCertificates(*certificates, NULL));
+  onc::CertificateImporterImpl importer;
+  ASSERT_TRUE(importer.ImportCertificates(
+      *certificates, onc::ONC_SOURCE_USER_IMPORT, NULL));
 
   VirtualNetwork* vpn = cros_->FindVirtualNetworkByPath("vpn_cert_pattern");
 
@@ -404,10 +406,10 @@ INSTANTIATE_TEST_CASE_P(
     LoadOncNetworksTest,
     LoadOncNetworksTest,
     ::testing::Values(
-         ImportParams("managed_toplevel1.onc",
+         ImportParams("managed_toplevel1_with_cert_pems.onc",
                       "chromeos/net/shill_for_managed_toplevel1.json",
                       onc::ONC_SOURCE_USER_POLICY),
-         ImportParams("managed_toplevel2.onc",
+         ImportParams("managed_toplevel2_with_cert_pems.onc",
                       "chromeos/net/shill_for_managed_toplevel2.json",
                       onc::ONC_SOURCE_USER_POLICY),
          ImportParams("managed_toplevel_l2tpipsec.onc",
@@ -429,10 +431,10 @@ INSTANTIATE_TEST_CASE_P(
                       "chromeos/net/shill_for_toplevel_wifi_leap.json",
                       onc::ONC_SOURCE_USER_POLICY),
          ImportParams(
-            "toplevel_wifi_eap_clientcert.onc",
+            "toplevel_wifi_eap_clientcert_with_cert_pems.onc",
             "chromeos/net/shill_for_toplevel_wifi_eap_clientcert.json",
             onc::ONC_SOURCE_USER_POLICY),
-         ImportParams("toplevel_openvpn_clientcert.onc",
+         ImportParams("toplevel_openvpn_clientcert_with_cert_pems.onc",
                       "chromeos/net/shill_for_toplevel_openvpn_clientcert.json",
                       onc::ONC_SOURCE_USER_POLICY),
          ImportParams("toplevel_wifi_remove.onc",

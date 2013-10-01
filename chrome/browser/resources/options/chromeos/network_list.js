@@ -19,13 +19,13 @@ cr.define('options.network', function() {
   function Constants() {}
 
   // Network types:
-  Constants.TYPE_UNKNOWN = 0;
-  Constants.TYPE_ETHERNET = 1;
-  Constants.TYPE_WIFI = 2;
-  Constants.TYPE_WIMAX = 3;
-  Constants.TYPE_BLUETOOTH = 4;
-  Constants.TYPE_CELLULAR = 5;
-  Constants.TYPE_VPN = 6;
+  Constants.TYPE_UNKNOWN = 'UNKNOWN';
+  Constants.TYPE_ETHERNET = 'ethernet';
+  Constants.TYPE_WIFI = 'wifi';
+  Constants.TYPE_WIMAX = 'wimax';
+  Constants.TYPE_BLUETOOTH = 'bluetooth';
+  Constants.TYPE_CELLULAR = 'cellular';
+  Constants.TYPE_VPN = 'vpn';
 
   // Cellular activation states:
   Constants.ACTIVATION_STATE_UNKNOWN = 0;
@@ -110,6 +110,16 @@ cr.define('options.network', function() {
    * @private
    */
   var defaultIcons_ = {};
+
+  /**
+   * Contains the current logged in user type, which is one of 'none',
+   * 'regular', 'owner', 'guest', 'retail-mode', 'public-account',
+   * 'locally-managed', and 'kiosk-app', or empty string if the data has not
+   * been set.
+   * @type {string}
+   * @private
+   */
+  var loggedInUserType_ = '';
 
   /**
    * Create an element in the network list for controlling network
@@ -463,7 +473,7 @@ cr.define('options.network', function() {
 
         var label = enableDataRoaming_ ? 'disableDataRoaming' :
             'enableDataRoaming';
-        var disabled = !UIAccountTweaks.currentUserIsOwner();
+        var disabled = loggedInUserType_ != 'owner';
         var entry = {label: loadTimeData.getString(label),
                      data: {}};
         if (disabled) {
@@ -525,8 +535,7 @@ cr.define('options.network', function() {
                        },
                        data: {}});
         } else if (this.data_.key == 'wimax') {
-          // TODO(zelidrag): Add proper strings for wimax.
-          addendum.push({label: loadTimeData.getString('turnOffCellular'),
+          addendum.push({label: loadTimeData.getString('turnOffWimax'),
                        command: function() {
                          chrome.send('disableWimax');
                        },
@@ -721,7 +730,7 @@ cr.define('options.network', function() {
     button.appendChild(buttonLabel);
     var callback = null;
     if (typeof command == 'string') {
-      var type = String(data.networkType);
+      var type = data.networkType;
       var path = data.servicePath;
       callback = function() {
         chrome.send('networkCommand',
@@ -931,6 +940,14 @@ cr.define('options.network', function() {
    */
   NetworkList.setDefaultNetworkIcons = function(data) {
     defaultIcons_ = Object.create(data);
+  };
+
+  /**
+   * Sets the current logged in user type.
+   * @param {string} userType Current logged in user type.
+   */
+  NetworkList.updateLoggedInUserType = function(userType) {
+    loggedInUserType_ = String(userType);
   };
 
   /**

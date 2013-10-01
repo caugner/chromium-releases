@@ -8,6 +8,7 @@
 #include <list>
 
 #include "ash/ash_export.h"
+#include "ash/display/display_controller.h"
 #include "ash/launcher/launcher_icon_observer.h"
 #include "ash/shelf/shelf_layout_manager_observer.h"
 #include "ash/shell_observer.h"
@@ -56,6 +57,7 @@ class ASH_EXPORT PanelLayoutManager
       public aura::WindowObserver,
       public aura::client::ActivationChangeObserver,
       public keyboard::KeyboardControllerObserver,
+      public DisplayController::Observer,
       public ShelfLayoutManagerObserver {
  public:
   explicit PanelLayoutManager(aura::Window* panel_container);
@@ -98,6 +100,9 @@ class ASH_EXPORT PanelLayoutManager
   // Overridden from aura::client::ActivationChangeObserver
   virtual void OnWindowActivated(aura::Window* gained_active,
                                  aura::Window* lost_active) OVERRIDE;
+
+  // Overridden from DisplayController::Observer
+  virtual void OnDisplayConfigurationChanged() OVERRIDE;
 
   // Overridden from ShelfLayoutManagerObserver
   virtual void WillChangeVisibilityState(
@@ -167,8 +172,8 @@ class ASH_EXPORT PanelLayoutManager
   // Tracks the visibility of the shelf. Defaults to false when there is no
   // shelf.
   bool shelf_hidden_;
-  // The last active panel. Used to maintain stacking even if no panels are
-  // currently focused.
+  // The last active panel. Used to maintain stacking order even if no panels
+  // are currently focused.
   aura::Window* last_active_panel_;
   base::WeakPtrFactory<PanelLayoutManager> weak_factory_;
 

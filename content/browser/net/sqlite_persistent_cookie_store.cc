@@ -25,10 +25,9 @@
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_constants.h"
@@ -38,6 +37,7 @@
 #include "sql/statement.h"
 #include "sql/transaction.h"
 #include "third_party/sqlite/sqlite3.h"
+#include "url/gurl.h"
 #include "webkit/browser/quota/special_storage_policy.h"
 
 using base::Time;
@@ -545,7 +545,7 @@ bool SQLitePersistentCookieStore::Backend::InitializeDatabase() {
   base::Time start = base::Time::Now();
 
   const base::FilePath dir = path_.DirName();
-  if (!file_util::PathExists(dir) && !file_util::CreateDirectory(dir)) {
+  if (!base::PathExists(dir) && !file_util::CreateDirectory(dir)) {
     return false;
   }
 
@@ -580,10 +580,10 @@ bool SQLitePersistentCookieStore::Backend::InitializeDatabase() {
   }
 
   UMA_HISTOGRAM_CUSTOM_TIMES(
-    "Cookie.TimeInitializeDB",
-    base::Time::Now() - start,
-    base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
-    50);
+      "Cookie.TimeInitializeDB",
+      base::Time::Now() - start,
+      base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
+      50);
 
   start = base::Time::Now();
 
@@ -599,27 +599,40 @@ bool SQLitePersistentCookieStore::Backend::InitializeDatabase() {
     return false;
   }
 
+  std::vector<std::string> host_keys;
+  while (smt.Step())
+    host_keys.push_back(smt.ColumnString(0));
+
+  UMA_HISTOGRAM_CUSTOM_TIMES(
+      "Cookie.TimeLoadDomains",
+      base::Time::Now() - start,
+      base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
+      50);
+
+  base::Time start_parse = base::Time::Now();
+
   // Build a map of domain keys (always eTLD+1) to domains.
-  while (smt.Step()) {
-    std::string domain = smt.ColumnString(0);
+  for (size_t idx = 0; idx < host_keys.size(); ++idx) {
+    const std::string& domain = host_keys[idx];
     std::string key =
         net::registry_controlled_domains::GetDomainAndRegistry(
             domain,
             net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
 
-    std::map<std::string, std::set<std::string> >::iterator it =
-      keys_to_load_.find(key);
-    if (it == keys_to_load_.end())
-      it = keys_to_load_.insert(std::make_pair
-                                (key, std::set<std::string>())).first;
-    it->second.insert(domain);
+    keys_to_load_[key].insert(domain);
   }
 
   UMA_HISTOGRAM_CUSTOM_TIMES(
-    "Cookie.TimeInitializeDomainMap",
-    base::Time::Now() - start,
-    base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
-    50);
+      "Cookie.TimeParseDomains",
+      base::Time::Now() - start_parse,
+      base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
+      50);
+
+  UMA_HISTOGRAM_CUSTOM_TIMES(
+      "Cookie.TimeInitializeDomainMap",
+      base::Time::Now() - start,
+      base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
+      50);
 
   initialized_ = true;
   return true;
@@ -831,7 +844,7 @@ bool SQLitePersistentCookieStore::Backend::EnsureDatabaseVersion() {
 
     meta_table_.Reset();
     db_.reset(new sql::Connection);
-    if (!file_util::Delete(path_, false) ||
+    if (!base::DeleteFile(path_, false) ||
         !db_->Open(path_) ||
         !meta_table_.Init(
             db_.get(), kCurrentVersionNumber, kCompatibleVersionNumber)) {

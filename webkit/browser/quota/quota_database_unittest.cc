@@ -10,13 +10,13 @@
 #include "base/callback.h"
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
-#include "googleurl/src/gurl.h"
+#include "base/message_loop/message_loop.h"
 #include "sql/connection.h"
 #include "sql/meta_table.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 #include "webkit/browser/quota/mock_special_storage_policy.h"
 #include "webkit/browser/quota/quota_database.h"
 
@@ -39,7 +39,7 @@ class QuotaDatabaseTest : public testing::Test {
     EXPECT_FALSE(db.LazyOpen(false));
     ASSERT_TRUE(db.LazyOpen(true));
     EXPECT_TRUE(db.db_.get());
-    EXPECT_TRUE(kDbFile.empty() || file_util::PathExists(kDbFile));
+    EXPECT_TRUE(kDbFile.empty() || base::PathExists(kDbFile));
   }
 
   void UpgradeSchemaV2toV3(const base::FilePath& kDbFile) {

@@ -5,7 +5,7 @@
 #include "chrome/browser/invalidation/invalidator_storage.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
@@ -47,7 +47,7 @@ class InvalidatorStorageTest : public testing::Test {
         kAutofillId_(kChromeSyncSourceId, "AUTOFILL") {}
 
   virtual void SetUp() {
-    InvalidatorStorage::RegisterUserPrefs(pref_service_.registry());
+    InvalidatorStorage::RegisterProfilePrefs(pref_service_.registry());
   }
 
  protected:

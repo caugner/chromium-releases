@@ -10,29 +10,43 @@
 #include "base/mac/scoped_nsobject.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_layout.h"
+#import "chrome/browser/ui/cocoa/autofill/autofill_section_container.h"
+
 
 namespace autofill {
-class AutofillDialogController;
+class AutofillDialogViewDelegate;
 }
 
-@class AutofillSectionContainer;
+@class InfoBubbleView;
 
 // UI controller for details for current payment instrument.
-@interface AutofillDetailsContainer : NSViewController<AutofillLayout> {
+@interface AutofillDetailsContainer
+    : NSViewController<AutofillLayout,
+                       AutofillValidationDisplay> {
  @private
-  base::scoped_nsobject<NSMutableArray> details_;   // The individual detail
-                                                    // sections.
-  autofill::AutofillDialogController* controller_;  // Not owned.
+  // Scroll view containing all detail sections.
+  base::scoped_nsobject<NSScrollView> scrollView_;
+
+  // The individual detail sections.
+  base::scoped_nsobject<NSMutableArray> details_;
+
+  // An info bubble to display validation errors.
+  base::scoped_nsobject<InfoBubbleView> infoBubble_;
+
+  autofill::AutofillDialogViewDelegate* delegate_;  // Not owned.
 }
 
 // Designated initializer.
-- (id)initWithController:(autofill::AutofillDialogController*)controller;
+- (id)initWithDelegate:(autofill::AutofillDialogViewDelegate*)delegate;
 
 // Retrieve the container for the specified |section|.
 - (AutofillSectionContainer*)sectionForId:(autofill::DialogSection)section;
 
-// Called when the controller-maintained suggestions model has changed.
+// Called when the delegate-maintained suggestions model has changed.
 - (void)modelChanged;
+
+// Validate every visible details section.
+- (BOOL)validate;
 
 @end
 

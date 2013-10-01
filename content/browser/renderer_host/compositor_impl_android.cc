@@ -19,16 +19,18 @@
 #include "base/threading/thread.h"
 #include "cc/input/input_handler.h"
 #include "cc/layers/layer.h"
+#include "cc/output/compositor_frame.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface.h"
 #include "cc/trees/layer_tree_host.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
-#include "content/browser/renderer_host/image_transport_factory_android.h"
+#include "content/common/gpu/client/command_buffer_proxy_impl.h"
 #include "content/common/gpu/client/gl_helper.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
+#include "content/public/browser/android/compositor_client.h"
 #include "content/public/common/content_switches.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
 #include "third_party/khronos/GLES2/gl2.h"
@@ -66,6 +68,17 @@ class OutputSurfaceWithoutParent : public cc::OutputSurface {
       : cc::OutputSurface(context3d.Pass()) {
     capabilities_.adjust_deadline_for_parent = false;
   }
+
+  virtual void SwapBuffers(cc::CompositorFrame* frame) OVERRIDE {
+    content::WebGraphicsContext3DCommandBufferImpl* command_buffer =
+      static_cast<content::WebGraphicsContext3DCommandBufferImpl*>(context3d());
+    content::CommandBufferProxyImpl* command_buffer_proxy =
+        command_buffer->GetCommandBufferProxy();
+    DCHECK(command_buffer_proxy);
+    command_buffer_proxy->SetLatencyInfo(frame->metadata.latency_info);
+
+    OutputSurface::SwapBuffers(frame);
+  }
 };
 
 static bool g_initialized = false;
@@ -83,7 +96,7 @@ static base::LazyInstance<SurfaceMap>
 static base::LazyInstance<base::Lock> g_surface_map_lock;
 
 // static
-Compositor* Compositor::Create(Client* client) {
+Compositor* Compositor::Create(CompositorClient* client) {
   return client ? new CompositorImpl(client) : NULL;
 }
 
@@ -131,7 +144,7 @@ jobject CompositorImpl::GetSurface(int surface_id) {
   return jsurface;
 }
 
-CompositorImpl::CompositorImpl(Compositor::Client* client)
+CompositorImpl::CompositorImpl(CompositorClient* client)
     : root_layer_(cc::Layer::Create()),
       has_transparent_background_(false),
       window_(NULL),
@@ -139,9 +152,11 @@ CompositorImpl::CompositorImpl(Compositor::Client* client)
       client_(client),
       weak_factory_(this) {
   DCHECK(client);
+  ImageTransportFactoryAndroid::AddObserver(this);
 }
 
 CompositorImpl::~CompositorImpl() {
+  ImageTransportFactoryAndroid::RemoveObserver(this);
   // Clean-up any surface references.
   SetSurface(NULL);
 }
@@ -218,6 +233,7 @@ void CompositorImpl::SetVisible(bool visible) {
     settings.compositor_name = "BrowserCompositor";
     settings.refresh_rate = 60.0;
     settings.impl_side_painting = false;
+    settings.allow_antialiasing = false;
     settings.calculate_top_controls_position = false;
     settings.top_controls_height = 0.f;
     settings.use_memory_management = false;
@@ -290,7 +306,6 @@ WebKit::WebGLId CompositorImpl::GenerateTexture(gfx::JavaBitmap& bitmap) {
                       type,
                       bitmap.pixels());
   context->shallowFlushCHROMIUM();
-  DCHECK(context->getError() == GL_NO_ERROR);
   return texture_id;
 }
 
@@ -312,7 +327,6 @@ WebKit::WebGLId CompositorImpl::GenerateCompressedTexture(gfx::Size& size,
                                 data_size,
                                 data);
   context->shallowFlushCHROMIUM();
-  DCHECK(context->getError() == GL_NO_ERROR);
   return texture_id;
 }
 
@@ -323,7 +337,6 @@ void CompositorImpl::DeleteTexture(WebKit::WebGLId texture_id) {
     return;
   context->deleteTexture(texture_id);
   context->shallowFlushCHROMIUM();
-  DCHECK(context->getError() == GL_NO_ERROR);
 }
 
 bool CompositorImpl::CopyTextureToBitmap(WebKit::WebGLId texture_id,
@@ -345,7 +358,8 @@ bool CompositorImpl::CopyTextureToBitmap(WebKit::WebGLId texture_id,
   return true;
 }
 
-scoped_ptr<cc::OutputSurface> CompositorImpl::CreateOutputSurface() {
+scoped_ptr<cc::OutputSurface> CompositorImpl::CreateOutputSurface(
+    bool fallback) {
   WebKit::WebGraphicsContext3D::Attributes attrs;
   attrs.shareResources = true;
   attrs.noAutomaticFlushes = true;
@@ -380,9 +394,8 @@ scoped_ptr<cc::OutputSurface> CompositorImpl::CreateOutputSurface() {
         false,
         CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE,
         64 * 1024,  // command buffer size
-        std::min(full_screen_texture_size_in_bytes,
-        kDefaultStartTransferBufferSize),
-        kDefaultMinTransferBufferSize,
+        64 * 1024,  // start transfer buffer size
+        64 * 1024,  // min transfer buffer size
         std::min(3 * full_screen_texture_size_in_bytes,
                  kDefaultMaxTransferBufferSize))) {
       LOG(ERROR) << "Failed to create 3D context for compositor.";
@@ -392,6 +405,10 @@ scoped_ptr<cc::OutputSurface> CompositorImpl::CreateOutputSurface() {
         new OutputSurfaceWithoutParent(
             context.PassAs<WebKit::WebGraphicsContext3D>()));
   }
+}
+
+void CompositorImpl::OnLostResources() {
+  client_->DidLoseResources();
 }
 
 void CompositorImpl::DidCompleteSwapBuffers() {
@@ -447,7 +464,6 @@ WebKit::WebGLId CompositorImpl::BuildBasicTexture() {
   context->texParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   context->texParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   context->texParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  DCHECK(context->getError() == GL_NO_ERROR);
   return texture_id;
 }
 

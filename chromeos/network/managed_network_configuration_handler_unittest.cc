@@ -7,7 +7,7 @@
 #include <iostream>
 #include <sstream>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/mock_dbus_thread_manager.h"
 #include "chromeos/dbus/mock_shill_manager_client.h"
@@ -132,7 +132,9 @@ class ShillProfileTestClient {
 
 class TestNetworkProfileHandler : public NetworkProfileHandler {
  public:
-  TestNetworkProfileHandler() {}
+  TestNetworkProfileHandler() {
+    Init(NULL /* No NetworkStateHandler */);
+  }
   virtual ~TestNetworkProfileHandler() {}
 
   void AddProfileForTest(const NetworkProfile& profile) {
@@ -270,6 +272,27 @@ TEST_F(ManagedNetworkConfigurationHandlerTest, ProfileInitialization) {
   message_loop_.RunUntilIdle();
 }
 
+TEST_F(ManagedNetworkConfigurationHandlerTest, RemoveIrrelevantFields) {
+  InitializeStandardProfiles();
+  scoped_ptr<base::DictionaryValue> expected_shill_properties =
+      test_utils::ReadTestDictionary(
+          "policy/shill_policy_on_unconfigured_wifi1.json");
+
+  EXPECT_CALL(mock_profile_client_,
+              GetProperties(dbus::ObjectPath(kUser1ProfilePath), _, _));
+
+  EXPECT_CALL(mock_manager_client_,
+              ConfigureServiceForProfile(
+                  dbus::ObjectPath(kUser1ProfilePath),
+                  IsEqualTo(expected_shill_properties.get()),
+                  _, _));
+
+  SetPolicy(onc::ONC_SOURCE_USER_POLICY,
+            kUser1,
+            "policy/policy_wifi1_with_redundant_fields.onc");
+  message_loop_.RunUntilIdle();
+}
+
 TEST_F(ManagedNetworkConfigurationHandlerTest, SetPolicyManageUnconfigured) {
   InitializeStandardProfiles();
   scoped_ptr<base::DictionaryValue> expected_shill_properties =
@@ -327,10 +350,46 @@ TEST_F(ManagedNetworkConfigurationHandlerTest, SetPolicyManageUnmanaged) {
   EXPECT_CALL(mock_profile_client_,
               GetProperties(dbus::ObjectPath(kUser1ProfilePath), _, _));
 
+  EXPECT_CALL(
+      mock_profile_client_,
+      GetEntry(dbus::ObjectPath(kUser1ProfilePath), "old_entry_path", _, _));
+
+  EXPECT_CALL(
+      mock_profile_client_,
+      DeleteEntry(dbus::ObjectPath(kUser1ProfilePath), "old_entry_path", _, _));
+
+  EXPECT_CALL(mock_manager_client_,
+              ConfigureServiceForProfile(
+                  dbus::ObjectPath(kUser1ProfilePath),
+                  IsEqualTo(expected_shill_properties.get()),
+                  _, _));
+
+  SetPolicy(onc::ONC_SOURCE_USER_POLICY, kUser1, "policy/policy_wifi1.onc");
+  message_loop_.RunUntilIdle();
+}
+
+// Old ChromeOS versions may not have used the UIData property
+TEST_F(ManagedNetworkConfigurationHandlerTest,
+       SetPolicyManageUnmanagedWithoutUIData) {
+  InitializeStandardProfiles();
+  SetUpEntry("policy/shill_unmanaged_user_wifi1.json",
+             kUser1ProfilePath,
+             "old_entry_path");
+
+  scoped_ptr<base::DictionaryValue> expected_shill_properties =
+      test_utils::ReadTestDictionary(
+          "policy/shill_policy_on_unmanaged_user_wifi1.json");
+
   EXPECT_CALL(mock_profile_client_,
-              GetEntry(dbus::ObjectPath(kUser1ProfilePath),
-                       "old_entry_path",
-                       _, _));
+              GetProperties(dbus::ObjectPath(kUser1ProfilePath), _, _));
+
+  EXPECT_CALL(
+      mock_profile_client_,
+      GetEntry(dbus::ObjectPath(kUser1ProfilePath), "old_entry_path", _, _));
+
+  EXPECT_CALL(
+      mock_profile_client_,
+      DeleteEntry(dbus::ObjectPath(kUser1ProfilePath), "old_entry_path", _, _));
 
   EXPECT_CALL(mock_manager_client_,
               ConfigureServiceForProfile(
@@ -360,10 +419,13 @@ TEST_F(ManagedNetworkConfigurationHandlerTest, SetPolicyUpdateManagedNewGUID) {
   EXPECT_CALL(mock_profile_client_,
               GetProperties(dbus::ObjectPath(kUser1ProfilePath), _, _));
 
-  EXPECT_CALL(mock_profile_client_,
-              GetEntry(dbus::ObjectPath(kUser1ProfilePath),
-                       "old_entry_path",
-                       _, _));
+  EXPECT_CALL(
+      mock_profile_client_,
+      GetEntry(dbus::ObjectPath(kUser1ProfilePath), "old_entry_path", _, _));
+
+  EXPECT_CALL(
+      mock_profile_client_,
+      DeleteEntry(dbus::ObjectPath(kUser1ProfilePath), "old_entry_path", _, _));
 
   EXPECT_CALL(mock_manager_client_,
               ConfigureServiceForProfile(
@@ -393,16 +455,28 @@ TEST_F(ManagedNetworkConfigurationHandlerTest, SetPolicyReapplyToManaged) {
   EXPECT_CALL(mock_profile_client_,
               GetProperties(dbus::ObjectPath(kUser1ProfilePath), _, _));
 
-  EXPECT_CALL(mock_profile_client_,
-              GetEntry(dbus::ObjectPath(kUser1ProfilePath),
-                       "old_entry_path",
-                       _, _));
+  EXPECT_CALL(
+      mock_profile_client_,
+      GetEntry(dbus::ObjectPath(kUser1ProfilePath), "old_entry_path", _, _));
 
   EXPECT_CALL(mock_manager_client_,
               ConfigureServiceForProfile(
                   dbus::ObjectPath(kUser1ProfilePath),
                   IsEqualTo(expected_shill_properties.get()),
                   _, _));
+
+  SetPolicy(onc::ONC_SOURCE_USER_POLICY, kUser1, "policy/policy_wifi1.onc");
+  message_loop_.RunUntilIdle();
+  VerifyAndClearExpectations();
+
+  // If we apply the policy again, without change, then the Shill profile will
+  // not be modified.
+  EXPECT_CALL(mock_profile_client_,
+              GetProperties(dbus::ObjectPath(kUser1ProfilePath), _, _));
+
+  EXPECT_CALL(
+      mock_profile_client_,
+      GetEntry(dbus::ObjectPath(kUser1ProfilePath), "old_entry_path", _, _));
 
   SetPolicy(onc::ONC_SOURCE_USER_POLICY, kUser1, "policy/policy_wifi1.onc");
   message_loop_.RunUntilIdle();
@@ -431,7 +505,7 @@ TEST_F(ManagedNetworkConfigurationHandlerTest, SetPolicyUnmanageManaged) {
   message_loop_.RunUntilIdle();
 }
 
-TEST_F(ManagedNetworkConfigurationHandlerTest, SetPolicyIgnoreUnmanaged) {
+TEST_F(ManagedNetworkConfigurationHandlerTest, SetEmptyPolicyIgnoreUnmanaged) {
   InitializeStandardProfiles();
   SetUpEntry("policy/shill_unmanaged_user_wifi1.json",
              kUser1ProfilePath,
@@ -446,6 +520,33 @@ TEST_F(ManagedNetworkConfigurationHandlerTest, SetPolicyIgnoreUnmanaged) {
                        _, _));
 
   SetPolicy(onc::ONC_SOURCE_USER_POLICY, kUser1, "");
+  message_loop_.RunUntilIdle();
+}
+
+TEST_F(ManagedNetworkConfigurationHandlerTest, SetPolicyIgnoreUnmanaged) {
+  InitializeStandardProfiles();
+  SetUpEntry("policy/shill_unmanaged_user_wifi2.json",
+             kUser1ProfilePath,
+             "wifi2_entry_path");
+
+  EXPECT_CALL(mock_profile_client_,
+              GetProperties(dbus::ObjectPath(kUser1ProfilePath), _, _));
+
+  EXPECT_CALL(
+      mock_profile_client_,
+      GetEntry(dbus::ObjectPath(kUser1ProfilePath), "wifi2_entry_path", _, _));
+
+  scoped_ptr<base::DictionaryValue> expected_shill_properties =
+      test_utils::ReadTestDictionary(
+          "policy/shill_policy_on_unconfigured_wifi1.json");
+
+  EXPECT_CALL(mock_manager_client_,
+              ConfigureServiceForProfile(
+                  dbus::ObjectPath(kUser1ProfilePath),
+                  IsEqualTo(expected_shill_properties.get()),
+                  _, _));
+
+  SetPolicy(onc::ONC_SOURCE_USER_POLICY, kUser1, "policy/policy_wifi1.onc");
   message_loop_.RunUntilIdle();
 }
 

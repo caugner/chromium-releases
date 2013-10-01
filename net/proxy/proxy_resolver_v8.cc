@@ -10,17 +10,17 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/strings/string_util.h"
 #include "base/strings/string_tokenizer.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "googleurl/src/gurl.h"
-#include "googleurl/src/url_canon.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_resolver_script.h"
+#include "url/gurl.h"
+#include "url/url_canon.h"
 #include "v8/include/v8.h"
 
 // Notes on the javascript environment:
@@ -759,6 +759,20 @@ void ProxyResolverV8::RememberDefaultIsolate() {
       << "Default Isolate can not be changed";
   g_default_isolate_ = isolate;
 }
+
+#if defined(OS_WIN)
+// static
+void ProxyResolverV8::CreateIsolate() {
+  v8::Isolate* isolate = v8::Isolate::New();
+  DCHECK(isolate);
+  DCHECK(g_default_isolate_ == NULL) << "Default Isolate can not be set twice";
+
+  isolate->Enter();
+  v8::V8::Initialize();
+
+  g_default_isolate_ = isolate;
+}
+#endif  // defined(OS_WIN)
 
 // static
 v8::Isolate* ProxyResolverV8::GetDefaultIsolate() {

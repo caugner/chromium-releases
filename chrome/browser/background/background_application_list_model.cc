@@ -14,12 +14,12 @@
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -43,7 +43,8 @@ using extensions::UpdatedExtensionPermissionsInfo;
 class ExtensionNameComparator {
  public:
   explicit ExtensionNameComparator(icu::Collator* collator);
-  bool operator()(const Extension* x, const Extension* y);
+  bool operator()(const scoped_refptr<const Extension>& x,
+                  const scoped_refptr<const Extension>& y);
 
  private:
   icu::Collator* collator_;
@@ -53,11 +54,11 @@ ExtensionNameComparator::ExtensionNameComparator(icu::Collator* collator)
   : collator_(collator) {
 }
 
-bool ExtensionNameComparator::operator()(const Extension* x,
-                                         const Extension* y) {
+bool ExtensionNameComparator::operator()(
+    const scoped_refptr<const Extension>& x,
+    const scoped_refptr<const Extension>& y) {
   return l10n_util::StringComparator<string16>(collator_)(
-    UTF8ToUTF16(x->name()),
-    UTF8ToUTF16(y->name()));
+      UTF8ToUTF16(x->name()), UTF8ToUTF16(y->name()));
 }
 
 // Background application representation, private to the

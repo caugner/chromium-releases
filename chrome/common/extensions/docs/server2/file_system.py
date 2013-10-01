@@ -2,8 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import os
-
 class FileNotFoundError(Exception):
   def __init__(self, filename):
     Exception.__init__(self, filename)
@@ -51,7 +49,7 @@ class FileSystem(object):
     and failing that as latin-1 (some extension docs use latin-1). If
     binary=True then the contents will be a str.
     '''
-    raise NotImplementedError()
+    raise NotImplementedError(self.__class__)
 
   def ReadSingle(self, path, binary=False):
     '''Reads a single file from the FileSystem.
@@ -64,7 +62,7 @@ class FileSystem(object):
     is a directory, |StatInfo| will have the versions of all the children of
     the directory in |StatInfo.child_versions|.
     '''
-    raise NotImplementedError()
+    raise NotImplementedError(self.__class__)
 
   def GetIdentity(self):
     '''The identity of the file system, exposed for caching classes to
@@ -73,4 +71,31 @@ class FileSystem(object):
     different to that of a SubversionFileSystem with a base path of /bar, is
     different to a LocalFileSystem with a base path of /usr.
     '''
-    raise NotImplementedError()
+    raise NotImplementedError(self.__class__)
+
+  def Walk(self, root):
+    '''Recursively walk the directories in a file system, starting with root.
+    Emulates os.walk from the standard os module.
+    '''
+    basepath = root.rstrip('/') + '/'
+
+    def walk(root):
+      if not root.endswith('/'):
+        root += '/'
+
+      dirs, files = [], []
+
+      for f in self.ReadSingle(root):
+        if f.endswith('/'):
+          dirs.append(f)
+        else:
+          files.append(f)
+
+      yield root[len(basepath):].rstrip('/'), dirs, files
+
+      for d in dirs:
+        for walkinfo in walk(root + d):
+          yield walkinfo
+
+    for walkinfo in walk(root):
+      yield walkinfo

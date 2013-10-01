@@ -18,14 +18,13 @@
 #include "base/file_util.h"
 #include "base/format_macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "net/base/capturing_net_log.h"
 #include "net/base/load_flags.h"
@@ -765,7 +764,7 @@ TEST_F(URLRequestTest, FileTestFullSpecifiedRange) {
     EXPECT_TRUE(partial_buffer_string == d.data_received());
   }
 
-  EXPECT_TRUE(file_util::Delete(temp_path, false));
+  EXPECT_TRUE(base::DeleteFile(temp_path, false));
 }
 
 TEST_F(URLRequestTest, FileTestHalfSpecifiedRange) {
@@ -808,7 +807,7 @@ TEST_F(URLRequestTest, FileTestHalfSpecifiedRange) {
     EXPECT_TRUE(partial_buffer_string == d.data_received());
   }
 
-  EXPECT_TRUE(file_util::Delete(temp_path, false));
+  EXPECT_TRUE(base::DeleteFile(temp_path, false));
 }
 
 TEST_F(URLRequestTest, FileTestMultipleRanges) {
@@ -839,7 +838,7 @@ TEST_F(URLRequestTest, FileTestMultipleRanges) {
     EXPECT_TRUE(d.request_failed());
   }
 
-  EXPECT_TRUE(file_util::Delete(temp_path, false));
+  EXPECT_TRUE(base::DeleteFile(temp_path, false));
 }
 
 TEST_F(URLRequestTest, InvalidUrlTest) {
@@ -3933,6 +3932,53 @@ TEST_F(URLRequestTestHTTP, ProcessSTS) {
             domain_state.upgrade_mode);
   EXPECT_TRUE(domain_state.sts_include_subdomains);
   EXPECT_FALSE(domain_state.pkp_include_subdomains);
+#if defined(OS_ANDROID)
+  // Android's CertVerifyProc does not (yet) handle pins.
+#else
+  EXPECT_FALSE(domain_state.HasPublicKeyPins());
+#endif
+}
+
+// Android's CertVerifyProc does not (yet) handle pins. Therefore, it will
+// reject HPKP headers, and a test setting only HPKP headers will fail (no
+// DomainState present because header rejected).
+#if defined(OS_ANDROID)
+#define MAYBE_ProcessPKP DISABLED_ProcessPKP
+#else
+#define MAYBE_ProcessPKP ProcessPKP
+#endif
+
+// Tests that enabling HPKP on a domain does not affect the HSTS
+// validity/expiration.
+TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKP) {
+  SpawnedTestServer::SSLOptions ssl_options;
+  SpawnedTestServer https_test_server(
+      SpawnedTestServer::TYPE_HTTPS,
+      ssl_options,
+      base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
+  ASSERT_TRUE(https_test_server.Start());
+
+  TestDelegate d;
+  URLRequest request(
+      https_test_server.GetURL("files/hpkp-headers.html"),
+      &d,
+      &default_context_);
+  request.Start();
+  base::MessageLoop::current()->Run();
+
+  TransportSecurityState* security_state =
+      default_context_.transport_security_state();
+  bool sni_available = true;
+  TransportSecurityState::DomainState domain_state;
+  EXPECT_TRUE(security_state->GetDomainState(
+      SpawnedTestServer::kLocalhost, sni_available, &domain_state));
+  EXPECT_EQ(TransportSecurityState::DomainState::MODE_DEFAULT,
+            domain_state.upgrade_mode);
+  EXPECT_FALSE(domain_state.sts_include_subdomains);
+  EXPECT_FALSE(domain_state.pkp_include_subdomains);
+  EXPECT_TRUE(domain_state.HasPublicKeyPins());
+  EXPECT_NE(domain_state.upgrade_expiry,
+            domain_state.dynamic_spki_hashes_expiry);
 }
 
 TEST_F(URLRequestTestHTTP, ProcessSTSOnce) {
@@ -4001,6 +4047,44 @@ TEST_F(URLRequestTestHTTP, ProcessSTSAndPKP) {
   // the *second* such header, and we MUST process only the first.
   EXPECT_FALSE(domain_state.sts_include_subdomains);
   // includeSubdomains does not occur in the test HPKP header.
+  EXPECT_FALSE(domain_state.pkp_include_subdomains);
+}
+
+// Tests that when multiple HPKP headers are present, asserting different
+// policies, that only the first such policy is processed.
+TEST_F(URLRequestTestHTTP, ProcessSTSAndPKP2) {
+  SpawnedTestServer::SSLOptions ssl_options;
+  SpawnedTestServer https_test_server(
+      SpawnedTestServer::TYPE_HTTPS,
+      ssl_options,
+      base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
+  ASSERT_TRUE(https_test_server.Start());
+
+  TestDelegate d;
+  URLRequest request(
+      https_test_server.GetURL("files/hsts-and-hpkp-headers2.html"),
+      &d,
+      &default_context_);
+  request.Start();
+  base::MessageLoop::current()->Run();
+
+  TransportSecurityState* security_state =
+      default_context_.transport_security_state();
+  bool sni_available = true;
+  TransportSecurityState::DomainState domain_state;
+  EXPECT_TRUE(security_state->GetDomainState(
+      SpawnedTestServer::kLocalhost, sni_available, &domain_state));
+  EXPECT_EQ(TransportSecurityState::DomainState::MODE_FORCE_HTTPS,
+            domain_state.upgrade_mode);
+#if defined(OS_ANDROID)
+  // Android's CertVerifyProc does not (yet) handle pins.
+#else
+  EXPECT_TRUE(domain_state.HasPublicKeyPins());
+#endif
+  EXPECT_NE(domain_state.upgrade_expiry,
+            domain_state.dynamic_spki_hashes_expiry);
+
+  EXPECT_TRUE(domain_state.sts_include_subdomains);
   EXPECT_FALSE(domain_state.pkp_include_subdomains);
 }
 
@@ -5075,6 +5159,11 @@ TEST_F(HTTPSRequestTest, HSTSPreservesPosts) {
   EXPECT_EQ("https", req.url().scheme());
   EXPECT_EQ("POST", req.method());
   EXPECT_EQ(kData, d.data_received());
+
+  LoadTimingInfo load_timing_info;
+  network_delegate.GetLoadTimingInfoBeforeRedirect(&load_timing_info);
+  // LoadTimingInfo of HSTS redirects is similar to that of network cache hits
+  TestLoadTimingCacheHitNoNetwork(load_timing_info);
 }
 
 TEST_F(HTTPSRequestTest, SSLv3Fallback) {
@@ -5318,16 +5407,21 @@ TEST_F(HTTPSRequestTest, SSLSessionCacheShardTest) {
 
 class TestSSLConfigService : public SSLConfigService {
  public:
-  TestSSLConfigService(bool ev_enabled, bool online_rev_checking)
+  TestSSLConfigService(bool ev_enabled,
+                       bool online_rev_checking,
+                       bool rev_checking_required_local_anchors)
       : ev_enabled_(ev_enabled),
-        online_rev_checking_(online_rev_checking) {
-  }
+        online_rev_checking_(online_rev_checking),
+        rev_checking_required_local_anchors_(
+            rev_checking_required_local_anchors) {}
 
   // SSLConfigService:
   virtual void GetSSLConfig(SSLConfig* config) OVERRIDE {
     *config = SSLConfig();
     config->rev_checking_enabled = online_rev_checking_;
     config->verify_ev_cert = ev_enabled_;
+    config->rev_checking_required_local_anchors =
+        rev_checking_required_local_anchors_;
   }
 
  protected:
@@ -5336,6 +5430,7 @@ class TestSSLConfigService : public SSLConfigService {
  private:
   const bool ev_enabled_;
   const bool online_rev_checking_;
+  const bool rev_checking_required_local_anchors_;
 };
 
 // This the fingerprint of the "Testing CA" certificate used by the testserver.
@@ -5343,6 +5438,15 @@ class TestSSLConfigService : public SSLConfigService {
 static const SHA1HashValue kOCSPTestCertFingerprint =
   { { 0xf1, 0xad, 0xf6, 0xce, 0x42, 0xac, 0xe7, 0xb4, 0xf4, 0x24,
       0xdb, 0x1a, 0xf7, 0xa0, 0x9f, 0x09, 0xa1, 0xea, 0xf1, 0x5c } };
+
+// This is the SHA256, SPKI hash of the "Testing CA" certificate used by the
+// testserver.
+static const SHA256HashValue kOCSPTestCertSPKI = { {
+  0xee, 0xe6, 0x51, 0x2d, 0x4c, 0xfa, 0xf7, 0x3e,
+  0x6c, 0xd8, 0xca, 0x67, 0xed, 0xb5, 0x5d, 0x49,
+  0x76, 0xe1, 0x52, 0xa7, 0x6e, 0x0e, 0xa0, 0x74,
+  0x09, 0x75, 0xe6, 0x23, 0x24, 0xbd, 0x1b, 0x28,
+} };
 
 // This is the policy OID contained in the certificates that testserver
 // generates.
@@ -5363,7 +5467,7 @@ class HTTPSOCSPTest : public HTTPSRequestTest {
     context_.Init();
 
     scoped_refptr<net::X509Certificate> root_cert =
-      ImportCertFromFile(GetTestCertsDirectory(), "ocsp-test-root.pem");
+        ImportCertFromFile(GetTestCertsDirectory(), "ocsp-test-root.pem");
     CHECK_NE(static_cast<X509Certificate*>(NULL), root_cert);
     test_root_.reset(new ScopedTestRoot(root_cert.get()));
 
@@ -5407,7 +5511,9 @@ class HTTPSOCSPTest : public HTTPSRequestTest {
   virtual void SetupContext(URLRequestContext* context) {
     context->set_ssl_config_service(
         new TestSSLConfigService(true /* check for EV */,
-                                 true /* online revocation checking */));
+                                 true /* online revocation checking */,
+                                 false /* require rev. checking for local
+                                          anchors */));
   }
 
   scoped_ptr<ScopedTestRoot> test_root_;
@@ -5422,6 +5528,21 @@ static CertStatus ExpectedCertStatusForFailedOnlineRevocationCheck() {
   return CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
 #else
   return 0;
+#endif
+}
+
+// SystemSupportsHardFailRevocationChecking returns true iff the current
+// operating system supports revocation checking and can distinguish between
+// situations where a given certificate lacks any revocation information (eg:
+// no CRLDistributionPoints and no OCSP Responder AuthorityInfoAccess) and when
+// revocation information cannot be obtained (eg: the CRL was unreachable).
+// If it does not, then tests which rely on 'hard fail' behaviour should be
+// skipped.
+static bool SystemSupportsHardFailRevocationChecking() {
+#if defined(OS_WIN) || defined(USE_NSS) || defined(OS_IOS)
+  return true;
+#else
+  return false;
 #endif
 }
 
@@ -5519,12 +5640,52 @@ TEST_F(HTTPSOCSPTest, Invalid) {
   EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
+class HTTPSHardFailTest : public HTTPSOCSPTest {
+ protected:
+  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
+    context->set_ssl_config_service(
+        new TestSSLConfigService(false /* check for EV */,
+                                 false /* online revocation checking */,
+                                 true /* require rev. checking for local
+                                         anchors */));
+  }
+};
+
+
+TEST_F(HTTPSHardFailTest, FailsOnOCSPInvalid) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  if (!SystemSupportsHardFailRevocationChecking()) {
+    LOG(WARNING) << "Skipping test because system doesn't support hard fail "
+                 << "revocation checking";
+    return;
+  }
+
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = SpawnedTestServer::SSLOptions::OCSP_INVALID;
+
+  CertStatus cert_status;
+  DoConnection(ssl_options, &cert_status);
+
+  EXPECT_EQ(CERT_STATUS_REVOKED,
+            cert_status & CERT_STATUS_REVOKED);
+
+  // Without a positive OCSP response, we shouldn't show the EV status.
+  EXPECT_TRUE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
 class HTTPSEVCRLSetTest : public HTTPSOCSPTest {
  protected:
   virtual void SetupContext(URLRequestContext* context) OVERRIDE {
     context->set_ssl_config_service(
         new TestSSLConfigService(true /* check for EV */,
-                                 false /* online revocation checking */));
+                                 false /* online revocation checking */,
+                                 false /* require rev. checking for local
+                                          anchors */));
   }
 };
 
@@ -5595,24 +5756,55 @@ TEST_F(HTTPSEVCRLSetTest, ExpiredCRLSet) {
             static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
 }
 
-TEST_F(HTTPSEVCRLSetTest, FreshCRLSet) {
+TEST_F(HTTPSEVCRLSetTest, FreshCRLSetCovered) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = SpawnedTestServer::SSLOptions::OCSP_INVALID;
+  SSLConfigService::SetCRLSet(
+      scoped_refptr<CRLSet>(CRLSet::ForTesting(
+          false, &kOCSPTestCertSPKI, "")));
+
+  CertStatus cert_status;
+  DoConnection(ssl_options, &cert_status);
+
+  // With a fresh CRLSet that covers the issuing certificate, we shouldn't do a
+  // revocation check for EV.
+  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+  EXPECT_EQ(SystemUsesChromiumEVMetadata(),
+            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
+  EXPECT_FALSE(
+      static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
+}
+
+TEST_F(HTTPSEVCRLSetTest, FreshCRLSetNotCovered) {
+  if (!SystemSupportsOCSP()) {
+    LOG(WARNING) << "Skipping test because system doesn't support OCSP";
+    return;
+  }
+
   SpawnedTestServer::SSLOptions ssl_options(
       SpawnedTestServer::SSLOptions::CERT_AUTO);
   ssl_options.ocsp_status = SpawnedTestServer::SSLOptions::OCSP_INVALID;
   SSLConfigService::SetCRLSet(
       scoped_refptr<CRLSet>(CRLSet::EmptyCRLSetForTesting()));
 
-  CertStatus cert_status;
+  CertStatus cert_status = 0;
   DoConnection(ssl_options, &cert_status);
 
-  // With a valid, fresh CRLSet the bad OCSP response shouldn't matter because
-  // we wont check it.
-  EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
+  // Even with a fresh CRLSet, we should still do online revocation checks when
+  // the certificate chain isn't covered by the CRLSet, which it isn't in this
+  // test.
+  EXPECT_EQ(ExpectedCertStatusForFailedOnlineRevocationCheck(),
+            cert_status & CERT_STATUS_ALL_ERRORS);
 
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
   EXPECT_EQ(SystemUsesChromiumEVMetadata(),
-            static_cast<bool>(cert_status & CERT_STATUS_IS_EV));
-
-  EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+            static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
 }
 
 TEST_F(HTTPSEVCRLSetTest, ExpiredCRLSetAndRevokedNonEVCert) {
@@ -5648,7 +5840,9 @@ class HTTPSCRLSetTest : public HTTPSOCSPTest {
   virtual void SetupContext(URLRequestContext* context) OVERRIDE {
     context->set_ssl_config_service(
         new TestSSLConfigService(false /* check for EV */,
-                                 false /* online revocation checking */));
+                                 false /* online revocation checking */,
+                                 false /* require rev. checking for local
+                                          anchors */));
   }
 };
 
@@ -5667,6 +5861,31 @@ TEST_F(HTTPSCRLSetTest, ExpiredCRLSet) {
   EXPECT_EQ(0u, cert_status & CERT_STATUS_ALL_ERRORS);
   EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
   EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
+}
+
+TEST_F(HTTPSCRLSetTest, CRLSetRevoked) {
+#if defined(USE_OPENSSL)
+  LOG(WARNING) << "Skipping test because system doesn't support CRLSets";
+  return;
+#endif
+
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_AUTO);
+  ssl_options.ocsp_status = SpawnedTestServer::SSLOptions::OCSP_OK;
+  ssl_options.cert_serial = 10;
+  SSLConfigService::SetCRLSet(
+      scoped_refptr<CRLSet>(CRLSet::ForTesting(
+          false, &kOCSPTestCertSPKI, "\x0a")));
+
+  CertStatus cert_status = 0;
+  DoConnection(ssl_options, &cert_status);
+
+  // If the certificate is recorded as revoked in the CRLSet, that should be
+  // reflected without online revocation checking.
+  EXPECT_EQ(CERT_STATUS_REVOKED, cert_status & CERT_STATUS_ALL_ERRORS);
+  EXPECT_FALSE(cert_status & CERT_STATUS_IS_EV);
+  EXPECT_FALSE(
+      static_cast<bool>(cert_status & CERT_STATUS_REV_CHECKING_ENABLED));
 }
 #endif  // !defined(OS_IOS)
 

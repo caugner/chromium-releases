@@ -6,7 +6,7 @@
 
 #include "base/file_util.h"
 #include "base/files/file_path.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/auto_thread_task_runner.h"
@@ -89,7 +89,7 @@ void ConfigFileWatcherTest::SetUp() {
 void ConfigFileWatcherTest::TearDown() {
   // Delete the test file.
   if (!config_file_.empty())
-    file_util::Delete(config_file_, false);
+    base::DeleteFile(config_file_, false);
 }
 
 // Verifies that the initial notification is delivered.

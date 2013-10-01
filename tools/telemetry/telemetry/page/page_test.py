@@ -5,6 +5,7 @@ import logging
 
 from telemetry.core import util
 from telemetry.page import gtest_test_results
+from telemetry.page import test_expectations
 from telemetry.page import page_test_results
 from telemetry.page.actions import all_page_actions
 from telemetry.page.actions import page_action
@@ -70,6 +71,10 @@ class PageTest(object):
     the first run of the test can warm things up. """
     return self._discard_first_result
 
+  @discard_first_result.setter
+  def discard_first_result(self, discard):
+    self._discard_first_result = discard
+
   @property
   def clear_cache_before_each_run(self):
     """When set to True, the browser's disk and memory cache will be cleared
@@ -99,7 +104,11 @@ class PageTest(object):
     for action in GetCompoundActionFromPage(page, self._action_name_to_run):
       action.CustomizeBrowserOptions(options)
 
-  def SetUpBrowser(self, browser):
+  def WillStartBrowser(self, browser):
+    """Override to manipulate the browser environment before it launches."""
+    pass
+
+  def DidStartBrowser(self, browser):
     """Override to customize the browser right after it has launched."""
     pass
 
@@ -107,13 +116,15 @@ class PageTest(object):
     """Override to customize if the test can be ran for the given page."""
     return True
 
-  def WillRunPageSet(self, tab):
-    """Override to do operations before the page set is navigated."""
+  def WillRunTest(self, tab):
+    """Override to do operations before the page set(s) are navigated."""
     pass
 
-  def DidRunPageSet(self, tab, results):
-    """Override to do operations after page set is completed, but before browser
-    is torn down."""
+  def DidRunTest(self, tab, results):
+    """Override to do operations after all page set(s) are completed.
+
+    This will occur before the browser is torn down.
+    """
     pass
 
   def DidStartHTTPServer(self, tab):
@@ -141,6 +152,11 @@ class PageTest(object):
     """Override to make this test generate its own page set instead of
     allowing arbitrary page sets entered from the command-line."""
     return None
+
+  def CreateExpectations(self, page_set):  # pylint: disable=W0613
+    """Override to make this test generate its own expectations instead of
+    any that may have been defined in the page set."""
+    return test_expectations.TestExpectations()
 
   def AddOutputOptions(self, parser):
     parser.add_option('--output-format',

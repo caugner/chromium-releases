@@ -38,6 +38,7 @@ WHITELISTED_LICENSES = [
     'APSL (v2) BSD (4 clause)',
     'BSD',
     'BSD (2 clause)',
+    'BSD (2 clause) ISC',
     'BSD (2 clause) MIT/X11 (BSD like)',
     'BSD (3 clause)',
     'BSD (3 clause) GPL (v2)',
@@ -127,10 +128,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'data/tab_switching': [
         'UNKNOWN',
     ],
-    'googleurl': [  # http://code.google.com/p/google-url/issues/detail?id=15
-        'UNKNOWN',
-    ],
-
     'native_client': [  # http://crbug.com/98099
         'UNKNOWN',
     ],
@@ -292,9 +289,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/libvpx/source/libvpx/examples/includes': [
         'GPL (v2 or later)',
     ],
-    'third_party/libwebp': [  # http://crbug.com/98448
-        'UNKNOWN',
-    ],
     'third_party/libxml': [
         'UNKNOWN',
     ],
@@ -303,12 +297,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
     'third_party/lzma_sdk': [
         'UNKNOWN',
-    ],
-    'third_party/mesa/MesaLib': [
-        'GPL (v2)',
-        'GPL (v3 or later)',
-        'MIT/X11 (BSD like) GPL (v3 or later) with Bison parser exception',
-        'UNKNOWN',  # http://crbug.com/98450
     ],
     'third_party/mesa/src': [
         'GPL (v2)',

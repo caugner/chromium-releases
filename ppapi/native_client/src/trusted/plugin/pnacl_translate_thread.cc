@@ -2,15 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "native_client/src/trusted/plugin/pnacl_translate_thread.h"
+#include "ppapi/native_client/src/trusted/plugin/pnacl_translate_thread.h"
 
 #include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
-#include "native_client/src/trusted/plugin/plugin.h"
-#include "native_client/src/trusted/plugin/plugin_error.h"
-#include "native_client/src/trusted/plugin/pnacl_resources.h"
-#include "native_client/src/trusted/plugin/srpc_params.h"
-#include "native_client/src/trusted/plugin/temporary_file.h"
-#include "native_client/src/trusted/plugin/utility.h"
+#include "ppapi/native_client/src/trusted/plugin/plugin.h"
+#include "ppapi/native_client/src/trusted/plugin/plugin_error.h"
+#include "ppapi/native_client/src/trusted/plugin/pnacl_resources.h"
+#include "ppapi/native_client/src/trusted/plugin/srpc_params.h"
+#include "ppapi/native_client/src/trusted/plugin/temporary_file.h"
+#include "ppapi/native_client/src/trusted/plugin/utility.h"
 
 namespace plugin {
 
@@ -73,7 +73,8 @@ void PnaclTranslateThread::RunTranslate(
 // Called from main thread to send bytes to the translator.
 void PnaclTranslateThread::PutBytes(std::vector<char>* bytes,
                                              int count) {
-  PLUGIN_PRINTF(("PutBytes (this=%p, bytes=%p, size=%"NACL_PRIuS", count=%d)\n",
+  PLUGIN_PRINTF(("PutBytes (this=%p, bytes=%p, size=%" NACL_PRIuS
+                 ", count=%d)\n",
                  this, bytes, bytes ? bytes->size() : 0, count));
   size_t buffer_size = 0;
   // If we are done (error or not), Signal the translation thread to stop.
@@ -153,22 +154,14 @@ void PnaclTranslateThread::DoTranslate() {
 
   int64_t compile_start_time = NaClGetTimeOfDayMicroseconds();
   bool init_success;
-  if (pnacl_options_->HasDefaultOpts()) {
-    PLUGIN_PRINTF(("PnaclCoordinator: StreamInit with default options\n"));
-    init_success = llc_subprocess_->InvokeSrpcMethod("StreamInit",
-                                                     "h",
-                                                     &params,
-                                                     llc_out_file->desc());
-  } else {
-    std::vector<char> options = pnacl_options_->GetOptCommandline();
-    init_success = llc_subprocess_->InvokeSrpcMethod(
-        "StreamInitWithOverrides",
-        "hC",
-        &params,
-        llc_out_file->desc(),
-        &options[0],
-        options.size());
-  }
+  std::vector<char> options = pnacl_options_->GetOptCommandline();
+  init_success = llc_subprocess_->InvokeSrpcMethod(
+      "StreamInitWithOverrides",
+      "hC",
+      &params,
+      llc_out_file->desc(),
+      &options[0],
+      options.size());
 
   if (!init_success) {
     if (llc_subprocess_->srpc_client()->GetLastError() ==
@@ -193,7 +186,8 @@ void PnaclTranslateThread::DoTranslate() {
     while(!done_ && data_buffers_.size() == 0) {
       NaClXCondVarWait(&buffer_cond_, &cond_mu_);
     }
-    PLUGIN_PRINTF(("PnaclTranslateThread awake (done=%d, size=%"NACL_PRIuS")\n",
+    PLUGIN_PRINTF(("PnaclTranslateThread awake (done=%d, size=%" NACL_PRIuS
+                   ")\n",
                    done_, data_buffers_.size()));
     if (data_buffers_.size() > 0) {
       std::vector<char> data;
@@ -357,7 +351,8 @@ void PnaclTranslateThread::AbortSubprocesses() {
 PnaclTranslateThread::~PnaclTranslateThread() {
   PLUGIN_PRINTF(("~PnaclTranslateThread (translate_thread=%p)\n", this));
   AbortSubprocesses();
-  NaClThreadJoin(translate_thread_.get());
+  if (translate_thread_ != NULL)
+    NaClThreadJoin(translate_thread_.get());
   PLUGIN_PRINTF(("~PnaclTranslateThread joined\n"));
   NaClCondVarDtor(&buffer_cond_);
   NaClMutexDtor(&cond_mu_);

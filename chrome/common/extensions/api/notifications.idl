@@ -13,7 +13,10 @@ namespace notifications {
     image,
 
     // icon, title, message, items, up to two buttons
-    list
+    list,
+
+    // icon, title, message, progress, up to two buttons
+    progress
   };
 
   dictionary NotificationItem {
@@ -38,17 +41,17 @@ namespace notifications {
 
   dictionary NotificationOptions {
     // Which type of notification to display.
-    TemplateType type;
+    TemplateType? type;
 
     // Sender's avatar, app icon, or a thumbnail for image notifications.
-    DOMString iconUrl;
+    DOMString? iconUrl;
     [nodoc] NotificationBitmap? iconBitmap;
 
     // Title of the notification (e.g. sender name for email).
-    DOMString title;
+    DOMString? title;
 
     // Main notification content.
-    DOMString message;
+    DOMString? message;
 
     // Priority ranges from -2 to 2. -2 is lowest priority. 2 is highest. Zero
     // is default.
@@ -58,7 +61,7 @@ namespace notifications {
     // epoch (e.g. <code>Date.now() + n</code>).
     double? eventTime;
 
-    // Text and icons of notification action buttons.
+    // Text and icons for up to two notification action buttons.
     NotificationButton[]? buttons;
 
     // Secondary notification content.
@@ -70,6 +73,9 @@ namespace notifications {
 
     // Items for multi-item notifications.
     NotificationItem[]? items;
+
+    // Current progress ranges from 0 to 100.
+    long? progress;
   };
 
   callback CreateCallback = void (DOMString notificationId);

@@ -451,7 +451,9 @@ class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
         path, Manifest::INTERNAL, manifest, Extension::NO_FLAGS, id, &errors);
     ASSERT_TRUE(extension.get()) << errors;
     ASSERT_EQ(id, extension->id());
-    prefs()->SetDelayedInstallInfo(extension.get(), Extension::ENABLED,
+    prefs()->SetDelayedInstallInfo(extension.get(),
+                                   Extension::ENABLED,
+                                   Blacklist::NOT_BLACKLISTED,
                                    ExtensionPrefs::DELAY_REASON_WAIT_FOR_IDLE,
                                    syncer::StringOrdinal());
   }
@@ -546,14 +548,78 @@ class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
 };
 TEST_F(ExtensionPrefsDelayedInstallInfo, DelayedInstallInfo) {}
 
+// Tests the FinishDelayedInstallInfo function.
+class ExtensionPrefsFinishDelayedInstallInfo : public ExtensionPrefsTest {
+ public:
+  virtual void Initialize() OVERRIDE {
+    DictionaryValue dictionary;
+    dictionary.SetString(extension_manifest_keys::kName, "test");
+    dictionary.SetString(extension_manifest_keys::kVersion, "0.1");
+    dictionary.SetString(extension_manifest_keys::kBackgroundPage,
+        "background.html");
+    scoped_refptr<Extension> extension =
+        prefs_.AddExtensionWithManifest(dictionary, Manifest::INTERNAL);
+    id_ = extension->id();
+
+
+    // Set idle info
+    DictionaryValue manifest;
+    manifest.SetString(extension_manifest_keys::kName, "test");
+    manifest.SetString(extension_manifest_keys::kVersion, "0.2");
+    scoped_ptr<ListValue> scripts(new ListValue);
+    scripts->AppendString("test.js");
+    manifest.Set(extension_manifest_keys::kBackgroundScripts,
+        scripts.release());
+    base::FilePath path =
+        prefs_.extensions_dir().AppendASCII("test_0.2");
+    std::string errors;
+    scoped_refptr<Extension> new_extension = Extension::Create(
+        path, Manifest::INTERNAL, manifest, Extension::NO_FLAGS, id_, &errors);
+    ASSERT_TRUE(new_extension.get()) << errors;
+    ASSERT_EQ(id_, new_extension->id());
+    prefs()->SetDelayedInstallInfo(new_extension.get(),
+                                   Extension::ENABLED,
+                                   Blacklist::NOT_BLACKLISTED,
+                                   ExtensionPrefs::DELAY_REASON_WAIT_FOR_IDLE,
+                                   syncer::StringOrdinal());
+
+    // Finish idle installation
+    ASSERT_TRUE(prefs()->FinishDelayedInstallInfo(id_));
+  }
+
+  virtual void Verify() OVERRIDE {
+    EXPECT_FALSE(prefs()->GetDelayedInstallInfo(id_));
+
+    const DictionaryValue* manifest;
+    ASSERT_TRUE(prefs()->ReadPrefAsDictionary(id_, "manifest", &manifest));
+    ASSERT_TRUE(manifest);
+    std::string value;
+    EXPECT_TRUE(manifest->GetString(extension_manifest_keys::kName, &value));
+    EXPECT_EQ("test", value);
+    EXPECT_TRUE(manifest->GetString(extension_manifest_keys::kVersion, &value));
+    EXPECT_EQ("0.2", value);
+    EXPECT_FALSE(manifest->GetString(extension_manifest_keys::kBackgroundPage,
+                                     &value));
+    const ListValue* scripts;
+    ASSERT_TRUE(manifest->GetList(extension_manifest_keys::kBackgroundScripts,
+                                  &scripts));
+    EXPECT_EQ(1u, scripts->GetSize());
+  }
+
+ protected:
+  std::string id_;
+};
+TEST_F(ExtensionPrefsFinishDelayedInstallInfo, FinishDelayedInstallInfo) {}
+
 class ExtensionPrefsOnExtensionInstalled : public ExtensionPrefsTest {
  public:
   virtual void Initialize() OVERRIDE {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->IsExtensionDisabled(extension_->id()));
-    prefs()->OnExtensionInstalled(
-        extension_.get(), Extension::DISABLED,
-        syncer::StringOrdinal());
+    prefs()->OnExtensionInstalled(extension_.get(),
+                                  Extension::DISABLED,
+                                  Blacklist::NOT_BLACKLISTED,
+                                  syncer::StringOrdinal());
   }
 
   virtual void Verify() OVERRIDE {
@@ -571,7 +637,9 @@ class ExtensionPrefsAppDraggedByUser : public ExtensionPrefsTest {
   virtual void Initialize() OVERRIDE {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->WasAppDraggedByUser(extension_->id()));
-    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
+    prefs()->OnExtensionInstalled(extension_.get(),
+                                  Extension::ENABLED,
+                                  Blacklist::NOT_BLACKLISTED,
                                   syncer::StringOrdinal());
   }
 

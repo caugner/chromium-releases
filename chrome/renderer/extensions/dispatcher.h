@@ -10,18 +10,19 @@
 #include <string>
 #include <vector>
 
-#include "base/shared_memory.h"
-#include "base/timer.h"
-#include "content/public/renderer/render_process_observer.h"
+#include "base/memory/shared_memory.h"
+#include "base/timer/timer.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_context_set.h"
 #include "chrome/renderer/extensions/v8_schema_registry.h"
 #include "chrome/renderer/resource_bundle_source_map.h"
+#include "content/public/renderer/render_process_observer.h"
 #include "extensions/common/event_filter.h"
 #include "v8/include/v8.h"
 
+class ChromeRenderViewTest;
 class GURL;
 class ModuleSystem;
 class URLPattern;
@@ -30,6 +31,7 @@ struct ExtensionMsg_Loaded_Params;
 
 namespace WebKit {
 class WebFrame;
+class WebSecurityOrigin;
 }
 
 namespace base {
@@ -68,7 +70,7 @@ class Dispatcher : public content::RenderProcessObserver {
     return user_script_slave_.get();
   }
   V8SchemaRegistry* v8_schema_registry() {
-    return &v8_schema_registry_;
+    return v8_schema_registry_.get();
   }
   ContentWatcher* content_watcher() {
     return content_watcher_.get();
@@ -84,18 +86,6 @@ class Dispatcher : public content::RenderProcessObserver {
   // extension ID associated with the main world's JavaScript context. If the
   // JavaScript context isn't from an extension, returns empty string.
   std::string GetExtensionID(const WebKit::WebFrame* frame, int world_id);
-
-  // See WebKit::WebPermissionClient::allowScriptExtension
-  // TODO(koz): Remove once WebKit no longer calls this.
-  bool AllowScriptExtension(WebKit::WebFrame* frame,
-                            const std::string& v8_extension_name,
-                            int extension_group);
-
-  // TODO(koz): Remove once WebKit no longer calls this.
-  bool AllowScriptExtension(WebKit::WebFrame* frame,
-                            const std::string& v8_extension_name,
-                            int extension_group,
-                            int world_id);
 
   void DidCreateScriptContext(WebKit::WebFrame* frame,
                               v8::Handle<v8::Context> context,
@@ -143,7 +133,7 @@ class Dispatcher : public content::RenderProcessObserver {
       bool user_gesture);
 
  private:
-  friend class RenderViewTest;
+  friend class ::ChromeRenderViewTest;
   FRIEND_TEST_ALL_PREFIXES(RendererPermissionsPolicyDelegateTest,
                            CannotScriptWebstore);
   typedef void (*BindingInstaller)(ModuleSystem* module_system,
@@ -153,6 +143,7 @@ class Dispatcher : public content::RenderProcessObserver {
   virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void WebKitInitialized() OVERRIDE;
   virtual void IdleNotification() OVERRIDE;
+  virtual void OnRenderProcessShutdown() OVERRIDE;
 
   void OnSetChannel(int channel);
   void OnMessageInvoke(const std::string& extension_id,
@@ -209,6 +200,9 @@ class Dispatcher : public content::RenderProcessObserver {
       const Extension* extension,
       const URLPatternSet& origins);
 
+  // Enable custom element whitelist in Apps.
+  void EnableCustomElementWhiteList();
+
   // Adds or removes bindings for every context belonging to |extension_id|, or
   // or all contexts if |extension_id| is empty.
   void AddOrRemoveBindings(const std::string& extension_id);
@@ -235,15 +229,17 @@ class Dispatcher : public content::RenderProcessObserver {
                        v8::Handle<v8::Context> v8_context,
                        const std::string& api);
 
-  // Determines whether |frame| is loading a platform app resource URL. (this
-  // evaluates to true for iframes in platform apps and sandboxed resources that
-  // are not in the same origin).
-  bool IsWithinPlatformApp(const WebKit::WebFrame* frame);
+  // Returns whether the current renderer hosts a platform app.
+  bool IsWithinPlatformApp();
+
+  bool IsSandboxedPage(const GURL& url) const;
 
   // Returns the Feature::Context type of context for a JavaScript context.
-  Feature::Context ClassifyJavaScriptContext(const std::string& extension_id,
-                                             int extension_group,
-                                             const ExtensionURLInfo& url_info);
+  Feature::Context ClassifyJavaScriptContext(
+      const std::string& extension_id,
+      int extension_group,
+      const GURL& url,
+      const WebKit::WebSecurityOrigin& origin);
 
   // Gets |field| from |object| or creates it as an empty object if it doesn't
   // exist.
@@ -292,7 +288,7 @@ class Dispatcher : public content::RenderProcessObserver {
   ResourceBundleSourceMap source_map_;
 
   // Cache for the v8 representation of extension API schemas.
-  V8SchemaRegistry v8_schema_registry_;
+  scoped_ptr<V8SchemaRegistry> v8_schema_registry_;
 
   // Bindings that are defined lazily and have BindingInstallers to install
   // them.

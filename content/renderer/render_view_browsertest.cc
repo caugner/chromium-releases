@@ -4,13 +4,16 @@
 
 #include "base/basictypes.h"
 
-#include "base/shared_memory.h"
+#include "base/memory/shared_memory.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "content/common/ssl_status_serialization.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/common/bindings_policy.h"
+#include "content/public/common/page_zoom.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/history_item_serialization.h"
@@ -21,14 +24,18 @@
 #include "content/shell/shell_content_browser_client.h"
 #include "content/test/mock_keyboard.h"
 #include "net/base/net_errors.h"
+#include "net/cert/cert_status_flags.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/web/WebHistoryItem.h"
-#include "third_party/WebKit/public/web/WebView.h"
-#include "third_party/WebKit/public/web/WebWindowFeatures.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebHTTPBody.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
+#include "third_party/WebKit/public/platform/WebURLResponse.h"
+#include "third_party/WebKit/public/web/WebDataSource.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebHistoryItem.h"
+#include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/WebKit/public/web/WebWindowFeatures.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/codec/jpeg_codec.h"
@@ -205,7 +212,7 @@ class RenderViewImplTest : public RenderViewTest {
                                      flags);
     output->assign(1, static_cast<char16>(c));
     return 1;
-#elif defined(OS_LINUX)
+#elif defined(TOOLKIT_GTK)
     // We ignore |layout|, which means we are only testing the layout of the
     // current locale. TODO(estade): fix this to respect |layout|.
     std::vector<GdkEvent*> events;
@@ -415,30 +422,6 @@ TEST_F(RenderViewImplTest, DecideNavigationPolicyForWebUI) {
   // Clean up after the new view so we don't leak it.
   new_view->Close();
   new_view->Release();
-}
-
-TEST_F(RenderViewImplTest, ChromeNativeSchemeCommitsSynchronously) {
-  LoadHTML("<div>Page A</div>");
-  int initial_page_id = view()->GetPageId();
-
-  // Issue a navigation to a chrome-native page.
-  ViewMsg_Navigate_Params nav_params;
-  nav_params.url = GURL("chrome-native://testpage");
-  nav_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
-  nav_params.transition = PAGE_TRANSITION_TYPED;
-  nav_params.current_history_list_length = 1;
-  nav_params.current_history_list_offset = 0;
-  nav_params.pending_history_list_offset = 1;
-  nav_params.page_id = -1;
-  view()->OnNavigate(nav_params);
-
-  // Ensure the chrome-native:// navigate commits synchronously.
-  EXPECT_NE(initial_page_id, view()->GetPageId());
-
-  ProcessPendingMessages();
-  const IPC::Message* msg = render_thread_->sink().GetUniqueMessageMatching(
-      ViewHostMsg_UpdateState::ID);
-  EXPECT_TRUE(msg);
 }
 
 // Ensure the RenderViewImpl sends an ACK to a SwapOut request, even if it is
@@ -788,7 +771,10 @@ TEST_F(RenderViewImplTest, DontIgnoreBackAfterNavEntryLimit) {
 
 // Test that our IME backend sends a notification message when the input focus
 // changes.
-TEST_F(RenderViewImplTest, OnImeTypeChanged) {
+// crbug.com/276821:
+// Because Blink change cause this test failed, we first disabled this test and
+// fix later.
+TEST_F(RenderViewImplTest, DISABLED_OnImeTypeChanged) {
   // Enable our IME backend code.
   view()->OnSetInputMethodActive(true);
 
@@ -800,9 +786,45 @@ TEST_F(RenderViewImplTest, OnImeTypeChanged) {
            "<body>"
            "<input id=\"test1\" type=\"text\" value=\"some text\"></input>"
            "<input id=\"test2\" type=\"password\"></input>"
+           "<input id=\"test3\" type=\"text\" inputmode=\"verbatim\"></input>"
+           "<input id=\"test4\" type=\"text\" inputmode=\"latin\"></input>"
+           "<input id=\"test5\" type=\"text\" inputmode=\"latin-name\"></input>"
+           "<input id=\"test6\" type=\"text\" inputmode=\"latin-prose\">"
+               "</input>"
+           "<input id=\"test7\" type=\"text\" inputmode=\"full-width-latin\">"
+               "</input>"
+           "<input id=\"test8\" type=\"text\" inputmode=\"kana\"></input>"
+           "<input id=\"test9\" type=\"text\" inputmode=\"katakana\"></input>"
+           "<input id=\"test10\" type=\"text\" inputmode=\"numeric\"></input>"
+           "<input id=\"test11\" type=\"text\" inputmode=\"tel\"></input>"
+           "<input id=\"test12\" type=\"text\" inputmode=\"email\"></input>"
+           "<input id=\"test13\" type=\"text\" inputmode=\"url\"></input>"
+           "<input id=\"test14\" type=\"text\" inputmode=\"unknown\"></input>"
+           "<input id=\"test15\" type=\"text\" inputmode=\"verbatim\"></input>"
            "</body>"
            "</html>");
   render_thread_->sink().ClearMessages();
+
+  struct InputModeTestCase {
+    const char* input_id;
+    ui::TextInputMode expected_mode;
+  };
+  static const InputModeTestCase kInputModeTestCases[] = {
+     {"test1", ui::TEXT_INPUT_MODE_DEFAULT},
+     {"test3", ui::TEXT_INPUT_MODE_VERBATIM},
+     {"test4", ui::TEXT_INPUT_MODE_LATIN},
+     {"test5", ui::TEXT_INPUT_MODE_LATIN_NAME},
+     {"test6", ui::TEXT_INPUT_MODE_LATIN_PROSE},
+     {"test7", ui::TEXT_INPUT_MODE_FULL_WIDTH_LATIN},
+     {"test8", ui::TEXT_INPUT_MODE_KANA},
+     {"test9", ui::TEXT_INPUT_MODE_KATAKANA},
+     {"test10", ui::TEXT_INPUT_MODE_NUMERIC},
+     {"test11", ui::TEXT_INPUT_MODE_TEL},
+     {"test12", ui::TEXT_INPUT_MODE_EMAIL},
+     {"test13", ui::TEXT_INPUT_MODE_URL},
+     {"test14", ui::TEXT_INPUT_MODE_DEFAULT},
+     {"test15", ui::TEXT_INPUT_MODE_VERBATIM},
+  };
 
   const int kRepeatCount = 10;
   for (int i = 0; i < kRepeatCount; i++) {
@@ -820,7 +842,11 @@ TEST_F(RenderViewImplTest, OnImeTypeChanged) {
     EXPECT_EQ(ViewHostMsg_TextInputTypeChanged::ID, msg->type());
     ui::TextInputType type;
     bool can_compose_inline = false;
-    ViewHostMsg_TextInputTypeChanged::Read(msg, &type, &can_compose_inline);
+    ui::TextInputMode input_mode = ui::TEXT_INPUT_MODE_DEFAULT;
+    ViewHostMsg_TextInputTypeChanged::Read(msg,
+                                           &type,
+                                           &can_compose_inline,
+                                           &input_mode);
     EXPECT_EQ(ui::TEXT_INPUT_TYPE_TEXT, type);
     EXPECT_EQ(true, can_compose_inline);
 
@@ -836,8 +862,35 @@ TEST_F(RenderViewImplTest, OnImeTypeChanged) {
     msg = render_thread_->sink().GetMessageAt(0);
     EXPECT_TRUE(msg != NULL);
     EXPECT_EQ(ViewHostMsg_TextInputTypeChanged::ID, msg->type());
-    ViewHostMsg_TextInputTypeChanged::Read(msg, &type, &can_compose_inline);
+    ViewHostMsg_TextInputTypeChanged::Read(msg,
+                                           &type,
+                                           &can_compose_inline,
+                                           &input_mode);
     EXPECT_EQ(ui::TEXT_INPUT_TYPE_PASSWORD, type);
+
+    for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kInputModeTestCases); i++) {
+      const InputModeTestCase* test_case = &kInputModeTestCases[i];
+      std::string javascript =
+          base::StringPrintf("document.getElementById('%s').focus();",
+                             test_case->input_id);
+      // Move the input focus to the target <input> element, where we should
+      // activate IMEs.
+      ExecuteJavaScriptAndReturnIntValue(ASCIIToUTF16(javascript), NULL);
+      ProcessPendingMessages();
+      render_thread_->sink().ClearMessages();
+
+      // Update the IME status and verify if our IME backend sends an IPC
+      // message to activate IMEs.
+      view()->UpdateTextInputType();
+      const IPC::Message* msg = render_thread_->sink().GetMessageAt(0);
+      EXPECT_TRUE(msg != NULL);
+      EXPECT_EQ(ViewHostMsg_TextInputTypeChanged::ID, msg->type());
+      ViewHostMsg_TextInputTypeChanged::Read(msg,
+                                            &type,
+                                            &can_compose_inline,
+                                            &input_mode);
+      EXPECT_EQ(test_case->expected_mode, input_mode);
+    }
   }
 }
 
@@ -951,7 +1004,8 @@ TEST_F(RenderViewImplTest, ImeComposition) {
       case IME_CONFIRMCOMPOSITION:
         view()->OnImeConfirmComposition(
             WideToUTF16Hack(ime_message->ime_string),
-            ui::Range::InvalidRange());
+            ui::Range::InvalidRange(),
+            false);
         break;
 
       case IME_CANCELCOMPOSITION:
@@ -1694,6 +1748,7 @@ TEST_F(RenderViewImplTest, TestBackForward) {
   EXPECT_EQ(1, was_page_b);
 }
 
+#if defined(OS_MACOSX) || defined(OS_WIN) || defined(USE_AURA)
 TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
   LoadHTML("<textarea id=\"test\"></textarea>");
   ExecuteJavaScript("document.getElementById('test').focus();");
@@ -1711,7 +1766,8 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
   ASSERT_EQ(ascii_composition.size(), bounds.size());
   for (size_t i = 0; i < bounds.size(); ++i)
     EXPECT_LT(0, bounds[i].width());
-  view()->OnImeConfirmComposition(empty_string, ui::Range::InvalidRange());
+  view()->OnImeConfirmComposition(
+      empty_string, ui::Range::InvalidRange(), false);
 
   // Non surrogate pair unicode character.
   const string16 unicode_composition = UTF8ToUTF16(
@@ -1721,7 +1777,8 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
   ASSERT_EQ(unicode_composition.size(), bounds.size());
   for (size_t i = 0; i < bounds.size(); ++i)
     EXPECT_LT(0, bounds[i].width());
-  view()->OnImeConfirmComposition(empty_string, ui::Range::InvalidRange());
+  view()->OnImeConfirmComposition(
+      empty_string, ui::Range::InvalidRange(), false);
 
   // Surrogate pair character.
   const string16 surrogate_pair_char = UTF8ToUTF16("\xF0\xA0\xAE\x9F");
@@ -1733,7 +1790,8 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
   ASSERT_EQ(surrogate_pair_char.size(), bounds.size());
   EXPECT_LT(0, bounds[0].width());
   EXPECT_EQ(0, bounds[1].width());
-  view()->OnImeConfirmComposition(empty_string, ui::Range::InvalidRange());
+  view()->OnImeConfirmComposition(
+      empty_string, ui::Range::InvalidRange(), false);
 
   // Mixed string.
   const string16 surrogate_pair_mixed_composition =
@@ -1755,14 +1813,14 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
       EXPECT_LT(0, bounds[i].width());
     }
   }
-  view()->OnImeConfirmComposition(empty_string, ui::Range::InvalidRange());
+  view()->OnImeConfirmComposition(
+      empty_string, ui::Range::InvalidRange(), false);
 }
+#endif
 
 TEST_F(RenderViewImplTest, ZoomLimit) {
-  const double kMinZoomLevel =
-      WebKit::WebView::zoomFactorToZoomLevel(kMinimumZoomFactor);
-  const double kMaxZoomLevel =
-      WebKit::WebView::zoomFactorToZoomLevel(kMaximumZoomFactor);
+  const double kMinZoomLevel = ZoomFactorToZoomLevel(kMinimumZoomFactor);
+  const double kMaxZoomLevel = ZoomFactorToZoomLevel(kMaximumZoomFactor);
 
   ViewMsg_Navigate_Params params;
   params.page_id = -1;
@@ -1778,9 +1836,8 @@ TEST_F(RenderViewImplTest, ZoomLimit) {
   EXPECT_DOUBLE_EQ(kMinZoomLevel, view()->GetWebView()->zoomLevel());
 
   // It should work even when the zoom limit is temporarily changed in the page.
-  view()->GetWebView()->zoomLimitsChanged(
-      WebKit::WebView::zoomFactorToZoomLevel(1.0),
-      WebKit::WebView::zoomFactorToZoomLevel(1.0));
+  view()->GetWebView()->zoomLimitsChanged(ZoomFactorToZoomLevel(1.0),
+                                          ZoomFactorToZoomLevel(1.0));
   params.url = GURL("data:text/html,max_zoomlimit_test");
   view()->OnSetZoomLevelForLoadingURL(params.url, kMaxZoomLevel);
   view()->OnNavigate(params);
@@ -1867,6 +1924,20 @@ TEST_F(RenderViewImplTest, NavigateFrame) {
 // frame in the RenderView.
 TEST_F(RenderViewImplTest, BasicRenderFrame) {
   EXPECT_TRUE(view()->main_render_frame_.get());
+}
+
+TEST_F(RenderViewImplTest, GetSSLStatusOfFrame) {
+  LoadHTML("<!DOCTYPE html><html><body></body></html>");
+
+  WebFrame* frame = GetMainFrame();
+  SSLStatus ssl_status = view()->GetSSLStatusOfFrame(frame);
+  EXPECT_FALSE(net::IsCertStatusError(ssl_status.cert_status));
+
+  const_cast<WebKit::WebURLResponse&>(frame->dataSource()->response()).
+      setSecurityInfo(
+          SerializeSecurityInfo(0, net::CERT_STATUS_ALL_ERRORS, 0, 0));
+  ssl_status = view()->GetSSLStatusOfFrame(frame);
+  EXPECT_TRUE(net::IsCertStatusError(ssl_status.cert_status));
 }
 
 }  // namespace content

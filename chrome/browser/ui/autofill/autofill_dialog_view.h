@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_DIALOG_VIEW_H_
 #define CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_DIALOG_VIEW_H_
 
-#include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
+#include "chrome/browser/ui/autofill/autofill_dialog_view_delegate.h"
 
 namespace content {
 class NavigationController;
@@ -17,7 +17,7 @@ class Size;
 
 namespace autofill {
 
-class AutofillDialogController;
+class AutofillDialogViewDelegate;
 class TestableAutofillDialogView;
 
 // An interface for the dialog that appears when a site initiates an Autofill
@@ -87,9 +87,8 @@ class AutofillDialogView {
   virtual void ModelChanged() = 0;
 
   // Returns an object that can be used to test that the view is behaving as
-  // expected. This should be implemented on all platforms, but for now returns
-  // NULL on everything but Views.
-  virtual TestableAutofillDialogView* GetTestableView();
+  // expected.
+  virtual TestableAutofillDialogView* GetTestableView() = 0;
 
   // Called by AutofillDialogSignInDelegate when the sign-in page experiences a
   // resize. |pref_size| is the new preferred size of the sign-in page.
@@ -97,7 +96,7 @@ class AutofillDialogView {
 
   // Factory function to create the dialog (implemented once per view
   // implementation). |controller| will own the created dialog.
-  static AutofillDialogView* Create(AutofillDialogController* controller);
+  static AutofillDialogView* Create(AutofillDialogViewDelegate* delegate);
 };
 
 }  // namespace autofill

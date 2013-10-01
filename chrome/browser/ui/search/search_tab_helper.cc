@@ -4,8 +4,13 @@
 
 #include "chrome/browser/ui/search/search_tab_helper.h"
 
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/instant_service.h"
+#include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_controller.h"
@@ -14,6 +19,8 @@
 #include "content/public/browser/navigation_type.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -40,8 +47,31 @@ bool IsSearchResults(const content::WebContents* contents) {
 // namespace and remove InstantPage::IsLocal().
 bool IsLocal(const content::WebContents* contents) {
   return contents &&
-      (contents->GetURL() == GURL(chrome::kChromeSearchLocalNtpUrl) ||
-       contents->GetURL() == GURL(chrome::kChromeSearchLocalGoogleNtpUrl));
+      contents->GetURL() == GURL(chrome::kChromeSearchLocalNtpUrl);
+}
+
+// Returns true if |contents| are rendered inside an Instant process.
+bool InInstantProcess(Profile* profile,
+                      const content::WebContents* contents) {
+  InstantService* instant_service =
+      InstantServiceFactory::GetForProfile(profile);
+  return instant_service &&
+      instant_service->IsInstantProcess(
+          contents->GetRenderProcessHost()->GetID());
+}
+
+// Updates the location bar to reflect |contents| Instant support state.
+void UpdateLocationBar(content::WebContents* contents) {
+// iOS and Android doesn't use the Instant framework.
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+  if (!contents)
+    return;
+
+  Browser* browser = chrome::FindBrowserWithWebContents(contents);
+  if (!browser)
+    return;
+  browser->OnWebContentsInstantSupportDisabled(contents);
+#endif
 }
 
 }  // namespace
@@ -50,8 +80,6 @@ SearchTabHelper::SearchTabHelper(content::WebContents* web_contents)
     : WebContentsObserver(web_contents),
       is_search_enabled_(chrome::IsInstantExtendedAPIEnabled()),
       user_input_in_progress_(false),
-      popup_is_open_(false),
-      user_text_is_empty_(true),
       web_contents_(web_contents) {
   if (!is_search_enabled_)
     return;
@@ -74,15 +102,11 @@ void SearchTabHelper::InitForPreloadedNTP() {
 }
 
 void SearchTabHelper::OmniboxEditModelChanged(bool user_input_in_progress,
-                                              bool cancelling,
-                                              bool popup_is_open,
-                                              bool user_text_is_empty) {
+                                              bool cancelling) {
   if (!is_search_enabled_)
     return;
 
   user_input_in_progress_ = user_input_in_progress;
-  popup_is_open_ = popup_is_open;
-  user_text_is_empty_ = user_text_is_empty;
   if (!user_input_in_progress && !cancelling)
     return;
 
@@ -100,8 +124,18 @@ void SearchTabHelper::InstantSupportChanged(bool instant_support) {
   if (!is_search_enabled_)
     return;
 
-  model_.SetInstantSupportState(instant_support ? INSTANT_SUPPORT_YES :
-                                                  INSTANT_SUPPORT_NO);
+  InstantSupportState new_state = instant_support ? INSTANT_SUPPORT_YES :
+      INSTANT_SUPPORT_NO;
+
+  model_.SetInstantSupportState(new_state);
+
+  content::NavigationEntry* entry =
+      web_contents_->GetController().GetVisibleEntry();
+  if (entry) {
+    chrome::SetInstantSupportStateInNavigationEntry(new_state, entry);
+    if (!instant_support)
+      UpdateLocationBar(web_contents_);
+  }
 }
 
 bool SearchTabHelper::SupportsInstant() const {
@@ -120,6 +154,10 @@ void SearchTabHelper::Observe(
 
   UpdateMode(true, false);
 
+  content::NavigationEntry* entry =
+      web_contents_->GetController().GetVisibleEntry();
+  DCHECK(entry);
+
   // Already determined the instant support state for this page, do not reset
   // the instant support state.
   //
@@ -132,11 +170,22 @@ void SearchTabHelper::Observe(
   // crbug.com/251330 for more details.
   if (load_details->is_in_page ||
       load_details->type == content::NAVIGATION_TYPE_IN_PAGE) {
+    // When an "in-page" navigation happens, we will not receive a
+    // DidFinishLoad() event. Therefore, we will not determine the Instant
+    // support for the navigated page. So, copy over the Instant support from
+    // the previous entry. If the page does not support Instant, update the
+    // location bar from here to turn off search terms replacement.
+    chrome::SetInstantSupportStateInNavigationEntry(model_.instant_support(),
+                                                    entry);
+    if (model_.instant_support() == INSTANT_SUPPORT_NO)
+      UpdateLocationBar(web_contents_);
     return;
   }
 
   model_.SetInstantSupportState(INSTANT_SUPPORT_UNKNOWN);
   model_.SetVoiceSearchSupported(false);
+  chrome::SetInstantSupportStateInNavigationEntry(model_.instant_support(),
+                                                  entry);
 }
 
 void SearchTabHelper::DidNavigateMainFrame(
@@ -164,10 +213,6 @@ void SearchTabHelper::DidNavigateMainFrame(
 bool SearchTabHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SearchTabHelper, message)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SearchBoxShowBars,
-                        OnSearchBoxShowBars)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SearchBoxHideBars,
-                        OnSearchBoxHideBars)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_InstantSupportDetermined,
                         OnInstantSupportDetermined)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SetVoiceSearchSupported,
@@ -200,29 +245,13 @@ void SearchTabHelper::UpdateMode(bool update_origin, bool is_preloaded_ntp) {
     origin = model_.mode().origin;
   if (user_input_in_progress_)
     type = SearchMode::MODE_SEARCH_SUGGESTIONS;
-
-  if (type == SearchMode::MODE_NTP && origin == SearchMode::ORIGIN_NTP &&
-      !popup_is_open_ && !user_text_is_empty_) {
-    // We're switching back (|popup_is_open_| is false) to an NTP (type and
-    // mode are |NTP|) with suggestions (|user_text_is_empty_| is false), don't
-    // modify visibility of top bars or voice search support.  This specific
-    // omnibox state is set when OmniboxEditModelChanged() is called from
-    // OmniboxEditModel::SetInputInProgress() which is called from
-    // OmniboxEditModel::Revert().
-    model_.SetState(SearchModel::State(SearchMode(type, origin),
-                                       model_.state().top_bars_visible,
-                                       model_.instant_support(),
-                                       model_.state().voice_search_supported));
-  } else {
-    model_.SetMode(SearchMode(type, origin));
-  }
+  model_.SetMode(SearchMode(type, origin));
 }
 
 void SearchTabHelper::DetermineIfPageSupportsInstant() {
   Profile* profile =
       Profile::FromBrowserContext(web_contents_->GetBrowserContext());
-  if (!chrome::ShouldAssignURLToInstantRenderer(web_contents_->GetURL(),
-                                                profile)) {
+  if (!InInstantProcess(profile, web_contents_)) {
     // The page is not in the Instant process. This page does not support
     // instant. If we send an IPC message to a page that is not in the Instant
     // process, it will never receive it and will never respond. Therefore,
@@ -242,18 +271,6 @@ void SearchTabHelper::OnInstantSupportDetermined(int page_id,
     return;
 
   InstantSupportChanged(instant_support);
-}
-
-void SearchTabHelper::OnSearchBoxShowBars(int page_id) {
-  if (web_contents()->IsActiveEntry(page_id))
-    model_.SetTopBarsVisible(true);
-}
-
-void SearchTabHelper::OnSearchBoxHideBars(int page_id) {
-  if (web_contents()->IsActiveEntry(page_id)) {
-    model_.SetTopBarsVisible(false);
-    Send(new ChromeViewMsg_SearchBoxBarsHidden(routing_id()));
-  }
 }
 
 void SearchTabHelper::OnSetVoiceSearchSupported(int page_id, bool supported) {

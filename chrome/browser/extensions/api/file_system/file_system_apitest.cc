@@ -6,23 +6,22 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "build/build_config.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
 
-using extensions::FileSystemChooseEntryFunction;
+namespace extensions {
 
 namespace {
 
 class AppInstallObserver : public content::NotificationObserver {
  public:
   AppInstallObserver(
-      base::Callback<void(const extensions::Extension*)> callback)
+      base::Callback<void(const Extension*)> callback)
       : callback_(callback) {
     registrar_.Add(this,
                    chrome::NOTIFICATION_EXTENSION_LOADED,
@@ -33,40 +32,42 @@ class AppInstallObserver : public content::NotificationObserver {
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
     EXPECT_EQ(chrome::NOTIFICATION_EXTENSION_LOADED, type);
-    callback_.Run(content::Details<const extensions::Extension>(details).ptr());
+    callback_.Run(content::Details<const Extension>(details).ptr());
   }
 
  private:
   content::NotificationRegistrar registrar_;
-  base::Callback<void(const extensions::Extension*)> callback_;
+  base::Callback<void(const Extension*)> callback_;
   DISALLOW_COPY_AND_ASSIGN(AppInstallObserver);
 };
 
 void SetLastChooseEntryDirectory(const base::FilePath& choose_entry_directory,
-                                 extensions::ExtensionPrefs* prefs,
-                                 const extensions::Extension* extension) {
-  prefs->SetLastChooseEntryDirectory(extension->id(), choose_entry_directory);
+                                 ExtensionPrefs* prefs,
+                                 const Extension* extension) {
+  file_system_api::SetLastChooseEntryDirectory(
+      prefs, extension->id(), choose_entry_directory);
 }
 
 void SetLastChooseEntryDirectoryToAppDirectory(
-    extensions::ExtensionPrefs* prefs,
-    const extensions::Extension* extension) {
-  prefs->SetLastChooseEntryDirectory(extension->id(), extension->path());
+    ExtensionPrefs* prefs,
+    const Extension* extension) {
+  file_system_api::SetLastChooseEntryDirectory(
+      prefs, extension->id(), extension->path());
 }
 
 void AddSavedEntry(const base::FilePath& path_to_save,
                    apps::SavedFilesService* service,
-                   const extensions::Extension* extension) {
+                   const Extension* extension) {
   service->RegisterFileEntry(
       extension->id(), "magic id", path_to_save, /* writable */ true);
 }
 
 }  // namespace
 
-class FileSystemApiTest : public extensions::PlatformAppBrowserTest {
+class FileSystemApiTest : public PlatformAppBrowserTest {
  public:
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    extensions::PlatformAppBrowserTest::SetUpCommandLine(command_line);
+    PlatformAppBrowserTest::SetUpCommandLine(command_line);
     test_root_folder_ = test_data_dir_.AppendASCII("api_test")
         .AppendASCII("file_system");
     FileSystemChooseEntryFunction::RegisterTempExternalFileSystemForTest(
@@ -75,7 +76,7 @@ class FileSystemApiTest : public extensions::PlatformAppBrowserTest {
 
   virtual void TearDown() OVERRIDE {
     FileSystemChooseEntryFunction::StopSkippingPickerForTest();
-    extensions::PlatformAppBrowserTest::TearDown();
+    PlatformAppBrowserTest::TearDown();
   };
 
  protected:
@@ -91,24 +92,47 @@ class FileSystemApiTest : public extensions::PlatformAppBrowserTest {
     base::FilePath destination = temp_dir_.path().AppendASCII(destination_name);
     if (copy_gold) {
       base::FilePath source = test_root_folder_.AppendASCII("gold.txt");
-      EXPECT_TRUE(file_util::CopyFile(source, destination));
+      EXPECT_TRUE(base::CopyFile(source, destination));
     }
     return destination;
   }
 
+  std::vector<base::FilePath> TempFilePaths(
+      const std::vector<std::string>& destination_names,
+      bool copy_gold) {
+    if (!temp_dir_.CreateUniqueTempDir()) {
+      ADD_FAILURE() << "CreateUniqueTempDir failed";
+      return std::vector<base::FilePath>();
+    }
+    FileSystemChooseEntryFunction::RegisterTempExternalFileSystemForTest(
+        "test_temp", temp_dir_.path());
+
+    std::vector<base::FilePath> result;
+    for (std::vector<std::string>::const_iterator it =
+             destination_names.begin();
+         it != destination_names.end(); ++it) {
+      base::FilePath destination = temp_dir_.path().AppendASCII(*it);
+      if (copy_gold) {
+        base::FilePath source = test_root_folder_.AppendASCII("gold.txt");
+        EXPECT_TRUE(base::CopyFile(source, destination));
+      }
+      result.push_back(destination);
+    }
+    return result;
+  }
+
   void CheckStoredDirectoryMatches(const base::FilePath& filename) {
-    const extensions::Extension* extension = GetSingleLoadedExtension();
+    const Extension* extension = GetSingleLoadedExtension();
     ASSERT_TRUE(extension);
     std::string extension_id = extension->id();
-    extensions::ExtensionPrefs* prefs = extensions::ExtensionSystem::Get(
-        profile())->extension_service()->extension_prefs();
+    ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
     base::FilePath stored_value;
     if (filename.empty()) {
-      EXPECT_FALSE(prefs->GetLastChooseEntryDirectory(extension_id,
-                                                      &stored_value));
+      EXPECT_FALSE(file_system_api::GetLastChooseEntryDirectory(
+          prefs, extension_id, &stored_value));
     } else {
-      EXPECT_TRUE(prefs->GetLastChooseEntryDirectory(extension_id,
-                                                     &stored_value));
+      EXPECT_TRUE(file_system_api::GetLastChooseEntryDirectory(
+          prefs, extension_id, &stored_value));
       EXPECT_EQ(base::MakeAbsoluteFilePath(filename.DirName()),
                 base::MakeAbsoluteFilePath(stored_value));
     }
@@ -153,7 +177,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
 
   base::FilePath test_file = test_path.AppendASCII("gold.txt");
   base::FilePath source = test_root_folder_.AppendASCII("gold.txt");
-  EXPECT_TRUE(file_util::CopyFile(source, test_file));
+  EXPECT_TRUE(base::CopyFile(source, test_file));
 
   FileSystemChooseEntryFunction::SkipPickerAndAlwaysSelectPathForTest(
       &test_file);
@@ -182,8 +206,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
     AppInstallObserver observer(
         base::Bind(SetLastChooseEntryDirectory,
                    test_file.DirName(),
-                   extensions::ExtensionSystem::Get(
-                       profile())->extension_service()->extension_prefs()));
+                   ExtensionPrefs::Get(profile())));
     ASSERT_TRUE(RunPlatformAppTest("api_test/file_system/open_existing"))
         << message_;
   }
@@ -203,8 +226,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
         SetLastChooseEntryDirectory,
         test_file.DirName().Append(
             base::FilePath::FromUTF8Unsafe("fake_directory_does_not_exist")),
-        extensions::ExtensionSystem::Get(
-            profile())->extension_service()->extension_prefs()));
+        ExtensionPrefs::Get(profile())));
     ASSERT_TRUE(RunPlatformAppTest("api_test/file_system/open_existing"))
         << message_;
   }
@@ -222,6 +244,31 @@ IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
   ASSERT_TRUE(RunPlatformAppTest("api_test/file_system/open_existing"))
       << message_;
   CheckStoredDirectoryMatches(test_file);
+}
+
+IN_PROC_BROWSER_TEST_F(FileSystemApiTest, FileSystemApiOpenMultipleSuggested) {
+  base::FilePath test_file = TempFilePath("open_existing.txt", true);
+  ASSERT_FALSE(test_file.empty());
+  ASSERT_TRUE(PathService::OverrideAndCreateIfNeeded(
+      chrome::DIR_USER_DOCUMENTS, test_file.DirName(), false));
+  FileSystemChooseEntryFunction::SkipPickerAndSelectSuggestedPathForTest();
+  ASSERT_TRUE(RunPlatformAppTest(
+      "api_test/file_system/open_multiple_with_suggested_name"))
+      << message_;
+  CheckStoredDirectoryMatches(test_file);
+}
+
+IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
+                       FileSystemApiOpenMultipleExistingFilesTest) {
+  std::vector<std::string> names;
+  names.push_back("open_existing1.txt");
+  names.push_back("open_existing2.txt");
+  std::vector<base::FilePath> test_files = TempFilePaths(names, true);
+  ASSERT_EQ(2u, test_files.size());
+  FileSystemChooseEntryFunction::SkipPickerAndAlwaysSelectPathsForTest(
+      &test_files);
+  ASSERT_TRUE(RunPlatformAppTest("api_test/file_system/open_multiple_existing"))
+      << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
@@ -272,6 +319,20 @@ IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
   ASSERT_TRUE(RunPlatformAppTest(
       "api_test/file_system/open_writable_existing_with_write")) << message_;
   CheckStoredDirectoryMatches(test_file);
+}
+
+IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
+                       FileSystemApiOpenMultipleWritableExistingFilesTest) {
+  std::vector<std::string> names;
+  names.push_back("open_existing1.txt");
+  names.push_back("open_existing2.txt");
+  std::vector<base::FilePath> test_files = TempFilePaths(names, true);
+  ASSERT_EQ(2u, test_files.size());
+  FileSystemChooseEntryFunction::SkipPickerAndAlwaysSelectPathsForTest(
+      &test_files);
+  ASSERT_TRUE(RunPlatformAppTest(
+      "api_test/file_system/open_multiple_writable_existing_with_write"))
+      << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(FileSystemApiTest, FileSystemApiOpenCancelTest) {
@@ -326,6 +387,18 @@ IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
   ASSERT_TRUE(RunPlatformAppTest(
       "api_test/file_system/save_existing_with_write")) << message_;
   CheckStoredDirectoryMatches(test_file);
+}
+
+IN_PROC_BROWSER_TEST_F(FileSystemApiTest, FileSystemApiSaveMultipleFilesTest) {
+  std::vector<std::string> names;
+  names.push_back("save1.txt");
+  names.push_back("save2.txt");
+  std::vector<base::FilePath> test_files = TempFilePaths(names, false);
+  ASSERT_EQ(2u, test_files.size());
+  FileSystemChooseEntryFunction::SkipPickerAndAlwaysSelectPathsForTest(
+      &test_files);
+  ASSERT_TRUE(RunPlatformAppTest("api_test/file_system/save_multiple"))
+      << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(FileSystemApiTest, FileSystemApiSaveCancelTest) {
@@ -392,8 +465,7 @@ IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
   {
     AppInstallObserver observer(
         base::Bind(SetLastChooseEntryDirectoryToAppDirectory,
-                   extensions::ExtensionSystem::Get(
-                       profile())->extension_service()->extension_prefs()));
+                   ExtensionPrefs::Get(profile())));
     ASSERT_TRUE(RunPlatformAppTest(
         "api_test/file_system/get_writable_file_entry_non_writable_file"))
         << message_;
@@ -499,10 +571,11 @@ IN_PROC_BROWSER_TEST_F(FileSystemApiTest,
   {
     AppInstallObserver observer(
         base::Bind(SetLastChooseEntryDirectoryToAppDirectory,
-                   extensions::ExtensionSystem::Get(
-                       profile())->extension_service()->extension_prefs()));
+                   ExtensionPrefs::Get(profile())));
     ASSERT_TRUE(RunPlatformAppTest(
         "api_test/file_system/open_writable_existing_non_writable"))
         << message_;
   }
 }
+
+}  // namespace extensions

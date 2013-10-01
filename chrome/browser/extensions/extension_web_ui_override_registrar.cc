@@ -5,9 +5,9 @@
 #include "chrome/browser/extensions/extension_web_ui_override_registrar.h"
 
 #include "base/lazy_instance.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 
@@ -36,7 +36,7 @@ void ExtensionWebUIOverrideRegistrar::Observe(
 
   } else if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     const Extension* extension =
-        content::Details<const UnloadedExtensionInfo>(details)->extension;
+        content::Details<UnloadedExtensionInfo>(details)->extension;
     ExtensionWebUI::UnregisterChromeURLOverrides(
         profile_, URLOverrides::GetChromeURLOverrides(extension));
   }

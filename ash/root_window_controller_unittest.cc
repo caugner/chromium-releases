@@ -4,7 +4,6 @@
 
 #include "ash/root_window_controller.h"
 
-#include "ash/display/display_controller.h"
 #include "ash/session_state_delegate.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
@@ -197,10 +196,23 @@ TEST_F(RootWindowControllerTest, MoveWindows_Basic) {
 
   // Maximized area on primary display has 3px (given as
   // kAutoHideSize in shelf_layout_manager.cc) inset at the bottom.
+
+  // First clear fullscreen status, since both fullscreen and maximized windows
+  // share the same desktop workspace, which cancels the shelf status.
+  fullscreen->SetFullscreen(false);
   EXPECT_EQ(root_windows[0], maximized->GetNativeView()->GetRootWindow());
   EXPECT_EQ("0,0 600x597",
             maximized->GetWindowBoundsInScreen().ToString());
   EXPECT_EQ("0,0 600x597",
+            maximized->GetNativeView()->GetBoundsInRootWindow().ToString());
+
+  // Set fullscreen to true. In that case the 3px inset becomes invisible so
+  // the maximized window can also use the area fully.
+  fullscreen->SetFullscreen(true);
+  EXPECT_EQ(root_windows[0], maximized->GetNativeView()->GetRootWindow());
+  EXPECT_EQ("0,0 600x600",
+            maximized->GetWindowBoundsInScreen().ToString());
+  EXPECT_EQ("0,0 600x600",
             maximized->GetNativeView()->GetBoundsInRootWindow().ToString());
 
   EXPECT_EQ(root_windows[0], minimized->GetNativeView()->GetRootWindow());
@@ -358,6 +370,55 @@ TEST_F(RootWindowControllerTest, ModalContainerNotLoggedInLoggedIn) {
               session_modal_widget->GetNativeView()));
 }
 
+TEST_F(RootWindowControllerTest, ModalContainerBlockedSession) {
+  UpdateDisplay("600x600");
+  Shell* shell = Shell::GetInstance();
+  internal::RootWindowController* controller =
+      shell->GetPrimaryRootWindowController();
+  aura::Window* lock_container =
+      Shell::GetContainer(controller->root_window(),
+                          internal::kShellWindowId_LockScreenContainer);
+  for (int block_reason = FIRST_BLOCK_REASON;
+       block_reason < NUMBER_OF_BLOCK_REASONS;
+       ++block_reason) {
+    views::Widget* session_modal_widget =
+          CreateModalWidget(gfx::Rect(300, 10, 100, 100));
+    EXPECT_EQ(Shell::GetContainer(controller->root_window(),
+        internal::kShellWindowId_SystemModalContainer)->layout_manager(),
+            controller->GetSystemModalLayoutManager(
+                session_modal_widget->GetNativeView()));
+    EXPECT_EQ(Shell::GetContainer(controller->root_window(),
+        internal::kShellWindowId_SystemModalContainer)->layout_manager(),
+            controller->GetSystemModalLayoutManager(NULL));
+    session_modal_widget->Close();
+
+    BlockUserSession(static_cast<UserSessionBlockReason>(block_reason));
+
+    EXPECT_EQ(Shell::GetContainer(controller->root_window(),
+        internal::kShellWindowId_LockSystemModalContainer)->layout_manager(),
+            controller->GetSystemModalLayoutManager(NULL));
+
+    views::Widget* lock_modal_widget =
+        CreateModalWidgetWithParent(gfx::Rect(300, 10, 100, 100),
+                                    lock_container);
+    EXPECT_EQ(Shell::GetContainer(controller->root_window(),
+        internal::kShellWindowId_LockSystemModalContainer)->layout_manager(),
+              controller->GetSystemModalLayoutManager(
+                  lock_modal_widget->GetNativeView()));
+
+    session_modal_widget =
+          CreateModalWidget(gfx::Rect(300, 10, 100, 100));
+    EXPECT_EQ(Shell::GetContainer(controller->root_window(),
+        internal::kShellWindowId_SystemModalContainer)->layout_manager(),
+            controller->GetSystemModalLayoutManager(
+                session_modal_widget->GetNativeView()));
+    session_modal_widget->Close();
+
+    lock_modal_widget->Close();
+    UnblockUserSession();
+  }
+}
+
 // Test that GetFullscreenWindow() returns a fullscreen window only if the
 // fullscreen window is in the active workspace.
 TEST_F(RootWindowControllerTest, GetFullscreenWindow) {
@@ -378,14 +439,57 @@ TEST_F(RootWindowControllerTest, GetFullscreenWindow) {
   w3->Activate();
   EXPECT_EQ(w2->GetNativeWindow(), controller->GetFullscreenWindow());
 
-  // Activate the maximized window's workspace. GetFullscreenWindow() should
-  // fail because the fullscreen window's workspace is no longer active.
+  // Since there's only one desktop workspace, it always returns the same
+  // fullscreen window.
   w1->Activate();
-  EXPECT_FALSE(controller->GetFullscreenWindow());
-
-  // If the fullscreen window is active, GetFullscreenWindow() should find it.
-  w2->Activate();
   EXPECT_EQ(w2->GetNativeWindow(), controller->GetFullscreenWindow());
+}
+
+// Test that user session window can't be focused if user session blocked by
+// some overlapping UI.
+TEST_F(RootWindowControllerTest, FocusBlockedWindow) {
+  UpdateDisplay("600x600");
+  internal::RootWindowController* controller =
+      Shell::GetInstance()->GetPrimaryRootWindowController();
+  aura::Window* lock_container =
+      Shell::GetContainer(controller->root_window(),
+                          internal::kShellWindowId_LockScreenContainer);
+  aura::Window* lock_window = Widget::CreateWindowWithParentAndBounds(NULL,
+      lock_container, gfx::Rect(0, 0, 100, 100))->GetNativeView();
+  lock_window->Show();
+  aura::Window* session_window =
+      CreateTestWidget(gfx::Rect(0, 0, 100, 100))->GetNativeView();
+  session_window->Show();
+
+  for (int block_reason = FIRST_BLOCK_REASON;
+       block_reason < NUMBER_OF_BLOCK_REASONS;
+       ++block_reason) {
+    BlockUserSession(static_cast<UserSessionBlockReason>(block_reason));
+    lock_window->Focus();
+    EXPECT_TRUE(lock_window->HasFocus());
+    session_window->Focus();
+    EXPECT_FALSE(session_window->HasFocus());
+    UnblockUserSession();
+  }
+}
+
+typedef test::NoSessionAshTestBase NoSessionRootWindowControllerTest;
+
+// Make sure that an event handler exists for entire display area.
+TEST_F(NoSessionRootWindowControllerTest, Event) {
+  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  const gfx::Size size = root->bounds().size();
+  aura::Window* event_target = root->GetEventHandlerForPoint(gfx::Point(0, 0));
+  EXPECT_TRUE(event_target);
+  EXPECT_EQ(event_target,
+            root->GetEventHandlerForPoint(gfx::Point(0, size.height() - 1)));
+  EXPECT_EQ(event_target,
+            root->GetEventHandlerForPoint(gfx::Point(size.width() - 1, 0)));
+  EXPECT_EQ(event_target,
+            root->GetEventHandlerForPoint(gfx::Point(0, size.height() - 1)));
+  EXPECT_EQ(event_target,
+            root->GetEventHandlerForPoint(
+                gfx::Point(size.width() - 1, size.height() - 1)));
 }
 
 }  // namespace test

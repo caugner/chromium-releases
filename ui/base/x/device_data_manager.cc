@@ -13,6 +13,7 @@
 #include "base/message_loop/message_pump_aurax11.h"
 #include "ui/base/events/event_constants.h"
 #include "ui/base/events/event_utils.h"
+#include "ui/base/touch/touch_factory_x11.h"
 #include "ui/base/x/device_list_cache_x.h"
 #include "ui/base/x/x11_util.h"
 
@@ -20,6 +21,14 @@
 // for backward-compatibility with older versions of XInput.
 #if !defined(XIScrollClass)
 #define XIScrollClass 3
+#endif
+
+// Multi-touch support was introduced in XI 2.2. Add XI event types here
+// for backward-compatibility with older versions of XInput.
+#if !defined(XI_TouchBegin)
+#define XI_TouchBegin  18
+#define XI_TouchUpdate 19
+#define XI_TouchEnd    20
 #endif
 
 // Copied from xserver-properties.h
@@ -109,12 +118,52 @@ DeviceDataManager* DeviceDataManager::GetInstance() {
 DeviceDataManager::DeviceDataManager()
     : natural_scroll_enabled_(false),
       atom_cache_(ui::GetXDisplay(), kCachedAtoms) {
+  InitializeXInputInternal();
+
   // Make sure the sizes of enum and kCachedAtoms are aligned.
   CHECK(arraysize(kCachedAtoms) == static_cast<size_t>(DT_LAST_ENTRY) + 1);
   UpdateDeviceList(ui::GetXDisplay());
 }
 
 DeviceDataManager::~DeviceDataManager() {
+}
+
+bool DeviceDataManager::InitializeXInputInternal() {
+  // Check if XInput is available on the system.
+  xi_opcode_ = -1;
+  int opcode, event, error;
+  if (!XQueryExtension(
+      ui::GetXDisplay(), "XInputExtension", &opcode, &event, &error)) {
+    VLOG(1) << "X Input extension not available: error=" << error;
+    return false;
+  }
+  xi_opcode_ = opcode;
+
+  // Check the XInput version.
+#if defined(USE_XI2_MT)
+  int major = 2, minor = USE_XI2_MT;
+#else
+  int major = 2, minor = 0;
+#endif
+  if (XIQueryVersion(ui::GetXDisplay(), &major, &minor) == BadRequest) {
+    VLOG(1) << "XInput2 not supported in the server.";
+    return false;
+  }
+
+  // Possible XI event types for XIDeviceEvent. See the XI2 protocol
+  // specification.
+  xi_device_event_types_[XI_KeyPress] = true;
+  xi_device_event_types_[XI_KeyRelease] = true;
+  xi_device_event_types_[XI_ButtonPress] = true;
+  xi_device_event_types_[XI_ButtonRelease] = true;
+  xi_device_event_types_[XI_Motion] = true;
+  // Multi-touch support was introduced in XI 2.2.
+  if (minor >= 2) {
+    xi_device_event_types_[XI_TouchBegin] = true;
+    xi_device_event_types_[XI_TouchUpdate] = true;
+    xi_device_event_types_[XI_TouchEnd] = true;
+  }
+  return true;
 }
 
 float DeviceDataManager::GetNaturalScrollFactor(int sourceid) const {
@@ -134,7 +183,8 @@ void DeviceDataManager::UpdateDeviceList(Display* display) {
     data_type_lookup_[i].clear();
     valuator_min_[i].clear();
     valuator_max_[i].clear();
-    last_seen_valuator_[i].clear();
+    for (int j = 0; j < kMaxSlotNum; j++)
+      last_seen_valuator_[i][j].clear();
   }
 
   // Find all the touchpad devices.
@@ -179,7 +229,8 @@ void DeviceDataManager::UpdateDeviceList(Display* display) {
         valuator_count_[deviceid], DT_LAST_ENTRY);
     valuator_min_[deviceid].resize(DT_LAST_ENTRY, 0);
     valuator_max_[deviceid].resize(DT_LAST_ENTRY, 0);
-    last_seen_valuator_[deviceid].resize(DT_LAST_ENTRY, 0);
+    for (int j = 0; j < kMaxSlotNum; j++)
+      last_seen_valuator_[deviceid][j].resize(DT_LAST_ENTRY, 0);
     for (int j = 0; j < info->num_classes; ++j) {
       if (info->classes[j]->type != XIValuatorClass)
         continue;
@@ -204,6 +255,20 @@ void DeviceDataManager::UpdateDeviceList(Display* display) {
   }
 }
 
+bool DeviceDataManager::GetSlotNumber(const XIDeviceEvent* xiev, int* slot) {
+#if defined(USE_XI2_MT)
+  ui::TouchFactory* factory = ui::TouchFactory::GetInstance();
+  if (!factory->IsMultiTouchDevice(xiev->sourceid)) {
+    *slot = 0;
+    return true;
+  }
+  return factory->QuerySlotForTrackingID(xiev->detail, slot);
+#else
+  *slot = 0;
+  return true;
+#endif
+}
+
 void DeviceDataManager::GetEventRawData(const XEvent& xev, EventData* data) {
   if (xev.type != GenericEvent)
     return;
@@ -219,8 +284,11 @@ void DeviceDataManager::GetEventRawData(const XEvent& xev, EventData* data) {
       int type = data_type_lookup_[sourceid][i];
       if (type != DT_LAST_ENTRY) {
         (*data)[type] = *valuators;
-        if (IsTouchDataType(type))
-          last_seen_valuator_[sourceid][type] = *valuators;
+        if (IsTouchDataType(type)) {
+          int slot = -1;
+          if (GetSlotNumber(xiev, &slot) && slot >= 0 && slot < kMaxSlotNum)
+            last_seen_valuator_[sourceid][slot][type] = *valuators;
+        }
       }
       valuators++;
     }
@@ -239,22 +307,6 @@ bool DeviceDataManager::GetEventData(const XEvent& xev,
   if (valuator_lookup_[sourceid].empty())
     return false;
 
-  int val_index = valuator_lookup_[sourceid][type];
-  if (val_index >= 0) {
-    if (XIMaskIsSet(xiev->valuators.mask, val_index)) {
-      double* valuators = xiev->valuators.values;
-      while (val_index--) {
-        if (XIMaskIsSet(xiev->valuators.mask, val_index))
-          ++valuators;
-      }
-      *value = *valuators;
-      last_seen_valuator_[sourceid][type] = *value;
-      return true;
-    } else if (IsTouchDataType(type)) {
-      *value = last_seen_valuator_[sourceid][type];
-    }
-  }
-
 #if defined(USE_XI2_MT)
   // With XInput2 MT, Tracking ID is provided in the detail field.
   if (type == DT_TOUCH_TRACKING_ID) {
@@ -263,7 +315,36 @@ bool DeviceDataManager::GetEventData(const XEvent& xev,
   }
 #endif
 
+  int val_index = valuator_lookup_[sourceid][type];
+  int slot = 0;
+  if (val_index >= 0) {
+    if (XIMaskIsSet(xiev->valuators.mask, val_index)) {
+      double* valuators = xiev->valuators.values;
+      while (val_index--) {
+        if (XIMaskIsSet(xiev->valuators.mask, val_index))
+          ++valuators;
+      }
+      *value = *valuators;
+      if (IsTouchDataType(type)) {
+        if (GetSlotNumber(xiev, &slot) && slot >= 0 && slot < kMaxSlotNum)
+          last_seen_valuator_[sourceid][slot][type] = *value;
+      }
+      return true;
+    } else if (IsTouchDataType(type)) {
+      if (GetSlotNumber(xiev, &slot) && slot >= 0 && slot < kMaxSlotNum)
+        *value = last_seen_valuator_[sourceid][slot][type];
+    }
+  }
+
   return false;
+}
+
+bool DeviceDataManager::IsXIDeviceEvent(
+    const base::NativeEvent& native_event) const {
+  if (native_event->type != GenericEvent ||
+      native_event->xcookie.extension != xi_opcode_)
+    return false;
+  return xi_device_event_types_[native_event->xcookie.evtype];
 }
 
 bool DeviceDataManager::IsTouchpadXInputEvent(
@@ -470,4 +551,37 @@ bool DeviceDataManager::GetDataRange(unsigned int deviceid,
   return false;
 }
 
+void DeviceDataManager::SetDeviceListForTest(
+    const std::vector<unsigned int>& devices) {
+  for (int i = 0; i < kMaxDeviceNum; ++i) {
+    valuator_count_[i] = 0;
+    valuator_lookup_[i].clear();
+    data_type_lookup_[i].clear();
+    valuator_min_[i].clear();
+    valuator_max_[i].clear();
+    for (int j = 0; j < kMaxSlotNum; j++)
+      last_seen_valuator_[i][j].clear();
+  }
+
+  for (size_t i = 0; i < devices.size(); i++) {
+    unsigned int deviceid = devices[i];
+    valuator_lookup_[deviceid].resize(DT_LAST_ENTRY, -1);
+    data_type_lookup_[deviceid].resize(DT_LAST_ENTRY, DT_LAST_ENTRY);
+    valuator_min_[deviceid].resize(DT_LAST_ENTRY, 0);
+    valuator_max_[deviceid].resize(DT_LAST_ENTRY, 0);
+    for (int j = 0; j < kMaxSlotNum; j++)
+      last_seen_valuator_[deviceid][j].resize(DT_LAST_ENTRY, 0);
+  }
+}
+
+void DeviceDataManager::SetDeviceValuatorForTest(int deviceid,
+                                                 int val_index,
+                                                 DataType data_type,
+                                                 double min,
+                                                 double max) {
+  valuator_lookup_[deviceid][data_type] = val_index;
+  data_type_lookup_[deviceid][val_index] = data_type;
+  valuator_min_[deviceid][data_type] = min;
+  valuator_max_[deviceid][data_type] = max;
+}
 }  // namespace ui

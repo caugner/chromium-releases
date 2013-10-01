@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/memory/ref_counted.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/policy_oauth2_token_fetcher.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
@@ -26,12 +25,21 @@ namespace policy {
 UserCloudPolicyManagerChromeOS::UserCloudPolicyManagerChromeOS(
     scoped_ptr<CloudPolicyStore> store,
     scoped_ptr<ResourceCache> resource_cache,
-    bool wait_for_policy_fetch)
+    bool wait_for_policy_fetch,
+    base::TimeDelta initial_policy_fetch_timeout)
     : CloudPolicyManager(
           PolicyNamespaceKey(dm_protocol::kChromeUserPolicyType, std::string()),
           store.get()),
       store_(store.Pass()),
-      wait_for_policy_fetch_(wait_for_policy_fetch) {
+      wait_for_policy_fetch_(wait_for_policy_fetch),
+      policy_fetch_timeout_(false, false) {
+  if (wait_for_policy_fetch_) {
+    policy_fetch_timeout_.Start(
+        FROM_HERE,
+        initial_policy_fetch_timeout,
+        base::Bind(&UserCloudPolicyManagerChromeOS::CancelWaitForPolicyFetch,
+                   base::Unretained(this)));
+  }
   if (resource_cache) {
     component_policy_service_.reset(new ComponentCloudPolicyService(
         this, store_.get(), resource_cache.Pass()));
@@ -65,13 +73,13 @@ void UserCloudPolicyManagerChromeOS::Connect(
   }
 }
 
-void UserCloudPolicyManagerChromeOS::OnRefreshTokenAvailable(
-    const std::string& refresh_token) {
-  oauth2_login_tokens_.refresh_token = refresh_token;
-  if (!oauth2_login_tokens_.refresh_token.empty() &&
-      service() && service()->IsInitializationComplete() &&
+void UserCloudPolicyManagerChromeOS::OnAccessTokenAvailable(
+    const std::string& access_token) {
+  access_token_ = access_token;
+  if (service() && service()->IsInitializationComplete() &&
       client() && !client()->is_registered()) {
-    FetchPolicyOAuthTokenUsingRefreshToken();
+    OnOAuth2PolicyTokenFetched(
+        access_token, GoogleServiceAuthError(GoogleServiceAuthError::NONE));
   }
 }
 
@@ -130,15 +138,16 @@ void UserCloudPolicyManagerChromeOS::OnInitializationCompleted(
   // fetch a refresh token, and then the policy token is fetched.
   //
   // If |wait_for_policy_fetch_| is false then the UserCloudPolicyTokenForwarder
-  // service will eventually call OnRefreshTokenAvailable() once the
-  // TokenService has one. That call may have already happened while waiting for
-  // initialization of the CloudPolicyService, so in that case check if a
-  // refresh token is already available.
+  // service will eventually call OnAccessTokenAvailable() once an access token
+  // is available. That call may have already happened while waiting for
+  // initialization of the CloudPolicyService, so in that case check if an
+  // access token is already available.
   if (!client()->is_registered()) {
     if (wait_for_policy_fetch_) {
       FetchPolicyOAuthTokenUsingSigninProfile();
-    } else if (!oauth2_login_tokens_.refresh_token.empty()) {
-      FetchPolicyOAuthTokenUsingRefreshToken();
+    } else if (!access_token_.empty()) {
+      OnOAuth2PolicyTokenFetched(
+          access_token_, GoogleServiceAuthError(GoogleServiceAuthError::NONE));
     }
   }
 
@@ -148,7 +157,7 @@ void UserCloudPolicyManagerChromeOS::OnInitializationCompleted(
     // Start the refresh scheduler now, which will eventually refresh the
     // cached policy or make the first fetch once the OAuth2 token is
     // available.
-    StartRefreshScheduler();
+    StartRefreshSchedulerIfReady();
   }
 }
 
@@ -188,7 +197,7 @@ void UserCloudPolicyManagerChromeOS::OnComponentCloudPolicyRefreshNeeded() {
 
 void UserCloudPolicyManagerChromeOS::OnComponentCloudPolicyUpdated() {
   CheckAndPublishPolicy();
-  StartRefreshScheduler();
+  StartRefreshSchedulerIfReady();
 }
 
 void UserCloudPolicyManagerChromeOS::FetchPolicyOAuthTokenUsingSigninProfile() {
@@ -198,7 +207,8 @@ void UserCloudPolicyManagerChromeOS::FetchPolicyOAuthTokenUsingSigninProfile() {
     signin_context = signin_profile->GetRequestContext();
   if (!signin_context.get()) {
     LOG(ERROR) << "No signin Profile for policy oauth token fetch!";
-    OnOAuth2PolicyTokenFetched(std::string());
+    OnOAuth2PolicyTokenFetched(
+        std::string(), GoogleServiceAuthError(GoogleServiceAuthError::NONE));
     return;
   }
 
@@ -210,31 +220,18 @@ void UserCloudPolicyManagerChromeOS::FetchPolicyOAuthTokenUsingSigninProfile() {
   token_fetcher_->Start();
 }
 
-void UserCloudPolicyManagerChromeOS::FetchPolicyOAuthTokenUsingRefreshToken() {
-  token_fetcher_.reset(new PolicyOAuth2TokenFetcher(
-      g_browser_process->system_request_context(),
-      oauth2_login_tokens_.refresh_token,
-      base::Bind(&UserCloudPolicyManagerChromeOS::OnOAuth2PolicyTokenFetched,
-                 base::Unretained(this))));
-  token_fetcher_->Start();
-}
-
 void UserCloudPolicyManagerChromeOS::OnOAuth2PolicyTokenFetched(
-    const std::string& policy_token) {
+    const std::string& policy_token,
+    const GoogleServiceAuthError& error) {
   DCHECK(!client()->is_registered());
-  // The TokenService will reuse the refresh token fetched by the
-  // |token_fetcher_|, if it fetched one.
-  if (token_fetcher_->has_oauth2_tokens())
-    oauth2_login_tokens_ = token_fetcher_->oauth2_tokens();
-
-  if (policy_token.empty()) {
-    // Failed to get a token, stop waiting and use an empty policy.
-    CancelWaitForPolicyFetch();
-  } else {
+  if (error.state() == GoogleServiceAuthError::NONE) {
     // Start client registration. Either OnRegistrationStateChanged() or
     // OnClientError() will be called back.
     client()->Register(em::DeviceRegisterRequest::USER,
                        policy_token, std::string(), false, std::string());
+  } else {
+    // Failed to get a token, stop waiting and use an empty policy.
+    CancelWaitForPolicyFetch();
   }
 
   token_fetcher_.reset();
@@ -246,14 +243,17 @@ void UserCloudPolicyManagerChromeOS::OnInitialPolicyFetchComplete(
 }
 
 void UserCloudPolicyManagerChromeOS::CancelWaitForPolicyFetch() {
+  if (!wait_for_policy_fetch_)
+    return;
+
   wait_for_policy_fetch_ = false;
   CheckAndPublishPolicy();
   // Now that |wait_for_policy_fetch_| is guaranteed to be false, the scheduler
   // can be started.
-  StartRefreshScheduler();
+  StartRefreshSchedulerIfReady();
 }
 
-void UserCloudPolicyManagerChromeOS::StartRefreshScheduler() {
+void UserCloudPolicyManagerChromeOS::StartRefreshSchedulerIfReady() {
   if (core()->refresh_scheduler())
     return;  // Already started.
 
@@ -271,7 +271,7 @@ void UserCloudPolicyManagerChromeOS::StartRefreshScheduler() {
     return;
   }
 
-  core()->StartRefreshScheduler();
+  StartRefreshScheduler();
   core()->TrackRefreshDelayPref(local_state_, prefs::kUserPolicyRefreshRate);
 }
 

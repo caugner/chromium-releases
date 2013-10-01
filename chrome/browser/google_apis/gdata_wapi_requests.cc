@@ -4,33 +4,25 @@
 
 #include "chrome/browser/google_apis/gdata_wapi_requests.h"
 
+#include "base/location.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
+#include "chrome/browser/google_apis/request_sender.h"
 #include "chrome/browser/google_apis/request_util.h"
 #include "chrome/browser/google_apis/time_util.h"
-#include "content/public/browser/browser_thread.h"
 #include "net/base/escape.h"
 #include "net/base/url_util.h"
 #include "third_party/libxml/chromium/libxml_utils.h"
 
-using content::BrowserThread;
 using net::URLFetcher;
 
 namespace google_apis {
 
 namespace {
-
-const char kUploadContentRange[] = "Content-Range: bytes ";
-
-const char kFeedField[] = "feed";
-
-// Templates for file uploading.
-const char kUploadResponseRange[] = "range";
 
 // Parses the JSON value to ResourceList.
 scoped_ptr<ResourceList> ParseResourceListOnBlockingPool(
@@ -40,13 +32,12 @@ scoped_ptr<ResourceList> ParseResourceListOnBlockingPool(
   return ResourceList::ExtractAndParse(*value);
 }
 
-// Runs |callback| with |error| and |value|, but replace the error code with
-// GDATA_PARSE_ERROR, if there was a parsing error.
+// Runs |callback| with |error| and |resource_list|, but replace the error code
+// with GDATA_PARSE_ERROR, if there was a parsing error.
 void DidParseResourceListOnBlockingPool(
     const GetResourceListCallback& callback,
     GDataErrorCode error,
     scoped_ptr<ResourceList> resource_list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
   // resource_list being NULL indicates there was a parsing error.
@@ -58,10 +49,11 @@ void DidParseResourceListOnBlockingPool(
 
 // Parses the JSON value to ResourceList on the blocking pool and runs
 // |callback| on the UI thread once parsing is done.
-void ParseResourceListAndRun(const GetResourceListCallback& callback,
-                             GDataErrorCode error,
-                             scoped_ptr<base::Value> value) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+void ParseResourceListAndRun(
+    scoped_refptr<base::TaskRunner> blocking_task_runner,
+    const GetResourceListCallback& callback,
+    GDataErrorCode error,
+    scoped_ptr<base::Value> value) {
   DCHECK(!callback.is_null());
 
   if (!value) {
@@ -70,7 +62,7 @@ void ParseResourceListAndRun(const GetResourceListCallback& callback,
   }
 
   base::PostTaskAndReplyWithResult(
-      BrowserThread::GetBlockingPool(),
+      blocking_task_runner,
       FROM_HERE,
       base::Bind(&ParseResourceListOnBlockingPool, base::Passed(&value)),
       base::Bind(&DidParseResourceListOnBlockingPool, callback, error));
@@ -81,7 +73,6 @@ void ParseResourceListAndRun(const GetResourceListCallback& callback,
 void ParseAccounetMetadataAndRun(const GetAccountMetadataCallback& callback,
                                  GDataErrorCode error,
                                  scoped_ptr<base::Value> value) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
   if (!value) {
@@ -122,7 +113,6 @@ void ParseOpenLinkAndRun(const std::string& app_id,
                          const AuthorizeAppCallback& callback,
                          GDataErrorCode error,
                          scoped_ptr<base::Value> value) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
   if (!value) {
@@ -159,16 +149,18 @@ void ParseOpenLinkAndRun(const std::string& app_id,
 //============================ GetResourceListRequest ========================
 
 GetResourceListRequest::GetResourceListRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const GURL& override_url,
     int64 start_changestamp,
     const std::string& search_string,
     const std::string& directory_resource_id,
     const GetResourceListCallback& callback)
-    : GetDataRequest(runner, url_request_context_getter,
-                     base::Bind(&ParseResourceListAndRun, callback)),
+    : GetDataRequest(
+          sender,
+          base::Bind(&ParseResourceListAndRun,
+                     make_scoped_refptr(sender->blocking_task_runner()),
+                     callback)),
       url_generator_(url_generator),
       override_url_(override_url),
       start_changestamp_(start_changestamp),
@@ -189,14 +181,16 @@ GURL GetResourceListRequest::GetURL() const {
 //============================ SearchByTitleRequest ==========================
 
 SearchByTitleRequest::SearchByTitleRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const std::string& title,
     const std::string& directory_resource_id,
     const GetResourceListCallback& callback)
-    : GetDataRequest(runner, url_request_context_getter,
-                     base::Bind(&ParseResourceListAndRun, callback)),
+    : GetDataRequest(
+          sender,
+          base::Bind(&ParseResourceListAndRun,
+                     make_scoped_refptr(sender->blocking_task_runner()),
+                     callback)),
       url_generator_(url_generator),
       title_(title),
       directory_resource_id_(directory_resource_id) {
@@ -213,32 +207,33 @@ GURL SearchByTitleRequest::GetURL() const {
 //============================ GetResourceEntryRequest =======================
 
 GetResourceEntryRequest::GetResourceEntryRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const std::string& resource_id,
+    const GURL& embed_origin,
     const GetDataCallback& callback)
-    : GetDataRequest(runner, url_request_context_getter, callback),
+    : GetDataRequest(sender, callback),
       url_generator_(url_generator),
-      resource_id_(resource_id) {
+      resource_id_(resource_id),
+      embed_origin_(embed_origin) {
   DCHECK(!callback.is_null());
 }
 
 GetResourceEntryRequest::~GetResourceEntryRequest() {}
 
 GURL GetResourceEntryRequest::GetURL() const {
-  return url_generator_.GenerateEditUrl(resource_id_);
+  return url_generator_.GenerateEditUrlWithEmbedOrigin(
+      resource_id_, embed_origin_);
 }
 
 //========================= GetAccountMetadataRequest ========================
 
 GetAccountMetadataRequest::GetAccountMetadataRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const GetAccountMetadataCallback& callback,
     bool include_installed_apps)
-    : GetDataRequest(runner, url_request_context_getter,
+    : GetDataRequest(sender,
                      base::Bind(&ParseAccounetMetadataAndRun, callback)),
       url_generator_(url_generator),
       include_installed_apps_(include_installed_apps) {
@@ -254,13 +249,12 @@ GURL GetAccountMetadataRequest::GetURL() const {
 //=========================== DeleteResourceRequest ==========================
 
 DeleteResourceRequest::DeleteResourceRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const EntryActionCallback& callback,
     const std::string& resource_id,
     const std::string& etag)
-    : EntryActionRequest(runner, url_request_context_getter, callback),
+    : EntryActionRequest(sender, callback),
       url_generator_(url_generator),
       resource_id_(resource_id),
       etag_(etag) {
@@ -287,16 +281,15 @@ DeleteResourceRequest::GetExtraRequestHeaders() const {
 //========================== CreateDirectoryRequest ==========================
 
 CreateDirectoryRequest::CreateDirectoryRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const GetDataCallback& callback,
     const std::string& parent_resource_id,
-    const std::string& directory_name)
-    : GetDataRequest(runner, url_request_context_getter, callback),
+    const std::string& directory_title)
+    : GetDataRequest(sender, callback),
       url_generator_(url_generator),
       parent_resource_id_(parent_resource_id),
-      directory_name_(directory_name) {
+      directory_title_(directory_title) {
   DCHECK(!callback.is_null());
 }
 
@@ -326,7 +319,7 @@ bool CreateDirectoryRequest::GetContentData(std::string* upload_content_type,
                           "http://schemas.google.com/docs/2007#folder");
   xml_writer.EndElement();  // Ends "category" element.
 
-  xml_writer.WriteElement("title", directory_name_);
+  xml_writer.WriteElement("title", directory_title_);
 
   xml_writer.EndElement();  // Ends "entry" element.
   xml_writer.StopWriting();
@@ -339,16 +332,15 @@ bool CreateDirectoryRequest::GetContentData(std::string* upload_content_type,
 //============================ CopyHostedDocumentRequest =====================
 
 CopyHostedDocumentRequest::CopyHostedDocumentRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const GetDataCallback& callback,
     const std::string& resource_id,
-    const std::string& new_name)
-    : GetDataRequest(runner, url_request_context_getter, callback),
+    const std::string& new_title)
+    : GetDataRequest(sender, callback),
       url_generator_(url_generator),
       resource_id_(resource_id),
-      new_name_(new_name) {
+      new_title_(new_title) {
   DCHECK(!callback.is_null());
 }
 
@@ -372,7 +364,7 @@ bool CopyHostedDocumentRequest::GetContentData(
   xml_writer.AddAttribute("xmlns", "http://www.w3.org/2005/Atom");
 
   xml_writer.WriteElement("id", resource_id_);
-  xml_writer.WriteElement("title", new_name_);
+  xml_writer.WriteElement("title", new_title_);
 
   xml_writer.EndElement();  // Ends "entry" element.
   xml_writer.StopWriting();
@@ -385,16 +377,15 @@ bool CopyHostedDocumentRequest::GetContentData(
 //=========================== RenameResourceRequest ==========================
 
 RenameResourceRequest::RenameResourceRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const EntryActionCallback& callback,
     const std::string& resource_id,
-    const std::string& new_name)
-    : EntryActionRequest(runner, url_request_context_getter, callback),
+    const std::string& new_title)
+    : EntryActionRequest(sender, callback),
       url_generator_(url_generator),
       resource_id_(resource_id),
-      new_name_(new_name) {
+      new_title_(new_title) {
   DCHECK(!callback.is_null());
 }
 
@@ -423,7 +414,7 @@ bool RenameResourceRequest::GetContentData(std::string* upload_content_type,
   xml_writer.StartElement("entry");
   xml_writer.AddAttribute("xmlns", "http://www.w3.org/2005/Atom");
 
-  xml_writer.WriteElement("title", new_name_);
+  xml_writer.WriteElement("title", new_title_);
 
   xml_writer.EndElement();  // Ends "entry" element.
   xml_writer.StopWriting();
@@ -436,13 +427,12 @@ bool RenameResourceRequest::GetContentData(std::string* upload_content_type,
 //=========================== AuthorizeAppRequest ==========================
 
 AuthorizeAppRequest::AuthorizeAppRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const AuthorizeAppCallback& callback,
     const std::string& resource_id,
     const std::string& app_id)
-    : GetDataRequest(runner, url_request_context_getter,
+    : GetDataRequest(sender,
                      base::Bind(&ParseOpenLinkAndRun, app_id, callback)),
       url_generator_(url_generator),
       resource_id_(resource_id),
@@ -488,13 +478,12 @@ GURL AuthorizeAppRequest::GetURL() const {
 //======================= AddResourceToDirectoryRequest ======================
 
 AddResourceToDirectoryRequest::AddResourceToDirectoryRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const EntryActionCallback& callback,
     const std::string& parent_resource_id,
     const std::string& resource_id)
-    : EntryActionRequest(runner, url_request_context_getter, callback),
+    : EntryActionRequest(sender, callback),
       url_generator_(url_generator),
       parent_resource_id_(parent_resource_id),
       resource_id_(resource_id) {
@@ -534,13 +523,12 @@ bool AddResourceToDirectoryRequest::GetContentData(
 //==================== RemoveResourceFromDirectoryRequest ====================
 
 RemoveResourceFromDirectoryRequest::RemoveResourceFromDirectoryRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const EntryActionCallback& callback,
     const std::string& parent_resource_id,
     const std::string& document_resource_id)
-    : EntryActionRequest(runner, url_request_context_getter, callback),
+    : EntryActionRequest(sender, callback),
       url_generator_(url_generator),
       resource_id_(document_resource_id),
       parent_resource_id_(parent_resource_id) {
@@ -570,16 +558,14 @@ RemoveResourceFromDirectoryRequest::GetExtraRequestHeaders() const {
 //======================= InitiateUploadNewFileRequest =======================
 
 InitiateUploadNewFileRequest::InitiateUploadNewFileRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const InitiateUploadCallback& callback,
     const std::string& content_type,
     int64 content_length,
     const std::string& parent_resource_id,
     const std::string& title)
-    : InitiateUploadRequestBase(runner,
-                                url_request_context_getter,
+    : InitiateUploadRequestBase(sender,
                                 callback,
                                 content_type,
                                 content_length),
@@ -621,16 +607,14 @@ bool InitiateUploadNewFileRequest::GetContentData(
 //===================== InitiateUploadExistingFileRequest ====================
 
 InitiateUploadExistingFileRequest::InitiateUploadExistingFileRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const GDataWapiUrlGenerator& url_generator,
     const InitiateUploadCallback& callback,
     const std::string& content_type,
     int64 content_length,
     const std::string& resource_id,
     const std::string& etag)
-    : InitiateUploadRequestBase(runner,
-                                url_request_context_getter,
+    : InitiateUploadRequestBase(sender,
                                 callback,
                                 content_type,
                                 content_length),
@@ -673,8 +657,7 @@ InitiateUploadExistingFileRequest::GetExtraRequestHeaders() const {
 //============================ ResumeUploadRequest ===========================
 
 ResumeUploadRequest::ResumeUploadRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const UploadRangeCallback& callback,
     const ProgressCallback& progress_callback,
     const GURL& upload_location,
@@ -683,8 +666,7 @@ ResumeUploadRequest::ResumeUploadRequest(
     int64 content_length,
     const std::string& content_type,
     const base::FilePath& local_file_path)
-    : ResumeUploadRequestBase(runner,
-                              url_request_context_getter,
+    : ResumeUploadRequestBase(sender,
                               upload_location,
                               start_position,
                               end_position,
@@ -712,15 +694,11 @@ void ResumeUploadRequest::OnURLFetchUploadProgress(
 //========================== GetUploadStatusRequest ==========================
 
 GetUploadStatusRequest::GetUploadStatusRequest(
-    RequestSender* runner,
-    net::URLRequestContextGetter* url_request_context_getter,
+    RequestSender* sender,
     const UploadRangeCallback& callback,
     const GURL& upload_url,
     int64 content_length)
-    : GetUploadStatusRequestBase(runner,
-                                 url_request_context_getter,
-                                 upload_url,
-                                 content_length),
+    : GetUploadStatusRequestBase(sender, upload_url, content_length),
       callback_(callback) {
   DCHECK(!callback.is_null());
 }
@@ -730,6 +708,29 @@ GetUploadStatusRequest::~GetUploadStatusRequest() {}
 void GetUploadStatusRequest::OnRangeRequestComplete(
     const UploadRangeResponse& response, scoped_ptr<base::Value> value) {
   callback_.Run(response, ParseResourceEntry(value.Pass()));
+}
+
+
+//========================== DownloadFileRequest ==========================
+
+DownloadFileRequest::DownloadFileRequest(
+    RequestSender* sender,
+    const GDataWapiUrlGenerator& url_generator,
+    const DownloadActionCallback& download_action_callback,
+    const GetContentCallback& get_content_callback,
+    const ProgressCallback& progress_callback,
+    const std::string& resource_id,
+    const base::FilePath& output_file_path)
+    : DownloadFileRequestBase(
+          sender,
+          download_action_callback,
+          get_content_callback,
+          progress_callback,
+          url_generator.GenerateDownloadFileUrl(resource_id),
+          output_file_path) {
+}
+
+DownloadFileRequest::~DownloadFileRequest() {
 }
 
 }  // namespace google_apis

@@ -11,7 +11,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 
 namespace base {
@@ -47,6 +47,10 @@ class SyncClient {
   enum SyncType {
     FETCH,  // Fetch a file from the Drive server.
     UPLOAD,  // Upload a file to the Drive server.
+    UPLOAD_NO_CONTENT_CHECK,  // Upload a file without checking if the file is
+                              // really modified. This type is used for upload
+                              // retry tasks that should have already run the
+                              // check at least once.
   };
 
   SyncClient(base::SequencedTaskRunner* blocking_task_runner,
@@ -87,7 +91,9 @@ class SyncClient {
  private:
   // Adds the given task to the queue. If the same task is queued, remove the
   // existing one, and adds a new one to the end of the queue.
-  void AddTaskToQueue(SyncType type, const std::string& resource_id);
+  void AddTaskToQueue(SyncType type,
+                      const std::string& resource_id,
+                      const base::TimeDelta& delay);
 
   // Called when a task is ready to be added to the queue.
   void StartTask(SyncType type, const std::string& resource_id);
@@ -149,8 +155,11 @@ class SyncClient {
   // removed before starting, they will be cancelled.
   std::set<std::string> pending_fetch_list_;
 
-  // The delay is used for delaying processing SyncTasks in DoSyncLoop().
+  // The delay is used for delaying processing tasks in AddTaskToQueue().
   base::TimeDelta delay_;
+
+  // The delay is used for delaying retry of tasks on server errors.
+  base::TimeDelta long_delay_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

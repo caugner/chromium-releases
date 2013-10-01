@@ -10,6 +10,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
@@ -29,6 +30,7 @@
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/webui/jstemplate_builder.h"
@@ -37,25 +39,10 @@
 #include "base/win/windows_version.h"
 #endif
 
-using base::TimeDelta;
 using base::TimeTicks;
 using content::InterstitialPage;
 using content::NavigationController;
 using content::NavigationEntry;
-
-#define HISTOGRAM_INTERSTITIAL_SMALL_TIME(name, sample) \
-    UMA_HISTOGRAM_CUSTOM_TIMES( \
-        name, \
-        sample, \
-        base::TimeDelta::FromMilliseconds(400), \
-        base::TimeDelta::FromMinutes(15), 75);
-
-#define HISTOGRAM_INTERSTITIAL_LARGE_TIME(name, sample) \
-    UMA_HISTOGRAM_CUSTOM_TIMES( \
-        name, \
-        sample, \
-        base::TimeDelta::FromMilliseconds(400), \
-        base::TimeDelta::FromMinutes(20), 50);
 
 namespace {
 
@@ -82,6 +69,10 @@ enum SSLBlockingPageEvent {
   DONT_PROCEED_AUTHORITY,
   MORE,
   SHOW_UNDERSTAND,
+  SHOW_INTERNAL_HOSTNAME,
+  PROCEED_INTERNAL_HOSTNAME,
+  SHOW_NEW_SITE,
+  PROCEED_NEW_SITE,
   UNUSED_BLOCKING_PAGE_EVENT,
 };
 
@@ -91,35 +82,35 @@ void RecordSSLBlockingPageEventStats(SSLBlockingPageEvent event) {
                             UNUSED_BLOCKING_PAGE_EVENT);
 }
 
-void RecordSSLBlockingPageTimeStats(
+void RecordSSLBlockingPageDetailedStats(
     bool proceed,
     int cert_error,
     bool overridable,
+    bool internal,
     const base::TimeTicks& start_time,
-    const base::TimeTicks& end_time) {
+    int num_visits) {
   UMA_HISTOGRAM_ENUMERATION("interstitial.ssl_error_type",
      SSLErrorInfo::NetErrorToErrorType(cert_error), SSLErrorInfo::END_OF_ENUM);
   if (start_time.is_null() || !overridable) {
-    // A null start time will occur if the page never came into focus and the
-    // user quit without seeing it. If so, we don't record the time.
-    // The user might not have an option except to turn back; that happens
-    // if overridable is true.  If so, the time/outcome isn't meaningful.
+    // A null start time will occur if the page never came into focus.
+    // Overridable is false if the user didn't have any option except to turn
+    // back. In either case, we don't want to record some of our metrics.
     return;
   }
-  base::TimeDelta delta = end_time - start_time;
+  if (num_visits == 0)
+    RecordSSLBlockingPageEventStats(SHOW_NEW_SITE);
   if (proceed) {
     RecordSSLBlockingPageEventStats(PROCEED_OVERRIDABLE);
-    HISTOGRAM_INTERSTITIAL_LARGE_TIME("interstitial.ssl_accept_time", delta);
+    if (internal)
+      RecordSSLBlockingPageEventStats(PROCEED_INTERNAL_HOSTNAME);
+    if (num_visits == 0)
+      RecordSSLBlockingPageEventStats(PROCEED_NEW_SITE);
   } else if (!proceed) {
     RecordSSLBlockingPageEventStats(DONT_PROCEED_OVERRIDABLE);
-    HISTOGRAM_INTERSTITIAL_LARGE_TIME("interstitial.ssl_reject_time", delta);
   }
   SSLErrorInfo::ErrorType type = SSLErrorInfo::NetErrorToErrorType(cert_error);
   switch (type) {
     case SSLErrorInfo::CERT_COMMON_NAME_INVALID: {
-      HISTOGRAM_INTERSTITIAL_SMALL_TIME(
-          "interstitial.common_name_invalid_time",
-          delta);
       if (proceed)
         RecordSSLBlockingPageEventStats(PROCEED_NAME);
       else
@@ -127,9 +118,6 @@ void RecordSSLBlockingPageTimeStats(
       break;
     }
     case SSLErrorInfo::CERT_DATE_INVALID: {
-      HISTOGRAM_INTERSTITIAL_SMALL_TIME(
-          "interstitial.date_invalid_time",
-          delta);
       if (proceed)
         RecordSSLBlockingPageEventStats(PROCEED_DATE);
       else
@@ -137,9 +125,6 @@ void RecordSSLBlockingPageTimeStats(
       break;
     }
     case SSLErrorInfo::CERT_AUTHORITY_INVALID: {
-      HISTOGRAM_INTERSTITIAL_SMALL_TIME(
-          "interstitial.authority_invalid_time",
-          delta);
       if (proceed)
         RecordSSLBlockingPageEventStats(PROCEED_AUTHORITY);
       else
@@ -180,12 +165,30 @@ SSLBlockingPage::SSLBlockingPage(
       ssl_info_(ssl_info),
       request_url_(request_url),
       overridable_(overridable),
-      strict_enforcement_(strict_enforcement) {
+      strict_enforcement_(strict_enforcement),
+      internal_(false),
+      num_visits_(-1) {
   trialCondition_ = base::FieldTrialList::FindFullName(kStudyName);
 
+  // For UMA stats.
+  if (net::IsHostnameNonUnique(request_url_.HostNoBrackets()))
+    internal_ = true;
   RecordSSLBlockingPageEventStats(SHOW_ALL);
-  if (overridable_ && !strict_enforcement_)
+  if (overridable_ && !strict_enforcement_) {
     RecordSSLBlockingPageEventStats(SHOW_OVERRIDABLE);
+    if (internal_)
+      RecordSSLBlockingPageEventStats(SHOW_INTERNAL_HOSTNAME);
+    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+        Profile::FromBrowserContext(web_contents->GetBrowserContext()),
+        Profile::EXPLICIT_ACCESS);
+    if (history_service) {
+      history_service->GetVisibleVisitCountToHost(
+          request_url_,
+          &request_consumer_,
+          base::Bind(&SSLBlockingPage::OnGotHistoryCount,
+                    base::Unretained(this)));
+    }
+  }
 
   interstitial_page_ = InterstitialPage::Create(
       web_contents_, true, request_url, this);
@@ -195,10 +198,12 @@ SSLBlockingPage::SSLBlockingPage(
 
 SSLBlockingPage::~SSLBlockingPage() {
   if (!callback_.is_null()) {
-    RecordSSLBlockingPageTimeStats(
-      false, cert_error_,
-      overridable_ && !strict_enforcement_, display_start_time_,
-      base::TimeTicks::Now());
+    RecordSSLBlockingPageDetailedStats(false,
+                                       cert_error_,
+                                       overridable_ && !strict_enforcement_,
+                                       internal_,
+                                       display_start_time_,
+                                       num_visits_);
     // The page is closed without the user having chosen what to do, default to
     // deny.
     NotifyDenyCertificate();
@@ -321,19 +326,23 @@ void SSLBlockingPage::OverrideRendererPrefs(
 }
 
 void SSLBlockingPage::OnProceed() {
-  RecordSSLBlockingPageTimeStats(true, cert_error_,
-      overridable_ && !strict_enforcement_, display_start_time_,
-      base::TimeTicks::Now());
-
+  RecordSSLBlockingPageDetailedStats(true,
+                                     cert_error_,
+                                     overridable_ && !strict_enforcement_,
+                                     internal_,
+                                     display_start_time_,
+                                     num_visits_);
   // Accepting the certificate resumes the loading of the page.
   NotifyAllowCertificate();
 }
 
 void SSLBlockingPage::OnDontProceed() {
-  RecordSSLBlockingPageTimeStats(false, cert_error_,
-    overridable_ && !strict_enforcement_, display_start_time_,
-    base::TimeTicks::Now());
-
+  RecordSSLBlockingPageDetailedStats(false,
+                                     cert_error_,
+                                     overridable_ && !strict_enforcement_,
+                                     internal_,
+                                     display_start_time_,
+                                     num_visits_);
   NotifyDenyCertificate();
 }
 
@@ -370,4 +379,11 @@ void SSLBlockingPage::SetExtraInfo(
   for (; i < 5; i++) {
     strings->SetString(keys[i], std::string());
   }
+}
+
+void SSLBlockingPage::OnGotHistoryCount(HistoryService::Handle handle,
+                                        bool success,
+                                        int num_visits,
+                                        base::Time first_visit) {
+  num_visits_ = num_visits;
 }

@@ -127,8 +127,7 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
   void LayoutHeader(views::NonClientFrameView* view, bool shorter_layout);
 
   // Schedule a re-paint of the entire title.
-  void SchedulePaintForTitle(views::NonClientFrameView* view,
-                             const gfx::Font& title_font);
+  void SchedulePaintForTitle(const gfx::Font& title_font);
 
   // Called when the browser theme changes.
   void OnThemeChanged();
@@ -156,8 +155,13 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
   FRIEND_TEST_ALL_PREFIXES(FramePainterTest, UseSoloWindowHeaderWithPanel);
   FRIEND_TEST_ALL_PREFIXES(FramePainterTest, UseSoloWindowHeaderModal);
   FRIEND_TEST_ALL_PREFIXES(FramePainterTest, UseSoloWindowHeaderConstrained);
+  FRIEND_TEST_ALL_PREFIXES(FramePainterTest, UseSoloWindowHeaderNotDrawn);
   FRIEND_TEST_ALL_PREFIXES(FramePainterTest, UseSoloWindowHeaderMultiDisplay);
   FRIEND_TEST_ALL_PREFIXES(FramePainterTest, GetHeaderOpacity);
+  FRIEND_TEST_ALL_PREFIXES(FramePainterTest, TitleIconAlignment);
+  FRIEND_TEST_ALL_PREFIXES(FramePainterTest, ChildWindowVisibility);
+  FRIEND_TEST_ALL_PREFIXES(FramePainterTest,
+                           NoCrashShutdownWithAlwaysOnTopWindow);
 
   // Sets the images for a button based on IDs from the |frame_| theme provider.
   void SetButtonImages(views::ImageButton* button,
@@ -175,17 +179,20 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
   // Returns the offset between window left edge and title string.
   int GetTitleOffsetX() const;
 
+  // Returns the vertical center of the close button in window coordinates.
+  int GetCloseButtonCenterY() const;
+
   // Returns the opacity value used to paint the header.
   // |theme_frame_overlay_id| is 0 if no overlay image is used.
   int GetHeaderOpacity(HeaderMode header_mode,
                        int theme_frame_id,
                        int theme_frame_overlay_id) const;
 
+  // Returns the radius of the header's top corners.
+  int GetHeaderCornerRadius() const;
+
   // Adjust frame operations for left / right maximized modes.
   int AdjustFrameHitCodeForMaximizedModes(int hit_code);
-
-  // Returns true if the user is cycling through workspaces.
-  bool IsCyclingThroughWorkspaces() const;
 
   // Returns true if |window_->GetRootWindow()| should be drawing transparent
   // window headers.
@@ -209,10 +216,9 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
   // a header (or other way around).
   void SchedulePaintForHeader();
 
-  // Get the bounds for the title. The provided |view| and |title_font| are
-  // used to determine the correct dimensions.
-  gfx::Rect GetTitleBounds(views::NonClientFrameView* view,
-                           const gfx::Font& title_font);
+  // Get the bounds for the title. The provided |title_font| is used to
+  // determine the correct dimensions.
+  gfx::Rect GetTitleBounds(const gfx::Font& title_font);
 
   // Not owned
   views::Widget* frame_;

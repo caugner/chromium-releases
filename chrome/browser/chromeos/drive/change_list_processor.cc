@@ -20,10 +20,13 @@ ChangeList::ChangeList(const google_apis::ResourceList& resource_list)
   resource_list.GetNextFeedURL(&next_url_);
 
   entries_.resize(resource_list.entries().size());
+  size_t entries_index = 0;
   for (size_t i = 0; i < resource_list.entries().size(); ++i) {
-    ConvertToResourceEntry(*resource_list.entries()[i]).Swap(
-        &entries_[i]);
+    if (ConvertToResourceEntry(*resource_list.entries()[i],
+                               &entries_[entries_index]))
+      ++entries_index;
   }
+  entries_.resize(entries_index);
 }
 
 ChangeList::~ChangeList() {}
@@ -272,12 +275,9 @@ void ChangeListProcessor::ConvertToMap(
           uma_stats->IncrementNumSharedWithMeEntries();
       }
 
-      std::pair<ResourceEntryMap::iterator, bool> ret = entry_map->
-          insert(std::make_pair(entry->resource_id(), ResourceEntry()));
-      if (ret.second)
-        ret.first->second.Swap(entry);
-      else
-        LOG(DFATAL) << "Found duplicate file " << entry->base_name();
+      (*entry_map)[entry->resource_id()].Swap(entry);
+      LOG_IF(WARNING, !entry->resource_id().empty())
+          << "Found duplicated file: " << entry->base_name();
     }
   }
 }

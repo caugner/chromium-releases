@@ -23,9 +23,9 @@
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_propvariant.h"
 #include "base/win/windows_version.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/favicon/favicon_types.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites.h"
@@ -35,12 +35,11 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/favicon/favicon_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
-#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -49,6 +48,7 @@
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/icon_util.h"
 #include "ui/gfx/image/image_family.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -735,9 +735,9 @@ void JumpList::RunUpdate() {
   // icon directory, and create a new directory which contains new JumpList
   // icon files.
   base::FilePath icon_dir_old(icon_dir_.value() + L"Old");
-  if (file_util::PathExists(icon_dir_old))
-    file_util::Delete(icon_dir_old, true);
-  file_util::Move(icon_dir_, icon_dir_old);
+  if (base::PathExists(icon_dir_old))
+    base::DeleteFile(icon_dir_old, true);
+  base::Move(icon_dir_, icon_dir_old);
   file_util::CreateDirectory(icon_dir_);
 
   // Create temporary icon files for shortcuts in the "Most Visited" category.

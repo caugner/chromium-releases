@@ -9,8 +9,9 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/process/launch.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -21,6 +22,8 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/invalidation/invalidation_service_factory.h"
+#include "chrome/browser/invalidation/p2p_invalidation_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -41,7 +44,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/network_change_notifier.h"
@@ -58,8 +60,10 @@
 #include "sync/engine/sync_scheduler_impl.h"
 #include "sync/notifier/p2p_invalidator.h"
 #include "sync/protocol/sync.pb.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
+using invalidation::InvalidationServiceFactory;
 
 namespace switches {
 const char kPasswordFileForTest[] = "password-file-for-test";
@@ -196,11 +200,6 @@ void SyncTest::SetUpCommandLine(CommandLine* cl) {
 }
 
 void SyncTest::AddTestSwitches(CommandLine* cl) {
-  // TODO(rsimha): Until we implement a fake Tango server against which tests
-  // can run, we need to set the --sync-notification-method to "p2p".
-  if (!cl->HasSwitch(switches::kSyncNotificationMethod))
-    cl->AppendSwitchASCII(switches::kSyncNotificationMethod, "p2p");
-
   // Disable non-essential access of external network resources.
   if (!cl->HasSwitch(switches::kDisableBackgroundNetworking))
     cl->AppendSwitch(switches::kDisableBackgroundNetworking);
@@ -222,7 +221,7 @@ Profile* SyncTest::MakeProfile(const base::FilePath::StringType name) {
   PathService::Get(chrome::DIR_USER_DATA, &path);
   path = path.Append(name);
 
-  if (!file_util::PathExists(path))
+  if (!base::PathExists(path))
     CHECK(file_util::CreateDirectory(path));
 
   Profile* profile =
@@ -302,18 +301,26 @@ void SyncTest::InitializeInstance(int index) {
                                           << index << ".";
 
   browsers_[index] = new Browser(Browser::CreateParams(
-      GetProfile(index), chrome::HOST_DESKTOP_TYPE_NATIVE));
+      GetProfile(index), chrome::GetActiveDesktop()));
   EXPECT_FALSE(GetBrowser(index) == NULL) << "Could not create Browser "
                                           << index << ".";
+
+  invalidation::P2PInvalidationService* p2p_invalidation_service =
+      InvalidationServiceFactory::GetInstance()->
+          BuildAndUseP2PInvalidationServiceForTest(GetProfile(index));
+  p2p_invalidation_service->UpdateCredentials(username_, password_);
 
   // Make sure the ProfileSyncService has been created before creating the
   // ProfileSyncServiceHarness - some tests expect the ProfileSyncService to
   // already exist.
   ProfileSyncServiceFactory::GetForProfile(GetProfile(index));
 
-  clients_[index] = new ProfileSyncServiceHarness(GetProfile(index),
-                                                  username_,
-                                                  password_);
+  clients_[index] =
+      ProfileSyncServiceHarness::CreateForIntegrationTest(
+          GetProfile(index),
+          username_,
+          password_,
+          p2p_invalidation_service);
   EXPECT_FALSE(GetClient(index) == NULL) << "Could not create Client "
                                          << index << ".";
 
@@ -356,6 +363,10 @@ bool SyncTest::SetupSync() {
 }
 
 void SyncTest::CleanUpOnMainThread() {
+  for (size_t i = 0; i < clients_.size(); ++i) {
+    clients_[i]->service()->DisableForUser();
+  }
+
   // Some of the pending messages might rely on browser windows still being
   // around, so run messages both before and after closing all browsers.
   content::RunAllPendingInMessageLoop();
@@ -665,7 +676,9 @@ void SyncTest::TriggerNotification(syncer::ModelTypeSet changed_types) {
           "from_server",
           syncer::NOTIFY_ALL,
           syncer::ObjectIdSetToInvalidationMap(
-              syncer::ModelTypeSetToObjectIdSet(changed_types), std::string())
+              syncer::ModelTypeSetToObjectIdSet(changed_types),
+              syncer::Invalidation::kUnknownVersion,
+              std::string())
           ).ToString();
   const std::string& path =
       std::string("chromiumsync/sendnotification?channel=") +

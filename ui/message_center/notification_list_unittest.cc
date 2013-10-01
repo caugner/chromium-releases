@@ -606,9 +606,6 @@ TEST_F(NotificationListTest, QuietMode) {
   AddPriorityNotification(MAX_PRIORITY);
   EXPECT_EQ(3u, notification_list()->NotificationCount());
   EXPECT_EQ(0u, GetPopupCounts());
-  // TODO(mukai): fix here when notification_list distinguish dismiss by quiet
-  // mode and by user operation.
-  EXPECT_EQ(0u, notification_list()->unread_count());
 
   notification_list()->SetQuietMode(false);
   AddNotification();
@@ -616,6 +613,32 @@ TEST_F(NotificationListTest, QuietMode) {
   EXPECT_EQ(1u, GetPopupCounts());
 
   // TODO(mukai): Add test of quiet mode with expiration.
+}
+
+// Verifies that unread_count doesn't become negative.
+TEST_F(NotificationListTest, UnreadCountNoNegative) {
+  std::string id = AddNotification();
+  EXPECT_EQ(1u, notification_list()->unread_count());
+
+  notification_list()->MarkSinglePopupAsDisplayed(id);
+  EXPECT_EQ(0u, notification_list()->unread_count());
+  notification_list()->MarkSinglePopupAsShown(
+      id, false /* mark_notification_as_read */);
+  EXPECT_EQ(1u, notification_list()->unread_count());
+
+  // Updates the notification  and verifies unread_count doesn't change.
+  scoped_ptr<Notification> updated_notification(new Notification(
+      message_center::NOTIFICATION_TYPE_SIMPLE,
+      id,
+      UTF8ToUTF16("updated"),
+      UTF8ToUTF16("updated"),
+      gfx::Image(),
+      base::string16(),
+      std::string(),
+      RichNotificationData(),
+      NULL));
+  notification_list()->AddNotification(updated_notification.Pass());
+  EXPECT_EQ(1u, notification_list()->unread_count());
 }
 
 }  // namespace test

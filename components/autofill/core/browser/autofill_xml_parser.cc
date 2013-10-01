@@ -100,7 +100,7 @@ void AutofillQueryXmlParser::StartElement(buzz::XmlParseContext* context,
       if (attribute_name.compare("autofilltype") == 0) {
         int value = GetIntValue(context, *attrs);
         if (value >= 0 && value < MAX_VALID_FIELD_TYPE)
-          field_info.field_type = static_cast<AutofillFieldType>(value);
+          field_info.field_type = static_cast<ServerFieldType>(value);
         else
           field_info.field_type = NO_SERVER_DATA;
       } else if (field_info.field_type == FIELD_WITH_DEFAULT_VALUE &&
@@ -123,7 +123,7 @@ void AutofillQueryXmlParser::StartElement(buzz::XmlParseContext* context,
       else if (attribute_name.compare("total_pages") == 0)
         page_meta_data_->total_pages = GetIntValue(context, *attrs);
       else if (attribute_name.compare("ignore_ajax") == 0)
-        page_meta_data_->ignore_ajax = strcmp(*attrs, "true") == 0;
+        page_meta_data_->ignore_ajax = strcmp(*attrs, "false") != 0;
       ++attrs;
     }
   } else if (element.compare("page_advance_button") == 0) {
@@ -196,7 +196,7 @@ void AutofillQueryXmlParser::CharacterData(
     return;
 
   int type = -1;
-  base::StringToInt(text, &type);
+  base::StringToInt(std::string(text, len), &type);
   if (type >= AUTOCHECKOUT_STEP_MIN_VALUE &&
       type <= AUTOCHECKOUT_STEP_MAX_VALUE) {
     AutocheckoutStepType step_type =

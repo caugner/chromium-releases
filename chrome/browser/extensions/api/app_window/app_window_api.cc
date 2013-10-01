@@ -4,27 +4,30 @@
 
 #include "chrome/browser/extensions/api/app_window/app_window_api.h"
 
+#include "apps/app_window_contents.h"
+#include "apps/native_app_window.h"
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "base/command_line.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/window_controller.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/ui/apps/chrome_shell_window_delegate.h"
 #include "chrome/common/extensions/api/app_window.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
-#include "googleurl/src/gurl.h"
+#include "extensions/common/switches.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
@@ -32,6 +35,8 @@
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #endif
+
+using apps::ShellWindow;
 
 namespace app_window = extensions::api::app_window;
 namespace Create = app_window::Create;
@@ -145,7 +150,7 @@ bool AppWindowCreateFunction::RunImpl() {
       create_params.window_key = *options->id;
 
       if (!options->singleton || *options->singleton) {
-        ShellWindow* window = ShellWindowRegistry::Get(profile())->
+        ShellWindow* window = apps::ShellWindowRegistry::Get(profile())->
             GetShellWindowForAppAndKey(extension_id(),
                                        create_params.window_key);
         if (window) {
@@ -202,8 +207,8 @@ bool AppWindowCreateFunction::RunImpl() {
         create_params.bounds.set_y(*bounds->top.get());
     }
 
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableExperimentalExtensionApis)) {
+    if (GetCurrentChannel() <= chrome::VersionInfo::CHANNEL_DEV ||
+        GetExtension()->location() == extensions::Manifest::COMPONENT) {
       if (options->type == extensions::api::app_window::WINDOW_TYPE_PANEL) {
           create_params.window_type = ShellWindow::WINDOW_TYPE_PANEL;
       }
@@ -289,10 +294,14 @@ bool AppWindowCreateFunction::RunImpl() {
   if (force_maximize)
     create_params.state = ui::SHOW_STATE_MAXIMIZED;
 
-  ShellWindow* shell_window =
-      ShellWindow::Create(profile(), GetExtension(), url, create_params);
+  ShellWindow* shell_window = new ShellWindow(profile(),
+                                              new ChromeShellWindowDelegate(),
+                                              GetExtension());
+  shell_window->Init(url,
+                     new apps::AppWindowContents(shell_window),
+                     create_params);
 
-  if (chrome::ShouldForceFullscreenApp())
+  if (chrome::IsRunningInForcedAppMode())
     shell_window->Fullscreen();
 
   content::RenderViewHost* created_view =
@@ -309,7 +318,8 @@ bool AppWindowCreateFunction::RunImpl() {
   SetCreateResultFromShellWindow(shell_window, result);
   SetResult(result);
 
-  if (ShellWindowRegistry::Get(profile())->HadDevToolsAttached(created_view)) {
+  if (apps::ShellWindowRegistry::Get(profile())->
+          HadDevToolsAttached(created_view)) {
     new DevToolsRestorer(this, created_view);
     return true;
   }

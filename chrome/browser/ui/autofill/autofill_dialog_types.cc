@@ -25,9 +25,10 @@ DialogNotification::DialogNotification(Type type, const string16& display_text)
 
 SkColor DialogNotification::GetBackgroundColor() const {
   switch (type_) {
+    case DialogNotification::AUTOCHECKOUT_SUCCESS:
     case DialogNotification::EXPLANATORY_MESSAGE:
     case DialogNotification::WALLET_USAGE_CONFIRMATION:
-      return SkColorSetRGB(0x47, 0x89, 0xfa);
+      return SkColorSetRGB(0xf5, 0xf5, 0xf5);
     case DialogNotification::REQUIRED_ACTION:
     case DialogNotification::WALLET_ERROR:
     case DialogNotification::AUTOCHECKOUT_ERROR:
@@ -36,7 +37,6 @@ SkColor DialogNotification::GetBackgroundColor() const {
     case DialogNotification::SECURITY_WARNING:
     case DialogNotification::VALIDATION_ERROR:
       return kWarningColor;
-    case DialogNotification::AUTOCHECKOUT_SUCCESS:
     case DialogNotification::NONE:
       return SK_ColorTRANSPARENT;
   }
@@ -45,16 +45,36 @@ SkColor DialogNotification::GetBackgroundColor() const {
   return SK_ColorTRANSPARENT;
 }
 
-SkColor DialogNotification::GetTextColor() const {
+SkColor DialogNotification::GetBorderColor() const {
   switch (type_) {
     case DialogNotification::AUTOCHECKOUT_SUCCESS:
+    case DialogNotification::EXPLANATORY_MESSAGE:
+    case DialogNotification::WALLET_USAGE_CONFIRMATION:
+      return SkColorSetRGB(0xe5, 0xe5, 0xe5);
     case DialogNotification::REQUIRED_ACTION:
     case DialogNotification::WALLET_ERROR:
     case DialogNotification::AUTOCHECKOUT_ERROR:
-      return SK_ColorBLACK;
     case DialogNotification::DEVELOPER_WARNING:
+    case DialogNotification::SECURITY_WARNING:
+    case DialogNotification::VALIDATION_ERROR:
+    case DialogNotification::NONE:
+      return GetBackgroundColor();
+  }
+
+  NOTREACHED();
+  return SK_ColorTRANSPARENT;
+}
+
+SkColor DialogNotification::GetTextColor() const {
+  switch (type_) {
+    case DialogNotification::REQUIRED_ACTION:
+    case DialogNotification::WALLET_ERROR:
+    case DialogNotification::AUTOCHECKOUT_ERROR:
+    case DialogNotification::AUTOCHECKOUT_SUCCESS:
     case DialogNotification::EXPLANATORY_MESSAGE:
     case DialogNotification::WALLET_USAGE_CONFIRMATION:
+      return SkColorSetRGB(102, 102, 102);
+    case DialogNotification::DEVELOPER_WARNING:
     case DialogNotification::SECURITY_WARNING:
     case DialogNotification::VALIDATION_ERROR:
       return SK_ColorWHITE;
@@ -209,85 +229,26 @@ string16 DialogAutocheckoutStep::GetDisplayText() const {
 
 SkColor const kWarningColor = SkColorSetRGB(0xde, 0x49, 0x32);
 
-SuggestionState::SuggestionState(const string16& text,
-                                 gfx::Font::FontStyle text_style,
+SuggestionState::SuggestionState()
+    : visible(false) {}
+SuggestionState::SuggestionState(bool visible,
+                                 const string16& vertically_compact_text,
+                                 const string16& horizontally_compact_text,
                                  const gfx::Image& icon,
                                  const string16& extra_text,
                                  const gfx::Image& extra_icon)
-    : text(text),
-      text_style(text_style),
+    : visible(visible),
+      vertically_compact_text(vertically_compact_text),
+      horizontally_compact_text(horizontally_compact_text),
       icon(icon),
       extra_text(extra_text),
       extra_icon(extra_icon) {}
 SuggestionState::~SuggestionState() {}
 
-AutofillMetrics::DialogUiEvent DialogSectionToUiEditEvent(
-    DialogSection section) {
-  switch (section) {
-    case SECTION_EMAIL:
-      return AutofillMetrics::DIALOG_UI_EMAIL_EDIT_UI_SHOWN;
+DialogOverlayString::DialogOverlayString() : alignment(gfx::ALIGN_LEFT) {}
+DialogOverlayString::~DialogOverlayString() {}
 
-    case SECTION_BILLING:
-      return AutofillMetrics::DIALOG_UI_BILLING_EDIT_UI_SHOWN;
-
-    case SECTION_CC_BILLING:
-      return AutofillMetrics::DIALOG_UI_CC_BILLING_EDIT_UI_SHOWN;
-
-    case SECTION_SHIPPING:
-      return AutofillMetrics::DIALOG_UI_SHIPPING_EDIT_UI_SHOWN;
-
-    case SECTION_CC:
-      return AutofillMetrics::DIALOG_UI_CC_EDIT_UI_SHOWN;
-  }
-
-  NOTREACHED();
-  return AutofillMetrics::NUM_DIALOG_UI_EVENTS;
-}
-
-AutofillMetrics::DialogUiEvent DialogSectionToUiItemAddedEvent(
-    DialogSection section) {
-  switch (section) {
-    case SECTION_EMAIL:
-      return AutofillMetrics::DIALOG_UI_EMAIL_ITEM_ADDED;
-
-    case SECTION_BILLING:
-      return AutofillMetrics::DIALOG_UI_BILLING_ITEM_ADDED;
-
-    case SECTION_CC_BILLING:
-      return AutofillMetrics::DIALOG_UI_CC_BILLING_ITEM_ADDED;
-
-    case SECTION_SHIPPING:
-      return AutofillMetrics::DIALOG_UI_SHIPPING_ITEM_ADDED;
-
-    case SECTION_CC:
-      return AutofillMetrics::DIALOG_UI_CC_ITEM_ADDED;
-  }
-
-  NOTREACHED();
-  return AutofillMetrics::NUM_DIALOG_UI_EVENTS;
-}
-
-AutofillMetrics::DialogUiEvent DialogSectionToUiSelectionChangedEvent(
-    DialogSection section) {
-  switch (section) {
-    case SECTION_EMAIL:
-      return AutofillMetrics::DIALOG_UI_EMAIL_SELECTED_SUGGESTION_CHANGED;
-
-    case SECTION_BILLING:
-      return AutofillMetrics::DIALOG_UI_BILLING_SELECTED_SUGGESTION_CHANGED;
-
-    case SECTION_CC_BILLING:
-      return AutofillMetrics::DIALOG_UI_CC_BILLING_SELECTED_SUGGESTION_CHANGED;
-
-    case SECTION_SHIPPING:
-      return AutofillMetrics::DIALOG_UI_SHIPPING_SELECTED_SUGGESTION_CHANGED;
-
-    case SECTION_CC:
-      return AutofillMetrics::DIALOG_UI_CC_SELECTED_SUGGESTION_CHANGED;
-  }
-
-  NOTREACHED();
-  return AutofillMetrics::NUM_DIALOG_UI_EVENTS;
-}
+DialogOverlayState::DialogOverlayState() {}
+DialogOverlayState::~DialogOverlayState() {}
 
 }  // namespace autofill

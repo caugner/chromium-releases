@@ -4,15 +4,18 @@
 
 #include "chromeos/network/network_handler.h"
 
+#include "base/threading/worker_pool.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/network/cert_loader.h"
 #include "chromeos/network/geolocation_handler.h"
 #include "chromeos/network/managed_network_configuration_handler.h"
+#include "chromeos/network/network_cert_migrator.h"
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_connection_handler.h"
+#include "chromeos/network/network_device_handler.h"
 #include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_profile_handler.h"
 #include "chromeos/network/network_profile_observer.h"
+#include "chromeos/network/network_sms_handler.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_state_handler_observer.h"
 
@@ -20,18 +23,22 @@ namespace chromeos {
 
 static NetworkHandler* g_network_handler = NULL;
 
-NetworkHandler::NetworkHandler() {
+NetworkHandler::NetworkHandler()
+    : message_loop_(base::MessageLoopProxy::current()) {
   CHECK(DBusThreadManager::IsInitialized());
 
   network_event_log::Initialize();
 
-  cert_loader_.reset(new CertLoader);
   network_state_handler_.reset(new NetworkStateHandler());
+  network_device_handler_.reset(new NetworkDeviceHandler());
   network_profile_handler_.reset(new NetworkProfileHandler());
+  if (CertLoader::IsInitialized())
+    network_cert_migrator_.reset(new NetworkCertMigrator());
   network_configuration_handler_.reset(new NetworkConfigurationHandler());
   managed_network_configuration_handler_.reset(
       new ManagedNetworkConfigurationHandler());
   network_connection_handler_.reset(new NetworkConnectionHandler());
+  network_sms_handler_.reset(new NetworkSmsHandler());
   geolocation_handler_.reset(new GeolocationHandler());
 }
 
@@ -41,14 +48,17 @@ NetworkHandler::~NetworkHandler() {
 
 void NetworkHandler::Init() {
   network_state_handler_->InitShillPropertyHandler();
+  network_profile_handler_->Init(network_state_handler_.get());
+  if (network_cert_migrator_)
+    network_cert_migrator_->Init(network_state_handler_.get());
   network_configuration_handler_->Init(network_state_handler_.get());
   managed_network_configuration_handler_->Init(
       network_state_handler_.get(),
       network_profile_handler_.get(),
       network_configuration_handler_.get());
-  network_connection_handler_->Init(cert_loader_.get(),
-                                    network_state_handler_.get(),
+  network_connection_handler_->Init(network_state_handler_.get(),
                                     network_configuration_handler_.get());
+  network_sms_handler_->Init();
   geolocation_handler_->Init();
 }
 
@@ -78,12 +88,12 @@ bool NetworkHandler::IsInitialized() {
   return g_network_handler;
 }
 
-CertLoader* NetworkHandler::cert_loader() {
-  return cert_loader_.get();
-}
-
 NetworkStateHandler* NetworkHandler::network_state_handler() {
   return network_state_handler_.get();
+}
+
+NetworkDeviceHandler* NetworkHandler::network_device_handler() {
+  return network_device_handler_.get();
 }
 
 NetworkProfileHandler* NetworkHandler::network_profile_handler() {
@@ -101,6 +111,10 @@ NetworkHandler::managed_network_configuration_handler() {
 
 NetworkConnectionHandler* NetworkHandler::network_connection_handler() {
   return network_connection_handler_.get();
+}
+
+NetworkSmsHandler* NetworkHandler::network_sms_handler() {
+  return network_sms_handler_.get();
 }
 
 GeolocationHandler* NetworkHandler::geolocation_handler() {

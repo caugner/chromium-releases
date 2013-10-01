@@ -5,10 +5,13 @@
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 
 #include "base/callback.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -17,11 +20,14 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_chromeos.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
+#include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -30,12 +36,12 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/native_window_delegate.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -100,6 +106,12 @@ void ClearDnsCache(IOThread* io_thread) {
     return;
 
   io_thread->ClearHostCache();
+}
+
+static bool Contains(const std::vector<std::string>& container,
+                     const std::string& value) {
+  return std::find(container.begin(), container.end(), value) !=
+         container.end();
 }
 
 }  // namespace
@@ -195,10 +207,14 @@ bool IsUnderCaptivePortal(NetworkStateInformer::State state,
 }
 
 bool IsProxyError(NetworkStateInformer::State state,
-                  ErrorScreenActor::ErrorReason reason) {
+                  ErrorScreenActor::ErrorReason reason,
+                  net::Error frame_error) {
   return state == NetworkStateInformer::PROXY_AUTH_REQUIRED ||
       reason == ErrorScreenActor::ERROR_REASON_PROXY_AUTH_CANCELLED ||
-      reason == ErrorScreenActor::ERROR_REASON_PROXY_CONNECTION_FAILED;
+      reason == ErrorScreenActor::ERROR_REASON_PROXY_CONNECTION_FAILED ||
+      (reason == ErrorScreenActor::ERROR_REASON_FRAME_ERROR &&
+       (frame_error == net::ERR_PROXY_CONNECTION_FAILED ||
+        frame_error == net::ERR_TUNNEL_CONNECTION_FAILED));
 }
 
 bool IsSigninScreen(const OobeUI::Screen screen) {
@@ -220,15 +236,6 @@ std::string GetNetworkName(const std::string& service_path) {
   if (!network)
     return std::string();
   return network->name();
-}
-
-// Returns network unique id by service path.
-std::string GetNetworkUniqueId(const std::string& service_path) {
-  const NetworkState* network = NetworkHandler::Get()->network_state_handler()->
-      GetNetworkState(service_path);
-  if (!network)
-    return std::string();
-  return network->guid();
 }
 
 // Returns captive portal state for a network by its service path.
@@ -307,13 +314,67 @@ void RecordNetworkPortalDetectorStats(const std::string& service_path) {
   }
 }
 
+static bool SetUserInputMethodImpl(
+    const std::string& username,
+    chromeos::input_method::InputMethodManager* manager) {
+  PrefService* const local_state = g_browser_process->local_state();
+
+  const base::DictionaryValue* users_lru_input_methods =
+      local_state->GetDictionary(prefs::kUsersLRUInputMethod);
+
+  if (users_lru_input_methods == NULL) {
+    DLOG(WARNING) << "SetUserInputMethod('" << username
+                  << "'): no kUsersLRUInputMethod";
+    return false;
+  }
+
+  std::string input_method;
+
+  if (!users_lru_input_methods->GetStringWithoutPathExpansion(username,
+                                                              &input_method)) {
+    DLOG(INFO) << "SetUserInputMethod('" << username
+               << "'): no input method for this user";
+    return false;
+  }
+
+  if (input_method.empty())
+    return false;
+
+  if (!manager->IsFullLatinKeyboard(input_method)) {
+    LOG(WARNING) << "SetUserInputMethod('" << username
+                 << "'): stored user LRU input method '" << input_method
+                 << "' is no longer Full Latin Keyboard Language"
+                 << " (entry dropped). Use hardware default instead.";
+
+    DictionaryPrefUpdate updater(local_state, prefs::kUsersLRUInputMethod);
+
+    base::DictionaryValue* const users_lru_input_methods = updater.Get();
+    if (users_lru_input_methods != NULL) {
+      users_lru_input_methods->SetStringWithoutPathExpansion(username, "");
+    }
+    return false;
+  }
+
+  if (!Contains(manager->GetActiveInputMethodIds(), input_method)) {
+    if (!manager->EnableInputMethod(input_method)) {
+      DLOG(ERROR) << "SigninScreenHandler::SetUserInputMethod('" << username
+                  << "'): user input method '" << input_method
+                  << "' is not enabled and enabling failed (ignored!).";
+    }
+  }
+  manager->ChangeInputMethod(input_method);
+
+  return true;
+}
+
 }  // namespace
 
 // SigninScreenHandler implementation ------------------------------------------
 
 SigninScreenHandler::SigninScreenHandler(
     const scoped_refptr<NetworkStateInformer>& network_state_informer,
-    ErrorScreenActor* error_screen_actor)
+    ErrorScreenActor* error_screen_actor,
+    CoreOobeActor* core_oobe_actor)
     : ui_state_(UI_STATE_UNKNOWN),
       frame_state_(FRAME_STATE_UNKNOWN),
       frame_error_(net::OK),
@@ -328,17 +389,19 @@ SigninScreenHandler::SigninScreenHandler(
       dns_clear_task_running_(false),
       cookies_cleared_(false),
       network_state_informer_(network_state_informer),
+      test_expects_complete_login_(false),
       weak_factory_(this),
       webui_visible_(false),
       preferences_changed_delayed_(false),
       error_screen_actor_(error_screen_actor),
+      core_oobe_actor_(core_oobe_actor),
       is_first_update_state_call_(true),
       offline_login_active_(false),
       last_network_state_(NetworkStateInformer::UNKNOWN),
-      has_pending_auth_ui_(false),
-      ignore_next_user_abort_frame_error_(false) {
+      has_pending_auth_ui_(false) {
   DCHECK(network_state_informer_.get());
   DCHECK(error_screen_actor_);
+  DCHECK(core_oobe_actor_);
   network_state_informer_->AddObserver(this);
   CrosSettings::Get()->AddSettingsObserver(kAccountsPrefAllowNewUser, this);
   CrosSettings::Get()->AddSettingsObserver(kAccountsPrefAllowGuest, this);
@@ -393,8 +456,6 @@ void SigninScreenHandler::DeclareLocalizedValues(
                IDS_CREATE_LOCALLY_MANAGED_USER_HTML);
   builder->Add("createManagedUserFeatureName",
                IDS_CREATE_LOCALLY_MANAGED_USER_FEATURE_NAME);
-  builder->Add("createManagedUserNoManagerText",
-               IDS_CREATE_LOCALLY_MANAGED_USER_NO_MANAGER_TEXT);
   builder->Add("offlineLogin", IDS_OFFLINE_LOGIN_HTML);
   builder->Add("ownerUserPattern", IDS_LOGIN_POD_OWNER_USER);
   builder->Add("removeUser", IDS_LOGIN_POD_REMOVE_USER);
@@ -433,11 +494,11 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("publicAccountEnter", IDS_LOGIN_PUBLIC_ACCOUNT_ENTER);
   builder->Add("publicAccountEnterAccessibleName",
                IDS_LOGIN_PUBLIC_ACCOUNT_ENTER_ACCESSIBLE_NAME);
-  builder->AddF("removeManagedUserWarningText",
-               IDS_USER_IS_LOCALLY_MANAGED_REMOVE_WARNING,
+  builder->AddF("removeUserWarningText",
+               IDS_LOGIN_POD_USER_REMOVE_WARNING,
                UTF8ToUTF16(chrome::kSupervisedUserManagementDisplayURL));
-  builder->Add("removeManagedUserWarningButtonTitle",
-               IDS_USER_IS_LOCALLY_MANAGED_REMOVE_WARNING_BUTTON);
+  builder->Add("removeUserWarningButtonTitle",
+               IDS_LOGIN_POD_USER_REMOVE_WARNING_BUTTON);
 
   if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
     builder->Add("demoLoginMessage", IDS_KIOSK_MODE_LOGIN_MESSAGE);
@@ -488,9 +549,8 @@ void SigninScreenHandler::OnNetworkReady() {
   MaybePreloadAuthExtension();
 }
 
-void SigninScreenHandler::UpdateState(NetworkStateInformer::State state,
-                                      ErrorScreenActor::ErrorReason reason) {
-  UpdateStateInternal(state, reason, false);
+void SigninScreenHandler::UpdateState(ErrorScreenActor::ErrorReason reason) {
+  UpdateStateInternal(reason, false);
 }
 
 // SigninScreenHandler, private: -----------------------------------------------
@@ -514,7 +574,6 @@ void SigninScreenHandler::UpdateUIState(UIState ui_state,
 
 // TODO (ygorshenin@): split this method into small parts.
 void SigninScreenHandler::UpdateStateInternal(
-    NetworkStateInformer::State state,
     ErrorScreenActor::ErrorReason reason,
     bool force_update) {
   // Do nothing once user has signed in or sign in is in progress.
@@ -526,16 +585,15 @@ void SigninScreenHandler::UpdateStateInternal(
     return;
   }
 
-  const std::string service_path =
-      network_state_informer_->last_network_service_path();
-  const std::string network_id =
-      GetNetworkUniqueId(service_path);
+  NetworkStateInformer::State state = network_state_informer_->state();
+  const std::string network_path = network_state_informer_->network_path();
+  const std::string network_name = GetNetworkName(network_path);
 
   // Skip "update" notification about OFFLINE state from
   // NetworkStateInformer if previous notification already was
   // delayed.
-  if (state == NetworkStateInformer::OFFLINE &&
-      reason == ErrorScreenActor::ERROR_REASON_UPDATE &&
+  if ((state == NetworkStateInformer::OFFLINE || has_pending_auth_ui_) &&
+      !force_update &&
       !update_state_closure_.IsCancelled()) {
     return;
   }
@@ -544,31 +602,23 @@ void SigninScreenHandler::UpdateStateInternal(
   // will be tested well.
   LOG(WARNING) << "SigninScreenHandler::UpdateStateInternal(): "
                << "state=" << NetworkStateStatusString(state) << ", "
-               << "network_id=" << network_id << ", "
+               << "network_name=" << network_name << ", "
                << "reason=" << ErrorReasonString(reason) << ", "
                << "force_update=" << force_update;
   update_state_closure_.Cancel();
 
-  // Delay UpdateStateInternal() call in the following cases:
-  // 1. this is the first call and it's about offline state of the
-  //    current network. This can happen because device is just powered
-  //    up and network stack isn't ready now.
-  // 2. proxy auth ui is displayed. UpdateStateCall() is delayed to
-  //    prevent screen change behind proxy auth ui.
-  if ((state == NetworkStateInformer::OFFLINE && is_first_update_state_call_) ||
+  if ((state == NetworkStateInformer::OFFLINE && !force_update) ||
       has_pending_auth_ui_) {
-    is_first_update_state_call_ = false;
     update_state_closure_.Reset(
         base::Bind(
             &SigninScreenHandler::UpdateStateInternal,
-            weak_factory_.GetWeakPtr(), state, reason, force_update));
+            weak_factory_.GetWeakPtr(), reason, true));
     base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         update_state_closure_.callback(),
         base::TimeDelta::FromSeconds(kOfflineTimeoutSec));
     return;
   }
-  is_first_update_state_call_ = false;
 
   // Don't show or hide error screen if we're in connecting state.
   if (state == NetworkStateInformer::CONNECTING && !force_update) {
@@ -576,7 +626,7 @@ void SigninScreenHandler::UpdateStateInternal(
       // First notification about CONNECTING state.
       connecting_closure_.Reset(
           base::Bind(&SigninScreenHandler::UpdateStateInternal,
-                     weak_factory_.GetWeakPtr(), state, reason, true));
+                     weak_factory_.GetWeakPtr(), reason, true));
       base::MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
           connecting_closure_.callback(),
@@ -625,7 +675,8 @@ void SigninScreenHandler::UpdateStateInternal(
     ReloadGaiaScreen();
   }
 
-  if (reason == ErrorScreenActor::ERROR_REASON_FRAME_ERROR) {
+  if (reason == ErrorScreenActor::ERROR_REASON_FRAME_ERROR &&
+      !IsProxyError(state, reason, frame_error_)) {
     LOG(WARNING) << "Retry page load due to reason: "
                  << ErrorReasonString(reason);
     ReloadGaiaScreen();
@@ -642,19 +693,15 @@ void SigninScreenHandler::UpdateStateInternal(
 void SigninScreenHandler::SetupAndShowOfflineMessage(
     NetworkStateInformer:: State state,
     ErrorScreenActor::ErrorReason reason) {
-  const std::string service_path =
-      network_state_informer_->last_network_service_path();
-  const std::string network_id = GetNetworkUniqueId(service_path);
+  const std::string network_path = network_state_informer_->network_path();
   const bool is_under_captive_portal = IsUnderCaptivePortal(state, reason);
-  const bool is_proxy_error = IsProxyError(state, reason);
+  const bool is_proxy_error = IsProxyError(state, reason, frame_error_);
   const bool is_gaia_loading_timeout =
       (reason == ErrorScreenActor::ERROR_REASON_LOADING_TIMEOUT);
 
-  LOG(WARNING) << "Offline message is displayed";
-
   // Record portal detection stats only if we're going to show or
   // change state of the error screen.
-  RecordNetworkPortalDetectorStats(service_path);
+  RecordNetworkPortalDetectorStats(network_path);
 
   if (is_proxy_error) {
     error_screen_actor_->SetErrorState(ErrorScreen::ERROR_STATE_PROXY,
@@ -669,7 +716,7 @@ void SigninScreenHandler::SetupAndShowOfflineMessage(
          ErrorScreen::ERROR_STATE_PORTAL)) {
       error_screen_actor_->FixCaptivePortal();
     }
-    const std::string network_name = GetNetworkName(service_path);
+    const std::string network_name = GetNetworkName(network_path);
     error_screen_actor_->SetErrorState(ErrorScreen::ERROR_STATE_PORTAL,
                                        network_name);
   } else if (is_gaia_loading_timeout) {
@@ -692,9 +739,8 @@ void SigninScreenHandler::SetupAndShowOfflineMessage(
 
   if (GetCurrentScreen() != OobeUI::SCREEN_ERROR_MESSAGE) {
     DictionaryValue params;
-    const std::string connection_type =
-        network_state_informer_->last_network_type();
-    params.SetString("lastNetworkType", connection_type);
+    const std::string network_type = network_state_informer_->network_type();
+    params.SetString("lastNetworkType", network_type);
     error_screen_actor_->SetUIState(ErrorScreen::UI_STATE_SIGNIN);
     error_screen_actor_->Show(OobeUI::SCREEN_GAIA_SIGNIN, &params);
   }
@@ -706,7 +752,6 @@ void SigninScreenHandler::HideOfflineMessage(
   if (!IsSigninScreenHiddenByError())
     return;
 
-  LOG(WARNING) << "Offline message is hidden";
   error_screen_actor_->Hide();
 
   // Forces a reload for Gaia screen on hiding error message.
@@ -725,7 +770,6 @@ void SigninScreenHandler::ReloadGaiaScreen() {
   }
   LOG(WARNING) << "Reload auth extension frame.";
   frame_state_ = FRAME_STATE_LOADING;
-  ignore_next_user_abort_frame_error_ = true;
   CallJS("login.GaiaSigninScreen.doReload");
 }
 
@@ -783,9 +827,7 @@ void SigninScreenHandler::RegisterMessages() {
               &SigninScreenHandler::HandleAccountPickerReady);
   AddCallback("wallpaperReady", &SigninScreenHandler::HandleWallpaperReady);
   AddCallback("loginWebuiReady", &SigninScreenHandler::HandleLoginWebuiReady);
-  AddCallback("demoWebuiReady", &SigninScreenHandler::HandleDemoWebuiReady);
   AddCallback("signOutUser", &SigninScreenHandler::HandleSignOutUser);
-  AddCallback("userImagesLoaded", &SigninScreenHandler::HandleUserImagesLoaded);
   AddCallback("networkErrorShown",
               &SigninScreenHandler::HandleNetworkErrorShown);
   AddCallback("openProxySettings",
@@ -809,24 +851,28 @@ void SigninScreenHandler::RegisterMessages() {
               &SigninScreenHandler::HandleUpdateOfflineLogin);
 }
 
+void SigninScreenHandler::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDictionaryPref(prefs::kUsersLRUInputMethod);
+}
+
 void SigninScreenHandler::HandleGetUsers() {
   SendUserList(false);
 }
 
 void SigninScreenHandler::ClearAndEnablePassword() {
-  CallJS("cr.ui.Oobe.resetSigninUI", false);
+  core_oobe_actor_->ResetSignInUI(false);
 }
 
 void SigninScreenHandler::ClearUserPodPassword() {
-  CallJS("cr.ui.Oobe.clearUserPodPassword");
+  core_oobe_actor_->ClearUserPodPassword();
 }
 
 void SigninScreenHandler::RefocusCurrentPod() {
-  CallJS("cr.ui.Oobe.refocusCurrentPod");
+  core_oobe_actor_->RefocusCurrentPod();
 }
 
 void SigninScreenHandler::OnLoginSuccess(const std::string& username) {
-  CallJS("cr.ui.Oobe.onLoginSuccess", username);
+  core_oobe_actor_->OnLoginSuccess(username);
 }
 
 void SigninScreenHandler::OnUserRemoved(const std::string& username) {
@@ -864,14 +910,14 @@ void SigninScreenHandler::ShowError(int login_attempts,
                                     const std::string& error_text,
                                     const std::string& help_link_text,
                                     HelpAppLauncher::HelpTopic help_topic_id) {
-  CallJS("cr.ui.Oobe.showSignInError", login_attempts, error_text,
-         help_link_text, static_cast<int>(help_topic_id));
+  core_oobe_actor_->ShowSignInError(login_attempts, error_text, help_link_text,
+                                    help_topic_id);
 }
 
 void SigninScreenHandler::ShowErrorScreen(LoginDisplay::SigninError error_id) {
   switch (error_id) {
     case LoginDisplay::TPM_ERROR:
-      CallJS("cr.ui.Oobe.showTpmError");
+      core_oobe_actor_->ShowTpmError();
       break;
     default:
       NOTREACHED() << "Unknown sign in error";
@@ -880,28 +926,37 @@ void SigninScreenHandler::ShowErrorScreen(LoginDisplay::SigninError error_id) {
 }
 
 void SigninScreenHandler::ShowSigninUI(const std::string& email) {
-  CallJS("cr.ui.Oobe.showSigninUI", email);
+
 }
 
 void SigninScreenHandler::ShowGaiaPasswordChanged(const std::string& username) {
   email_ = username;
   password_changed_for_.insert(email_);
-  CallJS("cr.ui.Oobe.showSigninUI", email_);
+  core_oobe_actor_->ShowSignInUI(email_);
   CallJS("login.AccountPickerScreen.updateUserGaiaNeeded", email_);
 }
 
 void SigninScreenHandler::ShowPasswordChangedDialog(bool show_password_error) {
-  CallJS("cr.ui.Oobe.showPasswordChangedScreen", show_password_error);
+  core_oobe_actor_->ShowPasswordChangedScreen(show_password_error);
 }
 
 void SigninScreenHandler::ShowSigninScreenForCreds(
     const std::string& username,
     const std::string& password) {
-  VLOG(2) << "ShowSigninScreenForCreds " << username << " " << password;
+  VLOG(2) << "ShowSigninScreenForCreds  for user " << username
+          << ", frame_state=" << frame_state_;
 
   test_user_ = username;
   test_pass_ = password;
-  HandleShowAddUser(NULL);
+  test_expects_complete_login_ = true;
+
+  // Submit login form for test if gaia is ready. If gaia is loading, login
+  // will be attempted in HandleLoginWebuiReady after gaia is ready. Otherwise,
+  // reload gaia then follow the loading case.
+  if (frame_state_ == FRAME_STATE_LOADED)
+    SubmitLoginFormForTest();
+  else if (frame_state_ != FRAME_STATE_LOADING)
+    HandleShowAddUser(NULL);
 }
 
 void SigninScreenHandler::OnCookiesCleared(base::Closure on_clear_callback) {
@@ -956,15 +1011,32 @@ void SigninScreenHandler::OnDnsCleared() {
   ShowSigninScreenIfReady();
 }
 
+// Update keyboard layout to least recently used by the user.
+void SigninScreenHandler::SetUserInputMethod(const std::string& username) {
+  chromeos::input_method::InputMethodManager* const manager =
+      chromeos::input_method::InputMethodManager::Get();
+
+  const bool succeed = SetUserInputMethodImpl(username, manager);
+
+  // This is also a case when LRU layout is set only for a few local users,
+  // thus others need to be switched to default locale.
+  // Otherwise they will end up using another user's locale to log in.
+  if (!succeed) {
+    DLOG(INFO) << "SetUserInputMethod('" << username
+               << "'): failed to set user layout. Switching to default.";
+
+    manager->SetInputMethodDefault();
+  }
+}
+
 void SigninScreenHandler::ShowSigninScreenIfReady() {
   if (!dns_cleared_ || !cookies_cleared_ || !delegate_)
     return;
 
-  std::string active_network =
-      network_state_informer_->active_network_service_path();
+  std::string active_network_path = network_state_informer_->network_path();
   if (gaia_silent_load_ &&
-      (!network_state_informer_->is_online() ||
-       gaia_silent_load_network_ != active_network)) {
+      (network_state_informer_->state() != NetworkStateInformer::ONLINE ||
+       gaia_silent_load_network_ != active_network_path)) {
     // Network has changed. Force Gaia reload.
     gaia_silent_load_ = false;
     // Gaia page will be realoded, so focus isn't stolen anymore.
@@ -977,6 +1049,10 @@ void SigninScreenHandler::ShowSigninScreenIfReady() {
   else
     delegate_->LoadWallpaper(email_);
 
+  // Set Least Recently Used input method for the user.
+  if (!email_.empty())
+    SetUserInputMethod(email_);
+
   LoadAuthExtension(!gaia_silent_load_, false, false);
   UpdateUIState(UI_STATE_GAIA_SIGNIN, NULL);
 
@@ -988,8 +1064,7 @@ void SigninScreenHandler::ShowSigninScreenIfReady() {
       HandleLoginWebuiReady();
   }
 
-  UpdateState(network_state_informer_->state(),
-              ErrorScreenActor::ERROR_REASON_UPDATE);
+  UpdateState(ErrorScreenActor::ERROR_REASON_UPDATE);
 }
 
 
@@ -1002,13 +1077,31 @@ void SigninScreenHandler::UpdateAuthParams(DictionaryValue* params) {
   // Allow locally managed user creation only if:
   // 1. Enterprise managed device > is allowed by policy.
   // 2. Consumer device > owner exists.
+  // 3. New users are allowed by owner.
+
+  CrosSettings* cros_settings = CrosSettings::Get();
+  bool allow_new_user = false;
+  cros_settings->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
+
   bool managed_users_allowed =
       UserManager::Get()->AreLocallyManagedUsersAllowed();
-  bool managed_users_can_create = false;
-  if (managed_users_allowed)
-    managed_users_can_create = delegate_->GetUsers().size() > 0;
+  bool managed_users_can_create = true;
+  int message_id = -1;
+  if (delegate_->GetUsers().size() == 0) {
+    managed_users_can_create = false;
+    message_id = IDS_CREATE_LOCALLY_MANAGED_USER_NO_MANAGER_TEXT;
+  }
+  if (!allow_new_user) {
+    managed_users_can_create = false;
+    message_id = IDS_CREATE_LOCALLY_MANAGED_USER_CREATION_RESTRICTED_TEXT;
+  }
+
   params->SetBoolean("managedUsersEnabled", managed_users_allowed);
   params->SetBoolean("managedUsersCanCreate", managed_users_can_create);
+  if (!managed_users_can_create) {
+    params->SetString("managedUsersRestrictionReason",
+        l10n_util::GetStringUTF16(message_id));
+  }
 }
 
 void SigninScreenHandler::LoadAuthExtension(
@@ -1056,20 +1149,7 @@ void SigninScreenHandler::LoadAuthExtension(
           GaiaUrls::GetInstance()->gaia_url();
   params.SetString("gaiaUrl", gaia_url.spec());
 
-  // Test automation data:
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kAuthExtensionPath)) {
-    if (!test_user_.empty()) {
-      params.SetString("test_email", test_user_);
-      test_user_.clear();
-    }
-    if (!test_pass_.empty()) {
-      params.SetString("test_password", test_pass_);
-      test_pass_.clear();
-    }
-  }
   frame_state_ = FRAME_STATE_LOADING;
-  ignore_next_user_abort_frame_error_ = true;
   CallJS("login.GaiaSigninScreen.loadAuthExtension", params);
 }
 
@@ -1093,6 +1173,15 @@ void SigninScreenHandler::HandleCompleteLogin(const std::string& typed_email,
   delegate_->CompleteLogin(UserContext(sanitized_email,
                                        password,
                                        std::string()));  // auth_code
+
+  if (test_expects_complete_login_) {
+    VLOG(2) << "Complete test login for " << typed_email
+            << ", requested=" << test_user_;
+
+    test_expects_complete_login_ = false;
+    test_user_.clear();
+    test_pass_.clear();
+  }
 }
 
 void SigninScreenHandler::HandleCompleteAuthentication(
@@ -1386,25 +1475,14 @@ void SigninScreenHandler::HandleLoginWebuiReady() {
     RefocusCurrentPod();
   }
   HandleFrameLoadingCompleted(0);
-}
 
-void SigninScreenHandler::HandleDemoWebuiReady() {
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_DEMO_WEBUI_LOADED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
+  if (test_expects_complete_login_)
+    SubmitLoginFormForTest();
 }
 
 void SigninScreenHandler::HandleSignOutUser() {
   if (delegate_)
     delegate_->Signout();
-}
-
-void SigninScreenHandler::HandleUserImagesLoaded() {
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_LOGIN_USER_IMAGES_LOADED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
 }
 
 void SigninScreenHandler::HandleNetworkErrorShown() {
@@ -1424,15 +1502,17 @@ void SigninScreenHandler::HandleOpenProxySettings() {
 }
 
 void SigninScreenHandler::HandleLoginVisible(const std::string& source) {
-  LOG(INFO) << "Login WebUI >> LoginVisible, source: " << source << ", "
-            << "webui_visible_: " << webui_visible_;
+  LOG(WARNING) << "Login WebUI >> loginVisible, src: " << source << ", "
+               << "webui_visible_: " << webui_visible_;
   if (!webui_visible_) {
     // There might be multiple messages from OOBE UI so send notifications after
     // the first one only.
     content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+        chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
         content::NotificationService::AllSources(),
         content::NotificationService::NoDetails());
+    TRACE_EVENT_ASYNC_END0(
+        "ui", "ShowLoginWebUI", LoginDisplayHostImpl::kShowLoginWebUIid);
   }
   webui_visible_ = true;
   if (preferences_changed_delayed_)
@@ -1490,40 +1570,30 @@ void SigninScreenHandler::HandleUnlockOnLoginSuccess() {
 }
 
 void SigninScreenHandler::HandleFrameLoadingCompleted(int status) {
-  frame_error_ = static_cast<net::Error>(-status);
-  if (frame_error_ == net::OK) {
+  const net::Error frame_error = static_cast<net::Error>(-status);
+  if (frame_error == net::ERR_ABORTED) {
+    LOG(WARNING) << "Ignore gaia frame error: " << frame_error;
+    return;
+  }
+  frame_error_ = frame_error;
+  if (frame_error == net::OK) {
     LOG(INFO) << "Gaia frame is loaded";
     frame_state_ = FRAME_STATE_LOADED;
   } else {
-    // Ignore net::ERR_ABORTED frame error once.
-    if (ignore_next_user_abort_frame_error_ &&
-        frame_error_ == net::ERR_ABORTED) {
-      LOG(WARNING) << "Ignore gaia frame error: "  << frame_error_;
-      ignore_next_user_abort_frame_error_ = false;
-      return;
-    }
-
     LOG(WARNING) << "Gaia frame error: "  << frame_error_;
     frame_state_ = FRAME_STATE_ERROR;
   }
 
-  // Frame load okay and other frame error clears the flag.
-  ignore_next_user_abort_frame_error_ = false;
-
   if (network_state_informer_->state() != NetworkStateInformer::ONLINE)
     return;
-  if (frame_state_ == FRAME_STATE_LOADED) {
-    UpdateState(network_state_informer_->state(),
-                ErrorScreenActor::ERROR_REASON_UPDATE);
-  } else if (frame_state_ == FRAME_STATE_ERROR) {
-    UpdateState(network_state_informer_->state(),
-                ErrorScreenActor::ERROR_REASON_FRAME_ERROR);
-  }
+  if (frame_state_ == FRAME_STATE_LOADED)
+    UpdateState(ErrorScreenActor::ERROR_REASON_UPDATE);
+  else if (frame_state_ == FRAME_STATE_ERROR)
+    UpdateState(ErrorScreenActor::ERROR_REASON_FRAME_ERROR);
 }
 
 void SigninScreenHandler::HandleShowLoadingTimeoutError() {
-  UpdateState(network_state_informer_->state(),
-              ErrorScreenActor::ERROR_REASON_LOADING_TIMEOUT);
+  UpdateState(ErrorScreenActor::ERROR_REASON_LOADING_TIMEOUT);
 }
 
 void SigninScreenHandler::HandleUpdateOfflineLogin(bool offline_login_active) {
@@ -1566,10 +1636,9 @@ void SigninScreenHandler::MaybePreloadAuthExtension() {
       !ScreenLocker::default_screen_locker() &&
       !cookies_cleared_ &&
       !dns_clear_task_running_ &&
-      network_state_informer_->is_online()) {
+      network_state_informer_->state() == NetworkStateInformer::ONLINE) {
     gaia_silent_load_ = true;
-    gaia_silent_load_network_ =
-        network_state_informer_->active_network_service_path();
+    gaia_silent_load_network_ = network_state_informer_->network_path();
     LoadAuthExtension(true, true, false);
   }
 }
@@ -1647,6 +1716,24 @@ bool SigninScreenHandler::IsOfflineLoginAllowed() const {
   bool show_pods;
   cros_settings->GetBoolean(kAccountsPrefShowUserNamesOnSignIn, &show_pods);
   return !show_pods;
+}
+
+void SigninScreenHandler::SubmitLoginFormForTest() {
+  VLOG(2) << "Submit login form for test, user=" << test_user_;
+
+  std::string code;
+  code += "document.getElementById('Email').value = '" + test_user_ + "';";
+  code += "document.getElementById('Passwd').value = '" + test_pass_ + "';";
+  code += "document.getElementById('signIn').click();";
+
+  RenderViewHost* rvh = web_ui()->GetWebContents()->GetRenderViewHost();
+  rvh->ExecuteJavascriptInWebFrame(
+      ASCIIToUTF16("//iframe[@id='signin-frame']\n//iframe"),
+      ASCIIToUTF16(code));
+
+  // Test properties are cleared in HandleCompleteLogin because the form
+  // submission might fail and login will not be attempted after reloading
+  // if they are cleared here.
 }
 
 }  // namespace chromeos

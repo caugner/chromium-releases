@@ -6,17 +6,33 @@
 
 #include <string>
 
+#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/location.h"
+#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/stringize_macros.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "net/base/net_util.h"
 #include "remoting/base/rsa_key_pair.h"
+#include "remoting/host/host_exit_codes.h"
+#include "remoting/host/pairing_registry_delegate.h"
+#include "remoting/host/pairing_registry_delegate.h"
 #include "remoting/host/pin_hash.h"
+#include "remoting/protocol/pairing_registry.h"
+
+#if defined(OS_POSIX)
+#include <unistd.h>
+#endif
 
 namespace {
+
+// Features supported in addition to the base protocol.
+const char* kSupportedFeatures[] = {
+  "pairingRegistry",
+};
 
 // Helper to extract the "config" part of a message as a DictionaryValue.
 // Returns NULL on failure, and logs an error message.
@@ -38,6 +54,7 @@ namespace remoting {
 
 NativeMessagingHost::NativeMessagingHost(
     scoped_ptr<DaemonController> daemon_controller,
+    scoped_refptr<protocol::PairingRegistry> pairing_registry,
     base::PlatformFile input,
     base::PlatformFile output,
     scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
@@ -47,6 +64,7 @@ NativeMessagingHost::NativeMessagingHost(
       native_messaging_reader_(input),
       native_messaging_writer_(output),
       daemon_controller_(daemon_controller.Pass()),
+      pairing_registry_(pairing_registry),
       weak_factory_(this) {
   weak_ptr_ = weak_factory_.GetWeakPtr();
 }
@@ -103,6 +121,10 @@ void NativeMessagingHost::ProcessMessage(scoped_ptr<base::Value> message) {
   bool success = false;
   if (type == "hello") {
     success = ProcessHello(*message_dict, response_dict.Pass());
+  } else if (type == "clearPairedClients") {
+    success = ProcessClearPairedClients(*message_dict, response_dict.Pass());
+  } else if (type == "deletePairedClient") {
+    success = ProcessDeletePairedClient(*message_dict, response_dict.Pass());
   } else if (type == "getHostName") {
     success = ProcessGetHostName(*message_dict, response_dict.Pass());
   } else if (type == "getPinHash") {
@@ -113,6 +135,8 @@ void NativeMessagingHost::ProcessMessage(scoped_ptr<base::Value> message) {
     success = ProcessUpdateDaemonConfig(*message_dict, response_dict.Pass());
   } else if (type == "getDaemonConfig") {
     success = ProcessGetDaemonConfig(*message_dict, response_dict.Pass());
+  } else if (type == "getPairedClients") {
+    success = ProcessGetPairedClients(*message_dict, response_dict.Pass());
   } else if (type == "getUsageStatsConsent") {
     success = ProcessGetUsageStatsConsent(*message_dict, response_dict.Pass());
   } else if (type == "startDaemon") {
@@ -133,7 +157,44 @@ bool NativeMessagingHost::ProcessHello(
     const base::DictionaryValue& message,
     scoped_ptr<base::DictionaryValue> response) {
   response->SetString("version", STRINGIZE(VERSION));
+  scoped_ptr<base::ListValue> supported_features_list(new base::ListValue());
+  supported_features_list->AppendStrings(std::vector<std::string>(
+      kSupportedFeatures, kSupportedFeatures + arraysize(kSupportedFeatures)));
+  response->Set("supportedFeatures", supported_features_list.release());
   SendResponse(response.Pass());
+  return true;
+}
+
+bool NativeMessagingHost::ProcessClearPairedClients(
+    const base::DictionaryValue& message,
+    scoped_ptr<base::DictionaryValue> response) {
+  if (pairing_registry_) {
+    pairing_registry_->ClearAllPairings(
+        base::Bind(&NativeMessagingHost::SendBooleanResult, weak_ptr_,
+                   base::Passed(&response)));
+  } else {
+    SendBooleanResult(response.Pass(), false);
+  }
+  return true;
+}
+
+bool NativeMessagingHost::ProcessDeletePairedClient(
+    const base::DictionaryValue& message,
+    scoped_ptr<base::DictionaryValue> response) {
+  std::string client_id;
+  if (!message.GetString(protocol::PairingRegistry::kClientIdKey, &client_id)) {
+    LOG(ERROR) << "'" << protocol::PairingRegistry::kClientIdKey
+               << "' string not found.";
+    return false;
+  }
+
+  if (pairing_registry_) {
+    pairing_registry_->DeletePairing(
+        client_id, base::Bind(&NativeMessagingHost::SendBooleanResult,
+                              weak_ptr_, base::Passed(&response)));
+  } else {
+    SendBooleanResult(response.Pass(), false);
+  }
   return true;
 }
 
@@ -196,6 +257,20 @@ bool NativeMessagingHost::ProcessGetDaemonConfig(
   daemon_controller_->GetConfig(
       base::Bind(&NativeMessagingHost::SendConfigResponse,
                  base::Unretained(this), base::Passed(&response)));
+  return true;
+}
+
+bool NativeMessagingHost::ProcessGetPairedClients(
+    const base::DictionaryValue& message,
+    scoped_ptr<base::DictionaryValue> response) {
+  if (pairing_registry_) {
+    pairing_registry_->GetAllPairings(
+        base::Bind(&NativeMessagingHost::SendPairedClientsResponse, weak_ptr_,
+                   base::Passed(&response)));
+  } else {
+    scoped_ptr<base::ListValue> no_paired_clients(new base::ListValue);
+    SendPairedClientsResponse(response.Pass(), no_paired_clients.Pass());
+  }
   return true;
 }
 
@@ -288,7 +363,18 @@ void NativeMessagingHost::SendResponse(
 void NativeMessagingHost::SendConfigResponse(
     scoped_ptr<base::DictionaryValue> response,
     scoped_ptr<base::DictionaryValue> config) {
-  response->Set("config", config.release());
+  if (config) {
+    response->Set("config", config.release());
+  } else {
+    response->Set("config", Value::CreateNullValue());
+  }
+  SendResponse(response.Pass());
+}
+
+void NativeMessagingHost::SendPairedClientsResponse(
+    scoped_ptr<base::DictionaryValue> response,
+    scoped_ptr<base::ListValue> pairings) {
+  response->Set("pairedClients", pairings.release());
   SendResponse(response.Pass());
 }
 
@@ -321,6 +407,37 @@ void NativeMessagingHost::SendAsyncResult(
       break;
   }
   SendResponse(response.Pass());
+}
+
+void NativeMessagingHost::SendBooleanResult(
+    scoped_ptr<base::DictionaryValue> response, bool result) {
+  response->SetBoolean("result", result);
+  SendResponse(response.Pass());
+}
+
+int NativeMessagingHostMain() {
+#if defined(OS_WIN)
+  base::PlatformFile read_file = GetStdHandle(STD_INPUT_HANDLE);
+  base::PlatformFile write_file = GetStdHandle(STD_OUTPUT_HANDLE);
+#elif defined(OS_POSIX)
+  base::PlatformFile read_file = STDIN_FILENO;
+  base::PlatformFile write_file = STDOUT_FILENO;
+#else
+#error Not implemented.
+#endif
+
+  base::MessageLoop message_loop(base::MessageLoop::TYPE_IO);
+  base::RunLoop run_loop;
+  scoped_refptr<protocol::PairingRegistry> pairing_registry =
+      CreatePairingRegistry(message_loop.message_loop_proxy());
+  remoting::NativeMessagingHost host(remoting::DaemonController::Create(),
+                                     pairing_registry,
+                                     read_file, write_file,
+                                     message_loop.message_loop_proxy(),
+                                     run_loop.QuitClosure());
+  host.Start();
+  run_loop.Run();
+  return kSuccessExitCode;
 }
 
 }  // namespace remoting

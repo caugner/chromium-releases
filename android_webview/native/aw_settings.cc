@@ -13,6 +13,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/page_zoom.h"
 #include "jni/AwSettings_jni.h"
 #include "webkit/common/user_agent/user_agent.h"
 #include "webkit/common/webpreferences.h"
@@ -114,7 +115,7 @@ void AwSettings::UpdateWebkitPreferencesLocked(JNIEnv* env, jobject obj) {
     render_view_host_ext->SetTextZoomLevel(0);
   } else {
     prefs.force_enable_zoom = false;
-    render_view_host_ext->SetTextZoomLevel(webkit_glue::ZoomFactorToZoomLevel(
+    render_view_host_ext->SetTextZoomLevel(content::ZoomFactorToZoomLevel(
         text_size_percent / 100.0f));
   }
 
@@ -188,6 +189,7 @@ void AwSettings::UpdateWebkitPreferencesLocked(JNIEnv* env, jobject obj) {
 
   prefs.databases_enabled = Java_AwSettings_getDatabaseEnabledLocked(env, obj);
 
+  prefs.wide_viewport_quirk = true;
   prefs.double_tap_to_zoom_enabled = prefs.use_wide_viewport =
       Java_AwSettings_getUseWideViewportLocked(env, obj);
 
@@ -202,8 +204,14 @@ void AwSettings::UpdateWebkitPreferencesLocked(JNIEnv* env, jobject obj) {
   prefs.default_video_poster_url = url.obj() ?
       GURL(ConvertJavaStringToUTF8(url)) : GURL();
 
-  prefs.support_deprecated_target_density_dpi =
-      Java_AwSettings_getSupportDeprecatedTargetDensityDPILocked(env, obj);
+  bool support_quirks = Java_AwSettings_getSupportLegacyQuirksLocked(env, obj);
+  prefs.support_deprecated_target_density_dpi = support_quirks;
+  prefs.use_legacy_background_size_shorthand_behavior = support_quirks;
+  prefs.viewport_meta_layout_size_quirk = support_quirks;
+  prefs.viewport_meta_zero_values_quirk = support_quirks;
+
+  prefs.password_echo_enabled =
+      Java_AwSettings_getPasswordEchoEnabled(env, obj);
 
   render_view_host->UpdateWebkitPreferences(prefs);
 }

@@ -17,9 +17,7 @@
 #include "base/strings/string_util.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/diagnostics/sqlite_diagnostics.h"
 #include "content/public/browser/browser_thread.h"
-#include "googleurl/src/gurl.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cookies/cookie_util.h"
 #include "net/ssl/ssl_client_cert_type.h"
@@ -28,6 +26,7 @@
 #include "sql/statement.h"
 #include "sql/transaction.h"
 #include "third_party/sqlite/sqlite3.h"
+#include "url/gurl.h"
 #include "webkit/browser/quota/special_storage_policy.h"
 
 using content::BrowserThread;
@@ -201,7 +200,7 @@ void SQLiteServerBoundCertStore::Backend::LoadOnDBThread(
   // Ensure the parent directory for storing certs is created before reading
   // from it.
   const base::FilePath dir = path_.DirName();
-  if (!file_util::PathExists(dir) && !file_util::CreateDirectory(dir))
+  if (!base::PathExists(dir) && !file_util::CreateDirectory(dir))
     return;
 
   int64 db_size = 0;
@@ -248,13 +247,16 @@ void SQLiteServerBoundCertStore::Backend::LoadOnDBThread(
   }
 
   while (smt.Step()) {
+    net::SSLClientCertType type =
+        static_cast<net::SSLClientCertType>(smt.ColumnInt(3));
+    if (type != net::CLIENT_CERT_ECDSA_SIGN)
+      continue;
     std::string private_key_from_db, cert_from_db;
     smt.ColumnBlobAsString(1, &private_key_from_db);
     smt.ColumnBlobAsString(2, &cert_from_db);
     scoped_ptr<net::DefaultServerBoundCertStore::ServerBoundCert> cert(
         new net::DefaultServerBoundCertStore::ServerBoundCert(
             smt.ColumnString(0),  // origin
-            static_cast<net::SSLClientCertType>(smt.ColumnInt(3)),
             base::Time::FromInternalValue(smt.ColumnInt64(5)),
             base::Time::FromInternalValue(smt.ColumnInt64(4)),
             private_key_from_db,
@@ -297,8 +299,9 @@ bool SQLiteServerBoundCertStore::Backend::EnsureDatabaseVersion() {
                    << "version 2.";
       return false;
     }
-    // All certs in version 1 database are rsa_sign, which has a value of 1.
-    if (!db_->Execute("UPDATE origin_bound_certs SET cert_type = 1")) {
+    // All certs in version 1 database are rsa_sign, which are unsupported.
+    // Just discard them all.
+    if (!db_->Execute("DELETE from origin_bound_certs")) {
       LOG(WARNING) << "Unable to update server bound cert database to "
                    << "version 2.";
       return false;
@@ -519,7 +522,7 @@ void SQLiteServerBoundCertStore::Backend::Commit() {
         add_smt.BindBlob(1, private_key.data(), private_key.size());
         const std::string& cert = po->cert().cert();
         add_smt.BindBlob(2, cert.data(), cert.size());
-        add_smt.BindInt(3, po->cert().type());
+        add_smt.BindInt(3, net::CLIENT_CERT_ECDSA_SIGN);
         add_smt.BindInt64(4, po->cert().expiration_time().ToInternalValue());
         add_smt.BindInt64(5, po->cert().creation_time().ToInternalValue());
         if (!add_smt.Run())

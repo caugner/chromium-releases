@@ -2,30 +2,43 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Tests for the Variations Helpers.
+#include "chrome/common/metrics/variations/variations_util.h"
 
 #include <set>
+#include <string>
 
-#include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/common/metrics/metrics_util.h"
-#include "chrome/common/metrics/variations/variations_util.h"
-#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chrome_variations {
 
 namespace {
 
-// Convenience helper to retrieve the chrome_variations::VariationID for a
-// FieldTrial. Note that this will do the group assignment in |trial| if not
-// already done.
-VariationID GetIDForTrial(IDCollectionKey key, base::FieldTrial* trial) {
-  return GetGoogleVariationID(key, trial->trial_name(), trial->group_name());
+// Tests whether a field trial is active (i.e. group() has been called on it).
+bool IsFieldTrialActive(const std::string& trial_name) {
+  base::FieldTrial::ActiveGroups active_groups;
+  base::FieldTrialList::GetActiveFieldTrialGroups(&active_groups);
+  for (size_t i = 0; i < active_groups.size(); ++i) {
+    if (active_groups[i].trial_name == trial_name)
+      return true;
+  }
+  return false;
+}
+
+// Call FieldTrialList::FactoryGetFieldTrial() with a future expiry date.
+scoped_refptr<base::FieldTrial> CreateFieldTrial(
+    const std::string& trial_name,
+    int total_probability,
+    const std::string& default_group_name,
+    int* default_group_number) {
+  return base::FieldTrialList::FactoryGetFieldTrial(
+      trial_name, total_probability, default_group_name,
+      base::FieldTrialList::kNoExpirationYear, 1, 1,
+      base::FieldTrial::SESSION_RANDOMIZED, default_group_number);
 }
 
 }  // namespace
@@ -33,31 +46,18 @@ VariationID GetIDForTrial(IDCollectionKey key, base::FieldTrial* trial) {
 class VariationsUtilTest : public ::testing::Test {
  public:
   VariationsUtilTest() : field_trial_list_(NULL) {
-    // Since the API can only be called on the UI thread, we have to fake that
-    // we're on it.
-    ui_thread_.reset(new content::TestBrowserThread(
-        content::BrowserThread::UI, &message_loop_));
+  }
 
-    base::Time now = base::Time::NowFromSystemTime();
-    base::TimeDelta one_year = base::TimeDelta::FromDays(365);
-    base::Time::Exploded exploded;
-
-    base::Time next_year_time = now + one_year;
-    next_year_time.LocalExplode(&exploded);
-    next_year_ = exploded.year;
-
+  virtual ~VariationsUtilTest() {
     // Ensure that the maps are cleared between tests, since they are stored as
     // process singletons.
     testing::ClearAllVariationIDs();
   }
 
- protected:
-  int next_year_;
-
  private:
   base::FieldTrialList field_trial_list_;
-  base::MessageLoop message_loop_;
-  scoped_ptr<content::TestBrowserThread> ui_thread_;
+
+  DISALLOW_COPY_AND_ASSIGN(VariationsUtilTest);
 };
 
 TEST_F(VariationsUtilTest, GetFieldTrialActiveGroups) {
@@ -97,112 +97,6 @@ TEST_F(VariationsUtilTest, GetFieldTrialActiveGroups) {
     expected_groups.erase(expected_group);
   }
   EXPECT_EQ(0U, expected_groups.size());
-}
-
-// Test that if the trial is immediately disabled, GetGoogleVariationID just
-// returns the empty ID.
-TEST_F(VariationsUtilTest, DisableImmediately) {
-  int default_group_number = -1;
-  scoped_refptr<base::FieldTrial> trial(
-      base::FieldTrialList::FactoryGetFieldTrial("trial", 100, "default",
-                                                 next_year_, 12, 12,
-                                                 &default_group_number));
-  trial->Disable();
-
-  ASSERT_EQ(default_group_number, trial->group());
-  ASSERT_EQ(EMPTY_ID, GetIDForTrial(GOOGLE_WEB_PROPERTIES, trial.get()));
-}
-
-// Test that successfully associating the FieldTrial with some ID, and then
-// disabling the FieldTrial actually makes GetGoogleVariationID correctly
-// return the empty ID.
-TEST_F(VariationsUtilTest, DisableAfterInitialization) {
-  const std::string default_name = "default";
-  const std::string non_default_name = "non_default";
-
-  scoped_refptr<base::FieldTrial> trial(
-      base::FieldTrialList::FactoryGetFieldTrial("trial", 100, default_name,
-                                                 next_year_, 12, 12, NULL));
-  trial->AppendGroup(non_default_name, 100);
-  AssociateGoogleVariationID(GOOGLE_WEB_PROPERTIES, trial->trial_name(),
-      default_name, TEST_VALUE_A);
-  AssociateGoogleVariationID(GOOGLE_WEB_PROPERTIES, trial->trial_name(),
-      non_default_name, TEST_VALUE_B);
-  trial->Disable();
-  ASSERT_EQ(default_name, trial->group_name());
-  ASSERT_EQ(TEST_VALUE_A, GetIDForTrial(GOOGLE_WEB_PROPERTIES, trial.get()));
-}
-
-// Test various successful association cases.
-TEST_F(VariationsUtilTest, AssociateGoogleVariationID) {
-  const std::string default_name1 = "default";
-  scoped_refptr<base::FieldTrial> trial_true(
-      base::FieldTrialList::FactoryGetFieldTrial("d1", 10, default_name1,
-                                                 next_year_, 12, 31, NULL));
-  const std::string winner = "TheWinner";
-  int winner_group = trial_true->AppendGroup(winner, 10);
-
-  // Set GoogleVariationIDs so we can verify that they were chosen correctly.
-  AssociateGoogleVariationID(GOOGLE_WEB_PROPERTIES, trial_true->trial_name(),
-      default_name1, TEST_VALUE_A);
-  AssociateGoogleVariationID(GOOGLE_WEB_PROPERTIES, trial_true->trial_name(),
-      winner, TEST_VALUE_B);
-
-  EXPECT_EQ(winner_group, trial_true->group());
-  EXPECT_EQ(winner, trial_true->group_name());
-  EXPECT_EQ(TEST_VALUE_B,
-            GetIDForTrial(GOOGLE_WEB_PROPERTIES, trial_true.get()));
-
-  const std::string default_name2 = "default2";
-  scoped_refptr<base::FieldTrial> trial_false(
-      base::FieldTrialList::FactoryGetFieldTrial("d2", 10, default_name2,
-                                                 next_year_, 12, 31, NULL));
-  const std::string loser = "ALoser";
-  const int loser_group = trial_false->AppendGroup(loser, 0);
-
-  AssociateGoogleVariationID(GOOGLE_WEB_PROPERTIES, trial_false->trial_name(),
-      default_name2, TEST_VALUE_A);
-  AssociateGoogleVariationID(GOOGLE_WEB_PROPERTIES, trial_false->trial_name(),
-      loser, TEST_VALUE_B);
-
-  EXPECT_NE(loser_group, trial_false->group());
-  EXPECT_EQ(TEST_VALUE_A,
-            GetIDForTrial(GOOGLE_WEB_PROPERTIES, trial_false.get()));
-}
-
-// Test that not associating a FieldTrial with any IDs ensure that the empty ID
-// will be returned.
-TEST_F(VariationsUtilTest, NoAssociation) {
-  const std::string default_name = "default";
-  scoped_refptr<base::FieldTrial> no_id_trial(
-      base::FieldTrialList::FactoryGetFieldTrial("d3", 10, default_name,
-                                                 next_year_, 12, 31, NULL));
-  const std::string winner = "TheWinner";
-  const int winner_group = no_id_trial->AppendGroup(winner, 10);
-
-  // Ensure that despite the fact that a normal winner is elected, it does not
-  // have a valid VariationID associated with it.
-  EXPECT_EQ(winner_group, no_id_trial->group());
-  EXPECT_EQ(winner, no_id_trial->group_name());
-  EXPECT_EQ(EMPTY_ID, GetIDForTrial(GOOGLE_WEB_PROPERTIES, no_id_trial.get()));
-}
-
-// Ensure that the AssociateGoogleVariationIDForce works as expected.
-TEST_F(VariationsUtilTest, ForceAssociation) {
-  EXPECT_EQ(EMPTY_ID,
-            GetGoogleVariationID(GOOGLE_WEB_PROPERTIES, "trial", "group"));
-  AssociateGoogleVariationID(GOOGLE_WEB_PROPERTIES, "trial", "group",
-                             TEST_VALUE_A);
-  EXPECT_EQ(TEST_VALUE_A,
-            GetGoogleVariationID(GOOGLE_WEB_PROPERTIES, "trial", "group"));
-  AssociateGoogleVariationID(GOOGLE_WEB_PROPERTIES, "trial", "group",
-                             TEST_VALUE_B);
-  EXPECT_EQ(TEST_VALUE_A,
-            GetGoogleVariationID(GOOGLE_WEB_PROPERTIES, "trial", "group"));
-  AssociateGoogleVariationIDForce(GOOGLE_WEB_PROPERTIES, "trial", "group",
-                                  TEST_VALUE_B);
-  EXPECT_EQ(TEST_VALUE_B,
-            GetGoogleVariationID(GOOGLE_WEB_PROPERTIES, "trial", "group"));
 }
 
 TEST_F(VariationsUtilTest, GenerateExperimentChunks) {
@@ -259,37 +153,6 @@ TEST_F(VariationsUtilTest, GenerateExperimentChunks) {
   }
 }
 
-// Ensure that two collections can coexist without affecting each other.
-TEST_F(VariationsUtilTest, CollectionsCoexist) {
-  const std::string default_name = "default";
-  int default_group_number = -1;
-  scoped_refptr<base::FieldTrial> trial_true(
-      base::FieldTrialList::FactoryGetFieldTrial("d1", 10, default_name,
-                                                 next_year_, 12, 31,
-                                                 &default_group_number));
-  ASSERT_EQ(default_group_number, trial_true->group());
-  ASSERT_EQ(default_name, trial_true->group_name());
-
-  EXPECT_EQ(EMPTY_ID,
-            GetIDForTrial(GOOGLE_WEB_PROPERTIES, trial_true.get()));
-  EXPECT_EQ(EMPTY_ID,
-            GetIDForTrial(GOOGLE_UPDATE_SERVICE, trial_true.get()));
-
-  AssociateGoogleVariationID(GOOGLE_WEB_PROPERTIES, trial_true->trial_name(),
-      default_name, TEST_VALUE_A);
-  EXPECT_EQ(TEST_VALUE_A,
-            GetIDForTrial(GOOGLE_WEB_PROPERTIES, trial_true.get()));
-  EXPECT_EQ(EMPTY_ID,
-            GetIDForTrial(GOOGLE_UPDATE_SERVICE, trial_true.get()));
-
-  AssociateGoogleVariationID(GOOGLE_UPDATE_SERVICE, trial_true->trial_name(),
-      default_name, TEST_VALUE_A);
-  EXPECT_EQ(TEST_VALUE_A,
-            GetIDForTrial(GOOGLE_WEB_PROPERTIES, trial_true.get()));
-  EXPECT_EQ(TEST_VALUE_A,
-            GetIDForTrial(GOOGLE_UPDATE_SERVICE, trial_true.get()));
-}
-
 TEST_F(VariationsUtilTest, BuildGoogleUpdateExperimentLabel) {
   struct {
     const char* active_group_pairs;
@@ -313,18 +176,14 @@ TEST_F(VariationsUtilTest, BuildGoogleUpdateExperimentLabel) {
   };
 
   // Register a few VariationIDs.
-  chrome_variations::AssociateGoogleVariationID(
-      chrome_variations::GOOGLE_UPDATE_SERVICE, "FieldTrialA", "Default",
-          chrome_variations::TEST_VALUE_A);
-  chrome_variations::AssociateGoogleVariationID(
-      chrome_variations::GOOGLE_UPDATE_SERVICE, "FieldTrialB", "Group1",
-          chrome_variations::TEST_VALUE_B);
-  chrome_variations::AssociateGoogleVariationID(
-      chrome_variations::GOOGLE_UPDATE_SERVICE, "FieldTrialC", "Default",
-          chrome_variations::TEST_VALUE_C);
-  chrome_variations::AssociateGoogleVariationID(
-      chrome_variations::GOOGLE_UPDATE_SERVICE, "FieldTrialD", "Default",
-          chrome_variations::TEST_VALUE_D);  // Not actually used.
+  AssociateGoogleVariationID(GOOGLE_UPDATE_SERVICE, "FieldTrialA", "Default",
+                             TEST_VALUE_A);
+  AssociateGoogleVariationID(GOOGLE_UPDATE_SERVICE, "FieldTrialB", "Group1",
+                             TEST_VALUE_B);
+  AssociateGoogleVariationID(GOOGLE_UPDATE_SERVICE, "FieldTrialC", "Default",
+                             TEST_VALUE_C);
+  AssociateGoogleVariationID(GOOGLE_UPDATE_SERVICE, "FieldTrialD", "Default",
+                             TEST_VALUE_D);  // Not actually used.
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
     // Parse the input groups.

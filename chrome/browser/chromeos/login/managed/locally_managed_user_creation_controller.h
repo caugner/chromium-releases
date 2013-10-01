@@ -11,9 +11,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/login/managed/managed_user_authenticator.h"
-#include "chrome/browser/managed_mode/managed_user_registration_service.h"
+#include "chrome/browser/managed_mode/managed_user_registration_utility.h"
 
 class Profile;
 
@@ -79,7 +79,8 @@ class LocallyManagedUserCreationController
 
     string16 display_name;
     std::string manager_id;
-    std::string user_id;
+    std::string local_user_id; // Used to identify cryptohome.
+    std::string sync_user_id;  // Used to identify user in manager's sync data.
     std::string password;
     std::string mount_hash;
     std::string master_key;
@@ -87,7 +88,7 @@ class LocallyManagedUserCreationController
     std::string token;
     bool token_succesfully_written;
     Profile* manager_profile;
-    ManagedUserRegistrationService* service;
+    scoped_ptr<ManagedUserRegistrationUtility> registration_utility;
   };
 
   // ManagedUserAuthenticator::StatusConsumer overrides.

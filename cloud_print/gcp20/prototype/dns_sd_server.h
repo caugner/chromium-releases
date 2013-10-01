@@ -10,13 +10,16 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "cloud_print/gcp20/prototype/service_parameters.h"
 #include "net/base/ip_endpoint.h"
 #include "net/udp/udp_socket.h"
 
 namespace net {
-  class IOBufferWithSize;
-}
+
+class IOBufferWithSize;
+
+}  // namespace net
 
 struct DnsQueryRecord;
 class DnsResponseBuilder;
@@ -24,7 +27,7 @@ class DnsResponseBuilder;
 // Class for sending multicast announcements, receiving queries and answering on
 // them.
 // TODO(maksymb): Implement probing.
-class DnsSdServer {
+class DnsSdServer : public base::SupportsWeakPtr<DnsSdServer> {
  public:
   // Constructor does not start server.
   DnsSdServer();
@@ -34,7 +37,8 @@ class DnsSdServer {
 
   // Starts the server. Returns |true| if server works. Also sends
   // announcement.
-  bool Start(const ServiceParameters& serv_params, uint32 full_ttl,
+  bool Start(const ServiceParameters& serv_params,
+             uint32 full_ttl,
              const std::vector<std::string>& metadata) WARN_UNUSED_RESULT;
 
   // Sends announcement if server works.
@@ -54,7 +58,8 @@ class DnsSdServer {
   bool CreateSocket();
 
   // Processes single query.
-  void ProccessQuery(uint32 current_ttl, const DnsQueryRecord& query,
+  void ProccessQuery(uint32 current_ttl,
+                     const DnsQueryRecord& query,
                      DnsResponseBuilder* builder) const;
 
   // Processes DNS message.

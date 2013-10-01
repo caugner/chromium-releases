@@ -41,6 +41,7 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // WidgetDelegate overrides:
   virtual BubbleDelegateView* AsBubbleDelegate() OVERRIDE;
   virtual bool CanActivate() const OVERRIDE;
+  virtual bool ShouldShowCloseButton() const OVERRIDE;
   virtual View* GetContentsView() OVERRIDE;
   virtual NonClientFrameView* CreateNonClientFrameView(Widget* widget) OVERRIDE;
 
@@ -116,6 +117,11 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // Sets the bubble arrow paint type.
   void SetArrowPaintType(BubbleBorder::ArrowPaintType paint_type);
 
+  // Call this method when the anchor view bounds have changed to reposition
+  // the bubble. The bubble is automatically repositioned when the anchor view
+  // bounds change as a result of the widget's bounds changing.
+  void OnAnchorViewBoundsChanged();
+
  protected:
   // Get bubble bounds from the anchor rect and client view's preferred size.
   virtual gfx::Rect GetBubbleBounds();
@@ -144,8 +150,8 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   BubbleFrameView* GetBubbleFrameView() const;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(BubbleFrameViewTest, NonClientHitTest);
   FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, CreateDelegate);
+  FRIEND_TEST_ALL_PREFIXES(BubbleDelegateTest, NonClientHitTest);
 
   // Update the bubble color from |theme|, unless it was explicitly set.
   void UpdateColorsFromTheme(const ui::NativeTheme* theme);

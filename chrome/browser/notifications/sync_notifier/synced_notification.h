@@ -15,10 +15,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/notifications/sync_notifier/notification_bitmap_fetcher.h"
-#include "googleurl/src/gurl.h"
 #include "sync/api/sync_data.h"
 #include "sync/protocol/sync.pb.h"
 #include "ui/gfx/image/image.h"
+#include "url/gurl.h"
 
 namespace sync_pb {
 class SyncedNotificationSpecifics;
@@ -52,6 +52,7 @@ class SyncedNotification : public NotificationBitmapFetcherDelegate {
   std::string GetTitle() const;
   std::string GetHeading() const;
   std::string GetDescription() const;
+  std::string GetAnnotation() const;
   std::string GetAppId() const;
   std::string GetKey() const;
   GURL GetOriginUrl() const;
@@ -62,22 +63,23 @@ class SyncedNotification : public NotificationBitmapFetcherDelegate {
   uint64 GetCreationTime() const;
   int GetPriority() const;
   std::string GetDefaultDestinationTitle() const;
-  std::string GetDefaultDestinationIconUrl() const;
-  std::string GetDefaultDestinationUrl() const;
-  std::string GetButtonOneTitle() const;
-  std::string GetButtonOneIconUrl() const;
-  std::string GetButtonOneUrl() const;
-  std::string GetButtonTwoTitle() const;
-  std::string GetButtonTwoIconUrl() const;
-  std::string GetButtonTwoUrl() const;
-  int GetNotificationCount() const;
-  int GetButtonCount() const;
+  GURL GetDefaultDestinationIconUrl() const;
+  GURL GetDefaultDestinationUrl() const;
+  std::string GetButtonTitle(unsigned int which_button) const;
+  GURL GetButtonIconUrl(unsigned int which_button) const;
+  GURL GetButtonUrl(unsigned int which_button) const;
+  GURL GetProfilePictureUrl(unsigned int which_url) const;
+  size_t GetProfilePictureCount() const;
+  size_t GetNotificationCount() const;
+  size_t GetButtonCount() const;
   std::string GetContainedNotificationTitle(int index) const;
   std::string GetContainedNotificationMessage(int index) const;
+  std::string GetSendingServiceId() const;
 
 
   bool EqualsIgnoringReadState(const SyncedNotification& other) const;
 
+  void NotificationHasBeenRead();
   void NotificationHasBeenDismissed();
 
   // Fill up the queue of bitmaps to fetch.
@@ -98,6 +100,9 @@ class SyncedNotification : public NotificationBitmapFetcherDelegate {
   // of the sync data.
   sync_pb::EntitySpecifics GetEntitySpecifics() const;
 
+  // Write a notification to the console log.
+  void LogNotification();
+
  private:
   // Helper function to mark a notification as read or dismissed.
   void SetReadState(const ReadState& read_state);
@@ -115,9 +120,9 @@ class SyncedNotification : public NotificationBitmapFetcherDelegate {
   ScopedVector<NotificationBitmapFetcher> fetchers_;
   int active_fetcher_count_;
   gfx::Image app_icon_bitmap_;
+  gfx::Image sender_bitmap_;
   gfx::Image image_bitmap_;
-  gfx::Image button_one_bitmap_;
-  gfx::Image button_two_bitmap_;
+  std::vector<gfx::Image> button_bitmaps_;
 
   FRIEND_TEST_ALL_PREFIXES(SyncedNotificationTest, AddBitmapToFetchQueueTest);
   FRIEND_TEST_ALL_PREFIXES(SyncedNotificationTest, OnFetchCompleteTest);

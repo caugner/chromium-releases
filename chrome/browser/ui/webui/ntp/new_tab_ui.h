@@ -9,11 +9,12 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/url_data_source.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_controller.h"
 
 class GURL;
@@ -34,7 +35,7 @@ class NewTabUI : public content::WebUIController,
   explicit NewTabUI(content::WebUI* web_ui);
   virtual ~NewTabUI();
 
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Returns whether or not to show apps pages.
   static bool ShouldShowApps();
@@ -104,6 +105,10 @@ class NewTabUI : public content::WebUIController,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // If |web_contents| has an NTP URL, emits the number of NTP mouseovers
+  // associated with |web_contents|, to be logged in UMA histogram.
+  void EmitMouseoverCount(content::WebContents* web_contents);
 
   void OnShowBookmarkBarChanged();
 

@@ -33,12 +33,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(ENABLE_MANAGED_USERS)
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
-#endif
-
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/extensions/external_pref_cache_loader.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/policy/app_pack_updater.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
@@ -384,14 +380,15 @@ void ExternalProviderImpl::CreateExternalProviders(
       Extension::WAS_INSTALLED_BY_DEFAULT;
 #endif
 
-  bool is_managed_profile = false;
+  bool is_managed_profile = profile->IsManaged();
   int external_apps_path_id = chrome::DIR_EXTERNAL_EXTENSIONS;
-#if defined(ENABLE_MANAGED_USERS)
-  ManagedUserService* managed_user_service =
-      ManagedUserServiceFactory::GetForProfile(profile);
-  is_managed_profile = managed_user_service->ProfileIsManaged();
   if (is_managed_profile)
     external_apps_path_id = chrome::DIR_MANAGED_USERS_DEFAULT_APPS;
+
+#if defined(OS_CHROMEOS)
+  typedef chromeos::ExternalPrefCacheLoader PrefLoader;
+#else
+  typedef ExternalPrefLoader PrefLoader;
 #endif
 
   if (!is_chromeos_demo_session) {
@@ -399,8 +396,8 @@ void ExternalProviderImpl::CreateExternalProviders(
         linked_ptr<ExternalProviderInterface>(
             new ExternalProviderImpl(
                 service,
-                new ExternalPrefLoader(external_apps_path_id,
-                                       check_admin_permissions_on_mac),
+                new PrefLoader(external_apps_path_id,
+                               check_admin_permissions_on_mac),
                 profile,
                 Manifest::EXTERNAL_PREF,
                 Manifest::EXTERNAL_PREF_DOWNLOAD,

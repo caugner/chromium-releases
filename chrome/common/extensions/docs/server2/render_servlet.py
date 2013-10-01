@@ -5,58 +5,49 @@
 from fnmatch import fnmatch
 import logging
 import mimetypes
-import os
 import traceback
+from urlparse import urlsplit
 
-from appengine_wrappers import IsDevServer
-from branch_utility import BranchUtility
 from file_system import FileNotFoundError
-from server_instance import ServerInstance
 from servlet import Servlet, Response
 import svn_constants
 
 def _IsBinaryMimetype(mimetype):
-  return any(mimetype.startswith(prefix)
-             for prefix in ['audio', 'image', 'video'])
+  return any(
+    mimetype.startswith(prefix) for prefix in ['audio', 'image', 'video'])
 
 class RenderServlet(Servlet):
   '''Servlet which renders templates.
   '''
   class Delegate(object):
-    def CreateServerInstanceForChannel(self, channel):
-      raise NotImplementedError()
+    def CreateServerInstance(self):
+      raise NotImplementedError(self.__class__)
 
-  def __init__(self, request, delegate, default_channel='stable'):
+  def __init__(self, request, delegate):
     Servlet.__init__(self, request)
     self._delegate = delegate
-    self._default_channel = default_channel
 
   def Get(self):
-    path_with_channel, headers = (self._request.path, self._request.headers)
+    ''' Render the page for a request.
+    '''
+    # TODO(kalman): a consistent path syntax (even a Path class?) so that we
+    # can stop being so conservative with stripping and adding back the '/'s.
+    path = self._request.path.lstrip('/')
 
-    # Redirect "extensions" and "extensions/" to "extensions/index.html", etc.
-    if (os.path.splitext(path_with_channel)[1] == '' and
-        path_with_channel.find('/') == -1):
-      path_with_channel += '/'
-    if path_with_channel.endswith('/'):
-      return Response.Redirect('/%sindex.html' % path_with_channel)
+    if path.split('/')[-1] == 'redirects.json':
+      return Response.Ok('')
 
-    channel, path = BranchUtility.SplitChannelNameFromPath(path_with_channel)
+    server_instance = self._delegate.CreateServerInstance()
 
-    if channel == self._default_channel:
-      return Response.Redirect('/%s' % path)
+    redirect = server_instance.redirector.Redirect(self._request.host, path)
+    if redirect is not None:
+      return Response.Redirect(redirect)
 
-    if channel is None:
-      channel = self._default_channel
-
-    server_instance = self._delegate.CreateServerInstanceForChannel(channel)
-
-    canonical_path = (
-        server_instance.path_canonicalizer.Canonicalize(path).lstrip('/'))
-    if path != canonical_path:
-      redirect_path = (canonical_path if channel is None else
-                       '%s/%s' % (channel, canonical_path))
-      return Response.Redirect('/%s' % redirect_path)
+    canonical_result = server_instance.path_canonicalizer.Canonicalize(path)
+    redirect = canonical_result.path.lstrip('/')
+    if path != redirect:
+      return Response.Redirect('/' + redirect,
+                               permanent=canonical_result.permanent)
 
     templates = server_instance.template_data_source_factory.Create(
         self._request, path)
@@ -65,26 +56,30 @@ class RenderServlet(Servlet):
     content_type = None
 
     try:
-      if fnmatch(path, 'extensions/examples/*.zip'):
+      # At this point, any valid paths ending with '/' have been redirected.
+      # Therefore, the response should be a 404 Not Found.
+      if path.endswith('/'):
+        pass
+      elif fnmatch(path, 'extensions/examples/*.zip'):
         content = server_instance.example_zipper.Create(
             path[len('extensions/'):-len('.zip')])
         content_type = 'application/zip'
       elif path.startswith('extensions/examples/'):
         mimetype = mimetypes.guess_type(path)[0] or 'text/plain'
-        content = server_instance.content_cache.GetFromFile(
+        content = server_instance.host_file_system.ReadSingle(
             '%s/%s' % (svn_constants.DOCS_PATH, path[len('extensions/'):]),
             binary=_IsBinaryMimetype(mimetype))
         content_type = mimetype
       elif path.startswith('static/'):
         mimetype = mimetypes.guess_type(path)[0] or 'text/plain'
-        content = server_instance.content_cache.GetFromFile(
+        content = server_instance.host_file_system.ReadSingle(
             ('%s/%s' % (svn_constants.DOCS_PATH, path)),
             binary=_IsBinaryMimetype(mimetype))
         content_type = mimetype
       elif path.endswith('.html'):
         content = templates.Render(path)
         content_type = 'text/html'
-    except FileNotFoundError as e:
+    except FileNotFoundError:
       logging.warning(traceback.format_exc())
       content = None
 

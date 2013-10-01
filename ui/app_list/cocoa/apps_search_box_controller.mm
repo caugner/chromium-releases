@@ -5,6 +5,7 @@
 #import "ui/app_list/cocoa/apps_search_box_controller.h"
 
 #include "base/mac/foundation_util.h"
+#include "base/mac/mac_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "grit/ui_resources.h"
 #import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
@@ -29,8 +30,9 @@ const CGFloat kSearchIconDimension = 32;
 // Size of the menu button on the right.
 const CGFloat kMenuButtonDimension = 29;
 
-// Vertical offset that the menu should appear below the menu button.
-const CGFloat kMenuOffsetFromButton = 2;
+// Menu offset relative to the bottom-right corner of the menu button.
+const CGFloat kMenuYOffsetFromButton = -4;
+const CGFloat kMenuXOffsetFromButton = -7;
 
 }
 
@@ -90,8 +92,8 @@ void SearchBoxModelObserverBridge::SetSearchText(const base::string16& text) {
 }
 
 void SearchBoxModelObserverBridge::IconChanged() {
-  [[parent_ searchImageView]
-      setImage:gfx::NSImageFromImageSkia(GetModel()->icon())];
+  [[parent_ searchImageView] setImage:gfx::NSImageFromImageSkiaWithColorSpace(
+      GetModel()->icon(), base::mac::GetSRGBColorSpace())];
 }
 
 void SearchBoxModelObserverBridge::HintTextChanged() {
@@ -152,6 +154,15 @@ void SearchBoxModelObserverBridge::TextChanged() {
   [self controlTextDidChange:nil];
 }
 
+- (void)rebuildMenu {
+  if (![delegate_ appListDelegate])
+    return;
+
+  menuController_.reset([[AppListMenuController alloc]
+      initWithSearchBoxController:self]);
+  [menuButton_ setMenu:[menuController_ menu]];  // Menu will populate here.
+}
+
 - (void)setDelegate:(id<AppsSearchBoxDelegate>)delegate {
   [[menuButton_ menu] removeAllItems];
   menuController_.reset();
@@ -166,9 +177,7 @@ void SearchBoxModelObserverBridge::TextChanged() {
     return;
 
   appListMenu_.reset(new app_list::AppListMenu([delegate_ appListDelegate]));
-  menuController_.reset([[AppListMenuController alloc]
-      initWithSearchBoxController:self]);
-  [menuButton_ setMenu:[menuController_ menu]];  // Menu will populate here.
+  [self rebuildMenu];
 }
 
 - (NSTextField*)searchTextField {
@@ -384,8 +393,8 @@ void SearchBoxModelObserverBridge::TextChanged() {
   NSRect anchorRect = [menuButton convertRect:[menuButton bounds]
                                        toView:nil];
   NSPoint anchorPoint = [[menuButton window] convertBaseToScreen:NSMakePoint(
-      NSMaxX(anchorRect),
-      NSMinY(anchorRect) - kMenuOffsetFromButton)];
+      NSMaxX(anchorRect) + kMenuXOffsetFromButton,
+      NSMinY(anchorRect) - kMenuYOffsetFromButton)];
   NSRect confinementRect = [[menuButton window] frame];
   confinementRect.size = NSMakeSize(anchorPoint.x - NSMinX(confinementRect),
                                     anchorPoint.y - NSMinY(confinementRect));

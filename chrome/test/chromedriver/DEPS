@@ -1,5 +1,10 @@
 include_rules = [
-  "+third_party/mongoose",
+  # These files should not depend on browser code.
+  "-chrome",
+  "-content",
+
+  "+chrome/test/chromedriver",
+
   "+third_party/webdriver",
   "+third_party/zlib",
 ]

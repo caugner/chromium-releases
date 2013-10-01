@@ -36,10 +36,10 @@ class MessageCenterTrayBridge :
   virtual void OnMessageCenterTrayChanged() OVERRIDE;
   virtual bool ShowPopups() OVERRIDE;
   virtual void HidePopups() OVERRIDE;
-  virtual void UpdatePopups() OVERRIDE;
   virtual bool ShowMessageCenter() OVERRIDE;
   virtual void HideMessageCenter() OVERRIDE;
   virtual bool ShowNotifierSettings() OVERRIDE;
+  virtual message_center::MessageCenterTray* GetMessageCenterTray() OVERRIDE;
 
   message_center::MessageCenter* message_center() { return message_center_; }
 

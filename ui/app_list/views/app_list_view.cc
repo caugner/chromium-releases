@@ -4,6 +4,7 @@
 
 #include "ui/app_list/views/app_list_view.h"
 
+#include "base/command_line.h"
 #include "base/strings/string_util.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_model.h"
@@ -14,6 +15,7 @@
 #include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/search_box_view.h"
 #include "ui/app_list/views/signin_view.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/path.h"
@@ -25,6 +27,10 @@
 
 #if defined(USE_AURA)
 #include "ui/aura/window.h"
+#include "ui/aura/root_window.h"
+#if defined(OS_WIN)
+#include "ui/base/win/shell.h"
+#endif
 #endif
 
 namespace app_list {
@@ -94,6 +100,13 @@ void AppListView::InitAsBubble(gfx::NativeView parent,
                                      kArrowOffset, kArrowOffset));
   set_border_accepts_events(border_accepts_events);
   set_shadow(views::BubbleBorder::BIG_SHADOW);
+#if defined(USE_AURA) && defined(OS_WIN)
+  if (!ui::win::IsAeroGlassEnabled() ||
+      CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableDwmComposition)) {
+    set_shadow(views::BubbleBorder::NO_SHADOW_OPAQUE_BORDER);
+  }
+#endif
   views::BubbleDelegateView::CreateBubble(this);
   SetBubbleArrow(arrow);
 
@@ -167,7 +180,20 @@ void AppListView::OnSigninStatusChanged() {
 
   signin_view_->SetVisible(needs_signin);
   app_list_main_view_->SetVisible(!needs_signin);
+  app_list_main_view_->search_box_view()->InvalidateMenu();
 }
+
+#if defined(OS_WIN)
+HWND AppListView::GetHWND() const {
+#if defined(USE_AURA)
+  gfx::NativeWindow window =
+      GetWidget()->GetTopLevelWidget()->GetNativeWindow();
+  return window->GetRootWindow()->GetAcceleratedWidget();
+#else
+  return GetWidget()->GetTopLevelWidget()->GetNativeWindow();
+#endif
+}
+#endif
 
 views::View* AppListView::GetInitiallyFocusedView() {
   return app_list_main_view_->search_box_view()->search_box();
@@ -193,10 +219,12 @@ void AppListView::GetWidgetHitTestMask(gfx::Path* mask) const {
 bool AppListView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   // The accelerator is added by BubbleDelegateView.
   if (accelerator.key_code() == ui::VKEY_ESCAPE) {
-    if (app_list_main_view_->search_box_view()->HasSearch())
+    if (app_list_main_view_->search_box_view()->HasSearch()) {
       app_list_main_view_->search_box_view()->ClearSearch();
-    else
+    } else {
+      GetWidget()->Deactivate();
       Close();
+    }
     return true;
   }
 

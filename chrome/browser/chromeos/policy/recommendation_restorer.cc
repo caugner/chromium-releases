@@ -11,11 +11,11 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -79,7 +79,7 @@ void RecommendationRestorer::Observe(
   }
 }
 
-void RecommendationRestorer::OnUserActivity() {
+void RecommendationRestorer::OnUserActivity(const ui::Event* event) {
   if (restore_timer_.IsRunning())
     restore_timer_.Reset();
 }
@@ -96,7 +96,16 @@ void RecommendationRestorer::Restore(bool allow_delay,
   if (!pref->GetRecommendedValue() || !pref->HasUserSetting())
     return;
 
-  if (!logged_in_ && allow_delay)
+  if (logged_in_) {
+    allow_delay = false;
+  } else if (allow_delay && ash::Shell::HasInstance()) {
+    // Skip the delay if there has been no user input since the browser started.
+    const ash::UserActivityDetector* user_activity_detector =
+        ash::Shell::GetInstance()->user_activity_detector();
+    allow_delay = !user_activity_detector->last_activity_time().is_null();
+  }
+
+  if (allow_delay)
     StartTimer();
   else
     pref_change_registrar_.prefs()->ClearPref(pref->name().c_str());

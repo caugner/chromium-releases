@@ -12,6 +12,7 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/ntp/favicon_webui_handler.h"
@@ -19,8 +20,8 @@
 #include "chrome/browser/ui/webui/ntp/most_visited_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
+#include "chrome/browser/ui/webui/ntp/ntp_user_data_logger.h"
 #include "chrome/browser/ui/webui/ntp/recently_closed_tabs_handler.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/user_prefs/pref_registry_syncable.h"
@@ -37,6 +38,7 @@
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
+#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_sync_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
@@ -44,6 +46,7 @@
 #else
 #include "chrome/browser/ui/webui/ntp/android/bookmarks_handler.h"
 #include "chrome/browser/ui/webui/ntp/android/context_menu_handler.h"
+#include "chrome/browser/ui/webui/ntp/android/navigation_handler.h"
 #include "chrome/browser/ui/webui/ntp/android/new_tab_page_ready_handler.h"
 #include "chrome/browser/ui/webui/ntp/android/promo_handler.h"
 #endif
@@ -84,6 +87,16 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
   g_live_new_tabs.Pointer()->insert(this);
   web_ui->OverrideTitle(l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
 
+  content::WebContents* web_contents = web_ui->GetWebContents();
+  NTPUserDataLogger::CreateForWebContents(web_contents);
+  NTPUserDataLogger::FromWebContents(web_contents)->set_ntp_url(
+      GURL(chrome::kChromeUINewTabURL));
+
+  registrar_.Add(
+      this,
+      content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
+      content::Source<content::WebContents>(web_contents));
+
   // We count all link clicks as AUTO_BOOKMARK, so that site can be ranked more
   // highly. Note this means we're including clicks on not only most visited
   // thumbnails, but also clicks on recently bookmarked.
@@ -93,9 +106,11 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
     web_ui->AddMessageHandler(new browser_sync::ForeignSessionHandler());
     web_ui->AddMessageHandler(new MostVisitedHandler());
     web_ui->AddMessageHandler(new RecentlyClosedTabsHandler());
-    web_ui->AddMessageHandler(new MetricsHandler());
 #if !defined(OS_ANDROID)
+    web_ui->AddMessageHandler(new FaviconWebUIHandler());
+    web_ui->AddMessageHandler(new MetricsHandler());
     web_ui->AddMessageHandler(new NewTabPageHandler());
+    web_ui->AddMessageHandler(new CoreAppLauncherHandler());
     if (NewTabUI::IsDiscoveryInNTPEnabled())
       web_ui->AddMessageHandler(new SuggestionsHandler());
     // Android doesn't have a sync promo/username on NTP.
@@ -109,14 +124,14 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
         web_ui->AddMessageHandler(new AppLauncherHandler(service));
     }
 #endif
-
-    web_ui->AddMessageHandler(new FaviconWebUIHandler());
   }
 
 #if defined(OS_ANDROID)
   // These handlers are specific to the Android NTP page.
   web_ui->AddMessageHandler(new BookmarksHandler());
   web_ui->AddMessageHandler(new ContextMenuHandler());
+  web_ui->AddMessageHandler(new FaviconWebUIHandler());
+  web_ui->AddMessageHandler(new NavigationHandler());
   web_ui->AddMessageHandler(new NewTabPageReadyHandler());
   if (!GetProfile()->IsOffTheRecord())
     web_ui->AddMessageHandler(new PromoHandler());
@@ -215,9 +230,22 @@ void NewTabUI::Observe(int type,
       last_paint_ = base::TimeTicks::Now();
       break;
     }
+    case content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED: {
+      if (!*content::Details<bool>(details).ptr()) {
+        EmitMouseoverCount(
+            content::Source<content::WebContents>(source).ptr());
+      }
+      break;
+    }
     default:
       CHECK(false) << "Unexpected notification: " << type;
   }
+}
+
+void NewTabUI::EmitMouseoverCount(content::WebContents* web_contents) {
+  NTPUserDataLogger* data = NTPUserDataLogger::FromWebContents(web_contents);
+  if (data->ntp_url() == GURL(chrome::kChromeUINewTabURL))
+    data->EmitMouseoverCount();
 }
 
 void NewTabUI::OnShowBookmarkBarChanged() {
@@ -228,15 +256,16 @@ void NewTabUI::OnShowBookmarkBarChanged() {
 }
 
 // static
-void NewTabUI::RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
+void NewTabUI::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
 #if !defined(OS_ANDROID)
-  AppLauncherHandler::RegisterUserPrefs(registry);
-  NewTabPageHandler::RegisterUserPrefs(registry);
+  CoreAppLauncherHandler::RegisterProfilePrefs(registry);
+  NewTabPageHandler::RegisterProfilePrefs(registry);
   if (NewTabUI::IsDiscoveryInNTPEnabled())
-    SuggestionsHandler::RegisterUserPrefs(registry);
+    SuggestionsHandler::RegisterProfilePrefs(registry);
 #endif
-  MostVisitedHandler::RegisterUserPrefs(registry);
-  browser_sync::ForeignSessionHandler::RegisterUserPrefs(registry);
+  MostVisitedHandler::RegisterProfilePrefs(registry);
+  browser_sync::ForeignSessionHandler::RegisterProfilePrefs(registry);
 }
 
 // static

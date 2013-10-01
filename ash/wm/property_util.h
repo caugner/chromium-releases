@@ -24,7 +24,7 @@ class RootWindowController;
 // Sets the restore bounds property on |window| in the virtual screen
 // coordinates.  Deletes existing bounds value if exists.
 ASH_EXPORT void SetRestoreBoundsInScreen(aura::Window* window,
-                                       const gfx::Rect& screen_bounds);
+                                         const gfx::Rect& screen_bounds);
 // Same as |SetRestoreBoundsInScreen| except that the bounds is in the
 // parent's coordinates.
 ASH_EXPORT void SetRestoreBoundsInParent(aura::Window* window,
@@ -40,12 +40,6 @@ ASH_EXPORT gfx::Rect GetRestoreBoundsInParent(aura::Window* window);
 
 // Deletes and clears the restore bounds property on |window|.
 ASH_EXPORT void ClearRestoreBounds(aura::Window* window);
-
-enum WindowPersistsAcrossAllWorkspacesType {
-  WINDOW_PERSISTS_ACROSS_ALL_WORKSPACES_VALUE_DEFAULT,
-  WINDOW_PERSISTS_ACROSS_ALL_WORKSPACES_VALUE_NO,
-  WINDOW_PERSISTS_ACROSS_ALL_WORKSPACES_VALUE_YES,
-};
 
 // Sets whether |window| is ignored when determining whether the shelf should
 // be darkened when overlapped.
@@ -68,13 +62,6 @@ ASH_EXPORT bool GetWindowAlwaysRestoresToRestoreBounds(
 // is intended for tab dragging.
 ASH_EXPORT void SetTrackedByWorkspace(aura::Window* window, bool value);
 ASH_EXPORT bool GetTrackedByWorkspace(const aura::Window* window);
-
-// Makes |window| persist across all workspaces. The default is controlled
-// by SetDefaultPersistsAcrossAllWorkspaces().
-ASH_EXPORT void SetPersistsAcrossAllWorkspaces(
-    aura::Window* window,
-    WindowPersistsAcrossAllWorkspacesType type);
-ASH_EXPORT bool GetPersistsAcrossAllWorkspaces(aura::Window* window);
 
 // Sets the default value for whether windows persist across all workspaces.
 // The default is false.

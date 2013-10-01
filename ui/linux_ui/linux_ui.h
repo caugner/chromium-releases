@@ -7,6 +7,7 @@
 
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/linux_ui/linux_ui_export.h"
+#include "ui/linux_ui/status_icon_linux.h"
 #include "ui/shell_dialogs/linux_shell_dialog.h"
 
 // The main entrypoint into Linux toolkit specific code. GTK code should only
@@ -56,6 +57,19 @@ class LINUX_UI_EXPORT LinuxUI : public LinuxShellDialog {
   // Returns whether we should be using the native theme provided by this
   // object by default.
   virtual bool GetDefaultUsesSystemTheme() const = 0;
+
+  // Sets visual properties in the desktop environment related to download
+  // progress, if available.
+  virtual void SetDownloadCount(int count) const = 0;
+  virtual void SetProgressFraction(float percentage) const = 0;
+
+  // Checks for platform support for status icons.
+  virtual bool IsStatusIconSupported() const = 0;
+
+  // Create a native status icon.
+  virtual scoped_ptr<StatusIconLinux> CreateLinuxStatusIcon(
+      const gfx::ImageSkia& image,
+      const string16& tool_tip) const = 0;
 };
 
 }  // namespace ui

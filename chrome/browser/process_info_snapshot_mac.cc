@@ -9,7 +9,9 @@
 #include <sstream>
 
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/process/launch.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread.h"
@@ -147,7 +149,6 @@ static bool GetProcessMemoryInfoUsingPS(
   }
 
   std::istringstream in(output, std::istringstream::in);
-  std::string line;
 
   // Process lines until done.
   while (true) {

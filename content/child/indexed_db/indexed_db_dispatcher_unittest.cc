@@ -3,9 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/values.h"
 #include "content/child/indexed_db/indexed_db_dispatcher.h"
+#include "content/child/thread_safe_sender.h"
 #include "content/common/indexed_db/indexed_db_key.h"
+#include "ipc/ipc_sync_message_filter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebIDBCallbacks.h"
@@ -43,9 +46,16 @@ TEST(IndexedDBDispatcherTest, ValueSizeTest) {
   const int64 transaction_id = 1;
   const int64 object_store_id = 2;
 
+  scoped_refptr<base::MessageLoopProxy> message_loop_proxy(
+      base::MessageLoopProxy::current());
+  scoped_refptr<IPC::SyncMessageFilter> sync_message_filter(
+      new IPC::SyncMessageFilter(NULL));
+  scoped_refptr<ThreadSafeSender> thread_safe_sender(new ThreadSafeSender(
+      message_loop_proxy.get(), sync_message_filter.get()));
+
   MockCallbacks callbacks;
-  IndexedDBDispatcher dispatcher;
-  IndexedDBKey key(0, WebIDBKey::NumberType);
+  IndexedDBDispatcher dispatcher(thread_safe_sender.get());
+  IndexedDBKey key(0, WebKit::WebIDBKeyTypeNumber);
   dispatcher.RequestIDBDatabasePut(ipc_dummy_id,
                                    transaction_id,
                                    object_store_id,

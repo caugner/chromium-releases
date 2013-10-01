@@ -4,7 +4,7 @@
 #import "chrome/browser/ui/cocoa/autofill/autofill_dialog_cocoa.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller_impl.h"
 #include "chrome/browser/ui/browser.h"
@@ -44,7 +44,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
   virtual ~TestAutofillDialogController() {}
 
   virtual void ViewClosed() OVERRIDE {
-    DCHECK(runner_);
+    DCHECK(runner_.get());
     runner_->Quit();
     AutofillDialogControllerImpl::ViewClosed();
   }
@@ -92,7 +92,7 @@ class AutofillDialogCocoaBrowserTest : public InProcessBrowserTest {
   TestAutofillDialogController* controller() { return controller_; }
 
   void RunMessageLoop() {
-    DCHECK(runner_);
+    DCHECK(runner_.get());
     runner_->Run();
   }
 

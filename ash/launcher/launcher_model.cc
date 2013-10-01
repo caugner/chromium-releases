@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "ash/ash_switches.h"
 #include "ash/launcher/launcher_model_observer.h"
 
 namespace ash {
@@ -13,18 +14,34 @@ namespace ash {
 namespace {
 
 int LauncherItemTypeToWeight(LauncherItemType type) {
-  switch (type) {
-    case TYPE_BROWSER_SHORTCUT:
-    case TYPE_APP_SHORTCUT:
-    case TYPE_WINDOWED_APP:
-      return 0;
-    case TYPE_TABBED:
-    case TYPE_PLATFORM_APP:
-      return 1;
-    case TYPE_APP_LIST:
-      return 2;
-    case TYPE_APP_PANEL:
-      return 3;
+  if (ash::switches::UseAlternateShelfLayout()) {
+    switch (type) {
+      case TYPE_APP_LIST:
+        return 0;
+      case TYPE_BROWSER_SHORTCUT:
+      case TYPE_APP_SHORTCUT:
+      case TYPE_WINDOWED_APP:
+        return 1;
+      case TYPE_TABBED:
+      case TYPE_PLATFORM_APP:
+        return 2;
+      case TYPE_APP_PANEL:
+        return 3;
+    }
+  } else {
+    switch (type) {
+      case TYPE_BROWSER_SHORTCUT:
+      case TYPE_APP_SHORTCUT:
+      case TYPE_WINDOWED_APP:
+        return 0;
+      case TYPE_TABBED:
+      case TYPE_PLATFORM_APP:
+        return 1;
+      case TYPE_APP_LIST:
+        return 2;
+      case TYPE_APP_PANEL:
+        return 3;
+    }
   }
 
   NOTREACHED() << "Invalid type " << type;
@@ -148,7 +165,8 @@ void LauncherModel::RemoveObserver(LauncherModelObserver* observer) {
 
 int LauncherModel::ValidateInsertionIndex(LauncherItemType type,
                                           int index) const {
-  DCHECK(index >= 0 && index <= item_count());
+  DCHECK(index >= 0 && index <= item_count() +
+      (ash::switches::UseAlternateShelfLayout() ? 1 : 0));
 
   // Clamp |index| to the allowed range for the type as determined by |weight|.
   LauncherItem weight_dummy;

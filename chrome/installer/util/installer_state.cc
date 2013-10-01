@@ -214,8 +214,8 @@ void InstallerState::Initialize(const CommandLine& command_line,
     }
 
     bool keep_binaries = false;
-    // Look for a product that is not the binaries and that is not being
-    // uninstalled. If not found, binaries are uninstalled too.
+    // Look for a multi-install product that is not the binaries and that is not
+    // being uninstalled. If not found, binaries are uninstalled too.
     for (size_t i = 0; i < BrowserDistribution::NUM_TYPES; ++i) {
       BrowserDistribution::Type type =
           static_cast<BrowserDistribution::Type>(i);
@@ -223,8 +223,19 @@ void InstallerState::Initialize(const CommandLine& command_line,
       if (type == BrowserDistribution::CHROME_BINARIES)
         continue;
 
-      if (machine_state.GetProductState(system_install(), type) == NULL) {
+      const ProductState* product_state =
+          machine_state.GetProductState(system_install(), type);
+      if (product_state == NULL) {
         // The product is not installed.
+        continue;
+      }
+
+      if (!product_state->is_multi_install() &&
+          type != BrowserDistribution::CHROME_BROWSER) {
+        // The product is not sharing the binaries. It is ordinarily impossible
+        // for single-install Chrome to be installed along with any
+        // multi-install product. Treat single-install Chrome the same as any
+        // multi-install product just in case the impossible happens.
         continue;
       }
 
@@ -552,7 +563,7 @@ Version* InstallerState::GetCurrentVersion(
     // Be aware that there might be a pending "new_chrome.exe" already in the
     // installation path.  If so, we use old_version, which holds the version of
     // "chrome.exe" itself.
-    if (file_util::PathExists(target_path().Append(kChromeNewExe)))
+    if (base::PathExists(target_path().Append(kChromeNewExe)))
       version = product_state->old_version();
 
     if (version == NULL)
@@ -590,7 +601,7 @@ bool InstallerState::IsChromeFrameRunning(
     base::FilePath cf_install_path(
         target_path().AppendASCII(current_version->GetString())
                      .Append(kChromeFrameDll));
-    in_use = file_util::PathExists(cf_install_path) &&
+    in_use = base::PathExists(cf_install_path) &&
         IsFileInUse(cf_install_path);
   }
   return in_use;
@@ -637,7 +648,6 @@ void InstallerState::RemoveOldVersionDirectories(
     Version* existing_version,
     const base::FilePath& temp_path) const {
   Version version;
-  std::vector<base::FilePath> key_files;
   scoped_ptr<WorkItem> item;
 
   std::set<std::string> existing_version_strings;
@@ -665,7 +675,7 @@ void InstallerState::RemoveOldVersionDirectories(
       LOG(ERROR) << "Deleting old version directory: " << next_version.value();
 
       // Attempt to recursively delete the old version dir.
-      bool delete_succeeded = file_util::Delete(next_version, true);
+      bool delete_succeeded = base::DeleteFile(next_version, true);
 
       // Note: temporarily log old version deletion at ERROR level to make it
       // more likely we see this in the installer log.

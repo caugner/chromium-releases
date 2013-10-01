@@ -2,16 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
-
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/format_macros.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -23,7 +22,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -37,13 +35,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
-
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/ui/views/frame/browser_view.h"
-#include "ui/views/focus/focus_manager.h"
-#include "ui/views/view.h"
-#endif
+#include "net/test/embedded_test_server/embedded_test_server.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -87,9 +79,9 @@ const int kActionDelayMs = 500;
 // Maxiumum time to wait until the focus is moved to expected view.
 const int kFocusChangeTimeoutMs = 500;
 
-const char kSimplePage[] = "files/focus/page_with_focus.html";
-const char kStealFocusPage[] = "files/focus/page_steals_focus.html";
-const char kTypicalPage[] = "files/focus/typical_page.html";
+const char kSimplePage[] = "/focus/page_with_focus.html";
+const char kStealFocusPage[] = "/focus/page_steals_focus.html";
+const char kTypicalPage[] = "/focus/typical_page.html";
 const char kTypicalPageName[] = "typical_page.html";
 
 // Test to make sure Chrome is in the foreground as we start testing. This is
@@ -238,10 +230,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_ClickingMovesFocus) {
 // Flaky, http://crbug.com/69034.
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_BrowsersRememberFocus) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // First we navigate to our test page.
-  GURL url = test_server()->GetURL(kSimplePage);
+  GURL url = embedded_test_server()->GetURL(kSimplePage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   gfx::NativeWindow window = browser()->window()->GetNativeWindow();
@@ -259,58 +251,16 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_BrowsersRememberFocus) {
   ui_test_utils::HideNativeWindow(window);
   ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(window));
   ASSERT_TRUE(IsViewFocused(VIEW_ID_OMNIBOX));
-
-  // The rest of this test does not make sense on Linux because the behavior
-  // of Activate() is not well defined and can vary by window manager.
-#if defined(OS_WIN)
-  // Open a new browser window.
-  Browser* browser2 =
-      new Browser(Browser::CreateParams(browser()->profile(),
-                                        browser()->host_desktop_type()));
-  ASSERT_TRUE(browser2);
-  chrome::AddBlankTabAt(browser2, -1, true);
-  browser2->window()->Show();
-  ui_test_utils::NavigateToURL(browser2, url);
-
-  gfx::NativeWindow window2 = browser2->window()->GetNativeWindow();
-  BrowserView* browser_view2 =
-      BrowserView::GetBrowserViewForBrowser(browser2);
-  ASSERT_TRUE(browser_view2);
-  const views::Widget* widget2 =
-      views::Widget::GetWidgetForNativeWindow(window2);
-  ASSERT_TRUE(widget2);
-  const views::FocusManager* focus_manager2 = widget2->GetFocusManager();
-  ASSERT_TRUE(focus_manager2);
-  EXPECT_EQ(browser_view2->GetTabContentsContainerView(),
-            focus_manager2->GetFocusedView());
-
-  // Switch to the 1st browser window, focus should still be on the location
-  // bar and the second browser should have nothing focused.
-  browser()->window()->Activate();
-  ASSERT_TRUE(IsViewFocused(VIEW_ID_OMNIBOX));
-  EXPECT_EQ(NULL, focus_manager2->GetFocusedView());
-
-  // Switch back to the second browser, focus should still be on the page.
-  browser2->window()->Activate();
-  views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
-  ASSERT_TRUE(widget);
-  EXPECT_EQ(NULL, widget->GetFocusManager()->GetFocusedView());
-  EXPECT_EQ(browser_view2->GetTabContentsContainerView(),
-            focus_manager2->GetFocusedView());
-
-  // Close the 2nd browser to avoid a DCHECK().
-  browser_view2->Close();
-#endif
 }
 
 // Tabs remember focus.
 // Disabled, http://crbug.com/62542.
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_TabsRememberFocus) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // First we navigate to our test page.
-  GURL url = test_server()->GetURL(kSimplePage);
+  GURL url = embedded_test_server()->GetURL(kSimplePage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Create several tabs.
@@ -376,10 +326,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_TabsRememberFocus) {
 // Tabs remember focus with find-in-page box.
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_TabsRememberFocusFindInPage) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // First we navigate to our test page.
-  GURL url = test_server()->GetURL(kSimplePage);
+  GURL url = embedded_test_server()->GetURL(kSimplePage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   chrome::Find(browser());
@@ -417,7 +367,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_TabsRememberFocusFindInPage) {
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest,
                        DISABLED_BackgroundBrowserDontStealFocus) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // Open a new browser window.
   Browser* browser2 =
@@ -450,7 +400,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest,
   unfocused_browser = browser();
 #endif
 
-  GURL steal_focus_url = test_server()->GetURL(kStealFocusPage);
+  GURL steal_focus_url = embedded_test_server()->GetURL(kStealFocusPage);
   ui_test_utils::NavigateToURL(unfocused_browser, steal_focus_url);
 
   // Activate the first browser.
@@ -467,10 +417,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest,
 // Page cannot steal focus when focus is on location bar.
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, LocationBarLockFocus) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // Open the page that steals focus.
-  GURL url = test_server()->GetURL(kStealFocusPage);
+  GURL url = embedded_test_server()->GetURL(kStealFocusPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   chrome::FocusLocationBar(browser());
@@ -490,10 +440,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, LocationBarLockFocus) {
 // RenderWidget::didFocus()).
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversal) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // First we navigate to our test page.
-  GURL url = test_server()->GetURL(kTypicalPage);
+  GURL url = embedded_test_server()->GetURL(kTypicalPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   chrome::FocusLocationBar(browser());
@@ -612,10 +562,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversal) {
 // Focus traversal while an interstitial is showing.
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // First we navigate to our test page.
-  GURL url = test_server()->GetURL(kSimplePage);
+  GURL url = embedded_test_server()->GetURL(kSimplePage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Focus should be on the page.
@@ -732,10 +682,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
 // http://crbug.com/81451
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_InterstitialFocus) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // First we navigate to our test page.
-  GURL url = test_server()->GetURL(kSimplePage);
+  GURL url = embedded_test_server()->GetURL(kSimplePage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   // Page should have focus.
@@ -769,10 +719,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_InterstitialFocus) {
 // Disabled due to flakiness. http://crbug.com/67301.
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_FindFocusTest) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // Open some page (any page that doesn't steal focus).
-  GURL url = test_server()->GetURL(kTypicalPage);
+  GURL url = embedded_test_server()->GetURL(kTypicalPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   EXPECT_TRUE(ChromeInForeground());
@@ -853,7 +803,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_TabInitialFocus) {
 // Tests that focus goes where expected when using reload.
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FocusOnReload) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // Open the new tab, reload.
   {
@@ -878,7 +828,8 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FocusOnReload) {
   ASSERT_TRUE(IsViewFocused(VIEW_ID_OMNIBOX));
 
   // Open a regular page, focus the location bar, reload.
-  ui_test_utils::NavigateToURL(browser(), test_server()->GetURL(kSimplePage));
+  ui_test_utils::NavigateToURL(browser(),
+                               embedded_test_server()->GetURL(kSimplePage));
   chrome::FocusLocationBar(browser());
   ASSERT_TRUE(IsViewFocused(VIEW_ID_OMNIBOX));
   {
@@ -899,10 +850,11 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FocusOnReload) {
 // Tests that focus goes where expected when using reload on a crashed tab.
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_FocusOnReloadCrashedTab) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // Open a regular page, crash, reload.
-  ui_test_utils::NavigateToURL(browser(), test_server()->GetURL(kSimplePage));
+  ui_test_utils::NavigateToURL(browser(),
+                               embedded_test_server()->GetURL(kSimplePage));
   content::CrashTab(browser()->tab_strip_model()->GetActiveWebContents());
   {
     content::WindowedNotificationObserver observer(

@@ -5,12 +5,11 @@
 #include "chrome/browser/importer/importer_list.h"
 
 #include "base/bind.h"
-#include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/importer/firefox_importer_utils.h"
-#include "chrome/browser/importer/importer_bridge.h"
-#include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/importer/importer_list_observer.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/common/importer/firefox_importer_utils.h"
+#include "chrome/common/importer/importer_bridge.h"
+#include "chrome/common/importer/importer_data_types.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -18,7 +17,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 
 #include "base/mac/foundation_util.h"
-#include "chrome/browser/importer/safari_importer.h"
+#include "chrome/common/importer/safari_importer_utils.h"
 #endif
 
 using content::BrowserThread;
@@ -42,7 +41,7 @@ void DetectIEProfiles(std::vector<importer::SourceProfile*>* profiles) {
 #if defined(OS_MACOSX)
 void DetectSafariProfiles(std::vector<importer::SourceProfile*>* profiles) {
   uint16 items = importer::NONE;
-  if (!SafariImporter::CanImport(base::mac::GetUserLibraryPath(), &items))
+  if (!SafariImporterCanImport(base::mac::GetUserLibraryPath(), &items))
     return;
 
   importer::SourceProfile* safari = new importer::SourceProfile;
@@ -56,7 +55,7 @@ void DetectSafariProfiles(std::vector<importer::SourceProfile*>* profiles) {
 #endif  // defined(OS_MACOSX)
 
 // |locale|: The application locale used for lookups in Firefox's
-// locale-specific search engines feature (see firefox3_importer.cc for
+// locale-specific search engines feature (see firefox_importer.cc for
 // details).
 void DetectFirefoxProfiles(const std::string locale,
                            std::vector<importer::SourceProfile*>* profiles) {
@@ -75,7 +74,7 @@ void DetectFirefoxProfiles(const std::string locale,
     GetFirefoxVersionAndPathFromProfile(profile_path, &version, &app_path);
 
   if (version >= 3) {
-    firefox_type = importer::TYPE_FIREFOX3;
+    firefox_type = importer::TYPE_FIREFOX;
   } else {
     // Ignores old versions of firefox.
     return;
@@ -96,34 +95,13 @@ void DetectFirefoxProfiles(const std::string locale,
   profiles->push_back(firefox);
 }
 
-#if defined(OS_WIN)
-void DetectGoogleToolbarProfiles(
-    std::vector<importer::SourceProfile*>* profiles,
-    scoped_refptr<net::URLRequestContextGetter> request_context_getter) {
-  if (first_run::IsChromeFirstRun())
-    return;
-
-  importer::SourceProfile* google_toolbar = new importer::SourceProfile;
-  google_toolbar->importer_name =
-      l10n_util::GetStringUTF16(IDS_IMPORT_FROM_GOOGLE_TOOLBAR);
-  google_toolbar->importer_type = importer::TYPE_GOOGLE_TOOLBAR5;
-  google_toolbar->source_path.clear();
-  google_toolbar->app_path.clear();
-  google_toolbar->services_supported = importer::FAVORITES;
-  google_toolbar->request_context_getter = request_context_getter;
-  profiles->push_back(google_toolbar);
-}
-#endif
-
 }  // namespace
 
-ImporterList::ImporterList(
-    net::URLRequestContextGetter* request_context_getter)
+ImporterList::ImporterList()
     : source_thread_id_(BrowserThread::UI),
       observer_(NULL),
       is_observed_(false),
       source_profiles_loaded_(false) {
- request_context_getter_ = make_scoped_refptr(request_context_getter);
 }
 
 void ImporterList::DetectSourceProfiles(
@@ -140,10 +118,6 @@ void ImporterList::DetectSourceProfiles(
       BrowserThread::FILE,
       FROM_HERE,
       base::Bind(&ImporterList::DetectSourceProfilesWorker, this, locale));
-}
-
-void ImporterList::SetObserver(importer::ImporterListObserver* observer) {
-  observer_ = observer;
 }
 
 void ImporterList::DetectSourceProfilesHack(const std::string& locale) {
@@ -190,8 +164,6 @@ void ImporterList::DetectSourceProfilesWorker(const std::string& locale) {
     DetectIEProfiles(&profiles);
     DetectFirefoxProfiles(locale, &profiles);
   }
-  // TODO(brg) : Current UI requires win_util.
-  DetectGoogleToolbarProfiles(&profiles, request_context_getter_);
 #elif defined(OS_MACOSX)
   if (ShellIntegration::IsFirefoxDefaultBrowser()) {
     DetectFirefoxProfiles(locale, &profiles);
@@ -203,6 +175,12 @@ void ImporterList::DetectSourceProfilesWorker(const std::string& locale) {
 #else
   DetectFirefoxProfiles(locale, &profiles);
 #endif
+  importer::SourceProfile* bookmarks_file = new importer::SourceProfile;
+  bookmarks_file->importer_name =
+      l10n_util::GetStringUTF16(IDS_IMPORT_FROM_BOOKMARKS_HTML_FILE);
+  bookmarks_file->importer_type = importer::TYPE_BOOKMARKS_FILE;
+  bookmarks_file->services_supported = importer::FAVORITES;
+  profiles.push_back(bookmarks_file);
 
   // TODO(jhawkins): Remove this condition once DetectSourceProfilesHack is
   // removed.

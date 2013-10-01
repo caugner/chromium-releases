@@ -166,6 +166,9 @@
         'controls/native/native_view_host_aura.h',
         'controls/native/native_view_host_win.cc',
         'controls/native/native_view_host_win.h',
+        'controls/prefix_delegate.h',
+        'controls/prefix_selector.cc',
+        'controls/prefix_selector.h',
         'controls/progress_bar.cc',
         'controls/progress_bar.h',
         'controls/resize_area.cc',
@@ -232,8 +235,6 @@
         'controls/tree/tree_view.h',
         'controls/tree/tree_view_controller.cc',
         'controls/tree/tree_view_controller.h',
-        'controls/tree/tree_view_selector.cc',
-        'controls/tree/tree_view_selector.h',
         'corewm/base_focus_rules.cc',
         'corewm/base_focus_rules.h',
         'corewm/compound_event_filter.cc',
@@ -296,8 +297,6 @@
         'ime/input_method_bridge.h',
         'ime/input_method_delegate.h',
         'ime/input_method.h',
-        'ime/input_method_win.cc',
-        'ime/input_method_win.h',
         'ime/mock_input_method.cc',
         'ime/mock_input_method.h',
         'layout/box_layout.cc',
@@ -324,6 +323,8 @@
         'repeat_controller.h',
         'round_rect_painter.cc',
         'round_rect_painter.h',
+        'shadow_border.cc',
+        'shadow_border.h',
         'touchui/touch_editing_menu.cc',
         'touchui/touch_editing_menu.h',
         'touchui/touch_selection_controller_impl.cc',
@@ -339,8 +340,6 @@
         'view_model.h',
         'view_model_utils.cc',
         'view_model_utils.h',
-        'view_text_utils.cc',
-        'view_text_utils.h',
         'view_win.cc',
         'views_delegate.cc',
         'views_delegate.h',
@@ -520,6 +519,12 @@
             ['exclude', 'widget/desktop_aura'],
           ],
         }],
+        ['use_ash==0', {
+          'sources!': [
+            'bubble/tray_bubble_view.cc',
+            'bubble/tray_bubble_view.h',
+          ],
+        }],
         ['use_aura==0 and OS=="win"', {
           'sources!': [
             'controls/menu/menu_config_views.cc',
@@ -679,6 +684,7 @@
         '..',
       ],
       'sources': [
+        'accessibility/native_view_accessibility_win_unittest.cc',
         'accessible_pane_view_unittest.cc',
         'animation/bounds_animator_unittest.cc',
         'bubble/bubble_border_unittest.cc',
@@ -692,6 +698,7 @@
         'controls/menu/menu_model_adapter_unittest.cc',
         'controls/native/native_view_host_aura_unittest.cc',
         'controls/native/native_view_host_unittest.cc',
+        'controls/prefix_selector_unittest.cc',
         'controls/progress_bar_unittest.cc',
         'controls/scrollbar/scrollbar_unittest.cc',
         'controls/scroll_view_unittest.cc',
@@ -721,6 +728,7 @@
         'focus/focus_manager_unittest.cc',
         'focus/focus_manager_unittest_win.cc',
         'focus/focus_traversal_unittest.cc',
+        'ime/input_method_bridge_unittest.cc',
         'layout/box_layout_unittest.cc',
         'layout/grid_layout_unittest.cc',
         'touchui/touch_selection_controller_impl_unittest.cc',
@@ -730,6 +738,7 @@
         'window/dialog_client_view_unittest.cc',
         'window/dialog_delegate_unittest.cc',
         'widget/desktop_aura/desktop_capture_client_unittest.cc',
+        'widget/desktop_aura/desktop_screen_position_client_unittest.cc',
         'widget/native_widget_aura_unittest.cc',
         'widget/native_widget_unittest.cc',
         'widget/native_widget_win_unittest.cc',
@@ -742,8 +751,9 @@
           'sources!': [
             'touchui/touch_selection_controller_impl_unittest.cc',
           ],
-        }, { # use_aura==0
+        }, { # use_chromeos==1
           'sources/': [
+            ['exclude', 'ime/input_method_bridge_unittest.cc'],
             ['exclude', 'widget/desktop_aura'],
           ],
         }],
@@ -783,6 +793,7 @@
           ],
           'sources/': [
             ['exclude', 'corewm'],
+            ['exclude', 'ime/input_method_bridge_unittest.cc'],
             ['exclude', 'widget/desktop_aura'],
             ['exclude', 'widget/window_reorderer_unittest.cc']
           ],
@@ -973,8 +984,8 @@
         '../../base/base.gyp:base',
         '../../base/base.gyp:base_i18n',
         '../../chrome/chrome_resources.gyp:packed_resources',
-        '../../content/content.gyp:content_shell_lib',
         '../../content/content.gyp:content',
+        '../../content/content.gyp:content_shell_lib',
         '../../content/content.gyp:test_support_content',
         '../../skia/skia.gyp:skia',
         '../../third_party/icu/icu.gyp:icui18n',
@@ -1008,7 +1019,9 @@
           },
           'msvs_settings': {
             'VCManifestTool': {
-              'AdditionalManifestFiles': 'examples\\views_examples.exe.manifest',
+              'AdditionalManifestFiles': [
+                'examples\\views_examples.exe.manifest',
+              ],
             },
             'VCLinkerTool': {
               'SubSystem': '2',  # Set /SUBSYSTEM:WINDOWS

@@ -15,6 +15,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/text_constants.h"
 
 namespace autofill {
 
@@ -34,9 +35,10 @@ extern int const kSplashFadeInDialogDurationMs;
 struct DetailInput {
   // Multiple DetailInput structs with the same row_id go on the same row. The
   // actual order of the rows is determined by their order of appearance in
-  // kBillingInputs.
+  // kBillingInputs. If negative, don't show the input at all (leave it hidden
+  // at all times).
   int row_id;
-  AutofillFieldType type;
+  ServerFieldType type;
   // Placeholder text resource ID.
   int placeholder_text_rid;
   // A number between 0 and 1.0 that describes how much of the horizontal space
@@ -94,9 +96,10 @@ class DialogNotification {
   DialogNotification();
   DialogNotification(Type type, const string16& display_text);
 
-  // Returns the appropriate background or text color for the view's
+  // Returns the appropriate background, border, or text color for the view's
   // notification area based on |type_|.
   SkColor GetBackgroundColor() const;
+  SkColor GetBorderColor() const;
   SkColor GetTextColor() const;
 
   // Whether this notification has an arrow pointing up at the account chooser.
@@ -105,8 +108,13 @@ class DialogNotification {
   // Whether this notifications has the "Save details to wallet" checkbox.
   bool HasCheckbox() const;
 
-  const string16& display_text() const { return display_text_; }
   Type type() const { return type_; }
+  const string16& display_text() const { return display_text_; }
+
+  void set_tooltip_text(const string16& tooltip_text) {
+    tooltip_text_ = tooltip_text;
+  }
+  const string16& tooltip_text() const { return tooltip_text_; }
 
   void set_checked(bool checked) { checked_ = checked; }
   bool checked() const { return checked_; }
@@ -117,6 +125,10 @@ class DialogNotification {
  private:
   Type type_;
   string16 display_text_;
+
+  // When non-empty, indicates that a tooltip should be shown on the end of
+  // the notification.
+  string16 tooltip_text_;
 
   // Whether the dialog notification's checkbox should be checked. Only applies
   // when |HasCheckbox()| is true.
@@ -172,21 +184,54 @@ enum AutocheckoutState {
   AUTOCHECKOUT_ERROR,        // There was an error in the flow.
   AUTOCHECKOUT_IN_PROGRESS,  // The flow is currently in.
   AUTOCHECKOUT_NOT_STARTED,  // The flow has not been initiated by the user yet.
-  AUTOCHECKOUT_SUCCESS,      // The flow completed successsfully.
+  AUTOCHECKOUT_SUCCESS,      // The flow completed successfully.
 };
 
 struct SuggestionState {
-  SuggestionState(const string16& text,
-                  gfx::Font::FontStyle text_style,
+  SuggestionState();
+  SuggestionState(bool visible,
+                  const string16& vertically_compact_text,
+                  const string16& horizontally_compact_text,
                   const gfx::Image& icon,
                   const string16& extra_text,
                   const gfx::Image& extra_icon);
   ~SuggestionState();
-  string16 text;
-  gfx::Font::FontStyle text_style;
+  // Whether a suggestion should be shown.
+  bool visible;
+  // Text to be shown for the suggestion. This should be preferred over
+  // |horizontally_compact_text| when there's enough horizontal space available
+  // to display it. When there's not enough space, fall back to
+  // |horizontally_compact_text|.
+  base::string16 vertically_compact_text;
+  base::string16 horizontally_compact_text;
   gfx::Image icon;
   string16 extra_text;
   gfx::Image extra_icon;
+};
+
+// A struct to describe a textual message within a dialog overlay.
+struct DialogOverlayString {
+  DialogOverlayString();
+  ~DialogOverlayString();
+  // TODO(estade): need to set a color as well.
+  base::string16 text;
+  SkColor text_color;
+  gfx::Font font;
+  gfx::HorizontalAlignment alignment;
+};
+
+// A struct to describe a dialog overlay. If |image| is empty, no overlay should
+// be shown.
+struct DialogOverlayState {
+  DialogOverlayState();
+  ~DialogOverlayState();
+  // If empty, there should not be an overlay. If non-empty, an image that is
+  // more or less front and center.
+  gfx::Image image;
+  // If non-empty, messages to display.
+  std::vector<DialogOverlayString> strings;
+  // If non-empty, holds text that should go on a button.
+  base::string16 button_text;
 };
 
 enum ValidationType {
@@ -197,22 +242,7 @@ enum ValidationType {
 typedef std::vector<DetailInput> DetailInputs;
 typedef std::map<const DetailInput*, string16> DetailOutputMap;
 
-typedef std::map<AutofillFieldType, string16> ValidityData;
-
-// Returns the AutofillMetrics::DIALOG_UI_*_EDIT_UI_SHOWN metric corresponding
-// to the |section|.
-AutofillMetrics::DialogUiEvent DialogSectionToUiEditEvent(
-    DialogSection section);
-
-// Returns the AutofillMetrics::DIALOG_UI_*_ITEM_ADDED metric corresponding
-// to the |section|.
-AutofillMetrics::DialogUiEvent DialogSectionToUiItemAddedEvent(
-    DialogSection section);
-
-// Returns the AutofillMetrics::DIALOG_UI_*_ITEM_ADDED metric corresponding
-// to the |section|.
-AutofillMetrics::DialogUiEvent DialogSectionToUiSelectionChangedEvent(
-    DialogSection section);
+typedef std::map<ServerFieldType, string16> ValidityData;
 
 }  // namespace autofill
 

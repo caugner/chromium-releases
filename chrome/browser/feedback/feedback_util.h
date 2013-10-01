@@ -21,8 +21,6 @@
 #include "base/sys_info.h"
 #elif defined(OS_WIN)
 #include "base/win/windows_version.h"
-#elif defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #endif
 
 class Profile;
@@ -78,6 +76,7 @@ class FeedbackUtil {
   static void ClearScreenshotPng();
   static void SetScreenshotSize(const gfx::Rect& rect);
   static gfx::Rect& GetScreenshotSize();
+  static bool ZipString(const std::string& logs, std::string* compressed_logs);
 
   class PostCleanup;
 

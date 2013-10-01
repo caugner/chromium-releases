@@ -9,15 +9,13 @@
  * progress and other messages.
  * @param {HTMLElement} dialogDom FileManager top-level div.
  * @param {FileCopyManagerWrapper} copyManager The copy manager.
- * @param {MetadataCache} metadataCache The metadata cache.
  * @constructor
  */
-function ButterBar(dialogDom, copyManager, metadataCache) {
+function ButterBar(dialogDom, copyManager) {
   this.dialogDom_ = dialogDom;
   this.butter_ = this.dialogDom_.querySelector('#butter-bar');
   this.document_ = this.butter_.ownerDocument;
   this.copyManager_ = copyManager;
-  this.metadataCache_ = metadataCache;
   this.hideTimeout_ = null;
   this.showTimeout_ = null;
   this.lastShowTime_ = 0;
@@ -27,10 +25,11 @@ function ButterBar(dialogDom, copyManager, metadataCache) {
   this.lastProgressValue_ = 0;
   this.alert_ = new ErrorDialog(this.dialogDom_);
 
-  this.copyManager_.addEventListener('copy-progress',
-                                     this.onCopyProgress_.bind(this));
-  this.copyManager_.addEventListener('delete',
-                                     this.onDelete_.bind(this));
+  this.onCopyProgressBound_ = this.onCopyProgress_.bind(this);
+  this.copyManager_.addEventListener(
+      'copy-progress', this.onCopyProgressBound_);
+  this.onDeleteBound_ = this.onDelete_.bind(this);
+  this.copyManager_.addEventListener('delete', this.onDeleteBound_);
 }
 
 /**
@@ -56,6 +55,17 @@ ButterBar.ACTION_X = '--action--x--';
 ButterBar.Mode = {
   COPY: 1,
   DELETE: 2
+};
+
+/**
+ * Disposes the instance. No methods should be called after this method's
+ * invocation.
+ */
+ButterBar.prototype.dispose = function() {
+  // Unregister listeners from FileCopyManager.
+  this.copyManager_.removeEventListener(
+      'copy-progress', this.onCopyProgressBound_);
+  this.copyManager_.removeEventListener('delete', this.onDeleteBound_);
 };
 
 /**
@@ -237,20 +247,24 @@ ButterBar.prototype.transferType_ = function() {
 
 /**
  * Set up butter bar for showing copy progress.
+ *
+ * @param {Object} progress Copy status object created by
+ *     FileCopyManager.getStatus().
  * @private
  */
-ButterBar.prototype.showProgress_ = function() {
-  this.progress_ = this.copyManager_.getStatus();
+ButterBar.prototype.showProgress_ = function(progress) {
+  this.progress_ = progress;
   var options = {
-    progress: this.progress_.percentage,
+    progress: progress.completedBytes / progress.totalBytes,
     actions: {},
     timeout: false
   };
 
+  var pendingItems = progress.totalItems - progress.completedItems;
   var type = this.transferType_();
-  var progressString = (this.progress_.pendingItems === 1) ?
-          strf(type + '_FILE_NAME', this.progress_.filename) :
-          strf(type + '_ITEMS_REMAINING', this.progress_.pendingItems);
+  var progressString = (pendingItems === 1) ?
+          strf(type + '_FILE_NAME', progress.filename) :
+          strf(type + '_ITEMS_REMAINING', pendingItems);
 
   if (this.currentMode_ == ButterBar.Mode.COPY) {
     this.update_(progressString, options);
@@ -278,12 +292,12 @@ ButterBar.prototype.onCopyProgress_ = function(event) {
     case 'BEGIN':
       this.showTimeout_ = setTimeout(function() {
         this.showTimeout_ = null;
-        this.showProgress_();
+        this.showProgress_(event.status);
       }.bind(this), 500);
       break;
 
     case 'PROGRESS':
-      this.showProgress_();
+      this.showProgress_(event.status);
       break;
 
     case 'SUCCESS':
@@ -296,30 +310,31 @@ ButterBar.prototype.onCopyProgress_ = function(event) {
       break;
 
     case 'ERROR':
-      this.progress_ = this.copyManager_.getStatus();
-      if (event.error.reason === 'TARGET_EXISTS') {
-        var name = event.error.data.name;
-        if (event.error.data.isDirectory)
+      this.progress_ = event.status;
+      var error = event.error;
+      if (error.code === util.FileOperationErrorType.TARGET_EXISTS) {
+        var name = error.data.name;
+        if (error.data.isDirectory)
           name += '/';
-        this.showError_(strf(this.transferType_() +
-                             '_TARGET_EXISTS_ERROR', name));
-      } else if (event.error.reason === 'FILESYSTEM_ERROR') {
-        if (event.error.data.toDrive &&
-            event.error.data.code === FileError.QUOTA_EXCEEDED_ERR) {
+        this.showError_(
+            strf(this.transferType_() + '_TARGET_EXISTS_ERROR', name));
+      } else if (error.code === util.FileOperationErrorType.FILESYSTEM_ERROR) {
+        if (error.data.toDrive &&
+            error.data.code === FileError.QUOTA_EXCEEDED_ERR) {
           // The alert will be shown in FileManager.onCopyProgress_.
           this.hide_();
         } else {
           this.showError_(strf(this.transferType_() + '_FILESYSTEM_ERROR',
-                               util.getFileErrorString(event.error.data.code)));
+                               util.getFileErrorString(error.data.code)));
           }
       } else {
-        this.showError_(strf(this.transferType_() + '_UNEXPECTED_ERROR',
-                             event.error));
+        this.showError_(
+            strf(this.transferType_() + '_UNEXPECTED_ERROR', error));
       }
       break;
 
     default:
-      console.warn('Unknown "copy-progress" event reason: ' + event.reason);
+      console.warn('Unknown "copy-progress" event reason: ' + event.code);
   }
 };
 
@@ -329,23 +344,16 @@ ButterBar.prototype.onCopyProgress_ = function(event) {
  * @private
  */
 ButterBar.prototype.onDelete_ = function(event) {
-  var urls = Array.prototype.slice.call(event.urls);
   switch (event.reason) {
     case 'BEGIN':
       if (this.currentMode_ != ButterBar.Mode.DELETE)
         this.totalDeleted_ = 0;
 
     case 'PROGRESS':
-      var props = [];
-      for (var i = 0; i < urls.length; i++) {
-        props[i] = {deleted: true};
-      }
-      this.metadataCache_.set(urls, 'internal', props);
-
-      this.totalDeleted_ += urls.length;
+      this.totalDeleted_ += event.urls.length;
       var title = strf('DELETED_MESSAGE_PLURAL', this.totalDeleted_);
       if (this.totalDeleted_ == 1) {
-        var fullPath = util.extractFilePath(urls[0]);
+        var fullPath = util.extractFilePath(event.urls[0]);
         var fileName = PathUtil.split(fullPath).pop();
         title = strf('DELETED_MESSAGE', fileName);
       }
@@ -360,12 +368,6 @@ ButterBar.prototype.onDelete_ = function(event) {
       break;
 
     case 'ERROR':
-      var props = [];
-      for (var i = 0; i < urls.length; i++) {
-        props[i] = {deleted: false};
-      }
-      this.metadataCache_.set(urls, 'internal', props);
-
       this.showError_(str('DELETE_ERROR'));
       break;
 

@@ -13,13 +13,13 @@
 #include "base/containers/mru_cache.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/expire_history_backend.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_marshaling.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/history/text_database_manager.h"
 #include "chrome/browser/history/thumbnail_database.h"
 #include "chrome/browser/history/visit_tracker.h"
 #include "chrome/browser/search_engines/template_url_id.h"
@@ -38,6 +38,7 @@ class AndroidProviderBackend;
 
 class CommitLaterTask;
 class HistoryPublisher;
+class PageCollector;
 class VisitFilter;
 struct DownloadRow;
 
@@ -307,12 +308,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Downloads -----------------------------------------------------------------
 
-  void GetNextDownloadId(int* id);
+  void GetNextDownloadId(uint32* next_id);
   void QueryDownloads(std::vector<DownloadRow>* rows);
   void UpdateDownload(const DownloadRow& data);
   void CreateDownload(const history::DownloadRow& history_info,
-                      int64* db_handle);
-  void RemoveDownloads(const std::set<int64>& db_handles);
+                      bool* success);
+  void RemoveDownloads(const std::set<uint32>& ids);
 
   // Segment usage -------------------------------------------------------------
 
@@ -563,6 +564,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, QueryFilteredURLs);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, UpdateVisitDuration);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, ExpireHistoryForTimes);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteFTSIndexDatabases);
 
   friend class ::TestingProfile;
 
@@ -597,6 +599,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Does the work of Init.
   void InitImpl(const std::string& languages);
+
+  // Called when the system is under memory pressure.
+  void OnMemoryPressure(
+      base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
 
   // Closes all databases managed by HistoryBackend. Commits any pending
   // transactions.
@@ -653,9 +659,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                         const string16& text_query,
                         const QueryOptions& options,
                         QueryResults* result);
-  void QueryHistoryFTS(const string16& text_query,
-                       const QueryOptions& options,
-                       QueryResults* result);
 
   // Committing ----------------------------------------------------------------
 
@@ -838,6 +841,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // The IDs of the URLs may change.
   bool ClearAllMainHistory(const URLRows& kept_urls);
 
+  // Deletes the FTS index database files, which are no longer used.
+  void DeleteFTSIndexDatabases();
+
   // Returns the BookmarkService, blocking until it is loaded. This may return
   // NULL during testing.
   BookmarkService* GetBookmarkService();
@@ -870,9 +876,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Stores old history in a larger, slower database.
   scoped_ptr<ArchivedDatabase> archived_db_;
 
-  // Full text database manager, possibly NULL if the database could not be
-  // created.
-  scoped_ptr<TextDatabaseManager> text_database_;
+  // Helper to collect page data for vending to history_publisher_.
+  scoped_ptr<PageCollector> page_collector_;
 
   // Manages expiration between the various databases.
   ExpireHistoryBackend expirer_;
@@ -938,6 +943,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Used to manage syncing of the typed urls datatype. This will be NULL
   // before Init is called.
   scoped_ptr<TypedUrlSyncableService> typed_url_syncable_service_;
+
+  // Listens for the system being under memory pressure.
+  scoped_ptr<base::MemoryPressureListener> memory_pressure_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(HistoryBackend);
 };

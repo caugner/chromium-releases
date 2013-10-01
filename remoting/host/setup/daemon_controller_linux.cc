@@ -16,7 +16,9 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/md5.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -34,8 +36,10 @@ namespace {
 const char kDaemonScript[] =
     "/opt/google/chrome-remote-desktop/chrome-remote-desktop";
 
-// Timeout for running daemon script.
-const int64 kDaemonTimeoutMs = 5000;
+// Timeout for running daemon script. The script itself sets a timeout when
+// waiting for the host to come online, so the setting here should be at least
+// as long.
+const int64 kDaemonTimeoutMs = 60000;
 
 // Timeout for commands that require password prompt - 5 minutes.
 const int64 kSudoTimeoutSeconds = 5 * 60;
@@ -255,7 +259,7 @@ void DaemonControllerLinux::DoSetConfigAndStart(
 
   // Ensure the configuration directory exists.
   base::FilePath config_dir = GetConfigPath().DirName();
-  if (!file_util::DirectoryExists(config_dir) &&
+  if (!base::DirectoryExists(config_dir) &&
       !file_util::CreateDirectory(config_dir)) {
     LOG(ERROR) << "Failed to create config directory " << config_dir.value();
     done_callback.Run(RESULT_FAILED);

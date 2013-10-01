@@ -14,13 +14,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
-
-class Profile;
+#include "chrome/browser/chromeos/drive/resource_metadata_storage.h"
 
 namespace base {
-
 class SequencedTaskRunner;
-
 }  // namespace base
 
 namespace drive {
@@ -41,18 +38,15 @@ typedef base::Callback<void(const std::string& resource_id,
 
 namespace internal {
 
-class ResourceMetadataStorage;
-
 // Callback for GetFileFromCache.
 typedef base::Callback<void(FileError error,
                             const base::FilePath& cache_file_path)>
     GetFileFromCacheCallback;
 
-// Callback for RequestInitialize.
+// Callback for ClearAllOnUIThread.
 // |success| indicates if the operation was successful.
 // TODO(satorux): Change this to FileError when it becomes necessary.
-typedef base::Callback<void(bool success)>
-    InitializeCacheCallback;
+typedef base::Callback<void(bool success)> ClearAllCallback;
 
 // Interface class used for getting the free disk space. Tests can inject an
 // implementation that reports fake free disk space.
@@ -73,6 +67,8 @@ class FileCache {
     FILE_OPERATION_MOVE = 0,
     FILE_OPERATION_COPY,
   };
+
+  typedef ResourceMetadataStorage::CacheEntryIterator Iterator;
 
   // Name of the cache metadata DB previously used.
   // TODO(hashimoto): Remove this at some point.
@@ -98,20 +94,17 @@ class FileCache {
   // Can be called on any thread.
   bool IsUnderFileCacheDirectory(const base::FilePath& path) const;
 
-  // Gets the cache entry for file corresponding to |resource_id| and |md5|
-  // and runs |callback| with true and the entry found if entry exists in cache
-  // map.  Otherwise, runs |callback| with false.
-  // |md5| can be empty if only matching |resource_id| is desired.
+  // Gets the cache entry for file corresponding to |resource_id| and runs
+  // |callback| with true and the entry found if entry exists in cache map.
+  // Otherwise, runs |callback| with false.
   // |callback| must not be null.
   // Must be called on the UI thread.
   void GetCacheEntryOnUIThread(const std::string& resource_id,
-                               const std::string& md5,
                                const GetCacheEntryCallback& callback);
 
-  // Gets the cache entry by the given resource ID and MD5.
+  // Gets the cache entry by the given resource ID.
   // See also GetCacheEntryOnUIThread().
   bool GetCacheEntry(const std::string& resource_id,
-                     const std::string& md5,
                      FileCacheEntry* entry);
 
   // Runs Iterate() with |iteration_callback| on |blocking_task_runner_| and
@@ -120,19 +113,8 @@ class FileCache {
   void IterateOnUIThread(const CacheIterateCallback& iteration_callback,
                          const base::Closure& completion_callback);
 
-  // Iterates all files in the cache and calls |iteration_callback| for each
-  // file. |completion_callback| is run upon completion.
-  // TODO(hashimoto): Stop using callbacks for this method. crbug.com/242818
-  void Iterate(const CacheIterateCallback& iteration_callback);
-
-
-  // Runs FreeDiskSpaceIfNeededFor() on |blocking_task_runner_|, and calls
-  // |callback| with the result asynchronously.
-  // |callback| must not be null.
-  // Must be called on the UI thread.
-  void FreeDiskSpaceIfNeededForOnUIThread(
-      int64 num_bytes,
-      const InitializeCacheCallback& callback);
+  // Returns an object to iterate over entries.
+  scoped_ptr<Iterator> GetIterator();
 
   // Frees up disk space to store a file with |num_bytes| size content, while
   // keeping kMinFreeSpace bytes on the disk, if needed.
@@ -145,15 +127,12 @@ class FileCache {
   // |callback| must not be null.
   // Must be called on the UI thread.
   void GetFileOnUIThread(const std::string& resource_id,
-                         const std::string& md5,
                          const GetFileFromCacheCallback& callback);
 
-  // Checks if file corresponding to |resource_id| and |md5| exists in cache,
-  // and returns FILE_ERROR_OK with |cache_file_path| storing the path to
-  // the file.
+  // Checks if file corresponding to |resource_id| exists in cache, and returns
+  // FILE_ERROR_OK with |cache_file_path| storing the path to the file.
   // |cache_file_path| must not be null.
   FileError GetFile(const std::string& resource_id,
-                    const std::string& md5,
                     base::FilePath* cache_file_path);
 
   // Runs Store() on |blocking_task_runner_|, and calls |callback| with
@@ -211,14 +190,12 @@ class FileCache {
   // |callback| must not be null.
   // Must be called on the UI thread.
   void MarkDirtyOnUIThread(const std::string& resource_id,
-                           const std::string& md5,
                            const FileOperationCallback& callback);
 
   // Marks the specified entry dirty.
-  FileError MarkDirty(const std::string& resource_id,
-                      const std::string& md5);
+  FileError MarkDirty(const std::string& resource_id);
 
-  // Clears dirty state of the specified entry.
+  // Clears dirty state of the specified entry and updates its MD5.
   FileError ClearDirty(const std::string& resource_id,
                        const std::string& md5);
 
@@ -237,7 +214,7 @@ class FileCache {
   // - re-create the |metadata_| instance.
   // |callback| must not be null.
   // Must be called on the UI thread.
-  void ClearAllOnUIThread(const InitializeCacheCallback& callback);
+  void ClearAllOnUIThread(const ClearAllCallback& callback);
 
   // Initializes the cache. Returns true on success.
   bool Initialize();
@@ -251,21 +228,12 @@ class FileCache {
   friend class FileCacheTest;
   friend class FileCacheTestOnUIThread;
 
-  // Enum defining origin of a cached file.
-  enum CachedFileOrigin {
-    CACHED_FILE_FROM_SERVER = 0,
-    CACHED_FILE_LOCALLY_MODIFIED,
-  };
-
   ~FileCache();
 
   // Returns absolute path of the file if it were cached or to be cached.
   //
   // Can be called on any thread.
-  base::FilePath GetCacheFilePath(const std::string& resource_id,
-                                  const std::string& md5,
-                                  CachedFileOrigin file_origin) const;
-
+  base::FilePath GetCacheFilePath(const std::string& resource_id) const;
 
   // Checks whether the current thread is on the right sequenced worker pool
   // with the right sequence ID. If not, DCHECK will fail.
@@ -300,6 +268,10 @@ class FileCache {
   // TODO(hashimoto): Remove this method and FileCacheMetadata at some point.
   bool ImportOldDB(const base::FilePath& old_db_path);
 
+  // Renames cache files from old "resource_id.md5" format to the new format.
+  // TODO(hashimoto): Remove this method at some point.
+  void RenameCacheFilesToNewFormat();
+
   const base::FilePath cache_file_directory_;
 
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
@@ -317,8 +289,8 @@ class FileCache {
   DISALLOW_COPY_AND_ASSIGN(FileCache);
 };
 
-// The minimum free space to keep. FileSystem::GetFileByPath() returns
-// GDATA_FILE_ERROR_NO_SPACE if the available space is smaller than
+// The minimum free space to keep. Operations that add cache files return
+// FILE_ERROR_NO_LOCAL_SPACE if the available space is smaller than
 // this value.
 //
 // Copied from cryptohome/homedirs.h.

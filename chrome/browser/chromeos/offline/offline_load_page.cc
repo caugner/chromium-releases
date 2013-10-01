@@ -13,14 +13,12 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -96,9 +94,6 @@ std::string OfflineLoadPage::GetHTMLContents() {
   strings.SetString("icon",
                     webui::GetBitmapDataUrlFromResource(IDR_PRODUCT_LOGO_32));
 
-  // Activation
-  strings.SetBoolean("show_activation", ShowActivationMessage());
-
   webui::SetFontAndTextDirection(&strings);
   string16 failed_url(ASCIIToUTF16(url_.spec()));
   if (base::i18n::IsRTL())
@@ -114,8 +109,7 @@ std::string OfflineLoadPage::GetHTMLContents() {
       extensions::ExtensionSystem::Get(profile)->extension_service();
   // Extension service does not exist in test.
   if (extensions_service)
-    extension = extensions_service->extensions()->GetHostedAppByURL(
-        ExtensionURLInfo(url_));
+    extension = extensions_service->extensions()->GetHostedAppByURL(url_);
 
   if (extension)
     GetAppOfflineStrings(extension, &strings);
@@ -192,22 +186,6 @@ void OfflineLoadPage::OnConnectionTypeChanged(
     net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
     interstitial_page_->Proceed();
   }
-}
-
-bool OfflineLoadPage::ShowActivationMessage() {
-  CrosLibrary* cros = CrosLibrary::Get();
-  if (!cros || !cros->GetNetworkLibrary()->cellular_available())
-    return false;
-
-  const CellularNetworkVector& cell_networks =
-      cros->GetNetworkLibrary()->cellular_networks();
-  for (size_t i = 0; i < cell_networks.size(); ++i) {
-    chromeos::ActivationState activation_state =
-        cell_networks[i]->activation_state();
-    if (activation_state == ACTIVATION_STATE_ACTIVATED)
-      return false;
-  }
-  return true;
 }
 
 }  // namespace chromeos

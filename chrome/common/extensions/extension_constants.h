@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace extension_urls {
   // Returns the URL prefix for the extension/apps gallery. Can be set via the
@@ -55,26 +55,6 @@ namespace extension_urls {
   // download URLs.
   extern const char kGalleryBrowsePrefix[];
 }  // namespace extension_urls
-
-namespace extension_filenames {
-  // The name of a temporary directory to install an extension into for
-  // validation before finalizing install.
-  extern const char kTempExtensionName[];
-
-  // The file to write our decoded images to, relative to the extension_path.
-  extern const char kDecodedImagesFilename[];
-
-  // The file to write our decoded message catalogs to, relative to the
-  // extension_path.
-  extern const char kDecodedMessageCatalogsFilename[];
-
-  // The filename to use for a background page generated from
-  // background.scripts.
-  extern const char kGeneratedBackgroundPageFilename[];
-
-  // Path to imported modules.
-  extern const char kModulesDir[];
-}
 
 namespace extension_misc {
   // Matches chrome.windows.WINDOW_ID_NONE.
@@ -269,9 +249,15 @@ namespace extension_misc {
     APP_LAUNCH_BUCKET_INVALID
   };
 
+  // The extension id of the ChromeVox extension.
+  extern const char kChromeVoxExtensionId[];
+
 #if defined(OS_CHROMEOS)
   // Path to preinstalled ChromeVox screen reader extension.
   extern const char kChromeVoxExtensionPath[];
+  // Path to preinstalled Connectivity Diagnostics extension.
+  extern const char kConnectivityDiagnosticsPath[];
+  extern const char kConnectivityDiagnosticsLauncherPath[];
   // Path to preinstalled speech synthesis extension.
   extern const char kSpeechSynthesisExtensionPath[];
   // The extension id of the speech synthesis extension.

@@ -7,19 +7,18 @@
 #include <string>
 #include <vector>
 
-#include "base/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
-#include "chrome/test/base/testing_profile.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_status.h"
+#include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using ::testing::_;
 using ::testing::Eq;
@@ -155,17 +154,24 @@ const std::string kDummyTokenInfoResult =
 namespace gaia {
 
 class GaiaOAuthClientTest : public testing::Test {
- public:
-  GaiaOAuthClientTest() {}
+ protected:
   virtual void SetUp() OVERRIDE {
     client_info_.client_id = "test_client_id";
     client_info_.client_secret = "test_client_secret";
     client_info_.redirect_uri = "test_redirect_uri";
   };
 
-  TestingProfile profile_;
  protected:
+  net::TestURLRequestContextGetter* GetRequestContext() {
+    if (!request_context_getter_) {
+      request_context_getter_ = new net::TestURLRequestContextGetter(
+          message_loop_.message_loop_proxy());
+    }
+    return request_context_getter_;
+  }
+
   base::MessageLoop message_loop_;
+  scoped_refptr<net::TestURLRequestContextGetter> request_context_getter_;
   OAuthClientInfo client_info_;
 };
 
@@ -179,7 +185,7 @@ class MockGaiaOAuthClientDelegate : public gaia::GaiaOAuthClient::Delegate {
                                          int expires_in_seconds));
   MOCK_METHOD2(OnRefreshTokenResponse, void(const std::string& access_token,
                                             int expires_in_seconds));
-  MOCK_METHOD1(OnGetUserInfoResponse, void(const std::string& user_email));
+  MOCK_METHOD1(OnGetUserEmailResponse, void(const std::string& user_email));
   MOCK_METHOD0(OnOAuthError, void());
   MOCK_METHOD1(OnNetworkError, void(int response_code));
 
@@ -211,7 +217,7 @@ TEST_F(GaiaOAuthClientTest, NetworkFailure) {
   factory.set_response_code(response_code);
   factory.set_max_failure_count(4);
 
-  GaiaOAuthClient auth(profile_.GetRequestContext());
+  GaiaOAuthClient auth(GetRequestContext());
   auth.GetTokensFromAuthCode(client_info_, "auth_code", 2, &delegate);
 }
 
@@ -227,7 +233,7 @@ TEST_F(GaiaOAuthClientTest, NetworkFailureRecover) {
   factory.set_max_failure_count(4);
   factory.set_results(kDummyGetTokensResult);
 
-  GaiaOAuthClient auth(profile_.GetRequestContext());
+  GaiaOAuthClient auth(GetRequestContext());
   auth.GetTokensFromAuthCode(client_info_, "auth_code", -1, &delegate);
 }
 
@@ -242,7 +248,7 @@ TEST_F(GaiaOAuthClientTest, OAuthFailure) {
   factory.set_max_failure_count(-1);
   factory.set_results(kDummyGetTokensResult);
 
-  GaiaOAuthClient auth(profile_.GetRequestContext());
+  GaiaOAuthClient auth(GetRequestContext());
   auth.GetTokensFromAuthCode(client_info_, "auth_code", -1, &delegate);
 }
 
@@ -255,7 +261,7 @@ TEST_F(GaiaOAuthClientTest, GetTokensSuccess) {
   MockOAuthFetcherFactory factory;
   factory.set_results(kDummyGetTokensResult);
 
-  GaiaOAuthClient auth(profile_.GetRequestContext());
+  GaiaOAuthClient auth(GetRequestContext());
   auth.GetTokensFromAuthCode(client_info_, "auth_code", -1, &delegate);
 }
 
@@ -268,7 +274,7 @@ TEST_F(GaiaOAuthClientTest, RefreshTokenSuccess) {
   factory.set_results(kDummyRefreshTokenResult);
   factory.set_complete_immediately(false);
 
-  GaiaOAuthClient auth(profile_.GetRequestContext());
+  GaiaOAuthClient auth(GetRequestContext());
   auth.RefreshToken(client_info_, "refresh_token", std::vector<std::string>(),
                     -1, &delegate);
   EXPECT_THAT(factory.get_url_fetcher()->upload_data(),
@@ -285,7 +291,7 @@ TEST_F(GaiaOAuthClientTest, RefreshTokenDownscopingSuccess) {
   factory.set_results(kDummyRefreshTokenResult);
   factory.set_complete_immediately(false);
 
-  GaiaOAuthClient auth(profile_.GetRequestContext());
+  GaiaOAuthClient auth(GetRequestContext());
   auth.RefreshToken(client_info_, "refresh_token",
                     std::vector<std::string>(1, "scope4test"), -1, &delegate);
   EXPECT_THAT(factory.get_url_fetcher()->upload_data(),
@@ -294,15 +300,15 @@ TEST_F(GaiaOAuthClientTest, RefreshTokenDownscopingSuccess) {
 }
 
 
-TEST_F(GaiaOAuthClientTest, GetUserInfo) {
+TEST_F(GaiaOAuthClientTest, GetUserEmail) {
   MockGaiaOAuthClientDelegate delegate;
-  EXPECT_CALL(delegate, OnGetUserInfoResponse(kTestUserEmail)).Times(1);
+  EXPECT_CALL(delegate, OnGetUserEmailResponse(kTestUserEmail)).Times(1);
 
   MockOAuthFetcherFactory factory;
   factory.set_results(kDummyUserInfoResult);
 
-  GaiaOAuthClient auth(profile_.GetRequestContext());
-  auth.GetUserInfo("access_token", 1, &delegate);
+  GaiaOAuthClient auth(GetRequestContext());
+  auth.GetUserEmail("access_token", 1, &delegate);
 }
 
 TEST_F(GaiaOAuthClientTest, GetTokenInfo) {
@@ -315,7 +321,7 @@ TEST_F(GaiaOAuthClientTest, GetTokenInfo) {
   MockOAuthFetcherFactory factory;
   factory.set_results(kDummyTokenInfoResult);
 
-  GaiaOAuthClient auth(profile_.GetRequestContext());
+  GaiaOAuthClient auth(GetRequestContext());
   auth.GetTokenInfo("access_token", 1, &delegate);
 
   std::string issued_to;

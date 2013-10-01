@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "content/common/content_export.h"
 #include "media/base/demuxer.h"
 #include "third_party/libjingle/source/talk/media/webrtc/webrtcvideodecoderfactory.h"
@@ -55,7 +55,6 @@ class CONTENT_EXPORT RTCVideoDecoderFactoryTv
   // For RTCVideoDecoderBridgeTv to talk to RTCDemuxerStream.
   void InitializeStream(const gfx::Size& size);
   void QueueBuffer(scoped_refptr<media::DecoderBuffer> buffer,
-                   const base::Closure& done_cb,
                    const gfx::Size& size);
 
  private:

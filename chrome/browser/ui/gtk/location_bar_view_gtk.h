@@ -29,14 +29,13 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/page_transition_types.h"
-#include "googleurl/src/gurl.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/base/window_open_disposition.h"
+#include "url/gurl.h"
 
-class ActionBoxButtonGtk;
 class Browser;
 class CommandUpdater;
 class ContentSettingImageModel;
@@ -99,9 +98,6 @@ class LocationBarViewGtk : public OmniboxEditController,
   // Show the bookmark bubble.
   void ShowStarBubble(const GURL& url, bool newly_boomkarked);
 
-  // Shows the Chrome To Mobile bubble.
-  void ShowChromeToMobileBubble();
-
   // Happens when the zoom changes for the active tab. |can_show_bubble| will be
   // true if it was a user action and a bubble could be shown.
   void ZoomChangedForActiveTab(bool can_show_bubble);
@@ -126,12 +122,9 @@ class LocationBarViewGtk : public OmniboxEditController,
   virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
   virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual gfx::Rect GetOmniboxBounds() const OVERRIDE;
 
   // LocationBar:
   virtual void ShowFirstRunBubble() OVERRIDE;
-  virtual void SetInstantSuggestion(
-      const InstantSuggestion& suggestion) OVERRIDE;
   virtual string16 GetInputString() const OVERRIDE;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
   virtual content::PageTransition GetPageTransition() const OVERRIDE;
@@ -142,6 +135,7 @@ class LocationBarViewGtk : public OmniboxEditController,
   virtual void UpdatePageActions() OVERRIDE;
   virtual void InvalidatePageActions() OVERRIDE;
   virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE;
+  virtual void UpdateGeneratedCreditCardView() OVERRIDE;
   virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
   virtual const OmniboxView* GetLocationEntry() const OVERRIDE;
@@ -154,7 +148,6 @@ class LocationBarViewGtk : public OmniboxEditController,
   virtual ExtensionAction* GetPageAction(size_t index) OVERRIDE;
   virtual ExtensionAction* GetVisiblePageAction(size_t index) OVERRIDE;
   virtual void TestPageActionPressed(size_t index) OVERRIDE;
-  virtual void TestActionBoxMenuItemSelected(int command_id) OVERRIDE;
   virtual bool GetBookmarkStarVisibility() OVERRIDE;
 
   // content::NotificationObserver:
@@ -487,8 +480,6 @@ class LocationBarViewGtk : public OmniboxEditController,
 
   // Alignment used to wrap |location_entry_|.
   GtkWidget* location_entry_alignment_;
-
-  scoped_ptr<ActionBoxButtonGtk> action_box_button_;
 
   CommandUpdater* command_updater_;
   ToolbarModel* toolbar_model_;

@@ -29,6 +29,7 @@ namespace cc {
 
 class CompositorFrame;
 class CompositorFrameAck;
+struct ManagedMemoryPolicy;
 class OutputSurfaceClient;
 class OutputSurfaceCallbacks;
 
@@ -59,10 +60,12 @@ class CC_EXPORT OutputSurface : public FrameRateControllerClient {
         : delegated_rendering(false),
           max_frames_pending(0),
           deferred_gl_initialization(false),
+          draw_and_swap_full_viewport_every_frame(false),
           adjust_deadline_for_parent(true) {}
     bool delegated_rendering;
     int max_frames_pending;
     bool deferred_gl_initialization;
+    bool draw_and_swap_full_viewport_every_frame;
     // This doesn't handle the <webview> case, but once BeginFrame is
     // supported natively, we shouldn't need adjust_deadline_for_parent.
     bool adjust_deadline_for_parent;
@@ -132,6 +135,7 @@ class CC_EXPORT OutputSurface : public FrameRateControllerClient {
   bool InitializeAndSetContext3D(
       scoped_ptr<WebKit::WebGraphicsContext3D> context3d,
       scoped_refptr<ContextProvider> offscreen_context_provider);
+  void ReleaseGL();
 
   void PostSwapBuffersComplete();
 
@@ -165,6 +169,7 @@ class CC_EXPORT OutputSurface : public FrameRateControllerClient {
   void DidSwapBuffers();
   void OnSwapBuffersComplete(const CompositorFrameAck* ack);
   void DidLoseOutputSurface();
+  void SetExternalStencilTest(bool enabled);
   void SetExternalDrawConstraints(const gfx::Transform& transform,
                                   gfx::Rect viewport);
 
@@ -178,8 +183,17 @@ class CC_EXPORT OutputSurface : public FrameRateControllerClient {
   friend class OutputSurfaceCallbacks;
 
   void SetContext3D(scoped_ptr<WebKit::WebGraphicsContext3D> context3d);
+  void ResetContext3D();
+  void SetMemoryPolicy(const ManagedMemoryPolicy& policy,
+                       bool discard_backbuffer_when_not_visible);
 
+  // This stores a BeginFrame that we couldn't process immediately, but might
+  // process retroactively in the near future.
   BeginFrameArgs skipped_begin_frame_args_;
+
+  // check_for_retroactive_begin_frame_pending_ is used to avoid posting
+  // redundant checks for a retroactive BeginFrame.
+  bool check_for_retroactive_begin_frame_pending_;
 
   DISALLOW_COPY_AND_ASSIGN(OutputSurface);
 };

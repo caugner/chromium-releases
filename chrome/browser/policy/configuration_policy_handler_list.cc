@@ -20,7 +20,12 @@
 #if defined(OS_CHROMEOS)
 #include "ash/magnifier/magnifier_constants.h"
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
+#include "chromeos/dbus/power_policy_controller.h"
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/policy/configuration_policy_handler_android.h"
+#endif  // defined(OS_ANDROID)
 
 namespace policy {
 
@@ -184,6 +189,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kEnableOnlineRevocationChecks,
     prefs::kCertRevocationCheckingEnabled,
     Value::TYPE_BOOLEAN },
+  { key::kRequireOnlineRevocationChecksForLocalAnchors,
+    prefs::kCertRevocationCheckingRequiredLocalAnchors,
+    Value::TYPE_BOOLEAN },
   { key::kAuthSchemes,
     prefs::kAuthSchemes,
     Value::TYPE_STRING },
@@ -240,6 +248,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     Value::TYPE_STRING },
   { key::kRemoteAccessHostRequireCurtain,
     prefs::kRemoteAccessHostRequireCurtain,
+    Value::TYPE_BOOLEAN },
+  { key::kRemoteAccessHostAllowClientPairing,
+    prefs::kRemoteAccessHostAllowClientPairing,
     Value::TYPE_BOOLEAN },
   { key::kCloudPrintProxyEnabled,
     prefs::kCloudPrintProxyEnabled,
@@ -331,6 +342,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kContentPackManualBehaviorURLs,
     prefs::kManagedModeManualURLs,
     Value::TYPE_DICTIONARY },
+  { key::kSupervisedUserCreationEnabled,
+    prefs::kManagedUserCreationAllowed,
+    Value::TYPE_BOOLEAN },
 
 #if defined(OS_CHROMEOS)
   { key::kChromeOsLockOnIdleSuspend,
@@ -474,6 +488,7 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
   handlers_.push_back(NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   handlers_.push_back(new PinnedLauncherAppsPolicyHandler());
   handlers_.push_back(new ScreenMagnifierPolicyHandler());
+  handlers_.push_back(new LoginScreenPowerManagementPolicyHandler);
 
   handlers_.push_back(
       new IntRangePolicyHandler(
@@ -527,14 +542,26 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
           0, INT_MAX, true));
   handlers_.push_back(
       new IntRangePolicyHandler(
-          key::kIdleAction,
-          prefs::kPowerIdleAction,
-          0, 3, false));
+          key::kIdleActionAC,
+          prefs::kPowerAcIdleAction,
+          chromeos::PowerPolicyController::ACTION_SUSPEND,
+          chromeos::PowerPolicyController::ACTION_DO_NOTHING,
+          false));
+  handlers_.push_back(
+      new IntRangePolicyHandler(
+          key::kIdleActionBattery,
+          prefs::kPowerBatteryIdleAction,
+          chromeos::PowerPolicyController::ACTION_SUSPEND,
+          chromeos::PowerPolicyController::ACTION_DO_NOTHING,
+          false));
+  handlers_.push_back(new DeprecatedIdleActionHandler());
   handlers_.push_back(
       new IntRangePolicyHandler(
           key::kLidCloseAction,
           prefs::kPowerLidClosedAction,
-          0, 3, false));
+          chromeos::PowerPolicyController::ACTION_SUSPEND,
+          chromeos::PowerPolicyController::ACTION_DO_NOTHING,
+          false));
   handlers_.push_back(
       new IntPercentageToDoublePolicyHandler(
           key::kPresentationScreenDimDelayScale,
@@ -553,6 +580,10 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
       NULL,
       0, ash::MAGNIFIER_FULL, false));
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(OS_ANDROID)
+  handlers_.push_back(new ManagedBookmarksPolicyHandler());
+#endif
 }
 
 ConfigurationPolicyHandlerList::~ConfigurationPolicyHandlerList() {

@@ -19,6 +19,38 @@
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/notification.h"
 
+
+@interface MCNotificationProgressBar : NSProgressIndicator
+@end
+
+@implementation MCNotificationProgressBar
+- (void)drawRect:(NSRect)dirtyRect {
+  NSRect sliceRect, remainderRect;
+  double progressFraction = ([self doubleValue] - [self minValue]) /
+      ([self maxValue] - [self minValue]);
+  NSDivideRect(dirtyRect, &sliceRect, &remainderRect,
+               NSWidth(dirtyRect) * progressFraction, NSMinXEdge);
+
+  NSBezierPath* path = [NSBezierPath bezierPathWithRoundedRect:dirtyRect
+      xRadius:message_center::kProgressBarCornerRadius
+      yRadius:message_center::kProgressBarCornerRadius];
+  [gfx::SkColorToCalibratedNSColor(message_center::kProgressBarBackgroundColor)
+      set];
+  [path fill];
+
+  if (progressFraction == 0.0)
+    return;
+
+  path = [NSBezierPath bezierPathWithRoundedRect:sliceRect
+      xRadius:message_center::kProgressBarCornerRadius
+      yRadius:message_center::kProgressBarCornerRadius];
+  [gfx::SkColorToCalibratedNSColor(message_center::kProgressBarSliceColor) set];
+  [path fill];
+}
+@end
+
+////////////////////////////////////////////////////////////////////////////////
+
 @interface MCNotificationButtonCell : NSButtonCell {
   BOOL hovered_;
 }
@@ -270,6 +302,7 @@
       [self wrapText:notification_->message()
             forField:title_
        maxNumberOfLines:message_center::kMessageExpandedLineLimit])];
+  [message_ setHidden:NO];
   [message_ sizeToFit];
   NSRect messageFrame = [message_ frame];
   messageFrame.origin.y =
@@ -282,6 +315,11 @@
       notification->items();
   NSRect listFrame = NSZeroRect;
   if (items.size() > 0) {
+    // If there are list items, then the message_ view should not be displayed.
+    [message_ setHidden:YES];
+    messageFrame.origin.y = titleFrame.origin.y;
+    messageFrame.size.height = 0;
+
     listFrame = [self currentContentRect];
     listFrame.origin.y = 0;
     listFrame.size.height = 0;
@@ -313,9 +351,27 @@
         message_center::kTextTopPadding - messageTopGap;
     listFrame.size.height = y;
     listFrame.origin.y =
-        NSMinY(messageFrame) - listTopPadding - NSHeight(listFrame);
+        NSMinY(titleFrame) - listTopPadding - NSHeight(listFrame);
     [listItemView_ setFrame:listFrame];
     [[self view] addSubview:listItemView_];
+  }
+
+  // Create the progress bar view if needed.
+  [progressBarView_ removeFromSuperview];
+  NSRect progressBarFrame = NSZeroRect;
+  if (notification->type() == message_center::NOTIFICATION_TYPE_PROGRESS) {
+    progressBarFrame = [self currentContentRect];
+    progressBarFrame.origin.y = NSMinY(messageFrame) -
+        message_center::kProgressBarTopPadding -
+        message_center::kProgressBarThickness;
+    progressBarFrame.size.height = message_center::kProgressBarThickness;
+    progressBarView_.reset(
+        [[MCNotificationProgressBar alloc] initWithFrame:progressBarFrame]);
+    // Setting indeterminate to NO does not work with custom drawRect.
+    [progressBarView_ setIndeterminate:YES];
+    [progressBarView_ setStyle:NSProgressIndicatorBarStyle];
+    [progressBarView_ setDoubleValue:notification->progress()];
+    [[self view] addSubview:progressBarView_];
   }
 
   // If the bottom-most element so far is out of the rootView's bounds, resize
@@ -323,12 +379,15 @@
   CGFloat minY = NSMinY(messageFrame);
   if (listItemView_ && NSMinY(listFrame) < minY)
     minY = NSMinY(listFrame);
+  if (progressBarView_ && NSMinY(progressBarFrame) < minY)
+    minY = NSMinY(progressBarFrame);
   if (minY < messagePadding) {
     CGFloat delta = messagePadding - minY;
     rootFrame.size.height += delta;
     titleFrame.origin.y += delta;
     messageFrame.origin.y += delta;
     listFrame.origin.y += delta;
+    progressBarFrame.origin.y += delta;
   }
 
   // Add the bottom container view.
@@ -398,11 +457,25 @@
   titleFrame.origin.y += NSHeight(frame);
   messageFrame.origin.y += NSHeight(frame);
   listFrame.origin.y += NSHeight(frame);
+  progressBarFrame.origin.y += NSHeight(frame);
+
+  // Make sure that there is a minimum amount of spacing below the icon and
+  // the edge of the frame.
+  CGFloat bottomDelta = NSHeight(rootFrame) - NSHeight([icon_ frame]);
+  if (bottomDelta > 0 && bottomDelta < message_center::kIconBottomPadding) {
+    CGFloat bottomAdjust = message_center::kIconBottomPadding - bottomDelta;
+    rootFrame.size.height += bottomAdjust;
+    titleFrame.origin.y += bottomAdjust;
+    messageFrame.origin.y += bottomAdjust;
+    listFrame.origin.y += bottomAdjust;
+    progressBarFrame.origin.y += bottomAdjust;
+  }
 
   [[self view] setFrame:rootFrame];
   [title_ setFrame:titleFrame];
   [message_ setFrame:messageFrame];
   [listItemView_ setFrame:listFrame];
+  [progressBarView_ setFrame:progressBarFrame];
 
   return rootFrame;
 }

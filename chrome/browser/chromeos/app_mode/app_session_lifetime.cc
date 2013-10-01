@@ -4,17 +4,17 @@
 
 #include "chrome/browser/chromeos/app_mode/app_session_lifetime.h"
 
+#include "apps/shell_window_registry.h"
 #include "base/basictypes.h"
 #include "base/lazy_instance.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_update_service.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/common/pref_names.h"
 
-using extensions::ShellWindowRegistry;
+using apps::ShellWindowRegistry;
 
 namespace chromeos {
 
@@ -35,17 +35,18 @@ class AppWindowWatcher : public ShellWindowRegistry::Observer {
   }
 
  private:
-  // extensions::ShellWindowRegistry::Observer overrides:
-  virtual void OnShellWindowAdded(ShellWindow* shell_window) OVERRIDE {}
-  virtual void OnShellWindowIconChanged(ShellWindow* shell_window) OVERRIDE {}
-  virtual void OnShellWindowRemoved(ShellWindow* shell_window) OVERRIDE {
+  // apps::ShellWindowRegistry::Observer overrides:
+  virtual void OnShellWindowAdded(apps::ShellWindow* shell_window) OVERRIDE {}
+  virtual void OnShellWindowIconChanged(apps::ShellWindow* shell_window)
+    OVERRIDE {}
+  virtual void OnShellWindowRemoved(apps::ShellWindow* shell_window) OVERRIDE {
     if (window_registry_->shell_windows().empty()) {
       chrome::AttemptUserExit();
       window_registry_->RemoveObserver(this);
     }
   }
 
-  extensions::ShellWindowRegistry* window_registry_;
+  apps::ShellWindowRegistry* window_registry_;
 
   DISALLOW_COPY_AND_ASSIGN(AppWindowWatcher);
 };

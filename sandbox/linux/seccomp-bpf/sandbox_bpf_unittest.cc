@@ -28,6 +28,7 @@
 #include "sandbox/linux/seccomp-bpf/verifier.h"
 #include "sandbox/linux/services/broker_process.h"
 #include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/tests/unit_tests.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // Workaround for Android's prctl.h file.
@@ -46,14 +47,6 @@ namespace {
 
 const int  kExpectedReturnValue   = 42;
 const char kSandboxDebuggingEnv[] = "CHROME_SANDBOX_DEBUGGING";
-
-inline bool IsAndroid() {
-#if defined(OS_ANDROID)
-  return true;
-#else
-  return false;
-#endif
-}
 
 // This test should execute no matter whether we have kernel support. So,
 // we make it a TEST() instead of a BPF_TEST().
@@ -101,7 +94,7 @@ ErrorCode VerboseAPITestingPolicy(Sandbox *sandbox, int sysno, void *aux) {
   }
 }
 
-SANDBOX_TEST(SandboxBpf, VerboseAPITesting) {
+SANDBOX_TEST(SandboxBpf, DISABLE_ON_TSAN(VerboseAPITesting)) {
   if (Sandbox::SupportsSeccompSandbox(-1) ==
       playground2::Sandbox::STATUS_AVAILABLE) {
     pid_t test_var = 0;
@@ -264,7 +257,7 @@ BPF_TEST(SandboxBpf, ErrnoTest, ErrnoTestPolicy) {
   // On Android, errno is only supported up to 255, otherwise errno
   // processing is skipped.
   // We work around this (crbug.com/181647).
-  if (IsAndroid() && setgid(0) != -1) {
+  if (sandbox::IsAndroid() && setgid(0) != -1) {
     errno = 0;
     BPF_ASSERT(setgid(0) == -ErrorCode::ERR_MAX_ERRNO);
     BPF_ASSERT(errno == 0);

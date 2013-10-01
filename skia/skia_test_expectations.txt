@@ -48,39 +48,23 @@
 #
 # START OVERRIDES HERE
 
-# Skia r9262 (don't overclamp cubics (see skbug.com/1316)) changed
-# the way curves are drawn. The changes to this image are imperceptible
-crbug.com/243726 svg/as-background-image/svg-as-background-6.html [ ImageOnlyFailure ]
+# Image scaling difference due to ongoing Skia image resizing changes
+crbug.com/263331 virtual/deferred/fast/images/webp-color-profile-lossy.html [ ImageOnlyFailure ]
 
-# Skia's roll to r9450 caused some changes to the layout tests
-# In particular, the change to rendering some large fonts using paths
-# altered an svg test
-crbug.com/247306 svg/custom/use-referencing-nonexisting-symbol.svg [ Failure ImageOnlyFailure ]
-crbug.com/247306 [ Linux ] fast/text/international/spaces-combined-in-vertical-text.html [ Failure ]
+# With Skia r10399 Skia's Windows text metrics have been improved
+crbug.com/265448 [ Win ] svg/batik/text/textEffect3.svg [ ImageOnlyFailure ]
+crbug.com/265448 [ Win ] svg/custom/use-referencing-nonexisting-symbol.svg [ ImageOnlyFailure ]
+crbug.com/265448 [ Win ] svg/transforms/animated-path-inside-transformed-html.xhtml [ ImageOnlyFailure ]
+crbug.com/265448 [ Win ] svg/transforms/text-with-pattern-inside-transformed-html.xhtml [ ImageOnlyFailure ]
+crbug.com/265448 [ Win ] svg/transforms/text-with-pattern-with-svg-transform.svg [ ImageOnlyFailure ]
 
-# With the Skia DEPS roll to r9631 (https://codereview.chromium.org/17078006/)
-# some layout test images changed. This is most likely due to r9605 
-# (https://code.google.com/p/skia/source/detail?r=9605)
-crbug.com/250525 css3/filters/custom/custom-filter-nonseparable-blend-mode-color.html [ ImageOnlyFailure Crash ]
-crbug.com/250525 css3/filters/custom/custom-filter-nonseparable-blend-mode-hue.html [ ImageOnlyFailure Crash ]
-crbug.com/250525 css3/filters/custom/custom-filter-nonseparable-blend-mode-luminosity.html [ ImageOnlyFailure Crash ]
-crbug.com/250525 css3/filters/custom/custom-filter-nonseparable-blend-mode-saturation.html [ ImageOnlyFailure Crash ]
-crbug.com/250525 svg/W3C-SVG-1.1/masking-intro-01-f.svg [ ImageOnlyFailure ]
-crbug.com/250525 svg/css/circle-in-mask-with-shadow.svg [ ImageOnlyFailure ]
-crbug.com/250525 svg/custom/grayscale-gradient-mask-2.svg [ ImageOnlyFailure ]
-crbug.com/250525 svg/custom/mask-colorspace.svg [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-dom-baseFrequency-attr.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-dom-numOctaves-attr.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-dom-seed-attr.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-dom-stitchTiles-attr.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-dom-type-attr.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-svgdom-baseFrequency-prop.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-svgdom-numOctaves-prop.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-svgdom-seed-prop.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-svgdom-stitchTiles-prop.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/dynamic-updates/SVGFETurbulenceElement-svgdom-type-prop.html [ ImageOnlyFailure ]
-crbug.com/250525 svg/filters/filter-clip.svg [ ImageOnlyFailure ]
-crbug.com/250525 svg/W3C-SVG-1.1/filters-turb-01-f.svg [ ImageOnlyFailure ]
-crbug.com/250525 svg/W3C-SVG-1.1/filters-turb-02-f.svg [ ImageOnlyFailure ]
+# With skia r10444 some imperceptible differences on the edges of blurs were caused
+crbug.com/266315 fast/box-shadow/box-shadow-clipped-slices.html [ ImageOnlyFailure ]
+crbug.com/266315 fast/repaint/box-shadow-h.html [ ImageOnlyFailure ]
+crbug.com/266315 fast/repaint/box-shadow-v.html [ ImageOnlyFailure ]
+crbug.com/266315 fast/repaint/shadow-multiple-horizontal.html [ ImageOnlyFailure ]
+crbug.com/266315 fast/repaint/shadow-multiple-strict-horizontal.html [ ImageOnlyFailure ]
+crbug.com/266315 fast/repaint/shadow-multiple-strict-vertical.html [ ImageOnlyFailure ]
+crbug.com/266315 fast/repaint/shadow-multiple-vertical.html [ ImageOnlyFailure ]
 
 # END OVERRIDES HERE (this line ensures that the file is newline-terminated)

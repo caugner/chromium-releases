@@ -5,13 +5,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mount.h>
 
 #include <algorithm>
 #include <sstream>
 #include <string>
 #include <vector>
-
-#include "nacl_io/nacl_io.h"
 
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_size.h"
@@ -104,8 +103,8 @@ int example_main(int argc, char *argv[]) {
 
   PSEventSetFilter(PSE_ALL);
 
-  // Mount the images directory as an HTTP resources
-  mount("/images", "/images", "httpfs", 0, "");
+  // Mount the images directory as an HTTP resource.
+  mount("images", "/images", "httpfs", 0, "");
 
   FILE* fp = fopen("/images/flock_green.raw", "rb");
   fread(&fmt, sizeof(fmt), 1, fp);
@@ -117,7 +116,7 @@ int example_main(int argc, char *argv[]) {
 
   g_goose_sprite = new Sprite(buffer, pp::Size(fmt.width, fmt.height), 0);
 
-  PSContext2D_t* ctx = PSContext2DAllocate();
+  PSContext2D_t* ctx = PSContext2DAllocate(PP_IMAGEDATAFORMAT_BGRA_PREMUL);
   ResetFlock(ctx, 50);
   while (1) {
     PSEvent* event;

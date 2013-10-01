@@ -2,7 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "apps/launcher.h"
+#include "apps/native_app_window.h"
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/prefs/pref_service.h"
@@ -12,6 +17,7 @@
 #include "base/threading/platform_thread.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/automation/automation_util.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/component_loader.h"
@@ -23,17 +29,13 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
-#include "chrome/browser/extensions/platform_app_launcher.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -42,8 +44,11 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/test/test_utils.h"
-#include "googleurl/src/gurl.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "url/gurl.h"
 
+using apps::ShellWindow;
+using apps::ShellWindowRegistry;
 using content::WebContents;
 using web_modal::WebContentsModalDialogManager;
 
@@ -109,7 +114,7 @@ bool CopyTestDataAndSetCommandLineArg(
     const char* filename) {
   base::FilePath path = temp_dir.AppendASCII(
       filename).NormalizePathSeparators();
-  if (!(file_util::CopyFile(test_data_file, path)))
+  if (!(base::CopyFile(test_data_file, path)))
     return false;
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -303,7 +308,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWithContextMenuClicked) {
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DisallowNavigation) {
   TabsAddedNotificationObserver observer(2);
 
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/navigation")) << message_;
 
   observer.Wait();
@@ -315,7 +320,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DisallowNavigation) {
 }
 
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, Iframes) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/iframes")) << message_;
 }
 
@@ -342,11 +347,11 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, PlatformAppsOnly) {
 
 // Tests that platform apps have isolated storage by default.
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, Isolation) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
 
   // Load a (non-app) page under the "localhost" origin that sets a cookie.
-  GURL set_cookie_url = test_server()->GetURL(
-      "files/extensions/platform_apps/isolation/set_cookie.html");
+  GURL set_cookie_url = embedded_test_server()->GetURL(
+      "/extensions/platform_apps/isolation/set_cookie.html");
   GURL::Replacements replace_host;
   std::string host_str("localhost");  // Must stay in scope with replace_host.
   replace_host.SetHostStr(host_str);
@@ -607,7 +612,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, GetDisplayPath) {
 #endif  // defined(OS_CHROMEOS)
 
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, OpenLink) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_TAB_ADDED,
       content::Source<content::WebContentsDelegate>(browser()));
@@ -790,6 +795,11 @@ void PlatformAppDevToolsBrowserTest::RunTestWithDevTools(
 #define MAYBE_ReOpenedWithID ReOpenedWithID
 #endif
 IN_PROC_BROWSER_TEST_F(PlatformAppDevToolsBrowserTest, MAYBE_ReOpenedWithID) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
   RunTestWithDevTools("minimal_id", RELAUNCH | HAS_ID);
 }
 
@@ -948,19 +958,12 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
   extensions::ExtensionSystem::Get(browser()->profile())->event_router()->
       SetRegisteredEvents(extension->id(), std::set<std::string>());
 
-  const base::StringValue old_version("1");
-  std::string pref_path("extensions.settings.");
-  pref_path += extension->id();
-  pref_path += ".manifest.version";
-  // TODO(joi): Do registrations up front.
-  user_prefs::PrefRegistrySyncable* registry =
-      static_cast<user_prefs::PrefRegistrySyncable*>(
-          extension_prefs->pref_service()->DeprecatedGetPrefRegistry());
-  registry->RegisterStringPref(
-      pref_path.c_str(),
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  extension_prefs->pref_service()->Set(pref_path.c_str(), old_version);
+  DictionaryPrefUpdate update(extension_prefs->pref_service(),
+                              ExtensionPrefs::kExtensionsPref);
+  DictionaryValue* dict = update.Get();
+  std::string key(extension->id());
+  key += ".manifest.version";
+  dict->SetString(key, "1");
 }
 
 // Component App Test 3 of 3: simulate a component extension upgrade that

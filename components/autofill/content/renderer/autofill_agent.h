@@ -11,10 +11,11 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "components/autofill/content/renderer/form_cache.h"
 #include "components/autofill/content/renderer/page_click_listener.h"
+#include "components/autofill/core/common/autocheckout_status.h"
 #include "components/autofill/core/common/forms_seen_state.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/public/web/WebAutofillClient.h"
@@ -80,19 +81,7 @@ class AutofillAgent : public content::RenderViewObserver,
   virtual void InputElementLostFocus() OVERRIDE;
 
   // WebKit::WebAutofillClient:
-  virtual void didAcceptAutofillSuggestion(const WebKit::WebNode& node,
-                                           const WebKit::WebString& value,
-                                           const WebKit::WebString& label,
-                                           int item_id,
-                                           unsigned index) OVERRIDE;
-  virtual void didSelectAutofillSuggestion(const WebKit::WebNode& node,
-                                           const WebKit::WebString& value,
-                                           const WebKit::WebString& label,
-                                           int item_id) OVERRIDE;
   virtual void didClearAutofillSelection(const WebKit::WebNode& node) OVERRIDE;
-  virtual void removeAutocompleteSuggestion(
-      const WebKit::WebString& name,
-      const WebKit::WebString& value) OVERRIDE;
   virtual void textFieldDidEndEditing(
       const WebKit::WebInputElement& element) OVERRIDE;
   virtual void textFieldDidChange(
@@ -107,11 +96,6 @@ class AutofillAgent : public content::RenderViewObserver,
   virtual void didAssociateFormControls(
       const WebKit::WebVector<WebKit::WebNode>& nodes) OVERRIDE;
 
-  void OnSuggestionsReturned(int query_id,
-                             const std::vector<base::string16>& values,
-                             const std::vector<base::string16>& labels,
-                             const std::vector<base::string16>& icons,
-                             const std::vector<int>& unique_ids);
   void OnFormDataFilled(int query_id, const FormData& form);
   void OnFieldTypePredictionsAvailable(
       const std::vector<FormDataPredictions>& forms);
@@ -148,6 +132,13 @@ class AutofillAgent : public content::RenderViewObserver,
   // Called when |topmost_frame_| is supported for Autocheckout.
   void OnAutocheckoutSupported();
 
+  // Called when the page is actually shown in the browser, as opposed to simply
+  // being preloaded.
+  void OnPageShown();
+
+  // Called when an Autocheckout page is completed by the renderer.
+  void CompleteAutocheckoutPage(autofill::AutocheckoutStatus status);
+
   // Called when clicking an Autocheckout proceed element fails to do anything.
   void ClickFailed();
 
@@ -176,15 +167,6 @@ class AutofillAgent : public content::RenderViewObserver,
   void QueryAutofillSuggestions(const WebKit::WebInputElement& element,
                                 bool display_warning_if_disabled);
 
-  // Combines DataList suggestion entries with the autofill ones and show them
-  // to the user.
-  void CombineDataListEntriesAndShow(const WebKit::WebInputElement& element,
-                                     const std::vector<base::string16>& values,
-                                     const std::vector<base::string16>& labels,
-                                     const std::vector<base::string16>& icons,
-                                     const std::vector<int>& item_ids,
-                                     bool has_autofill_item);
-
   // Sets the element value to reflect the selected |suggested_value|.
   void AcceptDataListSuggestion(const base::string16& suggested_value);
 
@@ -206,11 +188,8 @@ class AutofillAgent : public content::RenderViewObserver,
   // Set |node| to display the given |value|.
   void SetNodeText(const base::string16& value, WebKit::WebInputElement* node);
 
-  // Hides any currently showing Autofill UI in the renderer or browser.
-  void HideAutofillUi();
-
-  // Hides any currently showing Autofill UI in the browser only.
-  void HideHostAutofillUi();
+  // Hides any currently showing Autofill UI.
+  void HideAutofillUI();
 
   void MaybeSendDynamicFormsSeen();
 

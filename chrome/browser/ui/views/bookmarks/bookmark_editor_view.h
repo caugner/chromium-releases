@@ -10,9 +10,9 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
+#include "chrome/browser/ui/bookmarks/bookmark_editor.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/models/tree_node_model.h"
 #include "ui/views/context_menu_controller.h"
@@ -115,9 +115,6 @@ class BookmarkEditorView : public BookmarkEditor,
   // Creates a Window and adds the BookmarkEditorView to it. When the window is
   // closed the BookmarkEditorView is deleted.
   void Show(gfx::NativeWindow parent);
-
-  // Closes the dialog.
-  void Close();
 
   // views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,

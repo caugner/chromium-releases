@@ -6,12 +6,9 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autocomplete_history_manager.h"
+#include "components/autofill/core/browser/autofill_driver.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/common/autofill_messages.h"
-#include "content/public/browser/navigation_controller.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/component_strings.h"
@@ -29,9 +26,11 @@ namespace autofill {
 
 AutofillExternalDelegate::AutofillExternalDelegate(
     content::WebContents* web_contents,
-    AutofillManager* autofill_manager)
+    AutofillManager* autofill_manager,
+    AutofillDriver* autofill_driver)
     : web_contents_(web_contents),
       autofill_manager_(autofill_manager),
+      autofill_driver_(autofill_driver),
       password_autofill_manager_(web_contents),
       autofill_query_id_(0),
       display_warning_if_disabled_(false),
@@ -40,15 +39,6 @@ AutofillExternalDelegate::AutofillExternalDelegate(
       registered_keyboard_listener_with_(NULL),
       weak_ptr_factory_(this) {
   DCHECK(autofill_manager);
-
-  registrar_.Add(this,
-                 content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
-                 content::Source<content::WebContents>(web_contents));
-  registrar_.Add(
-      this,
-      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      content::Source<content::NavigationController>(
-          &(web_contents->GetController())));
 }
 
 AutofillExternalDelegate::~AutofillExternalDelegate() {}
@@ -110,6 +100,9 @@ void AutofillExternalDelegate::OnSuggestionsReturned(
     ids.pop_back();
   }
 
+  // If anything else is added to modify the values after inserting the data
+  // list, AutofillPopupControllerImpl::UpdateDataListValues will need to be
+  // updated to match.
   InsertDataListValues(&values, &labels, &icons, &ids);
 
   if (values.empty()) {
@@ -159,13 +152,13 @@ void AutofillExternalDelegate::OnShowPasswordSuggestions(
 
 void AutofillExternalDelegate::SetCurrentDataListValues(
     const std::vector<base::string16>& data_list_values,
-    const std::vector<base::string16>& data_list_labels,
-    const std::vector<base::string16>& data_list_icons,
-    const std::vector<int>& data_list_unique_ids) {
+    const std::vector<base::string16>& data_list_labels) {
   data_list_values_ = data_list_values;
   data_list_labels_ = data_list_labels;
-  data_list_icons_ = data_list_icons;
-  data_list_unique_ids_ = data_list_unique_ids;
+
+  autofill_manager_->delegate()->UpdateAutofillPopupDataListValues(
+      data_list_values,
+      data_list_labels);
 }
 
 void AutofillExternalDelegate::OnPopupShown(
@@ -182,8 +175,11 @@ void AutofillExternalDelegate::OnPopupShown(
 
 void AutofillExternalDelegate::OnPopupHidden(
     content::KeyboardListener* listener) {
-  if (registered_keyboard_listener_with_ == web_contents_->GetRenderViewHost())
+  if ((!web_contents_->IsBeingDestroyed()) &&
+      (registered_keyboard_listener_with_ ==
+          web_contents_->GetRenderViewHost())) {
     web_contents_->GetRenderViewHost()->RemoveKeyboardListener(listener);
+  }
 
   registered_keyboard_listener_with_ = NULL;
 }
@@ -205,7 +201,7 @@ void AutofillExternalDelegate::DidAcceptSuggestion(const base::string16& value,
     autofill_manager_->OnShowAutofillDialog();
   } else if (identifier == WebAutofillClient::MenuItemIDClearForm) {
     // User selected 'Clear form'.
-    host->Send(new AutofillMsg_ClearForm(host->GetRoutingID()));
+    autofill_driver_->RendererShouldClearFilledForm();
   } else if (identifier == WebAutofillClient::MenuItemIDPasswordEntry) {
     bool success = password_autofill_manager_.DidAcceptAutofillSuggestion(
         autofill_query_field_, value);
@@ -240,9 +236,7 @@ void AutofillExternalDelegate::DidEndTextFieldEditing() {
 }
 
 void AutofillExternalDelegate::ClearPreviewedForm() {
-  RenderViewHost* host = web_contents_->GetRenderViewHost();
-  if (host)
-    host->Send(new AutofillMsg_ClearPreviewedForm(host->GetRoutingID()));
+  autofill_driver_->RendererShouldClearPreviewedForm();
 }
 
 void AutofillExternalDelegate::Reset() {
@@ -267,16 +261,12 @@ void AutofillExternalDelegate::FillAutofillFormData(int unique_id,
   if (unique_id == WebAutofillClient::MenuItemIDWarningMessage)
     return;
 
-  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  AutofillDriver::RendererFormDataAction renderer_action = is_preview ?
+      AutofillDriver::FORM_DATA_ACTION_PREVIEW :
+      AutofillDriver::FORM_DATA_ACTION_FILL;
 
-  if (is_preview) {
-    host->Send(new AutofillMsg_SetAutofillActionPreview(
-        host->GetRoutingID()));
-  } else {
-    host->Send(new AutofillMsg_SetAutofillActionFill(
-        host->GetRoutingID()));
-  }
-
+  DCHECK(autofill_driver_->RendererIsAvailable());
+  autofill_driver_->SetRendererActionOnFormDataReception(renderer_action);
   // Fill the values for the whole form.
   autofill_manager_->OnFillAutofillFormData(autofill_query_id_,
                                             autofill_query_form_,
@@ -290,12 +280,23 @@ void AutofillExternalDelegate::ApplyAutofillWarnings(
     std::vector<base::string16>* autofill_icons,
     std::vector<int>* autofill_unique_ids) {
   if (!autofill_query_field_.should_autocomplete) {
-    // If autofill is disabled and we had suggestions, show a warning instead.
-    autofill_values->assign(
-        1, l10n_util::GetStringUTF16(IDS_AUTOFILL_WARNING_FORM_DISABLED));
-    autofill_labels->assign(1, base::string16());
-    autofill_icons->assign(1, base::string16());
-    autofill_unique_ids->assign(1, WebAutofillClient::MenuItemIDWarningMessage);
+    // Autofill is disabled.  If there were some profile or credit card
+    // suggestions to show, show a warning instead.  Otherwise, clear out the
+    // list of suggestions.
+    if (!autofill_unique_ids->empty() && (*autofill_unique_ids)[0] > 0) {
+      // If autofill is disabled and we had suggestions, show a warning instead.
+      autofill_values->assign(
+          1, l10n_util::GetStringUTF16(IDS_AUTOFILL_WARNING_FORM_DISABLED));
+      autofill_labels->assign(1, base::string16());
+      autofill_icons->assign(1, base::string16());
+      autofill_unique_ids->assign(1,
+                                  WebAutofillClient::MenuItemIDWarningMessage);
+    } else {
+      autofill_values->clear();
+      autofill_labels->clear();
+      autofill_icons->clear();
+      autofill_unique_ids->clear();
+    }
   } else if (autofill_unique_ids->size() > 1 &&
              (*autofill_unique_ids)[0] ==
                  WebAutofillClient::MenuItemIDWarningMessage) {
@@ -367,26 +368,14 @@ void AutofillExternalDelegate::InsertDataListValues(
   autofill_labels->insert(autofill_labels->begin(),
                           data_list_labels_.begin(),
                           data_list_labels_.end());
-  autofill_icons->insert(autofill_icons->begin(),
-                         data_list_icons_.begin(),
-                         data_list_icons_.end());
-  autofill_unique_ids->insert(autofill_unique_ids->begin(),
-                              data_list_unique_ids_.begin(),
-                              data_list_unique_ids_.end());
-}
 
-void AutofillExternalDelegate::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED) {
-    if (!*content::Details<bool>(details).ptr())
-      autofill_manager_->delegate()->HideAutofillPopup();
-  } else if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
-    autofill_manager_->delegate()->HideAutofillPopup();
-  } else {
-    NOTREACHED();
-  }
+  // Set the values that all datalist elements share.
+  autofill_icons->insert(autofill_icons->begin(),
+                         data_list_values_.size(),
+                         base::string16());
+  autofill_unique_ids->insert(autofill_unique_ids->begin(),
+                              data_list_values_.size(),
+                              WebAutofillClient::MenuItemIDDataListEntry);
 }
 
 }  // namespace autofill

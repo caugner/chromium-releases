@@ -9,6 +9,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -34,7 +35,6 @@
 #include "chrome/browser/ui/views/wrench_menu.h"
 #include "chrome/browser/ui/views/wrench_toolbar_button.h"
 #include "chrome/browser/upgrade_detector.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/notification_service.h"
@@ -360,9 +360,8 @@ ToolbarView::GetContentSettingBubbleModelDelegate() {
 
 void ToolbarView::ShowWebsiteSettings(content::WebContents* web_contents,
                                       const GURL& url,
-                                      const content::SSLStatus& ssl,
-                                      bool show_history) {
-  chrome::ShowWebsiteSettings(browser_, web_contents, url, ssl, show_history);
+                                      const content::SSLStatus& ssl) {
+  chrome::ShowWebsiteSettings(browser_, web_contents, url, ssl);
 }
 
 views::Widget* ToolbarView::CreateViewsBubble(
@@ -627,8 +626,8 @@ const char* ToolbarView::GetClassName() const {
 
 bool ToolbarView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   const views::View* focused_view = focus_manager()->GetFocusedView();
-  if (focused_view == location_bar_)
-    return false;  // Let location bar handle all accelerator events.
+  if (focused_view && (focused_view->id() == VIEW_ID_OMNIBOX))
+    return false;  // Let the omnibox handle all accelerator events.
   return AccessiblePaneView::AcceleratorPressed(accelerator);
 }
 

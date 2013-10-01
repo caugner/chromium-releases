@@ -15,12 +15,11 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history_service.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "components/user_prefs/user_prefs.h"
-#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -37,6 +36,7 @@
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
+#include "url/gurl.h"
 
 using views::GridLayout;
 
@@ -227,11 +227,6 @@ void BookmarkEditorView::Show(gfx::NativeWindow parent) {
   title_tf_->SelectAll(true);
   // Give focus to the name Textfield.
   title_tf_->RequestFocus();
-}
-
-void BookmarkEditorView::Close() {
-  DCHECK(GetWidget());
-  GetWidget()->Close();
 }
 
 void BookmarkEditorView::ShowContextMenuForView(
@@ -547,7 +542,7 @@ void BookmarkEditorView::ApplyEdits(EditorNode* parent) {
   string16 new_title(title_tf_->text());
 
   if (!show_tree_) {
-    bookmark_utils::ApplyEditsWithNoFolderChange(
+    BookmarkEditor::ApplyEditsWithNoFolderChange(
         bb_model_, parent_, details_, new_title, new_url);
     return;
   }
@@ -557,7 +552,7 @@ void BookmarkEditorView::ApplyEdits(EditorNode* parent) {
   ApplyNameChangesAndCreateNewFolders(
       bb_model_->root_node(), tree_model_->GetRoot(), parent, &new_parent);
 
-  bookmark_utils::ApplyEditsWithPossibleFolderChange(
+  BookmarkEditor::ApplyEditsWithPossibleFolderChange(
       bb_model_, new_parent, details_, new_title, new_url);
 
   BookmarkExpandedStateTracker::Nodes expanded_nodes;

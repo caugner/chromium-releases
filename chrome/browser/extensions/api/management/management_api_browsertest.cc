@@ -7,6 +7,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/management/management_api.h"
 #include "chrome/browser/extensions/api/management/management_api_constants.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
@@ -91,6 +91,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiBrowserTest,
       test_data_dir_.AppendASCII("management/self_uninstall_helper")));
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("management/self_uninstall")));
+  ASSERT_TRUE(listener1.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionManagementApiBrowserTest,
+                       SelfUninstallNoPermissions) {
+  ExtensionTestMessageListener listener1("success", false);
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("management/self_uninstall_helper")));
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("management/self_uninstall_noperm")));
   ASSERT_TRUE(listener1.WaitUntilSatisfied());
 }
 

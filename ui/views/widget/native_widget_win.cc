@@ -19,6 +19,7 @@
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
 #include "ui/base/events/event.h"
+#include "ui/base/ime/input_method_factory.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/theme_provider.h"
@@ -28,7 +29,6 @@
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/base/win/shell.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_paint.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/point_conversions.h"
@@ -41,7 +41,7 @@
 #include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/focus/widget_focus_manager.h"
-#include "ui/views/ime/input_method_win.h"
+#include "ui/views/ime/input_method_bridge.h"
 #include "ui/views/widget/aero_tooltip_manager.h"
 #include "ui/views/widget/drop_target_win.h"
 #include "ui/views/widget/monitor_win.h"
@@ -85,6 +85,8 @@ const int kDragFrameWindowAlpha = 200;
 NativeWidgetWin::NativeWidgetWin(internal::NativeWidgetDelegate* delegate)
     : delegate_(delegate),
       ownership_(Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET),
+      drag_frame_saved_window_style_(0),
+      drag_frame_saved_window_ex_style_(0),
       has_non_client_view_(false),
       message_handler_(new HWNDMessageHandler(this)) {
 }
@@ -209,7 +211,8 @@ bool NativeWidgetWin::HasCapture() const {
 }
 
 InputMethod* NativeWidgetWin::CreateInputMethod() {
-  return new InputMethodWin(GetMessageHandler(), GetNativeWindow(), NULL);
+  return new InputMethodBridge(GetMessageHandler(), ui::GetSharedInputMethod(),
+                               true);
 }
 
 internal::InputMethodDelegate* NativeWidgetWin::GetInputMethodDelegate() {
@@ -756,7 +759,8 @@ bool NativeWidgetWin::HandleMouseEvent(const ui::MouseEvent& event) {
   } else if (event.IsMouseEvent()) {
     CHECK(!event.IsScrollEvent()); // Scroll events don't happen in Windows.
     ui::MouseEvent dpi_event(event);
-    dpi_event.UpdateForRootTransform(scale_transform);
+    if (!(dpi_event.flags() & ui::EF_IS_NON_CLIENT))
+      dpi_event.UpdateForRootTransform(scale_transform);
     delegate_->OnMouseEvent(&dpi_event);
     return dpi_event.handled();
   }

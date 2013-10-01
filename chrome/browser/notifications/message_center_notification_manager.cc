@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
@@ -19,6 +20,8 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "ui/message_center/message_center_style.h"
@@ -33,21 +36,22 @@ const int kFirstRunIdleDelaySeconds = 1;
 
 MessageCenterNotificationManager::MessageCenterNotificationManager(
     message_center::MessageCenter* message_center,
-    PrefService* local_state)
+    PrefService* local_state,
+    scoped_ptr<message_center::NotifierSettingsProvider> settings_provider)
     : message_center_(message_center),
 #if defined(OS_WIN)
       first_run_idle_timeout_(
           base::TimeDelta::FromSeconds(kFirstRunIdleDelaySeconds)),
       weak_factory_(this),
 #endif
-      settings_controller_(new MessageCenterSettingsController) {
+      settings_provider_(settings_provider.Pass()) {
 #if defined(OS_WIN)
   first_run_pref_.Init(prefs::kMessageCenterShowedFirstRunBalloon, local_state);
 #endif
 
   message_center_->SetDelegate(this);
   message_center_->AddObserver(this);
-  message_center_->SetNotifierSettingsProvider(settings_controller_.get());
+  message_center_->SetNotifierSettingsProvider(settings_provider_.get());
 
 #if defined(OS_WIN) || defined(OS_MACOSX) \
   || (defined(USE_AURA) && !defined(USE_ASH))
@@ -55,6 +59,9 @@ MessageCenterNotificationManager::MessageCenterNotificationManager(
   // views.Other platforms have global ownership and Create will return NULL.
   tray_.reset(message_center::CreateMessageCenterTray());
 #endif
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_FULLSCREEN_CHANGED,
+                 content::NotificationService::AllSources());
 }
 
 MessageCenterNotificationManager::~MessageCenterNotificationManager() {
@@ -64,13 +71,15 @@ MessageCenterNotificationManager::~MessageCenterNotificationManager() {
 ////////////////////////////////////////////////////////////////////////////////
 // NotificationUIManager
 
-bool MessageCenterNotificationManager::DoesIdExist(const std::string& id) {
-  if (NotificationUIManagerImpl::DoesIdExist(id))
-    return true;
-  NotificationMap::iterator iter = profile_notifications_.find(id);
+const Notification* MessageCenterNotificationManager::FindById(
+    const std::string& id) const {
+  const Notification* notification = NotificationUIManagerImpl::FindById(id);
+  if (notification)
+    return notification;
+  NotificationMap::const_iterator iter = profile_notifications_.find(id);
   if (iter == profile_notifications_.end())
-    return false;
-  return true;
+    return NULL;
+  return &(iter->second->notification());
 }
 
 bool MessageCenterNotificationManager::CancelById(const std::string& id) {
@@ -162,7 +171,12 @@ bool MessageCenterNotificationManager::ShowNotification(
 
 bool MessageCenterNotificationManager::UpdateNotification(
     const Notification& notification, Profile* profile) {
-  if (message_center_->IsMessageCenterVisible())
+  // Only progress notification update can be reflected immediately in the
+  // message center.
+  bool update_progress_notification =
+      notification.type() == message_center::NOTIFICATION_TYPE_PROGRESS;
+  bool is_message_center_visible = message_center_->IsMessageCenterVisible();
+  if (!update_progress_notification && is_message_center_visible)
     return false;
 
   const string16& replace_id = notification.replace_id();
@@ -181,13 +195,20 @@ bool MessageCenterNotificationManager::UpdateNotification(
     if (old_notification->notification().replace_id() == replace_id &&
         old_notification->notification().origin_url() == origin_url &&
         old_notification->profile() == profile) {
+      // Changing the type from non-progress to progress does not count towards
+      // the immediate update allowed in the message center.
+      if (update_progress_notification && is_message_center_visible &&
+          old_notification->notification().type() !=
+              message_center::NOTIFICATION_TYPE_PROGRESS) {
+        return false;
+      }
+
       std::string old_id =
           old_notification->notification().notification_id();
       DCHECK(message_center_->HasNotification(old_id));
 
       // Add/remove notification in the local list but just update the same
       // one in MessageCenter.
-      old_notification->notification().Close(false); // Not by user.
       delete old_notification;
       profile_notifications_.erase(old_id);
       ProfileNotification* new_notification =
@@ -224,7 +245,9 @@ void MessageCenterNotificationManager::DisableExtension(
   DesktopNotificationService* service =
       DesktopNotificationServiceFactory::GetForProfile(
           profile_notification->profile());
-  service->SetExtensionEnabled(extension_id, false);
+  message_center::NotifierId notifier_id(
+      message_center::NotifierId::APPLICATION, extension_id);
+  service->SetNotifierEnabled(notifier_id, false);
 }
 
 void MessageCenterNotificationManager::DisableNotificationsFromSource(
@@ -243,9 +266,9 @@ void MessageCenterNotificationManager::DisableNotificationsFromSource(
       chrome::kChromeUIScheme) {
     const std::string name =
         profile_notification->notification().origin_url().host();
-    const message_center::Notifier::SystemComponentNotifierType type =
-        message_center::ParseSystemComponentName(name);
-    service->SetSystemComponentEnabled(type, false);
+    message_center::NotifierId notifier_id(
+        message_center::ParseSystemComponentName(name));
+    service->SetNotifierEnabled(notifier_id, false);
   } else {
     service->DenyPermission(profile_notification->notification().origin_url());
   }
@@ -284,7 +307,7 @@ void MessageCenterNotificationManager::OnNotificationRemoved(
   NotificationMap::const_iterator iter =
       profile_notifications_.find(notification_id);
   if (iter != profile_notifications_.end())
-    RemoveProfileNotification(iter->second, by_user);
+    RemoveProfileNotification(iter->second);
 
 #if defined(OS_WIN)
   CheckFirstRunTimer();
@@ -310,6 +333,20 @@ void MessageCenterNotificationManager::OnNotificationUpdated(
 void MessageCenterNotificationManager::SetMessageCenterTrayDelegateForTest(
     message_center::MessageCenterTrayDelegate* delegate) {
   tray_.reset(delegate);
+}
+
+void MessageCenterNotificationManager::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  if (type == chrome::NOTIFICATION_FULLSCREEN_CHANGED) {
+    const bool is_fullscreen = *content::Details<bool>(details).ptr();
+
+    if (is_fullscreen && tray_.get() && tray_->GetMessageCenterTray())
+      tray_->GetMessageCenterTray()->HidePopupBubble();
+  } else {
+    NotificationUIManagerImpl::Observe(type, source, details);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -482,8 +519,10 @@ std::string
       DesktopNotificationServiceFactory::GetForProfile(profile());
   for (ExtensionSet::const_iterator iter = extensions.begin();
        iter != extensions.end(); ++iter) {
-    if (desktop_service->IsExtensionEnabled((*iter)->id()))
+    if (desktop_service->IsNotifierEnabled(message_center::NotifierId(
+            message_center::NotifierId::APPLICATION, (*iter)->id()))) {
       return (*iter)->id();
+    }
   }
   return std::string();
 }
@@ -510,9 +549,7 @@ void MessageCenterNotificationManager::AddProfileNotification(
 }
 
 void MessageCenterNotificationManager::RemoveProfileNotification(
-    ProfileNotification* profile_notification,
-    bool by_user) {
-  profile_notification->notification().Close(by_user);
+    ProfileNotification* profile_notification) {
   std::string id = profile_notification->notification().notification_id();
   profile_notifications_.erase(id);
   delete profile_notification;

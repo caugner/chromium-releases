@@ -8,7 +8,7 @@
 
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/values.h"
 #include "chrome/common/cloud_print/cloud_print_constants.h"
@@ -56,7 +56,7 @@ class ConnectorSettingsTest : public testing::Test {
 
   ServiceProcessPrefs* CreateTestFile(const char* json) {
     base::FilePath file_name = temp_dir_.path().AppendASCII("file.txt");
-    file_util::Delete(file_name, false);
+    base::DeleteFile(file_name, false);
     if (json) {
       std::string content = json;
       std::replace(content.begin(), content.end(), '\'', '"');

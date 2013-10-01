@@ -10,7 +10,7 @@
 #include "base/strings/string16.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace base {
 class DictionaryValue;
@@ -46,9 +46,6 @@ struct ActionInfo {
   // Returns the extension's script badge.
   static const ActionInfo* GetScriptBadgeInfo(const Extension* etxension);
 
-  // Returns the extension's page launcher.
-  static const ActionInfo* GetPageLauncherInfo(const Extension* extension);
-
   // Returns the extension's system indicator, if any.
   static const ActionInfo* GetSystemIndicatorInfo(const Extension* extension);
 
@@ -60,9 +57,6 @@ struct ActionInfo {
 
   // Sets the extension's script badge. |extension| takes ownership of |info|.
   static void SetScriptBadgeInfo(Extension* extension, ActionInfo* info);
-
-  // Sets the extension's page launcher. |extension| takes ownership of |info|.
-  static void SetPageLauncherInfo(Extension* extension, ActionInfo* info);
 
   // Sets the extension's system indicator. |extension| takes ownership of
   // |info|.

@@ -4,7 +4,6 @@
 
 """Module containing base test results classes."""
 
-
 class ResultType(object):
   """Class enumerating test types."""
   PASS = 'PASS'
@@ -22,6 +21,7 @@ class ResultType(object):
 
 class BaseTestResult(object):
   """Base class for a single test result."""
+
   def __init__(self, name, test_type, log=''):
     """Construct a BaseTestResult.
 
@@ -49,6 +49,14 @@ class BaseTestResult(object):
   def __hash__(self):
     return hash(self._name)
 
+  def SetName(self, name):
+    """Set the test name.
+
+    Because we're putting this into a set, this should only be used if moving
+    this test result into another set.
+    """
+    self._name = name
+
   def GetName(self):
     """Get the test name."""
     return self._name
@@ -64,6 +72,7 @@ class BaseTestResult(object):
 
 class TestRunResults(object):
   """Set of results for a test run."""
+
   def __init__(self):
     self._results = set()
 

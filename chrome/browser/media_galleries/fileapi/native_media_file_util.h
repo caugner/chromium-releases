@@ -11,12 +11,14 @@
 
 namespace chrome {
 
+class MediaPathFilter;
+
 // This class handles native file system operations with media type filtering.
 // To support virtual file systems it implements the AsyncFileUtil interface
 // from scratch and provides synchronous override points.
 class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
  public:
-  NativeMediaFileUtil();
+  explicit NativeMediaFileUtil(MediaPathFilter* media_path_filter);
   virtual ~NativeMediaFileUtil();
 
   // Uses the MIME sniffer code, which actually looks into the file,
@@ -25,100 +27,104 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
   static base::PlatformFileError IsMediaFile(const base::FilePath& path);
 
   // AsyncFileUtil overrides.
-  virtual bool CreateOrOpen(
+  virtual void CreateOrOpen(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       int file_flags,
       const CreateOrOpenCallback& callback) OVERRIDE;
-  virtual bool EnsureFileExists(
+  virtual void EnsureFileExists(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const EnsureFileExistsCallback& callback) OVERRIDE;
-  virtual bool CreateDirectory(
+  virtual void CreateDirectory(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       bool exclusive,
       bool recursive,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool GetFileInfo(
+  virtual void GetFileInfo(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const GetFileInfoCallback& callback) OVERRIDE;
-  virtual bool ReadDirectory(
+  virtual void ReadDirectory(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const ReadDirectoryCallback& callback) OVERRIDE;
-  virtual bool Touch(
+  virtual void Touch(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const base::Time& last_access_time,
       const base::Time& last_modified_time,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool Truncate(
+  virtual void Truncate(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       int64 length,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool CopyFileLocal(
+  virtual void CopyFileLocal(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool MoveFileLocal(
+  virtual void MoveFileLocal(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool CopyInForeignFile(
+  virtual void CopyInForeignFile(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const base::FilePath& src_file_path,
       const fileapi::FileSystemURL& dest_url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool DeleteFile(
+  virtual void DeleteFile(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool DeleteDirectory(
+  virtual void DeleteDirectory(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool CreateSnapshotFile(
+  virtual void DeleteRecursively(
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
+      const fileapi::FileSystemURL& url,
+      const StatusCallback& callback) OVERRIDE;
+  virtual void CreateSnapshotFile(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const CreateSnapshotFileCallback& callback) OVERRIDE;
 
  protected:
   virtual void CreateDirectoryOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       bool exclusive,
       bool recursive,
       const StatusCallback& callback);
   virtual void GetFileInfoOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const GetFileInfoCallback& callback);
   virtual void ReadDirectoryOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const ReadDirectoryCallback& callback);
   virtual void CopyOrMoveFileLocalOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
       bool copy,
       const StatusCallback& callback);
   virtual void CopyInForeignFileOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const base::FilePath& src_file_path,
       const fileapi::FileSystemURL& dest_url,
       const StatusCallback& callback);
   virtual void DeleteDirectoryOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const StatusCallback& callback);
   virtual void CreateSnapshotFileOnTaskRunnerThread(
-      fileapi::FileSystemOperationContext* context,
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const CreateSnapshotFileCallback& callback);
 
@@ -165,6 +171,11 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
       base::FilePath* platform_path,
       scoped_refptr<webkit_blob::ShareableFileReference>* file_ref);
 
+ protected:
+  chrome::MediaPathFilter* media_path_filter() {
+    return media_path_filter_;
+  }
+
  private:
   // Like GetLocalFilePath(), but always take media_path_filter() into
   // consideration. If the media_path_filter() check fails, return
@@ -188,6 +199,9 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
 
 
   base::WeakPtrFactory<NativeMediaFileUtil> weak_factory_;
+
+  // Not owned, owned by the backend which owns this.
+  chrome::MediaPathFilter* media_path_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeMediaFileUtil);
 };

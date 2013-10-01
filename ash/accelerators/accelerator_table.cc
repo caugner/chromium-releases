@@ -25,6 +25,7 @@ const AcceleratorData kAcceleratorData[] = {
   { false, ui::VKEY_RSHIFT, ui::EF_NONE, DISABLE_CAPS_LOCK },
 
   { true, ui::VKEY_SPACE, ui::EF_CONTROL_DOWN, PREVIOUS_IME },
+  { false, ui::VKEY_SPACE, ui::EF_CONTROL_DOWN, PREVIOUS_IME },
   // Shortcuts for Japanese IME.
   { true, ui::VKEY_CONVERT, ui::EF_NONE, SWITCH_IME },
   { true, ui::VKEY_NONCONVERT, ui::EF_NONE, SWITCH_IME },
@@ -74,6 +75,8 @@ const AcceleratorData kAcceleratorData[] = {
     TOUCH_HUD_MODE_CHANGE },
   { true, ui::VKEY_I, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN,
     TOUCH_HUD_CLEAR },
+  { true, ui::VKEY_9, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN,
+    TOUCH_HUD_PROJECTION_TOGGLE },
   // Accessibility: Spoken feedback shortcuts. The first one is to toggle
   // spoken feedback on or off. The others are only valid when
   // spoken feedback is enabled.

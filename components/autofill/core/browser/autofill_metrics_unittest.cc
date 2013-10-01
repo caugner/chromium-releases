@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "components/autofill/core/browser/autofill_metrics.h"
+
 #include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
@@ -16,9 +18,9 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/autofill/content/browser/autocheckout_page_meta_data.h"
 #include "components/autofill/core/browser/autofill_common_test.h"
+#include "components/autofill/core/browser/autofill_external_delegate.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/autofill_manager_delegate.h"
-#include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/test_autofill_driver.h"
 #include "components/autofill/core/common/form_data.h"
@@ -26,10 +28,10 @@
 #include "components/autofill/core/common/forms_seen_state.h"
 #include "components/webdata/common/web_data_results.h"
 #include "content/public/test/test_utils.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 using base::TimeDelta;
 using base::TimeTicks;
@@ -49,15 +51,15 @@ class MockAutofillMetrics : public AutofillMetrics {
                      void(DeveloperEngagementMetric metric));
   MOCK_CONST_METHOD3(LogHeuristicTypePrediction,
                      void(FieldTypeQualityMetric metric,
-                          AutofillFieldType field_type,
+                          ServerFieldType field_type,
                           const std::string& experiment_id));
   MOCK_CONST_METHOD3(LogOverallTypePrediction,
                      void(FieldTypeQualityMetric metric,
-                          AutofillFieldType field_type,
+                          ServerFieldType field_type,
                           const std::string& experiment_id));
   MOCK_CONST_METHOD3(LogServerTypePrediction,
                      void(FieldTypeQualityMetric metric,
-                          AutofillFieldType field_type,
+                          ServerFieldType field_type,
                           const std::string& experiment_id));
   MOCK_CONST_METHOD2(LogQualityMetric, void(QualityMetric metric,
                                             const std::string& experiment_id));
@@ -156,8 +158,8 @@ class TestFormStructure : public FormStructure {
       : FormStructure(form, std::string()) {}
   virtual ~TestFormStructure() {}
 
-  void SetFieldTypes(const std::vector<AutofillFieldType>& heuristic_types,
-                     const std::vector<AutofillFieldType>& server_types) {
+  void SetFieldTypes(const std::vector<ServerFieldType>& heuristic_types,
+                     const std::vector<ServerFieldType>& server_types) {
     ASSERT_EQ(field_count(), heuristic_types.size());
     ASSERT_EQ(field_count(), server_types.size());
 
@@ -210,8 +212,8 @@ class TestAutofillManager : public AutofillManager {
   }
 
   void AddSeenForm(const FormData& form,
-                   const std::vector<AutofillFieldType>& heuristic_types,
-                   const std::vector<AutofillFieldType>& server_types,
+                   const std::vector<ServerFieldType>& heuristic_types,
+                   const std::vector<ServerFieldType>& server_types,
                    const std::string& experiment_id) {
     FormData empty_form = form;
     for (size_t i = 0; i < empty_form.fields.size(); ++i) {
@@ -270,6 +272,7 @@ class AutofillMetricsTest : public ChromeRenderViewHostTestHarness {
   scoped_ptr<TestAutofillDriver> autofill_driver_;
   scoped_ptr<TestAutofillManager> autofill_manager_;
   scoped_ptr<TestPersonalDataManager> personal_data_;
+  scoped_ptr<AutofillExternalDelegate> external_delegate_;
 };
 
 AutofillMetricsTest::~AutofillMetricsTest() {
@@ -279,25 +282,28 @@ AutofillMetricsTest::~AutofillMetricsTest() {
 }
 
 void AutofillMetricsTest::SetUp() {
-  TestingProfile* profile = new TestingProfile();
+  ChromeRenderViewHostTestHarness::SetUp();
 
   // Ensure Mac OS X does not pop up a modal dialog for the Address Book.
-  autofill::test::DisableSystemServices(profile);
+  autofill::test::DisableSystemServices(profile());
 
-  profile->CreateRequestContext();
-  browser_context_.reset(profile);
-  PersonalDataManagerFactory::GetInstance()->SetTestingFactory(profile, NULL);
+  PersonalDataManagerFactory::GetInstance()->SetTestingFactory(profile(), NULL);
 
-  ChromeRenderViewHostTestHarness::SetUp();
   TabAutofillManagerDelegate::CreateForWebContents(web_contents());
 
   personal_data_.reset(new TestPersonalDataManager());
-  personal_data_->SetBrowserContext(profile);
+  personal_data_->SetBrowserContext(profile());
   autofill_driver_.reset(new TestAutofillDriver(web_contents()));
   autofill_manager_.reset(new TestAutofillManager(
       autofill_driver_.get(),
       TabAutofillManagerDelegate::FromWebContents(web_contents()),
       personal_data_.get()));
+
+  external_delegate_.reset(new AutofillExternalDelegate(
+      web_contents(),
+      autofill_manager_.get(),
+      autofill_driver_.get()));
+  autofill_manager_->SetExternalDelegate(external_delegate_.get());
 }
 
 void AutofillMetricsTest::TearDown() {
@@ -308,7 +314,6 @@ void AutofillMetricsTest::TearDown() {
   autofill_manager_.reset();
   autofill_driver_.reset();
   personal_data_.reset();
-  profile()->ResetRequestContext();
   ChromeRenderViewHostTestHarness::TearDown();
 }
 
@@ -318,7 +323,7 @@ scoped_ptr<ConfirmInfoBarDelegate> AutofillMetricsTest::CreateDelegate(
               LogCreditCardInfoBarMetric(AutofillMetrics::INFOBAR_SHOWN));
 
   CreditCard credit_card;
-  return AutofillCCInfoBarDelegate::CreateForTesting(
+  return AutofillCCInfoBarDelegate::Create(
       metric_logger,
       base::Bind(&TestPersonalDataManager::SaveImportedCreditCard,
                  base::Unretained(personal_data_.get()), credit_card));
@@ -334,7 +339,7 @@ TEST_F(AutofillMetricsTest, QualityMetrics) {
   form.action = GURL("http://example.com/submit.html");
   form.user_submitted = true;
 
-  std::vector<AutofillFieldType> heuristic_types, server_types;
+  std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
 
   test::CreateTestFormField(
@@ -483,8 +488,8 @@ TEST_F(AutofillMetricsTest, QualityMetricsForFailure) {
     const char* label;
     const char* name;
     const char* value;
-    AutofillFieldType heuristic_type;
-    AutofillFieldType server_type;
+    ServerFieldType heuristic_type;
+    ServerFieldType server_type;
     AutofillMetrics::QualityMetric heuristic_metric;
     AutofillMetrics::QualityMetric server_metric;
   } failure_cases[] = {
@@ -544,7 +549,7 @@ TEST_F(AutofillMetricsTest, QualityMetricsForFailure) {
     }
   };
 
-  std::vector<AutofillFieldType> heuristic_types, server_types;
+  std::vector<ServerFieldType> heuristic_types, server_types;
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(failure_cases); ++i) {
     FormFieldData field;
     test::CreateTestFormField(failure_cases[i].label,
@@ -597,7 +602,7 @@ TEST_F(AutofillMetricsTest, SaneMetricsWithCacheMismatch) {
   form.action = GURL("http://example.com/submit.html");
   form.user_submitted = true;
 
-  std::vector<AutofillFieldType> heuristic_types, server_types;
+  std::vector<ServerFieldType> heuristic_types, server_types;
 
   FormFieldData field;
   test::CreateTestFormField(
@@ -803,7 +808,7 @@ TEST_F(AutofillMetricsTest, DeveloperEngagement) {
   field.autocomplete_attribute = "email";
   forms.back().fields.push_back(field);
   test::CreateTestFormField("", "", "", "text", &field);
-  field.autocomplete_attribute = "street-address";
+  field.autocomplete_attribute = "address-line1";
   forms.back().fields.push_back(field);
 
   // Expect both the "form parsed" metric and the author-specified field type
@@ -873,7 +878,7 @@ TEST_F(AutofillMetricsTest, QualityMetricsWithExperimentId) {
   form.action = GURL("http://example.com/submit.html");
   form.user_submitted = true;
 
-  std::vector<AutofillFieldType> heuristic_types, server_types;
+  std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
 
   test::CreateTestFormField(
@@ -1026,7 +1031,7 @@ TEST_F(AutofillMetricsTest, AddressSuggestionsCount) {
   form.user_submitted = true;
 
   FormFieldData field;
-  std::vector<AutofillFieldType> field_types;
+  std::vector<ServerFieldType> field_types;
   test::CreateTestFormField("Name", "name", "", "text", &field);
   form.fields.push_back(field);
   field_types.push_back(NAME_FULL);

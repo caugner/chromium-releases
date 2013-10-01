@@ -65,7 +65,7 @@ class PasswordAutofillAgentTest : public ChromeRenderViewTest {
   // protected.
   void SimulateOnFillPasswordForm(
       const PasswordFormFillData& fill_data) {
-    AutofillMsg_FillPasswordForm msg(0, fill_data, false);
+    AutofillMsg_FillPasswordForm msg(0, fill_data);
     password_autofill_->OnMessageReceived(msg);
   }
 
@@ -102,6 +102,7 @@ class PasswordAutofillAgentTest : public ChromeRenderViewTest {
     UsernamesCollectionKey key;
     key.username = username3_;
     key.password = password3_;
+    key.realm = "google.com";
     fill_data_.other_possible_usernames[key].push_back(alternate_username3_);
 
     // We need to set the origin so it matches the frame URL and the action so
@@ -259,7 +260,8 @@ TEST_F(PasswordAutofillAgentTest, InitialAutocompleteForEmptyAction) {
   CheckTextFieldsState(kAliceUsername, true, kAlicePassword, true);
 }
 
-// Tests that changing the username does not fill a read-only password field.
+// Tests that if a password or input element is marked as readonly, neither
+// field is autofilled on page load.
 TEST_F(PasswordAutofillAgentTest, NoInitialAutocompleteForReadOnly) {
   password_element_.setAttribute(WebString::fromUTF8("readonly"),
                                  WebString::fromUTF8("true"));
@@ -268,9 +270,7 @@ TEST_F(PasswordAutofillAgentTest, NoInitialAutocompleteForReadOnly) {
   // autocomplete.
   SimulateOnFillPasswordForm(fill_data_);
 
-  // Only the username should have been autocompleted.
-  // TODO(jcivelli): may be we should not event fill the username?
-  CheckTextFieldsState(kAliceUsername, true, std::string(), false);
+  CheckTextFieldsState(std::string(), false, std::string(), false);
 }
 
 // Tests that having a non-matching username precludes the autocomplete.
@@ -285,19 +285,17 @@ TEST_F(PasswordAutofillAgentTest, NoInitialAutocompleteForFilledField) {
   CheckTextFieldsState("bogus", false, std::string(), false);
 }
 
-// Tests that changing the username does not fill a field specifying
+// Tests that we do not autofill username/passwords if marked as
 // autocomplete="off".
 TEST_F(PasswordAutofillAgentTest, NoInitialAutocompleteForAutocompleteOff) {
-  password_element_.setAttribute(WebString::fromUTF8("autocomplete"),
+  username_element_.setAttribute(WebString::fromUTF8("autocomplete"),
                                  WebString::fromUTF8("off"));
 
   // Simulate the browser sending back the login info, it triggers the
   // autocomplete.
   SimulateOnFillPasswordForm(fill_data_);
 
-  // Only the username should have been autocompleted.
-  // TODO(jcivelli): may be we should not event fill the username?
-  CheckTextFieldsState(kAliceUsername, true, std::string(), false);
+  CheckTextFieldsState(std::string(), false, std::string(), false);
 }
 
 TEST_F(PasswordAutofillAgentTest, NoAutocompleteForTextFieldPasswords) {
@@ -480,26 +478,6 @@ TEST_F(PasswordAutofillAgentTest, InlineAutocomplete) {
   SimulateUsernameChange("R", true);
   CheckTextFieldsState(kCarolAlternateUsername, true, kCarolPassword, true);
   CheckUsernameSelection(1, 17);
-}
-
-// Tests that accepting an item in the suggestion drop-down works.
-TEST_F(PasswordAutofillAgentTest, SuggestionAccept) {
-  // Simulate the browser sending back the login info.
-  SimulateOnFillPasswordForm(fill_data_);
-
-  // Clear the text fields to start fresh.
-  ClearUsernameAndPasswordFields();
-
-  // To simulate accepting an item in the suggestion drop-down we just mimic
-  // what the WebView does: it sets the element value then calls
-  // didAcceptAutofillSuggestion on the renderer.
-  autofill_agent_->didAcceptAutofillSuggestion(username_element_,
-                                               ASCIIToUTF16(kAliceUsername),
-                                               WebKit::WebString(),
-                                               0,
-                                               0);
-  // Autocomplete should have kicked in.
-  CheckTextFieldsState(kAliceUsername, true, kAlicePassword, true);
 }
 
 // Tests that selecting an item in the suggestion drop-down no-ops.

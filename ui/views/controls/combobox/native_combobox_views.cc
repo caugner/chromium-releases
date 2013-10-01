@@ -19,6 +19,7 @@
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/color_constants.h"
+#include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/focusable_border.h"
 #include "ui/views/controls/menu/menu_runner.h"
@@ -97,7 +98,9 @@ NativeComboboxViews::~NativeComboboxViews() {
 
 bool NativeComboboxViews::OnMousePressed(const ui::MouseEvent& mouse_event) {
   combobox_->RequestFocus();
-  if (mouse_event.IsLeftMouseButton()) {
+  const base::TimeDelta delta = base::Time::Now() - closed_time_;
+  if (mouse_event.IsLeftMouseButton() &&
+      (delta.InMilliseconds() > MenuButton::kMinimumTimeBetweenButtonClicks)) {
     UpdateFromModel();
     ShowDropDownMenu(ui::MENU_SOURCE_MOUSE);
   }
@@ -117,11 +120,19 @@ bool NativeComboboxViews::OnKeyPressed(const ui::KeyEvent& key_event) {
   if (selected_index_ == -1)
     selected_index_ = 0;
 
+  bool show_menu = false;
   int new_index = selected_index_;
   switch (key_event.key_code()) {
-    // Move to the next item if any.
+    // Show the menu on Space.
+    case ui::VKEY_SPACE:
+      show_menu = true;
+      break;
+
+    // Show the menu on Alt+Down (like Windows) or move to the next item if any.
     case ui::VKEY_DOWN:
-      if (new_index < (combobox_->model()->GetItemCount() - 1))
+      if (key_event.IsAltDown())
+        show_menu = true;
+      else if (new_index < (combobox_->model()->GetItemCount() - 1))
         new_index++;
       break;
 
@@ -147,7 +158,10 @@ bool NativeComboboxViews::OnKeyPressed(const ui::KeyEvent& key_event) {
       return false;
   }
 
-  if (new_index != selected_index_) {
+  if (show_menu) {
+    UpdateFromModel();
+    ShowDropDownMenu(ui::MENU_SOURCE_KEYBOARD);
+  } else if (new_index != selected_index_) {
     selected_index_ = new_index;
     combobox_->SelectionChanged();
     SchedulePaint();
@@ -369,7 +383,6 @@ void NativeComboboxViews::PaintText(gfx::Canvas* canvas) {
 }
 
 void NativeComboboxViews::ShowDropDownMenu(ui::MenuSourceType source_type) {
-
   if (!dropdown_list_menu_runner_.get())
     UpdateFromModel();
 
@@ -396,11 +409,11 @@ void NativeComboboxViews::ShowDropDownMenu(ui::MenuSourceType source_type) {
 
   dropdown_open_ = true;
   if (dropdown_list_menu_runner_->RunMenuAt(
-          GetWidget(), NULL, bounds, MenuItemView::TOPLEFT,
-          source_type, MenuRunner::HAS_MNEMONICS) ==
+          GetWidget(), NULL, bounds, MenuItemView::TOPLEFT, source_type, 0) ==
       MenuRunner::MENU_DELETED)
     return;
   dropdown_open_ = false;
+  closed_time_ = base::Time::Now();
 
   // Need to explicitly clear mouse handler so that events get sent
   // properly after the menu finishes running. If we don't do this, then

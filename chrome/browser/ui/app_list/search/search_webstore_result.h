@@ -9,7 +9,7 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/ui/app_list/search/chrome_search_result.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class Profile;
 
@@ -25,6 +25,7 @@ class SearchWebstoreResult : public ChromeSearchResult {
   virtual void Open(int event_flags) OVERRIDE;
   virtual void InvokeAction(int action_index, int event_flags) OVERRIDE;
   virtual scoped_ptr<ChromeSearchResult> Duplicate() OVERRIDE;
+  virtual ChromeSearchResultType GetType() OVERRIDE;
 
  private:
   Profile* profile_;

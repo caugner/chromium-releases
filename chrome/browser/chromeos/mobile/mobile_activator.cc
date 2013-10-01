@@ -8,23 +8,23 @@
 #include <map>
 #include <string>
 
+#include "ash/system/chromeos/network/network_connect.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -89,7 +89,7 @@ void CellularConfigDocument::LoadCellularConfigFile() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   // Load partner customization startup manifest if it is available.
   base::FilePath config_path(kCellularConfigPath);
-  if (!file_util::PathExists(config_path))
+  if (!base::PathExists(config_path))
     return;
 
   if (LoadFromFile(config_path))
@@ -165,7 +165,7 @@ MobileActivator* MobileActivator::GetInstance() {
 
 void MobileActivator::TerminateActivation() {
   // We're exiting; don't continue with termination.
-  if (!CrosLibrary::Get())
+  if (!NetworkLibrary::Get())
     return;
 
   state_duration_timer_.Stop();
@@ -516,7 +516,8 @@ void MobileActivator::ContinueConnecting() {
     LOG(WARNING) << "Connect failed, will try again in a little bit.";
     if (network) {
       LOG(INFO) << "Connecting to: " << network->service_path();
-      GetNetworkLibrary()->ConnectToCellularNetwork(network);
+      ash::network_connect::ConnectToNetwork(
+          network->service_path(), NULL /* no parent window */);
     }
   }
 }
@@ -962,7 +963,7 @@ bool MobileActivator::GotActivationError(
 void MobileActivator::GetDeviceInfo(CellularNetwork* network,
                                     DictionaryValue* value) {
   DCHECK(network);
-  NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
+  NetworkLibrary* cros = NetworkLibrary::Get();
   if (!cros)
     return;
   value->SetString("carrier", network->name());
@@ -984,7 +985,7 @@ std::string MobileActivator::GetErrorMessage(const std::string& code) const {
 }
 
 NetworkLibrary* MobileActivator::GetNetworkLibrary() const {
-  return CrosLibrary::Get()->GetNetworkLibrary();
+  return NetworkLibrary::Get();
 }
 
 }  // namespace chromeos

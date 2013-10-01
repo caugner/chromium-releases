@@ -6,16 +6,16 @@
 
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/pepper_flash_settings_manager.h"
 #include "chrome/browser/plugins/plugin_data_remover_helper.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/plugin_service.h"
-#include "webkit/plugins/webplugininfo.h"
+#include "content/public/common/webplugininfo.h"
 
 using content::BrowserThread;
 using content::PluginService;
@@ -59,7 +59,7 @@ void PluginStatusPrefSetter::StartUpdate() {
 
 void PluginStatusPrefSetter::GotPlugins(
     scoped_refptr<PluginPrefs> plugin_prefs,
-    const std::vector<webkit::WebPluginInfo>& /* plugins */) {
+    const std::vector<content::WebPluginInfo>& plugins) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Set the values on the PrefService instead of through the PrefMembers to
   // notify observers if they changed.

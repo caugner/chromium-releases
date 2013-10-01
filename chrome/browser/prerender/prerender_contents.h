@@ -13,7 +13,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_origin.h"
@@ -231,7 +231,7 @@ class PrerenderContents : public content::NotificationObserver,
   virtual void DidUpdateFaviconURL(int32 page_id,
       const std::vector<content::FaviconURL>& urls) OVERRIDE;
 
-  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
+  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
 
   // content::NotificationObserver
   virtual void Observe(int type,

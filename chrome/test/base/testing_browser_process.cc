@@ -7,7 +7,9 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/bookmarks/bookmark_prompt_controller.h"
 #include "chrome/test/base/testing_browser_process_platform_part.h"
@@ -17,13 +19,16 @@
 #include "ui/message_center/message_center.h"
 
 #if !defined(OS_IOS)
-#include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
-#include "chrome/browser/printing/background_printing_manager.h"
-#include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
+#endif
+
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+#include "chrome/browser/media_galleries/media_file_system_registry.h"
+#include "chrome/browser/storage_monitor/storage_monitor.h"
+#include "chrome/browser/storage_monitor/test_storage_monitor.h"
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -31,6 +36,11 @@
 #else
 #include "chrome/browser/policy/policy_service_stub.h"
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
+
+#if defined(ENABLE_FULL_PRINTING)
+#include "chrome/browser/printing/background_printing_manager.h"
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
+#endif
 
 // static
 TestingBrowserProcess* TestingBrowserProcess::GetGlobal() {
@@ -55,6 +65,10 @@ TestingBrowserProcess::~TestingBrowserProcess() {
 #if defined(ENABLE_CONFIGURATION_POLICY)
   SetBrowserPolicyConnector(NULL);
 #endif
+
+  // Destructors for some objects owned by TestingBrowserProcess will use
+  // g_browser_process if it is not NULL, so it must be NULL before proceeding.
+  DCHECK_EQ(static_cast<BrowserProcess*>(NULL), g_browser_process);
 }
 
 void TestingBrowserProcess::ResourceDispatcherHostCreated() {
@@ -149,6 +163,11 @@ BackgroundModeManager* TestingBrowserProcess::background_mode_manager() {
   return NULL;
 }
 
+void TestingBrowserProcess::set_background_mode_manager_for_test(
+    scoped_ptr<BackgroundModeManager> manager) {
+  NOTREACHED();
+}
+
 StatusTray* TestingBrowserProcess::status_tray() {
   return NULL;
 }
@@ -230,7 +249,7 @@ printing::PrintJobManager* TestingBrowserProcess::print_job_manager() {
 
 printing::PrintPreviewDialogController*
 TestingBrowserProcess::print_preview_dialog_controller() {
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
   if (!print_preview_dialog_controller_.get())
     print_preview_dialog_controller_ =
         new printing::PrintPreviewDialogController();
@@ -243,7 +262,7 @@ TestingBrowserProcess::print_preview_dialog_controller() {
 
 printing::BackgroundPrintingManager*
 TestingBrowserProcess::background_printing_manager() {
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
   if (!background_printing_manager_.get()) {
     background_printing_manager_.reset(
         new printing::BackgroundPrintingManager());
@@ -308,9 +327,18 @@ BookmarkPromptController* TestingBrowserProcess::bookmark_prompt_controller() {
 #endif
 }
 
+chrome::StorageMonitor* TestingBrowserProcess::storage_monitor() {
+#if defined(OS_IOS) || defined(OS_ANDROID)
+  NOTIMPLEMENTED();
+  return NULL;
+#else
+  return storage_monitor_.get();
+#endif
+}
+
 chrome::MediaFileSystemRegistry*
 TestingBrowserProcess::media_file_system_registry() {
-#if defined(OS_IOS) || defined (OS_ANDROID)
+#if defined(OS_IOS) || defined(OS_ANDROID)
   NOTIMPLEMENTED();
   return NULL;
 #else
@@ -384,5 +412,12 @@ void TestingBrowserProcess::SetSafeBrowsingService(
 #if !defined(OS_IOS)
   NOTIMPLEMENTED();
   sb_service_ = sb_service;
+#endif
+}
+
+void TestingBrowserProcess::SetStorageMonitor(
+    scoped_ptr<chrome::StorageMonitor> storage_monitor) {
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+  storage_monitor_ = storage_monitor.Pass();
 #endif
 }

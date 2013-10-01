@@ -1,7 +1,6 @@
 /* Copyright (c) 2013 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+ * found in the LICENSE file. */
 
 
 /* XRay string pool */
@@ -10,6 +9,9 @@
 /* It is up to higher level data structures to avoid duplicates. */
 /* It is up to higher level data structures to provide fast lookups. */
 
+/* _GNU_SOURCE must be defined prior to the inclusion of string.h
+ * so that strnlen is available with glibc */
+#define _GNU_SOURCE
 #include <stdlib.h>
 #include <string.h>
 #include "xray/xray_priv.h"

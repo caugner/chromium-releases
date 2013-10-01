@@ -23,14 +23,13 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
-#include "chrome/common/extensions/permissions/permission_message.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/install_warning.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
-#include "googleurl/src/gurl.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/gfx/size.h"
+#include "url/gurl.h"
 
 class ExtensionAction;
 class SkBitmap;
@@ -179,9 +178,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Checks to see if the extension has a valid ID.
   static bool IdIsValid(const std::string& id);
 
-  // Returns true if the specified file is an extension.
-  static bool IsExtension(const base::FilePath& file_name);
-
   // See Type definition in Manifest.
   Manifest::Type GetType() const;
 
@@ -232,7 +228,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // DEPRECATED: These methods have been moved to PermissionsData.
   // TODO(rdevlin.cronin): remove these once all calls have been updated.
   bool HasAPIPermission(APIPermission::ID permission) const;
-  bool HasAPIPermission(const std::string& function_name) const;
+  bool HasAPIPermission(const std::string& permission_name) const;
   scoped_refptr<const PermissionSet> GetActivePermissions() const;
 
   // Whether context menu should be shown for page and browser actions.
@@ -254,6 +250,11 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Returns true if the extension should be displayed in the extension
   // settings page (i.e. chrome://extensions).
   bool ShouldDisplayInExtensionSettings() const;
+
+  // Returns true if the extension should not be shown anywhere. This is
+  // mostly the same as the extension being a component extension, but also
+  // includes non-component apps that are hidden from the app launcher and ntp.
+  bool ShouldNotBeVisible() const;
 
   // Get the manifest data associated with the key, or NULL if there is none.
   // Can only be called after InitValue is finished.
@@ -318,6 +319,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool is_legacy_packaged_app() const;
   bool is_extension() const;
   bool can_be_incognito_enabled() const;
+  bool force_incognito_enabled() const;
 
   void AddWebExtentPattern(const URLPattern& pattern);
   const URLPatternSet& web_extent() const { return extent_; }
@@ -350,8 +352,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // The following are helpers for InitFromValue to load various features of the
   // extension from the manifest.
-
-  bool LoadAppIsolation(string16* error);
 
   bool LoadRequiredFeatures(string16* error);
   bool LoadName(string16* error);
@@ -485,9 +485,6 @@ struct InstalledExtensionInfo {
 
 struct UnloadedExtensionInfo {
   extension_misc::UnloadedExtensionReason reason;
-
-  // Was the extension already disabled?
-  bool already_disabled;
 
   // The extension being unloaded - this should always be non-NULL.
   const Extension* extension;

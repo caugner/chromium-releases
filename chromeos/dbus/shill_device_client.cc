@@ -5,7 +5,7 @@
 #include "chromeos/dbus/shill_device_client.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "chromeos/dbus/shill_device_client_stub.h"
@@ -60,14 +60,6 @@ class ShillDeviceClientImpl : public ShillDeviceClient {
     dbus::MethodCall method_call(flimflam::kFlimflamDeviceInterface,
                                  flimflam::kGetPropertiesFunction);
     GetHelper(device_path)->CallDictionaryValueMethod(&method_call, callback);
-  }
-
-  virtual base::DictionaryValue* CallGetPropertiesAndBlock(
-      const dbus::ObjectPath& device_path) OVERRIDE {
-    dbus::MethodCall method_call(flimflam::kFlimflamDeviceInterface,
-                                 flimflam::kGetPropertiesFunction);
-    return GetHelper(device_path)->CallDictionaryValueMethodAndBlock(
-        &method_call);
   }
 
   virtual void ProposeScan(const dbus::ObjectPath& device_path,

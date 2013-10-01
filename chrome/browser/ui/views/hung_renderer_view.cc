@@ -10,7 +10,6 @@
 
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_vector.h"
-#include "base/process_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/platform_util.h"
@@ -158,7 +157,7 @@ HungPagesTableModel::WebContentsObserverImpl::WebContentsObserverImpl(
       model_(model) {
 }
 
-void HungPagesTableModel::WebContentsObserverImpl::RenderViewGone(
+void HungPagesTableModel::WebContentsObserverImpl::RenderProcessGone(
     base::TerminationStatus status) {
   model_->TabDestroyed(this);
 }

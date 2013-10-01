@@ -14,6 +14,7 @@
 #include "ash/system/chromeos/enterprise/enterprise_domain_observer.h"
 #include "ash/system/chromeos/network/network_observer.h"
 #include "ash/system/chromeos/network/sms_observer.h"
+#include "ash/system/chromeos/tray_tracing.h"
 #include "ash/system/date/clock_observer.h"
 #include "ash/system/drive/drive_observer.h"
 #include "ash/system/ime/ime_observer.h"
@@ -27,7 +28,6 @@
 #include "base/observer_list.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/system/chromeos/audio/audio_observer.h"
 #include "ash/system/chromeos/network/network_observer.h"
 #include "ash/system/chromeos/network/sms_observer.h"
 #include "ash/system/chromeos/screen_security/screen_capture_observer.h"
@@ -75,6 +75,9 @@ public:
   void AddSessionLengthLimitObserver(SessionLengthLimitObserver* observer);
   void RemoveSessionLengthLimitObserver(SessionLengthLimitObserver* observer);
 
+  void AddTracingObserver(TracingObserver* observer);
+  void RemoveTracingObserver(TracingObserver* observer);
+
   void AddUpdateObserver(UpdateObserver* observer);
   void RemoveUpdateObserver(UpdateObserver* observer);
 
@@ -82,9 +85,6 @@ public:
   void RemoveUserObserver(UserObserver* observer);
 
 #if defined(OS_CHROMEOS)
-  void AddAudioObserver(AudioObserver* observer);
-  void RemoveAudioObserver(AudioObserver* observer);
-
   void AddNetworkObserver(NetworkObserver* observer);
   void RemoveNetworkObserver(NetworkObserver* observer);
 
@@ -103,6 +103,7 @@ public:
 
   void NotifyAccessibilityModeChanged(
       AccessibilityNotificationVisibility notify);
+  void NotifyTracingModeChanged(bool value);
   void NotifyRefreshBluetooth();
   void NotifyBluetoothDiscoveringChanged();
   void NotifyBrightnessChanged(double level, bool user_initialted);
@@ -122,8 +123,6 @@ public:
   void NotifyUpdateRecommended(UpdateObserver::UpdateSeverity severity);
   void NotifyUserUpdate();
 #if defined(OS_CHROMEOS)
-  void NotifyVolumeChanged(float level);
-  void NotifyMuteToggled();
   void NotifySetNetworkMessage(NetworkTrayDelegate* delegate,
                                NetworkObserver::MessageType message_type,
                                NetworkObserver::NetworkType network_type,
@@ -157,10 +156,10 @@ public:
   ObserverList<LocaleObserver> locale_observers_;
   ObserverList<LogoutButtonObserver> logout_button_observers_;
   ObserverList<SessionLengthLimitObserver> session_length_limit_observers_;
+  ObserverList<TracingObserver> tracing_observers_;
   ObserverList<UpdateObserver> update_observers_;
   ObserverList<UserObserver> user_observers_;
 #if defined(OS_CHROMEOS)
-  ObserverList<AudioObserver> audio_observers_;
   ObserverList<NetworkObserver> network_observers_;
   ObserverList<SmsObserver> sms_observers_;
   ObserverList<EnterpriseDomainObserver> enterprise_domain_observers_;

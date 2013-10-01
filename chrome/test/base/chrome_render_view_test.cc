@@ -6,14 +6,12 @@
 
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/print_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/extensions/chrome_v8_context_set.h"
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/dispatcher.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_custom_bindings.h"
-#include "chrome/renderer/extensions/miscellaneous_bindings.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "components/autofill/content/renderer/password_autofill_agent.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -34,7 +32,6 @@
 #endif
 
 using extensions::ExtensionCustomBindings;
-using extensions::MiscellaneousBindings;
 using WebKit::WebFrame;
 using WebKit::WebInputEvent;
 using WebKit::WebMouseEvent;
@@ -58,7 +55,9 @@ void ChromeRenderViewTest::SetUp() {
   content::SetRendererClientForTesting(&chrome_content_renderer_client_);
   extension_dispatcher_ = new extensions::Dispatcher();
   chrome_content_renderer_client_.SetExtensionDispatcher(extension_dispatcher_);
+#if defined(ENABLE_SPELLCHECK)
   chrome_content_renderer_client_.SetSpellcheck(new SpellCheck());
+#endif
 
   content::RenderViewTest::SetUp();
 
@@ -70,8 +69,8 @@ void ChromeRenderViewTest::SetUp() {
 }
 
 void ChromeRenderViewTest::TearDown() {
-  content::RenderViewTest::TearDown();
-
   extension_dispatcher_->OnRenderProcessShutdown();
   extension_dispatcher_ = NULL;
+
+  content::RenderViewTest::TearDown();
 }

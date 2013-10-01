@@ -15,13 +15,12 @@
 #include "base/values.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/install_tracker.h"
-#include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/gpu/gpu_feature_checker.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -30,7 +29,6 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
@@ -178,16 +176,6 @@ base::DictionaryValue* CreateLoginResult(Profile* profile) {
 
 WebstoreInstaller::Delegate* test_webstore_installer_delegate = NULL;
 
-void EnableAppLauncher(base::Callback<void(bool)> callback) {
-#if defined(OS_WIN)
-  LOG(INFO) << "Enabling App Launcher via internal enable";
-  AppListService::Get()->EnableAppList();
-  callback.Run(true);
-#else
-  callback.Run(true);
-#endif
-}
-
 // We allow the web store to set a string containing login information when a
 // purchase is made, so that when a user logs into sync with a different
 // account we can recognize the situation. The Get function returns the login if
@@ -218,10 +206,10 @@ WebstorePrivateApi::PopApprovalForTesting(
   return g_pending_approvals.Get().PopApproval(profile, extension_id);
 }
 
-InstallBundleFunction::InstallBundleFunction() {}
-InstallBundleFunction::~InstallBundleFunction() {}
+WebstorePrivateInstallBundleFunction::WebstorePrivateInstallBundleFunction() {}
+WebstorePrivateInstallBundleFunction::~WebstorePrivateInstallBundleFunction() {}
 
-bool InstallBundleFunction::RunImpl() {
+bool WebstorePrivateInstallBundleFunction::RunImpl() {
   base::ListValue* extensions = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetList(0, &extensions));
 
@@ -237,8 +225,9 @@ bool InstallBundleFunction::RunImpl() {
   return true;
 }
 
-bool InstallBundleFunction::ReadBundleInfo(base::ListValue* extensions,
-                                           BundleInstaller::ItemList* items) {
+bool WebstorePrivateInstallBundleFunction::
+    ReadBundleInfo(base::ListValue* extensions,
+    BundleInstaller::ItemList* items) {
   for (size_t i = 0; i < extensions->GetSize(); ++i) {
     base::DictionaryValue* details = NULL;
     EXTENSION_FUNCTION_VALIDATE(extensions->GetDictionary(i, &details));
@@ -257,13 +246,14 @@ bool InstallBundleFunction::ReadBundleInfo(base::ListValue* extensions,
   return true;
 }
 
-void InstallBundleFunction::OnBundleInstallApproved() {
+void WebstorePrivateInstallBundleFunction::OnBundleInstallApproved() {
   bundle_->CompleteInstall(
       &(dispatcher()->delegate()->GetAssociatedWebContents()->GetController()),
       this);
 }
 
-void InstallBundleFunction::OnBundleInstallCanceled(bool user_initiated) {
+void WebstorePrivateInstallBundleFunction::OnBundleInstallCanceled(
+    bool user_initiated) {
   if (user_initiated)
     error_ = "user_canceled";
   else
@@ -274,18 +264,20 @@ void InstallBundleFunction::OnBundleInstallCanceled(bool user_initiated) {
   Release();  // Balanced in RunImpl().
 }
 
-void InstallBundleFunction::OnBundleInstallCompleted() {
+void WebstorePrivateInstallBundleFunction::OnBundleInstallCompleted() {
   SendResponse(true);
 
   Release();  // Balanced in RunImpl().
 }
 
-BeginInstallWithManifestFunction::BeginInstallWithManifestFunction()
+WebstorePrivateBeginInstallWithManifest3Function::
+    WebstorePrivateBeginInstallWithManifest3Function()
     : use_app_installed_bubble_(false), enable_launcher_(false) {}
 
-BeginInstallWithManifestFunction::~BeginInstallWithManifestFunction() {}
+WebstorePrivateBeginInstallWithManifest3Function::
+    ~WebstorePrivateBeginInstallWithManifest3Function() {}
 
-bool BeginInstallWithManifestFunction::RunImpl() {
+bool WebstorePrivateBeginInstallWithManifest3Function::RunImpl() {
   base::DictionaryValue* details = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &details));
   CHECK(details);
@@ -361,7 +353,8 @@ bool BeginInstallWithManifestFunction::RunImpl() {
 }
 
 
-void BeginInstallWithManifestFunction::SetResultCode(ResultCode code) {
+void WebstorePrivateBeginInstallWithManifest3Function::SetResultCode(
+    ResultCode code) {
   switch (code) {
     case ERROR_NONE:
       SetResult(Value::CreateStringValue(std::string()));
@@ -398,7 +391,7 @@ void BeginInstallWithManifestFunction::SetResultCode(ResultCode code) {
   }
 }
 
-void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
+void WebstorePrivateBeginInstallWithManifest3Function::OnWebstoreParseSuccess(
     const std::string& id,
     const SkBitmap& icon,
     base::DictionaryValue* parsed_manifest) {
@@ -436,7 +429,7 @@ void BeginInstallWithManifestFunction::OnWebstoreParseSuccess(
   SigninCompletedOrNotNeeded();
 }
 
-void BeginInstallWithManifestFunction::OnWebstoreParseFailure(
+void WebstorePrivateBeginInstallWithManifest3Function::OnWebstoreParseFailure(
     const std::string& id,
     WebstoreInstallHelper::Delegate::InstallHelperResultCode result_code,
     const std::string& error_message) {
@@ -464,7 +457,7 @@ void BeginInstallWithManifestFunction::OnWebstoreParseFailure(
   Release();
 }
 
-void BeginInstallWithManifestFunction::SigninFailed(
+void WebstorePrivateBeginInstallWithManifest3Function::SigninFailed(
     const GoogleServiceAuthError& error) {
   signin_tracker_.reset();
 
@@ -477,13 +470,14 @@ void BeginInstallWithManifestFunction::SigninFailed(
   Release();
 }
 
-void BeginInstallWithManifestFunction::SigninSuccess() {
+void WebstorePrivateBeginInstallWithManifest3Function::SigninSuccess() {
   signin_tracker_.reset();
 
   SigninCompletedOrNotNeeded();
 }
 
-void BeginInstallWithManifestFunction::SigninCompletedOrNotNeeded() {
+void WebstorePrivateBeginInstallWithManifest3Function::
+    SigninCompletedOrNotNeeded() {
   content::WebContents* web_contents = GetAssociatedWebContents();
   if (!web_contents)  // The browser window has gone away.
     return;
@@ -496,7 +490,7 @@ void BeginInstallWithManifestFunction::SigninCompletedOrNotNeeded() {
   // Control flow finishes up in InstallUIProceed or InstallUIAbort.
 }
 
-void BeginInstallWithManifestFunction::InstallUIProceed() {
+void WebstorePrivateBeginInstallWithManifest3Function::InstallUIProceed() {
   // This gets cleared in CrxInstaller::ConfirmInstall(). TODO(asargent) - in
   // the future we may also want to add time-based expiration, where a whitelist
   // entry is only valid for some number of minutes.
@@ -505,6 +499,9 @@ void BeginInstallWithManifestFunction::InstallUIProceed() {
           profile(), id_, parsed_manifest_.Pass()));
   approval->use_app_installed_bubble = use_app_installed_bubble_;
   approval->enable_launcher = enable_launcher_;
+  // If we are enabling the launcher, we should not show the app list in order
+  // to train the user to open it themselves at least once.
+  approval->skip_post_install_ui = enable_launcher_;
   approval->installing_icon = gfx::ImageSkia::CreateFrom1xBitmap(icon_);
   g_pending_approvals.Get().PushApproval(approval.Pass());
 
@@ -521,7 +518,8 @@ void BeginInstallWithManifestFunction::InstallUIProceed() {
   Release();
 }
 
-void BeginInstallWithManifestFunction::InstallUIAbort(bool user_initiated) {
+void WebstorePrivateBeginInstallWithManifest3Function::InstallUIAbort(
+    bool user_initiated) {
   error_ = kUserCancelledError;
   SetResultCode(USER_CANCELLED);
   g_pending_installs.Get().EraseInstall(profile_, id_);
@@ -546,11 +544,13 @@ void BeginInstallWithManifestFunction::InstallUIAbort(bool user_initiated) {
   Release();
 }
 
-CompleteInstallFunction::CompleteInstallFunction() {}
+WebstorePrivateCompleteInstallFunction::
+    WebstorePrivateCompleteInstallFunction() {}
 
-CompleteInstallFunction::~CompleteInstallFunction() {}
+WebstorePrivateCompleteInstallFunction::
+    ~WebstorePrivateCompleteInstallFunction() {}
 
-bool CompleteInstallFunction::RunImpl() {
+bool WebstorePrivateCompleteInstallFunction::RunImpl() {
   std::string id;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &id));
   if (!extensions::Extension::IdIsValid(id)) {
@@ -568,36 +568,16 @@ bool CompleteInstallFunction::RunImpl() {
   // Balanced in OnExtensionInstallSuccess() or OnExtensionInstallFailure().
   AddRef();
 
-  if (approval_->enable_launcher) {
-    EnableAppLauncher(
-        base::Bind(&CompleteInstallFunction::AfterMaybeInstallAppLauncher,
-                   this));
-  } else {
-    AfterMaybeInstallAppLauncher(true);
-  }
+  if (approval_->enable_launcher)
+    AppListService::Get()->EnableAppList(profile());
 
-  return true;
-}
-
-void CompleteInstallFunction::AfterMaybeInstallAppLauncher(bool ok) {
-  if (!ok)
-    LOG(ERROR) << "Error installing app launcher";
-  std::string id = approval_->extension_id;
-  if (apps::IsAppLauncherEnabled()) {
-    std::string name;
-    if (!approval_->manifest->value()->GetString(extension_manifest_keys::kName,
-                                                 &name)) {
-      NOTREACHED();
-    }
-    // Show the app list so it receives install progress notifications.
-    if (approval_->manifest->is_app())
-      AppListService::Get()->ShowAppList(profile());
-
-    extensions::InstallTracker* tracker =
-        extensions::InstallTrackerFactory::GetForProfile(profile());
-    tracker->OnBeginExtensionInstall(
-        id, name, approval_->installing_icon, approval_->manifest->is_app(),
-        approval_->manifest->is_platform_app());
+  if (apps::IsAppLauncherEnabled() && approval_->manifest->is_app()) {
+    // Show the app list to show download is progressing. Don't show the app
+    // list on first app install so users can be trained to open it themselves.
+    if (approval_->enable_launcher)
+      AppListService::Get()->CreateForProfile(profile());
+    else
+      AppListService::Get()->ShowForProfile(profile());
   }
 
   // The extension will install through the normal extension install flow, but
@@ -607,9 +587,11 @@ void CompleteInstallFunction::AfterMaybeInstallAppLauncher(bool ok) {
       &(dispatcher()->delegate()->GetAssociatedWebContents()->GetController()),
       id, approval_.Pass(), WebstoreInstaller::FLAG_NONE);
   installer->Start();
+
+  return true;
 }
 
-void CompleteInstallFunction::OnExtensionInstallSuccess(
+void WebstorePrivateCompleteInstallFunction::OnExtensionInstallSuccess(
     const std::string& id) {
   if (test_webstore_installer_delegate)
     test_webstore_installer_delegate->OnExtensionInstallSuccess(id);
@@ -622,13 +604,10 @@ void CompleteInstallFunction::OnExtensionInstallSuccess(
   Release();
 }
 
-void CompleteInstallFunction::OnExtensionInstallFailure(
+void WebstorePrivateCompleteInstallFunction::OnExtensionInstallFailure(
     const std::string& id,
     const std::string& error,
     WebstoreInstaller::FailureReason reason) {
-  extensions::InstallTracker* tracker =
-      extensions::InstallTrackerFactory::GetForProfile(profile());
-  tracker->OnInstallFailure(id);
   if (test_webstore_installer_delegate) {
     test_webstore_installer_delegate->OnExtensionInstallFailure(
         id, error, reason);
@@ -643,73 +622,70 @@ void CompleteInstallFunction::OnExtensionInstallFailure(
   Release();
 }
 
-void CompleteInstallFunction::OnExtensionDownloadProgress(
-    const std::string& id,
-    content::DownloadItem* item) {
-  extensions::InstallTracker* tracker =
-      extensions::InstallTrackerFactory::GetForProfile(profile());
-  tracker->OnDownloadProgress(id, item->PercentComplete());
-}
+WebstorePrivateEnableAppLauncherFunction::
+    WebstorePrivateEnableAppLauncherFunction() {}
 
-EnableAppLauncherFunction::EnableAppLauncherFunction() {}
+WebstorePrivateEnableAppLauncherFunction::
+    ~WebstorePrivateEnableAppLauncherFunction() {}
 
-EnableAppLauncherFunction::~EnableAppLauncherFunction() {}
-
-bool EnableAppLauncherFunction::RunImpl() {
-  EnableAppLauncher(
-      base::Bind(&EnableAppLauncherFunction::AfterEnableAppLauncher, this));
+bool WebstorePrivateEnableAppLauncherFunction::RunImpl() {
+  AppListService::Get()->EnableAppList(profile());
+  SendResponse(true);
   return true;
 }
 
-void EnableAppLauncherFunction::AfterEnableAppLauncher(bool ok) {
-  if (!ok)
-    LOG(ERROR) << "Error installing app launcher";
-  SendResponse(ok);
-}
-
-bool GetBrowserLoginFunction::RunImpl() {
+bool WebstorePrivateGetBrowserLoginFunction::RunImpl() {
   SetResult(CreateLoginResult(profile_->GetOriginalProfile()));
   return true;
 }
 
-bool GetStoreLoginFunction::RunImpl() {
+bool WebstorePrivateGetStoreLoginFunction::RunImpl() {
   SetResult(Value::CreateStringValue(GetWebstoreLogin(profile_)));
   return true;
 }
 
-bool SetStoreLoginFunction::RunImpl() {
+bool WebstorePrivateSetStoreLoginFunction::RunImpl() {
   std::string login;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &login));
   SetWebstoreLogin(profile_, login);
   return true;
 }
 
-GetWebGLStatusFunction::GetWebGLStatusFunction() {
+WebstorePrivateGetWebGLStatusFunction::WebstorePrivateGetWebGLStatusFunction() {
   feature_checker_ = new GPUFeatureChecker(
       gpu::GPU_FEATURE_TYPE_WEBGL,
-      base::Bind(&GetWebGLStatusFunction::OnFeatureCheck,
+      base::Bind(&WebstorePrivateGetWebGLStatusFunction::OnFeatureCheck,
           base::Unretained(this)));
 }
 
-GetWebGLStatusFunction::~GetWebGLStatusFunction() {}
+WebstorePrivateGetWebGLStatusFunction::
+    ~WebstorePrivateGetWebGLStatusFunction() {}
 
-void GetWebGLStatusFunction::CreateResult(bool webgl_allowed) {
+void WebstorePrivateGetWebGLStatusFunction::CreateResult(bool webgl_allowed) {
   SetResult(Value::CreateStringValue(
       webgl_allowed ? "webgl_allowed" : "webgl_blocked"));
 }
 
-bool GetWebGLStatusFunction::RunImpl() {
+bool WebstorePrivateGetWebGLStatusFunction::RunImpl() {
   feature_checker_->CheckGPUFeatureAvailability();
   return true;
 }
 
-void GetWebGLStatusFunction::OnFeatureCheck(bool feature_allowed) {
+void WebstorePrivateGetWebGLStatusFunction::
+    OnFeatureCheck(bool feature_allowed) {
   CreateResult(feature_allowed);
   SendResponse(true);
 }
 
-bool GetIsLauncherEnabledFunction::RunImpl() {
+bool WebstorePrivateGetIsLauncherEnabledFunction::RunImpl() {
   SetResult(Value::CreateBooleanValue(apps::IsAppLauncherEnabled()));
+  SendResponse(true);
+  return true;
+}
+
+bool WebstorePrivateIsInIncognitoModeFunction::RunImpl() {
+  SetResult(
+      Value::CreateBooleanValue(profile_ != profile_->GetOriginalProfile()));
   SendResponse(true);
   return true;
 }

@@ -14,7 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 
@@ -92,17 +92,9 @@ class ChangeListLoader {
   void LoadIfNeeded(const DirectoryFetchInfo& directory_fetch_info,
                     const FileOperationCallback& callback);
 
-  // Initiates the directory contents loading. This function first obtains
-  // the changestamp from the server in order to set the per-directory
-  // changestamp for the directory.
-  //
-  // Upon completion, |callback| is invoked. On success, the changestamp of
-  // the directory is updated. |callback| must not be null.
-  //
-  // Note that This function initiates the loading without comparing the
-  // directory changestamp against the server changestamp. The primary
-  // purpose of this function is to update parts of entries in the directory
-  // which can stale over time, such as thumbnail URLs.
+  // Loads the directory content from the server, without comparing the
+  // changestamps. The purpose of this function is to update thumbnail URLs
+  // in the directory which can stale over time.
   void LoadDirectoryFromServer(const std::string& directory_resource_id,
                                const FileOperationCallback& callback);
 
@@ -186,11 +178,8 @@ class ChangeListLoader {
 
   // ================= Implementation for directory loading =================
 
-  // Part of LoadDirectoryFromServer().
-  // Called after GetAboutResource() for getting remote changestamp is complete.
-  // Note that it directly proceeds to DoLoadDirectoryFromServer() not going
-  // through CheckChangestampAndLoadDirectoryIfNeeded, because the purpose of
-  // LoadDirectoryFromServer is to force reloading regardless of changestamp.
+  // Part of LoadDirectoryFromServer(), called after the current remote
+  // changestamp is obtained as |about_resource|.
   void LoadDirectoryFromServerAfterGetAbout(
       const std::string& directory_resource_id,
       const FileOperationCallback& callback,

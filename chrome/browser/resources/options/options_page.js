@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 cr.define('options', function() {
+  /** @const */ var FocusOutlineManager = cr.ui.FocusOutlineManager;
+
   /////////////////////////////////////////////////////////////////////////////
   // OptionsPage class:
 
@@ -162,9 +164,12 @@ cr.define('options', function() {
     // Update tab title.
     this.setTitle_(targetPage.title);
 
-    // Update focus if any other control was focused before.
-    if (document.activeElement != document.body)
+    // Update focus if any other control was focused on the previous page,
+    // or the previous page is not known.
+    if (document.activeElement != document.body &&
+        (!rootPage || rootPage.pageDiv.contains(document.activeElement))) {
       targetPage.focus();
+    }
 
     // Notify pages if they were shown.
     for (var i = 0; i < allPageNames.length; ++i) {
@@ -273,9 +278,15 @@ cr.define('options', function() {
     // Update tab title.
     this.setTitle_(overlay.title);
 
-    // Change focus to the overlay if any other control was focused before.
-    if (document.activeElement != document.body)
-      overlay.focus();
+    // Change focus to the overlay if any other control was focused by keyboard
+    // before. Otherwise, no one should have focus.
+    if (document.activeElement != document.body) {
+      if (FocusOutlineManager.forDocument(document).visible) {
+        overlay.focus();
+      } else if (!overlay.pageDiv.contains(document.activeElement)) {
+        document.activeElement.blur();
+      }
+    }
 
     $('searchBox').setAttribute('aria-hidden', true);
 
@@ -565,12 +576,20 @@ cr.define('options', function() {
   };
 
   /**
-   * Callback for window.onpopstate.
+   * Callback for window.onpopstate to handle back/forward navigations.
    * @param {Object} data State data pushed into history.
    */
   OptionsPage.setState = function(data) {
     if (data && data.pageName) {
-      this.willClose();
+      var currentOverlay = this.getVisibleOverlay_();
+      var lowercaseName = data.pageName.toLowerCase();
+      var newPage = this.registeredPages[lowercaseName] ||
+                    this.registeredOverlayPages[lowercaseName] ||
+                    this.getDefaultPage();
+      if (currentOverlay && !currentOverlay.isAncestorOfPage(newPage)) {
+        currentOverlay.visible = false;
+        if (currentOverlay.didClosePage) currentOverlay.didClosePage();
+      }
       this.showPageByName(data.pageName, false);
     }
   };
@@ -630,7 +649,7 @@ cr.define('options', function() {
   OptionsPage.initialize = function() {
     chrome.send('coreOptionsInitialize');
     uber.onContentFrameLoaded();
-
+    FocusOutlineManager.forDocument(document);
     document.addEventListener('scroll', this.handleScroll_.bind(this));
 
     // Trigger the scroll handler manually to set the initial state.
@@ -644,6 +663,8 @@ cr.define('options', function() {
       overlay.addEventListener('cancelOverlay',
                                OptionsPage.cancelOverlay.bind(OptionsPage));
     }
+
+    cr.ui.overlay.globalInitialization();
   };
 
   /**
@@ -873,6 +894,9 @@ cr.define('options', function() {
         container.classList.remove('transparent');
         this.onVisibilityChanged_();
       } else {
+        // Kick change events for text fields.
+        if (pageDiv.contains(document.activeElement))
+          document.activeElement.blur();
         var self = this;
         // TODO: Use an event delegate to avoid having to subscribe and
         // unsubscribe for webkitTransitionEnd events.

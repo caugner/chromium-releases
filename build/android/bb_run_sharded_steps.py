@@ -54,10 +54,12 @@ import os
 import signal
 import shutil
 import sys
+import time
 
 from pylib import android_commands
 from pylib import cmd_helper
 from pylib import constants
+from pylib import forwarder
 from pylib import ports
 
 
@@ -153,6 +155,15 @@ def _PrintStepOutput(step_name):
   return result['exit_code']
 
 
+def _PrintAllStepsOutput(steps):
+  with file(steps, 'r') as f:
+    steps = json.load(f)
+  ret = 0
+  for step_name in steps.keys():
+    ret |= _PrintStepOutput(step_name)
+  return ret
+
+
 def _KillPendingServers():
   for retry in range(5):
     for server in ['lighttpd', 'web-page-replay']:
@@ -164,6 +175,16 @@ def _KillPendingServers():
           os.kill(int(pid), signal.SIGQUIT)
         except Exception as e:
           logging.warning('Failed killing %s %s %s', server, pid, e)
+  # Restart the adb server with taskset to set a single CPU affinity.
+  cmd_helper.RunCmd(['adb', 'kill-server'])
+  cmd_helper.RunCmd(['taskset', '-c', '0', 'adb', 'start-server'])
+  cmd_helper.RunCmd(['taskset', '-c', '0', 'adb', 'root'])
+  i = 1
+  while not android_commands.GetAttachedDevices():
+    time.sleep(i)
+    i *= 2
+    if i > 10:
+      break
 
 
 def main(argv):
@@ -177,13 +198,20 @@ def main(argv):
   parser.add_option('-p', '--print_results',
                     help='Only prints the results for the previously '
                          'executed step, do not run it again.')
+  parser.add_option('-P', '--print_all',
+                    help='Only prints the results for the previously '
+                         'executed steps, do not run them again.')
   options, urls = parser.parse_args(argv)
   if options.print_results:
     return _PrintStepOutput(options.print_results)
+  if options.print_all:
+    return _PrintAllStepsOutput(options.print_all)
 
   # At this point, we should kill everything that may have been left over from
   # previous runs.
   _KillPendingServers()
+
+  forwarder.Forwarder.UseMultiprocessing()
 
   # Reset the test port allocation. It's important to do it before starting
   # to dispatch any step.

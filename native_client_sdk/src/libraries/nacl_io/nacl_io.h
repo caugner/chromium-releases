@@ -1,27 +1,27 @@
 /* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+ * found in the LICENSE file. */
+
 #ifndef LIBRARIES_NACL_IO_NACL_IO_H_
 #define LIBRARIES_NACL_IO_NACL_IO_H_
 
 #include <ppapi/c/pp_instance.h>
 #include <ppapi/c/ppb.h>
 
-#include "nacl_io/kernel_wrap.h"
 #include "sdk_util/macros.h"
 
 EXTERN_C_BEGIN
 
-
-/** Initialize nacl_io.
+/**
+ * Initialize nacl_io.
  *
  * NOTE: If you initialize nacl_io with this constructor, you cannot
  * use any mounts that require PPAPI; e.g. persistent storage, etc.
  */
 void nacl_io_init();
 
-/** Initialize nacl_io with PPAPI support.
+/**
+ * Initialize nacl_io with PPAPI support.
  *
  * Usage:
  *   PP_Instance instance;
@@ -42,7 +42,11 @@ void nacl_io_init_ppapi(PP_Instance instance,
                         PPB_GetInterface get_interface);
 
 
-/** Mount a new filesystem type.
+/**
+ * Mount a new filesystem type.
+ *
+ * This function is declared in <sys/mount.h>, but we document it here
+ * because nacl_io is controlled primarily through mount(2)/umount(2).
  *
  * Some parameters are dependent on the filesystem type being mounted.
  *
@@ -108,10 +112,11 @@ void nacl_io_init_ppapi(PP_Instance instance,
  * @param[in] mountflags Unused.
  * @param[in] data Depends on the filesystem type. See above.
  * @return 0 on success, -1 on failure (with errno set).
+ *
+ * int mount(const char* source, const char* target, const char* filesystemtype,
+ *         unsigned long mountflags, const void *data) NOTHROW;
  */
-int mount(const char* source, const char* target, const char* filesystemtype,
-          unsigned long mountflags, const void *data) NOTHROW;
 
 EXTERN_C_END
 
-#endif  // LIBRARIES_NACL_IO_NACL_IO_H_
+#endif  /* LIBRARIES_NACL_IO_NACL_IO_H_ */

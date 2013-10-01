@@ -10,7 +10,7 @@
 #include "base/file_util.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/policy/proto/chromeos/install_attributes.pb.h"
 #include "chromeos/cryptohome/cryptohome_library.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -100,7 +100,7 @@ EnterpriseInstallAttributes::~EnterpriseInstallAttributes() {}
 
 void EnterpriseInstallAttributes::ReadCacheFile(
     const base::FilePath& cache_file) {
-  if (device_locked_ || !file_util::PathExists(cache_file))
+  if (device_locked_ || !base::PathExists(cache_file))
     return;
 
   device_locked_ = true;

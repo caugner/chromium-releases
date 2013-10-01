@@ -8,7 +8,6 @@
 
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
-#include "base/process_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -49,11 +48,11 @@ class WebContentsObserverBridge : public content::WebContentsObserver {
 
  protected:
   // WebContentsObserver overrides:
-  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE {
-    [controller_ renderViewGone];
+  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE {
+    [controller_ renderProcessGone];
   }
   virtual void WebContentsDestroyed(WebContents* tab) OVERRIDE {
-    [controller_ renderViewGone];
+    [controller_ renderProcessGone];
   }
 
  private:
@@ -205,7 +204,7 @@ class WebContentsObserverBridge : public content::WebContentsObserver {
   }
 }
 
-- (void)renderViewGone {
+- (void)renderProcessGone {
   // Cannot call performClose:, because the close button is disabled.
   [self close];
 }

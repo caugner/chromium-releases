@@ -4,12 +4,14 @@
 
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/mock_owner_key_util.h"
 #include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/network/network_handler.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace chromeos {
@@ -138,6 +140,11 @@ void DeviceSettingsTestHelper::RetrievePolicyForUser(
     const RetrievePolicyCallback& callback) {
 }
 
+std::string DeviceSettingsTestHelper::BlockingRetrievePolicyForUser(
+    const std::string& username) {
+  return "";
+}
+
 void DeviceSettingsTestHelper::RetrieveDeviceLocalAccountPolicy(
     const std::string& account_id,
     const RetrievePolicyCallback& callback) {
@@ -200,9 +207,14 @@ DeviceSettingsTestBase::~DeviceSettingsTestBase() {
 }
 
 void DeviceSettingsTestBase::SetUp() {
+  // Initialize DBusThreadManager with a stub implementation.
+  DBusThreadManager::InitializeWithStub();
+  NetworkHandler::Initialize();
+  loop_.RunUntilIdle();
+
   device_policy_.payload().mutable_metrics_enabled()->set_metrics_enabled(
       false);
-  owner_key_util_->SetPublicKeyFromPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   device_policy_.Build();
   device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
   device_settings_service_.SetSessionManager(&device_settings_test_helper_,
@@ -212,6 +224,8 @@ void DeviceSettingsTestBase::SetUp() {
 void DeviceSettingsTestBase::TearDown() {
   FlushDeviceSettings();
   device_settings_service_.UnsetSessionManager();
+  NetworkHandler::Shutdown();
+  DBusThreadManager::Shutdown();
 }
 
 void DeviceSettingsTestBase::FlushDeviceSettings() {

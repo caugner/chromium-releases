@@ -4,10 +4,14 @@
 
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 
+#include "apps/native_app_window.h"
+#include "apps/shell_window_registry.h"
 #include "ash/keyboard_overlay/keyboard_overlay_view.h"
+#include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/background/ash_user_wallpaper_delegate.h"
@@ -18,7 +22,6 @@
 #include "chrome/browser/chromeos/system/ash_system_tray_delegate.h"
 #include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/ui/ash/caps_lock_delegate_chromeos.h"
@@ -28,10 +31,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -44,9 +44,24 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 
+namespace {
+
+// This function is used for restoring focus after the user session is started.
+// It's needed because some windows can be opened in background while login UI
+// is still active because we currently restore browser windows before login UI
+// is deleted.
+void RestoreFocus() {
+  ash::MruWindowTracker::WindowList mru_list =
+      ash::Shell::GetInstance()->mru_window_tracker()->BuildMruWindowList();
+  if (!mru_list.empty())
+    mru_list.front()->Focus();
+}
+
+}  // anonymous namespace
+
 bool ChromeShellDelegate::IsFirstRunAfterBoot() const {
   return CommandLine::ForCurrentProcess()->HasSwitch(
-      chromeos::switches::kFirstBoot);
+      chromeos::switches::kFirstExecAfterBoot);
 }
 
 void ChromeShellDelegate::PreInit() {
@@ -71,9 +86,9 @@ void ChromeShellDelegate::OpenFileManager(bool as_dialog) {
     }
   } else {
     Profile* const profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
-    const extensions::ShellWindowRegistry* const registry =
-        extensions::ShellWindowRegistry::Get(profile);
-    const extensions::ShellWindowRegistry::ShellWindowList list =
+    const apps::ShellWindowRegistry* const registry =
+        apps::ShellWindowRegistry::Get(profile);
+    const apps::ShellWindowRegistry::ShellWindowList list =
         registry->GetShellWindowsForApp(kFileBrowserDomain);
     if (list.empty()) {
       // Open the new window.
@@ -243,6 +258,7 @@ void ChromeShellDelegate::Observe(int type,
       ash::Shell::GetInstance()->CreateLauncher();
       break;
     case chrome::NOTIFICATION_SESSION_STARTED:
+      RestoreFocus();
       ash::Shell::GetInstance()->ShowLauncher();
       break;
     default:

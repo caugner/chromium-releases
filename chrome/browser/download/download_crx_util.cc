@@ -6,6 +6,7 @@
 
 #include "chrome/browser/download/download_crx_util.h"
 
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -15,10 +16,9 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/user_script.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_service.h"
+#include "extensions/common/user_script.h"
 
 using content::BrowserThread;
 using content::DownloadItem;
@@ -33,9 +33,9 @@ namespace {
 ExtensionInstallPrompt* mock_install_prompt_for_testing = NULL;
 
 // Called to get an extension install UI object.  In tests, will return
-// a mock if the test calls download_util::SetMockInstallUIForTesting()
+// a mock if the test calls download_util::SetMockInstallPromptForTesting()
 // to set one.
-ExtensionInstallPrompt* CreateExtensionInstallPrompt(
+scoped_ptr<ExtensionInstallPrompt> CreateExtensionInstallPrompt(
     Profile* profile,
     const DownloadItem& download_item) {
   // Use a mock if one is present.  Otherwise, create a real extensions
@@ -43,7 +43,7 @@ ExtensionInstallPrompt* CreateExtensionInstallPrompt(
   if (mock_install_prompt_for_testing) {
     ExtensionInstallPrompt* result = mock_install_prompt_for_testing;
     mock_install_prompt_for_testing = NULL;
-    return result;
+    return scoped_ptr<ExtensionInstallPrompt>(result);
   } else {
     content::WebContents* web_contents = download_item.GetWebContents();
     if (!web_contents) {
@@ -55,7 +55,8 @@ ExtensionInstallPrompt* CreateExtensionInstallPrompt(
                                                     profile, active_desktop));
       web_contents = browser->tab_strip_model()->GetActiveWebContents();
     }
-    return new ExtensionInstallPrompt(web_contents);
+    return scoped_ptr<ExtensionInstallPrompt>(
+        new ExtensionInstallPrompt(web_contents));
   }
 }
 
@@ -63,8 +64,9 @@ ExtensionInstallPrompt* CreateExtensionInstallPrompt(
 
 // Tests can call this method to inject a mock ExtensionInstallPrompt
 // to be used to confirm permissions on a downloaded CRX.
-void SetMockInstallPromptForTesting(ExtensionInstallPrompt* mock_prompt) {
-  mock_install_prompt_for_testing = mock_prompt;
+void SetMockInstallPromptForTesting(
+    scoped_ptr<ExtensionInstallPrompt> mock_prompt) {
+  mock_install_prompt_for_testing = mock_prompt.release();
 }
 
 scoped_refptr<extensions::CrxInstaller> OpenChromeExtension(

@@ -12,12 +12,15 @@
 #include "base/logging.h"
 #include "base/nix/mime_util_xdg.h"
 #include "base/stl_util.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/ui/libgtk2ui/app_indicator_icon.h"
 #include "chrome/browser/ui/libgtk2ui/chrome_gtk_frame.h"
 #include "chrome/browser/ui/libgtk2ui/gtk2_util.h"
 #include "chrome/browser/ui/libgtk2ui/native_theme_gtk2.h"
 #include "chrome/browser/ui/libgtk2ui/select_file_dialog_impl.h"
 #include "chrome/browser/ui/libgtk2ui/skia_utils_gtk2.h"
+#include "chrome/browser/ui/libgtk2ui/unity_service.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -47,6 +50,12 @@
 // - Everything else that we're not doing.
 
 namespace {
+
+// Prefix for app indicator ids
+const char kAppIndicatorIdPrefix[] = "chrome_app_indicator_";
+
+// Number of app indicators used (used as part of app-indicator id).
+int indicators_count;
 
 // The size of the rendered toolbar image.
 const int kToolbarImageWidth = 64;
@@ -145,9 +154,10 @@ struct IDRGtkMapping {
 
 // The image resources that will be tinted by the 'button' tint value.
 const int kOtherToolbarButtonIDs[] = {
-  IDR_TOOLS,
-  IDR_TOOLS_H,
-  IDR_TOOLS_P,
+  IDR_TOOLBAR_BEZEL_HOVER,
+  IDR_TOOLBAR_BEZEL_PRESSED,
+  IDR_BROWSER_ACTION_H,
+  IDR_BROWSER_ACTION_P,
   IDR_BROWSER_ACTIONS_OVERFLOW,
   IDR_BROWSER_ACTIONS_OVERFLOW_H,
   IDR_BROWSER_ACTIONS_OVERFLOW_P,
@@ -302,6 +312,8 @@ Gtk2UI::Gtk2UI() {
   // style-set signal handler.
   LoadGtkValues();
   SetXDGIconTheme();
+
+  indicators_count = 0;
 }
 
 Gtk2UI::~Gtk2UI() {
@@ -367,6 +379,34 @@ bool Gtk2UI::GetDefaultUsesSystemTheme() const {
   // Unless GetDesktopEnvironment() badly misbehaves, this should never happen.
   NOTREACHED();
   return false;
+}
+
+void Gtk2UI::SetDownloadCount(int count) const {
+  if (unity::IsRunning())
+    unity::SetDownloadCount(count);
+}
+
+void Gtk2UI::SetProgressFraction(float percentage) const {
+  if (unity::IsRunning())
+    unity::SetProgressFraction(percentage);
+}
+
+bool Gtk2UI::IsStatusIconSupported() const {
+  return AppIndicatorIcon::CouldOpen();
+}
+
+scoped_ptr<StatusIconLinux> Gtk2UI::CreateLinuxStatusIcon(
+    const gfx::ImageSkia& image,
+    const string16& tool_tip) const {
+  if (AppIndicatorIcon::CouldOpen()) {
+    ++indicators_count;
+    return scoped_ptr<StatusIconLinux>(new AppIndicatorIcon(
+        base::StringPrintf("%s%d", kAppIndicatorIdPrefix, indicators_count),
+        image,
+        tool_tip));
+  } else {
+    return scoped_ptr<StatusIconLinux>();
+  }
 }
 
 ui::SelectFileDialog* Gtk2UI::CreateSelectFileDialog(
@@ -770,11 +810,14 @@ SkBitmap Gtk2UI::GenerateGtkThemeBitmap(int id) const {
     case IDR_STOP_P: {
       return GenerateGTKIcon(id);
     }
-    case IDR_TOOLS:
-    case IDR_TOOLS_H:
-    case IDR_TOOLS_P: {
-      return GenerateWrenchIcon(id);
-    }
+    case IDR_TOOLBAR_BEZEL_HOVER:
+      return GenerateToolbarBezel(GTK_STATE_PRELIGHT, IDR_TOOLBAR_BEZEL_HOVER);
+    case IDR_TOOLBAR_BEZEL_PRESSED:
+      return GenerateToolbarBezel(GTK_STATE_ACTIVE, IDR_TOOLBAR_BEZEL_PRESSED);
+    case IDR_BROWSER_ACTION_H:
+      return GenerateToolbarBezel(GTK_STATE_PRELIGHT, IDR_BROWSER_ACTION_H);
+    case IDR_BROWSER_ACTION_P:
+      return GenerateToolbarBezel(GTK_STATE_ACTIVE, IDR_BROWSER_ACTION_P);
     default: {
       return GenerateTintedIcon(id, button_tint_);
     }
@@ -903,17 +946,10 @@ SkBitmap Gtk2UI::GenerateGTKIcon(int base_id) const {
   return retval;
 }
 
-SkBitmap Gtk2UI::GenerateWrenchIcon(int base_id) const {
+SkBitmap Gtk2UI::GenerateToolbarBezel(int gtk_state, int sizing_idr) const {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  SkBitmap default_bitmap = rb.GetImageNamed(IDR_TOOLS).AsBitmap();
-
-  // Part 1: Tint the wrench icon according to the button tint.
-  SkBitmap shifted = SkBitmapOperations::CreateHSLShiftedBitmap(
-      default_bitmap, button_tint_);
-
-  // The unhighlighted icon doesn't need to have a border composed onto it.
-  if (base_id == IDR_TOOLS)
-    return shifted;
+  SkBitmap default_bitmap =
+      rb.GetImageNamed(sizing_idr).AsBitmap();
 
   SkBitmap retval;
   retval.setConfig(SkBitmap::kARGB_8888_Config,
@@ -924,11 +960,10 @@ SkBitmap Gtk2UI::GenerateWrenchIcon(int base_id) const {
 
   SkCanvas canvas(retval);
   SkBitmap border = DrawGtkButtonBorder(
-      base_id == IDR_TOOLS_H ? GTK_STATE_PRELIGHT : GTK_STATE_ACTIVE,
+      gtk_state,
       default_bitmap.width(),
       default_bitmap.height());
   canvas.drawBitmap(border, 0, 0);
-  canvas.drawBitmap(shifted, 0, 0);
 
   return retval;
 }

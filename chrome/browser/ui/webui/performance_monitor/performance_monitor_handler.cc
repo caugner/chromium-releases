@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/performance_monitor/database.h"
 #include "chrome/browser/performance_monitor/event.h"
@@ -263,7 +263,6 @@ void DoGetEvents(ListValue* results,
 
       for (DictionaryValue::Iterator data(*(*event)->data()); !data.IsAtEnd();
            data.Advance()) {
-        std::string localized_key;
         Value* value = NULL;
 
         // The property 'eventType' is set in HandleGetEvents as part of the

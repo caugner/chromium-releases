@@ -15,7 +15,7 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/browser/accessibility/browser_accessibility_delegate_mac.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/edit_command.h"
@@ -27,6 +27,7 @@
 
 namespace content {
 class CompositingIOSurfaceMac;
+class CompositingIOSurfaceContext;
 class RenderWidgetHostViewMac;
 class RenderWidgetHostViewMacEditCommandHelper;
 }
@@ -171,6 +172,8 @@ class RenderWidgetHostViewMacEditCommandHelper;
 // Returns YES if the event was handled.
 - (BOOL)postProcessEventForPluginIme:(NSEvent*)event;
 - (void)updateCursor:(NSCursor*)cursor;
+- (NSRect)firstViewRectForCharacterRange:(NSRange)theRange
+                             actualRange:(NSRangePointer)actualRange;
 @end
 
 namespace content {
@@ -239,13 +242,14 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase,
   virtual void WasHidden() OVERRIDE;
   virtual void MovePluginWindows(
       const gfx::Vector2d& scroll_offset,
-      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
+      const std::vector<WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void Blur() OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
   virtual void TextInputTypeChanged(ui::TextInputType type,
-                                    bool can_compose_inline) OVERRIDE;
+                                    bool can_compose_inline,
+                                    ui::TextInputMode input_mode) OVERRIDE;
   virtual void ImeCancelComposition() OVERRIDE;
   virtual void ImeCompositionRangeChanged(
       const ui::Range& range,
@@ -255,8 +259,8 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase,
       const gfx::Vector2d& scroll_delta,
       const std::vector<gfx::Rect>& copy_rects,
       const ui::LatencyInfo& latency_info) OVERRIDE;
-  virtual void RenderViewGone(base::TerminationStatus status,
-                              int error_code) OVERRIDE;
+  virtual void RenderProcessGone(base::TerminationStatus status,
+                                 int error_code) OVERRIDE;
   virtual void Destroy() OVERRIDE;
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
   virtual void SelectionChanged(const string16& text,
@@ -328,13 +332,14 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase,
   const std::string& selected_text() const { return selected_text_; }
 
   // Update the IOSurface to be drawn and call setNeedsDisplay on
-  // |cocoa_view_|. Returns false if an unexpected error cause creation of the
-  // IOSurface or its texture to fail, or if there was an error on the GL
-  // context.
-  bool CompositorSwapBuffers(uint64 surface_handle,
+  // |cocoa_view_|.
+  void CompositorSwapBuffers(uint64 surface_handle,
                              const gfx::Size& size,
                              float scale_factor,
                              const ui::LatencyInfo& latency_info);
+
+  // Draw the IOSurface by making its context current to this view.
+  bool DrawIOSurfaceWithoutCoreAnimation();
 
   // Called when a GPU error is detected. Deletes all compositing state.
   void GotAcceleratedCompositingError();
@@ -400,8 +405,12 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase,
   bool can_compose_inline_;
 
   base::scoped_nsobject<CALayer> software_layer_;
+
+  // Accelerated compositing structures. These may be dynamically created and
+  // destroyed together in Create/DestroyCompositedIOSurfaceAndLayer.
   base::scoped_nsobject<CompositingIOSurfaceLayer> compositing_iosurface_layer_;
   scoped_ptr<CompositingIOSurfaceMac> compositing_iosurface_;
+  scoped_refptr<CompositingIOSurfaceContext> compositing_iosurface_context_;
 
   // Whether to allow overlapping views.
   bool allow_overlapping_views_;
@@ -452,11 +461,21 @@ class RenderWidgetHostViewMac : public RenderWidgetHostViewBase,
   // invoke it from the message loop.
   void ShutdownHost();
 
-  bool CreateCompositedIOSurfaceAndLayer();
-  void DestroyCompositedIOSurfaceAndLayer();
+  bool CreateCompositedIOSurface();
+  bool CreateCompositedIOSurfaceLayer();
+  enum DestroyContextBehavior {
+    kLeaveContextBoundToView,
+    kDestroyContext,
+  };
+  void DestroyCompositedIOSurfaceAndLayer(DestroyContextBehavior
+      destroy_context_behavior);
+
+  // Unbind the GL context (if any) that is bound to |cocoa_view_|.
+  void ClearBoundContextDrawable();
 
   // Called when a GPU SwapBuffers is received.
   void GotAcceleratedFrame();
+
   // Called when a software DIB is received.
   void GotSoftwareFrame();
 

@@ -38,6 +38,8 @@ class FakeCryptohomeClient : public CryptohomeClient {
   virtual void GetSanitizedUsername(
       const std::string& username,
       const StringDBusMethodCallback& callback) OVERRIDE;
+  virtual std::string BlockingGetSanitizedUsername(
+      const std::string& username) OVERRIDE;
   virtual void AsyncMount(const std::string& username,
                           const std::string& key,
                           int flags,
@@ -47,6 +49,9 @@ class FakeCryptohomeClient : public CryptohomeClient {
                            const std::string& new_key,
                            const AsyncMethodCallback& callback) OVERRIDE;
   virtual void AsyncMountGuest(const AsyncMethodCallback& callback) OVERRIDE;
+  virtual void AsyncMountPublic(const std::string& public_mount_id,
+                                int flags,
+                                const AsyncMethodCallback& callback) OVERRIDE;
   virtual void TpmIsReady(const BoolDBusMethodCallback& callback) OVERRIDE;
   virtual void TpmIsEnabled(const BoolDBusMethodCallback& callback) OVERRIDE;
   virtual bool CallTpmIsEnabledAndBlock(bool* enabled) OVERRIDE;

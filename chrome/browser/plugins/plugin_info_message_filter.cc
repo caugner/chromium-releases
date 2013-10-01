@@ -22,8 +22,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/plugin_service_filter.h"
-#include "googleurl/src/gurl.h"
-#include "webkit/plugins/npapi/plugin_list.h"
+#include "url/gurl.h"
 
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
@@ -32,7 +31,7 @@
 #endif
 
 using content::PluginService;
-using webkit::WebPluginInfo;
+using content::WebPluginInfo;
 
 namespace {
 

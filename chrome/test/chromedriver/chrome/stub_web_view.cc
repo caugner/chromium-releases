@@ -68,7 +68,12 @@ Status StubWebView::GetFrameByFunction(const std::string& frame,
   return Status(kOk);
 }
 
-Status StubWebView::DispatchMouseEvents(const std::list<MouseEvent>& events) {
+Status StubWebView::DispatchMouseEvents(const std::list<MouseEvent>& events,
+                                        const std::string& frame) {
+  return Status(kOk);
+}
+
+Status StubWebView::DispatchTouchEvents(const std::list<TouchEvent>& events) {
   return Status(kOk);
 }
 

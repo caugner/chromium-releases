@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/login/wallpaper_manager.h"
 
-#include "ash/ash_resources/grit/ash_wallpaper_resources.h"
+#include "ash/ash_resources/grit/ash_resources.h"
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/desktop_background/desktop_background_controller_observer.h"
 #include "ash/display/display_manager.h"
@@ -12,9 +12,9 @@
 #include "ash/test/display_manager_test_api.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/user.h"
@@ -32,8 +32,8 @@ namespace chromeos {
 
 namespace {
 
-const int kLargeWallpaperResourceId = IDR_AURA_WALLPAPERS_5_GRADIENT5_LARGE;
-const int kSmallWallpaperResourceId = IDR_AURA_WALLPAPERS_5_GRADIENT5_SMALL;
+const int kLargeWallpaperResourceId = IDR_AURA_WALLPAPER_DEFAULT_LARGE;
+const int kSmallWallpaperResourceId = IDR_AURA_WALLPAPER_DEFAULT_SMALL;
 
 int kLargeWallpaperWidth = 256;
 int kLargeWallpaperHeight = ash::kLargeWallpaperMaxHeight;
@@ -94,7 +94,7 @@ class WallpaperManagerBrowserTest : public CrosInProcessBrowserTest,
                                         const std::string& id) {
     base::FilePath wallpaper_path =
         WallpaperManager::Get()->GetCustomWallpaperPath(sub_dir, email, id);
-    if (!file_util::DirectoryExists(wallpaper_path.DirName()))
+    if (!base::DirectoryExists(wallpaper_path.DirName()))
       file_util::CreateDirectory(wallpaper_path.DirName());
 
     return wallpaper_path;
@@ -291,8 +291,8 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
   EXPECT_EQ(3, LoadedWallpapers());
   base::FilePath new_wallpaper_path = GetCustomWallpaperPath(
       kOriginalWallpaperSubDir, kTestUser1, "DUMMY");
-  EXPECT_FALSE(file_util::PathExists(old_wallpaper_path));
-  EXPECT_TRUE(file_util::PathExists(new_wallpaper_path));
+  EXPECT_FALSE(base::PathExists(old_wallpaper_path));
+  EXPECT_TRUE(base::PathExists(new_wallpaper_path));
 }
 
 // Some users have old user profiles which may have legacy wallpapers. And these
@@ -344,6 +344,21 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
   WaitAsyncWallpaperLoad();
   // This test should finish normally. If timeout, it is probably because chrome
   // can not handle pre migrated user profile (M21 profile or older).
+}
+
+// Test for http://crbug.com/265689. When hooked up a large external monitor,
+// the default large resolution wallpaper should load.
+IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+                       HotPlugInScreenAtGAIALoginScreen) {
+  UpdateDisplay("800x600");
+  // Set initial wallpaper to the default wallpaper.
+  WallpaperManager::Get()->SetDefaultWallpaper();
+  WaitAsyncWallpaperLoad();
+
+  // Hook up a 2000x2000 display. The large resolution custom wallpaper should
+  // be loaded.
+  UpdateDisplay("800x600,2000x2000");
+  WaitAsyncWallpaperLoad();
 }
 
 class WallpaperManagerBrowserTestNoAnimation

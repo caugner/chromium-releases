@@ -4,9 +4,11 @@
 
 package org.chromium.android_webview;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.provider.Settings;
 import android.webkit.WebSettings.PluginState;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -80,7 +82,9 @@ public class AwSettings {
     private String mDefaultVideoPosterURL;
     private float mInitialPageScalePercent = 0;
 
-    private final boolean mSupportDeprecatedTargetDensityDPI = true;
+    private final boolean mSupportLegacyQuirks;
+
+    private final boolean mPasswordEchoEnabled;
 
     // Not accessed by the native side.
     private boolean mBlockNetworkLoads;  // Default depends on permission of embedding APK.
@@ -165,13 +169,14 @@ public class AwSettings {
     }
 
     interface ZoomSupportChangeListener {
-        public void onMultiTouchZoomSupportChanged(boolean supportsMultiTouchZoom);
+        public void onGestureZoomSupportChanged(boolean supportsGestureZoom);
     }
 
-    public AwSettings(boolean hasInternetPermission,
+    public AwSettings(Context context, boolean hasInternetPermission,
             ZoomSupportChangeListener zoomChangeListener,
             boolean isAccessFromFileURLsGrantedByDefault,
-            double dipScale) {
+            double dipScale,
+            boolean supportsLegacyQuirks) {
         ThreadUtils.assertOnUiThread();
         synchronized (mAwSettingsLock) {
             mHasInternetPermission = hasInternetPermission;
@@ -186,7 +191,13 @@ public class AwSettings {
             }
 
             mUserAgent = LazyDefaultUserAgent.sInstance;
-            onMultiTouchZoomSupportChanged(supportsMultiTouchZoomLocked());
+            onGestureZoomSupportChanged(supportsGestureZoomLocked());
+
+            // Respect the system setting for password echoing.
+            mPasswordEchoEnabled = Settings.System.getInt(context.getContentResolver(),
+                    Settings.System.TEXT_SHOW_PASSWORD, 1) == 1;
+
+            mSupportLegacyQuirks = supportsLegacyQuirks;
         }
         // Defer initializing the native side until a native WebContents instance is set.
     }
@@ -1025,8 +1036,8 @@ public class AwSettings {
     }
 
     @CalledByNative
-    private boolean getSupportDeprecatedTargetDensityDPILocked() {
-        return mSupportDeprecatedTargetDensityDPI;
+    private boolean getSupportLegacyQuirksLocked() {
+        return mSupportLegacyQuirks;
     }
 
     /**
@@ -1053,6 +1064,11 @@ public class AwSettings {
     @CalledByNative
     private boolean getUseWideViewportLocked() {
         return mUseWideViewport;
+    }
+
+    @CalledByNative
+    private boolean getPasswordEchoEnabled() {
+        return mPasswordEchoEnabled;
     }
 
     /**
@@ -1236,12 +1252,12 @@ public class AwSettings {
         return mDefaultVideoPosterURL;
     }
 
-    private void onMultiTouchZoomSupportChanged(final boolean supportsMultiTouchZoom) {
+    private void onGestureZoomSupportChanged(final boolean supportsGestureZoom) {
         // Always post asynchronously here, to avoid doubling back onto the caller.
         ThreadUtils.postOnUiThread(new Runnable() {
             @Override
             public void run() {
-                mZoomChangeListener.onMultiTouchZoomSupportChanged(supportsMultiTouchZoom);
+                mZoomChangeListener.onGestureZoomSupportChanged(supportsGestureZoom);
             }
         });
     }
@@ -1253,7 +1269,7 @@ public class AwSettings {
         synchronized (mAwSettingsLock) {
             if (mSupportZoom != support) {
                 mSupportZoom = support;
-                onMultiTouchZoomSupportChanged(supportsMultiTouchZoomLocked());
+                onGestureZoomSupportChanged(supportsGestureZoomLocked());
             }
         }
     }
@@ -1274,7 +1290,7 @@ public class AwSettings {
         synchronized (mAwSettingsLock) {
             if (mBuiltInZoomControls != enabled) {
                 mBuiltInZoomControls = enabled;
-                onMultiTouchZoomSupportChanged(supportsMultiTouchZoomLocked());
+                onGestureZoomSupportChanged(supportsGestureZoomLocked());
             }
         }
     }
@@ -1306,20 +1322,20 @@ public class AwSettings {
         }
     }
 
-    private boolean supportsMultiTouchZoomLocked() {
+    private boolean supportsGestureZoomLocked() {
         assert Thread.holdsLock(mAwSettingsLock);
         return mSupportZoom && mBuiltInZoomControls;
     }
 
-    boolean supportsMultiTouchZoom() {
+    boolean supportsGestureZoom() {
         synchronized (mAwSettingsLock) {
-            return supportsMultiTouchZoomLocked();
+            return supportsGestureZoomLocked();
         }
     }
 
     boolean shouldDisplayZoomControls() {
         synchronized (mAwSettingsLock) {
-            return supportsMultiTouchZoomLocked() && mDisplayZoomControls;
+            return supportsGestureZoomLocked() && mDisplayZoomControls;
         }
     }
 

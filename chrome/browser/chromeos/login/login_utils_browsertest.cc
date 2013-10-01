@@ -8,7 +8,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/run_loop.h"
@@ -16,14 +16,13 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/net/connectivity_state_helper.h"
-#include "chrome/browser/chromeos/net/mock_connectivity_state_helper.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
@@ -38,7 +37,6 @@
 #include "chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/rlz/rlz.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -217,9 +215,6 @@ class LoginUtilsTest : public testing::Test,
 
     CryptohomeLibrary::Initialize();
     LoginState::Initialize();
-    ConnectivityStateHelper::SetForTest(&mock_connectivity_state_helper_);
-    EXPECT_CALL(mock_connectivity_state_helper_, DefaultNetworkOnline())
-        .WillRepeatedly(Return(false));
 
     mock_input_method_manager_ = new input_method::MockInputMethodManager();
     input_method::InitializeForTesting(mock_input_method_manager_);
@@ -314,7 +309,6 @@ class LoginUtilsTest : public testing::Test,
     LoginUtils::Set(NULL);
 
     input_method::Shutdown();
-    ConnectivityStateHelper::SetForTest(NULL);
     LoginState::Shutdown();
     CryptohomeLibrary::Shutdown();
 
@@ -509,7 +503,7 @@ class LoginUtilsTest : public testing::Test,
   }
 
  protected:
-  ScopedStubCrosEnabler stub_cros_enabler_;
+  ScopedStubNetworkLibraryEnabler stub_network_library_enabler_;
 
   base::Closure fake_io_thread_work_;
   base::WaitableEvent fake_io_thread_completion_;
@@ -529,7 +523,6 @@ class LoginUtilsTest : public testing::Test,
   input_method::MockInputMethodManager* mock_input_method_manager_;
   disks::MockDiskMountManager mock_disk_mount_manager_;
   net::TestURLFetcherFactory test_url_fetcher_factory_;
-  MockConnectivityStateHelper mock_connectivity_state_helper_;
 
   cryptohome::MockAsyncMethodCaller* mock_async_method_caller_;
 
@@ -736,4 +729,4 @@ INSTANTIATE_TEST_CASE_P(
 
 }  // namespace
 
-}
+}  // namespace chromeos

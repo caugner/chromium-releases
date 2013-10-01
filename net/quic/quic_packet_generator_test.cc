@@ -32,16 +32,34 @@ class MockDelegate : public QuicPacketGenerator::DelegateInterface {
   MockDelegate() {}
   virtual ~MockDelegate() {}
 
-  MOCK_METHOD2(CanWrite, bool(Retransmission retransmission,
-                              HasRetransmittableData retransmittable));
+  MOCK_METHOD3(CanWrite, bool(Retransmission retransmission,
+                              HasRetransmittableData retransmittable,
+                              IsHandshake handshake));
 
   MOCK_METHOD0(CreateAckFrame, QuicAckFrame*());
   MOCK_METHOD0(CreateFeedbackFrame, QuicCongestionFeedbackFrame*());
   MOCK_METHOD1(OnSerializedPacket, bool(const SerializedPacket& packet));
 
-  void SetCanWrite(bool can_write) {
-    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, _))
-        .WillRepeatedly(Return(can_write));
+  void SetCanWriteAnything() {
+    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, _, _))
+        .WillRepeatedly(Return(true));
+    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA, _))
+        .WillRepeatedly(Return(true));
+  }
+
+  void SetCanNotWrite() {
+    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, _, _))
+        .WillRepeatedly(Return(false));
+    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA, _))
+        .WillRepeatedly(Return(false));
+  }
+
+  // Use this when only ack and feedback frames should be allowed to be written.
+  void SetCanWriteOnlyNonRetransmittable() {
+    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, _, _))
+        .WillRepeatedly(Return(false));
+    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA, _))
+        .WillRepeatedly(Return(true));
   }
 
  private:
@@ -77,7 +95,7 @@ struct PacketContents {
 class QuicPacketGeneratorTest : public ::testing::Test {
  protected:
   QuicPacketGeneratorTest()
-      : framer_(kQuicVersion1, QuicTime::Zero(), false),
+      : framer_(QuicVersionMax(), QuicTime::Zero(), false),
         creator_(42, &framer_, &random_, false),
         generator_(&delegate_, NULL, &creator_),
         packet_(0, NULL, 0, NULL),
@@ -194,14 +212,14 @@ class QuicPacketGeneratorTest : public ::testing::Test {
 };
 
 TEST_F(QuicPacketGeneratorTest, ShouldSendAck_NotWritable) {
-  delegate_.SetCanWrite(false);
+  delegate_.SetCanNotWrite();
 
   generator_.SetShouldSendAck(false);
   EXPECT_TRUE(generator_.HasQueuedFrames());
 }
 
 TEST_F(QuicPacketGeneratorTest, ShouldSendAck_WritableAndShouldNotFlush) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteOnlyNonRetransmittable();
   generator_.StartBatchOperations();
 
   EXPECT_CALL(delegate_, CreateAckFrame()).WillOnce(Return(CreateAckFrame()));
@@ -211,7 +229,7 @@ TEST_F(QuicPacketGeneratorTest, ShouldSendAck_WritableAndShouldNotFlush) {
 }
 
 TEST_F(QuicPacketGeneratorTest, ShouldSendAck_WritableAndShouldFlush) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteOnlyNonRetransmittable();
 
   EXPECT_CALL(delegate_, CreateAckFrame()).WillOnce(Return(CreateAckFrame()));
   EXPECT_CALL(delegate_, OnSerializedPacket(_)).WillOnce(
@@ -227,7 +245,7 @@ TEST_F(QuicPacketGeneratorTest, ShouldSendAck_WritableAndShouldFlush) {
 
 TEST_F(QuicPacketGeneratorTest,
        ShouldSendAckWithFeedback_WritableAndShouldNotFlush) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteOnlyNonRetransmittable();
   generator_.StartBatchOperations();
 
   EXPECT_CALL(delegate_, CreateAckFrame()).WillOnce(Return(CreateAckFrame()));
@@ -240,7 +258,7 @@ TEST_F(QuicPacketGeneratorTest,
 
 TEST_F(QuicPacketGeneratorTest,
        ShouldSendAckWithFeedback_WritableAndShouldFlush) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteOnlyNonRetransmittable();
 
   EXPECT_CALL(delegate_, CreateAckFrame()).WillOnce(Return(CreateAckFrame()));
   EXPECT_CALL(delegate_, CreateFeedbackFrame()).WillOnce(
@@ -259,14 +277,21 @@ TEST_F(QuicPacketGeneratorTest,
 }
 
 TEST_F(QuicPacketGeneratorTest, AddControlFrame_NotWritable) {
-  delegate_.SetCanWrite(false);
+  delegate_.SetCanNotWrite();
+
+  generator_.AddControlFrame(QuicFrame(CreateRstStreamFrame()));
+  EXPECT_TRUE(generator_.HasQueuedFrames());
+}
+
+TEST_F(QuicPacketGeneratorTest, AddControlFrame_OnlyAckWritable) {
+  delegate_.SetCanWriteOnlyNonRetransmittable();
 
   generator_.AddControlFrame(QuicFrame(CreateRstStreamFrame()));
   EXPECT_TRUE(generator_.HasQueuedFrames());
 }
 
 TEST_F(QuicPacketGeneratorTest, AddControlFrame_WritableAndShouldNotFlush) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
   generator_.StartBatchOperations();
 
   generator_.AddControlFrame(QuicFrame(CreateRstStreamFrame()));
@@ -274,7 +299,7 @@ TEST_F(QuicPacketGeneratorTest, AddControlFrame_WritableAndShouldNotFlush) {
 }
 
 TEST_F(QuicPacketGeneratorTest, AddControlFrame_WritableAndShouldFlush) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
 
   EXPECT_CALL(delegate_, OnSerializedPacket(_)).WillOnce(
       DoAll(SaveArg<0>(&packet_), Return(true)));
@@ -288,7 +313,7 @@ TEST_F(QuicPacketGeneratorTest, AddControlFrame_WritableAndShouldFlush) {
 }
 
 TEST_F(QuicPacketGeneratorTest, ConsumeData_NotWritable) {
-  delegate_.SetCanWrite(false);
+  delegate_.SetCanNotWrite();
 
   QuicConsumedData consumed = generator_.ConsumeData(1, "foo", 2, true);
   EXPECT_EQ(0u, consumed.bytes_consumed);
@@ -297,7 +322,7 @@ TEST_F(QuicPacketGeneratorTest, ConsumeData_NotWritable) {
 }
 
 TEST_F(QuicPacketGeneratorTest, ConsumeData_WritableAndShouldNotFlush) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
   generator_.StartBatchOperations();
 
   QuicConsumedData consumed = generator_.ConsumeData(1, "foo", 2, true);
@@ -307,7 +332,7 @@ TEST_F(QuicPacketGeneratorTest, ConsumeData_WritableAndShouldNotFlush) {
 }
 
 TEST_F(QuicPacketGeneratorTest, ConsumeData_WritableAndShouldFlush) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
 
   EXPECT_CALL(delegate_, OnSerializedPacket(_)).WillOnce(
       DoAll(SaveArg<0>(&packet_), Return(true)));
@@ -323,7 +348,7 @@ TEST_F(QuicPacketGeneratorTest, ConsumeData_WritableAndShouldFlush) {
 
 TEST_F(QuicPacketGeneratorTest,
        ConsumeDataMultipleTimes_WritableAndShouldNotFlush) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
   generator_.StartBatchOperations();
 
   generator_.ConsumeData(1, "foo", 2, true);
@@ -334,7 +359,7 @@ TEST_F(QuicPacketGeneratorTest,
 }
 
 TEST_F(QuicPacketGeneratorTest, ConsumeData_BatchOperations) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
   generator_.StartBatchOperations();
 
   generator_.ConsumeData(1, "foo", 2, true);
@@ -355,7 +380,7 @@ TEST_F(QuicPacketGeneratorTest, ConsumeData_BatchOperations) {
 }
 
 TEST_F(QuicPacketGeneratorTest, ConsumeDataFEC) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
 
   // Send FEC every two packets.
   creator_.options()->max_packets_per_fec_group = 2;
@@ -391,7 +416,7 @@ TEST_F(QuicPacketGeneratorTest, ConsumeDataFEC) {
 }
 
 TEST_F(QuicPacketGeneratorTest, ConsumeDataSendsFecAtEnd) {
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
 
   // Send FEC every six packets.
   creator_.options()->max_packets_per_fec_group = 6;
@@ -420,13 +445,13 @@ TEST_F(QuicPacketGeneratorTest, ConsumeDataSendsFecAtEnd) {
 }
 
 TEST_F(QuicPacketGeneratorTest, NotWritableThenBatchOperations) {
-  delegate_.SetCanWrite(false);
+  delegate_.SetCanNotWrite();
 
   generator_.SetShouldSendAck(true);
   generator_.AddControlFrame(QuicFrame(CreateRstStreamFrame()));
   EXPECT_TRUE(generator_.HasQueuedFrames());
 
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
 
   generator_.StartBatchOperations();
 
@@ -456,13 +481,13 @@ TEST_F(QuicPacketGeneratorTest, NotWritableThenBatchOperations) {
 }
 
 TEST_F(QuicPacketGeneratorTest, NotWritableThenBatchOperations2) {
-  delegate_.SetCanWrite(false);
+  delegate_.SetCanNotWrite();
 
   generator_.SetShouldSendAck(true);
   generator_.AddControlFrame(QuicFrame(CreateRstStreamFrame()));
   EXPECT_TRUE(generator_.HasQueuedFrames());
 
-  delegate_.SetCanWrite(true);
+  delegate_.SetCanWriteAnything();
 
   generator_.StartBatchOperations();
 

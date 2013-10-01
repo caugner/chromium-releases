@@ -29,7 +29,7 @@
 #include "base/memory/singleton.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/global_descriptors.h"
-#include "base/process_util.h"
+#include "base/process/process_handle.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
@@ -580,7 +580,7 @@ void Channel::ChannelImpl::ResetToAcceptingConnectionState() {
 // static
 bool Channel::ChannelImpl::IsNamedServerInitialized(
     const std::string& channel_id) {
-  return file_util::PathExists(base::FilePath(channel_id));
+  return base::PathExists(base::FilePath(channel_id));
 }
 
 #if defined(OS_LINUX)

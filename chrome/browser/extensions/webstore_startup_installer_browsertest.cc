@@ -5,29 +5,34 @@
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/browser/extensions/webstore_standalone_installer.h"
+#include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_builder.h"
 #include "chrome/common/extensions/value_builder.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/host_port_pair.h"
 #include "net/dns/mock_host_resolver.h"
+#include "url/gurl.h"
 
 using content::WebContents;
 using extensions::DictionaryBuilder;
@@ -147,14 +152,9 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, FindLink) {
   RunTest("runTest");
 }
 
-// Crashes at random intervals on MacOS: http://crbug.com/95713.
-// Flakes on Windows: http://crbug.com/229947
-#if defined(OS_MACOSX) || defined(OS_WIN)
-#define Maybe_ArgumentValidation DISABLED_ArgumentValidation
-#else
-#define Maybe_ArgumentValidation ArgumentValidation
-#endif
-IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, Maybe_ArgumentValidation) {
+// Flakes on all platforms: http://crbug.com/95713, http://crbug.com/229947
+IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest,
+                       DISABLED_ArgumentValidation) {
   CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
 
@@ -233,6 +233,34 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, InstallFromHostedApp) {
   EXPECT_FALSE(extension_service->extensions()->Contains(kTestExtensionId));
   RunTest("runTest");
   EXPECT_TRUE(extension_service->extensions()->Contains(kTestExtensionId));
+}
+
+IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest,
+                       InstallProhibitedForManagedUsers) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
+
+  // Make the profile managed such that no extension installs are allowed.
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kProfileIsManaged, true);
+  ManagedUserService* service =
+      ManagedUserServiceFactory::GetForProfile(browser()->profile());
+  service->Init();
+
+  ui_test_utils::NavigateToURL(
+      browser(), GenerateTestServerUrl(kAppDomain, "install_prohibited.html"));
+
+  RunTest("runTest");
+
+  // No error infobar should show up.
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  InfoBarService* info_bar_service = InfoBarService::FromWebContents(contents);
+  EXPECT_EQ(info_bar_service->infobar_count(), 0u);
 }
 
 // The unpack failure test needs to use a different install .crx, which is

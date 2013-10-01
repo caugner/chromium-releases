@@ -7,12 +7,12 @@
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -47,7 +47,7 @@ class TestBrowserMainExtraParts
 
   // ChromeBrowserMainExtraParts implementation.
   virtual void PreEarlyInitialization() OVERRIDE {
-    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
+    registrar_.Add(this, chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
                    content::NotificationService::AllSources());
     registrar_.Add(this, chrome::NOTIFICATION_SESSION_STARTED,
                    content::NotificationService::AllSources());
@@ -62,8 +62,8 @@ class TestBrowserMainExtraParts
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
-    if (type == chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE) {
-      LOG(INFO) << "NOTIFICATION_LOGIN_WEBUI_VISIBLE";
+    if (type == chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE) {
+      LOG(INFO) << "NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE";
       webui_visible_ = true;
       if (browsing_data_removed_ && !signin_screen_shown_) {
         signin_screen_shown_ = true;
@@ -176,7 +176,7 @@ class OobeTest : public chromeos::CrosInProcessBrowserTest {
 
     scoped_ptr<BasicHttpResponse> http_response(new BasicHttpResponse());
     if (url.path() == "/ServiceLogin") {
-      http_response->set_code(net::test_server::SUCCESS);
+      http_response->set_code(net::HTTP_OK);
       http_response->set_content(service_login_response_);
       http_response->set_content_type("text/html");
     } else if (url.path() == "/ServiceLoginAuth") {
@@ -187,7 +187,7 @@ class OobeTest : public chromeos::CrosInProcessBrowserTest {
       int continue_arg_end = request.content.find("&", continue_arg_begin);
       const std::string continue_url = request.content.substr(
           continue_arg_begin, continue_arg_end - continue_arg_begin);
-      http_response->set_code(net::test_server::SUCCESS);
+      http_response->set_code(net::HTTP_OK);
       const std::string redirect_js =
           "document.location.href = unescape('" + continue_url + "');";
       http_response->set_content(

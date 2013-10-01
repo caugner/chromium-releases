@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/drive/debug_info_collector.h"
@@ -14,13 +15,13 @@
 #include "chrome/browser/chromeos/drive/drive_app_registry.h"
 #include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system.h"
-#include "chrome/browser/chromeos/drive/file_system_proxy.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/file_write_helper.h"
 #include "chrome/browser/chromeos/drive/job_scheduler.h"
 #include "chrome/browser/chromeos/drive/logging.h"
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
 #include "chrome/browser/chromeos/drive/resource_metadata_storage.h"
+#include "chrome/browser/chromeos/profiles/profile_util.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_util.h"
@@ -32,6 +33,8 @@
 #include "chrome/browser/google_apis/auth_service.h"
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/profile_oauth2_token_service.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
@@ -50,7 +53,7 @@ namespace {
 bool IsDriveEnabledForProfile(Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (!google_apis::AuthService::CanAuthenticate(profile))
+  if (!chromeos::IsProfileAssociatedWithGaiaAccount(profile))
     return false;
 
   // Disable Drive if preference is set.  This can happen with commandline flag
@@ -152,21 +155,33 @@ DriveIntegrationService::DriveIntegrationService(
   blocking_task_runner_ = blocking_pool->GetSequencedTaskRunner(
       blocking_pool->GetSequenceToken());
 
+  OAuth2TokenService* oauth_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
+
   if (test_drive_service) {
     drive_service_.reset(test_drive_service);
   } else if (util::IsDriveV2ApiEnabled()) {
     drive_service_.reset(new DriveAPIService(
+        oauth_service,
         g_browser_process->system_request_context(),
+        blocking_task_runner_.get(),
         GURL(google_apis::DriveApiUrlGenerator::kBaseUrlForProduction),
+        GURL(google_apis::DriveApiUrlGenerator::kBaseDownloadUrlForProduction),
+        GURL(google_apis::GDataWapiUrlGenerator::kBaseUrlForProduction),
         GetDriveUserAgent()));
   } else {
     drive_service_.reset(new GDataWapiService(
+        oauth_service,
         g_browser_process->system_request_context(),
+        blocking_task_runner_.get(),
         GURL(google_apis::GDataWapiUrlGenerator::kBaseUrlForProduction),
+        GURL(google_apis::GDataWapiUrlGenerator::kBaseDownloadUrlForProduction),
         GetDriveUserAgent()));
   }
   scheduler_.reset(new JobScheduler(
-      profile_, drive_service_.get(), blocking_task_runner_.get()));
+      profile_->GetPrefs(),
+      drive_service_.get(),
+      blocking_task_runner_.get()));
   metadata_storage_.reset(new internal::ResourceMetadataStorage(
       cache_root_directory_.Append(util::kMetadataDirectory),
       blocking_task_runner_.get()));
@@ -182,7 +197,7 @@ DriveIntegrationService::DriveIntegrationService(
 
   file_system_.reset(
       test_file_system ? test_file_system : new FileSystem(
-          profile_,
+          profile_->GetPrefs(),
           cache_.get(),
           drive_service_.get(),
           scheduler_.get(),
@@ -202,11 +217,11 @@ DriveIntegrationService::~DriveIntegrationService() {
 
 void DriveIntegrationService::Initialize() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  drive_service_->Initialize(profile_);
+  drive_service_->Initialize();
   file_system_->Initialize();
 
   base::PostTaskAndReplyWithResult(
-      blocking_task_runner_,
+      blocking_task_runner_.get(),
       FROM_HERE,
       base::Bind(&InitializeMetadata,
                  cache_root_directory_,
@@ -226,6 +241,13 @@ void DriveIntegrationService::Shutdown() {
     drive_notification_manager->RemoveObserver(this);
 
   RemoveDriveMountPoint();
+  debug_info_collector_.reset();
+  download_handler_.reset();
+  file_write_helper_.reset();
+  file_system_.reset();
+  drive_app_registry_.reset();
+  scheduler_.reset();
+  drive_service_.reset();
 }
 
 void DriveIntegrationService::AddObserver(
@@ -246,8 +268,11 @@ void DriveIntegrationService::OnNotificationReceived() {
 }
 
 void DriveIntegrationService::OnPushNotificationEnabled(bool enabled) {
+  if (enabled)
+    drive_app_registry_->Update();
+
   const char* status = (enabled ? "enabled" : "disabled");
-  util::Log("Push notification is %s", status);
+  util::Log(logging::LOG_INFO, "Push notification is %s", status);
 }
 
 bool DriveIntegrationService::IsDriveEnabled() {
@@ -269,6 +294,11 @@ void DriveIntegrationService::ClearCacheAndRemountFileSystem(
   DCHECK(!callback.is_null());
 
   RemoveDriveMountPoint();
+  // Reloading the file system will clear the resource metadata.
+  file_system_->Reload();
+  // Reload the Drive app registry too.
+  drive_app_registry_->Update();
+
   cache_->ClearAllOnUIThread(base::Bind(
       &DriveIntegrationService::AddBackDriveMountPoint,
       weak_ptr_factory_.GetWeakPtr(),
@@ -293,37 +323,21 @@ void DriveIntegrationService::AddBackDriveMountPoint(
   callback.Run(true);
 }
 
-void DriveIntegrationService::ReloadAndRemountFileSystem() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  RemoveDriveMountPoint();
-  file_system_->Reload();
-  drive_app_registry_->Update();
-
-  // Reload() is asynchronous. But we can add back the mount point right away
-  // because every operation waits until loading is complete.
-  AddDriveMountPoint();
-}
-
 void DriveIntegrationService::AddDriveMountPoint() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!file_system_proxy_.get());
 
   const base::FilePath drive_mount_point = util::GetDriveMountPointPath();
   fileapi::ExternalMountPoints* mount_points =
       BrowserContext::GetMountPoints(profile_);
   DCHECK(mount_points);
 
-  file_system_proxy_ = new FileSystemProxy(file_system_.get());
-
-  bool success = mount_points->RegisterRemoteFileSystem(
+  bool success = mount_points->RegisterFileSystem(
       drive_mount_point.BaseName().AsUTF8Unsafe(),
       fileapi::kFileSystemTypeDrive,
-      file_system_proxy_.get(),
       drive_mount_point);
 
   if (success) {
-    util::Log("Drive mount point is added");
+    util::Log(logging::LOG_INFO, "Drive mount point is added");
     FOR_EACH_OBSERVER(DriveIntegrationServiceObserver, observers_,
                       OnFileSystemMounted());
   }
@@ -343,11 +357,7 @@ void DriveIntegrationService::RemoveDriveMountPoint() {
 
   mount_points->RevokeFileSystem(
       util::GetDriveMountPointPath().BaseName().AsUTF8Unsafe());
-  if (file_system_proxy_.get()) {
-    file_system_proxy_->DetachFromFileSystem();
-    file_system_proxy_ = NULL;
-  }
-  util::Log("Drive mount point is removed");
+  util::Log(logging::LOG_INFO, "Drive mount point is removed");
 }
 
 void DriveIntegrationService::InitializeAfterMetadataInitialized(
@@ -376,10 +386,12 @@ void DriveIntegrationService::InitializeAfterMetadataInitialized(
     const bool registered =
         drive_notification_manager->push_notification_registered();
     const char* status = (registered ? "registered" : "not registered");
-    util::Log("Push notification is %s", status);
+    util::Log(logging::LOG_INFO, "Push notification is %s", status);
+
+    if (drive_notification_manager->push_notification_enabled())
+      drive_app_registry_->Update();
   }
 
-  drive_app_registry_->Update();
   AddDriveMountPoint();
 }
 
@@ -450,6 +462,7 @@ DriveIntegrationServiceFactory::DriveIntegrationServiceFactory()
     : BrowserContextKeyedServiceFactory(
         "DriveIntegrationService",
         BrowserContextDependencyManager::GetInstance()) {
+  DependsOn(ProfileOAuth2TokenServiceFactory::GetInstance());
   DependsOn(DriveNotificationManagerFactory::GetInstance());
   DependsOn(DownloadServiceFactory::GetInstance());
 }

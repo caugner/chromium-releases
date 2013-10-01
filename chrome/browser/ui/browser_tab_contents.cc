@@ -13,8 +13,10 @@
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/managed_mode/managed_mode_navigation_observer.h"
 #include "chrome/browser/net/load_time_stats.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
+#include "chrome/browser/net/predictor_tab_helper.h"
 #include "chrome/browser/password_manager/password_generation_manager.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate_impl.h"
@@ -30,6 +32,7 @@
 #include "chrome/browser/ui/alternate_error_tab_observer.h"
 #include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
+#include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/hung_plugin_tab_helper.h"
@@ -52,15 +55,14 @@
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
-#include "chrome/browser/managed_mode/managed_mode_navigation_observer.h"
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#endif
-
 #if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/printing/print_view_manager.h"
-#endif
+#else
+#include "chrome/browser/printing/print_view_manager_basic.h"
+#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINTING)
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
@@ -119,6 +121,7 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   chrome_browser_net::LoadTimeStatsTabHelper::CreateForWebContents(
       web_contents);
   chrome_browser_net::NetErrorTabHelper::CreateForWebContents(web_contents);
+  chrome_browser_net::PredictorTabHelper::CreateForWebContents(web_contents);
   WebContentsModalDialogManager::CreateForWebContents(web_contents);
   CoreTabHelper::CreateForWebContents(web_contents);
   extensions::TabHelper::CreateForWebContents(web_contents);
@@ -136,6 +139,10 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
       web_contents, PasswordManagerDelegateImpl::FromWebContents(web_contents));
   PDFTabHelper::CreateForWebContents(web_contents);
   PluginObserver::CreateForWebContents(web_contents);
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableBetterPopupBlocking)) {
+    PopupBlockerTabHelper::CreateForWebContents(web_contents);
+  }
   PrefsTabHelper::CreateForWebContents(web_contents);
   prerender::PrerenderTabHelper::CreateForWebContents(web_contents);
   SadTabHelper::CreateForWebContents(web_contents);
@@ -153,15 +160,18 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   captive_portal::CaptivePortalTabHelper::CreateForWebContents(web_contents);
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
-  if (ManagedUserService::ProfileIsManaged(profile))
+  if (profile->IsManaged()) {
     ManagedModeNavigationObserver::CreateForWebContents(web_contents);
-#endif
+  }
 
 #if defined(ENABLE_PRINTING)
-  printing::PrintPreviewMessageHandler::CreateForWebContents(web_contents);
+#if defined(ENABLE_FULL_PRINTING)
   printing::PrintViewManager::CreateForWebContents(web_contents);
-#endif
+  printing::PrintPreviewMessageHandler::CreateForWebContents(web_contents);
+#else
+  printing::PrintViewManagerBasic::CreateForWebContents(web_contents);
+#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINTING)
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   // If this is not an incognito window, setup to handle one-click login.

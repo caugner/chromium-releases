@@ -176,7 +176,9 @@ void PopupTimersController::OnNotificationUpdated(const std::string& id) {
     return;
   }
 
-  ResetTimer(id, GetTimeoutForPriority((*iter)->priority()));
+  // Start the timer if not yet.
+  if (popup_timers_.find(id) == popup_timers_.end())
+    StartTimer(id, GetTimeoutForPriority((*iter)->priority()));
 }
 
 void PopupTimersController::OnNotificationRemoved(const std::string& id,
@@ -310,6 +312,11 @@ void MessageCenterImpl::RemoveNotification(const std::string& id,
                                            bool by_user) {
   if (!HasNotification(id))
     return;
+
+  NotificationDelegate* delegate =
+      notification_list_->GetNotificationDelegate(id);
+  if (delegate)
+    delegate->Close(by_user);
 
   // In many cases |id| is a reference to an existing notification instance
   // but the instance can be destructed in RemoveNotification(). Hence

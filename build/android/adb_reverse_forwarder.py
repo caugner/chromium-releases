@@ -17,7 +17,6 @@ import time
 
 from pylib import android_commands, forwarder
 from pylib.utils import run_tests_helper
-from pylib.valgrind_tools import CreateTool
 
 
 def main(argv):
@@ -32,9 +31,6 @@ def main(argv):
                     help='Verbose level (multiple times for more)')
   parser.add_option('--device',
                     help='Serial number of device we should use.')
-  parser.add_option('--host',
-                    help='Host address to forward to from the host machine. '
-                    '127.0.0.1 by default', default='127.0.0.1')
   parser.add_option('--debug', action='store_const', const='Debug',
                     dest='build_type', default='Release',
                     help='Use Debug build of host tools instead of Release.')
@@ -54,17 +50,14 @@ def main(argv):
     sys.exit(1)
 
   adb = android_commands.AndroidCommands(options.device)
-  tool = CreateTool(None, adb)
-  forwarder_instance = forwarder.Forwarder(adb, options.build_type)
   try:
-    forwarder_instance.Run(port_pairs, tool, options.host)
+    forwarder.Forwarder.Map(port_pairs, adb, options.build_type)
     while True:
       time.sleep(60)
   except KeyboardInterrupt:
     sys.exit(0)
   finally:
-    forwarder_instance.Close()
-
+    forwarder.Forwarder.UnmapAllDevicePorts(adb)
 
 if __name__ == '__main__':
   main(sys.argv)

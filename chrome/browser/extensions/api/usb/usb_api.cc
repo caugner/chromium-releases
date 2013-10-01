@@ -11,8 +11,8 @@
 #include "chrome/browser/extensions/api/usb/usb_device_resource.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/usb/usb_device_handle.h"
 #include "chrome/browser/usb/usb_service.h"
-#include "chrome/browser/usb/usb_service_factory.h"
 #include "chrome/common/extensions/api/usb.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/extensions/permissions/usb_device_permission.h"
@@ -184,19 +184,19 @@ static bool ConvertDirection(const Direction& input,
 }
 
 static bool ConvertRequestType(const RequestType& input,
-                               UsbDevice::TransferRequestType* output) {
+                               UsbDeviceHandle::TransferRequestType* output) {
   switch (input) {
     case usb::REQUEST_TYPE_STANDARD:
-      *output = UsbDevice::STANDARD;
+      *output = UsbDeviceHandle::STANDARD;
       return true;
     case usb::REQUEST_TYPE_CLASS:
-      *output = UsbDevice::CLASS;
+      *output = UsbDeviceHandle::CLASS;
       return true;
     case usb::REQUEST_TYPE_VENDOR:
-      *output = UsbDevice::VENDOR;
+      *output = UsbDeviceHandle::VENDOR;
       return true;
     case usb::REQUEST_TYPE_RESERVED:
-      *output = UsbDevice::RESERVED;
+      *output = UsbDeviceHandle::RESERVED;
       return true;
     default:
       NOTREACHED();
@@ -205,19 +205,19 @@ static bool ConvertRequestType(const RequestType& input,
 }
 
 static bool ConvertRecipient(const Recipient& input,
-                             UsbDevice::TransferRecipient* output) {
+                             UsbDeviceHandle::TransferRecipient* output) {
   switch (input) {
     case usb::RECIPIENT_DEVICE:
-      *output = UsbDevice::DEVICE;
+      *output = UsbDeviceHandle::DEVICE;
       return true;
     case usb::RECIPIENT_INTERFACE:
-      *output = UsbDevice::INTERFACE;
+      *output = UsbDeviceHandle::INTERFACE;
       return true;
     case usb::RECIPIENT_ENDPOINT:
-      *output = UsbDevice::ENDPOINT;
+      *output = UsbDeviceHandle::ENDPOINT;
       return true;
     case usb::RECIPIENT_OTHER:
-      *output = UsbDevice::OTHER;
+      *output = UsbDeviceHandle::OTHER;
       return true;
     default:
       NOTREACHED();
@@ -321,9 +321,17 @@ static base::Value* PopulateInterfaceDescriptor(int interface_number,
   descriptor.alternate_setting = alternate_setting;
   descriptor.interface_class = interface_class;
   descriptor.interface_subclass = interface_subclass;
-  descriptor.interface_protocol = interface_subclass;
+  descriptor.interface_protocol = interface_protocol;
   descriptor.endpoints = *endpoints;
   return descriptor.ToValue().release();
+}
+
+void GetUsbService(base::Callback<void(UsbService* service)> callback) {
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(UsbService::GetInstance),
+      callback);
 }
 
 }  // namespace
@@ -383,7 +391,7 @@ bool UsbAsyncApiTransferFunction::ConvertDirectionSafely(
 }
 
 bool UsbAsyncApiTransferFunction::ConvertRequestTypeSafely(
-    const RequestType& input, UsbDevice::TransferRequestType* output) {
+    const RequestType& input, UsbDeviceHandle::TransferRequestType* output) {
   const bool converted = ConvertRequestType(input, output);
   if (!converted)
     SetError(kErrorConvertRequestType);
@@ -391,7 +399,7 @@ bool UsbAsyncApiTransferFunction::ConvertRequestTypeSafely(
 }
 
 bool UsbAsyncApiTransferFunction::ConvertRecipientSafely(
-    const Recipient& input, UsbDevice::TransferRecipient* output) {
+    const Recipient& input, UsbDeviceHandle::TransferRecipient* output) {
   const bool converted = ConvertRecipient(input, output);
   if (!converted)
     SetError(kErrorConvertRecipient);
@@ -418,7 +426,7 @@ void UsbFindDevicesFunction::AsyncWorkStart() {
   if (device_for_test_) {
     UsbDeviceResource* const resource = new UsbDeviceResource(
         extension_->id(),
-        device_for_test_);
+        device_for_test_->Open());
 
     Device device;
     result_->Append(PopulateDevice(manager_->Add(resource), 0, 0));
@@ -440,25 +448,51 @@ void UsbFindDevicesFunction::AsyncWorkStart() {
     return;
   }
 
-  UsbService* const service = UsbServiceFactory::GetInstance()->GetForProfile(
-      profile());
-  if (!service) {
-    LOG(WARNING) << "Could not get UsbService for active profile.";
-    CompleteWithError(kErrorNoDevice);
-    return;
+  GetUsbService(base::Bind(&UsbFindDevicesFunction::EnumerateDevices,
+                           this,
+                           vendor_id,
+                           product_id,
+                           interface_id));
+}
+
+void UsbFindDevicesFunction::EnumerateDevices(
+    uint16_t vendor_id,
+    uint16_t product_id,
+    int interface_id,
+    UsbService* service) {
+  BrowserThread::PostTask(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&UsbService::FindDevices,
+                 base::Unretained(service),
+                 vendor_id,
+                 product_id,
+                 interface_id,
+                 base::Bind(&UsbFindDevicesFunction::OnEnumerationCompleted,
+                            this)));
+}
+
+void UsbFindDevicesFunction::OnEnumerationCompleted(
+    ScopedDeviceVector devices) {
+  for (size_t i = 0; i < devices->size(); ++i) {
+    scoped_refptr<UsbDeviceHandle> device_handle =
+      devices->at(i)->Open();
+    if (device_handle)
+      device_handles_.push_back(device_handle);
   }
 
-  service->FindDevices(vendor_id, product_id, interface_id, &devices_,
-                       base::Bind(&UsbFindDevicesFunction::OnCompleted, this));
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&UsbFindDevicesFunction::OnCompleted, this));
 }
 
 void UsbFindDevicesFunction::OnCompleted() {
-  for (size_t i = 0; i < devices_.size(); ++i) {
-    UsbDevice* const device = devices_[i].get();
+  for (size_t i = 0; i < device_handles_.size(); ++i) {
+    UsbDeviceHandle* const device_handle = device_handles_[i].get();
     UsbDeviceResource* const resource =
-        new UsbDeviceResource(extension_->id(), device);
+        new UsbDeviceResource(extension_->id(), device_handle);
 
-    Device js_device;
     result_->Append(PopulateDevice(manager_->Add(resource),
                                    parameters_->options.vendor_id,
                                    parameters_->options.product_id));
@@ -487,8 +521,13 @@ void UsbListInterfacesFunction::AsyncWorkStart() {
   }
 
   config_ = new UsbConfigDescriptor();
-  resource->device()->ListInterfaces(
-      config_.get(), base::Bind(&UsbListInterfacesFunction::OnCompleted, this));
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&UsbDevice::ListInterfaces,
+                 resource->device()->device(),
+                 config_),
+      base::Bind(&UsbListInterfacesFunction::OnCompleted, this));
 }
 
 void UsbListInterfacesFunction::OnCompleted(bool success) {
@@ -611,12 +650,15 @@ void UsbCloseDeviceFunction::AsyncWorkStart() {
     return;
   }
 
-  resource->device()->Close(base::Bind(&UsbCloseDeviceFunction::OnCompleted,
-                                     this));
-  RemoveUsbDeviceResource(parameters_->device.handle);
+  BrowserThread::PostTaskAndReply(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&UsbDeviceHandle::Close, resource->device()),
+      base::Bind(&UsbCloseDeviceFunction::OnCompleted, this));
 }
 
 void UsbCloseDeviceFunction::OnCompleted() {
+  RemoveUsbDeviceResource(parameters_->device.handle);
   AsyncWorkCompleted();
 }
 
@@ -638,7 +680,12 @@ void UsbClaimInterfaceFunction::AsyncWorkStart() {
     return;
   }
 
-  resource->device()->ClaimInterface(parameters_->interface_number,
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&UsbDeviceHandle::ClaimInterface,
+                 resource->device(),
+                 parameters_->interface_number),
       base::Bind(&UsbClaimInterfaceFunction::OnCompleted, this));
 }
 
@@ -666,7 +713,12 @@ void UsbReleaseInterfaceFunction::AsyncWorkStart() {
     return;
   }
 
-  resource->device()->ReleaseInterface(parameters_->interface_number,
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&UsbDeviceHandle::ReleaseInterface,
+                 resource->device(),
+                 parameters_->interface_number),
       base::Bind(&UsbReleaseInterfaceFunction::OnCompleted, this));
 }
 
@@ -696,9 +748,13 @@ void UsbSetInterfaceAlternateSettingFunction::AsyncWorkStart() {
     return;
   }
 
-  resource->device()->SetInterfaceAlternateSetting(
-      parameters_->interface_number,
-      parameters_->alternate_setting,
+  BrowserThread::PostTaskAndReplyWithResult(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&UsbDeviceHandle::SetInterfaceAlternateSetting,
+                 resource->device(),
+                 parameters_->interface_number,
+                 parameters_->alternate_setting),
       base::Bind(&UsbSetInterfaceAlternateSettingFunction::OnCompleted, this));
 }
 
@@ -729,8 +785,8 @@ void UsbControlTransferFunction::AsyncWorkStart() {
   const ControlTransferInfo& transfer = parameters_->transfer_info;
 
   UsbEndpointDirection direction;
-  UsbDevice::TransferRequestType request_type;
-  UsbDevice::TransferRecipient recipient;
+  UsbDeviceHandle::TransferRequestType request_type;
+  UsbDeviceHandle::TransferRecipient recipient;
   size_t size = 0;
 
   if (!ConvertDirectionSafely(transfer.direction, &direction) ||
@@ -955,8 +1011,7 @@ void UsbResetDeviceFunction::AsyncWorkStart() {
 
 void UsbResetDeviceFunction::OnStartResest(UsbDeviceResource* resource) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  resource->device()->ResetDevice(
-      base::Bind(&UsbResetDeviceFunction::OnCompletedFileThread, this));
+  OnCompletedFileThread(resource->device()->ResetDevice());
 }
 
 void UsbResetDeviceFunction::OnCompletedFileThread(bool success) {
@@ -978,8 +1033,12 @@ void UsbResetDeviceFunction::OnCompleted(bool success) {
     }
     // Close the device now because the handle is invalid after an
     // unsuccessful reset.
-    resource->device()->Close(
-        base::Bind(&UsbResetDeviceFunction::OnError, this));
+    BrowserThread::PostTaskAndReply(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&UsbDeviceHandle::Close,
+                 resource->device()),
+      base::Bind(&UsbResetDeviceFunction::OnError, this));
     return;
   }
   SetResult(Value::CreateBooleanValue(true));

@@ -11,7 +11,6 @@
 #include "ash/wm/coordinate_conversion.h"
 #include "ash/wm/system_modal_container_layout_manager.h"
 #include "ash/wm/window_properties.h"
-#include "ash/wm/workspace_controller.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_client.h"
@@ -24,6 +23,14 @@
 
 namespace ash {
 namespace {
+
+// Return true if the window or its ancestor has |kStayInSameRootWindowkey|
+// property.
+bool ShouldStayInSameRootWindow(const aura::Window* window) {
+  return window &&
+      (window->GetProperty(internal::kStayInSameRootWindowKey) ||
+       ShouldStayInSameRootWindow(window->parent()));
+}
 
 // Move all transient children to |dst_root|, including the ones in
 // the child windows and transient children of the transient children.
@@ -151,10 +158,11 @@ void ScreenPositionController::SetBounds(aura::Window* window,
   // Don't move a window to other root window if:
   // a) the window is a transient window. It moves when its
   //    transient_parent moves.
-  // b) if the window has kStayInSameRootWindowkey. It's intentionally kept in
-  //    the same root window even if the bounds is outside of the display.
+  // b) if the window or its ancestor has kStayInSameRootWindowkey. It's
+  //    intentionally kept in the same root window even if the bounds is
+  //    outside of the display.
   if (!window->transient_parent() &&
-      !window->GetProperty(internal::kStayInSameRootWindowKey)) {
+      !ShouldStayInSameRootWindow(window)) {
     aura::RootWindow* dst_root =
         Shell::GetInstance()->display_controller()->GetRootWindowForDisplayId(
             display.id());
@@ -165,7 +173,7 @@ void ScreenPositionController::SetBounds(aura::Window* window,
       // Dragging a docked window to another root window should show it floating
       // rather than docked in another screen's dock.
       if (container_id == kShellWindowId_DockedContainer)
-        container_id = kShellWindowId_WorkspaceContainer;
+        container_id = kShellWindowId_DefaultContainer;
       // All containers that uses screen coordinates must have valid window ids.
       DCHECK_GE(container_id, 0);
       // Don't move modal background.
@@ -186,12 +194,6 @@ void ScreenPositionController::SetBounds(aura::Window* window,
       if (active && focused != active)
         tracker.Add(active);
 
-      if (dst_container->id() == kShellWindowId_WorkspaceContainer) {
-        dst_container =
-            GetRootWindowController(dst_root)->workspace_controller()->
-            GetParentForNewWindow(window);
-      }
-
       dst_container->AddChild(window);
 
       MoveAllTransientChildrenToNewRoot(display, window);
@@ -199,6 +201,8 @@ void ScreenPositionController::SetBounds(aura::Window* window,
       // Restore focused/active window.
       if (tracker.Contains(focused)) {
         aura::client::GetFocusClient(window)->FocusWindow(focused);
+        ash::Shell::GetInstance()->set_active_root_window(
+            focused->GetRootWindow());
       } else if (tracker.Contains(active)) {
         activation_client->ActivateWindow(active);
       }

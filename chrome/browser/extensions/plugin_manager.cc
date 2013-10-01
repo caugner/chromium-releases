@@ -6,10 +6,10 @@
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/plugin_manager.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/plugins/plugins_handler.h"
 #include "chrome/common/extensions/extension.h"
@@ -17,7 +17,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/pepper_plugin_info.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 using content::PluginService;
 
@@ -148,7 +148,7 @@ void PluginManager::UpdatePluginListWithNaClModules() {
   if (!pepper_info)
     return;
 
-  std::vector<webkit::WebPluginMimeType>::const_iterator mime_iter;
+  std::vector<content::WebPluginMimeType>::const_iterator mime_iter;
   // Check each MIME type the plugins handle for the NaCl MIME type.
   for (mime_iter = pepper_info->mime_types.begin();
        mime_iter != pepper_info->mime_types.end(); ++mime_iter) {
@@ -157,7 +157,7 @@ void PluginManager::UpdatePluginListWithNaClModules() {
 
       PluginService::GetInstance()->UnregisterInternalPlugin(pepper_info->path);
 
-      webkit::WebPluginInfo info = pepper_info->ToWebPluginInfo();
+      content::WebPluginInfo info = pepper_info->ToWebPluginInfo();
 
       for (NaClModuleInfo::List::const_iterator iter =
                nacl_module_list_.begin();
@@ -165,7 +165,7 @@ void PluginManager::UpdatePluginListWithNaClModules() {
         // Add the MIME type specified in the extension to this NaCl plugin,
         // With an extra "nacl" argument to specify the location of the NaCl
         // manifest file.
-        webkit::WebPluginMimeType mime_type_info;
+        content::WebPluginMimeType mime_type_info;
         mime_type_info.mime_type = iter->mime_type;
         mime_type_info.additional_param_names.push_back(UTF8ToUTF16("nacl"));
         mime_type_info.additional_param_values.push_back(

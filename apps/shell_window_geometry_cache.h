@@ -11,8 +11,8 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
@@ -73,8 +73,8 @@ class ShellWindowGeometryCache
                     ui::WindowShowState state);
 
   // Get any saved geometry and state associated with |extension_id| and
-  // |window_id|. If saved data exists, sets |bounds| and |state| if not NULL
-  // and returns true.
+  // |window_id|. If saved data exists, sets |bounds|, |screen_bounds| and
+  // |state| if not NULL and returns true.
   bool GetGeometry(const std::string& extension_id,
                    const std::string& window_id,
                    gfx::Rect* bounds,

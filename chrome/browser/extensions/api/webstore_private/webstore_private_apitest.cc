@@ -8,6 +8,7 @@
 #include "base/files/file_path.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
@@ -18,9 +19,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/notification_observer.h"
@@ -191,15 +190,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallAccepted) {
   base::ScopedTempDir temp_dir;
   EXPECT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath missing_directory = temp_dir.Take();
-  EXPECT_TRUE(file_util::Delete(missing_directory, true));
+  EXPECT_TRUE(base::DeleteFile(missing_directory, true));
   WebstoreInstaller::SetDownloadDirectoryForTests(&missing_directory);
 
   // Now run the install test, which should succeed.
   ASSERT_TRUE(RunInstallTest("accepted.html", "extension.crx"));
 
   // Cleanup.
-  if (file_util::DirectoryExists(missing_directory))
-    EXPECT_TRUE(file_util::Delete(missing_directory, true));
+  if (base::DirectoryExists(missing_directory))
+    EXPECT_TRUE(base::DeleteFile(missing_directory, true));
 }
 
 // Tests passing a localized name.
@@ -239,6 +238,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
   listener.Wait();
   ASSERT_TRUE(listener.received_success());
   ASSERT_EQ("iladmdjkfniedhfhcfoefgojhgaiaccc", listener.id());
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, IsInIncognitoMode) {
+  GURL page_url = GetTestServerURL("incognito.html");
+  ASSERT_TRUE(
+      RunPageTest(page_url.spec(), ExtensionApiTest::kFlagUseIncognito));
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, IsNotInIncognitoMode) {
+  GURL page_url = GetTestServerURL("not_incognito.html");
+  ASSERT_TRUE(RunPageTest(page_url.spec()));
 }
 
 // Fails often on Windows dbg bots. http://crbug.com/177163.
@@ -301,24 +311,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, EmptyCrx) {
 }
 
 class ExtensionWebstoreGetWebGLStatusTest : public InProcessBrowserTest {
- public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    // We need to launch GPU process to decide if WebGL is allowed.
-    // Run it on top of osmesa to avoid bot driver issues.
-#if !defined(OS_MACOSX)
-    CHECK(test_launcher_utils::OverrideGLImplementation(
-        command_line, gfx::kGLImplementationOSMesaName)) <<
-        "kUseGL must not be set multiple times!";
-#endif
-  }
-
  protected:
   void RunTest(bool webgl_allowed) {
     static const char kEmptyArgs[] = "[]";
     static const char kWebGLStatusAllowed[] = "webgl_allowed";
     static const char kWebGLStatusBlocked[] = "webgl_blocked";
-    scoped_refptr<GetWebGLStatusFunction> function =
-        new GetWebGLStatusFunction();
+    scoped_refptr<WebstorePrivateGetWebGLStatusFunction> function =
+        new WebstorePrivateGetWebGLStatusFunction();
     scoped_ptr<base::Value> result(utils::RunFunctionAndReturnSingleResult(
             function.get(), kEmptyArgs, browser()));
     ASSERT_TRUE(result);

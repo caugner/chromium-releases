@@ -23,6 +23,20 @@ using testing::_;
 
 namespace net {
 namespace test {
+namespace {
+
+// No-op alarm implementation used by MockHelper.
+class TestAlarm : public QuicAlarm {
+ public:
+  explicit TestAlarm(QuicAlarm::Delegate* delegate)
+      : QuicAlarm(delegate) {
+  }
+
+  virtual void SetImpl() OVERRIDE {}
+  virtual void CancelImpl() OVERRIDE {}
+};
+
+}  // namespace
 
 MockFramerVisitor::MockFramerVisitor() {
   // By default, we want to accept packets.
@@ -55,7 +69,7 @@ MockFramerVisitor::MockFramerVisitor() {
 MockFramerVisitor::~MockFramerVisitor() {
 }
 
-bool NoOpFramerVisitor::OnProtocolVersionMismatch(QuicTag version) {
+bool NoOpFramerVisitor::OnProtocolVersionMismatch(QuicVersion version) {
   return false;
 }
 
@@ -181,6 +195,10 @@ QuicRandom* MockHelper::GetRandomGenerator() {
   return &random_generator_;
 }
 
+QuicAlarm* MockHelper::CreateAlarm(QuicAlarm::Delegate* delegate) {
+  return new TestAlarm(delegate);
+}
+
 void MockHelper::AdvanceTime(QuicTime::Delta delta) {
   clock_.AdvanceTime(delta);
 }
@@ -189,7 +207,7 @@ MockConnection::MockConnection(QuicGuid guid,
                                IPEndPoint address,
                                bool is_server)
     : QuicConnection(guid, address, new testing::NiceMock<MockHelper>(),
-                     is_server),
+                     is_server, QuicVersionMax()),
       has_mock_helper_(true) {
 }
 
@@ -197,7 +215,7 @@ MockConnection::MockConnection(QuicGuid guid,
                                IPEndPoint address,
                                QuicConnectionHelperInterface* helper,
                                bool is_server)
-    : QuicConnection(guid, address, helper, is_server),
+    : QuicConnection(guid, address, helper, is_server, QuicVersionMax()),
       has_mock_helper_(false) {
 }
 
@@ -354,7 +372,7 @@ static QuicPacket* ConstructPacketFromHandshakeMessage(
     bool should_include_version) {
   CryptoFramer crypto_framer;
   scoped_ptr<QuicData> data(crypto_framer.ConstructHandshakeMessage(message));
-  QuicFramer quic_framer(kQuicVersion1, QuicTime::Zero(), false);
+  QuicFramer quic_framer(QuicVersionMax(), QuicTime::Zero(), false);
 
   QuicPacketHeader header;
   header.public_header.guid = guid;
@@ -372,7 +390,7 @@ static QuicPacket* ConstructPacketFromHandshakeMessage(
   QuicFrame frame(&stream_frame);
   QuicFrames frames;
   frames.push_back(frame);
-  return quic_framer.ConstructFrameDataPacket(header, frames).packet;
+  return quic_framer.BuildUnsizedDataPacket(header, frames).packet;
 }
 
 QuicPacket* ConstructHandshakePacket(QuicGuid guid, QuicTag tag) {
@@ -381,25 +399,37 @@ QuicPacket* ConstructHandshakePacket(QuicGuid guid, QuicTag tag) {
   return ConstructPacketFromHandshakeMessage(guid, message, false);
 }
 
-size_t GetPacketLengthForOneStream(
-    bool include_version, InFecGroup is_in_fec_group, size_t payload) {
-  // TODO(wtc): the hardcoded use of NullEncrypter here seems wrong.
-  size_t packet_length = NullEncrypter().GetCiphertextSize(payload) +
+size_t GetPacketLengthForOneStream(QuicVersion version,
+                                   bool include_version,
+                                   InFecGroup is_in_fec_group,
+                                   size_t* payload_length) {
+  *payload_length = 1;
+  const size_t stream_length =
+      NullEncrypter().GetCiphertextSize(*payload_length) +
       QuicPacketCreator::StreamFramePacketOverhead(
-          1, PACKET_8BYTE_GUID, include_version,
+          version, PACKET_8BYTE_GUID, include_version,
           PACKET_6BYTE_SEQUENCE_NUMBER, is_in_fec_group);
-
-  size_t ack_length = NullEncrypter().GetCiphertextSize(
+  const size_t ack_length = NullEncrypter().GetCiphertextSize(
       QuicFramer::GetMinAckFrameSize()) +
       GetPacketHeaderSize(PACKET_8BYTE_GUID, include_version,
                           PACKET_6BYTE_SEQUENCE_NUMBER, is_in_fec_group);
-  // Make sure that if we change the size of the packet length for one stream
-  // or the ack frame; that all our test are configured correctly.
-  DCHECK_GE(packet_length, ack_length);
-  return packet_length;
+  if (stream_length < ack_length) {
+    *payload_length = 1 + ack_length - stream_length;
+  }
+
+  return NullEncrypter().GetCiphertextSize(*payload_length) +
+      QuicPacketCreator::StreamFramePacketOverhead(
+          version, PACKET_8BYTE_GUID, include_version,
+          PACKET_6BYTE_SEQUENCE_NUMBER, is_in_fec_group);
 }
 
-QuicPacketEntropyHash TestEntropyCalculator::ReceivedEntropyHash(
+// Size in bytes of the stream frame fields for an arbitrary StreamID and
+// offset and the last frame in a packet.
+size_t GetMinStreamFrameSize(QuicVersion version) {
+  return kQuicFrameTypeSize + kQuicMaxStreamIdSize + kQuicMaxStreamOffsetSize;
+}
+
+QuicPacketEntropyHash TestEntropyCalculator::EntropyHash(
     QuicPacketSequenceNumber sequence_number) const {
   return 1u;
 }

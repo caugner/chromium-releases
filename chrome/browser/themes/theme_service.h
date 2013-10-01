@@ -13,14 +13,15 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/theme_provider.h"
 
+class CustomThemeSupplier;
 class BrowserThemePack;
-class ThemeServiceTest;
 class ThemeSyncableService;
 class Profile;
 
@@ -38,6 +39,10 @@ class Extension;
 
 namespace gfx {
 class Image;
+}
+
+namespace theme_service_internal {
+class ThemeServiceTest;
 }
 
 namespace ui {
@@ -80,11 +85,10 @@ class ThemeService : public base::NonThreadSafe,
       int id,
       ui::ScaleFactor scale_factor) const OVERRIDE;
 #if defined(OS_MACOSX)
-  virtual NSImage* GetNSImageNamed(int id, bool allow_default) const OVERRIDE;
-  virtual NSColor* GetNSImageColorNamed(int id,
-                                        bool allow_default) const OVERRIDE;
-  virtual NSColor* GetNSColor(int id, bool allow_default) const OVERRIDE;
-  virtual NSColor* GetNSColorTint(int id, bool allow_default) const OVERRIDE;
+  virtual NSImage* GetNSImageNamed(int id) const OVERRIDE;
+  virtual NSColor* GetNSImageColorNamed(int id) const OVERRIDE;
+  virtual NSColor* GetNSColor(int id) const OVERRIDE;
+  virtual NSColor* GetNSColorTint(int id) const OVERRIDE;
   virtual NSGradient* GetNSGradient(int id) const OVERRIDE;
 #elif defined(OS_POSIX) && !defined(TOOLKIT_VIEWS) && !defined(OS_ANDROID)
   // This mismatch between what this class defines and whether or not it
@@ -142,6 +146,13 @@ class ThemeService : public base::NonThreadSafe,
   typedef std::map<base::FilePath, int> ImagesDiskCache;
 
  protected:
+  // Set a custom default theme instead of the normal default theme.
+  virtual void SetCustomDefaultTheme(
+      scoped_refptr<CustomThemeSupplier> theme_supplier);
+
+  // Returns true if the ThemeService should use the native theme on startup.
+  virtual bool ShouldInitWithNativeTheme() const;
+
   // Get the specified tint - |id| is one of the TINT_* enum values.
   color_utils::HSL GetTint(int id) const;
 
@@ -160,15 +171,28 @@ class ThemeService : public base::NonThreadSafe,
 #endif  // OS_MACOSX
 
   // Clears the platform-specific caches. Do not call directly; it's called
-  // from ClearCaches().
+  // from ClearAllThemeData().
   virtual void FreePlatformCaches();
 
   Profile* profile() const { return profile_; }
 
   void set_ready() { ready_ = true; }
 
+  const CustomThemeSupplier* get_theme_supplier() const {
+    return theme_supplier_.get();
+  }
+
+  // True if the theme service is ready to be used.
+  // TODO(pkotwicz): Add DCHECKS to the theme service's getters once
+  // ThemeSource no longer uses the ThemeService when it is not ready.
+  bool ready_;
+
  private:
-  friend class ThemeServiceTest;
+  friend class theme_service_internal::ThemeServiceTest;
+
+  // Replaces the current theme supplier with a new one and calls
+  // StopUsingTheme() or StartUsingTheme() as appropriate.
+  void SwapThemeSupplier(scoped_refptr<CustomThemeSupplier> theme_supplier);
 
   // Migrate the theme to the new theme pack schema by recreating the data pack
   // from the extension.
@@ -187,6 +211,13 @@ class ThemeService : public base::NonThreadSafe,
   // Returns true if the profile belongs to a managed user.
   bool IsManagedUser() const;
 
+  // Sets the current theme to the managed user theme. Should only be used for
+  // managed user profiles.
+  void SetManagedUserTheme();
+
+  // Sets the managed user theme if the user has no custom theme yet.
+  void OnManagedUserInitialized();
+
 #if defined(TOOLKIT_GTK)
   // Loads an image and flips it horizontally if |rtl_enabled| is true.
   GdkPixbuf* GetPixbufImpl(int id, bool rtl_enabled) const;
@@ -196,11 +227,12 @@ class ThemeService : public base::NonThreadSafe,
   typedef std::map<int, GdkPixbuf*> GdkPixbufMap;
   mutable GdkPixbufMap gdk_pixbufs_;
 #elif defined(OS_MACOSX)
+  // |nsimage_cache_| retains the images it has cached.
   typedef std::map<int, NSImage*> NSImageMap;
   mutable NSImageMap nsimage_cache_;
 
-  // The bool member of the pair is whether the color is a default color.
-  typedef std::map<int, std::pair<NSColor*, bool> > NSColorMap;
+  // |nscolor_cache_| retains the colors it has cached.
+  typedef std::map<int, NSColor*> NSColorMap;
   mutable NSColorMap nscolor_cache_;
 
   typedef std::map<int, NSGradient*> NSGradientMap;
@@ -210,12 +242,7 @@ class ThemeService : public base::NonThreadSafe,
   ui::ResourceBundle& rb_;
   Profile* profile_;
 
-  // True if the theme service is ready to be used.
-  // TODO(pkotwicz): Add DCHECKS to the theme service's getters once
-  // ThemeSource no longer uses the ThemeService when it is not ready.
-  bool ready_;
-
-  scoped_refptr<BrowserThemePack> theme_pack_;
+  scoped_refptr<CustomThemeSupplier> theme_supplier_;
 
   // The number of infobars currently displayed.
   int number_of_infobars_;
@@ -223,6 +250,8 @@ class ThemeService : public base::NonThreadSafe,
   content::NotificationRegistrar registrar_;
 
   scoped_ptr<ThemeSyncableService> theme_syncable_service_;
+
+  base::WeakPtrFactory<ThemeService> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ThemeService);
 };

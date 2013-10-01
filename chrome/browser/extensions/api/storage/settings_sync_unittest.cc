@@ -7,7 +7,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/extensions/api/storage/leveldb_settings_storage_factory.h"
 #include "chrome/browser/extensions/api/storage/settings_frontend.h"
 #include "chrome/browser/extensions/api/storage/settings_storage_factory.h"
@@ -97,6 +97,7 @@ class MockSyncChangeProcessor : public syncer::SyncChangeProcessor {
     if (fail_all_requests_) {
       return syncer::SyncError(
           FROM_HERE,
+          syncer::SyncError::DATATYPE_ERROR,
           "MockSyncChangeProcessor: configured to fail",
           change_list[0].sync_data().GetDataType());
     }

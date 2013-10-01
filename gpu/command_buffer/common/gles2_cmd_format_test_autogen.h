@@ -1803,7 +1803,8 @@ TEST_F(GLES2FormatTest, ReadPixels) {
       static_cast<uint32>(17),
       static_cast<uint32>(18),
       static_cast<uint32>(19),
-      static_cast<uint32>(20));
+      static_cast<uint32>(20),
+      static_cast<GLboolean>(21));
   EXPECT_EQ(static_cast<uint32>(cmds::ReadPixels::kCmdId),
             cmd.header.command);
   EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
@@ -1817,6 +1818,7 @@ TEST_F(GLES2FormatTest, ReadPixels) {
   EXPECT_EQ(static_cast<uint32>(18), cmd.pixels_shm_offset);
   EXPECT_EQ(static_cast<uint32>(19), cmd.result_shm_id);
   EXPECT_EQ(static_cast<uint32>(20), cmd.result_shm_offset);
+  EXPECT_EQ(static_cast<GLboolean>(21), cmd.async);
   CheckBytesWrittenMatchesExpectedSize(
       next_cmd, sizeof(cmd));
 }
@@ -3320,6 +3322,31 @@ TEST_F(GLES2FormatTest, RenderbufferStorageMultisampleEXT) {
   EXPECT_EQ(static_cast<GLenum>(13), cmd.internalformat);
   EXPECT_EQ(static_cast<GLsizei>(14), cmd.width);
   EXPECT_EQ(static_cast<GLsizei>(15), cmd.height);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, FramebufferTexture2DMultisampleEXT) {
+  cmds::FramebufferTexture2DMultisampleEXT& cmd =
+      *GetBufferAs<cmds::FramebufferTexture2DMultisampleEXT>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLenum>(11),
+      static_cast<GLenum>(12),
+      static_cast<GLenum>(13),
+      static_cast<GLuint>(14),
+      static_cast<GLint>(15),
+      static_cast<GLsizei>(16));
+  EXPECT_EQ(
+      static_cast<uint32>(cmds::FramebufferTexture2DMultisampleEXT::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.target);
+  EXPECT_EQ(static_cast<GLenum>(12), cmd.attachment);
+  EXPECT_EQ(static_cast<GLenum>(13), cmd.textarget);
+  EXPECT_EQ(static_cast<GLuint>(14), cmd.texture);
+  EXPECT_EQ(static_cast<GLint>(15), cmd.level);
+  EXPECT_EQ(static_cast<GLsizei>(16), cmd.samples);
   CheckBytesWrittenMatchesExpectedSize(
       next_cmd, sizeof(cmd));
 }

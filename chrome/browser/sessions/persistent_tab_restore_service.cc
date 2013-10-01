@@ -15,7 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/stl_util.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/base_session_service.h"
@@ -942,10 +942,11 @@ const TabRestoreService::Entries& PersistentTabRestoreService::entries() const {
   return helper_.entries();
 }
 
-void PersistentTabRestoreService::RestoreMostRecentEntry(
+std::vector<content::WebContents*>
+PersistentTabRestoreService::RestoreMostRecentEntry(
     TabRestoreServiceDelegate* delegate,
     chrome::HostDesktopType host_desktop_type) {
-  helper_.RestoreMostRecentEntry(delegate, host_desktop_type);
+  return helper_.RestoreMostRecentEntry(delegate, host_desktop_type);
 }
 
 TabRestoreService::Tab* PersistentTabRestoreService::RemoveTabEntryById(
@@ -953,12 +954,13 @@ TabRestoreService::Tab* PersistentTabRestoreService::RemoveTabEntryById(
   return helper_.RemoveTabEntryById(id);
 }
 
-void PersistentTabRestoreService::RestoreEntryById(
-    TabRestoreServiceDelegate* delegate,
-    SessionID::id_type id,
-    chrome::HostDesktopType host_desktop_type,
-    WindowOpenDisposition disposition) {
-  helper_.RestoreEntryById(delegate, id, host_desktop_type, disposition);
+std::vector<content::WebContents*>
+    PersistentTabRestoreService::RestoreEntryById(
+      TabRestoreServiceDelegate* delegate,
+      SessionID::id_type id,
+      chrome::HostDesktopType host_desktop_type,
+      WindowOpenDisposition disposition) {
+  return helper_.RestoreEntryById(delegate, id, host_desktop_type, disposition);
 }
 
 bool PersistentTabRestoreService::IsLoaded() const {

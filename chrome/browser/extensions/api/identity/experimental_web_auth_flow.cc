@@ -5,7 +5,7 @@
 #include "chrome/browser/extensions/api/identity/experimental_web_auth_flow.h"
 
 #include "base/location.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -17,8 +17,8 @@
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
-#include "googleurl/src/gurl.h"
 #include "ui/base/window_open_disposition.h"
+#include "url/gurl.h"
 
 using content::LoadNotificationDetails;
 using content::NavigationController;

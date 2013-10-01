@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -69,10 +69,6 @@ const bool kIgnoreCase = false;
 const bool kCaseSensitive = true;
 
 const int kMoveIterations = 30;
-
-void HistoryServiceQueried(int) {
-  base::MessageLoop::current()->Quit();
-}
 
 }  // namespace
 
@@ -181,8 +177,9 @@ class FindInPageControllerTest : public InProcessBrowserTest {
 
   void FlushHistoryService() {
     HistoryServiceFactory::GetForProfile(
-        browser()->profile(), Profile::IMPLICIT_ACCESS)->
-        GetNextDownloadId(base::Bind(&HistoryServiceQueried));
+        browser()->profile(), Profile::IMPLICIT_ACCESS)->FlushForTest(
+        base::Bind(&base::MessageLoop::Quit,
+                   base::Unretained(base::MessageLoop::current()->current())));
     content::RunMessageLoop();
   }
 };

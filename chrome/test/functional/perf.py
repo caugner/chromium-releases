@@ -158,27 +158,46 @@ class BasePerfTest(pyauto.PyUITest):
     except OSError, err:
       if err.errno == errno.ESRCH:
         return False
+
+    try:
+      with open('/proc/%s/status' % pid) as proc_file:
+        if 'zombie' in proc_file.read():
+          return False
+    except IOError:
+      return False
     return True
 
+  def _GetAllDescendentProcesses(self, pid):
+    pstree_out = subprocess.check_output(['pstree', '-p', '%s' % pid])
+    children = re.findall('\((\d+)\)', pstree_out)
+    return [int(pid) for pid in children]
+
   def _WaitForChromeExit(self, browser_info, timeout):
-    child_processes = browser_info['child_processes']
+    pid = browser_info['browser_pid']
+    chrome_pids = self._GetAllDescendentProcesses(pid)
     initial_time = time.time()
     while time.time() - initial_time < timeout:
-      if any([self._IsPIDRunning(c['pid']) for c in child_processes]):
+      if any([self._IsPIDRunning(pid) for pid in chrome_pids]):
         time.sleep(1)
       else:
         logging.info('_WaitForChromeExit() took: %s seconds',
                      time.time() - initial_time)
         return
-    self.fail('_WaitForChromeExit() did not finish within %s seconds',
+    self.fail('_WaitForChromeExit() did not finish within %s seconds' %
               timeout)
 
   def tearDown(self):
     if self._IsPGOMode():
       browser_info = self.GetBrowserInfo()
       pid = browser_info['browser_pid']
+      # session_manager kills chrome without waiting for it to cleanly exit.
+      # Until that behavior is changed, we stop it and wait for Chrome to exit
+      # cleanly before restarting it. See:
+      # crbug.com/264717
+      subprocess.call(['sudo', 'pkill', '-STOP', 'session_manager'])
       os.kill(pid, signal.SIGINT)
-      self._WaitForChromeExit(browser_info, 30)
+      self._WaitForChromeExit(browser_info, 120)
+      subprocess.call(['sudo', 'pkill', '-CONT', 'session_manager'])
 
     pyauto.PyUITest.tearDown(self)
 

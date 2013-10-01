@@ -5,7 +5,7 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
@@ -54,7 +54,7 @@ class SpeechRecognitionBrowserTest : public ContentBrowserTest {
     web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
     mouse_event.type = WebKit::WebInputEvent::MouseUp;
     web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
-    fake_speech_recognition_manager_.recognition_started_event().Wait();
+    fake_speech_recognition_manager_.WaitForRecognitionStarted();
 
     // We should wait for a navigation event, raised by the test page JS code
     // upon the onwebkitspeechchange event, in all cases except when the

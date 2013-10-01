@@ -37,6 +37,9 @@ enum LayerScaleAnimationDirection {
   LAYER_SCALE_ANIMATION_BELOW,
 };
 
+// Amount of time for the cross fade animation.
+extern const int kCrossFadeDurationMS;
+
 // Animate a cross-fade of |window| from its current bounds to |new_bounds|.
 ASH_EXPORT void CrossFadeToBounds(aura::Window* window,
                                   const gfx::Rect& new_bounds);
@@ -69,7 +72,12 @@ ASH_EXPORT void SetTransformForScaleAnimation(
     ui::Layer* layer,
     LayerScaleAnimationDirection type);
 
-}  // namespace ash
+// Returns the approximate bounds to which |window| will be animated when it
+// is minimized. The bounds are approximate because the minimize animation
+// involves rotation.
+ASH_EXPORT gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(
+    aura::Window* window);
 
+}  // namespace ash
 
 #endif  // ASH_WM_WINDOW_ANIMATIONS_H_

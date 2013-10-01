@@ -64,8 +64,6 @@ class AwContents : public FindHelper::Listener,
     return render_view_host_ext_.get();
   }
 
-  void PerformLongClick();
-
   // |handler| is an instance of
   // org.chromium.android_webview.AwHttpAuthHandler.
   bool OnReceivedHttpAuthRequest(const base::android::JavaRef<jobject>& handler,
@@ -92,13 +90,16 @@ class AwContents : public FindHelper::Listener,
   void RequestNewHitTestDataAt(JNIEnv* env, jobject obj, jint x, jint y);
   void UpdateLastHitTestData(JNIEnv* env, jobject obj);
   void OnSizeChanged(JNIEnv* env, jobject obj, int w, int h, int ow, int oh);
-  void SetVisibility(JNIEnv* env, jobject obj, bool visible);
+  void SetViewVisibility(JNIEnv* env, jobject obj, bool visible);
+  void SetWindowVisibility(JNIEnv* env, jobject obj, bool visible);
+  void SetIsPaused(JNIEnv* env, jobject obj, bool paused);
   void OnAttachedToWindow(JNIEnv* env, jobject obj, int w, int h);
   void OnDetachedFromWindow(JNIEnv* env, jobject obj);
   base::android::ScopedJavaLocalRef<jbyteArray> GetOpaqueState(
       JNIEnv* env, jobject obj);
   jboolean RestoreFromOpaqueState(JNIEnv* env, jobject obj, jbyteArray state);
   void FocusFirstNode(JNIEnv* env, jobject obj);
+  void SetBackgroundColor(JNIEnv* env, jobject obj, jint color);
   bool OnDraw(JNIEnv* env,
               jobject obj,
               jobject canvas,
@@ -109,12 +110,15 @@ class AwContents : public FindHelper::Listener,
               jint clip_top,
               jint clip_right,
               jint clip_bottom);
+  void SetGlobalVisibleRect(JNIEnv* env,
+                            jobject obj,
+                            jint visible_left,
+                            jint visible_top,
+                            jint visible_right,
+                            jint visible_bottom);
   jint GetAwDrawGLViewContext(JNIEnv* env, jobject obj);
-  base::android::ScopedJavaLocalRef<jobject> CapturePicture(JNIEnv* env,
-                                                            jobject obj);
-  void EnableOnNewPicture(JNIEnv* env,
-                          jobject obj,
-                          jboolean enabled);
+  jint CapturePicture(JNIEnv* env, jobject obj, int width, int height);
+  void EnableOnNewPicture(JNIEnv* env, jobject obj, jboolean enabled);
 
   // Geolocation API support
   void ShowGeolocationPrompt(const GURL& origin, base::Callback<void(bool)>);
@@ -135,19 +139,23 @@ class AwContents : public FindHelper::Listener,
                                     int match_count,
                                     bool finished) OVERRIDE;
   // IconHelper::Listener implementation.
-  virtual void OnReceivedIcon(const SkBitmap& bitmap) OVERRIDE;
+  virtual void OnReceivedIcon(const GURL& icon_url,
+                              const SkBitmap& bitmap) OVERRIDE;
   virtual void OnReceivedTouchIconUrl(const std::string& url,
                                       const bool precomposed) OVERRIDE;
 
   // AwRenderViewHostExtClient implementation.
-  virtual void OnPageScaleFactorChanged(float page_scale_factor) OVERRIDE;
+  virtual void OnWebLayoutPageScaleFactorChanged(
+      float page_scale_factor) OVERRIDE;
 
   // BrowserViewRenderer::Client implementation.
   virtual bool RequestDrawGL(jobject canvas) OVERRIDE;
   virtual void PostInvalidate() OVERRIDE;
+  virtual void UpdateGlobalVisibleRect() OVERRIDE;
   virtual void OnNewPicture() OVERRIDE;
   virtual gfx::Point GetLocationOnScreen() OVERRIDE;
   virtual void ScrollContainerViewTo(gfx::Vector2d new_value) OVERRIDE;
+  virtual void DidOverscroll(gfx::Vector2d overscroll_delta) OVERRIDE;
 
   void ClearCache(JNIEnv* env, jobject obj, jboolean include_disk_files);
   void SetPendingWebContentsForPopup(scoped_ptr<content::WebContents> pending);
@@ -155,11 +163,20 @@ class AwContents : public FindHelper::Listener,
 
   void ScrollTo(JNIEnv* env, jobject obj, jint xPix, jint yPix);
   void SetDipScale(JNIEnv* env, jobject obj, jfloat dipScale);
+  void SetDisplayedPageScaleFactor(JNIEnv* env,
+                                   jobject obj,
+                                   jfloat pageScaleFactor);
 
   void SetSaveFormData(bool enabled);
 
+  // Sets the java delegate
+  void SetAwAutofillManagerDelegate(jobject delegate);
+
+  void SetJsOnlineProperty(JNIEnv* env, jobject obj, jboolean network_up);
+
  private:
   void InitAutofillIfNecessary(bool enabled);
+  void SetAndroidWebViewRendererPrefs();
 
   JavaObjectWeakGlobalRef java_ref_;
   scoped_ptr<content::WebContents> web_contents_;

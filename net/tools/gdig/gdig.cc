@@ -11,12 +11,12 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/strings/string_split.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "net/base/address_list.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
@@ -223,6 +223,14 @@ class GDig {
   scoped_ptr<FileNetLogObserver> log_observer_;
   scoped_ptr<NetLog> log_;
   scoped_ptr<HostResolver> resolver_;
+
+#if defined(OS_MACOSX)
+  // Without this there will be a mem leak on osx.
+  base::mac::ScopedNSAutoreleasePool scoped_pool_;
+#endif
+
+  // Need AtExitManager to support AsWeakPtr (in NetLog).
+  base::AtExitManager exit_manager_;
 };
 
 GDig::GDig()
@@ -254,12 +262,6 @@ GDig::Result GDig::Main(int argc, const char* argv[]) {
       return RESULT_WRONG_USAGE;
   }
 
-#if defined(OS_MACOSX)
-  // Without this there will be a mem leak on osx.
-  base::mac::ScopedNSAutoreleasePool scoped_pool;
-#endif
-
-  base::AtExitManager exit_manager;
   base::MessageLoopForIO loop;
 
   result_ = RESULT_PENDING;

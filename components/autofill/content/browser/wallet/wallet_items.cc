@@ -10,12 +10,12 @@
 #include "base/values.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/credit_card.h"
-#include "googleurl/src/gurl.h"
 #include "grit/component_strings.h"
 #include "grit/webkit_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
+#include "url/gurl.h"
 
 namespace autofill {
 namespace wallet {
@@ -309,12 +309,12 @@ const gfx::Image& WalletItems::MaskedInstrument::CardIcon() const {
 }
 
 base::string16 WalletItems::MaskedInstrument::GetInfo(
-    AutofillFieldType type,
+    const AutofillType& type,
     const std::string& app_locale) const {
-  if (AutofillType(type).group() != AutofillType::CREDIT_CARD)
+  if (type.group() != CREDIT_CARD)
     return address().GetInfo(type, app_locale);
 
-  switch (type) {
+  switch (type.GetStorableType()) {
     case CREDIT_CARD_NAME:
       return address().recipient_name();
 

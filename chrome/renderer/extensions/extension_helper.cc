@@ -9,7 +9,7 @@
 #include "base/command_line.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -18,7 +18,7 @@
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/console.h"
 #include "chrome/renderer/extensions/dispatcher.h"
-#include "chrome/renderer/extensions/miscellaneous_bindings.h"
+#include "chrome/renderer/extensions/messaging_bindings.h"
 #include "chrome/renderer/extensions/user_script_scheduler.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
 #include "chrome/renderer/web_apps.h"
@@ -264,7 +264,7 @@ void ExtensionHelper::OnExtensionDispatchOnConnect(
     const std::string& channel_name,
     const base::DictionaryValue& source_tab,
     const ExtensionMsg_ExternalConnectionInfo& info) {
-  MiscellaneousBindings::DispatchOnConnect(
+  MessagingBindings::DispatchOnConnect(
       dispatcher_->v8_context_set().GetAll(),
       target_port_id, channel_name, source_tab,
       info.source_id, info.target_id, info.source_url,
@@ -273,7 +273,7 @@ void ExtensionHelper::OnExtensionDispatchOnConnect(
 
 void ExtensionHelper::OnExtensionDeliverMessage(int target_id,
                                                 const std::string& message) {
-  MiscellaneousBindings::DeliverMessage(dispatcher_->v8_context_set().GetAll(),
+  MessagingBindings::DeliverMessage(dispatcher_->v8_context_set().GetAll(),
                                         target_id,
                                         message,
                                         render_view());
@@ -282,7 +282,7 @@ void ExtensionHelper::OnExtensionDeliverMessage(int target_id,
 void ExtensionHelper::OnExtensionDispatchOnDisconnect(
     int port_id,
     const std::string& error_message) {
-  MiscellaneousBindings::DispatchOnDisconnect(
+  MessagingBindings::DispatchOnDisconnect(
       dispatcher_->v8_context_set().GetAll(),
       port_id, error_message,
       render_view());

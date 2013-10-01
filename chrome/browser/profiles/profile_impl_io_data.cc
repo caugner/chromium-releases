@@ -15,6 +15,7 @@
 #include "base/strings/string_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/worker_pool.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/io_thread.h"
@@ -26,7 +27,6 @@
 #include "chrome/browser/net/sqlite_server_bound_cert_store.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -291,7 +291,8 @@ void ProfileImplIOData::Handle::LazyInitialize() const {
   io_data_->http_server_properties_manager_ =
       new chrome_browser_net::HttpServerPropertiesManager(pref_service);
   io_data_->set_http_server_properties(
-      io_data_->http_server_properties_manager_);
+      scoped_ptr<net::HttpServerProperties>(
+          io_data_->http_server_properties_manager_));
   io_data_->session_startup_pref()->Init(
       prefs::kRestoreOnStartup, pref_service);
   io_data_->session_startup_pref()->MoveToThread(
@@ -604,14 +605,16 @@ ChromeURLRequestContext*
 ProfileImplIOData::InitializeMediaRequestContext(
     ChromeURLRequestContext* original_context,
     const StoragePartitionDescriptor& partition_descriptor) const {
-  // If this is for a in_memory partition, we can simply use the original
-  // context (like off-the-record mode).
-  if (partition_descriptor.in_memory)
-    return original_context;
-
   // Copy most state from the original context.
   MediaRequestContext* context = new MediaRequestContext(load_time_stats());
   context->CopyFrom(original_context);
+
+  // For in-memory context, return immediately after creating the new
+  // context before attaching a separate cache. It is important to return
+  // a new context rather than just reusing |original_context| because
+  // the caller expects to take ownership of the pointer.
+  if (partition_descriptor.in_memory)
+    return context;
 
   using content::StoragePartition;
   base::FilePath cache_path;

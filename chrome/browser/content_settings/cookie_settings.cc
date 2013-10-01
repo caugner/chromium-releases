@@ -6,11 +6,11 @@
 
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
@@ -22,9 +22,9 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/common/constants.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/base/static_cookie_policy.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using content::UserMetricsAction;
@@ -66,7 +66,7 @@ CookieSettings::Factory::Factory()
 
 CookieSettings::Factory::~Factory() {}
 
-void CookieSettings::Factory::RegisterUserPrefs(
+void CookieSettings::Factory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
       prefs::kBlockThirdPartyCookies,

@@ -20,9 +20,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handler.h"
@@ -30,16 +27,16 @@
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
-#include "chrome/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/id_util.h"
+#include "extensions/common/switches.h"
 #include "extensions/common/url_pattern_set.h"
-#include "googleurl/src/url_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "url/url_util.h"
 
 #if defined(OS_WIN)
 #include "grit/generated_resources.h"
@@ -83,7 +80,7 @@ class ExtensionConfig {
     // meant to be a general solution.
     // TODO(dmazzoni): remove this once we have an extension API that
     // allows any extension to request read-only access to webui pages.
-    scripting_whitelist_.push_back("kgejglhpjiefppelpmljglcjbhoiplfn");
+    scripting_whitelist_.push_back(extension_misc::kChromeVoxExtensionId);
 
     // Whitelist "Discover DevTools Companion" extension from Google that
     // needs the ability to script DevTools pages. Companion will assist
@@ -185,11 +182,6 @@ bool Extension::IdIsValid(const std::string& id) {
       return false;
 
   return true;
-}
-
-// static
-bool Extension::IsExtension(const base::FilePath& file_name) {
-  return file_name.MatchesExtension(chrome::kExtensionFileExtension);
 }
 
 Manifest::Type Extension::GetType() const {
@@ -343,8 +335,8 @@ bool Extension::HasAPIPermission(APIPermission::ID permission) const {
   return PermissionsData::HasAPIPermission(this, permission);
 }
 
-bool Extension::HasAPIPermission(const std::string& function_name) const {
-  return PermissionsData::HasAPIPermission(this, function_name);
+bool Extension::HasAPIPermission(const std::string& permission_name) const {
+  return PermissionsData::HasAPIPermission(this, permission_name);
 }
 
 scoped_refptr<const PermissionSet> Extension::GetActivePermissions() const {
@@ -398,21 +390,13 @@ bool Extension::ShouldDisplayInExtensionSettings() const {
   if (is_theme())
     return false;
 
-  // Don't show component extensions because they are only extensions as an
-  // implementation detail of Chrome.
-  if (location() == Manifest::COMPONENT &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kShowComponentExtensionOptions)) {
+  // Don't show component extensions and invisible apps.
+  if (ShouldNotBeVisible())
     return false;
-  }
 
   // Always show unpacked extensions and apps.
   if (Manifest::IsUnpackedLocation(location()))
     return true;
-
-  // Don't show apps that aren't visible in either launcher or ntp.
-  if (is_app() && !ShouldDisplayInAppLauncher() && !ShouldDisplayInNewTabPage())
-    return false;
 
   // Unless they are unpacked, never show hosted apps. Note: We intentionally
   // show packaged apps and platform apps because there are some pieces of
@@ -423,6 +407,26 @@ bool Extension::ShouldDisplayInExtensionSettings() const {
     return false;
 
   return true;
+}
+
+bool Extension::ShouldNotBeVisible() const {
+  // Don't show component extensions because they are only extensions as an
+  // implementation detail of Chrome.
+  if (location() == Manifest::COMPONENT &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kShowComponentExtensionOptions)) {
+    return true;
+  }
+
+  // Always show unpacked extensions and apps.
+  if (Manifest::IsUnpackedLocation(location()))
+    return false;
+
+  // Don't show apps that aren't visible in either launcher or ntp.
+  if (is_app() && !ShouldDisplayInAppLauncher() && !ShouldDisplayInNewTabPage())
+    return true;
+
+  return false;
 }
 
 Extension::ManifestData* Extension::GetManifestData(const std::string& key)
@@ -485,6 +489,10 @@ bool Extension::is_extension() const {
 bool Extension::can_be_incognito_enabled() const {
   // Only component platform apps are supported in incognito.
   return !is_platform_app() || location() == Manifest::COMPONENT;
+}
+
+bool Extension::force_incognito_enabled() const {
+  return PermissionsData::HasAPIPermission(this, APIPermission::kProxy);
 }
 
 void Extension::AddWebExtentPattern(const URLPattern& pattern) {
@@ -561,11 +569,6 @@ bool Extension::InitFromValue(int flags, string16* error) {
   // Important to load manifest version first because many other features
   // depend on its value.
   if (!LoadManifestVersion(error))
-    return false;
-
-  // Validate minimum Chrome version. We don't need to store this, since the
-  // extension is not valid if it is incorrect
-  if (!CheckMinimumChromeVersion(error))
     return false;
 
   if (!LoadRequiredFeatures(error))
@@ -774,44 +777,6 @@ bool Extension::LoadManifestVersion(string16* error) {
   return true;
 }
 
-bool Extension::CheckMinimumChromeVersion(string16* error) const {
-  if (!manifest_->HasKey(keys::kMinimumChromeVersion))
-    return true;
-  std::string minimum_version_string;
-  if (!manifest_->GetString(keys::kMinimumChromeVersion,
-                            &minimum_version_string)) {
-    *error = ASCIIToUTF16(errors::kInvalidMinimumChromeVersion);
-    return false;
-  }
-
-  Version minimum_version(minimum_version_string);
-  if (!minimum_version.IsValid()) {
-    *error = ASCIIToUTF16(errors::kInvalidMinimumChromeVersion);
-    return false;
-  }
-
-  chrome::VersionInfo current_version_info;
-  if (!current_version_info.is_valid()) {
-    NOTREACHED();
-    return false;
-  }
-
-  Version current_version(current_version_info.Version());
-  if (!current_version.IsValid()) {
-    DCHECK(false);
-    return false;
-  }
-
-  if (current_version.CompareTo(minimum_version) < 0) {
-    *error = ErrorUtils::FormatErrorMessageUTF16(
-        errors::kChromeVersionTooLow,
-        l10n_util::GetStringUTF8(IDS_PRODUCT_NAME),
-        minimum_version_string);
-    return false;
-  }
-  return true;
-}
-
 ExtensionInfo::ExtensionInfo(const base::DictionaryValue* manifest,
                              const std::string& id,
                              const base::FilePath& path,
@@ -837,7 +802,6 @@ UnloadedExtensionInfo::UnloadedExtensionInfo(
     const Extension* extension,
     extension_misc::UnloadedExtensionReason reason)
     : reason(reason),
-      already_disabled(false),
       extension(extension) {}
 
 UpdatedExtensionPermissionsInfo::UpdatedExtensionPermissionsInfo(

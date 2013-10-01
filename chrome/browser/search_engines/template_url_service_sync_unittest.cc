@@ -4,16 +4,17 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
@@ -124,7 +125,10 @@ syncer::SyncError TestChangeProcessor::ProcessSyncChanges(
     const syncer::SyncChangeList& change_list) {
   if (erroneous_)
     return syncer::SyncError(
-        FROM_HERE, "Some error.", syncer::SEARCH_ENGINES);
+        FROM_HERE,
+        syncer::SyncError::DATATYPE_ERROR,
+        "Some error.",
+        syncer::SEARCH_ENGINES);
 
   change_map_.erase(change_map_.begin(), change_map_.end());
   for (syncer::SyncChangeList::const_iterator iter = change_list.begin();
@@ -1892,7 +1896,7 @@ TEST_F(TemplateURLServiceSyncTest, PreSyncUpdates) {
 
   // Merge the prepopulate search engines.
   base::Time pre_merge_time = base::Time::Now();
-  test_util_a_.BlockTillServiceProcessesRequests();
+  base::RunLoop().RunUntilIdle();
   test_util_a_.ResetModel(true);
 
   // The newly added search engine should have been safely merged, with an

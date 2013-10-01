@@ -6,6 +6,7 @@
 #define ASH_DISPLAY_DISPLAY_INFO_H_
 
 #include <string>
+#include <vector>
 
 #include "ash/ash_export.h"
 #include "base/gtest_prod_util.h"
@@ -15,6 +16,15 @@
 
 namespace ash {
 namespace internal {
+
+// A struct that represents the display's resolution and
+// interlaced info.
+struct ASH_EXPORT Resolution {
+  Resolution(const gfx::Size& size, bool interlaced);
+
+  gfx::Size size;
+  bool interlaced;
+};
 
 // DisplayInfo contains metadata for each display. This is used to
 // create |gfx::Display| as well as to maintain extra infomation
@@ -66,7 +76,8 @@ class ASH_EXPORT DisplayInfo {
   // The name of the display.
   const std::string& name() const { return name_; }
 
-  // True if the display has overscan.
+  // True if the display EDID has the overscan flag. This does not create the
+  // actual overscan automatically, but used in the message.
   bool has_overscan() const { return has_overscan_; }
 
   void set_rotation(gfx::Display::Rotation rotation) { rotation_ = rotation; }
@@ -94,8 +105,7 @@ class ASH_EXPORT DisplayInfo {
   void set_ui_scale(float scale) { ui_scale_ = scale; }
 
   // Copy the display info except for fields that can be modified by a user
-  // (|has_custom_overscan_insets_| and |custom_overscan_insets_in_dip_|,
-  //  |rotation_| and |ui_scale_|). |rotation_| and |ui_scale_| are copied
+  // (|rotation_| and |ui_scale_|). |rotation_| and |ui_scale_| are copied
   // when the |another_info| isn't native one.
   void Copy(const DisplayInfo& another_info);
 
@@ -105,41 +115,31 @@ class ASH_EXPORT DisplayInfo {
 
   // Update the |bounds_in_pixel| according to the current overscan
   // and rotation settings.
-  // 1) If this has custom overscan insets
-  //    (i.e. |has_custom_overscan_insets_| is true), it simply applies
-  //    the existing |overscan_insets_in_dip_|.
-  // 2) If this doesn't have custom overscan insets but the display claims
-  //    that it has overscan (|has_overscan_| is true), then updates
-  //    |overscan_insets_in_dip_| to default value (5% of the display size)
-  //    and apply the insets.
-  // 3) Otherwise, clear the overscan insets.
   void UpdateDisplaySize();
 
   // Sets/Clears the overscan insets.
-  void SetOverscanInsets(bool custom,
-                         const gfx::Insets& insets_in_dip);
+  void SetOverscanInsets(const gfx::Insets& insets_in_dip);
   gfx::Insets GetOverscanInsetsInPixel() const;
-
-  void clear_has_custom_overscan_insets() {
-    has_custom_overscan_insets_ = false;
-  }
-  bool has_custom_overscan_insets() const {
-    return has_custom_overscan_insets_;
-  }
 
   void set_native(bool native) { native_ = native; }
   bool native() const { return native_; }
 
-  // Returns a string representation of the DisplayInfo;
-  std::string ToString() const;
-
- private:
-  FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, AutomaticOverscanInsets);
-  // Set the overscan flag. Used for test.
-  void set_has_overscan_for_test(bool has_overscan) {
-    has_overscan_ = has_overscan;
+  const std::vector<Resolution>& resolutions() const {
+    return resolutions_;
+  }
+  void set_resolutions(std::vector<Resolution>& resolution) {
+    resolutions_.swap(resolution);
   }
 
+  // Returns a string representation of the DisplayInfo
+  // excluding resolutions.
+  std::string ToString() const;
+
+  // Returns a string representation of the DisplayInfo
+  // including resolutions.
+  std::string ToFullString() const;
+
+ private:
   int64 id_;
   std::string name_;
   bool has_overscan_;
@@ -151,15 +151,14 @@ class ASH_EXPORT DisplayInfo {
   gfx::Size size_in_pixel_;
   gfx::Insets overscan_insets_in_dip_;
 
-  // True if the |overscan_insets_in_dip| is specified by a user. This
-  // is used not to override the insets by native insets.
-  bool has_custom_overscan_insets_;
-
   // UI scale of the display.
   float ui_scale_;
 
   // True if this comes from native platform (DisplayChangeObserverX11).
   bool native_;
+
+  // The list of resolutions supported by this display.
+  std::vector<Resolution> resolutions_;
 };
 
 }  // namespace internal

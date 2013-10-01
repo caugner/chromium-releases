@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 
@@ -27,7 +27,7 @@ public:
         content::NotificationService::AllSources());
 
     scoped_refptr<extensions::CrxInstaller> installer(
-        extensions::CrxInstaller::Create(service, NULL));
+        extensions::CrxInstaller::CreateSilent(service));
     installer->set_is_gallery_install(false);
     installer->set_allow_silent_install(true);
     installer->set_install_source(Manifest::INTERNAL);
@@ -51,18 +51,14 @@ public:
   }
 };
 
-// Failing on mac_rel trybots with timeout error. Disabling for now.
-#if defined(OS_MACOSX)
-#define TestAdblockExtensionCrash DISABLED_TestAdblockExtensionCrash
-#endif
-IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest, TestAdblockExtensionCrash) {
+IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest,
+                       PRE_TestAdblockExtensionCrash) {
   ExtensionService* service = profile()->GetExtensionService();
   InstallExtensionSilently(service, "adblock.crx");
+}
 
-  // Restart the browser.
-  chrome::Exit();
-  chrome::NewWindow(browser());
-
+IN_PROC_BROWSER_TEST_F(ExtensionFunctionalTest, TestAdblockExtensionCrash) {
+  ExtensionService* service = profile()->GetExtensionService();
   // Verify that the extension is enabled and allowed in incognito
   // is disabled.
   EXPECT_TRUE(service->IsExtensionEnabled(last_loaded_extension_id_));

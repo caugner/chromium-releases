@@ -11,8 +11,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "remoting/host/client_session_control.h"
 #include "remoting/host/mouse_clamping_filter.h"
 #include "remoting/host/remote_input_filter.h"
@@ -111,6 +111,8 @@ class ClientSession
       const protocol::Capabilities& capabilities) OVERRIDE;
   virtual void RequestPairing(
       const remoting::protocol::PairingRequest& pairing_request) OVERRIDE;
+  virtual void DeliverClientMessage(
+      const protocol::ExtensionMessage& message) OVERRIDE;
 
   // protocol::ConnectionToClient::EventHandler interface.
   virtual void OnConnectionAuthenticated(

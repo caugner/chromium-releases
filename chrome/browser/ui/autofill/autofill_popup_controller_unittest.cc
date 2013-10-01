@@ -33,8 +33,10 @@ namespace {
 class MockAutofillExternalDelegate : public AutofillExternalDelegate {
  public:
   MockAutofillExternalDelegate(content::WebContents* web_contents,
-                               AutofillManager* autofill_manager)
-      : AutofillExternalDelegate(web_contents, autofill_manager) {}
+                               AutofillManager* autofill_manager,
+                               AutofillDriver* autofill_driver)
+      : AutofillExternalDelegate(web_contents, autofill_manager,
+                                 autofill_driver) {}
   virtual ~MockAutofillExternalDelegate() {}
 
   virtual void DidSelectSuggestion(int identifier) OVERRIDE {}
@@ -87,6 +89,9 @@ class TestAutofillPopupController : public AutofillPopupControllerImpl {
   }
   const std::vector<string16>& subtexts() const {
     return AutofillPopupControllerImpl::subtexts();
+  }
+  const std::vector<int>& identifiers() const {
+    return AutofillPopupControllerImpl::identifiers();
   }
   int selected_line() const {
     return AutofillPopupControllerImpl::selected_line();
@@ -167,7 +172,8 @@ class AutofillPopupControllerUnitTest : public ChromeRenderViewHostTestHarness {
     external_delegate_.reset(
         new NiceMock<MockAutofillExternalDelegate>(
             web_contents(),
-            driver->autofill_manager()));
+            driver->autofill_manager(),
+            driver));
 
     autofill_popup_controller_ =
         new testing::NiceMock<TestAutofillPopupController>(
@@ -363,11 +369,96 @@ TEST_F(AutofillPopupControllerUnitTest, RowWidthWithoutText) {
             autofill_popup_controller_->RowWidthWithoutText(3));
 }
 
+TEST_F(AutofillPopupControllerUnitTest, UpdateDataListValues) {
+  std::vector<string16> items;
+  items.push_back(string16());
+  std::vector<int> ids;
+  ids.push_back(1);
+
+  autofill_popup_controller_->Show(items, items, items, ids);
+
+  EXPECT_EQ(items, autofill_popup_controller_->names());
+  EXPECT_EQ(ids, autofill_popup_controller_->identifiers());
+
+  // Add one data list entry.
+  std::vector<string16> data_list_values;
+  data_list_values.push_back(ASCIIToUTF16("data list value 1"));
+
+  autofill_popup_controller_->UpdateDataListValues(data_list_values,
+                                                   data_list_values);
+
+  // Update the expected values.
+  items.insert(items.begin(), data_list_values[0]);
+  items.insert(items.begin() + 1, string16());
+  ids.insert(ids.begin(), WebAutofillClient::MenuItemIDDataListEntry);
+  ids.insert(ids.begin() + 1, WebAutofillClient::MenuItemIDSeparator);
+
+  EXPECT_EQ(items, autofill_popup_controller_->names());
+  EXPECT_EQ(ids, autofill_popup_controller_->identifiers());
+
+  // Add two data list entries (which should replace the current one).
+  data_list_values.push_back(ASCIIToUTF16("data list value 2"));
+
+  autofill_popup_controller_->UpdateDataListValues(data_list_values,
+                                                   data_list_values);
+
+  // Update the expected values.
+  items.insert(items.begin() + 1, data_list_values[1]);
+  ids.insert(ids.begin(), WebAutofillClient::MenuItemIDDataListEntry);
+
+  EXPECT_EQ(items, autofill_popup_controller_->names());
+  EXPECT_EQ(ids, autofill_popup_controller_->identifiers());
+
+  // Clear all data list values.
+  data_list_values.clear();
+
+  autofill_popup_controller_->UpdateDataListValues(data_list_values,
+                                                   data_list_values);
+
+  items.clear();
+  items.push_back(string16());
+  ids.clear();
+  ids.push_back(1);
+
+  EXPECT_EQ(items, autofill_popup_controller_->names());
+  EXPECT_EQ(ids, autofill_popup_controller_->identifiers());
+}
+
+TEST_F(AutofillPopupControllerUnitTest, PopupsWithOnlyDataLists) {
+  // Create the popup with a single datalist element.
+  std::vector<string16> items;
+  items.push_back(string16());
+  std::vector<int> ids;
+  ids.push_back(WebAutofillClient::MenuItemIDDataListEntry);
+
+  autofill_popup_controller_->Show(items, items, items, ids);
+
+  EXPECT_EQ(items, autofill_popup_controller_->names());
+  EXPECT_EQ(ids, autofill_popup_controller_->identifiers());
+
+  // Replace the datalist element with a new one.
+  std::vector<string16> data_list_values;
+  data_list_values.push_back(ASCIIToUTF16("data list value 1"));
+
+  autofill_popup_controller_->UpdateDataListValues(data_list_values,
+                                                   data_list_values);
+
+  EXPECT_EQ(data_list_values, autofill_popup_controller_->names());
+  // The id value should stay the same.
+  EXPECT_EQ(ids, autofill_popup_controller_->identifiers());
+
+  // Clear datalist values and check that the popup becomes hidden.
+  EXPECT_CALL(*autofill_popup_controller_, Hide());
+  data_list_values.clear();
+  autofill_popup_controller_->UpdateDataListValues(data_list_values,
+                                                   data_list_values);
+}
+
 TEST_F(AutofillPopupControllerUnitTest, GetOrCreate) {
   AutofillDriverImpl* driver =
       AutofillDriverImpl::FromWebContents(web_contents());
   MockAutofillExternalDelegate delegate(
-      web_contents(), driver->autofill_manager());
+      web_contents(), driver->autofill_manager(), driver);
 
   WeakPtr<AutofillPopupControllerImpl> controller =
       AutofillPopupControllerImpl::GetOrCreate(
@@ -526,7 +617,7 @@ TEST_F(AutofillPopupControllerUnitTest, GrowPopupInSpace) {
     AutofillDriverImpl* driver =
         AutofillDriverImpl::FromWebContents(web_contents());
     NiceMock<MockAutofillExternalDelegate> external_delegate(
-        web_contents(), driver->autofill_manager());
+        web_contents(), driver->autofill_manager(), driver);
     TestAutofillPopupController* autofill_popup_controller =
         new TestAutofillPopupController(external_delegate.GetWeakPtr(),
                                         element_bounds[i]);

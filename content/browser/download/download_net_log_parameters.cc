@@ -10,8 +10,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "content/public/browser/download_interrupt_reasons.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
+#include "url/gurl.h"
 
 namespace content {
 
@@ -31,6 +31,7 @@ static const char* download_danger_names[] = {
   "UNCOMMON_CONTENT",
   "USER_VALIDATED",
   "DANGEROUS_HOST",
+  "POTENTIALLY_UNWANTED"
 };
 
 COMPILE_ASSERT(ARRAYSIZE_UNSAFE(download_type_names) == SRC_SAVE_PAGE_AS + 1,

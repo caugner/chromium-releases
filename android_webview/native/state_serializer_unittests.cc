@@ -9,13 +9,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/pickle.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/page_state.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using std::string;
 

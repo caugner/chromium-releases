@@ -5,16 +5,20 @@
 #include "chrome/renderer/translate/translate_helper.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/translate/translate_util.h"
-#include "chrome/renderer/translate/translate_helper_metrics.h"
+#include "chrome/common/translate/language_detection_util.h"
+#include "chrome/common/translate/translate_common_metrics.h"
+#include "chrome/renderer/extensions/extension_groups.h"
+#include "chrome/renderer/isolated_world_ids.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
@@ -23,11 +27,9 @@
 #include "third_party/WebKit/public/web/WebNodeList.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/WebKit/public/web/WebWidget.h"
+#include "url/gurl.h"
 #include "v8/include/v8.h"
-
-#if defined(ENABLE_LANGUAGE_DETECTION)
-#include "third_party/cld/encodings/compact_lang_det/win/cld_unicodetext.h"
-#endif
 
 using WebKit::WebDocument;
 using WebKit::WebElement;
@@ -35,7 +37,9 @@ using WebKit::WebFrame;
 using WebKit::WebNode;
 using WebKit::WebNodeList;
 using WebKit::WebScriptSource;
+using WebKit::WebSecurityOrigin;
 using WebKit::WebString;
+using WebKit::WebVector;
 using WebKit::WebView;
 
 namespace {
@@ -55,35 +59,11 @@ const int kTranslateStatusCheckDelayMs = 400;
 // Language name passed to the Translate element for it to detect the language.
 const char kAutoDetectionLanguage[] = "auto";
 
-// Similar language code list. Some languages are very similar and difficult
-// for CLD to distinguish.
-struct SimilarLanguageCode {
-  const char* const code;
-  int group;
-};
+// Isolated world sets following content-security-policy.
+const char kContentSecurityPolicy[] = "script-src 'self' 'unsafe-eval'";
 
-const SimilarLanguageCode kSimilarLanguageCodes[] = {
-  {"bs", 1},
-  {"hr", 1},
-};
-
-// Checks |kSimilarLanguageCodes| and returns group code.
-int GetSimilarLanguageGroupCode(const std::string& language) {
-  for (size_t i = 0; i < arraysize(kSimilarLanguageCodes); ++i) {
-    if (language.find(kSimilarLanguageCodes[i].code) != 0)
-      continue;
-    return kSimilarLanguageCodes[i].group;
-  }
-  return 0;
-}
-
-// Well-known languages which often have wrong server configuration of
-// Content-Language: en.
-// TODO(toyoshim): Remove these static tables and caller functions to
-// chrome/common/translate, and implement them as std::set<>.
-const char* kWellKnownCodesOnWrongConfiguration[] = {
-  "es", "pt", "ja", "ru", "de", "zh-CN", "zh-TW", "ar", "id", "fr", "it", "th"
-};
+// Isolated world sets following security-origin by default.
+const char kSecurityOrigin[] = "https://translate.googleapis.com";
 
 }  // namespace
 
@@ -125,7 +105,7 @@ void TranslateHelper::PageCaptured(int page_id, const string16& contents) {
     html_lang = html_element.getAttribute("lang").utf8();
   std::string cld_language;
   bool is_cld_reliable;
-  std::string language = DeterminePageLanguage(
+  std::string language = LanguageDetectionUtil::DeterminePageLanguage(
       content_language, html_lang, contents, &cld_language, &is_cld_reliable);
 
   if (language.empty())
@@ -159,42 +139,6 @@ void TranslateHelper::CancelPendingTranslation() {
   source_lang_.clear();
   target_lang_.clear();
 }
-
-#if defined(ENABLE_LANGUAGE_DETECTION)
-// static
-std::string TranslateHelper::DetermineTextLanguage(const string16& text,
-                                                   bool* is_cld_reliable) {
-  std::string language = chrome::kUnknownLanguageCode;
-  int num_languages = 0;
-  int text_bytes = 0;
-  bool is_reliable = false;
-  Language cld_language =
-      DetectLanguageOfUnicodeText(NULL, text.c_str(), true, &is_reliable,
-                                  &num_languages, NULL, &text_bytes);
-  if (is_cld_reliable != NULL)
-    *is_cld_reliable = is_reliable;
-
-  // We don't trust the result if the CLD reports that the detection is not
-  // reliable, or if the actual text used to detect the language was less than
-  // 100 bytes (short texts can often lead to wrong results).
-  // TODO(toyoshim): CLD provides |is_reliable| flag. But, it just says that
-  // the determined language code is correct with 50% confidence. Chrome should
-  // handle the real confidence value to judge.
-  if (is_reliable && text_bytes >= 100 && cld_language != NUM_LANGUAGES &&
-      cld_language != UNKNOWN_LANGUAGE && cld_language != TG_UNKNOWN_LANGUAGE) {
-    // We should not use LanguageCode_ISO_639_1 because it does not cover all
-    // the languages CLD can detect. As a result, it'll return the invalid
-    // language code for tradtional Chinese among others.
-    // |LanguageCodeWithDialect| will go through ISO 639-1, ISO-639-2 and
-    // 'other' tables to do the 'right' thing. In addition, it'll return zh-CN
-    // for Simplified Chinese.
-    language = LanguageCodeWithDialects(cld_language);
-  }
-  VLOG(9) << "Detected lang_id: " << language << ", from Text:\n" << text
-          << "\n*************************************\n";
-  return language;
-}
-#endif  // defined(ENABLE_LANGUAGE_DETECTION)
 
 ////////////////////////////////////////////////////////////////////////////////
 // TranslateHelper, protected:
@@ -238,8 +182,15 @@ base::TimeDelta TranslateHelper::AdjustDelay(int delayInMs) {
 
 void TranslateHelper::ExecuteScript(const std::string& script) {
   WebFrame* main_frame = GetMainFrame();
-  if (main_frame)
-    main_frame->executeScript(WebScriptSource(ASCIIToUTF16(script)));
+  if (!main_frame)
+    return;
+
+  WebScriptSource source = WebScriptSource(ASCIIToUTF16(script));
+  main_frame->executeScriptInIsolatedWorld(
+      chrome::ISOLATED_WORLD_ID_TRANSLATE,
+      &source,
+      1,
+      extensions::EXTENSION_GROUP_INTERNAL_TRANSLATE_SCRIPTS);
 }
 
 bool TranslateHelper::ExecuteScriptAndGetBoolResult(const std::string& script,
@@ -249,14 +200,20 @@ bool TranslateHelper::ExecuteScriptAndGetBoolResult(const std::string& script,
     return fallback;
 
   v8::HandleScope handle_scope;
-  v8::Handle<v8::Value> v = main_frame->executeScriptAndReturnValue(
-      WebScriptSource(ASCIIToUTF16(script)));
-  if (v.IsEmpty() || !v->IsBoolean()) {
+  WebVector<v8::Local<v8::Value> > results;
+  WebScriptSource source = WebScriptSource(ASCIIToUTF16(script));
+  main_frame->executeScriptInIsolatedWorld(
+      chrome::ISOLATED_WORLD_ID_TRANSLATE,
+      &source,
+      1,
+      extensions::EXTENSION_GROUP_INTERNAL_TRANSLATE_SCRIPTS,
+      &results);
+  if (results.size() != 1 || results[0].IsEmpty() || !results[0]->IsBoolean()) {
     NOTREACHED();
     return fallback;
   }
 
-  return v->BooleanValue();
+  return results[0]->BooleanValue();
 }
 
 std::string TranslateHelper::ExecuteScriptAndGetStringResult(
@@ -266,14 +223,20 @@ std::string TranslateHelper::ExecuteScriptAndGetStringResult(
     return std::string();
 
   v8::HandleScope handle_scope;
-  v8::Handle<v8::Value> v = main_frame->executeScriptAndReturnValue(
-      WebScriptSource(ASCIIToUTF16(script)));
-  if (v.IsEmpty() || !v->IsString()) {
+  WebVector<v8::Local<v8::Value> > results;
+  WebScriptSource source = WebScriptSource(ASCIIToUTF16(script));
+  main_frame->executeScriptInIsolatedWorld(
+      chrome::ISOLATED_WORLD_ID_TRANSLATE,
+      &source,
+      1,
+      extensions::EXTENSION_GROUP_INTERNAL_TRANSLATE_SCRIPTS,
+      &results);
+  if (results.size() != 1 || results[0].IsEmpty() || !results[0]->IsString()) {
     NOTREACHED();
     return std::string();
   }
 
-  v8::Local<v8::String> v8_str = v->ToString();
+  v8::Local<v8::String> v8_str = results[0]->ToString();
   int length = v8_str->Utf8Length() + 1;
   scoped_ptr<char[]> str(new char[length]);
   v8_str->WriteUtf8(str.get(), length);
@@ -287,203 +250,25 @@ double TranslateHelper::ExecuteScriptAndGetDoubleResult(
     return 0.0;
 
   v8::HandleScope handle_scope;
-  v8::Handle<v8::Value> v = main_frame->executeScriptAndReturnValue(
-      WebScriptSource(ASCIIToUTF16(script)));
-  if (v.IsEmpty() || !v->IsNumber()) {
+  WebVector<v8::Local<v8::Value> > results;
+  WebScriptSource source = WebScriptSource(ASCIIToUTF16(script));
+  main_frame->executeScriptInIsolatedWorld(
+      chrome::ISOLATED_WORLD_ID_TRANSLATE,
+      &source,
+      1,
+      extensions::EXTENSION_GROUP_INTERNAL_TRANSLATE_SCRIPTS,
+      &results);
+  if (results.size() != 1 || results[0].IsEmpty() || !results[0]->IsNumber()) {
     NOTREACHED();
     return 0.0;
   }
 
-  return v->NumberValue();
+  return results[0]->NumberValue();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // TranslateHelper, private:
 //
-// static
-void TranslateHelper::CorrectLanguageCodeTypo(std::string* code) {
-  DCHECK(code);
-
-  size_t coma_index = code->find(',');
-  if (coma_index != std::string::npos) {
-    // There are more than 1 language specified, just keep the first one.
-    *code = code->substr(0, coma_index);
-  }
-  TrimWhitespaceASCII(*code, TRIM_ALL, code);
-
-  // An underscore instead of a dash is a frequent mistake.
-  size_t underscore_index = code->find('_');
-  if (underscore_index != std::string::npos)
-    (*code)[underscore_index] = '-';
-
-  // Change everything up to a dash to lower-case and everything after to upper.
-  size_t dash_index = code->find('-');
-  if (dash_index != std::string::npos) {
-    *code = StringToLowerASCII(code->substr(0, dash_index)) +
-        StringToUpperASCII(code->substr(dash_index));
-  } else {
-    *code = StringToLowerASCII(*code);
-  }
-}
-
-// static
-void TranslateHelper::ResetInvalidLanguageCode(std::string* code) {
-  // Roughly check if the language code follows [a-z][a-z](-[A-Z][A-Z]).
-  size_t dash_index = code->find('-');
-  if (!(dash_index == 2 && code->size() == 5) &&
-      !(dash_index == std::string::npos && code->size() == 2)) {
-    // Reset |language| to ignore the invalid code.
-    *code = std::string();
-  }
-}
-
-// static
-void TranslateHelper::ApplyLanguageCodeCorrection(std::string* code) {
-  // Correct well-known format errors.
-  CorrectLanguageCodeTypo(code);
-
-  // Convert language code synonym firstly because sometime synonym code is in
-  // invalid format, e.g. 'fil'. After validation, such a 3 characters language
-  // gets converted to an empty string.
-  TranslateUtil::ToTranslateLanguageSynonym(code);
-  ResetInvalidLanguageCode(code);
-}
-
-// static
-bool TranslateHelper::IsSameOrSimilarLanguages(
-    const std::string& page_language, const std::string& cld_language) {
-  // Language code part of |page_language| is matched to one of |cld_language|.
-  // Country code is ignored here.
-  if (page_language.size() >= 2 &&
-      cld_language.find(page_language.c_str(), 0, 2) == 0) {
-    // Languages are matched strictly. Reports false to metrics, but returns
-    // true.
-    TranslateHelperMetrics::ReportSimilarLanguageMatch(false);
-    return true;
-  }
-
-  // Check if |page_language| and |cld_language| are in the similar language
-  // list and belong to the same language group.
-  int page_code = GetSimilarLanguageGroupCode(page_language);
-  bool match = page_code != 0 &&
-               page_code == GetSimilarLanguageGroupCode(cld_language);
-
-  TranslateHelperMetrics::ReportSimilarLanguageMatch(match);
-  return match;
-}
-
-// static
-bool TranslateHelper::MaybeServerWrongConfiguration(
-    const std::string& page_language, const std::string& cld_language) {
-  // If |page_language| is not "en-*", respect it and just return false here.
-  if (!StartsWithASCII(page_language, "en", false))
-    return false;
-
-  // A server provides a language meta information representing "en-*". But it
-  // might be just a default value due to missing user configuration.
-  // Let's trust |cld_language| if the determined language is not difficult to
-  // distinguish from English, and the language is one of well-known languages
-  // which often provide "en-*" meta information mistakenly.
-  for (size_t i = 0; i < arraysize(kWellKnownCodesOnWrongConfiguration); ++i) {
-    if (cld_language == kWellKnownCodesOnWrongConfiguration[i])
-      return true;
-  }
-  return false;
-}
-
-// static
-bool TranslateHelper::CanCLDComplementSubCode(
-    const std::string& page_language, const std::string& cld_language) {
-  // Translate server cannot treat general Chinese. If Content-Language and
-  // CLD agree that the language is Chinese and Content-Language doesn't know
-  // which dialect is used, CLD language has priority.
-  // TODO(hajimehoshi): How about the other dialects like zh-MO?
-  return page_language == "zh" && StartsWithASCII(cld_language, "zh-", false);
-}
-
-// static
-std::string TranslateHelper::DeterminePageLanguage(const std::string& code,
-                                                   const std::string& html_lang,
-                                                   const string16& contents,
-                                                   std::string* cld_language_p,
-                                                   bool* is_cld_reliable_p) {
-#if defined(ENABLE_LANGUAGE_DETECTION)
-  base::TimeTicks begin_time = base::TimeTicks::Now();
-  bool is_cld_reliable;
-  std::string cld_language = DetermineTextLanguage(contents, &is_cld_reliable);
-  TranslateHelperMetrics::ReportLanguageDetectionTime(begin_time,
-                                                      base::TimeTicks::Now());
-
-  if (cld_language_p != NULL)
-    *cld_language_p = cld_language;
-  if (is_cld_reliable_p != NULL)
-    *is_cld_reliable_p = is_cld_reliable;
-  TranslateUtil::ToTranslateLanguageSynonym(&cld_language);
-#endif  // defined(ENABLE_LANGUAGE_DETECTION)
-
-  // Check if html lang attribute is valid.
-  std::string modified_html_lang;
-  if (!html_lang.empty()) {
-    modified_html_lang = html_lang;
-    ApplyLanguageCodeCorrection(&modified_html_lang);
-    TranslateHelperMetrics::ReportHtmlLang(html_lang, modified_html_lang);
-    VLOG(9) << "html lang based language code: " << modified_html_lang;
-  }
-
-  // Check if Content-Language is valid.
-  std::string modified_code;
-  if (!code.empty()) {
-    modified_code = code;
-    ApplyLanguageCodeCorrection(&modified_code);
-    TranslateHelperMetrics::ReportContentLanguage(code, modified_code);
-  }
-
-  // Adopt |modified_html_lang| if it is valid. Otherwise, adopt
-  // |modified_code|.
-  std::string language = modified_html_lang.empty() ? modified_code :
-                                                      modified_html_lang;
-
-#if defined(ENABLE_LANGUAGE_DETECTION)
-  // If |language| is empty, just use CLD result even though it might be
-  // chrome::kUnknownLanguageCode.
-  if (language.empty()) {
-    TranslateHelperMetrics::ReportLanguageVerification(
-        TranslateHelperMetrics::LANGUAGE_VERIFICATION_CLD_ONLY);
-    return cld_language;
-  }
-
-  if (cld_language == chrome::kUnknownLanguageCode) {
-    TranslateHelperMetrics::ReportLanguageVerification(
-        TranslateHelperMetrics::LANGUAGE_VERIFICATION_UNKNOWN);
-    return language;
-  } else if (IsSameOrSimilarLanguages(language, cld_language)) {
-    TranslateHelperMetrics::ReportLanguageVerification(
-        TranslateHelperMetrics::LANGUAGE_VERIFICATION_CLD_AGREE);
-    return language;
-  } else if (MaybeServerWrongConfiguration(language, cld_language)) {
-    TranslateHelperMetrics::ReportLanguageVerification(
-        TranslateHelperMetrics::LANGUAGE_VERIFICATION_TRUST_CLD);
-    return cld_language;
-  } else if (CanCLDComplementSubCode(language, cld_language)) {
-    TranslateHelperMetrics::ReportLanguageVerification(
-        TranslateHelperMetrics::LANGUAGE_VERIFICATION_CLD_COMPLEMENT_SUB_CODE);
-    return cld_language;
-  } else {
-    TranslateHelperMetrics::ReportLanguageVerification(
-        TranslateHelperMetrics::LANGUAGE_VERIFICATION_CLD_DISAGREE);
-    // Content-Language value might be wrong because CLD says that this page
-    // is written in another language with confidence.
-    // In this case, Chrome doesn't rely on any of the language codes, and
-    // gives up suggesting a translation.
-    return std::string(chrome::kUnknownLanguageCode);
-  }
-#else  // defined(ENABLE_LANGUAGE_DETECTION)
-  TranslateHelperMetrics::ReportLanguageVerification(
-      TranslateHelperMetrics::LANGUAGE_VERIFICATION_CLD_DISABLED);
-#endif  // defined(ENABLE_LANGUAGE_DETECTION)
-
-  return language;
-}
 
 // static
 bool TranslateHelper::IsTranslationAllowed(WebDocument* document) {
@@ -558,11 +343,30 @@ void TranslateHelper::OnTranslatePage(int page_id,
                   source_lang : kAutoDetectionLanguage;
   target_lang_ = target_lang;
 
-  TranslateHelperMetrics::ReportUserActionDuration(language_determined_time_,
+  TranslateCommonMetrics::ReportUserActionDuration(language_determined_time_,
                                                    base::TimeTicks::Now());
 
   GURL url(main_frame->document().url());
-  TranslateHelperMetrics::ReportPageScheme(url.scheme());
+  TranslateCommonMetrics::ReportPageScheme(url.scheme());
+
+  // Set up v8 isolated world with proper content-security-policy and
+  // security-origin.
+  WebFrame* frame = GetMainFrame();
+  if (frame) {
+    frame->setIsolatedWorldContentSecurityPolicy(
+        chrome::ISOLATED_WORLD_ID_TRANSLATE,
+        WebString::fromUTF8(kContentSecurityPolicy));
+
+    std::string security_origin(kSecurityOrigin);
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    if (command_line->HasSwitch(switches::kTranslateSecurityOrigin)) {
+      security_origin =
+          command_line->GetSwitchValueASCII(switches::kTranslateSecurityOrigin);
+    }
+    frame->setIsolatedWorldSecurityOrigin(
+        chrome::ISOLATED_WORLD_ID_TRANSLATE,
+        WebSecurityOrigin::create(GURL(security_origin)));
+  }
 
   if (!IsTranslateLibAvailable()) {
     // Evaluate the script to add the translation related method to the global
@@ -625,7 +429,7 @@ void TranslateHelper::CheckTranslateStatus() {
     translation_pending_ = false;
 
     // Check JavaScript performance counters for UMA reports.
-    TranslateHelperMetrics::ReportTimeToTranslate(
+    TranslateCommonMetrics::ReportTimeToTranslate(
         ExecuteScriptAndGetDoubleResult("cr.googleTranslate.translationTime"));
 
     // Notify the browser we are done.
@@ -666,9 +470,9 @@ void TranslateHelper::TranslatePageImpl(int count) {
 
   // The library is loaded, and ready for translation now.
   // Check JavaScript performance counters for UMA reports.
-  TranslateHelperMetrics::ReportTimeToBeReady(
+  TranslateCommonMetrics::ReportTimeToBeReady(
       ExecuteScriptAndGetDoubleResult("cr.googleTranslate.readyTime"));
-  TranslateHelperMetrics::ReportTimeToLoad(
+  TranslateCommonMetrics::ReportTimeToLoad(
       ExecuteScriptAndGetDoubleResult("cr.googleTranslate.loadTime"));
 
   if (!StartTranslation()) {

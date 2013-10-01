@@ -6,7 +6,7 @@
 
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chromeos/login/captive_portal_window_proxy.h"
@@ -299,8 +299,7 @@ SimpleWebViewDialog::GetContentSettingBubbleModelDelegate() {
 void SimpleWebViewDialog::ShowWebsiteSettings(
     content::WebContents* web_contents,
     const GURL& url,
-    const content::SSLStatus& ssl,
-    bool show_history) {
+    const content::SSLStatus& ssl) {
   NOTIMPLEMENTED();
   // TODO (ygorshenin@,markusheintz@): implement this
 }

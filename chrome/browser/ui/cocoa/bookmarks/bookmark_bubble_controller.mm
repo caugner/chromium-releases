@@ -9,9 +9,13 @@
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_sync_promo_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
+#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -67,6 +71,30 @@ using content::UserMetricsAction;
   [super awakeFromNib];
 
   [[nameTextField_ cell] setUsesSingleLineMode:YES];
+
+  Browser* browser = chrome::FindBrowserWithWindow(self.parentWindow);
+  if (SyncPromoUI::ShouldShowSyncPromo(browser->profile())) {
+    syncPromoController_.reset(
+        [[BookmarkSyncPromoController alloc] initWithBrowser:browser]);
+    [syncPromoPlaceholder_ addSubview:[syncPromoController_ view]];
+
+    // Resize the sync promo and its placeholder.
+    NSRect syncPromoPlaceholderFrame = [syncPromoPlaceholder_ frame];
+    CGFloat syncPromoHeight = [syncPromoController_
+        preferredHeightForWidth:syncPromoPlaceholderFrame.size.width];
+    syncPromoPlaceholderFrame.size.height = syncPromoHeight;
+
+    [syncPromoPlaceholder_ setFrame:syncPromoPlaceholderFrame];
+    [[syncPromoController_ view] setFrame:syncPromoPlaceholderFrame];
+
+    // Adjust the height of the bubble so that the sync promo fits in it,
+    // except for its bottom border. The xib file hides the left and right
+    // borders of the sync promo.
+    NSRect bubbleFrame = [[self window] frame];
+    bubbleFrame.size.height +=
+        syncPromoHeight - [syncPromoController_ borderWidth];
+    [[self window] setFrame:bubbleFrame display:YES];
+  }
 }
 
 // If this is a new bookmark somewhere visible (e.g. on the bookmark
@@ -317,6 +345,10 @@ using content::UserMetricsAction;
 
 
 @implementation BookmarkBubbleController (ExposedForUnitTesting)
+
+- (NSView*)syncPromoPlaceholder {
+  return syncPromoPlaceholder_;
+}
 
 + (NSString*)chooseAnotherFolderString {
   return l10n_util::GetNSStringWithFixup(

@@ -26,7 +26,7 @@ chrome.test.getConfig(function(config) {
     function setupTestTab() {
       chrome.test.log("Creating tab...");
       chrome.tabs.create({
-        url: "http://localhost:PORT/files/extensions/test_file.html"
+        url: "http://localhost:PORT/extensions/test_file.html"
                  .replace(/PORT/, config.testServer.port)
       }, function(newTab) {
         chrome.tabs.onUpdated.addListener(function listener(_, info, tab) {
@@ -163,6 +163,21 @@ chrome.test.getConfig(function(config) {
       port.onDisconnect.addListener(function() {
         chrome.test.succeed();
       });
+    },
+
+    // Tests that a message which fails to serialize prints an error and
+    // doesn't send (http://crbug.com/263077).
+    function unserializableMessage() {
+      try {
+        chrome.tabs.connect(testTab.id).postMessage(function() {
+          // This shouldn't ever be called, so it's a bit pointless.
+          chrome.test.fail();
+        });
+        // Didn't crash.
+        chrome.test.succeed();
+      } catch (e) {
+        chrome.test.fail(e.stack);
+      }
     },
 
     // Tests that we get the disconnect event when the tab context closes.

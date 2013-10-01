@@ -7,12 +7,15 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/policy/cloud/cloud_policy_validator.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
 
 namespace policy {
+
+class CloudExternalDataManager;
 
 // Defines the low-level interface used by the cloud policy code to:
 //   1. Validate policy blobs that should be applied locally
@@ -57,6 +60,10 @@ class CloudPolicyStore {
   // accomplished by calling Load() after startup.
   bool is_initialized() const { return is_initialized_; }
 
+  base::WeakPtr<CloudExternalDataManager> external_data_manager() const {
+    return external_data_manager_;
+  }
+
   const PolicyMap& policy_map() const { return policy_map_; }
   bool has_policy() const {
     return policy_.get() != NULL;
@@ -73,11 +80,23 @@ class CloudPolicyStore {
     return validation_status_;
   }
 
+  // Returns true if the latest policy loaded was different from the previous
+  // policy.
+  bool policy_changed() const {
+    return policy_changed_;
+  }
+
   // Store a new policy blob. Pending load/store operations will be canceled.
   // The store operation may proceed asynchronously and observers are notified
   // once the operation finishes. If successful, OnStoreLoaded() will be invoked
   // on the observers and the updated policy can be read through policy().
   // Errors generate OnStoreError() notifications.
+  // |invalidation_version| is the invalidation version of the policy to be
+  // stored.
+  void Store(
+      const enterprise_management::PolicyFetchResponse& policy,
+      int64 invalidation_version);
+
   virtual void Store(
       const enterprise_management::PolicyFetchResponse& policy) = 0;
 
@@ -93,10 +112,25 @@ class CloudPolicyStore {
   // Removes the specified observer.
   void RemoveObserver(Observer* observer);
 
+  // The invalidation version of the last policy stored. This value can be read
+  // by observers to determine which version of the policy is now available.
+  int64 invalidation_version() {
+    return invalidation_version_;
+  }
+
+  // Indicate that external data referenced by policies in this store is managed
+  // by |external_data_manager|. The |external_data_manager| will be notified
+  // about policy changes before any other observers.
+  void SetExternalDataManager(
+      base::WeakPtr<CloudExternalDataManager> external_data_manager);
+
  protected:
   // Invokes the corresponding callback on all registered observers.
   void NotifyStoreLoaded();
   void NotifyStoreError();
+
+  // Manages external data referenced by policies.
+  base::WeakPtr<CloudExternalDataManager> external_data_manager_;
 
   // Decoded version of the currently effective policy.
   PolicyMap policy_map_;
@@ -110,10 +144,20 @@ class CloudPolicyStore {
   // Latest validation status.
   CloudPolicyValidatorBase::Status validation_status_;
 
+  // The invalidation version of the last policy stored.
+  int64 invalidation_version_;
+
  private:
   // Whether the store has completed asynchronous initialization, which is
   // triggered by calling Load().
   bool is_initialized_;
+
+  // Whether latest policy loaded was different from the previous policy.
+  bool policy_changed_;
+
+  // The hash value of the current policy. This is used to determine when the
+  // policy changes.
+  uint32 hash_value_;
 
   ObserverList<Observer, true> observers_;
 

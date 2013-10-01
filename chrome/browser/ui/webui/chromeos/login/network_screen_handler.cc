@@ -8,9 +8,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
+#include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/options/chromeos/cros_language_options_handler.h"
 #include "chromeos/ime/input_method_manager.h"
@@ -21,6 +21,8 @@
 #include "ui/views/widget/widget.h"
 
 namespace {
+
+const char kJsScreenPath[] = "login.NetworkScreen";
 
 // JS API callbacks names.
 const char kJsApiNetworkOnExit[] = "networkOnExit";
@@ -33,10 +35,13 @@ namespace chromeos {
 
 // NetworkScreenHandler, public: -----------------------------------------------
 
-NetworkScreenHandler::NetworkScreenHandler()
-    : screen_(NULL),
+NetworkScreenHandler::NetworkScreenHandler(CoreOobeActor* core_oobe_actor)
+    : BaseScreenHandler(kJsScreenPath),
+      screen_(NULL),
+      core_oobe_actor_(core_oobe_actor),
       is_continue_enabled_(false),
       show_on_init_(false) {
+  DCHECK(core_oobe_actor_);
 }
 
 NetworkScreenHandler::~NetworkScreenHandler() {
@@ -66,12 +71,12 @@ void NetworkScreenHandler::Hide() {
 }
 
 void NetworkScreenHandler::ShowError(const string16& message) {
-  CallJS("login.NetworkScreen.showError", message);
+  CallJS("showError", message);
 }
 
 void NetworkScreenHandler::ClearErrors() {
   if (page_is_ready())
-    CallJS("cr.ui.Oobe.clearErrors");
+    core_oobe_actor_->ClearErrors();
 }
 
 void NetworkScreenHandler::ShowConnectingStatus(
@@ -89,7 +94,7 @@ void NetworkScreenHandler::ShowConnectingStatus(
 void NetworkScreenHandler::EnableContinue(bool enabled) {
   is_continue_enabled_ = enabled;
   if (page_is_ready())
-    CallJS("cr.ui.Oobe.enableContinueButton", enabled);
+    CallJS("enableContinueButton", enabled);
 }
 
 // NetworkScreenHandler, BaseScreenHandler implementation: --------------------
@@ -148,7 +153,8 @@ void NetworkScreenHandler::HandleOnLanguageChanged(const std::string& locale) {
   DictionaryValue localized_strings;
   static_cast<OobeUI*>(web_ui()->GetController())->GetLocalizedStrings(
       &localized_strings);
-  CallJS("cr.ui.Oobe.reloadContent", localized_strings);
+  core_oobe_actor_->ReloadContent(localized_strings);
+
   // Buttons are recreated, updated "Continue" button state.
   EnableContinue(is_continue_enabled_);
 }

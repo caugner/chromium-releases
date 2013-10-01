@@ -4,8 +4,6 @@
 """Finds CrOS browsers that can be controlled by telemetry."""
 
 import logging
-import sys
-import os
 
 from telemetry.core import browser
 from telemetry.core import possible_browser
@@ -38,7 +36,6 @@ class PossibleCrOSBrowser(possible_browser.PossibleBrowser):
         self.browser_type, self._options, self._cri, self._is_guest)
     b = browser.Browser(backend,
                         cros_platform_backend.CrosPlatformBackend(self._cri))
-    backend.SetBrowser(b)
     return b
 
   def SupportsOptions(self, options):
@@ -46,20 +43,27 @@ class PossibleCrOSBrowser(possible_browser.PossibleBrowser):
       return False
     return True
 
+def SelectDefaultBrowser(possible_browsers):
+  if cros_interface.IsRunningOnCrosDevice():
+    for b in possible_browsers:
+      if b.browser_type == 'system':
+        return b
+  return None
+
+def CanFindAvailableBrowsers(options):
+  return (cros_interface.IsRunningOnCrosDevice() or
+          options.cros_remote or
+          cros_interface.HasSSH())
+
 def FindAllAvailableBrowsers(options):
   """Finds all available chromeos browsers, locally and remotely."""
-  # Check if we are on a chromeos device.
-  lsb_release = '/etc/lsb-release'
-  if sys.platform.startswith('linux') and os.path.exists(lsb_release):
-    with open(lsb_release, 'r') as f:
-      res = f.read()
-      if res.count('CHROMEOS_RELEASE_NAME'):
-        return [PossibleCrOSBrowser('system', options,
-                                    cros_interface.CrOSInterface(),
-                                    is_guest=False),
-                PossibleCrOSBrowser('system-guest', options,
-                                    cros_interface.CrOSInterface(),
-                                    is_guest=True)]
+  if cros_interface.IsRunningOnCrosDevice():
+    return [PossibleCrOSBrowser('system', options,
+                                cros_interface.CrOSInterface(),
+                                is_guest=False),
+            PossibleCrOSBrowser('system-guest', options,
+                                cros_interface.CrOSInterface(),
+                                is_guest=True)]
 
   if options.cros_remote == None:
     logging.debug('No --remote specified, will not probe for CrOS.')

@@ -7,11 +7,12 @@
 #include "base/callback.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/processes/processes_api_constants.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/resource_provider.h"
 #include "chrome/browser/task_manager/task_manager.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -87,7 +87,6 @@ void SetProcessType(base::DictionaryValue* result,
     case task_manager::Resource::GPU:
       type = keys::kProcessTypeGPU;
       break;
-    case task_manager::Resource::PROFILE_IMPORT:
     case task_manager::Resource::ZYGOTE:
     case task_manager::Resource::SANDBOX_HELPER:
     case task_manager::Resource::UNKNOWN:

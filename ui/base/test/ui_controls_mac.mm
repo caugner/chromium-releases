@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ui/base/keycodes/keyboard_code_conversion_mac.h"
 
 
@@ -107,7 +107,7 @@ NSEvent* SynthesizeKeyEvent(NSWindow* window,
   // location should be fine.
   NSEvent* event =
       [NSEvent keyEventWithType:type
-                       location:NSMakePoint(0, 0)
+                       location:NSZeroPoint
                   modifierFlags:flags
                       timestamp:TimeIntervalSinceSystemStartup()
                    windowNumber:[window windowNumber]

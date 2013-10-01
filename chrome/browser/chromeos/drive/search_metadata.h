@@ -9,10 +9,15 @@
 
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 
+namespace base {
+namespace i18n {
+class FixedPatternStringSearchIgnoringCaseAndAccents;
+}  // namespace i18n
+}  // namespace base
+
 namespace drive {
 namespace internal {
 
-class FileCache;
 class ResourceMetadata;
 
 // Searches the local resource metadata, and returns the entries
@@ -25,7 +30,6 @@ class ResourceMetadata;
 void SearchMetadata(
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
     ResourceMetadata* resource_metadata,
-    FileCache* cache,
     const std::string& query,
     int search_options,
     int at_most_num_matches,
@@ -38,9 +42,10 @@ void SearchMetadata(
 // text with matched portions highlighted with <b> tag (only the first match
 // is highlighted). Meta characters are escaped like &lt;. The original
 // contents of |highlighted_text| will be lost.
-bool FindAndHighlight(const std::string& text,
-                      const std::string& query,
-                      std::string* highlighted_text);
+bool FindAndHighlight(
+    const std::string& text,
+    base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents* query,
+    std::string* highlighted_text);
 
 }  // namespace internal
 }  // namespace drive

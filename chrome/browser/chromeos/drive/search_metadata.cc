@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/i18n/string_search.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/escape.h"
@@ -83,7 +82,7 @@ class ScopedPriorityQueue {
 // SEARCH_METADATA_OFFLINE is requested, only hosted documents and cached files
 // match with the query. This option can not be used with other options.
 bool IsEligibleEntry(const ResourceEntry& entry,
-                     internal::FileCache* cache,
+                     ResourceMetadata::Iterator* it,
                      int options) {
   if ((options & SEARCH_METADATA_EXCLUDE_HOSTED_DOCUMENTS) &&
       entry.file_specific_info().is_hosted_document())
@@ -100,9 +99,7 @@ bool IsEligibleEntry(const ResourceEntry& entry,
     if (entry.file_specific_info().is_hosted_document())
       return true;
     FileCacheEntry cache_entry;
-    cache->GetCacheEntry(entry.resource_id(),
-                         std::string(),
-                         &cache_entry);
+    it->GetCacheEntry(&cache_entry);
     return cache_entry.is_present();
   }
 
@@ -117,16 +114,19 @@ bool IsEligibleEntry(const ResourceEntry& entry,
 
 // Used to implement SearchMetadata.
 // Adds entry to the result when appropriate.
+// In particular, if |query| is non-null, only adds files with the name matching
+// the query.
 void MaybeAddEntryToResult(
     ResourceMetadata* resource_metadata,
-    FileCache* cache,
-    const std::string& query,
+    ResourceMetadata::Iterator* it,
+    base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents* query,
     int options,
     size_t at_most_num_matches,
     ScopedPriorityQueue<MetadataSearchResult,
-                        MetadataSearchResultComparator>* result_candidates,
-    const ResourceEntry& entry) {
+                        MetadataSearchResultComparator>* result_candidates) {
   DCHECK_GE(at_most_num_matches, result_candidates->size());
+
+  const ResourceEntry& entry = it->Get();
 
   // If the candidate set is already full, and this |entry| is old, do nothing.
   // We perform this check first in order to avoid the costly find-and-highlight
@@ -139,55 +139,71 @@ void MaybeAddEntryToResult(
   // |options| and matches the query. The base name of the entry must
   // contain |query| to match the query.
   std::string highlighted;
-  if (!IsEligibleEntry(entry, cache, options) ||
-      !FindAndHighlight(entry.base_name(), query, &highlighted))
-    return;
-
-  base::FilePath path = resource_metadata->GetFilePath(entry.resource_id());
-  if (path.empty())
+  if (!IsEligibleEntry(entry, it, options) ||
+      (query && !FindAndHighlight(entry.base_name(), query, &highlighted)))
     return;
 
   // Make space for |entry| when appropriate.
   if (result_candidates->size() == at_most_num_matches)
     result_candidates->pop();
-  result_candidates->push(new MetadataSearchResult(path, entry, highlighted));
+  result_candidates->push(new MetadataSearchResult(entry, highlighted));
 }
 
 // Implements SearchMetadata().
-scoped_ptr<MetadataSearchResultVector> SearchMetadataOnBlockingPool(
-    ResourceMetadata* resource_metadata,
-    FileCache* cache,
-    const std::string& query,
-    int options,
-    int at_most_num_matches) {
+FileError SearchMetadataOnBlockingPool(ResourceMetadata* resource_metadata,
+                                       const std::string& query_text,
+                                       int options,
+                                       int at_most_num_matches,
+                                       MetadataSearchResultVector* results) {
   ScopedPriorityQueue<MetadataSearchResult,
                       MetadataSearchResultComparator> result_candidates;
+
+  // Prepare data structure for searching.
+  base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents query(
+      base::UTF8ToUTF16(query_text));
 
   // Iterate over entries.
   scoped_ptr<ResourceMetadata::Iterator> it = resource_metadata->GetIterator();
   for (; !it->IsAtEnd(); it->Advance()) {
-    MaybeAddEntryToResult(resource_metadata, cache, query, options,
-                          at_most_num_matches, &result_candidates, it->Get());
+    MaybeAddEntryToResult(resource_metadata, it.get(),
+                          query_text.empty() ? NULL : &query,
+                          options,
+                          at_most_num_matches, &result_candidates);
   }
 
   // Prepare the result.
-  scoped_ptr<MetadataSearchResultVector> results(
-      new MetadataSearchResultVector);
-  for (; !result_candidates.empty(); result_candidates.pop())
+  for (; !result_candidates.empty(); result_candidates.pop()) {
+    // The path field of entries in result_candidates are empty at this point,
+    // because we don't want to run the expensive metadata DB look up except for
+    // the final results. Hence, here we fill the part.
+    base::FilePath path = resource_metadata->GetFilePath(
+        result_candidates.top()->entry.resource_id());
+    if (path.empty())
+      return FILE_ERROR_FAILED;
     results->push_back(*result_candidates.top());
+    results->back().path = path;
+  }
 
   // Reverse the order here because |result_candidates| puts the most
   // uninteresting candidate at the top.
   std::reverse(results->begin(), results->end());
 
-  return results.Pass();
+  return FILE_ERROR_OK;
 }
+
+void RunSearchMetadataCallback(const SearchMetadataCallback& callback,
+                               scoped_ptr<MetadataSearchResultVector> results,
+                               FileError error) {
+  if (error != FILE_ERROR_OK)
+    results.reset();
+  callback.Run(error, results.Pass());
+}
+
 }  // namespace
 
 void SearchMetadata(
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
     ResourceMetadata* resource_metadata,
-    FileCache* cache,
     const std::string& query,
     int options,
     int at_most_num_matches,
@@ -196,45 +212,44 @@ void SearchMetadata(
   DCHECK_LE(0, at_most_num_matches);
   DCHECK(!callback.is_null());
 
-  // TODO(hashimoto): Report error code from ResourceMetadata::IterateEntries
-  // and stop binding FILE_ERROR_OK to |callback|.
+  scoped_ptr<MetadataSearchResultVector> results(
+      new MetadataSearchResultVector);
+  MetadataSearchResultVector* results_ptr = results.get();
   base::PostTaskAndReplyWithResult(blocking_task_runner.get(),
                                    FROM_HERE,
                                    base::Bind(&SearchMetadataOnBlockingPool,
                                               resource_metadata,
-                                              cache,
                                               query,
                                               options,
-                                              at_most_num_matches),
-                                   base::Bind(callback, FILE_ERROR_OK));
+                                              at_most_num_matches,
+                                              results_ptr),
+                                   base::Bind(&RunSearchMetadataCallback,
+                                              callback,
+                                              base::Passed(&results)));
 }
 
-bool FindAndHighlight(const std::string& text,
-                      const std::string& query,
-                      std::string* highlighted_text) {
+bool FindAndHighlight(
+    const std::string& text,
+    base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents* query,
+    std::string* highlighted_text) {
+  DCHECK(query);
   DCHECK(highlighted_text);
   highlighted_text->clear();
 
-  // For empty query, any filename matches with no highlighted text.
-  if (query.empty())
-    return true;
-
   string16 text16 = base::UTF8ToUTF16(text);
-  string16 query16 = base::UTF8ToUTF16(query);
   size_t match_start = 0;
   size_t match_length = 0;
-  if (!base::i18n::StringSearchIgnoringCaseAndAccents(
-      query16, text16, &match_start, &match_length)) {
+  if (!query->Search(text16, &match_start, &match_length))
     return false;
-  }
+
   string16 pre = text16.substr(0, match_start);
   string16 match = text16.substr(match_start, match_length);
   string16 post = text16.substr(match_start + match_length);
-  highlighted_text->append(net::EscapeForHTML(UTF16ToUTF8(pre)));
+  highlighted_text->append(net::EscapeForHTML(base::UTF16ToUTF8(pre)));
   highlighted_text->append("<b>");
-  highlighted_text->append(net::EscapeForHTML(UTF16ToUTF8(match)));
+  highlighted_text->append(net::EscapeForHTML(base::UTF16ToUTF8(match)));
   highlighted_text->append("</b>");
-  highlighted_text->append(net::EscapeForHTML(UTF16ToUTF8(post)));
+  highlighted_text->append(net::EscapeForHTML(base::UTF16ToUTF8(post)));
   return true;
 }
 
