@@ -12,19 +12,16 @@
 #include "base/callback.h"
 #include "chromeos/attestation/attestation_constants.h"
 #include "chromeos/chromeos_export.h"
+#include "chromeos/dbus/dbus_client.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
-
-namespace dbus {
-class Bus;
-}
 
 namespace chromeos {
 
 // CryptohomeClient is used to communicate with the Cryptohome service.
 // All method should be called from the origin thread (UI thread) which
 // initializes the DBusThreadManager instance.
-class CHROMEOS_EXPORT CryptohomeClient {
+class CHROMEOS_EXPORT CryptohomeClient : public DBusClient {
  public:
   // A callback to handle AsyncCallStatus signals.
   typedef base::Callback<void(int async_id,
@@ -52,8 +49,7 @@ class CHROMEOS_EXPORT CryptohomeClient {
 
   // Factory function, creates a new instance and returns ownership.
   // For normal usage, access the singleton via DBusThreadManager::Get().
-  static CryptohomeClient* Create(DBusClientImplementationType type,
-                                  dbus::Bus* bus);
+  static CryptohomeClient* Create(DBusClientImplementationType type);
 
   // Returns the sanitized |username| that the stub implementation would return.
   static std::string GetStubSanitizedUsername(const std::string& username);
@@ -250,14 +246,18 @@ class CHROMEOS_EXPORT CryptohomeClient {
       const AsyncMethodCallback& callback) = 0;
 
   // Asynchronously creates an attestation certificate request according to
-  // |options|, which is a combination of AttestationCertificateOptions.
-  // |callback| will be called when the dbus call completes.  When the operation
-  // completes, the AsyncCallStatusWithDataHandler signal handler is called.
-  // The data that is sent with the signal is a certificate request to be sent
-  // to the Privacy CA.  The certificate request is completed by calling
-  // AsyncTpmAttestationFinishCertRequest.
+  // |certificate_profile|.  Some profiles require that the |user_email| of the
+  // currently active user and an identifier of the |request_origin| be
+  // provided.  |callback| will be called when the dbus call completes.  When
+  // the operation completes, the AsyncCallStatusWithDataHandler signal handler
+  // is called.  The data that is sent with the signal is a certificate request
+  // to be sent to the Privacy CA.  The certificate request is completed by
+  // calling AsyncTpmAttestationFinishCertRequest.  The |user_email| will not
+  // be included in the certificate request for the Privacy CA.
   virtual void AsyncTpmAttestationCreateCertRequest(
-      int options,
+      attestation::AttestationCertificateProfile certificate_profile,
+      const std::string& user_email,
+      const std::string& request_origin,
       const AsyncMethodCallback& callback) = 0;
 
   // Asynchronously finishes a certificate request operation.  The callback will

@@ -24,8 +24,6 @@ const char kAccountsPrefDeviceLocalAccountsKeyType[] =
     "type";
 const char kAccountsPrefDeviceLocalAccountsKeyKioskAppId[] =
     "kiosk_app_id";
-const char kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL[] =
-    "kiosk_app_id_update_url";
 const char kAccountsPrefDeviceLocalAccountAutoLoginId[] =
     "cros.accounts.deviceLocalAccountAutoLoginId";
 const char kAccountsPrefDeviceLocalAccountAutoLoginDelay[] =
@@ -130,7 +128,13 @@ const char kStartUpFlags[] = "cros.startup_flags";
 const char kVariationsRestrictParameter[] =
     "cros.variations_restrict_parameter";
 
-// A boolean pref that indicates whether attestation is enabled for the device.
+// A boolean pref that indicates whether enterprise attestation is enabled for
+// the device.
 const char kDeviceAttestationEnabled[] = "cros.device.attestation_enabled";
+
+// A boolean pref that indicates whether attestation for content protection is
+// enabled for the device.
+const char kAttestationForContentProtectionEnabled[] =
+    "cros.device.attestation_for_content_protection_enabled";
 
 }  // namespace chromeos

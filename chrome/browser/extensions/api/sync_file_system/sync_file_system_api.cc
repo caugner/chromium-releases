@@ -14,7 +14,7 @@
 #include "chrome/browser/extensions/api/sync_file_system/extension_sync_event_observer_factory.h"
 #include "chrome/browser/extensions/api/sync_file_system/sync_file_system_api_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync_file_system/drive_backend/drive_file_sync_service.h"
+#include "chrome/browser/sync_file_system/drive_backend_v1/drive_file_sync_service.h"
 #include "chrome/browser/sync_file_system/sync_file_status.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service_factory.h"
@@ -99,23 +99,31 @@ void SyncFileSystemDeleteFileSystemFunction::DidDeleteFileSystem(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (error != base::PLATFORM_FILE_OK) {
     error_ = base::StringPrintf(kFileError, static_cast<int>(error));
-    SetResult(base::Value::CreateBooleanValue(false));
+    SetResult(new base::FundamentalValue(false));
     SendResponse(false);
     return;
   }
 
-  SetResult(base::Value::CreateBooleanValue(true));
+  SetResult(new base::FundamentalValue(true));
   SendResponse(true);
 }
 
 bool SyncFileSystemRequestFileSystemFunction::RunImpl() {
+  // SyncFileSystem initialization is done in OpenFileSystem below, but we call
+  // GetSyncFileSystemService here too to initialize sync event observer for
+  // extensions API.
+  GetSyncFileSystemService(profile());
+
   // Initializes sync context for this extension and continue to open
   // a new file system.
-  GetSyncFileSystemService(profile())->
-      InitializeForApp(
-          GetFileSystemContext(),
-          source_url().GetOrigin(),
-          base::Bind(&self::DidInitializeFileSystemContext, this));
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      Bind(&fileapi::FileSystemContext::OpenFileSystem,
+           GetFileSystemContext(),
+           source_url().GetOrigin(),
+           fileapi::kFileSystemTypeSyncable,
+           fileapi::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
+           base::Bind(&self::DidOpenFileSystem, this)));
   return true;
 }
 
@@ -125,29 +133,6 @@ SyncFileSystemRequestFileSystemFunction::GetFileSystemContext() {
   return BrowserContext::GetStoragePartition(
       profile(),
       render_view_host()->GetSiteInstance())->GetFileSystemContext();
-}
-
-void SyncFileSystemRequestFileSystemFunction::DidInitializeFileSystemContext(
-    SyncStatusCode status) {
-  if (status != sync_file_system::SYNC_STATUS_OK) {
-    error_ = sync_file_system::SyncStatusCodeToString(status);
-    SendResponse(false);
-    return;
-  }
-
-  if (!render_view_host()) {
-    // The app seems to have been closed.
-    return;
-  }
-
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      Bind(&fileapi::FileSystemContext::OpenFileSystem,
-           GetFileSystemContext(),
-           source_url().GetOrigin(),
-           fileapi::kFileSystemTypeSyncable,
-           fileapi::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
-           base::Bind(&self::DidOpenFileSystem, this)));
 }
 
 void SyncFileSystemRequestFileSystemFunction::DidOpenFileSystem(
@@ -189,7 +174,7 @@ bool SyncFileSystemGetFileStatusFunction::RunImpl() {
   fileapi::FileSystemURL file_system_url(
       file_system_context->CrackURL(GURL(url)));
 
-  SyncFileSystemServiceFactory::GetForProfile(profile())->GetFileSyncStatus(
+  GetSyncFileSystemService(profile())->GetFileSyncStatus(
       file_system_url,
       Bind(&SyncFileSystemGetFileStatusFunction::DidGetFileStatus,
            this));
@@ -234,7 +219,7 @@ bool SyncFileSystemGetFileStatusesFunction::RunImpl() {
   num_results_received_ = 0;
   file_sync_statuses_.clear();
   sync_file_system::SyncFileSystemService* sync_file_system_service =
-      SyncFileSystemServiceFactory::GetForProfile(profile());
+      GetSyncFileSystemService(profile());
   for (unsigned int i = 0; i < num_expected_results_; i++) {
     std::string url;
     file_entry_urls->GetString(i, &url);
@@ -380,8 +365,16 @@ bool SyncFileSystemGetConflictResolutionPolicyFunction::RunImpl() {
   api::sync_file_system::ConflictResolutionPolicy policy =
       ConflictResolutionPolicyToExtensionEnum(
           service->GetConflictResolutionPolicy());
-  SetResult(Value::CreateStringValue(
+  SetResult(new base::StringValue(
           api::sync_file_system::ToString(policy)));
+  return true;
+}
+
+bool SyncFileSystemGetServiceStatusFunction::RunImpl() {
+  sync_file_system::SyncFileSystemService* service = GetSyncFileSystemService(
+      profile());
+  results_ = api::sync_file_system::GetServiceStatus::Results::Create(
+      SyncServiceStateToExtensionEnum(service->GetSyncServiceState()));
   return true;
 }
 

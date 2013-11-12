@@ -8,15 +8,23 @@
 #include "apps/shell_window.h"
 #include "apps/shell_window_registry.h"
 #include "base/command_line.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/app_current_window_internal.h"
 #include "chrome/common/extensions/api/app_window.h"
 #include "chrome/common/extensions/features/feature_channel.h"
+#include "chrome/common/extensions/features/simple_feature.h"
 #include "extensions/common/switches.h"
+#include "third_party/skia/include/core/SkRegion.h"
+
+namespace SetBounds = extensions::api::app_current_window_internal::SetBounds;
+namespace SetIcon = extensions::api::app_current_window_internal::SetIcon;
+namespace SetInputRegion =
+    extensions::api::app_current_window_internal::SetInputRegion;
 
 using apps::ShellWindow;
-namespace SetBounds = extensions::api::app_current_window_internal::SetBounds;
 using extensions::api::app_current_window_internal::Bounds;
-namespace SetIcon = extensions::api::app_current_window_internal::SetIcon;
+using extensions::api::app_current_window_internal::Region;
+using extensions::api::app_current_window_internal::RegionRect;
 
 namespace extensions {
 
@@ -139,6 +147,58 @@ bool AppCurrentWindowInternalSetIconFunction::RunWithWindow(
     url = GetExtension()->GetResourceURL(params->icon_url);
 
   window->SetAppIconUrl(url);
+  return true;
+}
+
+bool AppCurrentWindowInternalSetInputRegionFunction::RunWithWindow(
+    ShellWindow* window) {
+
+  const char* whitelist[] = {
+    "EBA908206905323CECE6DC4B276A58A0F4AC573F",
+    "2775E568AC98F9578791F1EAB65A1BF5F8CEF414",
+    "4AA3C5D69A4AECBD236CAD7884502209F0F5C169",
+    "E410CDAB2C6E6DD408D731016CECF2444000A912",
+    "9E930B2B5EABA6243AE6C710F126E54688E8FAF6"
+  };
+  if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV &&
+      !SimpleFeature::IsIdInWhitelist(
+          GetExtension()->id(),
+          std::set<std::string>(whitelist,
+                                whitelist + arraysize(whitelist)))) {
+    error_ = kDevChannelOnly;
+    return false;
+  }
+
+  scoped_ptr<SetInputRegion::Params> params(
+      SetInputRegion::Params::Create(*args_));
+  const Region& inputRegion = params->region;
+
+  // Build a region from the supplied list of rects.
+  // If |rects| is missing, then the input region is removed. This clears the
+  // input region so that the entire window accepts input events.
+  // To specify an empty input region (so the window ignores all input),
+  // |rects| should be an empty list.
+  scoped_ptr<SkRegion> region(new SkRegion);
+  if (inputRegion.rects) {
+    for (std::vector<linked_ptr<RegionRect> >::const_iterator i =
+             inputRegion.rects->begin();
+         i != inputRegion.rects->end();
+         ++i) {
+      const RegionRect& inputRect = **i;
+      int32_t x = inputRect.left;
+      int32_t y = inputRect.top;
+      int32_t width = inputRect.width;
+      int32_t height = inputRect.height;
+
+      SkIRect rect = SkIRect::MakeXYWH(x, y, width, height);
+      region->op(rect, SkRegion::kUnion_Op);
+    }
+  } else {
+    region.reset(NULL);
+  }
+
+  window->UpdateInputRegion(region.Pass());
+
   return true;
 }
 

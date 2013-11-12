@@ -17,7 +17,7 @@
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "ipc/ipc_channel_handle.h"
-#include "net/socket/tcp_listen_socket.h"
+#include "net/socket/socket_descriptor.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
 #include "url/gurl.h"
 
@@ -35,6 +35,10 @@ namespace IPC {
 class ChannelProxy;
 }
 
+namespace nacl {
+void* AllocateAddressSpaceASLR(base::ProcessHandle process, size_t size);
+}
+
 // Represents the browser side of the browser <--> NaCl communication
 // channel. There will be one NaClProcessHost per NaCl process
 // The browser is responsible for starting the NaCl process
@@ -47,6 +51,15 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   // executed.
   // render_view_id: RenderView routing id, to control access to private APIs.
   // permission_bits: controls which interfaces the NaCl plugin can use.
+  // uses_irt: whether the launched process should use the IRT.
+  // enable_dyncode_syscalls: whether the launched process should allow dyncode
+  //                          and mmap with PROT_EXEC.
+  // enable_exception_handling: whether the launched process should allow
+  //                            hardware exception handling.
+  // enable_crash_throttling: whether a crash of this process contributes
+  //                          to the crash throttling statistics, and also
+  //                          whether this process should not start when too
+  //                          many crashes have been observed.
   // off_the_record: was the process launched from an incognito renderer?
   // profile_directory: is the path of current profile directory.
   NaClProcessHost(const GURL& manifest_url,
@@ -55,9 +68,12 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
                   bool uses_irt,
                   bool enable_dyncode_syscalls,
                   bool enable_exception_handling,
+                  bool enable_crash_throttling,
                   bool off_the_record,
                   const base::FilePath& profile_directory);
   virtual ~NaClProcessHost();
+
+  virtual void OnProcessCrashed(int exit_status) OVERRIDE;
 
   // Do any minimal work that must be done at browser startup.
   static void EarlyStartup(NaClBrowserDelegate* delegate);
@@ -106,7 +122,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   // Create bound TCP socket in the browser process so that the NaCl GDB debug
   // stub can use it to accept incoming connections even when the Chrome sandbox
   // is enabled.
-  SocketDescriptor GetDebugStubSocketHandle();
+  net::SocketDescriptor GetDebugStubSocketHandle();
 #endif
   bool LaunchSelLdr();
 
@@ -204,6 +220,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   bool enable_debug_stub_;
   bool enable_dyncode_syscalls_;
   bool enable_exception_handling_;
+  bool enable_crash_throttling_;
 
   bool off_the_record_;
 

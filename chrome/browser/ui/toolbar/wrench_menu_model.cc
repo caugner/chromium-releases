@@ -204,6 +204,7 @@ void ToolsMenuModel::Build(Browser* browser) {
 
   AddSeparator(ui::NORMAL_SEPARATOR);
 
+#if defined(GOOGLE_CHROME_BUILD)
 #if !defined(OS_CHROMEOS)
   // Show IDC_FEEDBACK in "Tools" menu for non-ChromeOS platforms.
   if (!chrome::UseAlternateSendFeedbackLocation()) {
@@ -218,6 +219,7 @@ void ToolsMenuModel::Build(Browser* browser) {
     AddSeparator(ui::NORMAL_SEPARATOR);
   }
 #endif
+#endif // GOOGLE_CHROME_BUILD
 
   encoding_menu_model_.reset(new EncodingMenuModel(browser));
   AddSubMenuWithStringId(IDC_ENCODING_MENU, IDS_ENCODING_MENU,
@@ -633,11 +635,13 @@ void WrenchMenuModel::Build(bool is_new_menu) {
     }
   }
 
+#if defined(GOOGLE_CHROME_BUILD)
   if (browser_defaults::kShowFeedbackMenuItem &&
       !chrome::UseAlternateSendFeedbackLocation()) {
     AddItemWithStringId(IDC_FEEDBACK,
                         chrome::GetSendFeedbackMenuLabelID());
   }
+#endif
 
   AddGlobalErrorMenuItems();
 
@@ -646,7 +650,7 @@ void WrenchMenuModel::Build(bool is_new_menu) {
                            tools_menu_model_.get());
   }
 
-#if !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
   // For Send Feedback Link experiment (crbug.com/169339).
   if (chrome::UseAlternateSendFeedbackLocation())
     AddItemWithStringId(IDC_FEEDBACK,
@@ -671,18 +675,24 @@ void WrenchMenuModel::AddGlobalErrorMenuItems() {
   // it won't show in the existing wrench menu. To fix this we need to some
   // how update the menu if new errors are added.
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  // GetSignedInServiceErrors() can modify the global error list, so call it
+  // before iterating through that list below.
+  std::vector<GlobalError*> signin_errors =
+      signin_ui_util::GetSignedInServiceErrors(
+          browser_->profile()->GetOriginalProfile());
   const GlobalErrorService::GlobalErrorList& errors =
       GlobalErrorServiceFactory::GetForProfile(browser_->profile())->errors();
   for (GlobalErrorService::GlobalErrorList::const_iterator
        it = errors.begin(); it != errors.end(); ++it) {
     GlobalError* error = *it;
+    // Verify that we're not getting NULL errors. TODO(sail) Make this a DCHECK
+    // once crbug.com/278543 is fixed.
+    CHECK(error);
     if (error->HasMenuItem()) {
-      // Don't add a signin error if it's already being displayed elsewhere.
 #if !defined(OS_CHROMEOS)
-      std::vector<GlobalError*> errors =
-          signin_ui_util::GetSignedInServiceErrors(
-              browser_->profile()->GetOriginalProfile());
-      if (std::find(errors.begin(), errors.end(), error) != errors.end()) {
+      // Don't add a signin error if it's already being displayed elsewhere.
+      if (std::find(signin_errors.begin(), signin_errors.end(), error) !=
+          signin_errors.end()) {
         MenuModel* model = this;
         int index = 0;
         if (MenuModel::GetModelAndIndexForCommandId(

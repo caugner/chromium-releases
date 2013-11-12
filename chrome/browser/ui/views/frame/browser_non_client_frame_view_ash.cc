@@ -4,13 +4,13 @@
 
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view_ash.h"
 
-#include "ash/shell_delegate.h"
+#include "ash/ash_switches.h"
+#include "ash/wm/caption_buttons/frame_caption_button_container_view.h"
 #include "ash/wm/frame_painter.h"
-#include "ash/wm/workspace/frame_maximize_button.h"
 #include "chrome/browser/themes/theme_properties.h"
-#include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/immersive_fullscreen_configuration.h"
+#include "chrome/browser/ui/views/avatar_label.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/ash_resources.h"
-#include "grit/generated_resources.h"  // Accessibility names
 #include "grit/theme_resources.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
@@ -30,10 +29,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/compositor/layer_animator.h"
-#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
@@ -65,6 +62,13 @@ const int kTabstripTopSpacingShort = 0;
 // to hit easily.
 const int kTabShadowHeight = 4;
 
+// Space between right edge of tabstrip and caption buttons when using the
+// alternate caption button style.
+const int kTabstripRightSpacingAlternateCaptionButtonStyle = 0;
+// Space between top of window and top of tabstrip for short headers when using
+// the alternate caption button style.
+const int kTabstripTopSpacingShortAlternateCaptionButtonStyle = 4;
+
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -77,28 +81,18 @@ const char BrowserNonClientFrameViewAsh::kViewClassName[] =
 BrowserNonClientFrameViewAsh::BrowserNonClientFrameViewAsh(
     BrowserFrame* frame, BrowserView* browser_view)
     : BrowserNonClientFrameView(frame, browser_view),
-      size_button_(NULL),
-      close_button_(NULL),
+      caption_button_container_(NULL),
       window_icon_(NULL),
-      frame_painter_(new ash::FramePainter),
-      size_button_minimizes_(false) {
+      frame_painter_(new ash::FramePainter) {
 }
 
 BrowserNonClientFrameViewAsh::~BrowserNonClientFrameViewAsh() {
 }
 
 void BrowserNonClientFrameViewAsh::Init() {
-  // Panels only minimize.
-  ash::FramePainter::SizeButtonBehavior size_button_behavior;
-  size_button_ = new ash::FrameMaximizeButton(this, this);
-  size_button_behavior = ash::FramePainter::SIZE_BUTTON_MAXIMIZES;
-  size_button_->SetAccessibleName(
-      l10n_util::GetStringUTF16(IDS_ACCNAME_MAXIMIZE));
-  AddChildView(size_button_);
-  close_button_ = new views::ImageButton(this);
-  close_button_->SetAccessibleName(
-      l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
-  AddChildView(close_button_);
+  caption_button_container_ = new ash::FrameCaptionButtonContainerView(frame(),
+      ash::FrameCaptionButtonContainerView::MINIMIZE_ALLOWED);
+  AddChildView(caption_button_container_);
 
   // Initializing the TabIconView is expensive, so only do it if we need to.
   if (browser_view()->ShouldShowWindowIcon()) {
@@ -111,9 +105,8 @@ void BrowserNonClientFrameViewAsh::Init() {
   // Create incognito icon if necessary.
   UpdateAvatarInfo();
 
-  // Frame painter handles layout of these buttons.
-  frame_painter_->Init(frame(), window_icon_, size_button_, close_button_,
-                       size_button_behavior);
+  // Frame painter handles layout.
+  frame_painter_->Init(frame(), window_icon_, caption_button_container_);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -140,7 +133,10 @@ BrowserNonClientFrameViewAsh::GetTabStripInsets(bool force_restored) const {
   int left = avatar_button() ? kAvatarSideSpacing +
       browser_view()->GetOTRAvatarIcon().width() + kAvatarSideSpacing :
       kTabstripLeftSpacing;
-  int right = frame_painter_->GetRightInset() + kTabstripRightSpacing;
+  int extra_right = ash::switches::UseAlternateFrameCaptionButtonStyle() ?
+      kTabstripRightSpacingAlternateCaptionButtonStyle :
+      kTabstripRightSpacing;
+  int right = frame_painter_->GetRightInset() + extra_right;
   return TabStripInsets(NonClientTopBorderHeight(force_restored), left, right);
 }
 
@@ -170,6 +166,14 @@ gfx::Rect BrowserNonClientFrameViewAsh::GetWindowBoundsForClientBounds(
 
 int BrowserNonClientFrameViewAsh::NonClientHitTest(const gfx::Point& point) {
   int hit_test = frame_painter_->NonClientHitTest(this, point);
+
+  // See if the point is actually within the avatar menu button or within
+  // the avatar label.
+  if (hit_test == HTCAPTION && ((avatar_button() &&
+       avatar_button()->GetMirroredBounds().Contains(point)) ||
+      (avatar_label() && avatar_label()->GetMirroredBounds().Contains(point))))
+      return HTCLIENT;
+
   // When the window is restored we want a large click target above the tabs
   // to drag the window, so redirect clicks in the tab's shadow to caption.
   if (hit_test == HTCLIENT &&
@@ -195,11 +199,9 @@ void BrowserNonClientFrameViewAsh::ResetWindowControls() {
   // is visible because it's confusing when the user hovers or clicks in the
   // top-right of the screen and hits one.
   bool button_visibility = !UseImmersiveLightbarHeaderStyle();
-  size_button_->SetVisible(button_visibility);
-  close_button_->SetVisible(button_visibility);
+  caption_button_container_->SetVisible(button_visibility);
 
-  size_button_->SetState(views::CustomButton::STATE_NORMAL);
-  // The close button isn't affected by this constraint.
+  caption_button_container_->ResetWindowControls();
 }
 
 void BrowserNonClientFrameViewAsh::UpdateWindowIcon() {
@@ -328,48 +330,6 @@ void BrowserNonClientFrameViewAsh::OnThemeChanged() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// views::ButtonListener overrides:
-
-void BrowserNonClientFrameViewAsh::ButtonPressed(views::Button* sender,
-                                                 const ui::Event& event) {
-  // When shift-clicking slow down animations for visual debugging.
-  // We used to do this via an event filter that looked for the shift key being
-  // pressed but this interfered with several normal keyboard shortcuts.
-  scoped_ptr<ui::ScopedAnimationDurationScaleMode> slow_duration_mode;
-  if (event.IsShiftDown()) {
-    slow_duration_mode.reset(new ui::ScopedAnimationDurationScaleMode(
-        ui::ScopedAnimationDurationScaleMode::SLOW_DURATION));
-  }
-
-  ash::UserMetricsAction action =
-      ash::UMA_WINDOW_MAXIMIZE_BUTTON_CLICK_MAXIMIZE;
-
-  if (sender == size_button_) {
-    // The maximize button may move out from under the cursor.
-    ResetWindowControls();
-    if (size_button_minimizes_) {
-      frame()->Minimize();
-      action = ash::UMA_WINDOW_MAXIMIZE_BUTTON_CLICK_MINIMIZE;
-    } else if (frame()->IsFullscreen()) { // Can be clicked in immersive mode.
-      frame()->SetFullscreen(false);
-      action = ash::UMA_WINDOW_MAXIMIZE_BUTTON_CLICK_EXIT_FULLSCREEN;
-    } else if (frame()->IsMaximized()) {
-      frame()->Restore();
-      action = ash::UMA_WINDOW_MAXIMIZE_BUTTON_CLICK_RESTORE;
-    } else {
-      frame()->Maximize();
-    }
-    // |this| may be deleted - some windows delete their frames on maximize.
-  } else if (sender == close_button_) {
-    frame()->Close();
-    action = ash::UMA_WINDOW_CLOSE_BUTTON_CLICK;
-  } else {
-    return;
-  }
-  ChromeShellDelegate::instance()->RecordUserMetricsAction(action);
-}
-
-///////////////////////////////////////////////////////////////////////////////
 // chrome::TabIconViewModel overrides:
 
 bool BrowserNonClientFrameViewAsh::ShouldTabIconViewAnimate() const {
@@ -390,7 +350,6 @@ gfx::ImageSkia BrowserNonClientFrameViewAsh::GetFaviconForTabIconView() {
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserNonClientFrameViewAsh, private:
 
-
 int BrowserNonClientFrameViewAsh::NonClientTopBorderHeight(
     bool force_restored) const {
   if (force_restored)
@@ -399,13 +358,16 @@ int BrowserNonClientFrameViewAsh::NonClientTopBorderHeight(
     return 0;
   // Windows with tab strips need a smaller non-client area.
   if (browser_view()->IsTabStripVisible()) {
-    if (UseShortHeader())
+    if (UseShortHeader()) {
+      if (ash::switches::UseAlternateFrameCaptionButtonStyle())
+        return kTabstripTopSpacingShortAlternateCaptionButtonStyle;
       return kTabstripTopSpacingShort;
+    }
     return kTabstripTopSpacingTall;
   }
   // For windows without a tab strip (popups, etc.) ensure we have enough space
   // to see the window caption buttons.
-  return close_button_->bounds().bottom() - kContentShadowHeight;
+  return caption_button_container_->bounds().bottom() - kContentShadowHeight;
 }
 
 bool BrowserNonClientFrameViewAsh::UseShortHeader() const {
@@ -414,8 +376,8 @@ bool BrowserNonClientFrameViewAsh::UseShortHeader() const {
   // Fullscreen browser, no immersive reveal -> hidden or super short light bar
   // Fullscreen browser, immersive reveal -> short header
   // Popup&App window -> tall header
-  // Panel -> short header
-  // Dialogs use short header and are handled via CustomFrameViewAsh.
+  // Panels use short header and are handled via ash::PanelFrameView.
+  // Dialogs use short header and are handled via ash::CustomFrameViewAsh.
   Browser* browser = browser_view()->browser();
   switch (browser->type()) {
     case Browser::TYPE_TABBED:
@@ -558,7 +520,7 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(gfx::Canvas* canvas) {
 }
 
 void BrowserNonClientFrameViewAsh::PaintContentEdge(gfx::Canvas* canvas) {
-  canvas->FillRect(gfx::Rect(0, close_button_->bounds().bottom(),
+  canvas->FillRect(gfx::Rect(0, caption_button_container_->bounds().bottom(),
                              width(), kClientEdgeThickness),
       ThemeProperties::GetDefaultColor(
           ThemeProperties::COLOR_TOOLBAR_SEPARATOR));

@@ -16,6 +16,11 @@ var appWindows = {};
 var queue = new AsyncUtil.Queue();
 
 /**
+ * Synchronous queue for the onExecute handler.
+ */
+var executeQueue = new AsyncUtil.Queue();
+
+/**
  * @return {Array.<DOMWindow>} Array of content windows for all currently open
  *   app windows.
  */
@@ -110,7 +115,6 @@ AppWindowWrapper.prototype.launch = function(appState, callback) {
     options = options();
   options.id = this.url_;  // This is to make Chrome reuse window geometries.
   options.singleton = false;
-  options.hidden = true;
 
   // Get similar windows, it means with the same initial url, eg. different
   // main windows of Files.app.
@@ -129,11 +133,6 @@ AppWindowWrapper.prototype.launch = function(appState, callback) {
         appWindow.moveTo(bounds.left + AppWindowWrapper.SHIFT_DISTANCE,
                          bounds.top + AppWindowWrapper.SHIFT_DISTANCE);
       }
-
-      // Show after changing bounds is done. For the new UI, Files.app shows
-      // it's window as soon as the UI is pre-initialized.
-      if (!this.id_.match(FILES_ID_PATTERN))
-        appWindow.show();
 
       appWindows[this.id_] = appWindow;
       var contentWindow = appWindow.contentWindow;
@@ -183,9 +182,13 @@ AppWindowWrapper.prototype.launch = function(appState, callback) {
 /**
  * Enqueues opening the window.
  * @param {Object} appState App state.
+ * @param {function()=} opt_callback Callback function to be called at the end
+ *     of launch.
  */
-AppWindowWrapper.prototype.enqueueLaunch = function(appState) {
+AppWindowWrapper.prototype.enqueueLaunch = function(appState, opt_callback) {
   this.queue_.run(this.launch.bind(this, appState));
+  if (opt_callback)
+    this.queue_.run(function(nextStep) { opt_callback(); nextStep(); });
 };
 
 /**
@@ -264,6 +267,7 @@ var FILES_ID_PATTERN = new RegExp('^' + FILES_ID_PREFIX + '(\\d*)$');
  */
 var nextFileManagerWindowID = 0;
 
+
 /**
  * @return {Object} File manager window create options.
  */
@@ -276,6 +280,7 @@ function createFileManagerOptions() {
     minWidth: 320,
     minHeight: 240,
     frame: 'none',
+    hidden: true,
     transparentBackground: true
   };
 }
@@ -359,9 +364,8 @@ function launchFileManager(opt_appState, opt_id, opt_type, opt_callback) {
         'main.html',
         appId,
         createFileManagerOptions);
-    appWindow.enqueueLaunch(opt_appState || {});
-    if (opt_callback)
-      opt_callback(appId);
+    appWindow.enqueueLaunch(opt_appState || {},
+                            opt_callback && opt_callback.bind(null, appId));
     onTaskCompleted();
   });
 }
@@ -395,7 +399,7 @@ function reopenFileManagers() {
  * @param {Object} details Details object.
  */
 function onExecute(action, details) {
-  var urls = details.entries.map(function(e) { return e.toURL() });
+  var urls = details.entries.map(function(e) { return e.toURL(); });
 
   switch (action) {
     case 'play':
@@ -407,43 +411,61 @@ function onExecute(action, details) {
       break;
 
     default:
-      // Every other action opens a Files app window.
-      var appState = {
-        params: {
-          action: action
-        },
-        defaultPath: details.entries[0].fullPath,
-      };
-      // For mounted devices just focus any Files.app window. The mounted
-      // volume will appear on the navigation list.
-      var type = action == 'auto-open' ? LaunchType.FOCUS_ANY_OR_CREATE :
-          LaunchType.FOCUS_SAME_OR_CREATE;
-      launchFileManager(appState,
-                        undefined,  // App ID.
-                        type);
+      var launchEnable = null;
+      executeQueue.run(function(nextStep) {
+        // If it is not auto-open (triggered by mounting external devices), we
+        // always launch Files.app.
+        if (action != 'auto-open') {
+          launchEnable = true;
+          nextStep();
+          return;
+        }
+        // If the disable-default-apps flag is on, Files.app is not opened
+        // automatically on device mount because it obstculs the manual test.
+        chrome.commandLinePrivate.hasSwitch('disable-default-apps',
+                                            function(flag) {
+          launchEnable = !flag;
+          nextStep();
+        });
+      });
+      executeQueue.run(function(nextStep) {
+        if (!launchEnable) {
+          nextStep();
+          return;
+        }
+
+        // Every other action opens a Files app window.
+        var appState = {
+          params: {
+            action: action
+          },
+          defaultPath: details.entries[0].fullPath
+        };
+        // For mounted devices just focus any Files.app window. The mounted
+        // volume will appear on the navigation list.
+        var type = action == 'auto-open' ? LaunchType.FOCUS_ANY_OR_CREATE :
+            LaunchType.FOCUS_SAME_OR_CREATE;
+        launchFileManager(appState,
+                          undefined,  // App ID.
+                          type,
+                          nextStep);
+      });
       break;
   }
 }
-
 
 /**
  * @return {Object} Audio player window create options.
  */
 function createAudioPlayerOptions() {
   var WIDTH = 280;
-  var MIN_HEIGHT = 35 + 58;
-  var MAX_HEIGHT = 35 + 58 * 3;
-  var BOTTOM = 80;
-  var RIGHT = 20;
-
+  var HEIGHT = 35 + 58;
   return {
-    defaultLeft: (window.screen.availWidth - WIDTH - RIGHT),
-    defaultTop: (window.screen.availHeight - MIN_HEIGHT - BOTTOM),
-    minHeight: MIN_HEIGHT,
-    maxHeight: MAX_HEIGHT,
-    height: MIN_HEIGHT,
+    type: 'panel',
+    hidden: true,
+    minHeight: HEIGHT,
     minWidth: WIDTH,
-    maxWidth: WIDTH,
+    height: HEIGHT,
     width: WIDTH
   };
 }
@@ -534,7 +556,7 @@ function onContextMenuClicked(info) {
  */
 function maybeCloseBackgroundPage() {
   if (Object.keys(appWindows).length === 0 &&
-      !FileCopyManager.getInstance().hasQueuedTasks())
+      !FileOperationManager.getInstance().hasQueuedTasks())
     close();
 }
 

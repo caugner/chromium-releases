@@ -49,13 +49,14 @@ void MountNode::Destroy() {
   }
 }
 
-// Declared in EventEmitter, default to regular files which always return
-// a ready of TRUE for read, write, or error.
-uint32_t MountNode::GetEventStatus() {
-  uint32_t val = POLLIN | POLLOUT | POLLERR;
-  return val;
-}
+EventEmitter* MountNode::GetEventEmitter() { return NULL; }
 
+uint32_t MountNode::GetEventStatus() {
+  if (GetEventEmitter())
+    return GetEventEmitter()->GetEventStatus();
+
+  return POLLIN | POLLOUT;
+}
 
 Error MountNode::FSync() { return 0; }
 
@@ -152,6 +153,8 @@ int MountNode::GetType() { return stat_.st_mode & S_IFMT; }
 bool MountNode::IsaDir() { return (stat_.st_mode & S_IFDIR) != 0; }
 
 bool MountNode::IsaFile() { return (stat_.st_mode & S_IFREG) != 0; }
+
+bool MountNode::IsaSock() { return (stat_.st_mode & S_IFSOCK) != 0; }
 
 bool MountNode::IsaTTY() { return (stat_.st_mode & S_IFCHR) != 0; }
 

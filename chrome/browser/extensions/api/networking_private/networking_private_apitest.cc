@@ -74,7 +74,6 @@ class ExtensionNetworkingPrivateApiTest :
     // Whitelist the extension ID of the test extension.
     command_line->AppendSwitchASCII(::switches::kWhitelistedExtensionID,
                                     "epcifkihnkjgphfkloaaleeakhpmgdmn");
-    command_line->AppendSwitch(switches::kUseNewNetworkConfigurationHandlers);
 
     // TODO(pneubeck): Remove the following hack, once the NetworkingPrivateAPI
     // uses the ProfileHelper to obtain the userhash crbug/238623.
@@ -248,6 +247,10 @@ IN_PROC_BROWSER_TEST_P(ExtensionNetworkingPrivateApiTest,
       << message_;
 }
 
+IN_PROC_BROWSER_TEST_P(ExtensionNetworkingPrivateApiTest, CreateNetwork) {
+  EXPECT_TRUE(RunNetworkingSubtest("createNetwork")) << message_;
+}
+
 IN_PROC_BROWSER_TEST_P(ExtensionNetworkingPrivateApiTest, GetVisibleNetworks) {
   EXPECT_TRUE(RunNetworkingSubtest("getVisibleNetworks")) << message_;
 }
@@ -324,7 +327,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionNetworkingPrivateApiTest,
   policy.Set(policy::key::kOpenNetworkConfiguration,
              policy::POLICY_LEVEL_MANDATORY,
              policy::POLICY_SCOPE_USER,
-             Value::CreateStringValue(user_policy_blob),
+             new base::StringValue(user_policy_blob),
              NULL);
   provider_.UpdateChromePolicy(policy);
 

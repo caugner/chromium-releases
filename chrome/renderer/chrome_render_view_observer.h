@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/basictypes.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
@@ -73,6 +74,11 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   virtual void DidClearWindowObject(WebKit::WebFrame* frame) OVERRIDE;
   virtual void DidHandleGestureEvent(
       const WebKit::WebGestureEvent& event) OVERRIDE;
+  virtual void DetailedConsoleMessageAdded(const base::string16& message,
+                                           const base::string16& source,
+                                           const base::string16& stack_trace,
+                                           int32 line_number,
+                                           int32 severity_level) OVERRIDE;
 
   // WebKit::WebPermissionClient implementation.
   virtual bool allowDatabase(WebKit::WebFrame* frame,
@@ -141,6 +147,7 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   void OnUpdateTopControlsState(content::TopControlsState constraints,
                                 content::TopControlsState current,
                                 bool animate);
+  void OnRetrieveWebappInformation(const GURL& expected_url);
 #endif
   void OnSetWindowFeatures(const WebKit::WebWindowFeatures& window_features);
 

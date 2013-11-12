@@ -108,7 +108,9 @@ class Predictor::LookupRequest {
     // lets the HostResolver know it can de-prioritize it.
     resolve_info.set_is_speculative(true);
     return resolver_.Resolve(
-        resolve_info, &addresses_,
+        resolve_info,
+        net::DEFAULT_PRIORITY,
+        &addresses_,
         base::Bind(&LookupRequest::OnLookupFinished, base::Unretained(this)),
         net::BoundNetLog());
   }
@@ -465,7 +467,7 @@ UrlList Predictor::GetPredictedUrlListAtStartup(
       GURL gurl = tab_start_pref.urls[i];
       if (!gurl.is_valid() || gurl.SchemeIsFile() || gurl.host().empty())
         continue;
-      if (gurl.SchemeIs("http") || gurl.SchemeIs("https"))
+      if (gurl.SchemeIsHTTPOrHTTPS())
         urls.push_back(gurl.GetWithEmptyPath());
     }
   }
@@ -1299,7 +1301,7 @@ void Predictor::InitialObserver::Append(const GURL& url,
   if (kStartupResolutionCount <= first_navigations_.size())
     return;
 
-  DCHECK(url.SchemeIs("http") || url.SchemeIs("https"));
+  DCHECK(url.SchemeIsHTTPOrHTTPS());
   DCHECK_EQ(url, Predictor::CanonicalizeUrl(url));
   if (first_navigations_.find(url) == first_navigations_.end())
     first_navigations_[url] = base::TimeTicks::Now();

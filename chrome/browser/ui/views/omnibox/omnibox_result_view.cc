@@ -21,12 +21,12 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/text/text_elider.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/render_text.h"
+#include "ui/gfx/text_elider.h"
 #include "ui/native_theme/native_theme.h"
 
 #if defined(OS_WIN)
@@ -121,7 +121,7 @@ OmniboxResultView::OmniboxResultView(
           string16(kEllipsis))),
       mirroring_context_(new MirroringContext()),
       keyword_icon_(new views::ImageView()),
-      animation_(new ui::SlideAnimation(this)) {
+      animation_(new gfx::SlideAnimation(this)) {
   CHECK_GE(model_index, 0);
   if (default_icon_size_ == 0) {
     default_icon_size_ =
@@ -517,7 +517,7 @@ void OmniboxResultView::Elide(Runs* runs, int remaining_width) const {
           (*j)->GetPrimaryFont().DeriveFont(0, gfx::Font::BOLD) :
           (*j)->GetPrimaryFont());
       string16 elided_text(
-          ui::ElideText((*j)->text(), font, remaining_width, ui::ELIDE_AT_END));
+          gfx::ElideText((*j)->text(), font, remaining_width, gfx::ELIDE_AT_END));
       Classifications::reverse_iterator prior(j + 1);
       const bool on_first_classification = (prior == i->classifications.rend());
       if (elided_text.empty() && (remaining_width >= ellipsis_width_) &&
@@ -627,7 +627,7 @@ void OmniboxResultView::OnPaint(gfx::Canvas* canvas) {
   }
 }
 
-void OmniboxResultView::AnimationProgressed(const ui::Animation* animation) {
+void OmniboxResultView::AnimationProgressed(const gfx::Animation* animation) {
   Layout();
   SchedulePaint();
 }

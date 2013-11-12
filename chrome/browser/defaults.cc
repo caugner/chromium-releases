@@ -49,12 +49,6 @@ const bool kAlwaysOpenIncognitoWindow = false;
 const bool kAlwaysCreateTabbedBrowserOnSessionRestore = true;
 #endif
 
-#if defined(OS_CHROMEOS)
-const bool kOSSupportsOtherBrowsers = false;
-#else
-const bool kOSSupportsOtherBrowsers = true;
-#endif
-
 const bool kDownloadPageHasShowInFolder = true;
 const bool kSizeTabButtonToTopOfTabStrip = false;
 
@@ -71,8 +65,6 @@ const bool kShowCancelButtonInTaskManager = true;
 #else
 const bool kShowCancelButtonInTaskManager = false;
 #endif
-
-const int kBookmarkBarHeight = 28;
 
 const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle =
     ui::ResourceBundle::BoldFont;

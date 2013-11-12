@@ -79,14 +79,12 @@ class MockDBusThreadManager : public DBusThreadManager {
   MOCK_METHOD0(GetSystemClockClient, SystemClockClient*(void));
   MOCK_METHOD0(GetUpdateEngineClient, UpdateEngineClient*(void));
   MOCK_METHOD0(GetIBusClient, IBusClient*(void));
-  MOCK_METHOD0(GetIBusConfigClient, IBusConfigClient*(void));
   MOCK_METHOD0(GetIBusInputContextClient, IBusInputContextClient*(void));
   MOCK_METHOD0(GetIBusEngineFactoryService, IBusEngineFactoryService*(void));
   MOCK_METHOD1(GetIBusEngineService,
                IBusEngineService*(const dbus::ObjectPath& object_path));
   MOCK_METHOD1(RemoveIBusEngineService,
                void(const dbus::ObjectPath& object_path));
-  MOCK_METHOD0(GetIBusPanelService, IBusPanelService*(void));
 
   FakeBluetoothAdapterClient* fake_bluetooth_adapter_client() {
     return fake_bluetooth_adapter_client_.get();

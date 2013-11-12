@@ -35,11 +35,9 @@ class FakeShillManagerClient;
 class FakeSystemClockClient;
 class FakeUpdateEngineClient;
 class MockIBusClient;
-class MockIBusConfigClient;
 class MockIBusEngineFactoryService;
 class MockIBusEngineService;
 class MockIBusInputContextClient;
-class MockIBusPanelService;
 
 // This class provides an another mock DBusThreadManager without gmock
 // dependency. This class is used for places where GMock is not allowed
@@ -86,14 +84,12 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
   virtual SystemClockClient* GetSystemClockClient() OVERRIDE;
   virtual UpdateEngineClient* GetUpdateEngineClient() OVERRIDE;
   virtual IBusClient* GetIBusClient() OVERRIDE;
-  virtual IBusConfigClient* GetIBusConfigClient() OVERRIDE;
   virtual IBusInputContextClient* GetIBusInputContextClient() OVERRIDE;
   virtual IBusEngineFactoryService* GetIBusEngineFactoryService() OVERRIDE;
   virtual IBusEngineService* GetIBusEngineService(
       const dbus::ObjectPath& object_path) OVERRIDE;
   virtual void RemoveIBusEngineService(
       const dbus::ObjectPath& object_path) OVERRIDE;
-  virtual IBusPanelService* GetIBusPanelService() OVERRIDE;
 
   FakeBluetoothAdapterClient* fake_bluetooth_adapter_client() {
     return fake_bluetooth_adapter_client_.get();
@@ -159,10 +155,6 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
     return mock_ibus_client_.get();
   }
 
-  MockIBusConfigClient* mock_ibus_config_client() {
-    return mock_ibus_config_client_.get();
-  }
-
   MockIBusInputContextClient* mock_ibus_input_context_client() {
     return mock_ibus_input_context_client_.get();
   }
@@ -173,10 +165,6 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
 
   MockIBusEngineFactoryService* mock_ibus_engine_factory_service() {
     return mock_ibus_engine_factory_service_.get();
-  }
-
-  MockIBusPanelService* mock_ibus_panel_service() {
-    return mock_ibus_panel_service_.get();
   }
 
   void set_ibus_bus(dbus::Bus* ibus_bus) {
@@ -207,11 +195,9 @@ class MockDBusThreadManagerWithoutGMock : public DBusThreadManager {
   scoped_ptr<FakeUpdateEngineClient> fake_update_engine_client_;
 
   scoped_ptr<MockIBusClient> mock_ibus_client_;
-  scoped_ptr<MockIBusConfigClient> mock_ibus_config_client_;
   scoped_ptr<MockIBusInputContextClient> mock_ibus_input_context_client_;
   scoped_ptr<MockIBusEngineService> mock_ibus_engine_service_;
   scoped_ptr<MockIBusEngineFactoryService> mock_ibus_engine_factory_service_;
-  scoped_ptr<MockIBusPanelService> mock_ibus_panel_service_;
 
   scoped_ptr<PowerPolicyController> power_policy_controller_;
   dbus::Bus* ibus_bus_;

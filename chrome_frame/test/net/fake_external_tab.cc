@@ -331,7 +331,10 @@ void FilterDisabledTests() {
     "HTTPSCRLSetTest.*",
 
     // Chrome Frame doesn't support GetFullRequestHeaders.
-    "URLRequestTest*.*_GetFullRequestHeaders"
+    "URLRequestTest*.*_GetFullRequestHeaders",
+
+    // IE redirects to data: URLs differently.
+    "URLRequestTestHTTP.RestrictDataRedirects"
   };
 
   const char* ie9_disabled_tests[] = {
@@ -520,6 +523,9 @@ void FakeExternalTab::Initialize() {
   ResourceBundle::InitSharedInstanceWithLocale("en-US", NULL);
 
   CommandLine* cmd = CommandLine::ForCurrentProcess();
+  // Disable Device Discovery with switch because this test does not respect
+  // BrowserContextKeyedBaseFactory::ServiceIsNULLWhileTesting.
+  cmd->AppendSwitch(switches::kDisableDeviceDiscoveryNotifications);
   cmd->AppendSwitch(switches::kDisableWebResources);
   cmd->AppendSwitch(switches::kSingleProcess);
 

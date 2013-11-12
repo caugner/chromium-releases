@@ -36,15 +36,15 @@
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/common/manifest_constants.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "ui/base/accelerators/platform_accelerator_gtk.h"
-#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia_paint.h"
+#include "ui/gfx/gtk_compat.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_operations.h"
@@ -189,7 +189,7 @@ class BrowserActionButton : public content::NotificationObserver,
               details).ptr();
       if (extension_->id() == payload->first &&
           payload->second ==
-              extension_manifest_values::kBrowserActionCommandEvent) {
+              extensions::manifest_values::kBrowserActionCommandEvent) {
         if (type == chrome::NOTIFICATION_EXTENSION_COMMAND_ADDED)
           ConnectBrowserActionPopupAccelerator();
         else
@@ -777,7 +777,7 @@ void BrowserActionsToolbarGtk::ModelLoaded() {
 }
 
 void BrowserActionsToolbarGtk::AnimationProgressed(
-    const ui::Animation* animation) {
+    const gfx::Animation* animation) {
   int width = start_width_ + (desired_width_ - start_width_) *
       animation->GetCurrentValue();
   gtk_widget_set_size_request(button_hbox_.get(), width, -1);
@@ -786,7 +786,7 @@ void BrowserActionsToolbarGtk::AnimationProgressed(
     resize_animation_.Reset();
 }
 
-void BrowserActionsToolbarGtk::AnimationEnded(const ui::Animation* animation) {
+void BrowserActionsToolbarGtk::AnimationEnded(const gfx::Animation* animation) {
   gtk_widget_set_size_request(button_hbox_.get(), desired_width_, -1);
   UpdateChevronVisibility();
 }

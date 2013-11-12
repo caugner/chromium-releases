@@ -38,7 +38,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/net_util.h"
 #include "ui/base/accelerators/accelerator.h"
-#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 
 using content::NavigationController;
 using content::WebContents;
@@ -91,8 +91,7 @@ class FindInPageControllerTest : public InProcessBrowserTest {
   }
 
   string16 GetFindBarTextForBrowser(Browser* browser) {
-    FindBarTesting* find_bar =
-        browser->GetFindBarController()->find_bar()->GetFindBarTesting();
+    FindBar* find_bar = browser->GetFindBarController()->find_bar();
     return find_bar->GetFindText();
   }
 
@@ -169,7 +168,7 @@ class FindInPageControllerTest : public InProcessBrowserTest {
     return start_x_position;
   }
 
-  GURL GetURL(const std::string filename) {
+  GURL GetURL(const std::string& filename) {
     return ui_test_utils::GetTestUrl(
         base::FilePath().AppendASCII("find_in_page"),
         base::FilePath().AppendASCII(filename));
@@ -405,7 +404,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindLongString) {
       base::FilePath().AppendASCII("find_in_page"),
       base::FilePath().AppendASCII("LongFind.txt"));
   std::string query;
-  file_util::ReadFileToString(path, &query);
+  base::ReadFileToString(path, &query);
   std::wstring search_string = UTF8ToWide(query);
   EXPECT_EQ(1,
             FindInPageWchar(web_contents, search_string.c_str(),
@@ -468,7 +467,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindWholeFileContent) {
   ui_test_utils::NavigateToURL(browser(), net::FilePathToFileURL(path));
 
   std::string query;
-  file_util::ReadFileToString(path, &query);
+  base::ReadFileToString(path, &query);
   std::wstring search_string = UTF8ToWide(query);
   EXPECT_EQ(1,
             FindInPageWchar(web_contents, search_string.c_str(),
@@ -1567,6 +1566,11 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, IncognitoFindNextSecret) {
       GetFindBarTextForBrowser(browser_incognito));
   EXPECT_EQ(ASCIIToUTF16("1 of 2"),
       GetFindBarMatchCountTextForBrowser(browser_incognito));
+
+  // Close the find bar.
+  FindTabHelper* find_tab_helper =
+      FindTabHelper::FromWebContents(web_contents_incognito);
+  find_tab_helper->StopFinding(FindBarController::kActivateSelectionOnPage);
 
   // Cmd + G triggers IDC_FIND_NEXT command. Thus we test FindInPage()
   // method from browser_commands.cc. FindInPageWchar() bypasses it.

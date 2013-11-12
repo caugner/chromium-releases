@@ -38,8 +38,8 @@ namespace RemoveGalleryWatch =
     extensions::api::media_galleries_private::RemoveGalleryWatch;
 namespace GetAllGalleryWatch =
     extensions::api::media_galleries_private::GetAllGalleryWatch;
-namespace EjectDevice =
-    extensions::api::media_galleries_private::EjectDevice;
+namespace media_galleries_private =
+    api::media_galleries_private;
 
 namespace {
 
@@ -59,11 +59,11 @@ bool GetGalleryFilePathAndId(const std::string& gallery_id,
                              Profile* profile,
                              const Extension* extension,
                              base::FilePath* gallery_file_path,
-                             chrome::MediaGalleryPrefId* gallery_pref_id) {
-  chrome::MediaGalleryPrefId pref_id;
+                             MediaGalleryPrefId* gallery_pref_id) {
+  MediaGalleryPrefId pref_id;
   if (!base::StringToUint64(gallery_id, &pref_id))
     return false;
-  chrome::MediaFileSystemRegistry* registry =
+  MediaFileSystemRegistry* registry =
       g_browser_process->media_file_system_registry();
    base::FilePath file_path(
       registry->GetPreferences(profile)->LookUpGalleryPathForExtension(
@@ -87,11 +87,11 @@ MediaGalleriesPrivateAPI::MediaGalleriesPrivateAPI(Profile* profile)
       weak_ptr_factory_(this) {
   DCHECK(profile_);
   ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
-      this, event_names::kOnAttachEventName);
+      this, media_galleries_private::OnDeviceAttached::kEventName);
   ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
-      this, event_names::kOnDetachEventName);
+      this, media_galleries_private::OnDeviceDetached::kEventName);
   ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
-      this, event_names::kOnGalleryChangedEventName);
+      this, media_galleries_private::OnGalleryChanged::kEventName);
 }
 
 MediaGalleriesPrivateAPI::~MediaGalleriesPrivateAPI() {
@@ -127,7 +127,7 @@ void MediaGalleriesPrivateAPI::OnListenerAdded(
   // This method is called synchronously with the message handler for the
   // JS invocation.
 
-  chrome::StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
+  StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
       &MediaGalleriesPrivateAPI::MaybeInitializeEventRouterAndTracker,
       weak_ptr_factory_.GetWeakPtr()));
 }
@@ -148,7 +148,7 @@ void MediaGalleriesPrivateAPI::MaybeInitializeEventRouterAndTracker() {
     return;
   media_galleries_private_event_router_.reset(
       new MediaGalleriesPrivateEventRouter(profile_));
-  DCHECK(chrome::StorageMonitor::GetInstance()->IsInitialized());
+  DCHECK(StorageMonitor::GetInstance()->IsInitialized());
   tracker_.reset(
       new GalleryWatchStateTracker(profile_));
 }
@@ -170,7 +170,7 @@ bool MediaGalleriesPrivateAddGalleryWatchFunction::RunImpl() {
       AddGalleryWatch::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  chrome::StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
+  StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
       &MediaGalleriesPrivateAddGalleryWatchFunction::OnStorageMonitorInit,
       this,
       params->gallery_id));
@@ -180,9 +180,9 @@ bool MediaGalleriesPrivateAddGalleryWatchFunction::RunImpl() {
 
 void MediaGalleriesPrivateAddGalleryWatchFunction::OnStorageMonitorInit(
     const std::string& pref_id) {
-  DCHECK(chrome::StorageMonitor::GetInstance()->IsInitialized());
+  DCHECK(StorageMonitor::GetInstance()->IsInitialized());
   base::FilePath gallery_file_path;
-  chrome::MediaGalleryPrefId gallery_pref_id = 0;
+  MediaGalleryPrefId gallery_pref_id = 0;
   if (!GetGalleryFilePathAndId(pref_id, profile_, GetExtension(),
                                &gallery_file_path, &gallery_pref_id)) {
     error_ = kInvalidGalleryIDError;
@@ -214,15 +214,15 @@ void MediaGalleriesPrivateAddGalleryWatchFunction::OnStorageMonitorInit(
 }
 
 void MediaGalleriesPrivateAddGalleryWatchFunction::HandleResponse(
-    chrome::MediaGalleryPrefId gallery_id,
+    MediaGalleryPrefId gallery_id,
     bool success) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  extensions::api::media_galleries_private::AddGalleryWatchResult result;
+  media_galleries_private::AddGalleryWatchResult result;
   result.gallery_id = base::Uint64ToString(gallery_id);
   result.success = success;
   SetResult(result.ToValue().release());
   if (success) {
-    DCHECK(chrome::StorageMonitor::GetInstance()->IsInitialized());
+    DCHECK(StorageMonitor::GetInstance()->IsInitialized());
     GalleryWatchStateTracker* state_tracker =
         MediaGalleriesPrivateAPI::Get(profile_)->GetGalleryWatchStateTracker();
     state_tracker->OnGalleryWatchAdded(extension_id(), gallery_id);
@@ -250,7 +250,7 @@ bool MediaGalleriesPrivateRemoveGalleryWatchFunction::RunImpl() {
       RemoveGalleryWatch::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  chrome::StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
+  StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
       &MediaGalleriesPrivateRemoveGalleryWatchFunction::OnStorageMonitorInit,
       this,
       params->gallery_id));
@@ -259,10 +259,10 @@ bool MediaGalleriesPrivateRemoveGalleryWatchFunction::RunImpl() {
 
 void MediaGalleriesPrivateRemoveGalleryWatchFunction::OnStorageMonitorInit(
     const std::string& pref_id) {
-  DCHECK(chrome::StorageMonitor::GetInstance()->IsInitialized());
+  DCHECK(StorageMonitor::GetInstance()->IsInitialized());
 #if defined(OS_WIN)
   base::FilePath gallery_file_path;
-  chrome::MediaGalleryPrefId gallery_pref_id = 0;
+  MediaGalleryPrefId gallery_pref_id = 0;
   if (!GetGalleryFilePathAndId(pref_id, profile_, GetExtension(),
                                &gallery_file_path, &gallery_pref_id)) {
     error_ = kInvalidGalleryIDError;
@@ -297,7 +297,7 @@ bool MediaGalleriesPrivateGetAllGalleryWatchFunction::RunImpl() {
   if (!render_view_host() || !render_view_host()->GetProcess())
     return false;
 
-  chrome::StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
+  StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
       &MediaGalleriesPrivateGetAllGalleryWatchFunction::OnStorageMonitorInit,
       this));
   return true;
@@ -306,13 +306,12 @@ bool MediaGalleriesPrivateGetAllGalleryWatchFunction::RunImpl() {
 void MediaGalleriesPrivateGetAllGalleryWatchFunction::OnStorageMonitorInit() {
   std::vector<std::string> result;
 #if defined(OS_WIN)
-  DCHECK(chrome::StorageMonitor::GetInstance()->IsInitialized());
+  DCHECK(StorageMonitor::GetInstance()->IsInitialized());
   GalleryWatchStateTracker* state_tracker =
       MediaGalleriesPrivateAPI::Get(profile_)->GetGalleryWatchStateTracker();
-  chrome::MediaGalleryPrefIdSet gallery_ids =
+  MediaGalleryPrefIdSet gallery_ids =
       state_tracker->GetAllWatchedGalleryIDsForExtension(extension_id());
-  for (chrome::MediaGalleryPrefIdSet::const_iterator iter =
-           gallery_ids.begin();
+  for (MediaGalleryPrefIdSet::const_iterator iter = gallery_ids.begin();
        iter != gallery_ids.end(); ++iter) {
     result.push_back(base::Uint64ToString(*iter));
   }
@@ -334,7 +333,7 @@ bool MediaGalleriesPrivateRemoveAllGalleryWatchFunction::RunImpl() {
   if (!render_view_host() || !render_view_host()->GetProcess())
     return false;
 
-  chrome::StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
+  StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
       &MediaGalleriesPrivateRemoveAllGalleryWatchFunction::OnStorageMonitorInit,
       this));
   return true;
@@ -343,79 +342,15 @@ bool MediaGalleriesPrivateRemoveAllGalleryWatchFunction::RunImpl() {
 void
 MediaGalleriesPrivateRemoveAllGalleryWatchFunction::OnStorageMonitorInit() {
 #if defined(OS_WIN)
-  DCHECK(chrome::StorageMonitor::GetInstance()->IsInitialized());
-  chrome::MediaFileSystemRegistry* registry =
+  DCHECK(StorageMonitor::GetInstance()->IsInitialized());
+  MediaFileSystemRegistry* registry =
       g_browser_process->media_file_system_registry();
-  chrome::MediaGalleriesPreferences* preferences =
-      registry->GetPreferences(profile_);
+  MediaGalleriesPreferences* preferences = registry->GetPreferences(profile_);
   GalleryWatchStateTracker* state_tracker =
       MediaGalleriesPrivateAPI::Get(profile_)->GetGalleryWatchStateTracker();
   state_tracker->RemoveAllGalleryWatchersForExtension(
       extension_id(), preferences);
 #endif
-  SendResponse(true);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-//              MediaGalleriesPrivateEjectDeviceFunction                     //
-///////////////////////////////////////////////////////////////////////////////
-
-MediaGalleriesPrivateEjectDeviceFunction::
-~MediaGalleriesPrivateEjectDeviceFunction() {
-}
-
-bool MediaGalleriesPrivateEjectDeviceFunction::RunImpl() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-
-  scoped_ptr<EjectDevice::Params> params(EjectDevice::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-
-  chrome::StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
-      &MediaGalleriesPrivateEjectDeviceFunction::OnStorageMonitorInit,
-      this,
-      params->device_id));
-  return true;
-}
-
-void MediaGalleriesPrivateEjectDeviceFunction::OnStorageMonitorInit(
-    const std::string& transient_device_id) {
-  DCHECK(chrome::StorageMonitor::GetInstance()->IsInitialized());
-  chrome::StorageMonitor* monitor = chrome::StorageMonitor::GetInstance();
-  std::string device_id_str =
-      monitor->GetDeviceIdForTransientId(transient_device_id);
-  if (device_id_str == "") {
-    HandleResponse(chrome::StorageMonitor::EJECT_NO_SUCH_DEVICE);
-    return;
-  }
-
-  monitor->EjectDevice(
-      device_id_str,
-      base::Bind(&MediaGalleriesPrivateEjectDeviceFunction::HandleResponse,
-                 this));
-}
-
-void MediaGalleriesPrivateEjectDeviceFunction::HandleResponse(
-    chrome::StorageMonitor::EjectStatus status) {
-  using extensions::api::media_galleries_private::
-      EJECT_DEVICE_RESULT_CODE_FAILURE;
-  using extensions::api::media_galleries_private::
-      EJECT_DEVICE_RESULT_CODE_IN_USE;
-  using extensions::api::media_galleries_private::
-      EJECT_DEVICE_RESULT_CODE_NO_SUCH_DEVICE;
-  using extensions::api::media_galleries_private::
-      EJECT_DEVICE_RESULT_CODE_SUCCESS;
-  using extensions::api::media_galleries_private::EjectDeviceResultCode;
-
-  EjectDeviceResultCode result = EJECT_DEVICE_RESULT_CODE_FAILURE;
-  if (status == chrome::StorageMonitor::EJECT_OK)
-    result = EJECT_DEVICE_RESULT_CODE_SUCCESS;
-  if (status == chrome::StorageMonitor::EJECT_IN_USE)
-    result = EJECT_DEVICE_RESULT_CODE_IN_USE;
-  if (status == chrome::StorageMonitor::EJECT_NO_SUCH_DEVICE)
-    result = EJECT_DEVICE_RESULT_CODE_NO_SUCH_DEVICE;
-
-  SetResult(base::StringValue::CreateStringValue(
-      api::media_galleries_private::ToString(result)));
   SendResponse(true);
 }
 

@@ -10,8 +10,9 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/profiles/avatar_menu_model.h"
+#include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
@@ -37,7 +38,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/url_constants.h"
-#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/ui/browser_commands_mac.h"
@@ -46,10 +47,11 @@
 #if defined(OS_WIN)
 #include "base/win/metro.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/ui/extensions/apps_metro_handler_win.h"
+#include "chrome/browser/ui/apps/apps_metro_handler_win.h"
 #endif
 
 #if defined(USE_ASH)
+#include "ash/accelerators/accelerator_commands.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #endif
 
@@ -58,6 +60,18 @@ using content::NavigationController;
 using content::WebContents;
 
 namespace {
+
+enum WindowState {
+  // Not in fullscreen mode.
+  WINDOW_STATE_NOT_FULLSCREEN,
+
+  // Fullscreen mode, occupying the whole screen.
+  WINDOW_STATE_FULLSCREEN,
+
+  // Fullscreen mode for metro snap, occupying the full height and 20% of
+  // the screen width.
+  WINDOW_STATE_METRO_SNAP,
+};
 
 // Returns |true| if entry has an internal chrome:// URL, |false| otherwise.
 bool HasInternalURL(const NavigationEntry* entry) {
@@ -196,6 +210,12 @@ BrowserCommandController::BrowserCommandController(
       prefs::kPrintingEnabled,
       base::Bind(&BrowserCommandController::UpdatePrintingState,
                  base::Unretained(this)));
+#if !defined(OS_MACOSX)
+  profile_pref_registrar_.Add(
+      prefs::kFullscreenAllowed,
+      base::Bind(&BrowserCommandController::UpdateCommandsForFullscreenMode,
+                 base::Unretained(this)));
+#endif
   pref_signin_allowed_.Init(
       prefs::kSigninAllowed,
       profile()->GetOriginalProfile()->GetPrefs(),
@@ -234,14 +254,15 @@ bool BrowserCommandController::IsReservedCommandOrKey(
     return false;
 
 #if defined(OS_CHROMEOS)
-  // On Chrome OS, the top row of keys are mapped to F1-F10.  We don't want web
-  // pages to be able to change the behavior of these keys.  Ash handles F4 and
-  // up; this leaves us needing to reserve F1-F3 here.
+  // On Chrome OS, the top row of keys are mapped to browser actions like
+  // back/forward or refresh. We don't want web pages to be able to change the
+  // behavior of these keys.  Ash handles F4 and up; this leaves us needing to
+  // reserve browser back/forward and refresh here.
   ui::KeyboardCode key_code =
     static_cast<ui::KeyboardCode>(event.windowsKeyCode);
-  if ((key_code == ui::VKEY_F1 && command_id == IDC_BACK) ||
-      (key_code == ui::VKEY_F2 && command_id == IDC_FORWARD) ||
-      (key_code == ui::VKEY_F3 && command_id == IDC_RELOAD)) {
+  if ((key_code == ui::VKEY_BROWSER_BACK && command_id == IDC_BACK) ||
+      (key_code == ui::VKEY_BROWSER_FORWARD && command_id == IDC_FORWARD) ||
+      (key_code == ui::VKEY_BROWSER_REFRESH && command_id == IDC_RELOAD)) {
     return true;
   }
 #endif
@@ -284,16 +305,7 @@ void BrowserCommandController::ContentRestrictionsChanged() {
 }
 
 void BrowserCommandController::FullscreenStateChanged() {
-  FullScreenMode fullscreen_mode = FULLSCREEN_DISABLED;
-  if (window()->IsFullscreen()) {
-#if defined(OS_WIN)
-    fullscreen_mode = window()->IsInMetroSnapMode() ? FULLSCREEN_METRO_SNAP :
-                                                      FULLSCREEN_NORMAL;
-#else
-    fullscreen_mode = FULLSCREEN_NORMAL;
-#endif
-  }
-  UpdateCommandsForFullscreenMode(fullscreen_mode);
+  UpdateCommandsForFullscreenMode();
 }
 
 void BrowserCommandController::PrintingStateChanged() {
@@ -433,6 +445,11 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_TOGGLE_ASH_DESKTOP:
       chrome::ToggleAshDesktop();
       break;
+    case IDC_MINIMIZE_WINDOW:
+      ash::accelerators::ToggleMinimized();
+      break;
+    // If Ash needs many more commands here we should implement a general
+    // mechanism to pass accelerators back into Ash. http://crbug.com/285308
 #endif
 
 #if defined(OS_WIN)
@@ -448,7 +465,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       content::RecordAction(content::UserMetricsAction("Win8DesktopRestart"));
       break;
     case IDC_WIN8_METRO_RESTART:
-      if (!chrome::VerifySwitchToMetroForApps(window()->GetNativeWindow()))
+      if (!VerifySwitchToMetroForApps(window()->GetNativeWindow()))
         break;
 
       // SwitchToMetroUIHandler deletes itself.
@@ -621,10 +638,11 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_TASK_MANAGER:
       OpenTaskManager(browser_);
       break;
+#if defined(GOOGLE_CHROME_BUILD)
     case IDC_FEEDBACK:
       OpenFeedbackDialog(browser_);
       break;
-
+#endif
     case IDC_SHOW_BOOKMARK_BAR:
       ToggleBookmarkBar(browser_);
       break;
@@ -824,6 +842,9 @@ void BrowserCommandController::InitCommandState() {
       chrome::HOST_DESKTOP_TYPE_NATIVE != chrome::HOST_DESKTOP_TYPE_ASH)
     command_updater_.UpdateCommandEnabled(IDC_TOGGLE_ASH_DESKTOP, true);
 #endif
+#if defined(USE_ASH)
+  command_updater_.UpdateCommandEnabled(IDC_MINIMIZE_WINDOW, true);
+#endif
 
   // Page-related commands
   command_updater_.UpdateCommandEnabled(IDC_EMAIL_PAGE_LOCATION, true);
@@ -934,7 +955,7 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_TOGGLE_SPEECH_INPUT, true);
 
   // Initialize other commands whose state changes based on fullscreen mode.
-  UpdateCommandsForFullscreenMode(FULLSCREEN_DISABLED);
+  UpdateCommandsForFullscreenMode();
 
   UpdateCommandsForContentRestrictionState();
 
@@ -1085,11 +1106,18 @@ void BrowserCommandController::UpdateCommandsForFileSelectionDialogs() {
   UpdateOpenFileState(&command_updater_);
 }
 
-void BrowserCommandController::UpdateCommandsForFullscreenMode(
-    FullScreenMode fullscreen_mode) {
+void BrowserCommandController::UpdateCommandsForFullscreenMode() {
+  WindowState window_state = WINDOW_STATE_NOT_FULLSCREEN;
+  if (window() && window()->IsFullscreen()) {
+    window_state = WINDOW_STATE_FULLSCREEN;
+#if defined(OS_WIN)
+    if (window()->IsInMetroSnapMode())
+      window_state = WINDOW_STATE_METRO_SNAP;
+#endif
+  }
   bool show_main_ui = IsShowingMainUI();
-  bool main_not_fullscreen = show_main_ui &&
-                             (fullscreen_mode == FULLSCREEN_DISABLED);
+  bool main_not_fullscreen =
+      show_main_ui && window_state == WINDOW_STATE_NOT_FULLSCREEN;
 
   // Navigation commands
   command_updater_.UpdateCommandEnabled(IDC_OPEN_CURRENT_URL, show_main_ui);
@@ -1097,7 +1125,8 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode(
   // Window management commands
   command_updater_.UpdateCommandEnabled(
       IDC_SHOW_AS_TAB,
-      !browser_->is_type_tabbed() && fullscreen_mode == FULLSCREEN_DISABLED);
+      !browser_->is_type_tabbed() &&
+          window_state == WINDOW_STATE_NOT_FULLSCREEN);
 
   // Focus various bits of UI
   command_updater_.UpdateCommandEnabled(IDC_FOCUS_TOOLBAR, show_main_ui);
@@ -1116,7 +1145,9 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode(
 
   // Show various bits of UI
   command_updater_.UpdateCommandEnabled(IDC_DEVELOPER_MENU, show_main_ui);
+#if defined(GOOGLE_CHROME_BUILD)
   command_updater_.UpdateCommandEnabled(IDC_FEEDBACK, show_main_ui);
+#endif
   UpdateShowSyncState(show_main_ui);
 
   // Settings page/subpages are forced to open in normal mode. We disable these
@@ -1136,13 +1167,19 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode(
 #endif
 
   // Disable explicit fullscreen toggling when in metro snap mode.
-  bool fullscreen_enabled = fullscreen_mode != FULLSCREEN_METRO_SNAP;
+  bool fullscreen_enabled = window_state != WINDOW_STATE_METRO_SNAP;
 #if defined(OS_MACOSX)
   // The Mac implementation doesn't support switching to fullscreen while
   // a tab modal dialog is displayed.
   int tab_index = chrome::IndexOfFirstBlockedTab(browser_->tab_strip_model());
   bool has_blocked_tab = tab_index != browser_->tab_strip_model()->count();
   fullscreen_enabled &= !has_blocked_tab;
+#else
+  if (window_state == WINDOW_STATE_NOT_FULLSCREEN &&
+      !profile()->GetPrefs()->GetBoolean(prefs::kFullscreenAllowed)) {
+    // Disable toggling into fullscreen mode if disallowed by pref.
+    fullscreen_enabled = false;
+  }
 #endif
 
   command_updater_.UpdateCommandEnabled(IDC_FULLSCREEN, fullscreen_enabled);
@@ -1157,7 +1194,7 @@ void BrowserCommandController::UpdateCommandsForMultipleProfiles() {
   bool enable = IsShowingMainUI() &&
       !profile()->IsOffTheRecord() &&
       profile_manager_ &&
-      AvatarMenuModel::ShouldShowAvatarMenu();
+      AvatarMenu::ShouldShowAvatarMenu();
   command_updater_.UpdateCommandEnabled(IDC_SHOW_AVATAR_MENU,
                                         enable);
 }

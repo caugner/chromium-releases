@@ -31,6 +31,7 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_stats.h"
+#include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -89,10 +90,10 @@
 #include "third_party/WebKit/public/web/WebPluginAction.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/text/text_elider.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/text_elider.h"
 
 #if defined(ENABLE_PRINTING)
 #include "chrome/common/print_messages.h"
@@ -865,7 +866,8 @@ void RenderViewContextMenu::AppendImageItems() {
   const TemplateURL* const default_provider =
       TemplateURLServiceFactory::GetForProfile(profile_)->
           GetDefaultSearchProvider();
-  if (default_provider && !default_provider->image_url().empty() &&
+  if (params_.has_image_contents && default_provider &&
+      !default_provider->image_url().empty() &&
       default_provider->image_url_ref().IsValid()) {
     menu_model_.AddItem(
         IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE,
@@ -1288,7 +1290,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
           (params_.src_url.scheme() != chrome::kChromeUIScheme);
 
     case IDC_CONTENT_CONTEXT_COPYIMAGE:
-      return !params_.is_image_blocked;
+      return params_.has_image_contents;
 
     // Media control commands should all be disabled if the player is in an
     // error state.
@@ -1790,8 +1792,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       DCHECK(platform_app);
       DCHECK(platform_app->is_platform_app());
 
-      extensions::ExtensionSystem::Get(profile_)->extension_service()->
-          InspectBackgroundPage(platform_app);
+      extensions::devtools_util::InspectBackgroundPage(platform_app, profile_);
       break;
     }
 
@@ -2031,7 +2032,7 @@ bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
 }
 
 string16 RenderViewContextMenu::PrintableSelectionText() {
-  return ui::TruncateString(params_.selection_text,
+  return gfx::TruncateString(params_.selection_text,
                             kMaxSelectionTextLength);
 }
 

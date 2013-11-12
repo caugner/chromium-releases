@@ -11,6 +11,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.graphics.Point;
 import android.os.Looper;
 import android.text.InputType;
 import android.util.Log;
@@ -123,6 +124,12 @@ public class JniInterface {
     /** Performs the native portion of the cleanup. */
     private static native void disconnectNative();
 
+    /** Position of cursor hotspot within cursor image. */
+    public static Point getCursorHotspot() { return sCursorHotspot; }
+
+    /** Returns the current cursor shape. */
+    public static Bitmap getCursorBitmap() { return sCursorBitmap; }
+
     /*
      * Entry points *from* the native code.
      */
@@ -137,6 +144,12 @@ public class JniInterface {
 
     /** Buffer holding the video feed. */
     private static ByteBuffer sBuffer = null;
+
+    /** Position of cursor hot-spot. */
+    private static Point sCursorHotspot = new Point();
+
+    /** Bitmap holding the cursor shape. */
+    private static Bitmap sCursorBitmap = null;
 
     /** Reports whenever the connection status changes. */
     private static void reportConnectionStatus(int state, int error) {
@@ -186,7 +199,7 @@ public class JniInterface {
     }
 
     /** Prompts the user to enter a PIN. */
-    private static void displayAuthenticationPrompt() {
+    private static void displayAuthenticationPrompt(boolean pairingSupported) {
         AlertDialog.Builder pinPrompt = new AlertDialog.Builder(sContext);
         pinPrompt.setTitle(sContext.getString(R.string.pin_entry_title));
         pinPrompt.setMessage(sContext.getString(R.string.pin_entry_message));
@@ -195,16 +208,21 @@ public class JniInterface {
         final View pinEntry = sContext.getLayoutInflater().inflate(R.layout.pin_dialog, null);
         pinPrompt.setView(pinEntry);
 
+        final TextView pinTextView = (TextView)pinEntry.findViewById(R.id.pin_dialog_text);
+        final CheckBox pinCheckBox = (CheckBox)pinEntry.findViewById(R.id.pin_dialog_check);
+
+        if (!pairingSupported) {
+            pinCheckBox.setChecked(false);
+            pinCheckBox.setVisibility(View.GONE);
+        }
+
         pinPrompt.setPositiveButton(
                 R.string.pin_entry_connect, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         Log.i("jniiface", "User provided a PIN code");
-                        authenticationResponse(String.valueOf(
-                                ((TextView)
-                                        pinEntry.findViewById(R.id.pin_dialog_text)).getText()),
-                                ((CheckBox)
-                                        pinEntry.findViewById(R.id.pin_dialog_check)).isChecked());
+                        authenticationResponse(String.valueOf(pinTextView.getText()),
+                                               pinCheckBox.isChecked());
                     }
                 });
 
@@ -222,7 +240,7 @@ public class JniInterface {
 
         final AlertDialog pinDialog = pinPrompt.create();
 
-        ((TextView)pinEntry.findViewById(R.id.pin_dialog_text)).setOnEditorActionListener(
+        pinTextView.setOnEditorActionListener(
                 new TextView.OnEditorActionListener() {
                     @Override
                     public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
@@ -298,6 +316,20 @@ public class JniInterface {
         sBuffer.asIntBuffer().get(frame, 0, frame.length);
 
         return Bitmap.createBitmap(frame, 0, sWidth, sWidth, sHeight, Bitmap.Config.ARGB_8888);
+    }
+
+    /**
+     * Updates the cursor shape. This is called from native code on the graphics thread when
+     * receiving a new cursor shape from the host.
+     */
+    public static void updateCursorShape(int width, int height, int hotspotX, int hotspotY,
+                                         ByteBuffer buffer) {
+        sCursorHotspot = new Point(hotspotX, hotspotY);
+
+        int[] data = new int[width * height];
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+        buffer.asIntBuffer().get(data, 0, data.length);
+        sCursorBitmap = Bitmap.createBitmap(data, width, height, Bitmap.Config.ARGB_8888);
     }
 
     /** Moves the mouse cursor, possibly while clicking the specified (nonnegative) button. */

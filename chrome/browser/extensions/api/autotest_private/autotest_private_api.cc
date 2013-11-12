@@ -13,6 +13,8 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/session_manager_client.h"
 #endif
 
 namespace extensions {
@@ -95,6 +97,33 @@ bool AutotestPrivateLoginStatusFunction::RunImpl() {
   SetResult(result);
   return true;
 }
+
+bool AutotestPrivateLockScreenFunction::RunImpl() {
+  DVLOG(1) << "AutotestPrivateLockScreenFunction";
+#if defined(OS_CHROMEOS)
+  chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
+      RequestLockScreen();
+#endif
+  return true;
+}
+
+static int AccessArray(const volatile int arr[], const volatile int *index) {
+  return arr[*index];
+}
+
+bool AutotestPrivateSimulateAsanMemoryBugFunction::RunImpl() {
+  DVLOG(1) << "AutotestPrivateSimulateAsanMemoryBugFunction";
+  if (!AutotestPrivateAPIFactory::GetForProfile(profile())->test_mode()) {
+    // This array is volatile not to let compiler optimize us out.
+    volatile int testarray[3] = {0, 0, 0};
+
+    // Cause Address Sanitizer to abort this process.
+    volatile int index = 5;
+    AccessArray(testarray, &index);
+  }
+  return true;
+}
+
 
 AutotestPrivateAPI::AutotestPrivateAPI() : test_mode_(false) {
 }

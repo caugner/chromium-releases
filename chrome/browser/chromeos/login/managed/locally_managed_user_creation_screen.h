@@ -65,7 +65,6 @@ class LocallyManagedUserCreationScreen
   virtual std::string GetName() const OVERRIDE;
 
   // LocallyManagedUserCreationScreenHandler::Delegate implementation:
-  virtual void OnExit() OVERRIDE;
   virtual void OnActorDestroyed(LocallyManagedUserCreationScreenHandler* actor)
       OVERRIDE;
   virtual void CreateManagedUser(
@@ -82,6 +81,7 @@ class LocallyManagedUserCreationScreen
       LocallyManagedUserCreationController::ErrorCode code) OVERRIDE;
   virtual void OnCreationTimeout() OVERRIDE;
   virtual void OnCreationSuccess() OVERRIDE;
+  virtual void OnLongCreationWarning() OVERRIDE;
 
   // NetworkPortalDetector::Observer implementation:
   virtual void OnPortalDetectionCompleted(

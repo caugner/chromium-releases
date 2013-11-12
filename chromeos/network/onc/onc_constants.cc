@@ -91,6 +91,18 @@ const char kSupportedCarriers[] = "SupportedCarriers";
 const char kSupportNetworkScan[] = "SupportNetworkScan";
 }  // namespace cellular
 
+namespace cellular_provider {
+const char kCode[] = "Code";
+const char kCountry[] = "Country";
+const char kName[] = "Name";
+}  // namespace cellular_provider
+
+namespace cellular_apn {
+const char kName[] = "Name";
+const char kUsername[] = "Username";
+const char kPassword[] = "Password";
+}  // namespace cellular_apn
+
 namespace connection_state {
 const char kConnected[] = "Connected";
 const char kConnecting[] = "Connecting";

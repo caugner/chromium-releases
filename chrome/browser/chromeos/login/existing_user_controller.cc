@@ -151,16 +151,32 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
   registrar_.Add(this,
                  chrome::NOTIFICATION_SESSION_STARTED,
                  content::NotificationService::AllSources());
-  cros_settings_->AddSettingsObserver(kAccountsPrefShowUserNamesOnSignIn, this);
-  cros_settings_->AddSettingsObserver(kAccountsPrefAllowNewUser, this);
-  cros_settings_->AddSettingsObserver(kAccountsPrefAllowGuest, this);
-  cros_settings_->AddSettingsObserver(kAccountsPrefUsers, this);
-  cros_settings_->AddSettingsObserver(
-      kAccountsPrefDeviceLocalAccountAutoLoginId,
-      this);
-  cros_settings_->AddSettingsObserver(
-      kAccountsPrefDeviceLocalAccountAutoLoginDelay,
-      this);
+  show_user_names_subscription_ = cros_settings_->AddSettingsObserver(
+      kAccountsPrefShowUserNamesOnSignIn,
+      base::Bind(&ExistingUserController::DeviceSettingsChanged,
+                 base::Unretained(this)));
+  allow_new_user_subscription_ = cros_settings_->AddSettingsObserver(
+      kAccountsPrefAllowNewUser,
+      base::Bind(&ExistingUserController::DeviceSettingsChanged,
+                 base::Unretained(this)));
+  allow_guest_subscription_ = cros_settings_->AddSettingsObserver(
+      kAccountsPrefAllowGuest,
+      base::Bind(&ExistingUserController::DeviceSettingsChanged,
+                 base::Unretained(this)));
+  users_subscription_ = cros_settings_->AddSettingsObserver(
+      kAccountsPrefUsers,
+      base::Bind(&ExistingUserController::DeviceSettingsChanged,
+                 base::Unretained(this)));
+  local_account_auto_login_id_subscription_ =
+      cros_settings_->AddSettingsObserver(
+          kAccountsPrefDeviceLocalAccountAutoLoginId,
+          base::Bind(&ExistingUserController::ConfigurePublicSessionAutoLogin,
+                     base::Unretained(this)));
+  local_account_auto_login_delay_subscription_ =
+      cros_settings_->AddSettingsObserver(
+          kAccountsPrefDeviceLocalAccountAutoLoginDelay,
+          base::Bind(&ExistingUserController::ConfigurePublicSessionAutoLogin,
+                     base::Unretained(this)));
 }
 
 void ExistingUserController::Init(const UserList& users) {
@@ -216,14 +232,6 @@ void ExistingUserController::ResumeLogin() {
   resume_login_callback_.Reset();
 }
 
-void ExistingUserController::PrepareKioskAppLaunch() {
-  // Disable login UI while waiting for the kiosk app launch. There is no
-  // balanced UI enable call because this very login screen will not be
-  // accessed again. If app is launched, it will be destroyed. If app fails to
-  // launch, chrome is restarted to go back to a new login screen.
-  login_display_->SetUIEnabled(false);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // ExistingUserController, content::NotificationObserver implementation:
 //
@@ -240,22 +248,9 @@ void ExistingUserController::Observe(
     registrar_.RemoveAll();
     return;
   }
-  if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED) {
-    const std::string setting = *content::Details<const std::string>(
-        details).ptr();
-    if (setting == kAccountsPrefDeviceLocalAccountAutoLoginId ||
-        setting == kAccountsPrefDeviceLocalAccountAutoLoginDelay) {
-      ConfigurePublicSessionAutoLogin();
-    }
-  }
-  if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED ||
-      type == chrome::NOTIFICATION_USER_LIST_CHANGED) {
-    if (host_ != NULL) {
-      // Signed settings or user list changed. Notify views and update them.
-      UpdateLoginDisplay(chromeos::UserManager::Get()->GetUsers());
-      ConfigurePublicSessionAutoLogin();
-      return;
-    }
+  if (type == chrome::NOTIFICATION_USER_LIST_CHANGED) {
+    DeviceSettingsChanged();
+    return;
   }
   if (type == chrome::NOTIFICATION_AUTH_SUPPLIED) {
     // Possibly the user has authenticated against a proxy server and we might
@@ -292,18 +287,6 @@ void ExistingUserController::Observe(
 
 ExistingUserController::~ExistingUserController() {
   LoginUtils::Get()->DelegateDeleted(this);
-
-  cros_settings_->RemoveSettingsObserver(kAccountsPrefShowUserNamesOnSignIn,
-                                         this);
-  cros_settings_->RemoveSettingsObserver(kAccountsPrefAllowNewUser, this);
-  cros_settings_->RemoveSettingsObserver(kAccountsPrefAllowGuest, this);
-  cros_settings_->RemoveSettingsObserver(kAccountsPrefUsers, this);
-  cros_settings_->RemoveSettingsObserver(
-      kAccountsPrefDeviceLocalAccountAutoLoginId,
-      this);
-  cros_settings_->RemoveSettingsObserver(
-      kAccountsPrefDeviceLocalAccountAutoLoginDelay,
-      this);
 
   if (current_controller_ == this) {
     current_controller_ = NULL;
@@ -361,8 +344,7 @@ void ExistingUserController::CompleteLogin(const UserContext& user_context) {
 
 void ExistingUserController::CompleteLoginInternal(
     const UserContext& user_context,
-    DeviceSettingsService::OwnershipStatus ownership_status,
-    bool is_owner) {
+    DeviceSettingsService::OwnershipStatus ownership_status) {
   // Auto-enrollment must have made a decision by now. It's too late to enroll
   // if the protocol isn't done at this point.
   if (do_auto_enrollment_ &&
@@ -442,11 +424,6 @@ void ExistingUserController::PerformLogin(
   is_login_in_progress_ = true;
   if (gaia::ExtractDomainName(user_context.username) ==
           UserManager::kLocallyManagedUserDomain) {
-    if (!UserManager::Get()->AreLocallyManagedUsersAllowed()) {
-      LOG(ERROR) << "Login attempt of locally managed user detected.";
-      login_display_->SetUIEnabled(true);
-      return;
-    }
     login_performer_->LoginAsLocallyManagedUser(
         UserContext(user_context.username,
                     user_context.password,
@@ -585,6 +562,10 @@ void ExistingUserController::LoginAsPublicAccount(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_PUBLIC_ACCOUNT));
 }
 
+void ExistingUserController::LoginAsKioskApp(const std::string& app_id) {
+  host_->StartAppLaunch(app_id);
+}
+
 void ExistingUserController::OnSigninScreenReady() {
   signin_screen_ready_ = true;
   StartPublicSessionAutoLoginTimer();
@@ -642,8 +623,7 @@ void ExistingUserController::OnConsumerKioskModeCheckCompleted(
 }
 
 void ExistingUserController::OnEnrollmentOwnershipCheckCompleted(
-    DeviceSettingsService::OwnershipStatus status,
-    bool current_user_is_owner) {
+    DeviceSettingsService::OwnershipStatus status) {
   if (status == DeviceSettingsService::OWNERSHIP_NONE) {
     ShowEnrollmentScreen(false, std::string());
   } else if (status == DeviceSettingsService::OWNERSHIP_TAKEN) {
@@ -653,8 +633,7 @@ void ExistingUserController::OnEnrollmentOwnershipCheckCompleted(
         CrosSettings::Get()->PrepareTrustedValues(
             base::Bind(
                 &ExistingUserController::OnEnrollmentOwnershipCheckCompleted,
-                weak_factory_.GetWeakPtr(),
-                status, current_user_is_owner));
+                weak_factory_.GetWeakPtr(), status));
     if (trusted_status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
       ShowEnrollmentScreen(false, std::string());
     }
@@ -815,8 +794,15 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
 
-  if (UserManager::Get()->IsCurrentUserNew() &&
-      !UserManager::Get()->GetCurrentUserFlow()->ShouldSkipPostLoginScreens() &&
+  UserManager* user_manager = UserManager::Get();
+  if (user_manager->IsCurrentUserNew() &&
+      user_manager->IsLoggedInAsLocallyManagedUser()) {
+    // Supervised users should launch into empty desktop on first run.
+    CommandLine::ForCurrentProcess()->AppendSwitch(::switches::kSilentLaunch);
+  }
+
+  if (user_manager->IsCurrentUserNew() &&
+      !user_manager->GetCurrentUserFlow()->ShouldSkipPostLoginScreens() &&
       !WizardController::default_controller()->skip_post_login_screens()) {
     // Don't specify start URLs if the administrator has configured the start
     // URLs via policy.
@@ -944,6 +930,15 @@ void ExistingUserController::OnOnlineChecked(const std::string& username,
 
 ////////////////////////////////////////////////////////////////////////////////
 // ExistingUserController, private:
+
+void ExistingUserController::DeviceSettingsChanged() {
+  if (host_ != NULL) {
+    // Signed settings or user list changed. Notify views and update them.
+    UpdateLoginDisplay(chromeos::UserManager::Get()->GetUsers());
+    ConfigurePublicSessionAutoLogin();
+    return;
+  }
+}
 
 void ExistingUserController::ActivateWizard(const std::string& screen_name) {
   scoped_ptr<DictionaryValue> params;

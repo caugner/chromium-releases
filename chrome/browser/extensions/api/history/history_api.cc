@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
@@ -17,6 +18,7 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/history/history_service.h"
@@ -25,7 +27,9 @@
 #include "chrome/browser/history/visit_filter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/cancelable_task_tracker.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/experimental_history.h"
+#include "chrome/common/extensions/api/history.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -35,6 +39,7 @@ namespace extensions {
 using api::experimental_history::MostVisitedItem;
 using api::history::HistoryItem;
 using api::history::VisitItem;
+using extensions::ActivityLog;
 
 typedef std::vector<linked_ptr<api::history::HistoryItem> >
     HistoryItemList;
@@ -51,9 +56,6 @@ namespace OnVisitRemoved = api::history::OnVisitRemoved;
 namespace Search = api::history::Search;
 
 namespace {
-
-const char kOnVisited[] = "history.onVisited";
-const char kOnVisitRemoved[] = "history.onVisitRemoved";
 
 const char kInvalidIdError[] = "History item id is invalid.";
 const char kInvalidUrlError[] = "Url is invalid.";
@@ -170,7 +172,7 @@ void HistoryEventRouter::HistoryUrlVisited(
   scoped_ptr<HistoryItem> history_item = GetHistoryItem(details->row);
   scoped_ptr<base::ListValue> args = OnVisited::Create(*history_item);
 
-  DispatchEvent(profile, kOnVisited, args.Pass());
+  DispatchEvent(profile, api::history::OnVisited::kEventName, args.Pass());
 }
 
 void HistoryEventRouter::HistoryUrlsRemoved(
@@ -187,7 +189,7 @@ void HistoryEventRouter::HistoryUrlsRemoved(
   removed.urls.reset(urls);
 
   scoped_ptr<base::ListValue> args = OnVisitRemoved::Create(removed);
-  DispatchEvent(profile, kOnVisitRemoved, args.Pass());
+  DispatchEvent(profile, api::history::OnVisitRemoved::kEventName, args.Pass());
 }
 
 void HistoryEventRouter::DispatchEvent(
@@ -205,9 +207,9 @@ void HistoryEventRouter::DispatchEvent(
 
 HistoryAPI::HistoryAPI(Profile* profile) : profile_(profile) {
   ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
-      this, kOnVisited);
+      this, api::history::OnVisited::kEventName);
   ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
-      this, kOnVisitRemoved);
+      this, api::history::OnVisitRemoved::kEventName);
 }
 
 HistoryAPI::~HistoryAPI() {
@@ -223,6 +225,11 @@ g_factory = LAZY_INSTANCE_INITIALIZER;
 // static
 ProfileKeyedAPIFactory<HistoryAPI>* HistoryAPI::GetFactoryInstance() {
   return &g_factory.Get();
+}
+
+template<>
+void ProfileKeyedAPIFactory<HistoryAPI>::DeclareFactoryDependencies() {
+  DependsOn(ActivityLogFactory::GetInstance());
 }
 
 void HistoryAPI::OnListenerAdded(const EventListenerInfo& details) {
@@ -446,6 +453,16 @@ bool HistoryDeleteUrlFunction::RunImpl() {
                                            Profile::EXPLICIT_ACCESS);
   hs->DeleteURL(url);
 
+  // Also clean out from the activity log. If the activity log testing flag is
+  // set then don't clean so testers can see what potentially malicious
+  // extensions have been trying to clean from their logs.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExtensionActivityLogTesting)) {
+    ActivityLog* activity_log = ActivityLog::GetInstance(profile_);
+    DCHECK(activity_log);
+    activity_log->RemoveURL(url);
+  }
+
   SendResponse(true);
   return true;
 }
@@ -472,6 +489,14 @@ bool HistoryDeleteRangeFunction::RunAsyncImpl() {
                  base::Unretained(this)),
       &task_tracker_);
 
+  // Also clean from the activity log unless in testing mode.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExtensionActivityLogTesting)) {
+    ActivityLog* activity_log = ActivityLog::GetInstance(profile_);
+    DCHECK(activity_log);
+    activity_log->RemoveURLs(restrict_urls);
+  }
+
   return true;
 }
 
@@ -494,6 +519,14 @@ bool HistoryDeleteAllFunction::RunAsyncImpl() {
       base::Bind(&HistoryDeleteAllFunction::DeleteComplete,
                  base::Unretained(this)),
       &task_tracker_);
+
+  // Also clean from the activity log unless in testing mode.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExtensionActivityLogTesting)) {
+    ActivityLog* activity_log = ActivityLog::GetInstance(profile_);
+    DCHECK(activity_log);
+    activity_log->RemoveURLs(restrict_urls);
+  }
 
   return true;
 }

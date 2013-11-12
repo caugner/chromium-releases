@@ -15,13 +15,13 @@
 namespace Webkit { class WebGraphicsContext3D; }
 
 namespace cc {
-class FakeContextProvider;
 class FakeLayerTreeHostClient;
+class FakeOutputSurface;
 class LayerImpl;
 class LayerTreeHost;
 class LayerTreeHostClient;
 class LayerTreeHostImpl;
-class FakeOutputSurface;
+class TestContextProvider;
 
 // Used by test stubs to notify the test when something interesting happens.
 class TestHooks : public AnimationDelegate {
@@ -31,6 +31,8 @@ class TestHooks : public AnimationDelegate {
 
   void ReadSettings(const LayerTreeSettings& settings);
 
+  virtual void WillBeginImplFrameOnThread(LayerTreeHostImpl* host_impl,
+                                          const BeginFrameArgs& args) {}
   virtual void BeginCommitOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void WillActivateTreeOnThread(LayerTreeHostImpl* host_impl) {}
@@ -43,6 +45,7 @@ class TestHooks : public AnimationDelegate {
   virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void SwapBuffersOnThread(LayerTreeHostImpl* host_impl, bool result) {}
   virtual void SwapBuffersCompleteOnThread(LayerTreeHostImpl* host_impl) {}
+  virtual void UpdateVisibleTilesOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void AnimateLayers(LayerTreeHostImpl* host_impl,
                              base::TimeTicks monotonic_time) {}
   virtual void UpdateAnimationState(LayerTreeHostImpl* host_impl,
@@ -64,10 +67,9 @@ class TestHooks : public AnimationDelegate {
   virtual void DidCompleteSwapBuffers() {}
   virtual void ScheduleComposite() {}
   virtual void DidDeferCommit() {}
-  virtual bool CanActivatePendingTree(LayerTreeHostImpl* host_impl);
-  virtual bool CanActivatePendingTreeIfNeeded(LayerTreeHostImpl* host_impl);
   virtual void DidSetVisibleOnImplTree(LayerTreeHostImpl* host_impl,
                                        bool visible) {}
+  virtual base::TimeDelta LowFrequencyAnimationInterval() const;
 
   // Implementation of AnimationDelegate:
   virtual void NotifyAnimationStarted(double time) OVERRIDE {}
@@ -111,6 +113,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void PostAddAnimationToMainThread(Layer* layer_to_receive_animation);
   void PostAddInstantAnimationToMainThread(Layer* layer_to_receive_animation);
   void PostSetNeedsCommitToMainThread();
+  void PostReadbackToMainThread();
   void PostAcquireLayerTextures();
   void PostSetNeedsRedrawToMainThread();
   void PostSetNeedsRedrawRectToMainThread(gfx::Rect damage_rect);
@@ -131,6 +134,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   virtual void DispatchAddInstantAnimation(Layer* layer_to_receive_animation);
   virtual void DispatchAddAnimation(Layer* layer_to_receive_animation);
   void DispatchSetNeedsCommit();
+  void DispatchReadback();
   void DispatchAcquireLayerTextures();
   void DispatchSetNeedsRedraw();
   void DispatchSetNeedsRedrawRect(gfx::Rect damage_rect);
@@ -144,7 +148,12 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 
   bool HasImplThread() { return proxy() ? proxy()->HasImplThread() : false; }
   base::SingleThreadTaskRunner* ImplThreadTaskRunner() {
-    return proxy() ? proxy()->ImplThreadTaskRunner() : NULL;
+    DCHECK(proxy());
+    return proxy()->ImplThreadTaskRunner() ? proxy()->ImplThreadTaskRunner()
+                                           : main_task_runner_.get();
+  }
+  base::SingleThreadTaskRunner* MainThreadTaskRunner() {
+    return main_task_runner_.get();
   }
   Proxy* proxy() const {
     return layer_tree_host_ ? layer_tree_host_->proxy() : NULL;
@@ -184,8 +193,8 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   base::CancelableClosure timeout_;
   base::WeakPtr<LayerTreeTest> main_thread_weak_ptr_;
   base::WeakPtrFactory<LayerTreeTest> weak_factory_;
-  scoped_refptr<FakeContextProvider> main_thread_contexts_;
-  scoped_refptr<FakeContextProvider> compositor_thread_contexts_;
+  scoped_refptr<TestContextProvider> main_thread_contexts_;
+  scoped_refptr<TestContextProvider> compositor_thread_contexts_;
 };
 
 }  // namespace cc

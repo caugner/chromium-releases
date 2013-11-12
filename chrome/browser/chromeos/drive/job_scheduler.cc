@@ -192,7 +192,7 @@ void JobScheduler::CancelAllJobs() {
 }
 
 void JobScheduler::GetAboutResource(
-    const google_apis::GetAboutResourceCallback& callback) {
+    const google_apis::AboutResourceCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -208,8 +208,7 @@ void JobScheduler::GetAboutResource(
   StartJob(new_job);
 }
 
-void JobScheduler::GetAppList(
-    const google_apis::GetAppListCallback& callback) {
+void JobScheduler::GetAppList(const google_apis::AppListCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
@@ -300,17 +299,36 @@ void JobScheduler::GetChangeList(
   StartJob(new_job);
 }
 
-void JobScheduler::ContinueGetResourceList(
-    const GURL& next_url,
+void JobScheduler::GetRemainingChangeList(
+    const GURL& next_link,
     const google_apis::GetResourceListCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  JobEntry* new_job = CreateNewJob(TYPE_CONTINUE_GET_RESOURCE_LIST);
+  JobEntry* new_job = CreateNewJob(TYPE_GET_REMAINING_CHANGE_LIST);
   new_job->task = base::Bind(
-      &DriveServiceInterface::ContinueGetResourceList,
+      &DriveServiceInterface::GetRemainingChangeList,
       base::Unretained(drive_service_),
-      next_url,
+      next_link,
+      base::Bind(&JobScheduler::OnGetResourceListJobDone,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 new_job->job_info.job_id,
+                 callback));
+  new_job->abort_callback = google_apis::CreateErrorRunCallback(callback);
+  StartJob(new_job);
+}
+
+void JobScheduler::GetRemainingFileList(
+    const GURL& next_link,
+    const google_apis::GetResourceListCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  JobEntry* new_job = CreateNewJob(TYPE_GET_REMAINING_FILE_LIST);
+  new_job->task = base::Bind(
+      &DriveServiceInterface::GetRemainingFileList,
+      base::Unretained(drive_service_),
+      next_link,
       base::Bind(&JobScheduler::OnGetResourceListJobDone,
                  weak_ptr_factory_.GetWeakPtr(),
                  new_job->job_info.job_id,
@@ -427,6 +445,29 @@ void JobScheduler::CopyHostedDocument(
   StartJob(new_job);
 }
 
+void JobScheduler::MoveResource(
+    const std::string& resource_id,
+    const std::string& parent_resource_id,
+    const std::string& new_title,
+    const google_apis::GetResourceEntryCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  JobEntry* new_job = CreateNewJob(TYPE_MOVE_RESOURCE);
+  new_job->task = base::Bind(
+      &DriveServiceInterface::MoveResource,
+      base::Unretained(drive_service_),
+      resource_id,
+      parent_resource_id,
+      new_title,
+      base::Bind(&JobScheduler::OnGetResourceEntryJobDone,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 new_job->job_info.job_id,
+                 callback));
+  new_job->abort_callback = google_apis::CreateErrorRunCallback(callback);
+  StartJob(new_job);
+}
+
 void JobScheduler::RenameResource(
     const std::string& resource_id,
     const std::string& new_title,
@@ -534,6 +575,7 @@ void JobScheduler::AddNewDirectory(
 
 JobID JobScheduler::DownloadFile(
     const base::FilePath& virtual_path,
+    int64 expected_file_size,
     const base::FilePath& local_cache_path,
     const std::string& resource_id,
     const ClientContext& context,
@@ -543,6 +585,7 @@ JobID JobScheduler::DownloadFile(
 
   JobEntry* new_job = CreateNewJob(TYPE_DOWNLOAD_FILE);
   new_job->job_info.file_path = virtual_path;
+  new_job->job_info.num_total_bytes = expected_file_size;
   new_job->context = context;
   new_job->task = base::Bind(
       &DriveServiceInterface::DownloadFile,
@@ -670,6 +713,45 @@ void JobScheduler::CreateFile(
   params.progress_callback = google_apis::ProgressCallback();
 
   new_job->task = base::Bind(&RunUploadNewFile, uploader_.get(), params);
+  new_job->abort_callback = google_apis::CreateErrorRunCallback(callback);
+  StartJob(new_job);
+}
+
+void JobScheduler::GetResourceListInDirectoryByWapi(
+    const std::string& directory_resource_id,
+    const google_apis::GetResourceListCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  JobEntry* new_job = CreateNewJob(
+      TYPE_GET_RESOURCE_LIST_IN_DIRECTORY_BY_WAPI);
+  new_job->task = base::Bind(
+      &DriveServiceInterface::GetResourceListInDirectoryByWapi,
+      base::Unretained(drive_service_),
+      directory_resource_id,
+      base::Bind(&JobScheduler::OnGetResourceListJobDone,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 new_job->job_info.job_id,
+                 callback));
+  new_job->abort_callback = google_apis::CreateErrorRunCallback(callback);
+  StartJob(new_job);
+}
+
+void JobScheduler::GetRemainingResourceList(
+    const GURL& next_link,
+    const google_apis::GetResourceListCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  JobEntry* new_job = CreateNewJob(TYPE_GET_REMAINING_RESOURCE_LIST);
+  new_job->task = base::Bind(
+      &DriveServiceInterface::GetRemainingResourceList,
+      base::Unretained(drive_service_),
+      next_link,
+      base::Bind(&JobScheduler::OnGetResourceListJobDone,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 new_job->job_info.job_id,
+                 callback));
   new_job->abort_callback = google_apis::CreateErrorRunCallback(callback);
   StartJob(new_job);
 }
@@ -881,7 +963,7 @@ void JobScheduler::OnGetResourceEntryJobDone(
 
 void JobScheduler::OnGetAboutResourceJobDone(
     JobID job_id,
-    const google_apis::GetAboutResourceCallback& callback,
+    const google_apis::AboutResourceCallback& callback,
     google_apis::GDataErrorCode error,
     scoped_ptr<google_apis::AboutResource> about_resource) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -905,7 +987,7 @@ void JobScheduler::OnGetShareUrlJobDone(
 
 void JobScheduler::OnGetAppListJobDone(
     JobID job_id,
-    const google_apis::GetAppListCallback& callback,
+    const google_apis::AppListCallback& callback,
     google_apis::GDataErrorCode error,
     scoped_ptr<google_apis::AppList> app_list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -1003,7 +1085,8 @@ void JobScheduler::UpdateProgress(JobID job_id, int64 progress, int64 total) {
   DCHECK(job_entry);
 
   job_entry->job_info.num_completed_bytes = progress;
-  job_entry->job_info.num_total_bytes = total;
+  if (total != -1)
+    job_entry->job_info.num_total_bytes = total;
   NotifyJobUpdated(job_entry->job_info);
 }
 
@@ -1026,18 +1109,22 @@ JobScheduler::QueueType JobScheduler::GetJobQueueType(JobType type) {
     case TYPE_GET_RESOURCE_LIST_IN_DIRECTORY:
     case TYPE_SEARCH:
     case TYPE_GET_CHANGE_LIST:
-    case TYPE_CONTINUE_GET_RESOURCE_LIST:
+    case TYPE_GET_REMAINING_CHANGE_LIST:
+    case TYPE_GET_REMAINING_FILE_LIST:
     case TYPE_GET_RESOURCE_ENTRY:
     case TYPE_GET_SHARE_URL:
     case TYPE_DELETE_RESOURCE:
     case TYPE_COPY_RESOURCE:
     case TYPE_COPY_HOSTED_DOCUMENT:
+    case TYPE_MOVE_RESOURCE:
     case TYPE_RENAME_RESOURCE:
     case TYPE_TOUCH_RESOURCE:
     case TYPE_ADD_RESOURCE_TO_DIRECTORY:
     case TYPE_REMOVE_RESOURCE_FROM_DIRECTORY:
     case TYPE_ADD_NEW_DIRECTORY:
     case TYPE_CREATE_FILE:
+    case TYPE_GET_RESOURCE_LIST_IN_DIRECTORY_BY_WAPI:
+    case TYPE_GET_REMAINING_RESOURCE_LIST:
       return METADATA_QUEUE;
 
     case TYPE_DOWNLOAD_FILE:

@@ -211,6 +211,8 @@ gfx::Rect NativeAppWindowGtk::GetRestoredBounds() const {
 ui::WindowShowState NativeAppWindowGtk::GetRestoredState() const {
   if (IsMaximized())
     return ui::SHOW_STATE_MAXIMIZED;
+  if (IsFullscreen())
+    return ui::SHOW_STATE_FULLSCREEN;
   return ui::SHOW_STATE_NORMAL;
 }
 
@@ -368,6 +370,9 @@ gfx::Insets NativeAppWindowGtk::GetFrameInsets() const {
       rect_with_decorations.width - current_width - left_inset);
 }
 
+void NativeAppWindowGtk::HideWithApp() {}
+void NativeAppWindowGtk::ShowWithApp() {}
+
 gfx::NativeView NativeAppWindowGtk::GetHostView() const {
   NOTIMPLEMENTED();
   return NULL;
@@ -379,6 +384,13 @@ gfx::Point NativeAppWindowGtk::GetDialogPosition(const gfx::Size& size) {
   gtk_window_get_size(window_, &current_width, &current_height);
   return gfx::Point(current_width / 2 - size.width() / 2,
                     current_height / 2 - size.height() / 2);
+}
+
+gfx::Size NativeAppWindowGtk::GetMaximumDialogSize() {
+  gint current_width = 0;
+  gint current_height = 0;
+  gtk_window_get_size(window_, &current_width, &current_height);
+  return gfx::Size(current_width, current_height);
 }
 
 void NativeAppWindowGtk::AddObserver(
@@ -586,7 +598,12 @@ void NativeAppWindowGtk::SetFullscreen(bool fullscreen) {
 }
 
 bool NativeAppWindowGtk::IsFullscreenOrPending() const {
-  return content_thinks_its_fullscreen_;
+  // |content_thinks_its_fullscreen_| is used when transitioning, and when
+  // the state change will not be made for some time. However, it is possible
+  // for a state update to be made before the final fullscreen state comes.
+  // In that case, |content_thinks_its_fullscreen_| will be cleared, but we
+  // will fall back to |IsFullscreen| which will soon have the correct state.
+  return content_thinks_its_fullscreen_ || IsFullscreen();
 }
 
 bool NativeAppWindowGtk::IsDetached() const {
@@ -610,6 +627,10 @@ void NativeAppWindowGtk::UpdateWindowTitle() {
 void NativeAppWindowGtk::HandleKeyboardEvent(
     const content::NativeWebKeyboardEvent& event) {
   // No-op.
+}
+
+void NativeAppWindowGtk::UpdateInputRegion(scoped_ptr<SkRegion> region) {
+  NOTIMPLEMENTED();
 }
 
 void NativeAppWindowGtk::UpdateDraggableRegions(

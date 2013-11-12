@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/cpu.h"
+#include "base/debug/crash_logging.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
@@ -18,6 +19,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/crash_keys.h"
 #include "chrome/common/pepper_flash.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
@@ -27,6 +29,7 @@
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
+#include "gpu/config/gpu_info.h"
 #include "grit/common_resources.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
 #include "remoting/client/plugin/pepper_entrypoints.h"
@@ -170,7 +173,8 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
                                                 kNaClPluginExtension,
                                                 kNaClPluginDescription);
       nacl.mime_types.push_back(nacl_mime_type);
-      if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnablePnacl)) {
+      if (!CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kDisablePnacl)) {
         content::WebPluginMimeType pnacl_mime_type(kPnaclPluginMimeType,
                                                    kPnaclPluginExtension,
                                                    kPnaclPluginDescription);
@@ -385,11 +389,29 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin) {
 namespace chrome {
 
 void ChromeContentClient::SetActiveURL(const GURL& url) {
-  child_process_logging::SetActiveURL(url);
+  base::debug::SetCrashKeyValue(crash_keys::kActiveURL,
+                                url.possibly_invalid_spec());
 }
 
 void ChromeContentClient::SetGpuInfo(const gpu::GPUInfo& gpu_info) {
-  child_process_logging::SetGpuInfo(gpu_info);
+#if !defined(OS_ANDROID)
+  base::debug::SetCrashKeyValue(crash_keys::kGPUVendorID,
+      base::StringPrintf("0x%04x", gpu_info.gpu.vendor_id));
+  base::debug::SetCrashKeyValue(crash_keys::kGPUDeviceID,
+      base::StringPrintf("0x%04x", gpu_info.gpu.device_id));
+#endif
+  base::debug::SetCrashKeyValue(crash_keys::kGPUDriverVersion,
+      gpu_info.driver_version);
+  base::debug::SetCrashKeyValue(crash_keys::kGPUPixelShaderVersion,
+      gpu_info.pixel_shader_version);
+  base::debug::SetCrashKeyValue(crash_keys::kGPUVertexShaderVersion,
+      gpu_info.vertex_shader_version);
+#if defined(OS_LINUX)
+  base::debug::SetCrashKeyValue(crash_keys::kGPUVendor, gpu_info.gl_vendor);
+  base::debug::SetCrashKeyValue(crash_keys::kGPURenderer, gpu_info.gl_renderer);
+#elif defined(OS_MACOSX)
+  base::debug::SetCrashKeyValue(crash_keys::kGPUGLVersion, gpu_info.gl_version);
+#endif
 }
 
 void ChromeContentClient::AddPepperPlugins(

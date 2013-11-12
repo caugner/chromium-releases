@@ -63,6 +63,16 @@ cr.define('options.internet', function() {
     DetailsInternetPage.getInstance().updateControls();
   }
 
+  /**
+   * Simple helper method for converting a field to a string. It is used to
+   * easily assign an empty string from fields that may be unknown or undefined.
+   * @param {object} value that should be converted to a string.
+   * @return {string} the result.
+   */
+  function stringFromValue(value) {
+    return value ? String(value) : '';
+  }
+
   /////////////////////////////////////////////////////////////////////////////
   // DetailsInternetPage class:
 
@@ -160,15 +170,14 @@ cr.define('options.internet', function() {
 
         if (data.providerApnList.value.length > 0) {
           var iApn = 0;
-          data.apn.apn = data.providerApnList.value[iApn].apn;
-          var username = data.providerApnList.value[iApn].username;
-          var password = data.providerApnList.value[iApn].password;
-          data.apn.username = username ? username : '';
-          data.apn.password = password ? password : '';
+          var defaultApn = data.providerApnList.value[iApn];
+          data.apn.apn = stringFromValue(defaultApn.apn);
+          data.apn.username = stringFromValue(defaultApn.username);
+          data.apn.password = stringFromValue(defaultApn.password);
           chrome.send('setApn', [data.servicePath,
-                                 String(data.apn.apn),
-                                 String(data.apn.username),
-                                 String(data.apn.password)]);
+                                 data.apn.apn,
+                                 data.apn.username,
+                                 data.apn.password]);
           apnSelector.selectedIndex = iApn;
           data.selectedApn = iApn;
         } else {
@@ -189,13 +198,18 @@ cr.define('options.internet', function() {
         var data = $('connection-state').data;
         var apnSelector = $('select-apn');
 
-        data.apn.apn = String($('cellular-apn').value);
-        data.apn.username = String($('cellular-apn-username').value);
-        data.apn.password = String($('cellular-apn-password').value);
+        data.apn.apn = stringFromValue($('cellular-apn').value);
+        data.apn.username = stringFromValue($('cellular-apn-username').value);
+        data.apn.password = stringFromValue($('cellular-apn-password').value);
+        data.userApn = {
+          'apn': data.apn.apn,
+          'username': data.apn.username,
+          'password': data.apn.password
+        };
         chrome.send('setApn', [data.servicePath,
-                               String(data.apn.apn),
-                               String(data.apn.username),
-                               String(data.apn.password)]);
+                               data.apn.apn,
+                               data.apn.username,
+                               data.apn.password]);
 
         if (data.userApnIndex != -1) {
           apnSelector.remove(data.userApnIndex);
@@ -226,23 +240,21 @@ cr.define('options.internet', function() {
         if (apnSelector[apnSelector.selectedIndex].value != -1) {
           var apnList = data.providerApnList.value;
           chrome.send('setApn', [data.servicePath,
-              String(apnList[apnSelector.selectedIndex].apn),
-              String(apnList[apnSelector.selectedIndex].username),
-              String(apnList[apnSelector.selectedIndex].password)
-          ]);
+              stringFromValue(apnList[apnSelector.selectedIndex].apn),
+              stringFromValue(apnList[apnSelector.selectedIndex].username),
+              stringFromValue(apnList[apnSelector.selectedIndex].password)]
+          );
           data.selectedApn = apnSelector.selectedIndex;
         } else if (apnSelector.selectedIndex == data.userApnIndex) {
           chrome.send('setApn', [data.servicePath,
-                                 String(data.apn.apn),
-                                 String(data.apn.username),
-                                 String(data.apn.password)]);
+                                 stringFromValue(data.userApn.apn),
+                                 stringFromValue(data.userApn.username),
+                                 stringFromValue(data.userApn.password)]);
           data.selectedApn = apnSelector.selectedIndex;
         } else {
-          $('cellular-apn').value = data.apn.apn;
-          var username = data.apn.username;
-          var password = data.apn.password;
-          $('cellular-apn-username').value = username ? username : '';
-          $('cellular-apn-password').value = password ? password : '';
+          $('cellular-apn').value = stringFromValue(data.apn.apn);
+          $('cellular-apn-username').value = stringFromValue(data.apn.username);
+          $('cellular-apn-password').value = stringFromValue(data.apn.password);
 
           updateHidden('.apn-list-view', true);
           updateHidden('.apn-details-view', false);
@@ -389,6 +401,12 @@ cr.define('options.internet', function() {
       updateHidden('#details-internet-page .wimax-details', !this.wimax);
       updateHidden('#details-internet-page .vpn-details', !this.vpn);
       updateHidden('#details-internet-page .proxy-details', !this.showProxy);
+      // Conditionally call updateHidden on .gsm-only, so that we don't unhide
+      // a previously hidden element.
+      if (this.gsm)
+        updateHidden('#details-internet-page .cdma-only', true);
+      else
+        updateHidden('#details-internet-page .gsm-only', true);
       /* Network information merged into the Wifi tab for wireless networks
          unless the option is set for enabling a static IP configuration. */
       updateHidden('#details-internet-page .network-details',
@@ -1094,18 +1112,34 @@ cr.define('options.internet', function() {
       $('model-id').textContent = data.modelId;
       $('firmware-revision').textContent = data.firmwareRevision;
       $('hardware-revision').textContent = data.hardwareRevision;
-      $('prl-version').textContent = data.prlVersion;
-      $('meid').textContent = data.meid;
-      $('iccid').textContent = data.iccid;
-      $('imei').textContent = data.imei;
       $('mdn').textContent = data.mdn;
-      $('esn').textContent = data.esn;
-      $('min').textContent = data.min;
+      $('operator-name').textContent = data.operatorName;
+      $('operator-code').textContent = data.operatorCode;
+
+      // Make sure that GSM/CDMA specific properties that shouldn't be hidden
+      // are visible.
+      updateHidden('#details-internet-page .gsm-only', false);
+      updateHidden('#details-internet-page .cdma-only', false);
+
+      // Show IMEI/ESN/MEID/MIN/PRL only if they are available.
+      (function() {
+        var setContentOrHide = function(property) {
+          var value = data[property];
+          if (value)
+            $(property).textContent = value;
+          else
+            $(property).parentElement.hidden = true;
+        };
+        setContentOrHide('esn');
+        setContentOrHide('imei');
+        setContentOrHide('meid');
+        setContentOrHide('min');
+        setContentOrHide('prl-version');
+      })();
       detailsPage.gsm = data.gsm;
       if (data.gsm) {
-        $('operator-name').textContent = data.operatorName;
-        $('operator-code').textContent = data.operatorCode;
-        $('imsi').textContent = data.imsi;
+        $('iccid').textContent = stringFromValue(data.iccid);
+        $('imsi').textContent = stringFromValue(data.imsi);
 
         var apnSelector = $('select-apn');
         // Clear APN lists, keep only last element that "other".

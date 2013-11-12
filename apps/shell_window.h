@@ -228,6 +228,10 @@ class ShellWindow : public content::NotificationObserver,
   // Specifies a url for the launcher icon.
   void SetAppIconUrl(const GURL& icon_url);
 
+  // Set the region in the window that will accept input events.
+  // If |region| is NULL, then the entire window will accept input events.
+  void UpdateInputRegion(scoped_ptr<SkRegion> region);
+
   // Called from the render interface to modify the draggable regions.
   void UpdateDraggableRegions(
       const std::vector<extensions::DraggableRegion>& regions);
@@ -334,8 +338,8 @@ class ShellWindow : public content::NotificationObserver,
   void DidDownloadFavicon(int id,
                           int http_status_code,
                           const GURL& image_url,
-                          int requested_size,
-                          const std::vector<SkBitmap>& bitmaps);
+                          const std::vector<SkBitmap>& bitmaps,
+                          const std::vector<gfx::Size>& original_bitmap_sizes);
 
   // extensions::IconImage::Observer implementation.
   virtual void OnExtensionIconImageChanged(

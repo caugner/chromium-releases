@@ -87,6 +87,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual bool IsHandledURL(const GURL& url) OVERRIDE;
   virtual bool CanCommitURL(content::RenderProcessHost* process_host,
                             const GURL& url) OVERRIDE;
+  virtual bool ShouldAllowOpenURL(content::SiteInstance* site_instance,
+                                  const GURL& url) OVERRIDE;
   virtual bool IsSuitableHost(content::RenderProcessHost* process_host,
                               const GURL& site_url) OVERRIDE;
   virtual bool ShouldTryToUseExistingProcessHost(
@@ -238,7 +240,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::BrowserContext* browser_context,
       const GURL& url,
       bool private_api,
-      const content::SocketPermissionRequest& params) OVERRIDE;
+      const content::SocketPermissionRequest* params) OVERRIDE;
   virtual ui::SelectFilePolicy* CreateSelectFilePolicy(
       content::WebContents* web_contents) OVERRIDE;
   virtual void GetAdditionalAllowedSchemesForFileSystem(

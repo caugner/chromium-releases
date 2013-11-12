@@ -12,7 +12,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -71,7 +70,7 @@ void CommandHandler::UpdateCommandDataOnPage() {
   DictionaryValue results;
   GetAllCommands(&results);
   web_ui()->CallJavascriptFunction(
-      "ExtensionCommandsOverlay.returnExtensionsData", results);
+      "extensions.ExtensionCommandsOverlay.returnExtensionsData", results);
 }
 
 void CommandHandler::HandleRequestExtensionsData(const ListValue* args) {

@@ -4,10 +4,26 @@
 
 /* This file contains styles specific to Android and iOS. */
 
+html {
+  height: 100%;
+}
+
 body {
   color: rgb(76, 76, 76);
+  height: 100%;
   margin: 0;
-  margin-bottom: 46px;
+}
+
+.page {
+  -webkit-flex-flow: column;
+  display: -webkit-flex;
+  height: 100%;
+}
+
+#scrolling-container {
+  -webkit-flex: auto;  /* Container should take up extra vertical space. */
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
 }
 
 h1 {
@@ -148,13 +164,12 @@ input {
   border: 0;
   border-radius: 0;
   border-top: 1px solid rgb(198, 198, 198);
-  bottom: 0;
   box-shadow: none;
   font-size: 75%;
   font-weight: bold;
   height: 46px;
   margin: 0;
-  position: fixed;
+  min-height: 46px;
   text-shadow: none;
   text-transform: uppercase;
   width: 100%;
@@ -164,13 +179,6 @@ input {
 .search-results {
   margin: 0;
 }
-
-<if expr="pp_ifdef('ios')">
-/* Add extra spacing caused by the missing search bar on iOS. */
-h3:first-of-type {
-  margin-top: 16px;
-}
-</if>
 
 /* Fade out the entry-box, rather than its parent node, so that the dividing
    line between entries doesn't fade out. */
@@ -216,7 +224,7 @@ h3:first-of-type {
   margin-top: 16px;
 }
 
-<if expr="pp_ifdef('ios')">
+<if expr="is_ios">
 /* iOS does not support the latest flexbox syntax, only the 2009 working draft
    syntax (http://www.w3.org/TR/2009/WD-css3-flexbox-20090723/). */
 .entry-box,
@@ -230,6 +238,19 @@ h3:first-of-type {
   -webkit-box-orient: vertical;
   -webkit-box-pack: center;
   display: -webkit-box;
+}
+
+#scrolling-container {
+  bottom: 46px;
+  left: 0;
+  position: fixed;
+  right: 0;
+  top: 0;
+}
+
+#clear-browsing-data {
+  bottom: 0;
+  position: fixed;
 }
 </if>
 
@@ -283,3 +304,25 @@ h1,
 }
 
 } /* @media only screen and (max-width:720px) */
+
+<if expr="is_ios">
+/* Ensure that the Clear Browsing Data button is hidden when the keyboard is
+   visible. The cutoff values are chosen to be compatible with all known device
+   aspect ratios. */
+
+#clear-browsing-data {
+  display: none;
+}
+
+@media only screen and (orientation: portrait) and (max-aspect-ratio: 1/1) {
+#clear-browsing-data {
+  display: block;
+}
+}
+
+@media only screen and (orientation: landscape) and (max-aspect-ratio: 5/2) {
+#clear-browsing-data {
+  display: block;
+}
+}
+</if> /* is_ios */

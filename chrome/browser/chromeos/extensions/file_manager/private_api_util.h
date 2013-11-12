@@ -8,6 +8,7 @@
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_UTIL_H_
 
 #include "base/callback_forward.h"
+#include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "url/gurl.h"
 
@@ -25,20 +26,12 @@ struct SelectedFileInfo;
 namespace file_manager {
 namespace util {
 
+// Converts VolumeType to a string enum (volumeType) used in the private API.
+std::string VolumeTypeToStringEnum(VolumeType type);
+
 // Returns the ID of the tab associated with the dispatcher. Returns 0 on
 // error.
 int32 GetTabId(ExtensionFunctionDispatcher* dispatcher);
-
-// Finds an icon in the list of icons. If unable to find an icon of the exact
-// size requested, returns one with the next larger size. If all icons are
-// smaller than the preferred size, we'll return the largest one available.
-// Icons must be sorted by the icon size, smallest to largest. If there are no
-// icons in the list, returns an empty URL.
-GURL FindPreferredIcon(const google_apis::InstalledApp::IconList& icons,
-                       int preferred_size);
-
-// The preferred icon size, which should usually be used for FindPreferredIcon;
-const int kPreferredIconSize = 16;
 
 // Returns the local FilePath associated with |url|. If the file isn't of the
 // type FileSystemBackend handles, returns an empty

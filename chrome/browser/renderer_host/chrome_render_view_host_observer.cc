@@ -9,7 +9,6 @@
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/net/predictor.h"
@@ -21,11 +20,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
-#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/child_process_security_policy.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -33,10 +30,12 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/manifest.h"
 #include "net/http/http_request_headers.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/codec/jpeg_codec.h"
+#include "ui/gfx/size.h"
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
@@ -82,7 +81,8 @@ void ChromeRenderViewHostObserver::Navigate(const GURL& url) {
   if (!predictor_)
     return;
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame) &&
-     (url.SchemeIs(chrome::kHttpScheme) || url.SchemeIs(chrome::kHttpsScheme)))
+      (url.SchemeIs(content::kHttpScheme) ||
+       url.SchemeIs(content::kHttpsScheme)))
     predictor_->PreconnectUrlAndSubresources(url, GURL());
 }
 
@@ -187,25 +187,22 @@ void ChromeRenderViewHostObserver::RemoveRenderViewHostForExtensions(
 }
 
 void ChromeRenderViewHostObserver::OnFocusedNodeTouched(bool editable) {
+#if defined(OS_WIN) && defined(USE_AURA)
   if (editable) {
-#if defined(OS_WIN) && defined(USE_AURA)
     base::win::DisplayVirtualKeyboard();
-#endif
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_FOCUSED_NODE_TOUCHED,
-        content::Source<RenderViewHost>(render_view_host()),
-        content::Details<bool>(&editable));
   } else {
-#if defined(OS_WIN) && defined(USE_AURA)
     base::win::DismissVirtualKeyboard();
-#endif
   }
+#endif  // OS_WIN && USE_AURA
 }
 
 // Handles the image thumbnail for the context node, composes a image search
 // request based on the received thumbnail and opens the request in a new tab.
 void ChromeRenderViewHostObserver::OnRequestThumbnailForContextNodeACK(
-    const SkBitmap& bitmap) {
+    const SkBitmap& bitmap,
+    const gfx::Size& original_size) {
+  if (bitmap.isNull())
+    return;
   WebContents* web_contents =
       WebContents::FromRenderViewHost(render_view_host());
   const TemplateURL* const default_provider =
@@ -229,6 +226,7 @@ void ChromeRenderViewHostObserver::OnRequestThumbnailForContextNodeACK(
   // TODO(jnd): Add a method in WebContentsViewDelegate to get the image URL
   // from the ContextMenuParams which creates current context menu.
   search_args.image_url = GURL();
+  search_args.image_original_size = original_size;
   TemplateURLRef::PostContent post_content;
   GURL result(default_provider->image_url_ref().ReplaceSearchTerms(
       search_args, &post_content));

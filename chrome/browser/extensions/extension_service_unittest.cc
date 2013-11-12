@@ -31,6 +31,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/app_sync_data.h"
+#include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/default_apps.h"
@@ -48,6 +49,7 @@
 #include "chrome/browser/extensions/external_pref_loader.h"
 #include "chrome/browser/extensions/external_provider_impl.h"
 #include "chrome/browser/extensions/external_provider_interface.h"
+#include "chrome/browser/extensions/fake_safe_browsing_database_manager.h"
 #include "chrome/browser/extensions/install_observer.h"
 #include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
@@ -72,7 +74,6 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_builder.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
@@ -80,6 +81,7 @@
 #include "chrome/common/extensions/value_builder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/base/scoped_browser_locale.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/dom_storage_context.h"
@@ -94,6 +96,7 @@
 #include "content/public/test/test_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_resource.h"
+#include "extensions/common/manifest_constants.h"
 #include "extensions/common/url_pattern.h"
 #include "gpu/config/gpu_info.h"
 #include "grit/browser_resources.h"
@@ -123,6 +126,11 @@
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #endif
 
+// The blacklist tests rely on safe browsing.
+#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
+#define ENABLE_BLACKLIST_TESTS
+#endif
+
 using base::DictionaryValue;
 using base::ListValue;
 using base::Value;
@@ -133,19 +141,21 @@ using content::IndexedDBContext;
 using content::PluginService;
 using extensions::APIPermission;
 using extensions::APIPermissionSet;
+using extensions::Blacklist;
 using extensions::CrxInstaller;
 using extensions::Extension;
 using extensions::ExtensionCreator;
 using extensions::ExtensionPrefs;
 using extensions::ExtensionResource;
 using extensions::ExtensionSystem;
+using extensions::FakeSafeBrowsingDatabaseManager;
 using extensions::FeatureSwitch;
 using extensions::Manifest;
 using extensions::PermissionSet;
 using extensions::TestExtensionSystem;
 using extensions::URLPatternSet;
 
-namespace keys = extension_manifest_keys;
+namespace keys = extensions::manifest_keys;
 
 namespace {
 
@@ -533,6 +543,16 @@ void ExtensionServiceTestBase::InitializeInstalledExtensionService(
   InitializeExtensionService(params);
 }
 
+void ExtensionServiceTestBase::InitializeGoodInstalledExtensionService() {
+  base::FilePath source_install_dir = data_dir_
+      .AppendASCII("good")
+      .AppendASCII("Extensions");
+  base::FilePath pref_path = source_install_dir
+      .DirName()
+      .AppendASCII("Preferences");
+  InitializeInstalledExtensionService(pref_path, source_install_dir);
+}
+
 void ExtensionServiceTestBase::InitializeEmptyExtensionService() {
   InitializeExtensionServiceHelper(false, true);
 }
@@ -656,6 +676,22 @@ class ExtensionServiceTest
   }
 
  protected:
+  // Paths to some of the fake extensions.
+  base::FilePath good0_path() {
+    return data_dir_.AppendASCII("good").AppendASCII("Extensions")
+                    .AppendASCII(good0).AppendASCII("1.0.0.0");
+  }
+
+  base::FilePath good1_path() {
+    return data_dir_.AppendASCII("good").AppendASCII("Extensions")
+                    .AppendASCII(good1).AppendASCII("2");
+  }
+
+  base::FilePath good2_path() {
+    return data_dir_.AppendASCII("good").AppendASCII("Extensions")
+                    .AppendASCII(good2).AppendASCII("1.0");
+  }
+
   void TestExternalProvider(MockExtensionProvider* provider,
                             Manifest::Location location);
 
@@ -826,7 +862,9 @@ class ExtensionServiceTest
         EXPECT_EQ(0u, loaded_.size()) << path.value();
       } else {
         EXPECT_EQ(1u, loaded_.size()) << path.value();
-        EXPECT_EQ(expected_extensions_count_, service_->extensions()->size()) <<
+        size_t actual_extension_count = service_->extensions()->size() +
+            service_->disabled_extensions()->size();
+        EXPECT_EQ(expected_extensions_count_, actual_extension_count) <<
             path.value();
         extension = loaded_[0].get();
         EXPECT_TRUE(service_->GetExtensionById(extension->id(), false))
@@ -993,10 +1031,11 @@ class ExtensionServiceTest
     EXPECT_EQ(count, GetPrefKeyCount());
   }
 
-  void ValidateBooleanPref(const std::string& extension_id,
-                           const std::string& pref_path,
-                           bool expected_val) {
-    std::string msg = " while checking: ";
+  testing::AssertionResult ValidateBooleanPref(
+      const std::string& extension_id,
+      const std::string& pref_path,
+      bool expected_val) {
+    std::string msg = "while checking: ";
     msg += extension_id;
     msg += " ";
     msg += pref_path;
@@ -1006,13 +1045,26 @@ class ExtensionServiceTest
     PrefService* prefs = profile_->GetPrefs();
     const DictionaryValue* dict =
         prefs->GetDictionary("extensions.settings");
-    ASSERT_TRUE(dict != NULL) << msg;
+    if (!dict) {
+      return testing::AssertionFailure()
+          << "extension.settings does not exist " << msg;
+    }
+
     const DictionaryValue* pref = NULL;
-    ASSERT_TRUE(dict->GetDictionary(extension_id, &pref)) << msg;
-    EXPECT_TRUE(pref != NULL) << msg;
+    if (!dict->GetDictionary(extension_id, &pref)) {
+      return testing::AssertionFailure()
+          << "extension pref does not exist " << msg;
+    }
+
     bool val;
-    ASSERT_TRUE(pref->GetBoolean(pref_path, &val)) << msg;
-    EXPECT_EQ(expected_val, val) << msg;
+    if (!pref->GetBoolean(pref_path, &val)) {
+      return testing::AssertionFailure()
+          << pref_path << " pref not found " << msg;
+    }
+
+    return expected_val == val
+        ? testing::AssertionSuccess()
+        : testing::AssertionFailure() << "Value is incorrect " << msg;
   }
 
   bool IsPrefExist(const std::string& extension_id,
@@ -1101,7 +1153,7 @@ class ExtensionServiceTest
     msg += " = ";
     msg += base::IntToString(value);
 
-    SetPref(extension_id, pref_path, Value::CreateIntegerValue(value), msg);
+    SetPref(extension_id, pref_path, new base::FundamentalValue(value), msg);
   }
 
   void SetPrefBool(const std::string& extension_id,
@@ -1112,7 +1164,7 @@ class ExtensionServiceTest
     msg += " = ";
     msg += (value ? "true" : "false");
 
-    SetPref(extension_id, pref_path, Value::CreateBooleanValue(value), msg);
+    SetPref(extension_id, pref_path, new base::FundamentalValue(value), msg);
   }
 
   void ClearPref(const std::string& extension_id,
@@ -1138,7 +1190,7 @@ class ExtensionServiceTest
     ListValue* list_value = new ListValue();
     for (std::set<std::string>::const_iterator iter = value.begin();
          iter != value.end(); ++iter)
-      list_value->Append(Value::CreateStringValue(*iter));
+      list_value->Append(new base::StringValue(*iter));
 
     SetPref(extension_id, pref_path, list_value, msg);
   }
@@ -1212,16 +1264,7 @@ void PackExtensionTestClient::OnPackFailure(const std::string& error_message,
 // Test loading good extensions from the profile directory.
 TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   InitPluginService();
-
-  // Initialize the test dir with a good Preferences/extensions.
-  base::FilePath source_install_dir = data_dir_
-      .AppendASCII("good")
-      .AppendASCII("Extensions");
-  base::FilePath pref_path = source_install_dir
-      .DirName()
-      .AppendASCII("Preferences");
-  InitializeInstalledExtensionService(pref_path, source_install_dir);
-
+  InitializeGoodInstalledExtensionService();
   service_->Init();
 
   uint32 expected_num_extensions = 3u;
@@ -1341,22 +1384,22 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectoryFail) {
 
   EXPECT_TRUE(MatchPattern(UTF16ToUTF8(GetErrors()[0]),
       std::string("Could not load extension from '*'. ") +
-      extension_manifest_errors::kManifestUnreadable)) <<
+      extensions::manifest_errors::kManifestUnreadable)) <<
       UTF16ToUTF8(GetErrors()[0]);
 
   EXPECT_TRUE(MatchPattern(UTF16ToUTF8(GetErrors()[1]),
       std::string("Could not load extension from '*'. ") +
-      extension_manifest_errors::kManifestUnreadable)) <<
+      extensions::manifest_errors::kManifestUnreadable)) <<
       UTF16ToUTF8(GetErrors()[1]);
 
   EXPECT_TRUE(MatchPattern(UTF16ToUTF8(GetErrors()[2]),
       std::string("Could not load extension from '*'. ") +
-      extension_manifest_errors::kMissingFile)) <<
+      extensions::manifest_errors::kMissingFile)) <<
       UTF16ToUTF8(GetErrors()[2]);
 
   EXPECT_TRUE(MatchPattern(UTF16ToUTF8(GetErrors()[3]),
       std::string("Could not load extension from '*'. ") +
-      extension_manifest_errors::kManifestUnreadable)) <<
+      extensions::manifest_errors::kManifestUnreadable)) <<
       UTF16ToUTF8(GetErrors()[3]);
 };
 
@@ -1364,15 +1407,7 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectoryFail) {
 // Test loading bad extensions from the profile directory.
 TEST_F(ExtensionServiceTest, CleanupOnStartup) {
   InitPluginService();
-
-  base::FilePath source_install_dir = data_dir_
-      .AppendASCII("good")
-      .AppendASCII("Extensions");
-  base::FilePath pref_path = source_install_dir
-      .DirName()
-      .AppendASCII("Preferences");
-
-  InitializeInstalledExtensionService(pref_path, source_install_dir);
+  InitializeGoodInstalledExtensionService();
 
   // Simulate that one of them got partially deleted by clearing its pref.
   {
@@ -1588,13 +1623,11 @@ TEST_F(ExtensionServiceTest, InstallExtension) {
   InstallCRX(path, INSTALL_FAILED);
   ValidatePrefKeyCount(pref_count);
 
-  // Extensions cannot have folders or files that have underscores except in
-  // certain whitelisted cases (eg _locales). This is an example of a broader
-  // class of validation that we do to the directory structure of the extension.
-  // We did not used to handle this correctly for installation.
+  // Packed extensions may have folders or files that have underscores.
+  // This will only cause a warning, rather than a fatal error.
   path = data_dir_.AppendASCII("bad_underscore.crx");
-  InstallCRX(path, INSTALL_FAILED);
-  ValidatePrefKeyCount(pref_count);
+  InstallCRX(path, INSTALL_NEW);
+  ValidatePrefKeyCount(++pref_count);
 
   // TODO(erikkay): add more tests for many of the failure cases.
   // TODO(erikkay): add tests for upgrade cases.
@@ -1701,12 +1734,12 @@ TEST_F(ExtensionServiceTest, InstallingExternalExtensionWithFlags) {
   const Extension* extension = service_->GetExtensionById(good_crx, false);
   ASSERT_TRUE(extension);
   ASSERT_TRUE(extension->from_bookmark());
-  ValidateBooleanPref(good_crx, kPrefFromBookmark, true);
+  ASSERT_TRUE(ValidateBooleanPref(good_crx, kPrefFromBookmark, true));
 
   // Upgrade to version 2.0, the flag should be preserved.
   path = data_dir_.AppendASCII("good2.crx");
   UpdateExtension(good_crx, path, ENABLED);
-  ValidateBooleanPref(good_crx, kPrefFromBookmark, true);
+  ASSERT_TRUE(ValidateBooleanPref(good_crx, kPrefFromBookmark, true));
   extension = service_->GetExtensionById(good_crx, false);
   ASSERT_TRUE(extension);
   ASSERT_TRUE(extension->from_bookmark());
@@ -2006,14 +2039,8 @@ TEST_F(ExtensionServiceTest, GrantedFullAccessPermissions) {
 
   InitializeEmptyExtensionService();
 
-  base::FilePath path = data_dir_
-      .AppendASCII("good")
-      .AppendASCII("Extensions")
-      .AppendASCII(good1)
-      .AppendASCII("2");
-
-  ASSERT_TRUE(base::PathExists(path));
-  const Extension* extension = PackAndInstallCRX(path, INSTALL_NEW);
+  ASSERT_TRUE(base::PathExists(good1_path()));
+  const Extension* extension = PackAndInstallCRX(good1_path(), INSTALL_NEW);
   EXPECT_EQ(0u, GetErrors().size());
   EXPECT_EQ(1u, service_->extensions()->size());
   ExtensionPrefs* prefs = service_->extension_prefs();
@@ -2103,7 +2130,7 @@ TEST_F(ExtensionServiceTest, GrantedAPIAndHostPermissions) {
 
   ListValue* api_permissions = new ListValue();
   api_permissions->Append(
-      Value::CreateStringValue("tabs"));
+      new base::StringValue("tabs"));
   SetPref(extension_id, "granted_permissions.api",
           api_permissions, "granted_permissions.api");
   SetPrefStringSet(
@@ -2346,6 +2373,7 @@ TEST_F(ExtensionServiceTest, PackExtensionOpenSSLKey) {
 
 TEST_F(ExtensionServiceTest, InstallTheme) {
   InitializeEmptyExtensionService();
+  service_->Init();
 
   // A theme.
   base::FilePath path = data_dir_.AppendASCII("theme.crx");
@@ -2387,6 +2415,8 @@ TEST_F(ExtensionServiceTest, InstallTheme) {
 TEST_F(ExtensionServiceTest, LoadLocalizedTheme) {
   // Load.
   InitializeEmptyExtensionService();
+  service_->Init();
+
   base::FilePath extension_path = data_dir_
       .AppendASCII("theme_i18n");
 
@@ -2485,8 +2515,20 @@ TEST_F(ExtensionServiceTest, UnpackedExtensionMayContainSymlinkedFiles) {
 }
 #endif
 
+TEST_F(ExtensionServiceTest, UnpackedExtensionMayNotHaveUnderscore) {
+  InitializeEmptyExtensionService();
+  base::FilePath extension_path = data_dir_
+      .AppendASCII("underscore_name");
+  extensions::UnpackedInstaller::Create(service_)->Load(extension_path);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1u, GetErrors().size());
+  EXPECT_EQ(0u, service_->extensions()->size());
+}
+
 TEST_F(ExtensionServiceTest, InstallLocalizedTheme) {
   InitializeEmptyExtensionService();
+  service_->Init();
+
   base::FilePath theme_path = data_dir_
       .AppendASCII("theme_i18n");
 
@@ -2720,14 +2762,14 @@ TEST_F(ExtensionServiceTest, FromWebStore) {
   std::string id = extension->id();
 
   ValidatePrefKeyCount(1);
-  ValidateBooleanPref(good_crx, "from_webstore", false);
+  ASSERT_TRUE(ValidateBooleanPref(good_crx, "from_webstore", false));
   ASSERT_FALSE(extension->from_webstore());
 
   // Test install from web store.
   InstallCRXFromWebStore(path, INSTALL_UPDATED);  // From web store.
 
   ValidatePrefKeyCount(1);
-  ValidateBooleanPref(good_crx, "from_webstore", true);
+  ASSERT_TRUE(ValidateBooleanPref(good_crx, "from_webstore", true));
 
   // Reload so extension gets reinitialized with new value.
   service_->ReloadExtensions();
@@ -2738,7 +2780,7 @@ TEST_F(ExtensionServiceTest, FromWebStore) {
   path = data_dir_.AppendASCII("good2.crx");
   UpdateExtension(good_crx, path, ENABLED);
   ValidatePrefKeyCount(1);
-  ValidateBooleanPref(good_crx, "from_webstore", true);
+  ASSERT_TRUE(ValidateBooleanPref(good_crx, "from_webstore", true));
 }
 
 // Test upgrading a signed extension.
@@ -2951,16 +2993,8 @@ TEST_F(ExtensionServiceTest, LoadExtensionsCanDowngrade) {
 #if !defined(OS_CHROMEOS)
 // LOAD extensions with plugins require approval.
 TEST_F(ExtensionServiceTest, LoadExtensionsWithPlugins) {
-  base::FilePath extension_with_plugin_path = data_dir_
-      .AppendASCII("good")
-      .AppendASCII("Extensions")
-      .AppendASCII(good1)
-      .AppendASCII("2");
-  base::FilePath extension_no_plugin_path = data_dir_
-      .AppendASCII("good")
-      .AppendASCII("Extensions")
-      .AppendASCII(good2)
-      .AppendASCII("1.0");
+  base::FilePath extension_with_plugin_path = good1_path();
+  base::FilePath extension_no_plugin_path = good2_path();
 
   InitPluginService();
   InitializeEmptyExtensionService();
@@ -3255,97 +3289,101 @@ TEST_F(ExtensionServiceTest, UpdatePendingExtensionAlreadyInstalled) {
   EXPECT_FALSE(service_->pending_extension_manager()->IsIdPending(kGoodId));
 }
 
-// Test pref settings for blacklist and unblacklist extensions.
+#if defined(ENABLE_BLACKLIST_TESTS)
+// Tests blacklisting then unblacklisting extensions after the service has been
+// initialized.
 TEST_F(ExtensionServiceTest, SetUnsetBlacklistInPrefs) {
-  InitializeEmptyExtensionService();
-  std::vector<std::string> blacklist;
-  blacklist.push_back(good0);
-  blacklist.push_back("invalid_id");  // an invalid id
-  blacklist.push_back(good1);
-  ExtensionSystem::Get(profile_.get())->blacklist()->SetFromUpdater(blacklist,
-                                                                    "v1");
+  scoped_refptr<FakeSafeBrowsingDatabaseManager> blacklist_db(
+      new FakeSafeBrowsingDatabaseManager(true));
+  Blacklist::ScopedDatabaseManagerForTest scoped_blacklist_db(blacklist_db);
 
-  // Make sure pref is updated
-  base::RunLoop().RunUntilIdle();
+  // A profile with 3 extensions installed: good0, good1, and good2.
+  InitializeGoodInstalledExtensionService();
+  service_->Init();
 
-  // blacklist is set for good0,1,2
-  ValidateBooleanPref(good0, "blacklist", true);
-  ValidateBooleanPref(good1, "blacklist", true);
-  // invalid_id should not be inserted to pref.
-  EXPECT_FALSE(IsPrefExist("invalid_id", "blacklist"));
+  const ExtensionSet* extensions = service_->extensions();
+  const ExtensionSet* blacklisted_extensions =
+      service_->blacklisted_extensions();
 
-  // remove good1, add good2
-  blacklist.pop_back();
-  blacklist.push_back(good2);
-  ExtensionSystem::Get(profile_.get())->blacklist()->SetFromUpdater(blacklist,
-                                                                    "v2");
+  EXPECT_TRUE( extensions->Contains(good0) &&
+              !blacklisted_extensions->Contains(good0));
+  EXPECT_TRUE( extensions->Contains(good1) &&
+              !blacklisted_extensions->Contains(good1));
+  EXPECT_TRUE( extensions->Contains(good2) &&
+              !blacklisted_extensions->Contains(good2));
 
-  // only good0 and good1 should be set
-  ValidateBooleanPref(good0, "blacklist", true);
+  EXPECT_FALSE(IsPrefExist(good0, "blacklist"));
   EXPECT_FALSE(IsPrefExist(good1, "blacklist"));
-  ValidateBooleanPref(good2, "blacklist", true);
+  EXPECT_FALSE(IsPrefExist(good2, "blacklist"));
+  EXPECT_FALSE(IsPrefExist("invalid_id", "blacklist"));
+
+  // Blacklist good0 and good1 (and an invalid extension ID).
+  blacklist_db->SetUnsafe(good0, good1, "invalid_id").NotifyUpdate();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_TRUE(!extensions->Contains(good0) &&
+               blacklisted_extensions->Contains(good0));
+  EXPECT_TRUE(!extensions->Contains(good1) &&
+               blacklisted_extensions->Contains(good1));
+  EXPECT_TRUE( extensions->Contains(good2) &&
+              !blacklisted_extensions->Contains(good2));
+
+  EXPECT_TRUE(ValidateBooleanPref(good0, "blacklist", true));
+  EXPECT_TRUE(ValidateBooleanPref(good1, "blacklist", true));
+  EXPECT_FALSE(IsPrefExist(good2, "blacklist"));
+  EXPECT_FALSE(IsPrefExist("invalid_id", "blacklist"));
+
+  // Un-blacklist good1 and blacklist good2.
+  blacklist_db->SetUnsafe(good0, good2, "invalid_id").NotifyUpdate();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_TRUE(!extensions->Contains(good0) &&
+               blacklisted_extensions->Contains(good0));
+  EXPECT_TRUE( extensions->Contains(good1) &&
+              !blacklisted_extensions->Contains(good1));
+  EXPECT_TRUE(!extensions->Contains(good2) &&
+               blacklisted_extensions->Contains(good2));
+
+  EXPECT_TRUE(ValidateBooleanPref(good0, "blacklist", true));
+  EXPECT_FALSE(IsPrefExist(good1, "blacklist"));
+  EXPECT_TRUE(ValidateBooleanPref(good2, "blacklist", true));
   EXPECT_FALSE(IsPrefExist("invalid_id", "blacklist"));
 }
+#endif  // defined(ENABLE_BLACKLIST_TESTS)
 
-// Unload installed extension from blacklist.
-TEST_F(ExtensionServiceTest, UnloadBlacklistedExtension) {
-  InitializeEmptyExtensionService();
-
-  base::FilePath path = data_dir_.AppendASCII("good.crx");
-
-  const Extension* good = InstallCRX(path, INSTALL_NEW);
-  EXPECT_EQ(good_crx, good->id());
-  UpdateExtension(good_crx, path, FAILED_SILENTLY);
-
-  std::vector<std::string> blacklist;
-  blacklist.push_back(good_crx);
-  ExtensionSystem::Get(profile_.get())->blacklist()->SetFromUpdater(blacklist,
-                                                                     "v1");
-
-  // Make sure pref is updated
-  base::RunLoop().RunUntilIdle();
-
-  // Now, the good_crx is blacklisted.
-  ValidateBooleanPref(good_crx, "blacklist", true);
-  EXPECT_EQ(0u, service_->extensions()->size());
-
-  // Remove good_crx from blacklist
-  blacklist.pop_back();
-  ExtensionSystem::Get(profile_.get())->blacklist()->SetFromUpdater(blacklist,
-                                                                     "v2");
-
-  // Make sure pref is updated
-  base::RunLoop().RunUntilIdle();
-  // blacklist value should not be set for good_crx
-  EXPECT_FALSE(IsPrefExist(good_crx, "blacklist"));
-}
-
-// Unload installed extension from blacklist.
+#if defined(ENABLE_BLACKLIST_TESTS)
+// Tests trying to install a blacklisted extension.
 TEST_F(ExtensionServiceTest, BlacklistedExtensionWillNotInstall) {
+  scoped_refptr<FakeSafeBrowsingDatabaseManager> blacklist_db(
+      new FakeSafeBrowsingDatabaseManager(true));
+  Blacklist::ScopedDatabaseManagerForTest scoped_blacklist_db(blacklist_db);
+
   InitializeEmptyExtensionService();
+  service_->Init();
 
-  // Fake the blacklisting of good_crx by pretending that we get an update
-  // which includes it.
-  extensions::Blacklist* blacklist =
-      ExtensionSystem::Get(profile_.get())->blacklist();
-  blacklist->SetFromUpdater(std::vector<std::string>(1, good_crx), "v1");
+  // After blacklisting good_crx, we cannot install it.
+  blacklist_db->SetUnsafe(good_crx).NotifyUpdate();
+  base::RunLoop().RunUntilIdle();
 
-  // Now good_crx is blacklisted.
-  ValidateBooleanPref(good_crx, "blacklist", true);
-
-  // We cannot install good_crx.
   base::FilePath path = data_dir_.AppendASCII("good.crx");
   // HACK: specify WAS_INSTALLED_BY_DEFAULT so that test machinery doesn't
   // decide to install this silently. Somebody should fix these tests, all
   // 6,000 lines of them. Hah!
   InstallCRX(path, INSTALL_FAILED, Extension::WAS_INSTALLED_BY_DEFAULT);
   EXPECT_EQ(0u, service_->extensions()->size());
-  ValidateBooleanPref(good_crx, "blacklist", true);
 }
+#endif  // defined(ENABLE_BLACKLIST_TESTS)
 
+#if defined(ENABLE_BLACKLIST_TESTS)
 // Unload blacklisted extension on policy change.
 TEST_F(ExtensionServiceTest, UnloadBlacklistedExtensionPolicy) {
+  scoped_refptr<FakeSafeBrowsingDatabaseManager> blacklist_db(
+      new FakeSafeBrowsingDatabaseManager(true));
+  Blacklist::ScopedDatabaseManagerForTest scoped_blacklist_db(blacklist_db);
+
+  // A profile with no extensions installed.
   InitializeEmptyExtensionService();
+
   base::FilePath path = data_dir_.AppendASCII("good.crx");
 
   const Extension* good = InstallCRX(path, INSTALL_NEW);
@@ -3355,60 +3393,80 @@ TEST_F(ExtensionServiceTest, UnloadBlacklistedExtensionPolicy) {
 
   base::ListValue whitelist;
   PrefService* prefs = service_->extension_prefs()->pref_service();
-  whitelist.Append(base::Value::CreateStringValue(good_crx));
+  whitelist.Append(new base::StringValue(good_crx));
   prefs->Set(prefs::kExtensionInstallAllowList, whitelist);
 
-  std::vector<std::string> blacklist;
-  blacklist.push_back(good_crx);
-  ExtensionSystem::Get(profile_.get())->blacklist()->SetFromUpdater(blacklist,
-                                                                    "v1");
-
-  // Make sure pref is updated
+  blacklist_db->SetUnsafe(good_crx).NotifyUpdate();
   base::RunLoop().RunUntilIdle();
 
   // The good_crx is blacklisted and the whitelist doesn't negate it.
-  ValidateBooleanPref(good_crx, "blacklist", true);
+  ASSERT_TRUE(ValidateBooleanPref(good_crx, "blacklist", true));
   EXPECT_EQ(0u, service_->extensions()->size());
 }
+#endif  // defined(ENABLE_BLACKLIST_TESTS)
 
-// Test loading extensions from the profile directory, except
-// blacklisted ones.
+#if defined(ENABLE_BLACKLIST_TESTS)
+// Tests that a blacklisted extension is eventually unloaded on startup, if it
+// wasn't already.
 TEST_F(ExtensionServiceTest, WillNotLoadBlacklistedExtensionsFromDirectory) {
-  // Initialize the test dir with a good Preferences/extensions.
-  base::FilePath source_install_dir = data_dir_
-      .AppendASCII("good")
-      .AppendASCII("Extensions");
-  base::FilePath pref_path = source_install_dir
-      .DirName()
-      .AppendASCII("Preferences");
-  InitializeInstalledExtensionService(pref_path, source_install_dir);
+  scoped_refptr<FakeSafeBrowsingDatabaseManager> blacklist_db(
+      new FakeSafeBrowsingDatabaseManager(true));
+  Blacklist::ScopedDatabaseManagerForTest scoped_blacklist_db(blacklist_db);
 
-  // Blacklist good1.
-  std::vector<std::string> blacklist;
-  blacklist.push_back(good1);
-  ExtensionSystem::Get(profile_.get())->blacklist()->SetFromUpdater(blacklist,
-                                                                    "v1");
+  // A profile with 3 extensions installed: good0, good1, and good2.
+  InitializeGoodInstalledExtensionService();
 
-  // Make sure pref is updated
-  base::RunLoop().RunUntilIdle();
-
-  ValidateBooleanPref(good1, "blacklist", true);
+  // Blacklist good1 before the service initializes.
+  blacklist_db->SetUnsafe(good1);
 
   // Load extensions.
   service_->Init();
+  ASSERT_EQ(3u, loaded_.size());  // hasn't had time to blacklist yet
 
-  std::vector<string16> errors = GetErrors();
-  for (std::vector<string16>::iterator err = errors.begin();
-    err != errors.end(); ++err) {
-    LOG(ERROR) << *err;
-  }
-  ASSERT_EQ(2u, loaded_.size());
+  base::RunLoop().RunUntilIdle();
+  ASSERT_EQ(1u, service_->blacklisted_extensions()->size());
+  ASSERT_EQ(2u, service_->extensions()->size());
 
-  EXPECT_TRUE(service_->GetInstalledExtension(good1));
-  int include_mask = ExtensionService::INCLUDE_EVERYTHING &
-                    ~ExtensionService::INCLUDE_BLACKLISTED;
-  EXPECT_FALSE(service_->GetExtensionById(good1, include_mask));
+  ASSERT_TRUE(service_->extensions()->Contains(good0));
+  ASSERT_TRUE(service_->blacklisted_extensions()->Contains(good1));
+  ASSERT_TRUE(service_->extensions()->Contains(good2));
 }
+#endif  // defined(ENABLE_BLACKLIST_TESTS)
+
+#if defined(ENABLE_BLACKLIST_TESTS)
+// Tests extensions blacklisted in prefs on startup; one still blacklisted by
+// safe browsing, the other not. The not-blacklisted one should recover.
+TEST_F(ExtensionServiceTest, BlacklistedInPrefsFromStartup) {
+  scoped_refptr<FakeSafeBrowsingDatabaseManager> blacklist_db(
+      new FakeSafeBrowsingDatabaseManager(true));
+  Blacklist::ScopedDatabaseManagerForTest scoped_blacklist_db(blacklist_db);
+
+  InitializeGoodInstalledExtensionService();
+  service_->extension_prefs()->SetExtensionBlacklisted(good0, true);
+  service_->extension_prefs()->SetExtensionBlacklisted(good1, true);
+
+  blacklist_db->SetUnsafe(good1);
+
+  service_->Init();
+
+  ASSERT_EQ(2u, service_->blacklisted_extensions()->size());
+  ASSERT_EQ(1u, service_->extensions()->size());
+
+  ASSERT_TRUE(service_->blacklisted_extensions()->Contains(good0));
+  ASSERT_TRUE(service_->blacklisted_extensions()->Contains(good1));
+  ASSERT_TRUE(service_->extensions()->Contains(good2));
+
+  // Give time for the blacklist to update.
+  base::RunLoop().RunUntilIdle();
+
+  ASSERT_EQ(1u, service_->blacklisted_extensions()->size());
+  ASSERT_EQ(2u, service_->extensions()->size());
+
+  ASSERT_TRUE(service_->extensions()->Contains(good0));
+  ASSERT_TRUE(service_->blacklisted_extensions()->Contains(good1));
+  ASSERT_TRUE(service_->extensions()->Contains(good2));
+}
+#endif  // defined(ENABLE_BLACKLIST_TESTS)
 
 // Will not install extension blacklisted by policy.
 TEST_F(ExtensionServiceTest, BlacklistedByPolicyWillNotInstall) {
@@ -3419,7 +3477,7 @@ TEST_F(ExtensionServiceTest, BlacklistedByPolicyWillNotInstall) {
     ListPrefUpdate update(profile_->GetPrefs(),
                           prefs::kExtensionInstallDenyList);
     ListValue* blacklist = update.Get();
-    blacklist->Append(Value::CreateStringValue("*"));
+    blacklist->Append(new base::StringValue("*"));
   }
 
   // Blacklist prevents us from installing good_crx.
@@ -3432,7 +3490,7 @@ TEST_F(ExtensionServiceTest, BlacklistedByPolicyWillNotInstall) {
     ListPrefUpdate update(profile_->GetPrefs(),
                           prefs::kExtensionInstallAllowList);
     ListValue* whitelist = update.Get();
-    whitelist->Append(Value::CreateStringValue(good_crx));
+    whitelist->Append(new base::StringValue(good_crx));
   }
 
   // Ensure we can now install good_crx.
@@ -3456,7 +3514,7 @@ TEST_F(ExtensionServiceTest, BlacklistedByPolicyRemovedIfRunning) {
     ASSERT_TRUE(blacklist != NULL);
 
     // Blacklist this extension.
-    blacklist->Append(Value::CreateStringValue(good_crx));
+    blacklist->Append(new base::StringValue(good_crx));
   }
 
   // Extension should not be running now.
@@ -3473,7 +3531,7 @@ TEST_F(ExtensionServiceTest, ComponentExtensionWhitelisted) {
     ListPrefUpdate update(profile_->GetPrefs(),
                           prefs::kExtensionInstallDenyList);
     ListValue* blacklist = update.Get();
-    blacklist->Append(Value::CreateStringValue("*"));
+    blacklist->Append(new base::StringValue("*"));
   }
 
   // Install a component extension.
@@ -3483,7 +3541,7 @@ TEST_F(ExtensionServiceTest, ComponentExtensionWhitelisted) {
       .AppendASCII(good0)
       .AppendASCII("1.0.0.0");
   std::string manifest;
-  ASSERT_TRUE(file_util::ReadFileToString(
+  ASSERT_TRUE(base::ReadFileToString(
       path.Append(extensions::kManifestFilename), &manifest));
   service_->component_loader()->Add(manifest, path);
   service_->Init();
@@ -3502,7 +3560,7 @@ TEST_F(ExtensionServiceTest, ComponentExtensionWhitelisted) {
     ListPrefUpdate update(profile_->GetPrefs(),
                           prefs::kExtensionInstallDenyList);
     ListValue* blacklist = update.Get();
-    blacklist->Append(Value::CreateStringValue(good0));
+    blacklist->Append(new base::StringValue(good0));
   }
   base::RunLoop().RunUntilIdle();
   ASSERT_EQ(1u, service_->extensions()->size());
@@ -3551,7 +3609,7 @@ TEST_F(ExtensionServiceTest, PolicyInstalledExtensionsWhitelisted) {
     ListPrefUpdate update(profile_->GetPrefs(),
                           prefs::kExtensionInstallDenyList);
     ListValue* blacklist = update.Get();
-    blacklist->Append(Value::CreateStringValue(good0));
+    blacklist->Append(new base::StringValue(good0));
   }
   base::RunLoop().RunUntilIdle();
   ASSERT_EQ(1u, service_->extensions()->size());
@@ -4368,6 +4426,23 @@ TEST_F(ExtensionServiceTest, GenerateID) {
   ASSERT_EQ(previous_id, loaded_[0]->id());
 }
 
+TEST_F(ExtensionServiceTest, UnpackedValidatesLocales) {
+  InitializeEmptyExtensionService();
+
+  base::FilePath bad_locale = data_dir_.AppendASCII("unpacked").
+      AppendASCII("bad_messages_file");
+  extensions::UnpackedInstaller::Create(service_)->Load(bad_locale);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1u, GetErrors().size());
+  base::FilePath ms_messages_file = bad_locale.AppendASCII("_locales")
+                                              .AppendASCII("ms")
+                                              .AppendASCII("messages.json");
+  EXPECT_THAT(UTF16ToUTF8(GetErrors()[0]), testing::AllOf(
+       testing::HasSubstr(UTF16ToUTF8(ms_messages_file.LossyDisplayName())),
+       testing::HasSubstr("Dictionary keys must be quoted.")));
+  ASSERT_EQ(0u, loaded_.size());
+}
+
 void ExtensionServiceTest::TestExternalProvider(
     MockExtensionProvider* provider, Manifest::Location location) {
   // Verify that starting with no providers loads no extensions.
@@ -4661,23 +4736,6 @@ TEST_F(ExtensionServiceTest, MultipleExternalUpdateCheck) {
   EXPECT_EQ(0u, GetErrors().size());
   EXPECT_EQ(0u, loaded_.size());
 }
-
-namespace {
-  class ScopedBrowserLocale {
-   public:
-    explicit ScopedBrowserLocale(const std::string& new_locale)
-      : old_locale_(g_browser_process->GetApplicationLocale()) {
-      g_browser_process->SetApplicationLocale(new_locale);
-    }
-
-    ~ScopedBrowserLocale() {
-      g_browser_process->SetApplicationLocale(old_locale_);
-    }
-
-   private:
-    std::string old_locale_;
-  };
-}  // namespace
 
 TEST_F(ExtensionServiceTest, ExternalPrefProvider) {
   InitializeEmptyExtensionService();
@@ -5051,7 +5109,7 @@ TEST_F(ExtensionServiceTest, ComponentExtensions) {
       .AppendASCII("1.0.0.0");
 
   std::string manifest;
-  ASSERT_TRUE(file_util::ReadFileToString(
+  ASSERT_TRUE(base::ReadFileToString(
       path.Append(extensions::kManifestFilename), &manifest));
 
   service_->component_loader()->Add(manifest, path);
@@ -5077,14 +5135,21 @@ TEST_F(ExtensionServiceTest, ComponentExtensions) {
 }
 
 namespace {
-  class TestSyncProcessorStub : public syncer::SyncChangeProcessor {
-    virtual syncer::SyncError ProcessSyncChanges(
-        const tracked_objects::Location& from_here,
-        const syncer::SyncChangeList& change_list) OVERRIDE {
-      return syncer::SyncError();
-    }
-  };
-}
+
+class TestSyncProcessorStub : public syncer::SyncChangeProcessor {
+  virtual syncer::SyncError ProcessSyncChanges(
+      const tracked_objects::Location& from_here,
+      const syncer::SyncChangeList& change_list) OVERRIDE {
+    return syncer::SyncError();
+  }
+
+  virtual syncer::SyncDataList GetAllSyncData(
+      syncer::ModelType type) const OVERRIDE {
+    return syncer::SyncDataList();
+  }
+};
+
+}  // namespace
 
 TEST_F(ExtensionServiceTest, DeferredSyncStartupPreInstalledComponent) {
   InitializeEmptyExtensionService();
@@ -5099,15 +5164,10 @@ TEST_F(ExtensionServiceTest, DeferredSyncStartupPreInstalledComponent) {
                  &triggered_type));  // Safe due to WeakPtrFactory scope.
 
   // Install a component extension.
-  base::FilePath path = data_dir_
-      .AppendASCII("good")
-      .AppendASCII("Extensions")
-      .AppendASCII(good0)
-      .AppendASCII("1.0.0.0");
   std::string manifest;
-  ASSERT_TRUE(file_util::ReadFileToString(
-      path.Append(extensions::kManifestFilename), &manifest));
-  service_->component_loader()->Add(manifest, path);
+  ASSERT_TRUE(base::ReadFileToString(
+      good0_path().Append(extensions::kManifestFilename), &manifest));
+  service_->component_loader()->Add(manifest, good0_path());
   ASSERT_FALSE(service_->is_ready());
   service_->Init();
   ASSERT_TRUE(service_->is_ready());
@@ -5118,14 +5178,7 @@ TEST_F(ExtensionServiceTest, DeferredSyncStartupPreInstalledComponent) {
 }
 
 TEST_F(ExtensionServiceTest, DeferredSyncStartupPreInstalledNormal) {
-  // Initialize the test dir with a good Preferences/extensions.
-  base::FilePath source_install_dir = data_dir_
-      .AppendASCII("good")
-      .AppendASCII("Extensions");
-  base::FilePath pref_path = source_install_dir
-      .DirName()
-      .AppendASCII("Preferences");
-  InitializeInstalledExtensionService(pref_path, source_install_dir);
+  InitializeGoodInstalledExtensionService();
 
   bool flare_was_called = false;
   syncer::ModelType triggered_type(syncer::UNSPECIFIED);
@@ -6248,7 +6301,13 @@ TEST_F(ExtensionServiceTest, ExternalInstallInitiallyDisabled) {
 }
 
 // Test that installing multiple external extensions works.
-TEST_F(ExtensionServiceTest, ExternalInstallMultiple) {
+// Flaky on windows; http://crbug.com/295757 .
+#if defined(OS_WIN)
+#define MAYBE_ExternalInstallMultiple DISABLED_ExternalInstallMultiple
+#else
+#define MAYBE_ExternalInstallMultiple ExternalInstallMultiple
+#endif
+TEST_F(ExtensionServiceTest, MAYBE_ExternalInstallMultiple) {
   FeatureSwitch::ScopedOverride prompt(
       FeatureSwitch::prompt_for_external_extensions(), true);
 

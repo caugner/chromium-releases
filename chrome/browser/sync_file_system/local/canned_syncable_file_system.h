@@ -15,6 +15,7 @@
 #include "base/platform_file.h"
 #include "chrome/browser/sync_file_system/local/local_file_sync_status.h"
 #include "chrome/browser/sync_file_system/sync_status_code.h"
+#include "webkit/browser/blob/blob_data_handle.h"
 #include "webkit/browser/fileapi/file_system_operation.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 #include "webkit/browser/quota/quota_callbacks.h"
@@ -44,6 +45,7 @@ class QuotaManager;
 
 namespace sync_file_system {
 
+class FileChangeList;
 class LocalFileSyncContext;
 class SyncFileSystemBackend;
 
@@ -126,7 +128,8 @@ class CannedSyncableFileSystem
 
   // Returns the # of bytes written (>=0) or an error code (<0).
   int64 Write(net::URLRequestContext* url_request_context,
-              const fileapi::FileSystemURL& url, const GURL& blob_url);
+              const fileapi::FileSystemURL& url,
+              scoped_ptr<webkit_blob::BlobDataHandle> blob_data_handle);
   int64 WriteString(const fileapi::FileSystemURL& url, const std::string& data);
 
   // Purges the file system local storage.
@@ -138,6 +141,8 @@ class CannedSyncableFileSystem
   // ChangeTracker related methods. They run on file task runner.
   void GetChangedURLsInTracker(fileapi::FileSystemURLSet* urls);
   void ClearChangeForURLInTracker(const fileapi::FileSystemURL& url);
+  void GetChangesForURLInTracker(const fileapi::FileSystemURL& url,
+                                 FileChangeList* changes);
 
   SyncFileSystemBackend* backend();
   fileapi::FileSystemOperationRunner* operation_runner();
@@ -184,7 +189,7 @@ class CannedSyncableFileSystem
                        const StatusCallback& callback);
   void DoWrite(net::URLRequestContext* url_request_context,
                const fileapi::FileSystemURL& url,
-               const GURL& blob_url,
+               scoped_ptr<webkit_blob::BlobDataHandle> blob_data_handle,
                const WriteCallback& callback);
   void DoWriteString(const fileapi::FileSystemURL& url,
                      const std::string& data,

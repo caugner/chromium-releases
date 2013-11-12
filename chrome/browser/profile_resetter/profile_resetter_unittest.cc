@@ -22,11 +22,11 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread.h"
+#include "extensions/common/manifest_constants.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 
@@ -232,16 +232,16 @@ scoped_refptr<Extension> CreateExtension(const std::string& name,
                                          extensions::Manifest::Type type,
                                          bool installed_by_default) {
   DictionaryValue manifest;
-  manifest.SetString(extension_manifest_keys::kVersion, "1.0.0.0");
-  manifest.SetString(extension_manifest_keys::kName, name);
+  manifest.SetString(extensions::manifest_keys::kVersion, "1.0.0.0");
+  manifest.SetString(extensions::manifest_keys::kName, name);
   switch (type) {
     case extensions::Manifest::TYPE_THEME:
-      manifest.Set(extension_manifest_keys::kTheme, new DictionaryValue);
+      manifest.Set(extensions::manifest_keys::kTheme, new DictionaryValue);
       break;
     case extensions::Manifest::TYPE_HOSTED_APP:
-      manifest.SetString(extension_manifest_keys::kLaunchWebURL,
+      manifest.SetString(extensions::manifest_keys::kLaunchWebURL,
                          "http://www.google.com");
-      manifest.SetString(extension_manifest_keys::kUpdateURL,
+      manifest.SetString(extensions::manifest_keys::kUpdateURL,
                          "http://clients2.google.com/service/update2/crx");
       break;
     case extensions::Manifest::TYPE_EXTENSION:
@@ -250,7 +250,7 @@ scoped_refptr<Extension> CreateExtension(const std::string& name,
     default:
       NOTREACHED();
   }
-  manifest.SetString(extension_manifest_keys::kOmniboxKeyword, name);
+  manifest.SetString(extensions::manifest_keys::kOmniboxKeyword, name);
   std::string error;
   scoped_refptr<Extension> extension = Extension::Create(
       path,
@@ -446,6 +446,8 @@ TEST_F(ProfileResetterTest, ResetContentSettings) {
 }
 
 TEST_F(ProfileResetterTest, ResetExtensionsByDisabling) {
+  service_->Init();
+
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
@@ -724,7 +726,8 @@ TEST_F(ProfileResetterTest, CheckSnapshots) {
   EXPECT_TRUE(empty_snap.homepage().empty());
   EXPECT_TRUE(empty_snap.homepage_is_ntp());
   EXPECT_NE(std::string::npos, empty_snap.dse_url().find("{google:baseURL}"));
-  EXPECT_EQ(std::vector<std::string>(), empty_snap.enabled_extensions());
+  EXPECT_EQ(ResettableSettingsSnapshot::ExtensionList(),
+            empty_snap.enabled_extensions());
 
   // Reset to organic defaults.
   ResetAndWait(ProfileResetter::DEFAULT_SEARCH_ENGINE |
@@ -743,8 +746,9 @@ TEST_F(ProfileResetterTest, CheckSnapshots) {
   EXPECT_EQ("http://www.foo.com", nonorganic_snap.homepage());
   EXPECT_FALSE(nonorganic_snap.homepage_is_ntp());
   EXPECT_EQ("http://www.foo.com/s?q={searchTerms}", nonorganic_snap.dse_url());
-  EXPECT_EQ(std::vector<std::string>(1, ext_id),
-            nonorganic_snap.enabled_extensions());
+  EXPECT_EQ(ResettableSettingsSnapshot::ExtensionList(
+      1, std::make_pair(ext_id, "example")),
+      nonorganic_snap.enabled_extensions());
 }
 
 TEST_F(ProfileResetterTest, FeedbackSerializtionTest) {

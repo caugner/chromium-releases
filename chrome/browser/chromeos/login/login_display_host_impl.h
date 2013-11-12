@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/chromeos/login/app_launch_controller.h"
 #include "chrome/browser/chromeos/login/auth_prewarmer.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/login_display.h"
@@ -66,12 +67,14 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
       const std::string& first_screen_name,
       scoped_ptr<DictionaryValue> screen_parameters) OVERRIDE;
   virtual WizardController* GetWizardController() OVERRIDE;
+  virtual AppLaunchController* GetAppLaunchController() OVERRIDE;
   virtual void StartUserAdding(
       const base::Closure& completion_callback) OVERRIDE;
   virtual void StartSignInScreen() OVERRIDE;
   virtual void ResumeSignInScreen() OVERRIDE;
   virtual void OnPreferencesChanged() OVERRIDE;
   virtual void PrewarmAuthentication() OVERRIDE;
+  virtual void StartAppLaunch(const std::string& app_id) OVERRIDE;
 
   // Creates WizardController instance.
   WizardController* CreateWizardController();
@@ -106,8 +109,8 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   void StartAnimation();
 
   // Callback for the ownership status check.
-  void OnOwnershipStatusCheckDone(DeviceSettingsService::OwnershipStatus status,
-                                  bool current_user_is_owner);
+  void OnOwnershipStatusCheckDone(
+      DeviceSettingsService::OwnershipStatus status);
 
   // Callback for completion of the |auto_enrollment_client_|.
   void OnAutoEnrollmentClientDone();
@@ -152,6 +155,9 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
 
   // OOBE and some screens (camera, recovery) controller.
   scoped_ptr<WizardController> wizard_controller_;
+
+  // App launch controller.
+  scoped_ptr<AppLaunchController> app_launch_controller_;
 
   // Client for enterprise auto-enrollment check.
   scoped_ptr<policy::AutoEnrollmentClient> auto_enrollment_client_;

@@ -69,6 +69,12 @@ class BrowserViewLayout::WebContentsModalDialogHostViews
           : browser_view_layout_(browser_view_layout) {
   }
 
+  virtual ~WebContentsModalDialogHostViews() {
+    FOR_EACH_OBSERVER(web_modal::WebContentsModalDialogHostObserver,
+                      observer_list_,
+                      OnHostDestroying());
+  }
+
   void NotifyPositionRequiresUpdate() {
     FOR_EACH_OBSERVER(WebContentsModalDialogHostObserver,
                       observer_list_,
@@ -91,6 +97,20 @@ class BrowserViewLayout::WebContentsModalDialogHostViews
         browser_view_layout_->browser_view_->GetClientAreaBounds();
     int middle_x = content_area.x() + content_area.width() / 2;
     return gfx::Point(middle_x - size.width() / 2, top_y);
+  }
+
+  virtual gfx::Size GetMaximumDialogSize() OVERRIDE {
+    gfx::Rect content_area =
+        browser_view_layout_->contents_container_->ConvertRectToWidget(
+            browser_view_layout_->contents_container_->GetLocalBounds());
+
+    gfx::Size max_dialog_size = content_area.size();
+    // Adjust for difference in alignment between the dialog top and the top of
+    // the content area.
+    int height_offset = content_area.y() -
+        browser_view_layout_->web_contents_modal_dialog_top_y_;
+    max_dialog_size.Enlarge(0, height_offset);
+    return max_dialog_size;
   }
 
   // Add/remove observer.
@@ -441,6 +461,9 @@ int BrowserViewLayout::LayoutToolbar(int top) {
 }
 
 int BrowserViewLayout::LayoutBookmarkAndInfoBars(int top, int browser_view_y) {
+  web_contents_modal_dialog_top_y_ =
+      top + browser_view_y - kConstrainedWindowOverlap;
+
   if (bookmark_bar_) {
     // If we're showing the Bookmark bar in detached style, then we
     // need to show any Info bar _above_ the Bookmark bar, since the
@@ -453,9 +476,6 @@ int BrowserViewLayout::LayoutBookmarkAndInfoBars(int top, int browser_view_y) {
     // Otherwise, Bookmark bar first, Info bar second.
     top = std::max(toolbar_->bounds().bottom(), LayoutBookmarkBar(top));
   }
-
-  web_contents_modal_dialog_top_y_ =
-      top + browser_view_y - kConstrainedWindowOverlap;
 
   return LayoutInfoBar(top);
 }

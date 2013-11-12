@@ -8,7 +8,6 @@
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -23,9 +22,9 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
+#include "google_apis/gaia/fake_gaia.h"
 #include "google_apis/gaia/gaia_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -93,7 +92,7 @@ class TestBrowserMainExtraParts
             controller->login_display());
     CHECK(webui_login_display);
     webui_login_display->ShowSigninScreenForCreds("username", "password");
-    // TODO(glotov): mock GAIA server (test_server_) should support
+    // TODO(glotov): mock GAIA server (test_server()) should support
     // username/password configuration.
   }
 
@@ -126,9 +125,7 @@ class TestContentBrowserClient : public chrome::ChromeContentBrowserClient {
   DISALLOW_COPY_AND_ASSIGN(TestContentBrowserClient);
 };
 
-const base::FilePath kServiceLogin("chromeos/service_login.html");
-
-class OobeTest : public chromeos::CrosInProcessBrowserTest {
+class OobeTest : public InProcessBrowserTest {
  protected:
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
@@ -144,66 +141,21 @@ class OobeTest : public chromeos::CrosInProcessBrowserTest {
     content_browser_client_.reset(new TestContentBrowserClient());
     original_content_browser_client_ = content::SetBrowserClientForTesting(
         content_browser_client_.get());
-    base::FilePath test_data_dir;
-    PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
-    CHECK(file_util::ReadFileToString(test_data_dir.Append(kServiceLogin),
-                                      &service_login_response_));
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
-    test_server_ = new EmbeddedTestServer(
-        content::BrowserThread::GetMessageLoopProxyForThread(
-            content::BrowserThread::IO));
-    CHECK(test_server_->InitializeAndWaitUntilReady());
-    test_server_->RegisterRequestHandler(
-        base::Bind(&OobeTest::HandleRequest, base::Unretained(this)));
-    LOG(INFO) << "Set up http server at " << test_server_->base_url();
+    CHECK(embedded_test_server()->InitializeAndWaitUntilReady());
+    embedded_test_server()->RegisterRequestHandler(
+        base::Bind(&FakeGaia::HandleRequest, base::Unretained(&fake_gaia_)));
+    LOG(INFO) << "Set up http server at " << embedded_test_server()->base_url();
 
-    const GURL gaia_url("http://localhost:" + test_server_->base_url().port());
     CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        ::switches::kGaiaUrl, gaia_url.spec());
-  }
-
-  virtual void CleanUpOnMainThread() OVERRIDE {
-    LOG(INFO) << "Stopping the http server.";
-    EXPECT_TRUE(test_server_->ShutdownAndWaitUntilComplete());
-    delete test_server_;  // Destructor wants UI thread.
-  }
-
-  scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
-    GURL url = test_server_->GetURL(request.relative_url);
-    LOG(INFO) << "Http request: " << url.spec();
-
-    scoped_ptr<BasicHttpResponse> http_response(new BasicHttpResponse());
-    if (url.path() == "/ServiceLogin") {
-      http_response->set_code(net::HTTP_OK);
-      http_response->set_content(service_login_response_);
-      http_response->set_content_type("text/html");
-    } else if (url.path() == "/ServiceLoginAuth") {
-      LOG(INFO) << "Params: " << request.content;
-      static const char kContinueParam[] = "continue=";
-      int continue_arg_begin = request.content.find(kContinueParam) +
-          arraysize(kContinueParam) - 1;
-      int continue_arg_end = request.content.find("&", continue_arg_begin);
-      const std::string continue_url = request.content.substr(
-          continue_arg_begin, continue_arg_end - continue_arg_begin);
-      http_response->set_code(net::HTTP_OK);
-      const std::string redirect_js =
-          "document.location.href = unescape('" + continue_url + "');";
-      http_response->set_content(
-          "<HTML><HEAD><SCRIPT>\n" + redirect_js + "\n</SCRIPT></HEAD></HTML>");
-      http_response->set_content_type("text/html");
-    } else {
-      NOTREACHED() << url.path();
-    }
-    return http_response.PassAs<HttpResponse>();
+        ::switches::kGaiaUrl, embedded_test_server()->base_url().spec());
   }
 
   scoped_ptr<TestContentBrowserClient> content_browser_client_;
   content::ContentBrowserClient* original_content_browser_client_;
-  std::string service_login_response_;
-  EmbeddedTestServer* test_server_;  // cant use scoped_ptr because destructor
-                                     // needs UI thread.
+  FakeGaia fake_gaia_;
 };
 
 IN_PROC_BROWSER_TEST_F(OobeTest, NewUser) {

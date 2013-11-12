@@ -61,10 +61,6 @@ class TopContainerView;
 class JumpList;
 #endif
 
-#if defined(USE_ASH)
-class BrowserLauncherItemController;
-#endif
-
 namespace autofill {
 class PasswordGenerator;
 }
@@ -204,6 +200,10 @@ class BrowserView : public BrowserWindow,
   // a guest session.
   bool IsGuestSession() const;
 
+  // Returns the resource ID to use for the Guest icon, which may depend on
+  // which layout is being shown and whether we are full-screen.
+  int GetGuestIconResourceID() const;
+
   // Returns true if the non-client view should render an avatar icon.
   bool ShouldShowAvatar() const;
 
@@ -252,17 +252,6 @@ class BrowserView : public BrowserWindow,
   // animations.
   void ToolbarSizeChanged(bool is_animating);
 
-#if defined(USE_ASH)
-  // Test support.
-  // Note: This is only needed to be BrowserLauncherItemController instead of
-  // LauncherItemController because of the "favicon_loader" member - to be more
-  // exact that member function is the only one being called.
-  // TODO(skuhne): Remove once per-app is default.
-  BrowserLauncherItemController* launcher_item_controller() const {
-    return launcher_item_controller_.get();
-  }
-#endif
-
   // Overridden from BrowserWindow:
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
@@ -308,8 +297,7 @@ class BrowserView : public BrowserWindow,
   virtual LocationBar* GetLocationBar() const OVERRIDE;
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
   virtual void UpdateReloadStopState(bool is_loading, bool force) OVERRIDE;
-  virtual void UpdateToolbar(content::WebContents* contents,
-                             bool should_restore_state) OVERRIDE;
+  virtual void UpdateToolbar(content::WebContents* contents) OVERRIDE;
   virtual void FocusToolbar() OVERRIDE;
   virtual void FocusAppMenu() OVERRIDE;
   virtual void FocusBookmarksToolbar() OVERRIDE;
@@ -340,7 +328,11 @@ class BrowserView : public BrowserWindow,
   void SetDownloadShelfVisible(bool visible);
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
-  virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE;
+  virtual void ConfirmBrowserCloseWithPendingDownloads(
+      int download_count,
+      Browser::DownloadClosePreventionType dialog_type,
+      bool app_modal,
+      const base::Callback<void(bool)>& callback) OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
@@ -369,9 +361,10 @@ class BrowserView : public BrowserWindow,
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
   virtual void ShowPasswordGenerationBubble(
       const gfx::Rect& rect,
-      const content::PasswordForm& form,
+      const autofill::PasswordForm& form,
       autofill::PasswordGenerator* password_generator) OVERRIDE;
   virtual void OverscrollUpdate(int delta_y) OVERRIDE;
+  virtual int GetRenderViewHeightInsetWithDetachedBookmarkBar() OVERRIDE;
 
   // Overridden from BrowserWindowTesting:
   virtual BookmarkBarView* GetBookmarkBarView() const OVERRIDE;
@@ -575,9 +568,6 @@ class BrowserView : public BrowserWindow,
   void UpdateAcceleratorMetrics(const ui::Accelerator& accelerator,
                                 int command_id);
 
-  // Create an icon for this window in the launcher (currently only for Ash).
-  void CreateLauncherIcon();
-
   // Calls |method| which is either RenderWidgetHost::Cut, ::Copy, or ::Paste,
   // first trying the content WebContents, then the devtools WebContents, and
   // lastly the Views::Textfield if one is focused.
@@ -735,13 +725,6 @@ class BrowserView : public BrowserWindow,
 
   // The custom JumpList for Windows 7.
   scoped_refptr<JumpList> jumplist_;
-#endif
-
-#if defined(USE_ASH)
-  // Needs to be BrowserLauncerItemController for
-  // "BrowserActivationStateChanged" and "favicon_loader".
-  // TODO(skuhne): Remove once per-app is default.
-  scoped_ptr<BrowserLauncherItemController> launcher_item_controller_;
 #endif
 
   // The timer used to update frames for the Loading Animation.

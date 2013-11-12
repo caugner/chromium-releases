@@ -14,17 +14,18 @@ var DRAG_AND_DROP_GLOBAL_DATA = '__drag_and_drop_global_data';
 
 /**
  * @param {HTMLDocument} doc Owning document.
- * @param {FileCopyManager} copyManager Copy manager instance.
+ * @param {FileOperationManager} fileOperationManager File operation manager
+ *     instance.
  * @param {MetadataCache} metadataCache Metadata cache service.
  * @param {DirectoryModel} directoryModel Directory model instance.
  * @constructor
  */
 function FileTransferController(doc,
-                                copyManager,
+                                fileOperationManager,
                                 metadataCache,
                                 directoryModel) {
   this.document_ = doc;
-  this.copyManager_ = copyManager;
+  this.fileOperationManager_ = fileOperationManager;
   this.metadataCache_ = metadataCache;
   this.directoryModel_ = directoryModel;
 
@@ -141,19 +142,13 @@ FileTransferController.prototype = {
    *     |dataTransfer.effectAllowed| property ('move', 'copy', 'copyMove').
    */
   cutOrCopy_: function(dataTransfer, effectAllowed) {
-    var directories = [];
-    var files = [];
-    var entries = this.selectedEntries_;
-    for (var i = 0; i < entries.length; i++) {
-      (entries[i].isDirectory ? directories : files).push(entries[i].fullPath);
-    }
-
     // Tag to check it's filemanager data.
     dataTransfer.setData('fs/tag', 'filemanager-data');
     dataTransfer.setData('fs/sourceRoot',
                          this.directoryModel_.getCurrentRootPath());
-    dataTransfer.setData('fs/directories', directories.join('\n'));
-    dataTransfer.setData('fs/files', files.join('\n'));
+    var sourcePaths =
+        this.selectedEntries_.map(function(e) { return e.fullPath; });
+    dataTransfer.setData('fs/sources', sourcePaths.join('\n'));
     dataTransfer.effectAllowed = effectAllowed;
     dataTransfer.setData('fs/effectallowed', effectAllowed);
 
@@ -201,21 +196,18 @@ FileTransferController.prototype = {
    * @return {string} Either "copy" or "move".
    */
   paste: function(dataTransfer, opt_destinationPath, opt_effect) {
+    var sourcePaths = (dataTransfer.getData('fs/sources') || '').split('\n');
     var destinationPath = opt_destinationPath ||
                           this.currentDirectoryContentPath;
     // effectAllowed set in copy/pase handlers stay uninitialized. DnD handlers
     // work fine.
-    var files = (dataTransfer.getData('fs/files') || '').split('\n');
-    var directories =
-        (dataTransfer.getData('fs/directories') || '').split('\n');
     var effectAllowed = dataTransfer.effectAllowed != 'uninitialized' ?
         dataTransfer.effectAllowed : dataTransfer.getData('fs/effectallowed');
     var toMove = effectAllowed == 'move' ||
         (effectAllowed == 'copyMove' && opt_effect == 'move');
-    this.copyManager_.paste(files,
-                            directories,
-                            toMove,
-                            destinationPath);
+
+    // Start the pasting operation.
+    this.fileOperationManager_.paste(sourcePaths, destinationPath, toMove);
     return toMove ? 'move' : 'copy';
   },
 
@@ -420,7 +412,7 @@ FileTransferController.prototype = {
     if (item == this.dropTarget_)
       return;
 
-    var path = item && list.dataModel.item(item.listIndex);
+    var path = item && list.dataModel.item(item.listIndex).path;
     if (path)
       this.setDropTarget_(item, true /* directory */, event.dataTransfer, path);
     else
@@ -547,8 +539,9 @@ FileTransferController.prototype = {
     if (!this.isDocumentWideEvent_())
       return;
 
-    // queryCommandEnabled returns true if event.returnValue is false.
-    event.returnValue = !this.canCopyOrDrag_();
+    // queryCommandEnabled returns true if event.defaultPrevented is true.
+    if (this.canCopyOrDrag_())
+      event.preventDefault();
   },
 
   /**
@@ -583,8 +576,9 @@ FileTransferController.prototype = {
   onBeforeCut_: function(event) {
     if (!this.isDocumentWideEvent_())
       return;
-    // queryCommandEnabled returns true if event.returnValue is false.
-    event.returnValue = !this.canCutOrDrag_();
+    // queryCommandEnabled returns true if event.defaultPrevented is true.
+    if (this.canCutOrDrag_())
+      event.preventDefault();
   },
 
   /**
@@ -625,9 +619,11 @@ FileTransferController.prototype = {
   onBeforePaste_: function(event) {
     if (!this.isDocumentWideEvent_())
       return;
-    // queryCommandEnabled returns true if event.returnValue is false.
-    event.returnValue = !this.canPasteOrDrop_(
-        event.clipboardData, this.currentDirectoryContentPath);
+    // queryCommandEnabled returns true if event.defaultPrevented is true.
+    if (this.canPasteOrDrop_(event.clipboardData,
+                             this.currentDirectoryContentPath)) {
+      event.preventDefault();
+    }
   },
 
   /**

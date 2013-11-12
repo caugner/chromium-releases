@@ -51,6 +51,27 @@ class AutotestPrivateLoginStatusFunction: public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
+class AutotestPrivateLockScreenFunction: public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.lockScreen",
+                             AUTOTESTPRIVATE_LOCKSCREEN)
+
+ private:
+  virtual ~AutotestPrivateLockScreenFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+};
+
+class AutotestPrivateSimulateAsanMemoryBugFunction
+    : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("autotestPrivate.simulateAsanMemoryBug",
+                             AUTOTESTPRIVATE_SIMULATEASANMEMORYBUG)
+
+ private:
+  virtual ~AutotestPrivateSimulateAsanMemoryBugFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+};
+
 // Don't kill the browser when we're in a browser test.
 void SetAutotestPrivateTest();
 

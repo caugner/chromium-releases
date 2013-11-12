@@ -33,8 +33,9 @@ using syncable::WriteTransaction;
 static char kValidAuthToken[] = "AuthToken";
 static char kCacheGuid[] = "kqyg7097kro6GSUod+GSg==";
 
-MockConnectionManager::MockConnectionManager(syncable::Directory* directory)
-    : ServerConnectionManager("unused", 0, false, false),
+MockConnectionManager::MockConnectionManager(syncable::Directory* directory,
+                                             CancelationSignal* signal)
+    : ServerConnectionManager("unused", 0, false, false, signal),
       server_reachable_(true),
       conflict_all_commits_(false),
       conflict_n_commits_(0),
@@ -502,12 +503,6 @@ void MockConnectionManager::ProcessGetUpdates(
         GetProgressMarkerForType(gu.from_progress_marker(), model_type);
     EXPECT_EQ(expected_filter_.Has(model_type), (progress_marker != NULL))
         << "Syncer requested_types differs from test expectation.";
-    if (progress_marker) {
-      EXPECT_EQ((expected_states_.count(model_type) > 0 ?
-                 expected_states_[model_type].payload :
-                 std::string()),
-                progress_marker->notification_hint());
-    }
   }
 
   // Verify that the items we're about to send back to the client are of

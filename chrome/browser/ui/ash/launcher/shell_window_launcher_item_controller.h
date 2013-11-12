@@ -56,7 +56,7 @@ class ShellWindowLauncherItemController : public LauncherItemController,
 
   // LauncherItemController
   virtual string16 GetTitle() OVERRIDE;
-  virtual bool HasWindow(aura::Window* window) const OVERRIDE;
+  virtual bool IsCurrentlyShownInWindow(aura::Window* window) const OVERRIDE;
   virtual bool IsOpen() const OVERRIDE;
   virtual bool IsVisible() const OVERRIDE;
   virtual void Launch(int event_flags) OVERRIDE;
@@ -64,9 +64,6 @@ class ShellWindowLauncherItemController : public LauncherItemController,
   virtual void Close() OVERRIDE;
   virtual void Clicked(const ui::Event& event) OVERRIDE;
   virtual void OnRemoved() OVERRIDE {}
-  virtual void LauncherItemChanged(
-      int model_index,
-      const ash::LauncherItem& old_item) OVERRIDE {}
   virtual ChromeLauncherAppMenuItems GetApplicationList(
       int event_flags) OVERRIDE;
 

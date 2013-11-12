@@ -17,7 +17,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/signin/oauth2_token_service.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/token_service.h"
@@ -33,9 +32,9 @@
 #include "google/cacheinvalidation/types.pb.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "google_apis/gaia/oauth2_token_service.h"
 #include "grit/generated_resources.h"
 #include "jni/ProfileSyncService_jni.h"
-#include "sync/internal_api/public/base/model_type_invalidation_map.h"
 #include "sync/internal_api/public/read_transaction.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -95,6 +94,7 @@ ProfileSyncServiceAndroid::~ProfileSyncServiceAndroid() {
 }
 
 void ProfileSyncServiceAndroid::SendNudgeNotification(
+    int object_source,
     const std::string& str_object_id,
     int64 version,
     const std::string& state) {
@@ -103,9 +103,11 @@ void ProfileSyncServiceAndroid::SendNudgeNotification(
   // TODO(nileshagrawal): Merge this with ChromeInvalidationClient::Invalidate.
   // Construct the ModelTypeStateMap and send it over with the notification.
   invalidation::ObjectId object_id(
-      ipc::invalidation::ObjectSource::CHROME_SYNC,
+      object_source,
       str_object_id);
-  if (version != ipc::invalidation::Constants::UNKNOWN) {
+  if (version == ipc::invalidation::Constants::UNKNOWN) {
+    version = syncer::Invalidation::kUnknownVersion;
+  } else {
     ObjectIdVersionMap::iterator it =
         max_invalidation_versions_.find(object_id);
     if ((it != max_invalidation_versions_.end()) &&
@@ -192,7 +194,7 @@ ScopedJavaLocalRef<jstring> ProfileSyncServiceAndroid::QuerySyncStatusSummary(
     JNIEnv* env, jobject) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(profile_);
-  std::string status(sync_service_->QuerySyncStatusSummary());
+  std::string status(sync_service_->QuerySyncStatusSummaryString());
   return ConvertUTF8ToJavaString(env, status);
 }
 
@@ -472,14 +474,24 @@ ScopedJavaLocalRef<jstring> ProfileSyncServiceAndroid::GetAboutInfoForTest(
   return ConvertUTF8ToJavaString(env, about_info_json);
 }
 
+jlong ProfileSyncServiceAndroid::GetLastSyncedTimeForTest(
+    JNIEnv* env, jobject obj) {
+  // Use profile preferences here instead of SyncPrefs to avoid an extra
+  // conversion, since SyncPrefs::GetLastSyncedTime() converts the stored value
+  // to to base::Time.
+  return static_cast<jlong>(
+      profile_->GetPrefs()->GetInt64(prefs::kSyncLastSyncedTime));
+}
+
 void ProfileSyncServiceAndroid::NudgeSyncer(JNIEnv* env,
                                             jobject obj,
+                                            jint objectSource,
                                             jstring objectId,
                                             jlong version,
                                             jstring state) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  SendNudgeNotification(ConvertJavaStringToUTF8(env, objectId), version,
-                        ConvertJavaStringToUTF8(env, state));
+  SendNudgeNotification(objectSource, ConvertJavaStringToUTF8(env, objectId),
+                        version, ConvertJavaStringToUTF8(env, state));
 }
 
 void ProfileSyncServiceAndroid::NudgeSyncerForAllTypes(JNIEnv* env,

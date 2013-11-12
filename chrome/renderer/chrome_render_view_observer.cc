@@ -10,6 +10,8 @@
 #include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -29,6 +31,7 @@
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/stack_frame.h"
 #include "net/base/data_url.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
@@ -38,7 +41,7 @@
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
-#include "third_party/WebKit/public/web/WebAccessibilityObject.h"
+#include "third_party/WebKit/public/web/WebAXObject.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
@@ -55,7 +58,9 @@
 #include "v8/include/v8-testing.h"
 #include "webkit/glue/webkit_glue.h"
 
-using WebKit::WebAccessibilityObject;
+using base::string16;
+using extensions::APIPermission;
+using WebKit::WebAXObject;
 using WebKit::WebCString;
 using WebKit::WebDataSource;
 using WebKit::WebDocument;
@@ -75,7 +80,6 @@ using WebKit::WebURLRequest;
 using WebKit::WebView;
 using WebKit::WebVector;
 using WebKit::WebWindowFeatures;
-using extensions::APIPermission;
 
 // Delay in milliseconds that we'll wait before capturing the page contents
 // and thumbnail.
@@ -166,6 +170,7 @@ static bool isHostInDomain(const std::string& host, const std::string& domain) {
 }
 
 namespace {
+
 GURL StripRef(const GURL& url) {
   GURL::Replacements replacements;
   replacements.ClearRef();
@@ -176,9 +181,9 @@ GURL StripRef(const GURL& url) {
 // |thumbnail_min_area_pixels|, we return the image unmodified.  Otherwise, we
 // scale down the image so that the width and height do not exceed
 // |thumbnail_max_size_pixels|, preserving the original aspect ratio.
-static SkBitmap Downscale(WebKit::WebImage image,
-                          int thumbnail_min_area_pixels,
-                          gfx::Size thumbnail_max_size_pixels) {
+SkBitmap Downscale(WebKit::WebImage image,
+                   int thumbnail_min_area_pixels,
+                   gfx::Size thumbnail_max_size_pixels) {
   if (image.isNull())
     return SkBitmap();
 
@@ -207,6 +212,62 @@ static SkBitmap Downscale(WebKit::WebImage image,
                                        static_cast<int>(scaled_size.width()),
                                        static_cast<int>(scaled_size.height()));
 }
+
+// The delimiter for a stack trace provided by WebKit.
+const char kStackFrameDelimiter[] = "\n    at ";
+
+// Get a stack trace from a WebKit console message.
+// There are three possible scenarios:
+// 1. WebKit gives us a stack trace in |stack_trace|.
+// 2. The stack trace is embedded in the error |message| by an internal
+//    script. This will be more useful than |stack_trace|, since |stack_trace|
+//    will include the internal bindings trace, instead of a developer's code.
+// 3. No stack trace is included. In this case, we should mock one up from
+//    the given line number and source.
+// |message| will be populated with the error message only (i.e., will not
+// include any stack trace).
+extensions::StackTrace GetStackTraceFromMessage(string16* message,
+                                                const string16& source,
+                                                const string16& stack_trace,
+                                                int32 line_number) {
+  extensions::StackTrace result;
+  std::vector<base::string16> pieces;
+  size_t index = 0;
+
+  if (message->find(base::UTF8ToUTF16(kStackFrameDelimiter)) !=
+          string16::npos) {
+    base::SplitStringUsingSubstr(*message,
+                                 base::UTF8ToUTF16(kStackFrameDelimiter),
+                                 &pieces);
+    *message = pieces[0];
+    index = 1;
+  } else if (!stack_trace.empty()) {
+    base::SplitStringUsingSubstr(stack_trace,
+                                 base::UTF8ToUTF16(kStackFrameDelimiter),
+                                 &pieces);
+  }
+
+  // If we got a stack trace, parse each frame from the text.
+  if (index < pieces.size()) {
+    for (; index < pieces.size(); ++index) {
+      scoped_ptr<extensions::StackFrame> frame =
+          extensions::StackFrame::CreateFromText(pieces[index]);
+      if (frame.get())
+        result.push_back(*frame);
+    }
+  }
+
+  if (result.empty()) {  // If we don't have a stack trace, mock one up.
+    result.push_back(
+        extensions::StackFrame(line_number,
+                               1u,  // column number
+                               source,
+                               EmptyString16() /* no function name */ ));
+  }
+
+  return result;
+}
+
 }  // namespace
 
 ChromeRenderViewObserver::ChromeRenderViewObserver(
@@ -261,6 +322,8 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
 #if defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_UpdateTopControlsState,
                         OnUpdateTopControlsState)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_RetrieveWebappInformation,
+                        OnRetrieveWebappInformation)
 #endif
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetWindowFeatures, OnSetWindowFeatures)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -337,6 +400,65 @@ void ChromeRenderViewObserver::OnUpdateTopControlsState(
     bool animate) {
   render_view()->UpdateTopControlsState(constraints, current, animate);
 }
+
+void ChromeRenderViewObserver::OnRetrieveWebappInformation(
+    const GURL& expected_url) {
+  WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
+  WebDocument document =
+      main_frame ? main_frame->document() : WebDocument();
+
+  WebElement head = document.isNull() ? WebElement() : document.head();
+  GURL document_url = document.isNull() ? GURL() : GURL(document.url());
+
+  // Make sure we're checking the right page.
+  bool success = document_url == expected_url;
+
+  bool is_mobile_webapp_capable = false;
+  bool is_apple_mobile_webapp_capable = false;
+
+  // Search the DOM for the webapp <meta> tags.
+  if (!head.isNull()) {
+    WebNodeList children = head.childNodes();
+    for (unsigned i = 0; i < children.length(); ++i) {
+      WebNode child = children.item(i);
+      if (!child.isElementNode())
+        continue;
+      WebElement elem = child.to<WebElement>();
+
+      if (elem.hasTagName("meta") && elem.hasAttribute("name")) {
+        std::string name = elem.getAttribute("name").utf8();
+        WebString content = elem.getAttribute("content");
+        if (LowerCaseEqualsASCII(content, "yes")) {
+          if (name == "mobile-web-app-capable") {
+            is_mobile_webapp_capable = true;
+          } else if (name == "apple-mobile-web-app-capable") {
+            is_apple_mobile_webapp_capable = true;
+          }
+        }
+      }
+    }
+  } else {
+    success = false;
+  }
+
+  if (main_frame && is_apple_mobile_webapp_capable &&
+      !is_mobile_webapp_capable) {
+    WebKit::WebConsoleMessage message(
+        WebKit::WebConsoleMessage::LevelWarning,
+        "<meta name=\"apple-mobile-web-app-capable\" content=\"yes\"> is "
+        "deprecated. Please include <meta name=\"mobile-web-app-capable\" "
+        "content=\"yes\"> - "
+        "http://developers.google.com/chrome/mobile/docs/installtohomescreen");
+    main_frame->addMessageToConsole(message);
+  }
+
+  bool webapp_capable =
+      is_mobile_webapp_capable || is_apple_mobile_webapp_capable;
+  Send(new ChromeViewHostMsg_DidRetrieveWebappInformation(routing_id(),
+                                                          success,
+                                                          webapp_capable,
+                                                          expected_url));
+}
 #endif
 
 void ChromeRenderViewObserver::OnSetWindowFeatures(
@@ -380,14 +502,17 @@ void ChromeRenderViewObserver::OnRequestThumbnailForContextNode(
     int thumbnail_min_area_pixels, gfx::Size thumbnail_max_size_pixels) {
   WebNode context_node = render_view()->GetContextMenuNode();
   SkBitmap thumbnail;
+  gfx::Size original_size;
+  CHECK(!context_node.isNull());
   if (context_node.isElementNode()) {
     WebKit::WebImage image = context_node.to<WebElement>().imageContents();
+    original_size = image.size();
     thumbnail = Downscale(image,
                           thumbnail_min_area_pixels,
                           thumbnail_max_size_pixels);
   }
-  Send(new ChromeViewHostMsg_RequestThumbnailForContextNode_ACK(routing_id(),
-                                                                thumbnail));
+  Send(new ChromeViewHostMsg_RequestThumbnailForContextNode_ACK(
+      routing_id(), thumbnail, original_size));
 }
 
 void ChromeRenderViewObserver::OnStartFrameSniffer(const string16& frame_name) {
@@ -716,6 +841,25 @@ void ChromeRenderViewObserver::DidHandleGestureEvent(
   render_view()->Send(new ChromeViewHostMsg_FocusedNodeTouched(
       routing_id(),
       text_input_type != WebKit::WebTextInputTypeNone));
+}
+
+void ChromeRenderViewObserver::DetailedConsoleMessageAdded(
+    const base::string16& message,
+    const base::string16& source,
+    const base::string16& stack_trace_string,
+    int32 line_number,
+    int32 severity_level) {
+  string16 trimmed_message = message;
+  extensions::StackTrace stack_trace = GetStackTraceFromMessage(
+      &trimmed_message,
+      source,
+      stack_trace_string,
+      line_number);
+  Send(new ChromeViewHostMsg_DetailedConsoleMessageAdded(routing_id(),
+                                                         trimmed_message,
+                                                         source,
+                                                         stack_trace,
+                                                         severity_level));
 }
 
 void ChromeRenderViewObserver::CapturePageInfoLater(int page_id,

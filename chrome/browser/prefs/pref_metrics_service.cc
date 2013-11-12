@@ -25,6 +25,7 @@
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
+#include "chrome/browser/ui/tabs/pinned_tab_codec.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
@@ -46,7 +47,7 @@ const char* kTrackedPrefs[] = {
   prefs::kHomePage,
   prefs::kRestoreOnStartup,
   prefs::kURLsToRestoreOnStartup,
-  "place holder",  // Reserved for prefs::kExtensionsPref.
+  prefs::kExtensionsPref,
   prefs::kGoogleServicesLastUsername,
   prefs::kSearchProviderOverrides,
   prefs::kDefaultSearchProviderSearchURL,
@@ -101,6 +102,7 @@ PrefMetricsService::PrefMetricsService(Profile* profile,
     : profile_(profile),
       prefs_(profile->GetPrefs()),
       local_state_(local_state),
+      profile_name_(profile_->GetPath().AsUTF8Unsafe()),
       pref_hash_seed_(kSHA256DigestSize, 0),
       device_id_(device_id),
       tracked_pref_paths_(tracked_pref_paths),
@@ -147,7 +149,7 @@ void PrefMetricsService::RecordLaunchPrefs() {
                                 url_list->GetSize(), 1, 50, 20);
     // Similarly, check startup pages for known search engine TLD+1s.
     std::string url_text;
-    for (size_t i = 0; i < url_list->GetSize(); i++) {
+    for (size_t i = 0; i < url_list->GetSize(); ++i) {
       if (url_list->GetString(i, &url_text)) {
         GURL start_url(url_text);
         if (start_url.is_valid()) {
@@ -159,6 +161,21 @@ void PrefMetricsService::RecordLaunchPrefs() {
       }
     }
   }
+
+#if !defined(OS_ANDROID)
+  StartupTabs startup_tabs = PinnedTabCodec::ReadPinnedTabs(profile_);
+  UMA_HISTOGRAM_CUSTOM_COUNTS("Settings.PinnedTabs",
+                              startup_tabs.size(), 1, 50, 20);
+  for (size_t i = 0; i < startup_tabs.size(); ++i) {
+    GURL start_url(startup_tabs.at(i).url);
+    if (start_url.is_valid()) {
+      UMA_HISTOGRAM_ENUMERATION(
+          "Settings.PinnedTabEngineTypes",
+          TemplateURLPrepopulateData::GetEngineType(start_url),
+          SEARCH_ENGINE_MAX);
+    }
+  }
+#endif
 }
 
 // static
@@ -266,7 +283,8 @@ void PrefMetricsService::CheckTrackedPreferences() {
   // Get the hashed prefs dictionary if it exists. If it doesn't, it will be
   // created if we set preference values below.
   const base::DictionaryValue* hashed_prefs = NULL;
-  pref_hash_dicts->GetDictionary(profile_name_, &hashed_prefs);
+  pref_hash_dicts->GetDictionaryWithoutPathExpansion(profile_name_,
+                                                     &hashed_prefs);
   for (int i = 0; i < tracked_pref_path_count_; ++i) {
     // Skip prefs that haven't been registered.
     if (!prefs_->FindPreference(tracked_pref_paths_[i]))
@@ -333,21 +351,28 @@ void PrefMetricsService::UpdateTrackedPreference(const char* path) {
     RemoveTrackedPreference(path);
   } else {
     DictionaryPrefUpdate update(local_state_, prefs::kProfilePreferenceHashes);
-    update->SetString(GetHashedPrefPath(path),
-                      GetHashedPrefValue(path, value));
+    DictionaryValue* child_dictionary = NULL;
+
+    // Get the dictionary corresponding to the profile name,
+    // which may have a '.'
+    if (!update->GetDictionaryWithoutPathExpansion(profile_name_,
+                                                   &child_dictionary)) {
+      child_dictionary = new DictionaryValue;
+      update->SetWithoutPathExpansion(profile_name_, child_dictionary);
+    }
+    child_dictionary->SetString(path, GetHashedPrefValue(path, value));
   }
 }
 
 bool PrefMetricsService::RemoveTrackedPreference(const char* path) {
   DictionaryPrefUpdate update(local_state_, prefs::kProfilePreferenceHashes);
-  return update->Remove(GetHashedPrefPath(path), NULL);
-}
+  DictionaryValue* child_dictionary = NULL;
 
-std::string PrefMetricsService::GetHashedPrefPath(const char* path) {
-  std::string hash_pref_path(profile_name_);
-  hash_pref_path.append(".");
-  hash_pref_path.append(path);
-  return hash_pref_path;
+  if (!update->GetDictionaryWithoutPathExpansion(profile_name_,
+                                                 &child_dictionary)) {
+    return false;
+  }
+  return child_dictionary->Remove(path, NULL);
 }
 
 std::string PrefMetricsService::GetHashedPrefValue(

@@ -19,12 +19,13 @@
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_instructions_delegate.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view_observer.h"
-#include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_views.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_observer.h"
 #include "chrome/browser/ui/views/detachable_toolbar_view.h"
-#include "ui/base/animation/animation_delegate.h"
+#include "ui/gfx/animation/animation_delegate.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
+#include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/drag_controller.h"
 
 class BookmarkContextMenu;
@@ -35,14 +36,13 @@ namespace content {
 class PageNavigator;
 }
 
-namespace ui {
+namespace gfx {
 class SlideAnimation;
 }
 
 namespace views {
 class CustomButton;
 class MenuButton;
-class MenuItemView;
 class TextButton;
 }
 
@@ -59,9 +59,9 @@ class BookmarkBarView : public DetachableToolbarView,
                         public views::ButtonListener,
                         public views::ContextMenuController,
                         public views::DragController,
-                        public ui::AnimationDelegate,
-                        public BookmarkMenuController::Observer,
-                        public chrome::BookmarkBarInstructionsDelegate,
+                        public gfx::AnimationDelegate,
+                        public BookmarkMenuControllerObserver,
+                        public BookmarkBarInstructionsDelegate,
                         public BookmarkBubbleViewObserver {
  public:
   // The internal view class name.
@@ -118,9 +118,8 @@ class BookmarkBarView : public DetachableToolbarView,
   views::MenuButton* GetMenuButtonForNode(const BookmarkNode* node);
 
   // Returns the position to anchor the menu for |button| at.
-  void GetAnchorPositionForButton(
-      views::MenuButton* button,
-      views::MenuItemView::AnchorPosition* anchor);
+  void GetAnchorPositionForButton(views::MenuButton* button,
+                                  views::MenuItemView::AnchorPosition* anchor);
 
   // Returns the button responsible for showing bookmarks in the other bookmark
   // folder.
@@ -185,15 +184,15 @@ class BookmarkBarView : public DetachableToolbarView,
   // AccessiblePaneView:
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // ui::AnimationDelegate:
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+  // gfx::AnimationDelegate:
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
 
-  // BookmarkMenuController::Observer:
-  virtual void BookmarkMenuDeleted(
+  // BookmarkMenuControllerObserver:
+  virtual void BookmarkMenuControllerDeleted(
       BookmarkMenuController* controller) OVERRIDE;
 
-  // chrome::BookmarkBarInstructionsDelegate:
+  // BookmarkBarInstructionsDelegate:
   virtual void ShowImportDialog() OVERRIDE;
 
   // BookmarkBubbleViewObserver:
@@ -422,7 +421,7 @@ class BookmarkBarView : public DetachableToolbarView,
   bool infobar_visible_;
 
   // Animation controlling showing and hiding of the bar.
-  scoped_ptr<ui::SlideAnimation> size_animation_;
+  scoped_ptr<gfx::SlideAnimation> size_animation_;
 
   // If the bookmark bubble is showing, this is the visible ancestor of the URL.
   // The visible ancestor is either the other_bookmarked_button_,

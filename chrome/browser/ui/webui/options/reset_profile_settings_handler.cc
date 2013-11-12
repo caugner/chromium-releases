@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
@@ -22,8 +23,10 @@
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
+
 const char kResetProfileSettingsLearnMoreUrl[] =
     "https://support.google.com/chrome/?p=ui_reset_settings";
+
 }  // namespace
 
 namespace options {
@@ -38,6 +41,12 @@ ResetProfileSettingsHandler::~ResetProfileSettingsHandler() {
 void ResetProfileSettingsHandler::InitializeHandler() {
   Profile* profile = Profile::FromWebUI(web_ui());
   resetter_.reset(new ProfileResetter(profile));
+}
+
+void ResetProfileSettingsHandler::InitializePage() {
+  web_ui()->CallJavascriptFunction(
+      "ResetProfileSettingsOverlay.setResettingState",
+      base::FundamentalValue(resetter_->IsActive()));
 }
 
 void ResetProfileSettingsHandler::GetLocalizedValues(
@@ -105,6 +114,13 @@ void ResetProfileSettingsHandler::OnResetProfileSettingsDone() {
 }
 
 void ResetProfileSettingsHandler::OnShowResetProfileDialog(const ListValue*) {
+  DictionaryValue flashInfo;
+  flashInfo.Set("feedbackInfo", GetReadableFeedback(
+      Profile::FromWebUI(web_ui())));
+  web_ui()->CallJavascriptFunction(
+      "ResetProfileSettingsOverlay.setFeedbackInfo",
+      flashInfo);
+
   if (brandcode_.empty())
     return;
   config_fetcher_.reset(new BrandcodeConfigFetcher(
@@ -146,6 +162,7 @@ void ResetProfileSettingsHandler::ResetProfile(bool send_settings) {
       base::Bind(&ResetProfileSettingsHandler::OnResetProfileSettingsDone,
                  AsWeakPtr()));
   content::RecordAction(content::UserMetricsAction("ResetProfile"));
+  UMA_HISTOGRAM_BOOLEAN("ProfileReset.SendFeedback", send_settings);
 }
 
 }  // namespace options

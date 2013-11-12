@@ -2,6 +2,18 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
+/* The order of z-index:
+ * - 2: drag-selection-bodrder
+ * - 3: preview-panel
+ * - 500: scrollbar
+ * - 500: splitter
+ * - 550: autocomplete-suggestions
+ * - 600: menus
+ * - 600: tooltip
+ * - 1000: preview thumbnail popup
+ * - 1000: overlay panel (ie. image editor)
+ */
+
 /* Special attribute used in HTML to hide elements. */
 body[type='folder'] [invisibleif~='folder'],
 body[type='upload-folder'] [invisibleif~='upload-folder'],
@@ -59,7 +71,7 @@ body {
   right: 0;
   top: 0;
   width: 10px;
-  z-index: 1000;
+  z-index: 500;  /* Must be below the contextmenu (600). */
 }
 
 .scrollbar-button {
@@ -160,6 +172,12 @@ body {
   position: relative;
 }
 
+/* The style applied when a modal dialog box overlap the dialog container. */
+.dialog-container.disable-header-drag .dialog-navigation-list-header,
+.dialog-container.disable-header-drag .dialog-header {
+  -webkit-app-region: no-drag;
+}
+
 /* List/grid and preview are inside this container. */
 .dialog-main {
   -webkit-box-align: stretch;
@@ -169,7 +187,7 @@ body {
 }
 
 /* Directory tree at the left. */
-.dialog-sidebar {
+.dialog-navigation-list {
   -webkit-border-end: 1px solid rgb(225, 225, 225);
   -webkit-box-flex: 0;
   -webkit-box-orient: vertical;
@@ -182,7 +200,7 @@ body {
   width: 150px;
 }
 
-.dialog-sidebar-header {
+.dialog-navigation-list-header {
   -webkit-app-region: drag;
   -webkit-box-flex: 0;
   display: -webkit-box;
@@ -190,19 +208,19 @@ body {
   line-height: 45px;
 }
 
-.dialog-sidebar-header #app-name {
+.dialog-navigation-list-header #app-name {
   -webkit-margin-start: 15px;
   color: #303030;
   font-size: 130%;
 }
 
-.dialog-sidebar-contents {
+.dialog-navigation-list-contents {
   -webkit-box-flex: 1;
   display: -webkit-box;
   position: relative;
 }
 
-.dialog-sidebar-footer {
+.dialog-navigation-list-footer {
   -webkit-box-flex: 0;
   display: -webkit-box;
 }
@@ -216,45 +234,60 @@ div.splitter {
   margin-right: -3px;
   position: relative;
   width: 6px;
-  z-index: 100;
+  z-index: 500;  /* Must be below the contextmenu (600). */
 }
 
-#volume-list {
+#navigation-list {
   -webkit-box-flex: 1;
   -webkit-box-orient: vertical;
   display: -webkit-box;
 }
 
-#volume-list > * {
+#navigation-list > * {
   height: 40px;
   padding: 0 5px;
 }
 
-#volume-list > .accepts,
-#volume-list > [lead][selected],
-#volume-list > [lead],
-#volume-list > [selected],
-#volume-list > [anchor] {
+#navigation-list > .accepts,
+#navigation-list > [lead][selected],
+#navigation-list > [lead],
+#navigation-list > [selected],
+#navigation-list > [anchor] {
   background-color: rgb(225, 225, 225);
 }
 
-#volume-list:focus > .accepts,
-#volume-list:focus > [lead][selected],
-#volume-list:focus > [lead],
-#volume-list:focus > [selected],
-#volume-list:focus > [anchor] {
+#navigation-list:focus > .accepts,
+#navigation-list:focus > [lead][selected],
+#navigation-list:focus > [lead],
+#navigation-list:focus > [selected],
+#navigation-list:focus > [anchor] {
   background-color: rgb(66, 129, 244);
   color: white;
 }
 
-#volume-list li.root-item {
+#navigation-list li.root-item {
   -webkit-box-align: center;
   display: -webkit-box;
   line-height: 22px;  /* To accomodate for icons. */
   padding-left: 11px;
 }
 
-#volume-list li.root-item > .root-label {
+/* TODO(yoshiki): Animation is temporary disabled for volumes. Add animation
+   back. crbug.com/276132. */
+#navigation-list li.root-item.fadein {
+  -webkit-animation: fadeIn 150ms ease-in-out;
+}
+
+/* This selector is used by JavaScript. "fadeout" class will be dinamically
+   added to elements.
+   Must keep the class name 'fadeout' and the animation name 'fadeOut' in sync
+   with JavaScript. */
+#navigation-list li.root-item.fadeout {
+  -webkit-animation: fadeOut 150ms ease-in-out 0 1 normal both;
+  opacity: 0;
+}
+
+#navigation-list li.root-item > .root-label {
   -webkit-box-flex: 1;
   margin: 0 2px;
   overflow: hidden;
@@ -262,7 +295,7 @@ div.splitter {
   white-space: nowrap;
 }
 
-#volume-list .volume-icon {
+#navigation-list .volume-icon {
   background-position: center 2px;
   background-repeat: no-repeat;
   height: 24px;
@@ -368,7 +401,7 @@ div.splitter {
   color: white;
 }
 
-#volume-list .root-item > div.root-eject {
+#navigation-list .root-item > div.root-eject {
   background-image: -webkit-image-set(
     url('../images/files/ui/eject.png') 1x,
     url('../images/files/ui/2x/eject.png') 2x);
@@ -383,7 +416,7 @@ div.splitter {
   width: 20px;
 }
 
-#volume-list:focus .root-item[selected] > div.root-eject {
+#navigation-list:focus .root-item[selected] > div.root-eject {
   -webkit-filter: brightness(0) invert();
   opacity: 1;
 }
@@ -422,27 +455,8 @@ div.splitter {
 .dialog-header #search-box,
 .dialog-header #autocomplete-list,
 .dialog-header #search-icon,
-.dialog-header #search-clear-button,
-.dialog-header .buttonbar button {
+.dialog-header #search-clear-button {
   -webkit-app-region: no-drag;
-}
-
-.dialog-header #gear-button {
-  background-image: -webkit-image-set(
-    url('../images/files/ui/topbar_button_settings.png') 1x,
-    url('../images/files/ui/2x/topbar_button_settings.png') 2x);
-}
-
-.dialog-header #maximize-button {
-  background-image: -webkit-image-set(
-    url('../images/files/ui/topbar_button_maximize.png') 1x,
-    url('../images/files/ui/2x/topbar_button_maximize.png') 2x);
-}
-
-.dialog-header #close-button {
-  background-image: -webkit-image-set(
-    url('../images/files/ui/topbar_button_close.png') 1x,
-    url('../images/files/ui/2x/topbar_button_close.png') 2x);
 }
 
 /* Container for the detail and thumbnail list views. */
@@ -550,9 +564,6 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
   width: 26px;
 }
 
-#search-breadcrumbs {
-}
-
 .breadcrumbs > [collapsed]::before {
   content: '...';
 }
@@ -587,40 +598,6 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
   height: 10px;
   overflow: hidden;
   width: 25px;
-}
-
-.dialog-header .buttonbar {
-  -webkit-box-align: center;
-  height: 100%;
-}
-
-.dialog-header .buttonbar button {
-  -webkit-box-shadow: none;
-  -webkit-margin-end: 10px;
-  -webkit-margin-start: 0;
-  background-color: transparent;
-  background-image: none;
-  background-position: center;
-  background-repeat: no-repeat;
-  border: 0 none transparent;
-  display: block;
-  height: 32px;
-  min-width: 0;
-  outline: none;
-  padding: 0;
-  width: 32px;
-}
-
-.dialog-header .buttonbar button:active {
-  -webkit-box-shadow:
-    0 1px 0 0 #c2c2c2 inset,
-    0 0 0 1px #dedede inset;
-}
-
-.dialog-header button:hover,
-.dialog-header button:focus,
-.dialog-header button:active {
-  background-color: #ededed;
 }
 
 #search-box,
@@ -663,9 +640,6 @@ body[drive] .dialog-container[connection='metered'] .offline-icon-space {
 
 #search-box::-webkit-search-cancel-button {
   -webkit-appearance: none;
-}
-
-#search-box::-webkit-search-cancel-button {
   right: 2px;
 }
 
@@ -1002,7 +976,7 @@ body[type='full-page'] .thumbnail-grid .thumbnail-bottom {
 }
 
 #directory-tree .tree-item.accepts > .tree-row,
-#volume-list > .accepts,
+#navigation-list > .accepts,
 #list-container list > li.accepts,
 #list-container grid > li.accepts {
   -webkit-animation: acceptsBlink 200ms linear 1s 3;
@@ -1011,8 +985,6 @@ body[type='full-page'] .thumbnail-grid .thumbnail-bottom {
 @-webkit-keyframes acceptsBlink {
   0% {
     background-color: transparent;
-  }
-  50% {
   }
 }
 
@@ -1128,24 +1100,42 @@ input.rename {
   padding-left: 25px;
 }
 
-.preview-thumbnails > .thumbnail {
+.preview-thumbnails > .img-container {
   background-color: white;
-  border: 1px solid #fff;
+  background-size: 35px 35px;  /* For file icons. */
+  border: 2px solid white;
   box-shadow: 0 1px 1px rgba(80, 80, 80, 0.5);
+  box-sizing: border-box;
+  cursor: pointer;
   height: 35px;
   margin: 0 0 0 -25px;  /* Overlapped images. */
+  overflow: hidden;
   position: relative;
   width: 35px;
 }
 
-.preview-thumbnails > .thumbnail > .img-container {
-  background-size: 35px 35px;
-  border: 1px solid white;
-  box-sizing: border-box;
-  height: 35px;
-  overflow: hidden;
-  position: relative;
-  width: 35px;
+.preview-thumbnails > .popup {
+  -webkit-transform: translate(0, 3px) scale(0.95);
+  background-color: #f2f2f2;
+  border: 2px solid #fff;
+  bottom: 8px;
+  box-shadow: 0 0 0 1px #F0F0F0,
+              0 0 0 2px #D0D0D0,
+              2px 2px 6px rgba(0, 0, 0, 0.2);
+  display: -webkit-flex;
+  left: -8px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 180ms ease-in 300ms,
+              -webkit-transform 180ms ease-in 300ms;
+  z-index: 1000;
+}
+
+.preview-thumbnails.has-zoom:hover > .popup {
+  -webkit-transform: translate(0, 0) scale(1.0);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 @-webkit-keyframes fadeIn {
@@ -1157,37 +1147,22 @@ input.rename {
   }
 }
 
-.preview-thumbnails > .popup {
-  -webkit-transform: translate(0, 3px) scale(0.95);
-  background-color: #f2f2f2;
-  border: 2px solid #fff;
-  box-shadow: 0 0 0 1px #F0F0F0,
-              0 0 0 2px #D0D0D0,
-              2px 2px 6px rgba(0, 0, 0, 0.2);
-  margin: 6px 0 0 -40px;
-  opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  z-index: 1;
+@-webkit-keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.preview-thumbnails img {
+  -webkit-animation: fadeIn 180ms ease-in-out;
 }
 
 .preview-thumbnails > .popup > img {
+  -webkit-flex: 1 1 0;
   -webkit-user-drag: none;
-}
-
-.preview-thumbnails > * {
-  transition: all 180ms ease-in;
-  transition-delay: 300ms;
-}
-
-.preview-thumbnails.has-zoom:hover > .popup {
-  -webkit-transform: translate(0, 0) scale(1.0);
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.preview-thumbnails.has-zoom:hover > .thumbnail {
-  opacity: 0;
 }
 
 /* Table splitter element */
@@ -1480,7 +1455,7 @@ body[drive] .dialog-container[connection='offline'] .dim-offline {
   position: absolute;
   top: 0;
   width: 100%;
-  z-index: 100;
+  z-index: 1000;  /* Must be above all elements in file manager container. */
 }
 
 /* When the overlay pane is visible hide everything else so that the tab order
@@ -1544,7 +1519,7 @@ body[overlay-visible] > :not(.overlay-pane) {
 }
 
 menu.file-context-menu {
-  z-index: 4;
+  z-index: 600;  /* Must be below the overlay pane (1000). */
 }
 
 menu.chrome-menu hr {
@@ -1632,7 +1607,6 @@ body[unformatted] #format-panel > .error,
 body[drive='mounting'] #unmounted-panel > .loading,
 body[drive='error'] #unmounted-panel > .error,
 #format-panel > #format-button,
-#unmounted-panel.retry-enabled > .retry,
 #unmounted-panel.retry-enabled > .learn-more {
   display: -webkit-box;
 }
@@ -1647,7 +1621,8 @@ body[drive='error'] #unmounted-panel > .error,
   position: relative;
 }
 
-.buttonbar .tooltip {
+.buttonbar .tooltip,
+.topbutton-bar .tooltip {
   right: -12px;
   top: 35px;
 }
@@ -1674,7 +1649,7 @@ body[drive='error'] #unmounted-panel > .error,
   text-align: center;
   top: 5px;
   white-space: nowrap;
-  z-index: 15;
+  z-index: 600;  /* Must be below the overlay pane (1000). */
 }
 
 .tooltip::after,
@@ -1782,7 +1757,7 @@ list.autocomplete-suggestions {
   padding: 5px 0;
   position: fixed;
   width: 300px !important; /* This overrides the value specified by script. */
-  z-index: 3;
+  z-index: 550;
 }
 
 list.autocomplete-suggestions > li {
@@ -1878,6 +1853,67 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
   z-index: 101;
 }
 
+#suggest-app-dialog {
+  background-color: #fff;
+  border: 0;
+  padding: 0;
+  width: auto;
+}
+
+#suggest-app-dialog .cr-dialog-title {
+  /* Entire height: 44px (content-box 22px + padding 11px * 2) */
+  font-size: 16px;
+  height: 22px;
+  margin: 0;
+  padding: 11px 18px;
+}
+
+#suggest-app-dialog #webview-container {
+  border-bottom: solid 1px #bbb;
+  border-top: solid 1px #bbb;
+}
+
+#suggest-app-dialog.show-spinner #webview-container webview {
+  pointer-events: none;
+}
+
+#suggest-app-dialog:not(.show-spinner) .spinner-container {
+  display: none;
+}
+
+#suggest-app-dialog .spinner-container {
+  background-color: rgba(255, 255, 255, 0.7);
+  top: 45px;  /* Title: 44px, border: 1px */
+}
+
+#suggest-app-dialog .cr-dialog-buttons,
+#suggest-app-dialog .cr-dialog-text,
+#suggest-app-dialog .cr-dialog-ok,
+#suggest-app-dialog .cr-dialog-cancel {
+  display: none;
+}
+
+#suggest-app-dialog #buttons {
+  background: #eee;
+  width: 100%;
+}
+
+#suggest-app-dialog #buttons > #webstore-button {
+  -webkit-padding-after: 10px;
+  -webkit-padding-before: 10px;
+  -webkit-padding-end: 10px;
+  -webkit-padding-start: 36px;
+  background-image: -webkit-image-set(
+    url('chrome://theme/IDR_WEBSTORE_ICON_16') 1x,
+    url('chrome://theme/IDR_WEBSTORE_ICON_16@2x') 2x);
+  background-position: 12px center;
+  background-repeat: no-repeat;
+  color: #00f;
+  cursor: pointer;
+  display: inline-block;
+  height: 16px;
+}
+
 .cr-dialog-frame.error-dialog-frame {
   width: 300px;
 }
@@ -1886,8 +1922,8 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
   background-image: -webkit-image-set(
     url('chrome://theme/IDR_ERROR_NETWORK_GENERIC') 1x,
     url('chrome://theme/IDR_ERROR_NETWORK_GENERIC@2x') 2x);
-  background-repeat: no-repeat;
   background-position: center;
+  background-repeat: no-repeat;
   height: 40px;
 }
 
@@ -1929,4 +1965,34 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
 .share-dialog-frame .cr-dialog-text,
 .share-dialog-frame .cr-dialog-buttons {
   display: none;
+}
+
+/* Progress center */
+
+#progress-center {
+  background-color: #ddd;
+  display: -webkit-flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.progress-center-item {
+  border-bottom: 1px solid #ccc;
+  padding: 8px 9px 8px 8px;
+}
+
+.progress-center-item-label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.progress-center-item-progress-frame {
+  border: 1px solid #aaa;
+  height: 8px;
+  width: 100%;
+}
+
+.progress-center-item-progress-bar {
+  background-color: #aaa;
+  height: 100%;
 }

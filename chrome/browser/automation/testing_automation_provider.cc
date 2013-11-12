@@ -144,9 +144,9 @@
 #include "extensions/common/url_pattern_set.h"
 #include "net/cookies/cookie_store.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "ui/base/events/event_constants.h"
-#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/events/event_constants.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/policy_service.h"
@@ -1758,32 +1758,6 @@ void TestingAutomationProvider::BuildJSONHandlerMaps() {
 
   handler_map_["GetBatteryInfo"] = &TestingAutomationProvider::GetBatteryInfo;
 
-  handler_map_["GetNetworkInfo"] = &TestingAutomationProvider::GetNetworkInfo;
-  handler_map_["NetworkScan"] = &TestingAutomationProvider::NetworkScan;
-  handler_map_["ToggleNetworkDevice"] =
-      &TestingAutomationProvider::ToggleNetworkDevice;
-  handler_map_["ConnectToCellularNetwork"] =
-      &TestingAutomationProvider::ConnectToCellularNetwork;
-  handler_map_["DisconnectFromCellularNetwork"] =
-      &TestingAutomationProvider::DisconnectFromCellularNetwork;
-  handler_map_["ConnectToWifiNetwork"] =
-      &TestingAutomationProvider::ConnectToWifiNetwork;
-  handler_map_["ConnectToHiddenWifiNetwork"] =
-      &TestingAutomationProvider::ConnectToHiddenWifiNetwork;
-  handler_map_["DisconnectFromWifiNetwork"] =
-      &TestingAutomationProvider::DisconnectFromWifiNetwork;
-  handler_map_["ForgetWifiNetwork"] =
-      &TestingAutomationProvider::ForgetWifiNetwork;
-
-  handler_map_["AddPrivateNetwork"] =
-      &TestingAutomationProvider::AddPrivateNetwork;
-  handler_map_["GetPrivateNetworkInfo"] =
-      &TestingAutomationProvider::GetPrivateNetworkInfo;
-  handler_map_["ConnectToPrivateNetwork"] =
-      &TestingAutomationProvider::ConnectToPrivateNetwork;
-  handler_map_["DisconnectFromPrivateNetwork"] =
-      &TestingAutomationProvider::DisconnectFromPrivateNetwork;
-
   handler_map_["EnableSpokenFeedback"] =
       &TestingAutomationProvider::EnableSpokenFeedback;
   handler_map_["IsSpokenFeedbackEnabled"] =
@@ -1799,10 +1773,6 @@ void TestingAutomationProvider::BuildJSONHandlerMaps() {
   handler_map_["SetMute"] = &TestingAutomationProvider::SetMute;
 
   handler_map_["OpenCrosh"] = &TestingAutomationProvider::OpenCrosh;
-  handler_map_["SetProxySettings"] =
-      &TestingAutomationProvider::SetProxySettings;
-  handler_map_["SetSharedProxies"] =
-      &TestingAutomationProvider::SetSharedProxies;
 
   browser_handler_map_["GetTimeInfo"] =
       &TestingAutomationProvider::GetTimeInfo;
@@ -3195,7 +3165,7 @@ void TestingAutomationProvider::SaveTabContents(
 namespace {
 
 // Translates a dictionary password to a PasswordForm struct.
-content::PasswordForm GetPasswordFormFromDict(
+autofill::PasswordForm GetPasswordFormFromDict(
     const DictionaryValue& password_dict) {
 
   // If the time is specified, change time to the specified time.
@@ -3235,7 +3205,7 @@ content::PasswordForm GetPasswordFormFromDict(
   GURL origin_gurl(origin_url_text);
   GURL action_target(action_target_text);
 
-  content::PasswordForm password_form;
+  autofill::PasswordForm password_form;
   password_form.signon_realm = signon_realm;
   password_form.username_value = username_value;
   password_form.password_value = password_value;
@@ -3274,7 +3244,7 @@ void TestingAutomationProvider::AddSavedPassword(
     return;
   }
 
-  content::PasswordForm new_password =
+  autofill::PasswordForm new_password =
       GetPasswordFormFromDict(*password_dict);
 
   // Use IMPLICIT_ACCESS since new passwords aren't added in incognito mode.
@@ -3320,7 +3290,7 @@ void TestingAutomationProvider::RemoveSavedPassword(
         "Password must include a value for 'signon_realm.'");
     return;
   }
-  content::PasswordForm to_remove =
+  autofill::PasswordForm to_remove =
       GetPasswordFormFromDict(*password_dict);
 
   // Use EXPLICIT_ACCESS since passwords can be removed in incognito mode.
@@ -5458,14 +5428,14 @@ void TestingAutomationProvider::IsPageActionVisible(
     return;
   }
   Browser* browser = automation_util::GetBrowserForTab(tab);
+  if (!browser) {
+    reply.SendError("Tab does not belong to an open browser");
+    return;
+  }
   const Extension* extension;
   if (!GetEnabledExtensionFromJSONArgs(
           args, "extension_id", browser->profile(), &extension, &error)) {
     reply.SendError(error);
-    return;
-  }
-  if (!browser) {
-    reply.SendError("Tab does not belong to an open browser");
     return;
   }
   ExtensionAction* page_action =

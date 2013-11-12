@@ -22,8 +22,10 @@
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
+#include "content/public/renderer/web_preferences.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "net/base/escape.h"
 #include "printing/metafile.h"
 #include "printing/metafile_impl.h"
 #include "printing/units.h"
@@ -46,7 +48,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/common/webpreferences.h"
-#include "webkit/renderer/webpreferences_renderer.h"
 
 namespace printing {
 
@@ -477,7 +478,7 @@ void PrintWebViewHelper::PrintHeaderAndFooter(
   WebKit::WebPrintParams webkit_params(page_size);
   webkit_params.printerDPI = GetDPI(&params);
 
-  frame->printBegin(webkit_params, WebKit::WebNode(), NULL);
+  frame->printBegin(webkit_params);
   frame->printPage(0, canvas);
   frame->printEnd();
 
@@ -598,7 +599,7 @@ PrepareFrameAndViewForPrint::PrepareFrameAndViewForPrint(
                        print_params.print_scaling_option ==
                             WebKit::WebPrintScalingOptionFitToPrintableArea;
     ComputeWebKitPrintParamsInDesiredDpi(params, &web_print_params_);
-    frame->printBegin(web_print_params_, node_to_print_, NULL);
+    frame->printBegin(web_print_params_, node_to_print_);
     print_params = CalculatePrintParamsForCss(frame, 0, print_params,
                                               ignore_css_margins, fit_to_page,
                                               NULL);
@@ -638,10 +639,8 @@ void PrepareFrameAndViewForPrint::StartPrinting() {
   ResizeForPrinting();
   WebKit::WebView* web_view = frame_.view();
   web_view->settings()->setShouldPrintBackgrounds(should_print_backgrounds_);
-  // TODO(vitalybuka): Update call after
-  // https://bugs.webkit.org/show_bug.cgi?id=107718 is fixed.
   expected_pages_count_ =
-      frame()->printBegin(web_print_params_, node_to_print_, NULL);
+      frame()->printBegin(web_print_params_, node_to_print_);
   is_printing_started_ = true;
 }
 
@@ -659,7 +658,8 @@ void PrepareFrameAndViewForPrint::CopySelection(
     const WebPreferences& preferences) {
   ResizeForPrinting();
   std::string url_str = "data:text/html;charset=utf-8,";
-  url_str.append(frame()->selectionAsMarkup().utf8());
+  url_str.append(
+      net::EscapeQueryParamValue(frame()->selectionAsMarkup().utf8(), false));
   RestoreSize();
   // Create a new WebView with the same settings as the current display one.
   // Except that we disable javascript (don't want any active content running
@@ -670,7 +670,7 @@ void PrepareFrameAndViewForPrint::CopySelection(
 
   WebKit::WebView* web_view = WebKit::WebView::create(this);
   owns_web_view_ = true;
-  webkit_glue::ApplyWebPreferences(prefs, web_view);
+  content::ApplyWebPreferences(prefs, web_view);
   web_view->initializeMainFrame(this);
   frame_.Reset(web_view->mainFrame());
   node_to_print_.reset();
@@ -1180,19 +1180,13 @@ void PrintWebViewHelper::OnPrintNodeUnderContextMenu() {
 
 void PrintWebViewHelper::OnInitiatePrintPreview(bool selection_only) {
   DCHECK(is_preview_enabled_);
-  WebKit::WebFrame* frame;
-  if (GetPrintFrame(&frame)) {
-    print_preview_context_.InitWithFrame(frame);
-    RequestPrintPreview(selection_only ?
-                        PRINT_PREVIEW_USER_INITIATED_SELECTION :
-                        PRINT_PREVIEW_USER_INITIATED_ENTIRE_FRAME);
-  } else {
-    // This should not happen. Let's add a CHECK here to see how often this
-    // gets hit.
-    // TODO(thestig) Remove this later when we have sufficient usage of this
-    // code on the M19 stable channel.
-    CHECK(false);
-  }
+  WebKit::WebFrame* frame = NULL;
+  GetPrintFrame(&frame);
+  DCHECK(frame);
+  print_preview_context_.InitWithFrame(frame);
+  RequestPrintPreview(selection_only ?
+                      PRINT_PREVIEW_USER_INITIATED_SELECTION :
+                      PRINT_PREVIEW_USER_INITIATED_ENTIRE_FRAME);
 }
 
 bool PrintWebViewHelper::IsPrintingEnabled() {

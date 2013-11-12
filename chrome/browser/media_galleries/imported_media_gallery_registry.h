@@ -20,9 +20,8 @@ class ITunesDataProviderTest;
 
 namespace picasa {
 class PicasaDataProvider;
+class PicasaDataProviderTest;
 }
-
-namespace chrome {
 
 // This class lives on the MediaTaskRunner thread. It has some static
 // methods which are called on the UI thread.
@@ -51,6 +50,7 @@ class ImportedMediaGalleryRegistry {
  private:
   friend struct base::DefaultLazyInstanceTraits<ImportedMediaGalleryRegistry>;
   friend class itunes::ITunesDataProviderTest;
+  friend class picasa::PicasaDataProviderTest;
 
   ImportedMediaGalleryRegistry();
   virtual ~ImportedMediaGalleryRegistry();
@@ -78,7 +78,5 @@ class ImportedMediaGalleryRegistry {
 
   DISALLOW_COPY_AND_ASSIGN(ImportedMediaGalleryRegistry);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_MEDIA_GALLERIES_IMPORTED_MEDIA_GALLERY_REGISTRY_H_

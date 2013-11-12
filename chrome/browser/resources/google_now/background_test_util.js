@@ -4,13 +4,10 @@
 
 // Mocks for globals needed for loading background.js.
 
-function emptyMock() {}
+var wrapper = {instrumentChromeApiFunction: emptyMock};
 
 function buildTaskManager() {
-  return {
-    debugSetStepName: emptyMock,
-    instrumentChromeApiFunction: emptyMock,
-  };
+  return {debugSetStepName: emptyMock};
 }
 
 function buildAuthenticationManager() {
@@ -22,22 +19,14 @@ function buildAuthenticationManager() {
 var instrumentApiFunction = emptyMock;
 var buildAttemptManager = emptyMock;
 var buildCardSet = emptyMock;
-var emptyListener = {addListener: emptyMock};
-var instrumented = {};
-instrumented['location'] = {onLocationUpdate: emptyListener};
-instrumented['notifications'] = {
-  onButtonClicked: emptyListener,
-  onClicked: emptyListener,
-  onClosed: emptyListener
-};
-instrumented['omnibox'] = {onInputEntered: emptyListener};
-instrumented['preferencesPrivate'] = {
-  googleGeolocationAccessEnabled: {
-    onChange: emptyListener
-  }
-};
-instrumented['runtime'] = {
-  onInstalled: emptyListener,
-  onStartup: emptyListener
-};
 
+var instrumented = {};
+mockChromeEvent(instrumented, 'location.onLocationUpdate');
+mockChromeEvent(instrumented, 'notifications.onButtonClicked');
+mockChromeEvent(instrumented, 'notifications.onClicked');
+mockChromeEvent(instrumented, 'notifications.onClosed');
+mockChromeEvent(instrumented, 'omnibox.onInputEntered');
+mockChromeEvent(
+    instrumented, 'preferencesPrivate.googleGeolocationAccessEnabled.onChange');
+mockChromeEvent(instrumented, 'runtime.onInstalled');
+mockChromeEvent(instrumented, 'runtime.onStartup');

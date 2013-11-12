@@ -12,6 +12,7 @@
 #include "base/run_loop.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/browser/chromeos/drive/change_list_loader.h"
+#include "chrome/browser/chromeos/drive/change_list_processor.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/fake_free_disk_space_getter.h"
 #include "chrome/browser/chromeos/drive/file_cache.h"
@@ -75,7 +76,7 @@ class DummyOperationObserver : public file_system::OperationObserver {
   virtual void OnDirectoryChangedByOperation(
       const base::FilePath& path) OVERRIDE {}
   virtual void OnCacheFileUploadNeededByOperation(
-      const std::string& resource_id) OVERRIDE {}
+      const std::string& local_id) OVERRIDE {}
 };
 
 }  // namespace
@@ -185,7 +186,8 @@ class SyncClientTest : public testing::Test {
     internal::ChangeListLoader change_list_loader(
         base::MessageLoopProxy::current().get(),
         metadata_.get(),
-        scheduler_.get());
+        scheduler_.get(),
+        drive_service_.get());
     change_list_loader.LoadIfNeeded(
         DirectoryFetchInfo(),
         google_apis::test_util::CreateCopyResultCallback(&error));
@@ -285,13 +287,13 @@ TEST_F(SyncClientTest, ExistingPinnedFiles) {
   std::string content;
   EXPECT_EQ(FILE_ERROR_OK, cache_->GetFile(resource_ids_["fetched"],
                                            &cache_file));
-  EXPECT_TRUE(file_util::ReadFileToString(cache_file, &content));
+  EXPECT_TRUE(base::ReadFileToString(cache_file, &content));
   EXPECT_EQ(kRemoteContent, content);
   content.clear();
 
   EXPECT_EQ(FILE_ERROR_OK, cache_->GetFile(resource_ids_["dirty"],
                                            &cache_file));
-  EXPECT_TRUE(file_util::ReadFileToString(cache_file, &content));
+  EXPECT_TRUE(base::ReadFileToString(cache_file, &content));
   EXPECT_EQ(kLocalContent, content);
 }
 

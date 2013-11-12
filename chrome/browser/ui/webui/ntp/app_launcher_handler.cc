@@ -21,7 +21,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -113,10 +112,16 @@ void AppLauncherHandler::CreateAppInfo(
 
   // The Extension class 'helpfully' wraps bidi control characters that
   // impede our ability to determine directionality.
+  string16 short_name = UTF8ToUTF16(extension->short_name());
+  base::i18n::UnadjustStringForLocaleDirection(&short_name);
+  NewTabUI::SetUrlTitleAndDirection(
+      value,
+      short_name,
+      extensions::AppLaunchInfo::GetFullLaunchURL(extension));
+
   string16 name = UTF8ToUTF16(extension->name());
   base::i18n::UnadjustStringForLocaleDirection(&name);
-  NewTabUI::SetUrlTitleAndDirection(
-      value, name, extensions::AppLaunchInfo::GetFullLaunchURL(extension));
+  NewTabUI::SetFullNameAndDirection(name, value);
 
   bool enabled = service->IsExtensionEnabled(extension->id()) &&
       !service->GetTerminatedExtension(extension->id());
@@ -296,7 +301,8 @@ void AppLauncherHandler::Observe(int type,
 
       scoped_ptr<DictionaryValue> app_info(GetAppInfo(extension));
       if (app_info.get()) {
-        visible_apps_.erase(extension->id());
+        if (uninstalled)
+          visible_apps_.erase(extension->id());
 
         scoped_ptr<base::FundamentalValue> uninstall_value(
             Value::CreateBooleanValue(uninstalled));
@@ -448,8 +454,7 @@ void AppLauncherHandler::HandleGetApps(const ListValue* args) {
         base::Unretained(this));
     extension_pref_change_registrar_.Init(
         extension_service_->extension_prefs()->pref_service());
-    extension_pref_change_registrar_.Add(ExtensionPrefs::kExtensionsPref,
-                                         callback);
+    extension_pref_change_registrar_.Add(prefs::kExtensionsPref, callback);
     extension_pref_change_registrar_.Add(prefs::kNtpAppPageNames, callback);
 
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,

@@ -40,7 +40,10 @@ class GuestView : public content::BrowserPluginGuestDelegate {
     scoped_ptr<DictionaryValue> args_;
   };
 
-  explicit GuestView(content::WebContents* guest_web_contents);
+  static Type GetViewTypeFromString(const std::string& api_type);
+
+  static GuestView* Create(content::WebContents* guest_web_contents,
+                           Type view_type);
 
   static GuestView* FromWebContents(content::WebContents* web_contents);
 
@@ -86,6 +89,7 @@ class GuestView : public content::BrowserPluginGuestDelegate {
   int embedder_render_process_id() const { return embedder_render_process_id_; }
 
  protected:
+  explicit GuestView(content::WebContents* guest_web_contents);
   virtual ~GuestView();
 
   // Dispatches an event |event_name| to the embedder with the |event| fields.

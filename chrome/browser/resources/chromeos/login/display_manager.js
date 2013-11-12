@@ -20,6 +20,9 @@
 /** @const */ var SCREEN_PASSWORD_CHANGED = 'password-changed';
 /** @const */ var SCREEN_CREATE_MANAGED_USER_FLOW =
     'managed-user-creation';
+/** @const */ var SCREEN_APP_LAUNCH_SPLASH = 'app-launch-splash';
+/** @const */ var SCREEN_CONFIRM_PASSWORD = 'confirm-password';
+/** @const */ var SCREEN_MESSAGE_BOX = 'message-box';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
@@ -32,6 +35,7 @@
 /** @const */ var ACCELERATOR_DEVICE_REQUISITION = 'device_requisition';
 /** @const */ var ACCELERATOR_DEVICE_REQUISITION_REMORA =
     'device_requisition_remora';
+/** @const */ var ACCELERATOR_APP_LAUNCH_BAILOUT = 'app_launch_bailout';
 
 /* Help topic identifiers. */
 /** @const */ var HELP_TOPIC_ENTERPRISE_REPORTING = 2535613;
@@ -50,7 +54,19 @@
   UNKNOWN: 'ui-state-unknown',
   UPDATE: 'ui-state-update',
   SIGNIN: 'ui-state-signin',
-  MANAGED_USER_CREATION_FLOW: 'ui-state-locally-managed'
+  MANAGED_USER_CREATION_FLOW: 'ui-state-locally-managed',
+  KIOSK_MODE: 'ui-state-kiosk-mode',
+  LOCAL_STATE_ERROR: 'ui-state-local-state-error'
+};
+
+/* Possible types of UI. */
+/** @const */ var DISPLAY_TYPE = {
+  UNKNOWN: 'unknown',
+  OOBE: 'oobe',
+  LOGIN: 'login',
+  LOCK: 'lock',
+  USER_ADDING: 'user-adding',
+  APP_LAUNCH_SPLASH: 'app-launch-splash'
 };
 
 cr.define('cr.ui.login', function() {
@@ -65,26 +81,6 @@ cr.define('cr.ui.login', function() {
    * @const
    */
   var MAX_SCREEN_TRANSITION_DURATION = 250;
-
-  /**
-   * webkitTransitionEnd does not always fire (e.g. when animation is aborted
-   * or when no paint happens during the animation). This function sets up
-   * a timer and emulate the event if it is not fired when the timer expires.
-   * @param {!HTMLElement} el The element to watch for webkitTransitionEnd.
-   * @param {number} timeOut The maximum wait time in milliseconds for the
-   *     webkitTransitionEnd to happen.
-   */
-  function ensureTransitionEndEvent(el, timeOut) {
-    var fired = false;
-    el.addEventListener('webkitTransitionEnd', function f(e) {
-      el.removeEventListener('webkitTransitionEnd', f);
-      fired = true;
-    });
-    window.setTimeout(function() {
-      if (!fired)
-        cr.dispatchSimpleEvent(el, 'webkitTransitionEnd');
-    }, timeOut);
-  }
 
   /**
    * Groups of screens (screen IDs) that should have the same dimensions.
@@ -130,6 +126,20 @@ cr.define('cr.ui.login', function() {
     forceKeyboardFlow_: false,
 
     /**
+     * Type of UI.
+     * @type {string}
+     */
+    displayType_: DISPLAY_TYPE.UNKNOWN,
+
+    get displayType() {
+      return this.displayType_;
+    },
+
+    set displayType(displayType) {
+      this.displayType_ = displayType;
+    },
+
+    /**
      * Gets current screen element.
      * @type {HTMLElement}
      */
@@ -143,6 +153,17 @@ cr.define('cr.ui.login', function() {
      */
     set headerHidden(hidden) {
       $('login-header-bar').hidden = hidden;
+    },
+
+    /**
+     * Toggles background of main body between transparency and solid.
+     * @param {boolean} solid Whether to show a solid background.
+     */
+    set solidBackground(solid) {
+      if (solid)
+        document.body.classList.add('solid');
+      else
+        document.body.classList.remove('solid');
     },
 
     /**
@@ -212,6 +233,10 @@ cr.define('cr.ui.login', function() {
           this.deviceRequisition_ = 'remora';
           this.showDeviceRequisitionPrompt_();
         }
+      } else if (name == ACCELERATOR_APP_LAUNCH_BAILOUT) {
+        var currentStepId = this.screens_[this.currentStep_];
+        if (currentStepId == SCREEN_APP_LAUNCH_SPLASH)
+          chrome.send('cancelAppLaunch');
       }
 
       if (!this.forceKeyboardFlow_)
@@ -348,8 +373,7 @@ cr.define('cr.ui.login', function() {
         }
       } else {
         // First screen on OOBE launch.
-        if (document.body.classList.contains('oobe-display') &&
-            innerContainer.classList.contains('down')) {
+        if (this.isOobeUI() && innerContainer.classList.contains('down')) {
           innerContainer.classList.remove('down');
           innerContainer.addEventListener(
               'webkitTransitionEnd', function f(e) {
@@ -366,8 +390,8 @@ cr.define('cr.ui.login', function() {
         } else {
           if (defaultControl)
             defaultControl.focus();
+          chrome.send('loginVisible', ['oobe']);
         }
-        newHeader.classList.remove('right');  // Old OOBE.
       }
       this.currentStep_ = nextStepIndex;
       $('oobe').className = nextStepId;
@@ -465,8 +489,13 @@ cr.define('cr.ui.login', function() {
       // Have to reset any previously predefined screen size first
       // so that screen contents would define it instead (offsetHeight/width).
       // http://crbug.com/146539
+      $('inner-container').style.height = '';
+      $('inner-container').style.width = '';
       screen.style.width = '';
       screen.style.height = '';
+
+     $('outer-container').classList.toggle(
+        'fullscreen', screen.classList.contains('fullscreen'));
 
       var height = screen.offsetHeight;
       var width = screen.offsetWidth;
@@ -564,23 +593,7 @@ cr.define('cr.ui.login', function() {
      * Returns true if Oobe UI is shown.
      */
     isOobeUI: function() {
-      return !document.body.classList.contains('login-display');
-    },
-
-    /**
-     * Returns true if the current UI type is the "Sign-in to add user"
-     * (another user session is already active).
-     */
-    isSignInToAddScreen: function() {
-      return document.documentElement.getAttribute('screen') ==
-          'user-adding';
-    },
-
-    /**
-     * Returns true if the current UI type is the lock screen.
-     */
-    isLockScreen: function() {
-      return document.documentElement.getAttribute('screen') == 'lock';
+      return document.body.classList.contains('oobe-display');
     },
 
     /**
@@ -595,16 +608,20 @@ cr.define('cr.ui.login', function() {
    * Initializes display manager.
    */
   DisplayManager.initialize = function() {
-    // Extracting screen type from URL.
-    var hash = window.location.hash;
-    var screenType;
-    if (!hash) {
-      console.error('Screen type not found. Setting default value "login".');
-      screenType = 'login';
-    } else {
-      screenType = hash.substring(1);
+    // Extracting display type from URL.
+    var path = window.location.pathname.substr(1);
+    var displayType = DISPLAY_TYPE.UNKNOWN;
+    Object.getOwnPropertyNames(DISPLAY_TYPE).forEach(function(type) {
+      if (DISPLAY_TYPE[type] == path) {
+        displayType = path;
+      }
+    });
+    if (displayType == DISPLAY_TYPE.UNKNOWN) {
+      console.error("Unknown display type '" + path + "'. Setting default.");
+      displayType = DISPLAY_TYPE.LOGIN;
     }
-    document.documentElement.setAttribute('screen', screenType);
+    Oobe.getInstance().displayType = displayType;
+    document.documentElement.setAttribute('screen', displayType);
 
     var link = $('enterprise-info-hint-link');
     link.addEventListener(

@@ -8,11 +8,14 @@
 
 #include "ash/caps_lock_delegate_stub.h"
 #include "ash/host/root_window_host_factory.h"
+#include "ash/keyboard_controller_proxy_stub.h"
 #include "ash/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/test_launcher_delegate.h"
 #include "ash/test/test_session_state_delegate.h"
+#include "ash/test/test_system_tray_delegate.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/logging.h"
 #include "content/public/test/test_browser_context.h"
@@ -65,9 +68,9 @@ void TestShellDelegate::NewWindow(bool incognito) {
 }
 
 void TestShellDelegate::ToggleMaximized() {
-  aura::Window* window = ash::wm::GetActiveWindow();
-  if (window)
-    ash::wm::ToggleMaximizedWindow(window);
+  wm::WindowState* window_state = wm::GetActiveWindowState();
+  if (window_state)
+    window_state->ToggleMaximized();
 }
 
 void TestShellDelegate::ToggleFullscreen() {
@@ -87,7 +90,7 @@ void TestShellDelegate::ShowKeyboardOverlay() {
 
 keyboard::KeyboardControllerProxy*
     TestShellDelegate::CreateKeyboardControllerProxy() {
-  return NULL;
+  return new KeyboardControllerProxyStub();
 }
 
 void TestShellDelegate::ShowTaskManager() {
@@ -156,7 +159,7 @@ LauncherDelegate* TestShellDelegate::CreateLauncherDelegate(
 }
 
 SystemTrayDelegate* TestShellDelegate::CreateSystemTrayDelegate() {
-  return NULL;
+  return new TestSystemTrayDelegate;
 }
 
 UserWallpaperDelegate* TestShellDelegate::CreateUserWallpaperDelegate() {

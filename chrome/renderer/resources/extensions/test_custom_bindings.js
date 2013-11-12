@@ -230,13 +230,19 @@ binding.registerCustomHook(function(api) {
 
   apiFunctions.setHandleRequest('assertThrows',
                                 function(fn, self, args, message) {
-    assertTrue(typeof fn == 'function');
+    chromeTest.assertTrue(typeof fn == 'function');
     try {
       fn.apply(self, args);
       chromeTest.fail('Did not throw error: ' + fn);
     } catch (e) {
-      if (message !== undefined)
-        chromeTest.assertEq(message, e.message);
+      if (e != failureException && message !== undefined) {
+        if (message instanceof RegExp) {
+          chromeTest.assertTrue(message.test(e.message),
+                                e.message + ' should match ' + message)
+        } else {
+          chromeTest.assertEq(message, e.message);
+        }
+      }
     }
   });
 

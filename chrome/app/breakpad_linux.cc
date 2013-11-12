@@ -192,26 +192,19 @@ size_t LengthWithoutTrailingSpaces(const char* str, size_t len) {
   return len;
 }
 
-// Populates the passed in allocated strings and their sizes with the GUID,
-// crash url and distro of the crashing process.
-// The passed strings are expected to be at least kGuidSize, kMaxActiveURLSize
+// Populates the passed in allocated strings and their sizes with the GUID
+// and distro of the crashing process.
+// The passed strings are expected to be at least kGuidSize
 // and kDistroSize bytes long respectively.
-void PopulateGUIDAndURLAndDistro(char* guid, size_t* guid_len_param,
-                                 char* crash_url, size_t* crash_url_len_param,
-                                 char* distro, size_t* distro_len_param) {
+void PopulateGUIDAndDistro(char* guid, size_t* guid_len_param,
+                           char* distro, size_t* distro_len_param) {
   size_t guid_len = std::min(my_strlen(child_process_logging::g_client_id),
                              kGuidSize);
-  size_t crash_url_len =
-      std::min(my_strlen(child_process_logging::g_active_url),
-               kMaxActiveURLSize);
   size_t distro_len = std::min(my_strlen(base::g_linux_distro), kDistroSize);
   memcpy(guid, child_process_logging::g_client_id, guid_len);
-  memcpy(crash_url, child_process_logging::g_active_url, crash_url_len);
   memcpy(distro, base::g_linux_distro, distro_len);
   if (guid_len_param)
     *guid_len_param = guid_len;
-  if (crash_url_len_param)
-    *crash_url_len_param = crash_url_len;
   if (distro_len_param)
     *distro_len_param = distro_len;
 }
@@ -594,8 +587,6 @@ bool CrashDone(const MinidumpDescriptor& minidump,
 #endif
   info.process_type = "browser";
   info.process_type_length = 7;
-  info.crash_url = NULL;
-  info.crash_url_length = 0;
   info.guid = child_process_logging::g_client_id;
   info.guid_length = my_strlen(child_process_logging::g_client_id);
   info.distro = base::g_linux_distro;
@@ -700,26 +691,22 @@ bool CrashDoneInProcessNoUpload(
 
   // Start constructing the message to send to the browser.
   char guid[kGuidSize + 1] = {0};
-  char crash_url[kMaxActiveURLSize + 1] = {0};
   char distro[kDistroSize + 1] = {0};
   size_t guid_length = 0;
-  size_t crash_url_length = 0;
   size_t distro_length = 0;
-  PopulateGUIDAndURLAndDistro(guid, &guid_length, crash_url, &crash_url_length,
-                              distro, &distro_length);
+  PopulateGUIDAndDistro(guid, &guid_length, distro, &distro_length);
   BreakpadInfo info = {0};
   info.filename = NULL;
   info.fd = descriptor.fd();
   info.process_type = g_process_type;
   info.process_type_length = my_strlen(g_process_type);
-  info.crash_url = crash_url;
-  info.crash_url_length = crash_url_length;
   info.guid = guid;
   info.guid_length = guid_length;
   info.distro = distro;
   info.distro_length = distro_length;
   info.upload = false;
   info.process_start_time = g_process_start_time;
+  info.crash_keys = g_crash_keys;
   HandleCrashDump(info);
   return FinalizeCrashDoneAndroid();
 }
@@ -771,9 +758,8 @@ bool NonBrowserCrashHandler(const void* crash_context,
 
   // Start constructing the message to send to the browser.
   char guid[kGuidSize + 1] = {0};
-  char crash_url[kMaxActiveURLSize + 1] = {0};
   char distro[kDistroSize + 1] = {0};
-  PopulateGUIDAndURLAndDistro(guid, NULL, crash_url, NULL, distro, NULL);
+  PopulateGUIDAndDistro(guid, NULL, distro, NULL);
 
   char b;  // Dummy variable for sys_read below.
   const char* b_addr = &b;  // Get the address of |b| so we can create the
@@ -792,26 +778,24 @@ bool NonBrowserCrashHandler(const void* crash_context,
   iov[0].iov_len = crash_context_size;
   iov[1].iov_base = guid;
   iov[1].iov_len = kGuidSize + 1;
-  iov[2].iov_base = crash_url;
-  iov[2].iov_len = kMaxActiveURLSize + 1;
-  iov[3].iov_base = distro;
-  iov[3].iov_len = kDistroSize + 1;
-  iov[4].iov_base = &b_addr;
-  iov[4].iov_len = sizeof(b_addr);
-  iov[5].iov_base = &fds[0];
-  iov[5].iov_len = sizeof(fds[0]);
-  iov[6].iov_base = &g_process_start_time;
-  iov[6].iov_len = sizeof(g_process_start_time);
-  iov[7].iov_base = &base::g_oom_size;
-  iov[7].iov_len = sizeof(base::g_oom_size);
+  iov[2].iov_base = distro;
+  iov[2].iov_len = kDistroSize + 1;
+  iov[3].iov_base = &b_addr;
+  iov[3].iov_len = sizeof(b_addr);
+  iov[4].iov_base = &fds[0];
+  iov[4].iov_len = sizeof(fds[0]);
+  iov[5].iov_base = &g_process_start_time;
+  iov[5].iov_len = sizeof(g_process_start_time);
+  iov[6].iov_base = &base::g_oom_size;
+  iov[6].iov_len = sizeof(base::g_oom_size);
   google_breakpad::SerializedNonAllocatingMap* serialized_map;
-  iov[8].iov_len = g_crash_keys->Serialize(
+  iov[7].iov_len = g_crash_keys->Serialize(
       const_cast<const google_breakpad::SerializedNonAllocatingMap**>(
           &serialized_map));
-  iov[8].iov_base = serialized_map;
+  iov[7].iov_base = serialized_map;
 #if defined(ADDRESS_SANITIZER)
-  iov[9].iov_base = const_cast<char*>(g_asan_report_str);
-  iov[9].iov_len = kMaxAsanReportSize + 1;
+  iov[8].iov_base = const_cast<char*>(g_asan_report_str);
+  iov[8].iov_len = kMaxAsanReportSize + 1;
 #endif
 
   msg.msg_iov = iov;
@@ -1168,54 +1152,9 @@ void HandleCrashDump(const BreakpadInfo& info) {
   //   abcdef \r\n
   //   BOUNDARY \r\n
   //
-  //   zero or more gpu entries:
-  //   Content-Disposition: form-data; name="gpu-xxxxx" \r\n \r\n
-  //   <gpu-xxxxx> \r\n
-  //   BOUNDARY \r\n
-  //
   //   zero or one:
   //   Content-Disposition: form-data; name="lsb-release" \r\n \r\n
   //   abcdef \r\n
-  //   BOUNDARY \r\n
-  //
-  //   zero or more:
-  //   Content-Disposition: form-data; name="url-chunk-1" \r\n \r\n
-  //   abcdef \r\n
-  //   BOUNDARY \r\n
-  //
-  //   zero or one:
-  //   Content-Disposition: form-data; name="channel" \r\n \r\n
-  //   beta \r\n
-  //   BOUNDARY \r\n
-  //
-  //   zero or one:
-  //   Content-Disposition: form-data; name="num-views" \r\n \r\n
-  //   3 \r\n
-  //   BOUNDARY \r\n
-  //
-  //   zero or one:
-  //   Content-Disposition: form-data; name="num-extensions" \r\n \r\n
-  //   5 \r\n
-  //   BOUNDARY \r\n
-  //
-  //   zero to 10:
-  //   Content-Disposition: form-data; name="extension-1" \r\n \r\n
-  //   abcdefghijklmnopqrstuvwxyzabcdef \r\n
-  //   BOUNDARY \r\n
-  //
-  //   zero to 4:
-  //   Content-Disposition: form-data; name="prn-info-1" \r\n \r\n
-  //   abcdefghijklmnopqrstuvwxyzabcdef \r\n
-  //   BOUNDARY \r\n
-  //
-  //   zero or one:
-  //   Content-Disposition: form-data; name="num-switches" \r\n \r\n
-  //   5 \r\n
-  //   BOUNDARY \r\n
-  //
-  //   zero to 15:
-  //   Content-Disposition: form-data; name="switch-1" \r\n \r\n
-  //   --foo \r\n
   //   BOUNDARY \r\n
   //
   //   zero or one:
@@ -1318,117 +1257,11 @@ void HandleCrashDump(const BreakpadInfo& info) {
     writer.Flush();
   }
 
-  // If GPU info is known, send it.
-  if (*child_process_logging::g_gpu_vendor_id) {
-#if !defined(OS_ANDROID)
-    static const char vendor_msg[] = "gpu-venid";
-    static const char device_msg[] = "gpu-devid";
-#endif
-    static const char gl_vendor_msg[] = "gpu-gl-vendor";
-    static const char gl_renderer_msg[] = "gpu-gl-renderer";
-    static const char driver_msg[] = "gpu-driver";
-    static const char psver_msg[] = "gpu-psver";
-    static const char vsver_msg[] = "gpu-vsver";
-
-#if !defined(OS_ANDROID)
-    writer.AddPairString(vendor_msg, child_process_logging::g_gpu_vendor_id);
-    writer.AddBoundary();
-    writer.AddPairString(device_msg, child_process_logging::g_gpu_device_id);
-    writer.AddBoundary();
-#endif
-    writer.AddPairString(gl_vendor_msg, child_process_logging::g_gpu_gl_vendor);
-    writer.AddBoundary();
-    writer.AddPairString(gl_renderer_msg,
-                         child_process_logging::g_gpu_gl_renderer);
-    writer.AddBoundary();
-    writer.AddPairString(driver_msg, child_process_logging::g_gpu_driver_ver);
-    writer.AddBoundary();
-    writer.AddPairString(psver_msg, child_process_logging::g_gpu_ps_ver);
-    writer.AddBoundary();
-    writer.AddPairString(vsver_msg, child_process_logging::g_gpu_vs_ver);
-    writer.AddBoundary();
-    writer.Flush();
-  }
-
   if (info.distro_length) {
     static const char distro_msg[] = "lsb-release";
     writer.AddPairString(distro_msg, info.distro);
     writer.AddBoundary();
     writer.Flush();
-  }
-
-  // For renderers and plugins.
-  if (info.crash_url_length) {
-    static const char url_chunk_msg[] = "url-chunk-";
-    static const unsigned kMaxUrlLength = 8 * MimeWriter::kMaxCrashChunkSize;
-    writer.AddPairDataInChunks(url_chunk_msg, sizeof(url_chunk_msg) - 1,
-        info.crash_url, std::min(info.crash_url_length, kMaxUrlLength),
-        MimeWriter::kMaxCrashChunkSize, false /* Don't strip whitespaces. */);
-  }
-
-  if (*child_process_logging::g_channel) {
-    writer.AddPairString("channel", child_process_logging::g_channel);
-    writer.AddBoundary();
-    writer.Flush();
-  }
-
-  if (*child_process_logging::g_num_views) {
-    writer.AddPairString("num-views", child_process_logging::g_num_views);
-    writer.AddBoundary();
-    writer.Flush();
-  }
-
-  if (*child_process_logging::g_num_extensions) {
-    writer.AddPairString("num-extensions",
-                         child_process_logging::g_num_extensions);
-    writer.AddBoundary();
-    writer.Flush();
-  }
-
-  unsigned extension_ids_len =
-      my_strlen(child_process_logging::g_extension_ids);
-  if (extension_ids_len) {
-    static const char extension_msg[] = "extension-";
-    static const unsigned kMaxExtensionsLen =
-        kMaxReportedActiveExtensions * child_process_logging::kExtensionLen;
-    writer.AddPairDataInChunks(extension_msg, sizeof(extension_msg) - 1,
-        child_process_logging::g_extension_ids,
-        std::min(extension_ids_len, kMaxExtensionsLen),
-        child_process_logging::kExtensionLen,
-        false /* Don't strip whitespace. */);
-  }
-
-  unsigned printer_info_len =
-      my_strlen(child_process_logging::g_printer_info);
-  if (printer_info_len) {
-    static const char printer_info_msg[] = "prn-info-";
-    static const unsigned kMaxPrnInfoLen =
-        kMaxReportedPrinterRecords * child_process_logging::kPrinterInfoStrLen;
-    writer.AddPairDataInChunks(printer_info_msg, sizeof(printer_info_msg) - 1,
-        child_process_logging::g_printer_info,
-        std::min(printer_info_len, kMaxPrnInfoLen),
-        child_process_logging::kPrinterInfoStrLen,
-        true);
-  }
-
-  if (*child_process_logging::g_num_switches) {
-    writer.AddPairString("num-switches",
-                         child_process_logging::g_num_switches);
-    writer.AddBoundary();
-    writer.Flush();
-  }
-
-  unsigned switches_len =
-      my_strlen(child_process_logging::g_switches);
-  if (switches_len) {
-    static const char switch_msg[] = "switch-";
-    static const unsigned kMaxSwitchLen =
-        kMaxSwitches * child_process_logging::kSwitchLen;
-    writer.AddPairDataInChunks(switch_msg, sizeof(switch_msg) - 1,
-        child_process_logging::g_switches,
-        std::min(switches_len, kMaxSwitchLen),
-        child_process_logging::kSwitchLen,
-        true /* Strip whitespace since switches are padded to kSwitchLen. */);
   }
 
   if (*child_process_logging::g_num_variations) {

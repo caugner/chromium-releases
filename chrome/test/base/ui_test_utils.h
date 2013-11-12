@@ -21,13 +21,12 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
 
 class AppModalDialog;
-class BookmarkModel;
 class Browser;
 class LocationBar;
 class Profile;
@@ -142,10 +141,6 @@ int FindInPage(content::WebContents* tab,
 void RegisterAndWait(content::NotificationObserver* observer,
                      int type,
                      const content::NotificationSource& source);
-
-// Blocks until |model| finishes loading.
-void WaitForBookmarkModelToLoad(BookmarkModel* model);
-void WaitForBookmarkModelToLoad(Profile* profile);
 
 // Blocks until |service| finishes loading.
 void WaitForTemplateURLServiceToLoad(TemplateURLService* service);

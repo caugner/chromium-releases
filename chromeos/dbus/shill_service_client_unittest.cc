@@ -33,8 +33,8 @@ class ShillServiceClientTest : public ShillClientUnittestBase {
   virtual void SetUp() {
     ShillClientUnittestBase::SetUp();
     // Create a client with the mock bus.
-    client_.reset(ShillServiceClient::Create(REAL_DBUS_CLIENT_IMPLEMENTATION,
-                                             mock_bus_.get()));
+    client_.reset(ShillServiceClient::Create(REAL_DBUS_CLIENT_IMPLEMENTATION));
+    client_->Init(mock_bus_.get());
     // Run the message loop to run the signal connection result callback.
     message_loop_.RunUntilIdle();
   }
@@ -299,21 +299,6 @@ TEST_F(ShillServiceClientTest, ActivateCellularModem) {
 
   // Run the message loop.
   message_loop_.RunUntilIdle();
-}
-
-TEST_F(ShillServiceClientTest, CallActivateCellularModemAndBlock) {
-  const char kCarrier[] = "carrier";
-  // Create response.
-  scoped_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
-
-  // Set expectations.
-  PrepareForMethodCall(flimflam::kActivateCellularModemFunction,
-                       base::Bind(&ExpectStringArgument, kCarrier),
-                       response.get());
-  // Call method.
-  const bool result = client_->CallActivateCellularModemAndBlock(
-      dbus::ObjectPath(kExampleServicePath), kCarrier);
-  EXPECT_TRUE(result);
 }
 
 }  // namespace chromeos

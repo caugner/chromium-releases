@@ -26,8 +26,8 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/common/extensions/background_info.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/features/simple_feature.h"
 #include "chrome/common/extensions/incognito_handler.h"
 #include "chrome/common/extensions/manifest_handlers/externally_connectable.h"
 #include "content/public/browser/browser_thread.h"
@@ -38,6 +38,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/manifest_constants.h"
 #include "url/gurl.h"
 
 using content::SiteInstance;
@@ -113,7 +114,7 @@ static base::StaticAtomicSequenceNumber g_channel_id_overflow_count;
 static content::RenderProcessHost* GetExtensionProcess(
     Profile* profile, const std::string& extension_id) {
   SiteInstance* site_instance =
-      extensions::ExtensionSystem::Get(profile)->process_manager()->
+      ExtensionSystem::Get(profile)->process_manager()->
           GetSiteInstanceForURL(
               Extension::GetBaseURLFromExtensionId(extension_id));
 
@@ -206,13 +207,21 @@ void MessageService::OpenChannelToExtension(
   }
 
   ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
+      ExtensionSystem::Get(profile)->extension_service();
 
   if (profile->IsOffTheRecord() &&
       !extension_service->IsIncognitoEnabled(target_extension_id)) {
-    DispatchOnDisconnect(
-        source, receiver_port_id, kReceivingEndDoesntExistError);
-    return;
+    // Allow the security token apps (normal, dev) to be connectable from
+    // incognito profiles. See http://crbug.com/295845.
+    std::set<std::string> incognito_whitelist;
+    incognito_whitelist.insert("E4FCC42F7C7776C0985996DAED74F630C4F0A785");
+    incognito_whitelist.insert("D3D12919F7F00FE553E8A573AAA7147C51DD65C9");
+    if (!extensions::SimpleFeature::IsIdInWhitelist(target_extension_id,
+                                                    incognito_whitelist)) {
+      DispatchOnDisconnect(
+          source, receiver_port_id, kReceivingEndDoesntExistError);
+      return;
+    }
   }
 
   if (source_extension_id != target_extension_id) {
@@ -222,7 +231,7 @@ void MessageService::OpenChannelToExtension(
     ExternallyConnectableInfo* externally_connectable =
         static_cast<ExternallyConnectableInfo*>(
             target_extension->GetManifestData(
-                extension_manifest_keys::kExternallyConnectable));
+                manifest_keys::kExternallyConnectable));
     bool is_externally_connectable = false;
 
     if (externally_connectable) {
@@ -305,7 +314,7 @@ void MessageService::OpenChannelToNativeApp(
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
   Profile* profile = Profile::FromBrowserContext(source->GetBrowserContext());
   ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
+      ExtensionSystem::Get(profile)->extension_service();
   bool has_permission = false;
   if (extension_service) {
     const Extension* extension =

@@ -26,9 +26,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/feature_switch.h"
-#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
@@ -36,6 +34,8 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "extensions/common/extension_resource.h"
+#include "extensions/common/manifest.h"
+#include "extensions/common/manifest_constants.h"
 #include "extensions/common/url_pattern.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -112,8 +112,6 @@ static const int kOAuthHeaderIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   0,  // Bundle installs don't show OAuth permissions.
   IDS_EXTENSION_PROMPT_OAUTH_REENABLE_HEADER,
   IDS_EXTENSION_PROMPT_OAUTH_PERMISSIONS_HEADER,
-  // TODO(mpcomplete): Do we need this for external install UI? If we do,
-  // we need to update FetchOAuthIssueAdviceIfNeeded.
   0,
   0,
 };
@@ -188,6 +186,7 @@ gfx::NativeWindow NativeWindowForWebContents(content::WebContents* contents) {
 
 ExtensionInstallPrompt::Prompt::Prompt(PromptType type)
     : type_(type),
+      is_showing_details_for_retained_files_(false),
       extension_(NULL),
       bundle_(NULL),
       average_rating_(0.0),
@@ -206,10 +205,34 @@ void ExtensionInstallPrompt::Prompt::SetPermissions(
 void ExtensionInstallPrompt::Prompt::SetPermissionsDetails(
     const std::vector<string16>& details) {
   details_ = details;
+  is_showing_details_for_permissions_.clear();
+  for (size_t i = 0; i < details.size(); ++i)
+    is_showing_details_for_permissions_.push_back(false);
+}
+
+void ExtensionInstallPrompt::Prompt::SetIsShowingDetails(
+    DetailsType type,
+    size_t index,
+    bool is_showing_details) {
+  switch (type) {
+    case PERMISSIONS_DETAILS:
+      is_showing_details_for_permissions_[index] = is_showing_details;
+      break;
+    case OAUTH_DETAILS:
+      is_showing_details_for_oauth_[index] = is_showing_details;
+      break;
+    case RETAINED_FILES_DETAILS:
+      is_showing_details_for_retained_files_ = is_showing_details;
+      break;
+  }
 }
 
 void ExtensionInstallPrompt::Prompt::SetOAuthIssueAdvice(
     const IssueAdviceInfo& issue_advice) {
+  is_showing_details_for_oauth_.clear();
+  for (size_t i = 0; i < issue_advice.size(); ++i)
+    is_showing_details_for_oauth_.push_back(false);
+
   oauth_issue_advice_ = issue_advice;
 }
 
@@ -324,16 +347,19 @@ string16 ExtensionInstallPrompt::Prompt::GetOAuthHeading() const {
 }
 
 string16 ExtensionInstallPrompt::Prompt::GetRetainedFilesHeading() const {
-  // TODO(finnur): Remove this once all platforms are using
-  // GetRetainedFilesHeadingWithCount().
-  return l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_RETAINED_FILES);
-}
-
-string16
-ExtensionInstallPrompt::Prompt::GetRetainedFilesHeadingWithCount() const {
-  return l10n_util::GetStringFUTF16(
-      IDS_EXTENSION_PROMPT_RETAINED_FILES_WITH_COUNT,
-      base::IntToString16(GetRetainedFileCount()));
+  const int kRetainedFilesMessageIDs[6] = {
+      IDS_EXTENSION_PROMPT_RETAINED_FILES_DEFAULT,
+      IDS_EXTENSION_PROMPT_RETAINED_FILE_SINGULAR,
+      IDS_EXTENSION_PROMPT_RETAINED_FILES_ZERO,
+      IDS_EXTENSION_PROMPT_RETAINED_FILES_TWO,
+      IDS_EXTENSION_PROMPT_RETAINED_FILES_FEW,
+      IDS_EXTENSION_PROMPT_RETAINED_FILES_MANY,
+  };
+  std::vector<int> message_ids;
+  for (size_t i = 0; i < arraysize(kRetainedFilesMessageIDs); i++) {
+    message_ids.push_back(kRetainedFilesMessageIDs[i]);
+  }
+  return l10n_util::GetPluralStringFUTF16(message_ids, GetRetainedFileCount());
 }
 
 bool ExtensionInstallPrompt::Prompt::ShouldShowPermissions() const {
@@ -407,6 +433,21 @@ string16 ExtensionInstallPrompt::Prompt::GetPermissionsDetails(
   return details_[index];
 }
 
+bool ExtensionInstallPrompt::Prompt::GetIsShowingDetails(
+    DetailsType type, size_t index) const {
+  switch (type) {
+    case PERMISSIONS_DETAILS:
+      CHECK_LT(index, is_showing_details_for_permissions_.size());
+      return is_showing_details_for_permissions_[index];
+    case OAUTH_DETAILS:
+      CHECK_LT(index, is_showing_details_for_oauth_.size());
+      return is_showing_details_for_oauth_[index];
+    case RETAINED_FILES_DETAILS:
+      return is_showing_details_for_retained_files_;
+  }
+  return false;
+}
+
 size_t ExtensionInstallPrompt::Prompt::GetOAuthIssueCount() const {
   return oauth_issue_advice_.size();
 }
@@ -457,11 +498,11 @@ scoped_refptr<Extension>
   if (!localized_name.empty() || !localized_description.empty()) {
     localized_manifest.reset(manifest->DeepCopy());
     if (!localized_name.empty()) {
-      localized_manifest->SetString(extension_manifest_keys::kName,
+      localized_manifest->SetString(extensions::manifest_keys::kName,
                                     localized_name);
     }
     if (!localized_description.empty()) {
-      localized_manifest->SetString(extension_manifest_keys::kDescription,
+      localized_manifest->SetString(extensions::manifest_keys::kDescription,
                                     localized_description);
     }
   }
@@ -513,7 +554,7 @@ void ExtensionInstallPrompt::ConfirmBundleInstall(
   delegate_ = bundle;
   prompt_.set_type(BUNDLE_INSTALL_PROMPT);
 
-  FetchOAuthIssueAdviceIfNeeded();
+  ShowConfirmation();
 }
 
 void ExtensionInstallPrompt::ConfirmStandaloneInstall(
@@ -528,7 +569,7 @@ void ExtensionInstallPrompt::ConfirmStandaloneInstall(
   prompt_ = prompt;
 
   SetIcon(icon);
-  FetchOAuthIssueAdviceIfNeeded();
+  ShowConfirmation();
 }
 
 void ExtensionInstallPrompt::ConfirmWebstoreInstall(
@@ -667,14 +708,14 @@ void ExtensionInstallPrompt::SetIcon(const SkBitmap* image) {
 
 void ExtensionInstallPrompt::OnImageLoaded(const gfx::Image& image) {
   SetIcon(image.IsEmpty() ? NULL : image.ToSkBitmap());
-  FetchOAuthIssueAdviceIfNeeded();
+  ShowConfirmation();
 }
 
 void ExtensionInstallPrompt::LoadImageIfNeeded() {
   // Bundle install prompts do not have an icon.
   // Also |install_ui_.profile()| can be NULL in unit tests.
   if (!icon_.empty() || !install_ui_->profile()) {
-    FetchOAuthIssueAdviceIfNeeded();
+    ShowConfirmation();
     return;
   }
 
@@ -691,37 +732,6 @@ void ExtensionInstallPrompt::LoadImageIfNeeded() {
   extensions::ImageLoader::Get(install_ui_->profile())->LoadImageAsync(
       extension_, image, gfx::Size(pixel_size, pixel_size),
       base::Bind(&ExtensionInstallPrompt::OnImageLoaded, AsWeakPtr()));
-}
-
-void ExtensionInstallPrompt::FetchOAuthIssueAdviceIfNeeded() {
-  // |extension_| may be NULL, e.g. in the bundle install case.
-  if (!extension_ ||
-      prompt_.type() == BUNDLE_INSTALL_PROMPT ||
-      prompt_.type() == INLINE_INSTALL_PROMPT ||
-      prompt_.type() == EXTERNAL_INSTALL_PROMPT ||
-      prompt_.GetOAuthIssueCount() != 0U) {
-    ShowConfirmation();
-    return;
-  }
-
-  const extensions::OAuth2Info& oauth2_info =
-      extensions::OAuth2Info::GetOAuth2Info(extension_);
-  if (oauth2_info.client_id.empty() ||
-      oauth2_info.scopes.empty()) {
-    ShowConfirmation();
-    return;
-  }
-
-  ProfileOAuth2TokenService* token_service =
-      ProfileOAuth2TokenServiceFactory::GetForProfile(install_ui_->profile());
-  if (!token_service || !token_service->RefreshTokenIsAvailable()) {
-    ShowConfirmation();
-    return;
-  }
-
-  // Get an access token from the token service.
-  login_token_request_ = token_service->StartRequest(
-      OAuth2TokenService::ScopeSet(), this);
 }
 
 void ExtensionInstallPrompt::OnGetTokenSuccess(

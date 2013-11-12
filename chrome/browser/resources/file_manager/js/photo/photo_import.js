@@ -21,7 +21,8 @@ function PhotoImport(dom, filesystem, params) {
   this.document_ = this.dom_.ownerDocument;
   this.metadataCache_ = params.metadataCache;
   this.volumeManager_ = new VolumeManager();
-  this.copyManager_ = FileCopyManagerWrapper.getInstance(this.filesystem_.root);
+  this.fileOperationManager_ =
+      FileOperationManagerWrapper.getInstance(this.filesystem_.root);
   this.mediaFilesList_ = null;
   this.destination_ = null;
   this.myPhotosDirectory_ = null;
@@ -72,7 +73,7 @@ PhotoImport.load = function(opt_filesystem, opt_params) {
     if (opt_filesystem) {
       onFilesystem(opt_filesystem);
     } else {
-      api.requestFileSystem(onFilesystem);
+      api.requestFileSystem('compatible', onFilesystem);
     }
   });
 };
@@ -119,7 +120,8 @@ PhotoImport.prototype.initDom_ = function() {
       this.onSelectionChanged_.bind(this));
   this.onSelectionChanged_();
 
-  this.importingDialog_ = new ImportingDialog(this.dom_, this.copyManager_,
+  this.importingDialog_ = new ImportingDialog(
+      this.dom_, this.fileOperationManager_,
       this.metadataCache_, this.parentWindowId_);
 
   var dialogs = cr.ui.dialogs;
@@ -149,7 +151,7 @@ PhotoImport.prototype.initMyPhotos_ = function() {
     util.getOrCreateDirectory(this.filesystem_.root, dir, onDirectory, onError);
   }.bind(this);
 
-  if (this.volumeManager_.isMounted(RootDirectory.DRIVE)) {
+  if (this.volumeManager_.getVolumeInfo(RootDirectory.DRIVE)) {
     onMounted();
   } else {
     this.volumeManager_.mountDrive(onMounted, onError);

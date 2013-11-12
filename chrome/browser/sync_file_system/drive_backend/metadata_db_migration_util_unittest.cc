@@ -7,7 +7,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/sync_file_system/drive_backend/drive_metadata_store.h"
+#include "chrome/browser/sync_file_system/drive_backend_v1/drive_metadata_store.h"
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
@@ -107,7 +107,7 @@ TEST(DriveMetadataDBMigrationUtilTest, MigrationFromV0) {
 
   leveldb::Options options;
   options.create_if_missing = true;
-  options.max_open_files = 64;  // Use minimum.
+  options.max_open_files = 0;  // Use minimum.
   leveldb::DB* db_ptr = NULL;
   std::string db_dir = fileapi::FilePathToString(
       base_dir.path().Append(DriveMetadataStore::kDatabaseName));

@@ -23,6 +23,9 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "ui/base/clipboard/clipboard_util_win.h"
 #include "win8/delegate_execute/chrome_util.h"
@@ -322,7 +325,11 @@ STDMETHODIMP CommandExecuteImpl::Execute() {
     return S_OK;
   }
 
-  string16 app_id = delegate_execute::GetAppId(chrome_exe_);
+  BrowserDistribution* distribution = BrowserDistribution::GetDistribution();
+  bool is_per_user_install = InstallUtil::IsPerUserInstall(
+      chrome_exe_.value().c_str());
+  string16 app_id = ShellUtil::GetBrowserModelId(
+      distribution, is_per_user_install);
 
   DWORD pid = 0;
   if (launch_scheme_ == INTERNET_SCHEME_FILE &&
@@ -535,7 +542,15 @@ EC_HOST_UI_MODE CommandExecuteImpl::GetLaunchMode() {
     }
   }
 
-  if (launch_mode >= ECHUIM_SYSTEM_LAUNCHER) {
+  // According to 'developing metro style enabled desktop browser' document
+  // ECHUIM_SYSTEM_LAUNCHER – Start menu launch (includes Tile activation,
+  // typing a URL into the search box in Start, etc.)
+  // In non aura world we apparently used ECHUIM_SYSTEM_LAUNCHER to mean
+  // launch on desktop. For Aura we are changing ECHUIM_SYSTEM to mean
+  // immersive mode.
+  if (launch_mode == ECHUIM_SYSTEM_LAUNCHER)
+    launch_mode = ECHUIM_IMMERSIVE;
+  else if (launch_mode > ECHUIM_SYSTEM_LAUNCHER) {
     // At the end if launch mode is not proper apply heuristics.
     launch_mode = base::win::IsTouchEnabledDevice() ?
                           ECHUIM_IMMERSIVE : ECHUIM_DESKTOP;

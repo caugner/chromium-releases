@@ -161,10 +161,11 @@ _OS_NEGATIVE_FILTER['android'] = [
     # http://crbug.com/156390
     'DragAndDropTest.*',
 
-    # Touch events are not yet supported.
+    # Flick touch events are not yet implemented.
     'TouchFlickTest.*',
+
+    # Scrolling touch events are not supported.
     'TouchScrollTest.*',
-    'TouchSingleTapTest.*',
 
     # These tests start multiple sessions, which is not supported on a single
     # Android device.
@@ -179,6 +180,16 @@ _OS_NEGATIVE_FILTER['android'] = [
 
     # Flaky: https://code.google.com/p/chromedriver/issues/detail?id=441
     'PageLoadingTest.testShouldBeAbleToNavigateBackInTheBrowserHistory',
+    'PageLoadingTest.testShouldBeAbleToNavigateForwardsInTheBrowserHistory',
+    # Flaky: https://code.google.com/p/chromedriver/issues/detail?id=528
+    'PageLoadingTest.testShouldDoNothingIfThereIsNothingToGoBackTo',
+
+    # https://code.google.com/p/chromedriver/issues/detail?id=526
+    'ElementFindingTest.testShouldNotBeAbleToLocateASingleElementOnABlankPage',
+    'ElementFindingTest.testShouldBeAbleToFindAnElementByBooleanAttributeUsingShortCssSelector',
+
+    # https://code.google.com/p/chromedriver/issues/detail?id=527
+    'ClickTest.testCanClickOnALinkThatContainsEmbeddedBlockElements',
 ]
 
 

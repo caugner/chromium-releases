@@ -75,6 +75,11 @@ class DeviceLocalAccountPolicyServiceTest
                              POLICY_SCOPE_USER,
                              Value::CreateBooleanValue(true),
                              NULL);
+    expected_policy_map_.Set(key::kFullscreenAllowed,
+                             POLICY_LEVEL_MANDATORY,
+                             POLICY_SCOPE_USER,
+                             Value::CreateBooleanValue(false),
+                             NULL);
     scoped_ptr<base::ListValue> allowed_extension_types(new base::ListValue());
     allowed_extension_types->AppendString("hosted_app");
     expected_policy_map_.Set(key::kExtensionAllowedTypes,
@@ -548,7 +553,8 @@ TEST_F(DeviceLocalAccountPolicyProviderTest, RefreshPolicies) {
   EXPECT_CALL(mock_device_management_service_, CreateJob(_))
       .WillRepeatedly(
           mock_device_management_service_.FailJob(DM_STATUS_REQUEST_FAILED));
-  EXPECT_CALL(mock_device_management_service_, StartJob(_, _, _, _, _, _, _));
+  EXPECT_CALL(mock_device_management_service_, StartJob(_, _, _, _, _, _, _))
+      .Times(AnyNumber());
   service_.Connect(&mock_device_management_service_);
   FlushDeviceSettings();
   Mock::VerifyAndClearExpectations(&mock_device_management_service_);

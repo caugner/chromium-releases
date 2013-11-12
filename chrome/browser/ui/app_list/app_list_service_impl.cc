@@ -10,14 +10,11 @@
 #include "base/prefs/pref_service.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
 
 namespace {
 
@@ -120,6 +117,9 @@ AppListServiceImpl::AppListServiceImpl()
 
 AppListServiceImpl::~AppListServiceImpl() {}
 
+void AppListServiceImpl::SetAppListNextPaintCallback(
+    const base::Closure& callback) {}
+
 void AppListServiceImpl::HandleFirstRun() {}
 
 void AppListServiceImpl::Init(Profile* initial_profile) {}
@@ -153,12 +153,7 @@ void AppListServiceImpl::SetProfilePath(const base::FilePath& profile_path) {
       profile_path.BaseName().MaybeAsASCII());
 }
 
-AppListControllerDelegate* AppListServiceImpl::CreateControllerDelegate() {
-  return NULL;
-}
-
 void AppListServiceImpl::CreateShortcut() {}
-void AppListServiceImpl::OnSigninStatusChanged() {}
 
 // We need to watch for profile removal to keep kAppListProfile updated.
 void AppListServiceImpl::OnProfileWillBeRemoved(
@@ -172,13 +167,6 @@ void AppListServiceImpl::OnProfileWillBeRemoved(
     local_state->SetString(prefs::kAppListProfile,
         local_state->GetString(prefs::kProfileLastUsed));
   }
-}
-
-void AppListServiceImpl::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  OnSigninStatusChanged();
 }
 
 void AppListServiceImpl::Show() {
@@ -202,17 +190,7 @@ Profile* AppListServiceImpl::GetCurrentAppListProfile() {
 }
 
 void AppListServiceImpl::SetProfile(Profile* new_profile) {
-  registrar_.RemoveAll();
   profile_ = new_profile;
-  if (!profile_)
-    return;
-
-  registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
-                 content::Source<Profile>(profile_));
-  registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
-                 content::Source<Profile>(profile_));
-  registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_SIGNED_OUT,
-                 content::Source<Profile>(profile_));
 }
 
 void AppListServiceImpl::InvalidatePendingProfileLoads() {
@@ -225,4 +203,11 @@ void AppListServiceImpl::HandleCommandLineFlags(Profile* initial_profile) {
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableAppList))
     SetAppListEnabledPreference(false);
+
+  // Send app list usage stats after a delay.
+  const int kSendUsageStatsDelay = 5;
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&AppListServiceImpl::SendAppListStats),
+      base::TimeDelta::FromSeconds(kSendUsageStatsDelay));
 }

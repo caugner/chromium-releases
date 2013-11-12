@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/threading/thread.h"
@@ -83,6 +84,8 @@ class ChromeChannelListener : public IPC::Listener {
 
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
     IPC_BEGIN_MESSAGE_MAP(ChromeChannelListener, message)
+      IPC_MESSAGE_HANDLER(MetroViewerHostMsg_OpenURLOnDesktop,
+                          OnOpenURLOnDesktop)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_SetCursor, OnSetCursor)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_DisplayFileOpen,
                           OnDisplayFileOpenDialog)
@@ -102,6 +105,14 @@ class ChromeChannelListener : public IPC::Listener {
   }
 
  private:
+  void OnOpenURLOnDesktop(const base::FilePath& shortcut,
+                          const string16& url) {
+    ui_proxy_->PostTask(FROM_HERE,
+        base::Bind(&ChromeAppViewAsh::OnOpenURLOnDesktop,
+        base::Unretained(app_view_),
+        shortcut, url));
+  }
+
   void OnSetCursor(int64 cursor) {
     ui_proxy_->PostTask(FROM_HERE,
                         base::Bind(&ChromeAppViewAsh::OnSetCursor,
@@ -292,6 +303,26 @@ uint32 GetKeyboardEventFlags() {
   if (base::win::IsAltPressed())
     flags |= ui::EF_ALT_DOWN;
   return flags;
+}
+
+bool LaunchChromeBrowserProcess (const wchar_t* additional_parameters) {
+  DVLOG(1) << "Launching chrome server";
+  base::FilePath chrome_exe_path;
+
+  if (!PathService::Get(base::FILE_EXE, &chrome_exe_path))
+    return false;
+
+  string16 parameters = L"--silent-launch --viewer-connect ";
+  if (additional_parameters)
+    parameters += additional_parameters;
+
+  SHELLEXECUTEINFO sei = { sizeof(sei) };
+  sei.nShow = SW_SHOWNORMAL;
+  sei.lpFile = chrome_exe_path.value().c_str();
+  sei.lpDirectory = L"";
+  sei.lpParameters = parameters.c_str();
+  ::ShellExecuteEx(&sei);
+  return true;
 }
 
 }  // namespace
@@ -502,6 +533,18 @@ HRESULT ChromeAppViewAsh::Unsnap() {
 }
 
 
+void ChromeAppViewAsh::OnOpenURLOnDesktop(const base::FilePath& shortcut,
+    const string16& url) {
+  base::FilePath::StringType file = shortcut.value();
+  SHELLEXECUTEINFO sei = { sizeof(sei) };
+  sei.fMask = SEE_MASK_FLAG_LOG_USAGE;
+  sei.nShow = SW_SHOWNORMAL;
+  sei.lpFile = file.c_str();
+  sei.lpDirectory = L"";
+  sei.lpParameters = url.c_str();
+  BOOL result = ShellExecuteEx(&sei);
+}
+
 void ChromeAppViewAsh::OnSetCursor(HCURSOR cursor) {
   ::SetCursor(HCURSOR(cursor));
 }
@@ -615,10 +658,14 @@ HRESULT ChromeAppViewAsh::OnActivate(
 
   winapp::Activation::ActivationKind activation_kind;
   CheckHR(args->get_Kind(&activation_kind));
+  DVLOG(1) << "Activation kind: " << activation_kind;
+
   if (activation_kind == winapp::Activation::ActivationKind_Search)
     HandleSearchRequest(args);
   else if (activation_kind == winapp::Activation::ActivationKind_Protocol)
     HandleProtocolRequest(args);
+  else
+    LaunchChromeBrowserProcess(NULL);
   // We call ICoreWindow::Activate after the handling for the search/protocol
   // requests because Chrome can be launched to handle a search request which
   // in turn launches the chrome browser process in desktop mode via
@@ -637,9 +684,10 @@ HRESULT ChromeAppViewAsh::OnPointerMoved(winui::Core::ICoreWindow* sender,
     return hr;
 
   if (pointer.IsMouse()) {
-    ui_channel_->Send(new MetroViewerHostMsg_MouseMoved(pointer.x(),
-                                                        pointer.y(),
-                                                        mouse_down_flags_));
+    ui_channel_->Send(new MetroViewerHostMsg_MouseMoved(
+        pointer.x(),
+        pointer.y(),
+        mouse_down_flags_ | GetKeyboardEventFlags()));
   } else {
     DCHECK(pointer.IsTouch());
     ui_channel_->Send(new MetroViewerHostMsg_TouchMoved(pointer.x(),
@@ -665,11 +713,13 @@ HRESULT ChromeAppViewAsh::OnPointerPressed(
 
   if (pointer.IsMouse()) {
     mouse_down_flags_ = pointer.flags();
-    ui_channel_->Send(new MetroViewerHostMsg_MouseButton(pointer.x(),
-                                                         pointer.y(),
-                                                         0,
-                                                         ui::ET_MOUSE_PRESSED,
-                                                         mouse_down_flags_));
+    ui_channel_->Send(new MetroViewerHostMsg_MouseButton(
+        pointer.x(),
+        pointer.y(),
+        0,
+        ui::ET_MOUSE_PRESSED,
+        static_cast<ui::EventFlags>(
+            mouse_down_flags_ | GetKeyboardEventFlags())));
   } else {
     DCHECK(pointer.IsTouch());
     ui_channel_->Send(new MetroViewerHostMsg_TouchDown(pointer.x(),
@@ -690,11 +740,13 @@ HRESULT ChromeAppViewAsh::OnPointerReleased(
 
   if (pointer.IsMouse()) {
     mouse_down_flags_ = ui::EF_NONE;
-    ui_channel_->Send(new MetroViewerHostMsg_MouseButton(pointer.x(),
-                                                         pointer.y(),
-                                                         0,
-                                                         ui::ET_MOUSE_RELEASED,
-                                                         pointer.flags()));
+    ui_channel_->Send(new MetroViewerHostMsg_MouseButton(
+        pointer.x(),
+        pointer.y(),
+        0,
+        ui::ET_MOUSE_RELEASED,
+        static_cast<ui::EventFlags>(
+            pointer.flags() | GetKeyboardEventFlags())));
   } else {
     DCHECK(pointer.IsTouch());
     ui_channel_->Send(new MetroViewerHostMsg_TouchUp(pointer.x(),
@@ -844,9 +896,6 @@ HRESULT ChromeAppViewAsh::OnWindowActivated(
   HRESULT hr = args->get_WindowActivationState(&state);
   if (FAILED(hr))
     return hr;
-  DVLOG(1) << "Window activation state: "  << state;
-  ui_channel_->Send(new MetroViewerHostMsg_WindowActivated(
-      state != winui::Core::CoreWindowActivationState_Deactivated));
   return S_OK;
 }
 
@@ -858,18 +907,7 @@ HRESULT ChromeAppViewAsh::HandleSearchRequest(
 
   if (!ui_channel_) {
     DVLOG(1) << "Launched to handle search request";
-    base::FilePath chrome_exe_path;
-
-    if (!PathService::Get(base::FILE_EXE, &chrome_exe_path))
-      return E_FAIL;
-
-    SHELLEXECUTEINFO sei = { sizeof(sei) };
-    sei.nShow = SW_SHOWNORMAL;
-    sei.lpFile = chrome_exe_path.value().c_str();
-    sei.lpDirectory = L"";
-    sei.lpParameters =
-        L"--silent-launch --viewer-connection=viewer --windows8-search";
-    ::ShellExecuteEx(&sei);
+    LaunchChromeBrowserProcess(L"--windows8-search");
   }
 
   mswrw::HString search_string;

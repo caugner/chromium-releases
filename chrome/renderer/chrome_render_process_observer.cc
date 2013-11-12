@@ -65,7 +65,8 @@ using content::RenderThread;
 
 namespace {
 
-static const int kCacheStatsDelayMS = 2000;
+const int kCacheStatsDelayMS = 2000;
+const size_t kUnitializedCacheCapacity = UINT_MAX;
 
 class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
  public:
@@ -253,21 +254,29 @@ void HeapStatisticsCollector::SendStatsToBrowser(int round_id) {
 
 bool ChromeRenderProcessObserver::is_incognito_process_ = false;
 
-bool ChromeRenderProcessObserver::extension_activity_log_enabled_ = false;
-
 ChromeRenderProcessObserver::ChromeRenderProcessObserver(
     chrome::ChromeContentRendererClient* client)
     : client_(client),
-      clear_cache_pending_(false) {
+      clear_cache_pending_(false),
+      webkit_initialized_(false),
+      pending_cache_min_dead_capacity_(0),
+      pending_cache_max_dead_capacity_(0),
+      pending_cache_capacity_(kUnitializedCacheCapacity) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kEnableWatchdog)) {
     // TODO(JAR): Need to implement renderer IO msgloop watchdog.
   }
 
 #if defined(ENABLE_AUTOFILL_DIALOG)
+#if defined(OS_MACOSX)
+  bool enableAutofill = command_line.HasSwitch(
+      autofill::switches::kEnableInteractiveAutocomplete);
+#else
+  bool enableAutofill = !command_line.HasSwitch(
+      autofill::switches::kDisableInteractiveAutocomplete);
+#endif
   WebRuntimeFeatures::enableRequestAutocomplete(
-      command_line.HasSwitch(
-          autofill::switches::kEnableInteractiveAutocomplete) ||
+      enableAutofill ||
       command_line.HasSwitch(switches::kEnableExperimentalWebPlatformFeatures));
 #endif
 
@@ -315,8 +324,6 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderProcessObserver, message)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetIsIncognitoProcess,
                         OnSetIsIncognitoProcess)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetExtensionActivityLogEnabled,
-                        OnSetExtensionActivityLogEnabled)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetCacheCapacities, OnSetCacheCapacities)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_ClearCache, OnClearCache)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetFieldTrialGroup, OnSetFieldTrialGroup)
@@ -332,6 +339,13 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
 }
 
 void ChromeRenderProcessObserver::WebKitInitialized() {
+  webkit_initialized_ = true;
+  if (pending_cache_capacity_ != kUnitializedCacheCapacity) {
+    WebCache::setCapacities(pending_cache_min_dead_capacity_,
+                            pending_cache_max_dead_capacity_,
+                            pending_cache_capacity_);
+  }
+
   // chrome-native: is a scheme used for placeholder navigations that allow
   // UIs to be drawn with platform native widgets instead of HTML.  These pages
   // should not be accessible, and should also be treated as empty documents
@@ -346,14 +360,13 @@ void ChromeRenderProcessObserver::WebKitInitialized() {
       native_scheme);
 }
 
+void ChromeRenderProcessObserver::OnRenderProcessShutdown() {
+  webkit_initialized_ = false;
+}
+
 void ChromeRenderProcessObserver::OnSetIsIncognitoProcess(
     bool is_incognito_process) {
   is_incognito_process_ = is_incognito_process;
-}
-
-void ChromeRenderProcessObserver::OnSetExtensionActivityLogEnabled(
-    bool extension_activity_log_enabled) {
-  extension_activity_log_enabled_ = extension_activity_log_enabled;
 }
 
 void ChromeRenderProcessObserver::OnSetContentSettingRules(
@@ -364,12 +377,19 @@ void ChromeRenderProcessObserver::OnSetContentSettingRules(
 void ChromeRenderProcessObserver::OnSetCacheCapacities(size_t min_dead_capacity,
                                                        size_t max_dead_capacity,
                                                        size_t capacity) {
+  if (!webkit_initialized_) {
+    pending_cache_min_dead_capacity_ = min_dead_capacity;
+    pending_cache_max_dead_capacity_ = max_dead_capacity;
+    pending_cache_capacity_ = capacity;
+    return;
+  }
+
   WebCache::setCapacities(
       min_dead_capacity, max_dead_capacity, capacity);
 }
 
 void ChromeRenderProcessObserver::OnClearCache(bool on_navigation) {
-  if (on_navigation) {
+  if (on_navigation || !webkit_initialized_) {
     clear_cache_pending_ = true;
   } else {
     WebCache::clear();
@@ -378,7 +398,8 @@ void ChromeRenderProcessObserver::OnClearCache(bool on_navigation) {
 
 void ChromeRenderProcessObserver::OnGetCacheResourceStats() {
   WebCache::ResourceTypeStats stats;
-  WebCache::getResourceTypeStats(&stats);
+  if (webkit_initialized_)
+    WebCache::getResourceTypeStats(&stats);
   RenderThread::Get()->Send(new ChromeViewHostMsg_ResourceTypeStats(stats));
 }
 
@@ -398,7 +419,8 @@ void ChromeRenderProcessObserver::OnGetV8HeapStats() {
 }
 
 void ChromeRenderProcessObserver::OnPurgeMemory() {
-  RenderThread::Get()->EnsureWebKitInitialized();
+  if (!webkit_initialized_)
+    return;
 
   // Clear the object cache (as much as possible; some live objects cannot be
   // freed).
@@ -425,7 +447,7 @@ void ChromeRenderProcessObserver::OnPurgeMemory() {
 }
 
 void ChromeRenderProcessObserver::ExecutePendingClearCache() {
-  if (clear_cache_pending_) {
+  if (clear_cache_pending_ && webkit_initialized_) {
     clear_cache_pending_ = false;
     WebCache::clear();
   }

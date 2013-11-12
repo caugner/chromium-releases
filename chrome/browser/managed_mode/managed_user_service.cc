@@ -17,12 +17,12 @@
 #include "chrome/browser/managed_mode/custodian_profile_downloader_service.h"
 #include "chrome/browser/managed_mode/custodian_profile_downloader_service_factory.h"
 #include "chrome/browser/managed_mode/managed_mode_site_list.h"
+#include "chrome/browser/managed_mode/managed_user_constants.h"
 #include "chrome/browser/managed_mode/managed_user_registration_utility.h"
+#include "chrome/browser/managed_mode/managed_user_settings_service.h"
+#include "chrome/browser/managed_mode/managed_user_settings_service_factory.h"
 #include "chrome/browser/managed_mode/managed_user_sync_service.h"
 #include "chrome/browser/managed_mode/managed_user_sync_service_factory.h"
-#include "chrome/browser/policy/managed_mode_policy_provider.h"
-#include "chrome/browser/policy/profile_policy_connector.h"
-#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
@@ -48,7 +48,6 @@
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
-#include "policy/policy_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
@@ -58,7 +57,6 @@
 using base::DictionaryValue;
 using base::Value;
 using content::BrowserThread;
-using policy::ManagedModePolicyProvider;
 
 namespace {
 
@@ -213,6 +211,24 @@ bool ManagedUserService::AreManagedUsersEnabled() {
              switches::kEnableManagedUsers);
 }
 
+// static
+void ManagedUserService::MigrateUserPrefs(PrefService* prefs) {
+  if (!prefs->HasPrefPath(prefs::kProfileIsManaged))
+    return;
+
+  bool is_managed = prefs->GetBoolean(prefs::kProfileIsManaged);
+  prefs->ClearPref(prefs::kProfileIsManaged);
+
+  if (!is_managed)
+    return;
+
+  std::string managed_user_id = prefs->GetString(prefs::kManagedUserId);
+  if (!managed_user_id.empty())
+    return;
+
+  prefs->SetString(prefs::kManagedUserId, "Dummy ID");
+}
+
 scoped_refptr<const ManagedModeURLFilter>
 ManagedUserService::GetURLFilterForIOThread() {
   return url_filter_context_.io_url_filter();
@@ -308,22 +324,20 @@ bool ManagedUserService::UserMayLoad(const extensions::Extension* extension,
       extension_service->GetInstalledExtension(extension->id()))
     return true;
 
-  if (extension) {
-    bool was_installed_by_default = extension->was_installed_by_default();
+  bool was_installed_by_default = extension->was_installed_by_default();
 #if defined(OS_CHROMEOS)
-    // On Chrome OS all external sources are controlled by us so it means that
-    // they are "default". Method was_installed_by_default returns false because
-    // extensions creation flags are ignored in case of default extensions with
-    // update URL(the flags aren't passed to OnExternalExtensionUpdateUrlFound).
-    // TODO(dpolukhin): remove this Chrome OS specific code as soon as creation
-    // flags are not ignored.
-    was_installed_by_default =
-        extensions::Manifest::IsExternalLocation(extension->location());
+  // On Chrome OS all external sources are controlled by us so it means that
+  // they are "default". Method was_installed_by_default returns false because
+  // extensions creation flags are ignored in case of default extensions with
+  // update URL(the flags aren't passed to OnExternalExtensionUpdateUrlFound).
+  // TODO(dpolukhin): remove this Chrome OS specific code as soon as creation
+  // flags are not ignored.
+  was_installed_by_default =
+      extensions::Manifest::IsExternalLocation(extension->location());
 #endif
-    if (extension->location() == extensions::Manifest::COMPONENT ||
-        was_installed_by_default) {
-      return true;
-    }
+  if (extension->location() == extensions::Manifest::COMPONENT ||
+      was_installed_by_default) {
+    return true;
   }
 
   if (error)
@@ -433,10 +447,8 @@ ScopedVector<ManagedModeSiteList> ManagedUserService::GetActiveSiteLists() {
   return site_lists.Pass();
 }
 
-ManagedModePolicyProvider* ManagedUserService::GetPolicyProvider() {
-  policy::ProfilePolicyConnector* connector =
-      policy::ProfilePolicyConnectorFactory::GetForProfile(profile_);
-  return connector->managed_mode_policy_provider();
+ManagedUserSettingsService* ManagedUserService::GetSettingsService() {
+  return ManagedUserSettingsServiceFactory::GetForProfile(profile_);
 }
 
 void ManagedUserService::OnDefaultFilteringBehaviorChanged() {
@@ -471,7 +483,7 @@ void ManagedUserService::AddAccessRequest(const GURL& url) {
   std::string output(net::EscapeQueryParamValue(normalized_url.spec(), true));
 
   // Add the prefix.
-  std::string key = ManagedModePolicyProvider::MakeSplitSettingKey(
+  std::string key = ManagedUserSettingsService::MakeSplitSettingKey(
       kManagedUserAccessRequestKeyPrefix, output);
 
   scoped_ptr<DictionaryValue> dict(new DictionaryValue);
@@ -479,7 +491,7 @@ void ManagedUserService::AddAccessRequest(const GURL& url) {
   // TODO(sergiu): Use sane time here when it's ready.
   dict->SetDouble(kManagedUserAccessRequestTime, base::Time::Now().ToJsTime());
 
-  GetPolicyProvider()->UploadItem(key, dict.PassAs<Value>());
+  GetSettingsService()->UploadItem(key, dict.PassAs<Value>());
 }
 
 ManagedUserService::ManualBehavior ManagedUserService::GetManualBehaviorForHost(
@@ -517,8 +529,8 @@ void ManagedUserService::GetManualExceptionsForHost(const std::string& host,
 }
 
 void ManagedUserService::InitForTesting() {
-  DCHECK(!profile_->GetPrefs()->GetBoolean(prefs::kProfileIsManaged));
-  profile_->GetPrefs()->SetBoolean(prefs::kProfileIsManaged, true);
+  DCHECK(!profile_->IsManaged());
+  profile_->GetPrefs()->SetString(prefs::kManagedUserId, "Test ID");
   Init();
 }
 
@@ -548,13 +560,14 @@ const char* ManagedUserService::GetManagedUserPseudoEmail() {
 }
 
 void ManagedUserService::Init() {
-  ManagedModePolicyProvider* policy_provider = GetPolicyProvider();
+  ManagedUserSettingsService* settings_service = GetSettingsService();
+  DCHECK(settings_service->IsReady());
   if (!ProfileIsManaged()) {
-    if (policy_provider)
-      policy_provider->Clear();
-
+    settings_service->Clear();
     return;
   }
+
+  settings_service->Activate();
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kManagedUserSyncToken)) {
@@ -593,9 +606,6 @@ void ManagedUserService::Init() {
 
   BrowserList::AddObserver(this);
 
-  if (policy_provider)
-    policy_provider->InitLocalPolicies();
-
   // Initialize the filter.
   OnDefaultFilteringBehaviorChanged();
   UpdateSiteLists();
@@ -615,13 +625,15 @@ void ManagedUserService::RegisterAndInitSync(
     ManagedUserRegistrationUtility* registration_utility,
     Profile* custodian_profile,
     const std::string& managed_user_id,
-    const ProfileManager::CreateCallback& callback) {
+    const AuthErrorCallback& callback) {
   DCHECK(ProfileIsManaged());
   DCHECK(!custodian_profile->IsManaged());
 
   string16 name = UTF8ToUTF16(
       profile_->GetPrefs()->GetString(prefs::kProfileName));
-  ManagedUserRegistrationInfo info(name);
+  int avatar_index = profile_->GetPrefs()->GetInteger(
+      prefs::kProfileAvatarIndex);
+  ManagedUserRegistrationInfo info(name, avatar_index);
   registration_utility->Register(
       managed_user_id,
       info,
@@ -646,23 +658,21 @@ void ManagedUserService::OnCustodianProfileDownloaded(
 }
 
 void ManagedUserService::OnManagedUserRegistered(
-    const ProfileManager::CreateCallback& callback,
+    const AuthErrorCallback& callback,
     Profile* custodian_profile,
     const GoogleServiceAuthError& auth_error,
     const std::string& token) {
-  if (auth_error.state() != GoogleServiceAuthError::NONE) {
-    LOG(ERROR) << "Managed user OAuth error: " << auth_error.ToString();
+  if (auth_error.state() == GoogleServiceAuthError::NONE) {
+    InitSync(token);
+    SigninManagerBase* signin =
+        SigninManagerFactory::GetForProfile(custodian_profile);
+    profile_->GetPrefs()->SetString(prefs::kManagedUserCustodianEmail,
+                                    signin->GetAuthenticatedUsername());
+  } else {
     DCHECK_EQ(std::string(), token);
-    callback.Run(profile_, Profile::CREATE_STATUS_REMOTE_FAIL);
-    return;
   }
 
-  InitSync(token);
-  SigninManagerBase* signin =
-      SigninManagerFactory::GetForProfile(custodian_profile);
-  profile_->GetPrefs()->SetString(prefs::kManagedUserCustodianEmail,
-                                  signin->GetAuthenticatedUsername());
-  callback.Run(profile_, Profile::CREATE_STATUS_INITIALIZED);
+  callback.Run(auth_error);
 }
 
 void ManagedUserService::UpdateManualHosts() {
@@ -704,7 +714,8 @@ void ManagedUserService::OnBrowserSetLastActive(Browser* browser) {
 
 void ManagedUserService::RecordProfileAndBrowserEventsHelper(
     const char* key_prefix) {
-  std::string key = ManagedModePolicyProvider::MakeSplitSettingKey(key_prefix,
+  std::string key = ManagedUserSettingsService::MakeSplitSettingKey(
+      key_prefix,
       base::Int64ToString(base::TimeTicks::Now().ToInternalValue()));
 
   scoped_ptr<DictionaryValue> dict(new DictionaryValue);
@@ -712,8 +723,5 @@ void ManagedUserService::RecordProfileAndBrowserEventsHelper(
   // TODO(bauerb): Use sane time when ready.
   dict->SetDouble(kEventTimestamp, base::Time::Now().ToJsTime());
 
-  ManagedModePolicyProvider* provider = GetPolicyProvider();
-  // It is NULL in tests.
-  if (provider)
-    provider->UploadItem(key, dict.PassAs<Value>());
+  GetSettingsService()->UploadItem(key, dict.PassAs<Value>());
 }

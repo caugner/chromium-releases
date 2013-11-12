@@ -37,6 +37,7 @@
 #include "components/autofill/core/common/form_data.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_render_process_host.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -84,21 +85,29 @@ const char kTestCCNumberIncomplete[] = "4111111111";
 // Credit card number fails Luhn check.
 const char kTestCCNumberInvalid[] = "4111111111111112";
 
-
+// Sets the value of |type| in |outputs| to |value|.
 void SetOutputValue(const DetailInputs& inputs,
-                    DetailOutputMap* outputs,
                     ServerFieldType type,
-                    const base::string16& value) {
+                    const base::string16& value,
+                    DetailOutputMap* outputs) {
   for (size_t i = 0; i < inputs.size(); ++i) {
     const DetailInput& input = inputs[i];
-    (*outputs)[&input] = input.type == type ?
-        value :
-        input.initial_value;
+    if (input.type == type)
+      (*outputs)[&input] = value;
+  }
+}
+
+// Copies the initial values from |inputs| into |outputs|.
+void CopyInitialValues(const DetailInputs& inputs, DetailOutputMap* outputs) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    const DetailInput& input = inputs[i];
+    (*outputs)[&input] = input.initial_value;
   }
 }
 
 scoped_ptr<wallet::WalletItems> CompleteAndValidWalletItems() {
-  scoped_ptr<wallet::WalletItems> items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   items->AddInstrument(wallet::GetTestMaskedInstrument());
   items->AddAddress(wallet::GetTestShippingAddress());
   return items.Pass();
@@ -122,17 +131,46 @@ scoped_ptr<risk::Fingerprint> GetFakeFingerprint() {
 
 class TestAutofillDialogView : public AutofillDialogView {
  public:
-  TestAutofillDialogView() {}
+  TestAutofillDialogView()
+      : updates_started_(0), save_details_locally_checked_(true) {}
   virtual ~TestAutofillDialogView() {}
 
   virtual void Show() OVERRIDE {}
   virtual void Hide() OVERRIDE {}
-  virtual void UpdateNotificationArea() OVERRIDE {}
-  virtual void UpdateAccountChooser() OVERRIDE {}
-  virtual void UpdateButtonStrip() OVERRIDE {}
-  virtual void UpdateDetailArea() OVERRIDE {}
-  virtual void UpdateAutocheckoutStepsArea() OVERRIDE {}
-  virtual void UpdateSection(DialogSection section) OVERRIDE {}
+
+  virtual void UpdatesStarted() OVERRIDE {
+    updates_started_++;
+  }
+
+  virtual void UpdatesFinished() OVERRIDE {
+    updates_started_--;
+    EXPECT_GE(updates_started_, 0);
+  }
+
+  virtual void UpdateNotificationArea() OVERRIDE {
+    EXPECT_GE(updates_started_, 1);
+  }
+
+  virtual void UpdateAccountChooser() OVERRIDE {
+    EXPECT_GE(updates_started_, 1);
+  }
+
+  virtual void UpdateButtonStrip() OVERRIDE {
+    EXPECT_GE(updates_started_, 1);
+  }
+
+  virtual void UpdateOverlay() OVERRIDE {
+    EXPECT_GE(updates_started_, 1);
+  }
+
+  virtual void UpdateDetailArea() OVERRIDE {
+    EXPECT_GE(updates_started_, 1);
+  }
+
+  virtual void UpdateSection(DialogSection section) OVERRIDE {
+    EXPECT_GE(updates_started_, 1);
+  }
+
   virtual void FillSection(DialogSection section,
                            const DetailInput& originating_input) OVERRIDE {};
   virtual void GetUserInput(DialogSection section, DetailOutputMap* output)
@@ -144,12 +182,19 @@ class TestAutofillDialogView : public AutofillDialogView {
   }
 
   virtual string16 GetCvc() OVERRIDE { return string16(); }
-  virtual bool SaveDetailsLocally() OVERRIDE { return true; }
+  virtual bool HitTestInput(const DetailInput& input,
+                            const gfx::Point& screen_point) OVERRIDE {
+    return false;
+  }
+
+  virtual bool SaveDetailsLocally() OVERRIDE {
+    return save_details_locally_checked_;
+  }
+
   virtual const content::NavigationController* ShowSignIn() OVERRIDE {
     return NULL;
   }
   virtual void HideSignIn() OVERRIDE {}
-  virtual void UpdateProgressBar(double value) OVERRIDE {}
 
   MOCK_METHOD0(ModelChanged, void());
   MOCK_METHOD0(UpdateForErrors, void());
@@ -160,8 +205,15 @@ class TestAutofillDialogView : public AutofillDialogView {
     outputs_[section] = map;
   }
 
+  void CheckSaveDetailsLocallyCheckbox(bool checked) {
+    save_details_locally_checked_ = checked;
+  }
+
  private:
   std::map<DialogSection, DetailOutputMap> outputs_;
+
+  int updates_started_;
+  bool save_details_locally_checked_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillDialogView);
 };
@@ -172,8 +224,7 @@ class TestAccountChooserModel : public AccountChooserModel {
   TestAccountChooserModel(AccountChooserModelDelegate* delegate,
                           PrefService* prefs,
                           const AutofillMetrics& metric_logger)
-      : AccountChooserModel(delegate, prefs, metric_logger,
-                            DIALOG_TYPE_REQUEST_AUTOCOMPLETE) {}
+      : AccountChooserModel(delegate, prefs, metric_logger) {}
   virtual ~TestAccountChooserModel() {}
 
   using AccountChooserModel::kActiveWalletItemId;
@@ -192,21 +243,18 @@ class TestAutofillDialogController
       const FormData& form_structure,
       const GURL& source_url,
       const AutofillMetrics& metric_logger,
-      const DialogType dialog_type,
-      const base::Callback<void(const FormStructure*,
-                                const std::string&)>& callback,
+      const base::Callback<void(const FormStructure*)>& callback,
       MockNewCreditCardBubbleController* mock_new_card_bubble_controller)
       : AutofillDialogControllerImpl(contents,
                                      form_structure,
                                      source_url,
-                                     dialog_type,
                                      callback),
         metric_logger_(metric_logger),
         mock_wallet_client_(
             Profile::FromBrowserContext(contents->GetBrowserContext())->
                 GetRequestContext(), this),
-        dialog_type_(dialog_type),
-        mock_new_card_bubble_controller_(mock_new_card_bubble_controller) {}
+        mock_new_card_bubble_controller_(mock_new_card_bubble_controller),
+        submit_button_delay_count_(0) {}
 
   virtual ~TestAutofillDialogController() {}
 
@@ -232,18 +280,28 @@ class TestAutofillDialogController
 
   const GURL& open_tab_url() { return open_tab_url_; }
 
-  virtual DialogType GetDialogType() const OVERRIDE {
-    return dialog_type_;
-  }
-
-  void set_dialog_type(DialogType dialog_type) { dialog_type_ = dialog_type; }
-
   void SimulateSigninError() {
     OnWalletSigninError();
   }
 
-  bool AutocheckoutIsRunning() const {
-    return AUTOCHECKOUT_IN_PROGRESS == autocheckout_state();
+  // Skips past the 2 second wait between FinishSubmit and DoFinishSubmit.
+  void ForceFinishSubmit() {
+#if defined(TOOLKIT_VIEWS)
+    DoFinishSubmit();
+#endif
+  }
+
+  void SimulateSubmitButtonDelayBegin() {
+    AutofillDialogControllerImpl::SubmitButtonDelayBegin();
+  }
+
+  void SimulateSubmitButtonDelayEnd() {
+    AutofillDialogControllerImpl::SubmitButtonDelayEndForTesting();
+  }
+
+  // Returns the number of times that the submit button was delayed.
+  int get_submit_button_delay_count() const {
+    return submit_button_delay_count_;
   }
 
   MOCK_METHOD0(LoadRiskFingerprintData, void());
@@ -276,6 +334,13 @@ class TestAutofillDialogController
                                            billing_profile.Pass());
   }
 
+  // AutofillDialogControllerImpl calls this method before showing the dialog
+  // window.
+  virtual void SubmitButtonDelayBegin() OVERRIDE {
+    // Do not delay enabling the submit button in testing.
+    submit_button_delay_count_++;
+  }
+
  private:
   // To specify our own metric logger.
   virtual const AutofillMetrics& GetMetricLogger() const OVERRIDE {
@@ -286,8 +351,10 @@ class TestAutofillDialogController
   TestPersonalDataManager test_manager_;
   testing::NiceMock<wallet::MockWalletClient> mock_wallet_client_;
   GURL open_tab_url_;
-  DialogType dialog_type_;
   MockNewCreditCardBubbleController* mock_new_card_bubble_controller_;
+
+  // The number of times that the submit button was delayed.
+  int submit_button_delay_count_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillDialogController);
 };
@@ -349,6 +416,7 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
     // Don't get stuck on the first run wallet interstitial.
     profile()->GetPrefs()->SetBoolean(::prefs::kAutofillDialogHasPaidWithWallet,
                                       true);
+    profile()->GetPrefs()->ClearPref(::prefs::kAutofillDialogSaveData);
 
     SetUpControllerWithFormData(DefaultFormData());
   }
@@ -367,7 +435,7 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
     if (controller_)
       controller_->ViewClosed();
 
-    base::Callback<void(const FormStructure*, const std::string&)> callback =
+    base::Callback<void(const FormStructure*)> callback =
         base::Bind(&AutofillDialogControllerTest::FinishedCallback,
                    base::Unretained(this));
     controller_ = (new testing::NiceMock<TestAutofillDialogController>(
@@ -375,7 +443,6 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
         form_data,
         GURL(),
         metric_logger_,
-        DIALOG_TYPE_REQUEST_AUTOCOMPLETE,
         callback,
         mock_new_card_bubble_controller_.get()))->AsWeakPtr();
     controller_->Init(profile());
@@ -392,6 +459,31 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
           ASCIIToUTF16(kTestCCNumberVisa) : ASCIIToUTF16("11");
     }
     controller()->GetView()->SetUserInput(SECTION_CC, cc_outputs);
+  }
+
+  // Activates the 'Add new foo' option from the |section|'s suggestions
+  // dropdown and fills the |section|'s inputs with the data from the
+  // |data_model|.  If |section| is SECTION_CC, also fills in '123' for the CVC.
+  void FillInputs(DialogSection section, const AutofillDataModel& data_model) {
+    // Select the 'Add new foo' option.
+    ui::MenuModel* model = GetMenuModelForSection(section);
+    if (model)
+      model->ActivatedAt(model->GetItemCount() - 2);
+
+    // Fill the inputs.
+    DetailOutputMap outputs;
+    const DetailInputs& inputs =
+        controller()->RequestedFieldsForSection(section);
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      ServerFieldType type = inputs[i].type;
+      base::string16 output;
+      if (type == CREDIT_CARD_VERIFICATION_CODE)
+        output = ASCIIToUTF16("123");
+      else
+        output = data_model.GetInfo(AutofillType(type), "en-US");
+      outputs[&inputs[i]] = output;
+    }
+    controller()->GetView()->SetUserInput(section, outputs);
   }
 
   std::vector<DialogNotification> NotificationsOfType(
@@ -431,8 +523,8 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
     const DetailInputs& inputs =
         controller()->RequestedFieldsForSection(section);
 
-    SetOutputValue(inputs, &outputs, CREDIT_CARD_NUMBER,
-                   ASCIIToUTF16(cc_number));
+    SetOutputValue(inputs, CREDIT_CARD_NUMBER,
+                   ASCIIToUTF16(cc_number), &outputs);
     ValidityData validity_data =
         controller()->InputsAreValid(section, outputs, VALIDATE_FINAL);
     EXPECT_EQ(should_pass ? 0U : 1U, validity_data.count(CREDIT_CARD_NUMBER));
@@ -460,6 +552,23 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
     return payload.a;
   }
 
+  // Returns true if the given |section| contains a field of the given |type|.
+  bool SectionContainsField(DialogSection section, ServerFieldType type) {
+    const DetailInputs& inputs =
+        controller()->RequestedFieldsForSection(section);
+    for (DetailInputs::const_iterator it = inputs.begin(); it != inputs.end();
+         ++it) {
+      if (it->type == type)
+        return true;
+    }
+    return false;
+  }
+
+  SuggestionsMenuModel* GetMenuModelForSection(DialogSection section) {
+    ui::MenuModel* model = controller()->MenuModelForSection(section);
+    return static_cast<SuggestionsMenuModel*>(model);
+  }
+
   TestAutofillDialogController* controller() { return controller_.get(); }
 
   const FormStructure* form_structure() { return form_structure_; }
@@ -473,11 +582,8 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
   }
 
  private:
-  void FinishedCallback(const FormStructure* form_structure,
-                        const std::string& google_transaction_id) {
+  void FinishedCallback(const FormStructure* form_structure) {
     form_structure_ = form_structure;
-    if (controller()->GetDialogType() == DIALOG_TYPE_AUTOCHECKOUT)
-      EXPECT_TRUE(controller()->AutocheckoutIsRunning());
   }
 
 #if defined(OS_WIN)
@@ -524,9 +630,6 @@ TEST_F(AutofillDialogControllerTest, PhoneNumberValidation) {
   // Construct DetailOutputMap from existing data.
   SwitchToAutofill();
 
-  AutofillProfile full_profile(test::GetVerifiedProfile());
-  controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-
   for (size_t i = 0; i < 2; ++i) {
     ServerFieldType phone = i == 0 ? PHONE_HOME_WHOLE_NUMBER :
                                      PHONE_BILLING_WHOLE_NUMBER;
@@ -534,13 +637,18 @@ TEST_F(AutofillDialogControllerTest, PhoneNumberValidation) {
                                        ADDRESS_BILLING_COUNTRY;
     DialogSection section = i == 0 ? SECTION_SHIPPING : SECTION_BILLING;
 
-    controller()->EditClickedForSection(section);
-
     DetailOutputMap outputs;
     const DetailInputs& inputs =
         controller()->RequestedFieldsForSection(section);
+    AutofillProfile full_profile(test::GetVerifiedProfile());
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      const DetailInput& input = inputs[i];
+      outputs[&input] = full_profile.GetInfo(AutofillType(input.type),
+                                             "en-US");
+    }
+
     // Make sure country is United States.
-    SetOutputValue(inputs, &outputs, address, ASCIIToUTF16("United States"));
+    SetOutputValue(inputs, address, ASCIIToUTF16("United States"), &outputs);
 
     // Existing data should have no errors.
     ValidityData validity_data =
@@ -548,7 +656,7 @@ TEST_F(AutofillDialogControllerTest, PhoneNumberValidation) {
     EXPECT_EQ(0U, validity_data.count(phone));
 
     // Input an empty phone number with VALIDATE_FINAL.
-    SetOutputValue( inputs, &outputs, phone, base::string16());
+    SetOutputValue(inputs, phone, base::string16(), &outputs);
     validity_data =
         controller()->InputsAreValid(section, outputs, VALIDATE_FINAL);
     EXPECT_EQ(1U, validity_data.count(phone));
@@ -559,32 +667,32 @@ TEST_F(AutofillDialogControllerTest, PhoneNumberValidation) {
     EXPECT_EQ(0U, validity_data.count(phone));
 
     // Input an invalid phone number.
-    SetOutputValue(inputs, &outputs, phone, ASCIIToUTF16("ABC"));
+    SetOutputValue(inputs, phone, ASCIIToUTF16("ABC"), &outputs);
     validity_data =
         controller()->InputsAreValid(section, outputs, VALIDATE_EDIT);
     EXPECT_EQ(1U, validity_data.count(phone));
 
     // Input a local phone number.
-    SetOutputValue(inputs, &outputs, phone, ASCIIToUTF16("2155546699"));
+    SetOutputValue(inputs, phone, ASCIIToUTF16("2155546699"), &outputs);
     validity_data =
         controller()->InputsAreValid(section, outputs, VALIDATE_EDIT);
     EXPECT_EQ(0U, validity_data.count(phone));
 
     // Input an invalid local phone number.
-    SetOutputValue(inputs, &outputs, phone, ASCIIToUTF16("215554669"));
+    SetOutputValue(inputs, phone, ASCIIToUTF16("215554669"), &outputs);
     validity_data =
         controller()->InputsAreValid(section, outputs, VALIDATE_EDIT);
     EXPECT_EQ(1U, validity_data.count(phone));
 
     // Input an international phone number.
-    SetOutputValue(inputs, &outputs, phone, ASCIIToUTF16("+33 892 70 12 39"));
+    SetOutputValue(inputs, phone, ASCIIToUTF16("+33 892 70 12 39"), &outputs);
     validity_data =
         controller()->InputsAreValid(section, outputs, VALIDATE_EDIT);
     EXPECT_EQ(0U, validity_data.count(phone));
 
     // Input an invalid international phone number.
-    SetOutputValue(inputs, &outputs, phone,
-                   ASCIIToUTF16("+112333 892 70 12 39"));
+    SetOutputValue(inputs, phone,
+                   ASCIIToUTF16("+112333 892 70 12 39"), &outputs);
     validity_data =
         controller()->InputsAreValid(section, outputs, VALIDATE_EDIT);
     EXPECT_EQ(1U, validity_data.count(phone));
@@ -603,14 +711,17 @@ TEST_F(AutofillDialogControllerTest, ExpirationDateValidity) {
 
   base::string16 default_year_value =
       exp_year_model->GetItemAt(exp_year_model->GetDefaultIndex());
+  base::string16 default_month_value =
+      exp_month_model->GetItemAt(exp_month_model->GetDefaultIndex());
 
   base::string16 other_year_value =
       exp_year_model->GetItemAt(exp_year_model->GetItemCount() - 1);
   base::string16 other_month_value =
       exp_month_model->GetItemAt(exp_month_model->GetItemCount() - 1);
 
-  SetOutputValue(inputs, &outputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
-                 default_year_value);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_MONTH, default_month_value, &outputs);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
+                 default_year_value, &outputs);
 
   // Expiration default values "validate" with VALIDATE_EDIT.
   ValidityData validity_data =
@@ -618,9 +729,15 @@ TEST_F(AutofillDialogControllerTest, ExpirationDateValidity) {
   EXPECT_EQ(0U, validity_data.count(CREDIT_CARD_EXP_4_DIGIT_YEAR));
   EXPECT_EQ(0U, validity_data.count(CREDIT_CARD_EXP_MONTH));
 
+  // Expiration default values fail with VALIDATE_FINAL.
+  validity_data =
+      controller()->InputsAreValid(SECTION_CC_BILLING, outputs, VALIDATE_FINAL);
+  EXPECT_EQ(1U, validity_data.count(CREDIT_CARD_EXP_4_DIGIT_YEAR));
+  EXPECT_EQ(1U, validity_data.count(CREDIT_CARD_EXP_MONTH));
+
   // Expiration date with default month "validates" with VALIDATE_EDIT.
-  SetOutputValue(inputs, &outputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
-                 other_year_value);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
+                 other_year_value, &outputs);
 
   validity_data =
       controller()->InputsAreValid(SECTION_CC_BILLING, outputs, VALIDATE_EDIT);
@@ -628,27 +745,19 @@ TEST_F(AutofillDialogControllerTest, ExpirationDateValidity) {
   EXPECT_EQ(0U, validity_data.count(CREDIT_CARD_EXP_MONTH));
 
   // Expiration date with default year "validates" with VALIDATE_EDIT.
-  SetOutputValue(inputs, &outputs, CREDIT_CARD_EXP_MONTH, other_month_value);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_MONTH, other_month_value, &outputs);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
+                 default_year_value, &outputs);
 
   validity_data =
       controller()->InputsAreValid(SECTION_CC_BILLING, outputs, VALIDATE_EDIT);
   EXPECT_EQ(0U, validity_data.count(CREDIT_CARD_EXP_4_DIGIT_YEAR));
   EXPECT_EQ(0U, validity_data.count(CREDIT_CARD_EXP_MONTH));
 
-  // Expiration default values fail with VALIDATE_FINAL.
-  SetOutputValue(inputs, &outputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
-                 default_year_value);
-
-  validity_data =
-      controller()->InputsAreValid(SECTION_CC_BILLING, outputs, VALIDATE_FINAL);
-  EXPECT_EQ(1U, validity_data.count(CREDIT_CARD_EXP_4_DIGIT_YEAR));
-  EXPECT_EQ(1U, validity_data.count(CREDIT_CARD_EXP_MONTH));
-
   // Expiration date with default month fails with VALIDATE_FINAL.
-  SetOutputValue(inputs,
-                 &outputs,
-                 CREDIT_CARD_EXP_4_DIGIT_YEAR,
-                 other_year_value);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_MONTH, default_month_value, &outputs);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
+                 other_year_value, &outputs);
 
   validity_data =
       controller()->InputsAreValid(SECTION_CC_BILLING, outputs, VALIDATE_FINAL);
@@ -656,7 +765,9 @@ TEST_F(AutofillDialogControllerTest, ExpirationDateValidity) {
   EXPECT_EQ(1U, validity_data.count(CREDIT_CARD_EXP_MONTH));
 
   // Expiration date with default year fails with VALIDATE_FINAL.
-  SetOutputValue(inputs, &outputs, CREDIT_CARD_EXP_MONTH, other_month_value);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_MONTH, other_month_value, &outputs);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
+                 default_year_value, &outputs);
 
   validity_data =
       controller()->InputsAreValid(SECTION_CC_BILLING, outputs, VALIDATE_FINAL);
@@ -673,7 +784,7 @@ TEST_F(AutofillDialogControllerTest, BillingNameValidation) {
       controller()->RequestedFieldsForSection(SECTION_BILLING);
 
   // Input an empty billing name with VALIDATE_FINAL.
-  SetOutputValue(inputs, &outputs, NAME_BILLING_FULL, base::string16());
+  SetOutputValue(inputs, NAME_BILLING_FULL, base::string16(), &outputs);
   ValidityData validity_data =
       controller()->InputsAreValid(SECTION_BILLING, outputs, VALIDATE_FINAL);
   EXPECT_EQ(1U, validity_data.count(NAME_BILLING_FULL));
@@ -684,7 +795,7 @@ TEST_F(AutofillDialogControllerTest, BillingNameValidation) {
   EXPECT_EQ(0U, validity_data.count(NAME_BILLING_FULL));
 
   // Input a non-empty billing name.
-  SetOutputValue(inputs, &outputs, NAME_BILLING_FULL, ASCIIToUTF16("Bob"));
+  SetOutputValue(inputs, NAME_BILLING_FULL, ASCIIToUTF16("Bob"), &outputs);
   validity_data =
       controller()->InputsAreValid(SECTION_BILLING, outputs, VALIDATE_FINAL);
   EXPECT_EQ(0U, validity_data.count(NAME_BILLING_FULL));
@@ -694,7 +805,8 @@ TEST_F(AutofillDialogControllerTest, BillingNameValidation) {
   SwitchToWallet();
 
   // Setup some wallet state.
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   controller()->OnDidGetWalletItems(wallet_items.Pass());
 
   DetailOutputMap wallet_outputs;
@@ -703,8 +815,8 @@ TEST_F(AutofillDialogControllerTest, BillingNameValidation) {
 
   // Input an empty billing name with VALIDATE_FINAL. Data source should not
   // change this behavior.
-  SetOutputValue(wallet_inputs, &wallet_outputs, NAME_BILLING_FULL,
-                 base::string16());
+  SetOutputValue(wallet_inputs, NAME_BILLING_FULL,
+                 base::string16(), &wallet_outputs);
   validity_data =
       controller()->InputsAreValid(
           SECTION_CC_BILLING, wallet_outputs, VALIDATE_FINAL);
@@ -718,24 +830,25 @@ TEST_F(AutofillDialogControllerTest, BillingNameValidation) {
   EXPECT_EQ(0U, validity_data.count(NAME_BILLING_FULL));
 
   // Input a one name billing name. Wallet does not currently support this.
-  SetOutputValue(wallet_inputs, &wallet_outputs, NAME_BILLING_FULL,
-                 ASCIIToUTF16("Bob"));
+  SetOutputValue(wallet_inputs, NAME_BILLING_FULL,
+                 ASCIIToUTF16("Bob"), &wallet_outputs);
   validity_data =
       controller()->InputsAreValid(
           SECTION_CC_BILLING, wallet_outputs, VALIDATE_FINAL);
   EXPECT_EQ(1U, validity_data.count(NAME_BILLING_FULL));
 
   // Input a two name billing name.
-  SetOutputValue(wallet_inputs, &wallet_outputs, NAME_BILLING_FULL,
-                 ASCIIToUTF16("Bob Barker"));
+  SetOutputValue(wallet_inputs, NAME_BILLING_FULL,
+                 ASCIIToUTF16("Bob Barker"), &wallet_outputs);
   validity_data =
       controller()->InputsAreValid(
           SECTION_CC_BILLING, wallet_outputs, VALIDATE_FINAL);
   EXPECT_EQ(0U, validity_data.count(NAME_BILLING_FULL));
 
   // Input a more than two name billing name.
-  SetOutputValue(wallet_inputs, &wallet_outputs, NAME_BILLING_FULL,
-                 ASCIIToUTF16("John Jacob Jingleheimer Schmidt"));
+  SetOutputValue(wallet_inputs, NAME_BILLING_FULL,
+                 ASCIIToUTF16("John Jacob Jingleheimer Schmidt"),
+                 &wallet_outputs);
   validity_data =
       controller()->InputsAreValid(
           SECTION_CC_BILLING, wallet_outputs, VALIDATE_FINAL);
@@ -743,8 +856,9 @@ TEST_F(AutofillDialogControllerTest, BillingNameValidation) {
 
   // Input a billing name with lots of crazy whitespace.
   SetOutputValue(
-      wallet_inputs, &wallet_outputs, NAME_BILLING_FULL,
-      ASCIIToUTF16("     \\n\\r John \\n  Jacob Jingleheimer \\t Schmidt  "));
+      wallet_inputs, NAME_BILLING_FULL,
+      ASCIIToUTF16("     \\n\\r John \\n  Jacob Jingleheimer \\t Schmidt  "),
+      &wallet_outputs);
   validity_data =
       controller()->InputsAreValid(
           SECTION_CC_BILLING, wallet_outputs, VALIDATE_FINAL);
@@ -760,22 +874,34 @@ TEST_F(AutofillDialogControllerTest, CreditCardNumberValidation) {
   ValidateCCNumber(SECTION_CC, kTestCCNumberMaster, true);
   ValidateCCNumber(SECTION_CC, kTestCCNumberDiscover, true);
   ValidateCCNumber(SECTION_CC, kTestCCNumberAmex, true);
-
   ValidateCCNumber(SECTION_CC, kTestCCNumberIncomplete, false);
   ValidateCCNumber(SECTION_CC, kTestCCNumberInvalid, false);
 
   // Switch to Wallet which will not accept AMEX.
   SwitchToWallet();
 
-  // Setup some wallet state.
-  controller()->OnDidGetWalletItems(wallet::GetTestWalletItems());
+  // Setup some wallet state on a merchant for which Wallet doesn't
+  // support AMEX.
+  controller()->OnDidGetWalletItems(
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED));
 
   // Should accept Visa, Master and Discover, but not AMEX.
   ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberVisa, true);
   ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberMaster, true);
   ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberDiscover, true);
-
   ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberAmex, false);
+  ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberIncomplete, false);
+  ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberInvalid, false);
+
+  // Setup some wallet state on a merchant for which Wallet supports AMEX.
+  controller()->OnDidGetWalletItems(
+      wallet::GetTestWalletItems(wallet::AMEX_ALLOWED));
+
+  // Should accept Visa, Master, Discover, and AMEX.
+  ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberVisa, true);
+  ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberMaster, true);
+  ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberDiscover, true);
+  ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberAmex, true);
   ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberIncomplete, false);
   ValidateCCNumber(SECTION_CC_BILLING, kTestCCNumberInvalid, false);
 }
@@ -791,7 +917,6 @@ TEST_F(AutofillDialogControllerTest, AutofillProfiles) {
   // suggestion.
   EXPECT_FALSE(controller()->MenuModelForSection(SECTION_CC));
   EXPECT_FALSE(controller()->MenuModelForSection(SECTION_BILLING));
-  EXPECT_FALSE(controller()->MenuModelForSection(SECTION_EMAIL));
 
   EXPECT_CALL(*controller()->GetView(), ModelChanged()).Times(3);
 
@@ -802,7 +927,6 @@ TEST_F(AutofillDialogControllerTest, AutofillProfiles) {
   shipping_model = controller()->MenuModelForSection(SECTION_SHIPPING);
   ASSERT_TRUE(shipping_model);
   EXPECT_EQ(3, shipping_model->GetItemCount());
-  EXPECT_FALSE(controller()->MenuModelForSection(SECTION_EMAIL));
 
   // An otherwise full but unverified profile should be ignored.
   AutofillProfile full_profile(test::GetFullProfile());
@@ -812,7 +936,6 @@ TEST_F(AutofillDialogControllerTest, AutofillProfiles) {
   shipping_model = controller()->MenuModelForSection(SECTION_SHIPPING);
   ASSERT_TRUE(shipping_model);
   EXPECT_EQ(3, shipping_model->GetItemCount());
-  EXPECT_FALSE(controller()->MenuModelForSection(SECTION_EMAIL));
 
   // A full, verified profile should be picked up.
   AutofillProfile verified_profile(test::GetVerifiedProfile());
@@ -821,37 +944,32 @@ TEST_F(AutofillDialogControllerTest, AutofillProfiles) {
   shipping_model = controller()->MenuModelForSection(SECTION_SHIPPING);
   ASSERT_TRUE(shipping_model);
   EXPECT_EQ(4, shipping_model->GetItemCount());
-  EXPECT_TRUE(!!controller()->MenuModelForSection(SECTION_EMAIL));
 }
 
 // Makes sure that the choice of which Autofill profile to use for each section
 // is sticky.
 TEST_F(AutofillDialogControllerTest, AutofillProfileDefaults) {
-  AutofillProfile full_profile(test::GetFullProfile());
-  full_profile.set_origin(kSettingsOrigin);
-  controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-  AutofillProfile full_profile2(test::GetFullProfile2());
-  full_profile2.set_origin(kSettingsOrigin);
-  controller()->GetTestingManager()->AddTestingProfile(&full_profile2);
+  AutofillProfile profile(test::GetVerifiedProfile());
+  AutofillProfile profile2(test::GetVerifiedProfile2());
+  controller()->GetTestingManager()->AddTestingProfile(&profile);
+  controller()->GetTestingManager()->AddTestingProfile(&profile2);
 
   // Until a selection has been made, the default shipping suggestion is the
   // first one (after "use billing").
-  SuggestionsMenuModel* shipping_model = static_cast<SuggestionsMenuModel*>(
-      controller()->MenuModelForSection(SECTION_SHIPPING));
+  SuggestionsMenuModel* shipping_model =
+      GetMenuModelForSection(SECTION_SHIPPING);
   EXPECT_EQ(1, shipping_model->checked_item());
 
   for (int i = 2; i >= 0; --i) {
-    shipping_model = static_cast<SuggestionsMenuModel*>(
-        controller()->MenuModelForSection(SECTION_SHIPPING));
+    shipping_model = GetMenuModelForSection(SECTION_SHIPPING);
     shipping_model->ExecuteCommand(i, 0);
     FillCreditCardInputs();
     controller()->OnAccept();
 
     Reset();
-    controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-    controller()->GetTestingManager()->AddTestingProfile(&full_profile2);
-    shipping_model = static_cast<SuggestionsMenuModel*>(
-        controller()->MenuModelForSection(SECTION_SHIPPING));
+    controller()->GetTestingManager()->AddTestingProfile(&profile);
+    controller()->GetTestingManager()->AddTestingProfile(&profile2);
+    shipping_model = GetMenuModelForSection(SECTION_SHIPPING);
     EXPECT_EQ(i, shipping_model->checked_item());
   }
 
@@ -861,70 +979,75 @@ TEST_F(AutofillDialogControllerTest, AutofillProfileDefaults) {
   FillCreditCardInputs();
   controller()->OnAccept();
   Reset();
-  controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-  shipping_model = static_cast<SuggestionsMenuModel*>(
-      controller()->MenuModelForSection(SECTION_SHIPPING));
+  controller()->GetTestingManager()->AddTestingProfile(&profile);
+  shipping_model = GetMenuModelForSection(SECTION_SHIPPING);
   EXPECT_EQ(1, shipping_model->checked_item());
+}
+
+// Makes sure that a newly added Autofill profile becomes set as the default
+// choice for the next run.
+TEST_F(AutofillDialogControllerTest, NewAutofillProfileIsDefault) {
+  SwitchToAutofill();
+
+  AutofillProfile profile(test::GetVerifiedProfile());
+  CreditCard credit_card(test::GetVerifiedCreditCard());
+  controller()->GetTestingManager()->AddTestingProfile(&profile);
+  controller()->GetTestingManager()->AddTestingCreditCard(&credit_card);
+
+  // Until a selection has been made, the default suggestion is the first one.
+  // For the shipping section, this follows the "use billing" suggestion.
+  EXPECT_EQ(0, GetMenuModelForSection(SECTION_CC)->checked_item());
+  EXPECT_EQ(1, GetMenuModelForSection(SECTION_SHIPPING)->checked_item());
+
+  // Fill in the shipping and credit card sections with new data.
+  AutofillProfile new_profile(test::GetVerifiedProfile2());
+  CreditCard new_credit_card(test::GetVerifiedCreditCard2());
+  FillInputs(SECTION_SHIPPING, new_profile);
+  FillInputs(SECTION_CC, new_credit_card);
+  controller()->GetView()->CheckSaveDetailsLocallyCheckbox(true);
+  controller()->OnAccept();
+
+  // Update the |new_profile| and |new_credit_card|'s guids to the saved ones.
+  new_profile.set_guid(
+      controller()->GetTestingManager()->imported_profile().guid());
+  new_credit_card.set_guid(
+      controller()->GetTestingManager()->imported_credit_card().guid());
+
+  // Reload the dialog. The newly added address and credit card should now be
+  // set as the defaults.
+  Reset();
+  controller()->GetTestingManager()->AddTestingProfile(&profile);
+  controller()->GetTestingManager()->AddTestingProfile(&new_profile);
+  controller()->GetTestingManager()->AddTestingCreditCard(&credit_card);
+  controller()->GetTestingManager()->AddTestingCreditCard(&new_credit_card);
+
+  // Until a selection has been made, the default suggestion is the first one.
+  // For the shipping section, this follows the "use billing" suggestion.
+  EXPECT_EQ(1, GetMenuModelForSection(SECTION_CC)->checked_item());
+  EXPECT_EQ(2, GetMenuModelForSection(SECTION_SHIPPING)->checked_item());
 }
 
 TEST_F(AutofillDialogControllerTest, AutofillProfileVariants) {
   EXPECT_CALL(*controller()->GetView(), ModelChanged()).Times(1);
-  ui::MenuModel* email_model =
-      controller()->MenuModelForSection(SECTION_EMAIL);
-  EXPECT_FALSE(email_model);
+  ui::MenuModel* shipping_model =
+      controller()->MenuModelForSection(SECTION_SHIPPING);
+  ASSERT_TRUE(!!shipping_model);
+  EXPECT_EQ(3, shipping_model->GetItemCount());
 
   // Set up some variant data.
   AutofillProfile full_profile(test::GetVerifiedProfile());
   std::vector<string16> names;
   names.push_back(ASCIIToUTF16("John Doe"));
   names.push_back(ASCIIToUTF16("Jane Doe"));
-  full_profile.SetRawMultiInfo(EMAIL_ADDRESS, names);
-  const string16 kEmail1 = ASCIIToUTF16(kFakeEmail);
-  const string16 kEmail2 = ASCIIToUTF16("admin@example.com");
+  full_profile.SetRawMultiInfo(NAME_FULL, names);
   std::vector<string16> emails;
-  emails.push_back(kEmail1);
-  emails.push_back(kEmail2);
+  emails.push_back(ASCIIToUTF16(kFakeEmail));
+  emails.push_back(ASCIIToUTF16("admin@example.com"));
   full_profile.SetRawMultiInfo(EMAIL_ADDRESS, emails);
 
-  // Respect variants for the email address field only.
+  // Non-default variants are ignored by the dialog.
   controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-  ui::MenuModel* shipping_model =
-      controller()->MenuModelForSection(SECTION_SHIPPING);
   EXPECT_EQ(4, shipping_model->GetItemCount());
-  email_model = controller()->MenuModelForSection(SECTION_EMAIL);
-  ASSERT_TRUE(!!email_model);
-  EXPECT_EQ(4, email_model->GetItemCount());
-
-  // The first one is the default.
-  SuggestionsMenuModel* email_suggestions = static_cast<SuggestionsMenuModel*>(
-      controller()->MenuModelForSection(SECTION_EMAIL));
-  EXPECT_EQ(0, email_suggestions->checked_item());
-
-  email_model->ActivatedAt(0);
-  EXPECT_EQ(kEmail1,
-            controller()->SuggestionStateForSection(SECTION_EMAIL).
-                vertically_compact_text);
-  email_model->ActivatedAt(1);
-  EXPECT_EQ(kEmail2,
-            controller()->SuggestionStateForSection(SECTION_EMAIL).
-                vertically_compact_text);
-
-  controller()->EditClickedForSection(SECTION_EMAIL);
-  const DetailInputs& inputs =
-      controller()->RequestedFieldsForSection(SECTION_EMAIL);
-  EXPECT_EQ(kEmail2, inputs[0].initial_value);
-
-  // The choice of variant is persisted across runs of the dialog.
-  email_model->ActivatedAt(0);
-  email_model->ActivatedAt(1);
-  FillCreditCardInputs();
-  controller()->OnAccept();
-
-  Reset();
-  controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-  email_suggestions = static_cast<SuggestionsMenuModel*>(
-      controller()->MenuModelForSection(SECTION_EMAIL));
-  EXPECT_EQ(1, email_suggestions->checked_item());
 }
 
 TEST_F(AutofillDialogControllerTest, SuggestValidEmail) {
@@ -933,44 +1056,32 @@ TEST_F(AutofillDialogControllerTest, SuggestValidEmail) {
   profile.SetRawInfo(EMAIL_ADDRESS, kValidEmail);
   controller()->GetTestingManager()->AddTestingProfile(&profile);
 
-  controller()->MenuModelForSection(SECTION_EMAIL)->ActivatedAt(0);
-  EXPECT_EQ(kValidEmail,
-            controller()->SuggestionStateForSection(SECTION_EMAIL).
-                vertically_compact_text);
+  // "add", "manage", and 1 suggestion.
+  EXPECT_EQ(
+      3, controller()->MenuModelForSection(SECTION_BILLING)->GetItemCount());
+  // "add", "manage", 1 suggestion, and "same as billing".
+  EXPECT_EQ(
+      4, controller()->MenuModelForSection(SECTION_SHIPPING)->GetItemCount());
 }
 
 TEST_F(AutofillDialogControllerTest, DoNotSuggestInvalidEmail) {
   AutofillProfile profile(test::GetVerifiedProfile());
   profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16(".!#$%&'*+/=?^_`-@-.."));
   controller()->GetTestingManager()->AddTestingProfile(&profile);
-  EXPECT_EQ(static_cast<ui::MenuModel*>(NULL),
-            controller()->MenuModelForSection(SECTION_EMAIL));
-}
 
-TEST_F(AutofillDialogControllerTest, DoNotSuggestEmailFromIncompleteProfile) {
-  AutofillProfile profile(test::GetVerifiedProfile());
-  profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16(kFakeEmail));
-  profile.SetRawInfo(ADDRESS_HOME_STATE, base::string16());
-  controller()->GetTestingManager()->AddTestingProfile(&profile);
-  EXPECT_EQ(static_cast<ui::MenuModel*>(NULL),
-            controller()->MenuModelForSection(SECTION_EMAIL));
-}
-
-TEST_F(AutofillDialogControllerTest, DoNotSuggestEmailFromInvalidProfile) {
-  AutofillProfile profile(test::GetVerifiedProfile());
-  profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16(kFakeEmail));
-  profile.SetRawInfo(ADDRESS_HOME_STATE, ASCIIToUTF16("C"));
-  controller()->GetTestingManager()->AddTestingProfile(&profile);
-  EXPECT_EQ(static_cast<ui::MenuModel*>(NULL),
-            controller()->MenuModelForSection(SECTION_EMAIL));
+  EXPECT_FALSE(!!controller()->MenuModelForSection(SECTION_BILLING));
+  // "add", "manage", 1 suggestion, and "same as billing".
+  EXPECT_EQ(
+      4, controller()->MenuModelForSection(SECTION_SHIPPING)->GetItemCount());
 }
 
 TEST_F(AutofillDialogControllerTest, SuggestValidAddress) {
   AutofillProfile full_profile(test::GetVerifiedProfile());
   full_profile.set_origin(kSettingsOrigin);
   controller()->GetTestingManager()->AddTestingProfile(&full_profile);
+  // "add", "manage", and 1 suggestion.
   EXPECT_EQ(
-      4, controller()->MenuModelForSection(SECTION_SHIPPING)->GetItemCount());
+      3, controller()->MenuModelForSection(SECTION_BILLING)->GetItemCount());
 }
 
 TEST_F(AutofillDialogControllerTest, DoNotSuggestInvalidAddress) {
@@ -978,8 +1089,16 @@ TEST_F(AutofillDialogControllerTest, DoNotSuggestInvalidAddress) {
   full_profile.set_origin(kSettingsOrigin);
   full_profile.SetRawInfo(ADDRESS_HOME_STATE, ASCIIToUTF16("C"));
   controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-  EXPECT_EQ(
-      3, controller()->MenuModelForSection(SECTION_SHIPPING)->GetItemCount());
+
+  EXPECT_FALSE(!!controller()->MenuModelForSection(SECTION_BILLING));
+}
+
+TEST_F(AutofillDialogControllerTest, DoNotSuggestIncompleteAddress) {
+  AutofillProfile profile(test::GetVerifiedProfile());
+  profile.SetRawInfo(ADDRESS_HOME_STATE, base::string16());
+  controller()->GetTestingManager()->AddTestingProfile(&profile);
+
+  EXPECT_FALSE(!!controller()->MenuModelForSection(SECTION_BILLING));
 }
 
 TEST_F(AutofillDialogControllerTest, AutofillCreditCards) {
@@ -1133,7 +1252,7 @@ TEST_F(AutofillDialogControllerTest, BillingVsShippingPhoneNumber) {
   EXPECT_EQ(PHONE_BILLING, form_structure()->field(1)->Type().group());
   EXPECT_EQ(shipping_profile.GetRawInfo(PHONE_HOME_WHOLE_NUMBER),
             form_structure()->field(0)->value);
-  EXPECT_EQ(billing_profile.GetRawInfo(PHONE_BILLING_WHOLE_NUMBER),
+  EXPECT_EQ(billing_profile.GetRawInfo(PHONE_HOME_WHOLE_NUMBER),
             form_structure()->field(1)->value);
   EXPECT_NE(form_structure()->field(1)->value,
             form_structure()->field(0)->value);
@@ -1156,7 +1275,8 @@ TEST_F(AutofillDialogControllerTest, AcceptLegalDocuments) {
 
 // Makes sure the default object IDs are respected.
 TEST_F(AutofillDialogControllerTest, WalletDefaultItems) {
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
   wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
@@ -1185,7 +1305,8 @@ TEST_F(AutofillDialogControllerTest, WalletDefaultItems) {
 
 // Tests that invalid and AMEX default instruments are ignored.
 TEST_F(AutofillDialogControllerTest, SelectInstrument) {
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   // Tests if default instrument is invalid, then, the first valid instrument is
   // selected instead of the default instrument.
   wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
@@ -1200,12 +1321,14 @@ TEST_F(AutofillDialogControllerTest, SelectInstrument) {
   EXPECT_TRUE(controller()->MenuModelForSection(SECTION_CC_BILLING)->
       IsItemCheckedAt(0));
 
-  // Tests if default instrument is AMEX, then, the first valid instrument is
+  // Tests if default instrument is AMEX but Wallet doesn't support
+  // AMEX on this merchant, then the first valid instrument is
   // selected instead of the default instrument.
-  wallet_items = wallet::GetTestWalletItems();
+  wallet_items = wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
   wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
-  wallet_items->AddInstrument(wallet::GetTestMaskedInstrumentAmex());
+  wallet_items->AddInstrument(
+      wallet::GetTestMaskedInstrumentAmex(wallet::AMEX_DISALLOWED));
   wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
 
   controller()->OnDidGetWalletItems(wallet_items.Pass());
@@ -1215,10 +1338,27 @@ TEST_F(AutofillDialogControllerTest, SelectInstrument) {
   EXPECT_TRUE(controller()->MenuModelForSection(SECTION_CC_BILLING)->
       IsItemCheckedAt(0));
 
+  // Tests if default instrument is AMEX and it is allowed on this merchant,
+  // then it is selected.
+  wallet_items = wallet::GetTestWalletItems(wallet::AMEX_ALLOWED);
+  wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
+  wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
+  wallet_items->AddInstrument(
+      wallet::GetTestMaskedInstrumentAmex(wallet::AMEX_ALLOWED));
+  wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
+
+  controller()->OnDidGetWalletItems(wallet_items.Pass());
+  // 4 suggestions and "add", "manage".
+  EXPECT_EQ(6,
+      controller()->MenuModelForSection(SECTION_CC_BILLING)->GetItemCount());
+  EXPECT_TRUE(controller()->MenuModelForSection(SECTION_CC_BILLING)->
+      IsItemCheckedAt(2));
+
   // Tests if only have AMEX and invalid instrument, then "add" is selected.
-  wallet_items = wallet::GetTestWalletItems();
+  wallet_items = wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrumentInvalid());
-  wallet_items->AddInstrument(wallet::GetTestMaskedInstrumentAmex());
+  wallet_items->AddInstrument(
+      wallet::GetTestMaskedInstrumentAmex(wallet::AMEX_DISALLOWED));
 
   controller()->OnDidGetWalletItems(wallet_items.Pass());
   // 2 suggestions and "add", "manage".
@@ -1236,15 +1376,16 @@ TEST_F(AutofillDialogControllerTest, SaveAddress) {
                                testing::NotNull(),
                                _)).Times(1);
 
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
   // If there is no shipping address in wallet, it will default to
   // "same-as-billing" instead of "add-new-item". "same-as-billing" is covered
-  // by the following tests. The last item in the menu is "add-new-item".
+  // by the following tests. The penultimate item in the menu is "add-new-item".
   ui::MenuModel* shipping_model =
       controller()->MenuModelForSection(SECTION_SHIPPING);
-  shipping_model->ActivatedAt(shipping_model->GetItemCount() - 1);
+  shipping_model->ActivatedAt(shipping_model->GetItemCount() - 2);
   AcceptAndLoadFakeFingerprint();
 }
 
@@ -1255,7 +1396,8 @@ TEST_F(AutofillDialogControllerTest, SaveInstrument) {
                                testing::IsNull(),
                                _)).Times(1);
 
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddAddress(wallet::GetTestShippingAddress());
   SubmitWithWalletItems(wallet_items.Pass());
 }
@@ -1267,7 +1409,8 @@ TEST_F(AutofillDialogControllerTest, SaveInstrumentWithInvalidInstruments) {
                                testing::IsNull(),
                                _)).Times(1);
 
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddAddress(wallet::GetTestShippingAddress());
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrumentInvalid());
   SubmitWithWalletItems(wallet_items.Pass());
@@ -1279,72 +1422,13 @@ TEST_F(AutofillDialogControllerTest, SaveInstrumentAndAddress) {
                                testing::NotNull(),
                                _)).Times(1);
 
-  controller()->OnDidGetWalletItems(wallet::GetTestWalletItems());
+  controller()->OnDidGetWalletItems(
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED));
   AcceptAndLoadFakeFingerprint();
 }
 
 MATCHER(IsUpdatingExistingData, "updating existing Wallet data") {
   return !arg->object_id().empty();
-}
-
-// Tests that editing an address (in wallet mode0 and submitting the dialog
-// should update the existing address on the server via WalletClient.
-TEST_F(AutofillDialogControllerTest, UpdateAddress) {
-  EXPECT_CALL(*controller()->GetTestingWalletClient(),
-              SaveToWalletMock(testing::IsNull(),
-                               IsUpdatingExistingData(),
-                               _)).Times(1);
-
-  controller()->OnDidGetWalletItems(CompleteAndValidWalletItems());
-
-  controller()->EditClickedForSection(SECTION_SHIPPING);
-  AcceptAndLoadFakeFingerprint();
-}
-
-// Tests that editing an instrument (CC + address) in wallet mode updates an
-// existing instrument on the server via WalletClient.
-TEST_F(AutofillDialogControllerTest, UpdateInstrument) {
-  EXPECT_CALL(*controller()->GetTestingWalletClient(),
-              SaveToWalletMock(IsUpdatingExistingData(),
-                               testing::IsNull(),
-                               _)).Times(1);
-
-  controller()->OnDidGetWalletItems(CompleteAndValidWalletItems());
-
-  controller()->EditClickedForSection(SECTION_CC_BILLING);
-  AcceptAndLoadFakeFingerprint();
-}
-
-// Test that a user is able to edit their instrument and add a new address in
-// the same submission.
-TEST_F(AutofillDialogControllerTest, UpdateInstrumentSaveAddress) {
-  EXPECT_CALL(*controller()->GetTestingWalletClient(),
-              SaveToWalletMock(IsUpdatingExistingData(),
-                               testing::NotNull(),
-                               _)).Times(1);
-
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
-  wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
-  controller()->OnDidGetWalletItems(wallet_items.Pass());
-
-  controller()->EditClickedForSection(SECTION_CC_BILLING);
-  AcceptAndLoadFakeFingerprint();
-}
-
-// Test that saving a new instrument and editing an address works.
-TEST_F(AutofillDialogControllerTest, SaveInstrumentUpdateAddress) {
-  EXPECT_CALL(*controller()->GetTestingWalletClient(),
-              SaveToWalletMock(testing::NotNull(),
-                               IsUpdatingExistingData(),
-                               _)).Times(1);
-
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
-  wallet_items->AddAddress(wallet::GetTestShippingAddress());
-
-  controller()->OnDidGetWalletItems(wallet_items.Pass());
-
-  controller()->EditClickedForSection(SECTION_SHIPPING);
-  AcceptAndLoadFakeFingerprint();
 }
 
 MATCHER(UsesLocalBillingAddress, "uses the local billing address") {
@@ -1372,7 +1456,8 @@ TEST_F(AutofillDialogControllerTest, BillingForShippingHasMatch) {
   EXPECT_CALL(*controller()->GetTestingWalletClient(),
               SaveToWalletMock(_, _, _)).Times(0);
 
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   scoped_ptr<wallet::WalletItems::MaskedInstrument> instrument =
       wallet::GetTestMaskedInstrument();
   // Copy billing address as shipping address, and assign an id to it.
@@ -1393,22 +1478,34 @@ TEST_F(AutofillDialogControllerTest, BillingForShippingHasMatch) {
 // Test that the local view contents is used when saving a new instrument and
 // the user has selected "Same as billing".
 TEST_F(AutofillDialogControllerTest, SaveInstrumentSameAsBilling) {
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
 
-  controller()->EditClickedForSection(SECTION_CC_BILLING);
-  controller()->OnAccept();
+  ui::MenuModel* model = controller()->MenuModelForSection(SECTION_CC_BILLING);
+  model->ActivatedAt(model->GetItemCount() - 2);
 
   DetailOutputMap outputs;
   const DetailInputs& inputs =
       controller()->RequestedFieldsForSection(SECTION_CC_BILLING);
+  AutofillProfile full_profile(test::GetVerifiedProfile());
+  CreditCard full_card(test::GetCreditCard());
   for (size_t i = 0; i < inputs.size(); ++i) {
     const DetailInput& input = inputs[i];
-    outputs[&input] = input.type == ADDRESS_BILLING_LINE1 ?
-        ASCIIToUTF16(kEditedBillingAddress) : input.initial_value;
+    if (input.type == ADDRESS_BILLING_LINE1) {
+      outputs[&input] = ASCIIToUTF16(kEditedBillingAddress);
+    } else {
+      outputs[&input] = full_profile.GetInfo(AutofillType(input.type),
+                                             "en-US");
+    }
+
+    if (outputs[&input].empty())
+      outputs[&input] = full_card.GetInfo(AutofillType(input.type), "en-US");
   }
   controller()->GetView()->SetUserInput(SECTION_CC_BILLING, outputs);
+
+  controller()->OnAccept();
 
   EXPECT_CALL(*controller()->GetTestingWalletClient(),
               SaveToWalletMock(testing::NotNull(),
@@ -1423,7 +1520,8 @@ TEST_F(AutofillDialogControllerTest, CancelNoSave) {
 
   EXPECT_CALL(*controller()->GetView(), ModelChanged()).Times(1);
 
-  controller()->OnDidGetWalletItems(wallet::GetTestWalletItems());
+  controller()->OnDidGetWalletItems(
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED));
   controller()->OnCancel();
 }
 
@@ -1436,14 +1534,14 @@ TEST_F(AutofillDialogControllerTest, ManageItem) {
   controller()->GetTestingManager()->AddTestingProfile(&full_profile);
   SwitchToAutofill();
 
-  SuggestionsMenuModel* shipping = static_cast<SuggestionsMenuModel*>(
-      controller()->MenuModelForSection(SECTION_SHIPPING));
+  SuggestionsMenuModel* shipping = GetMenuModelForSection(SECTION_SHIPPING);
   shipping->ExecuteCommand(shipping->GetItemCount() - 1, 0);
   GURL autofill_manage_url = controller()->open_tab_url();
   EXPECT_EQ("chrome", autofill_manage_url.scheme());
 
   SwitchToWallet();
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
 
@@ -1451,89 +1549,13 @@ TEST_F(AutofillDialogControllerTest, ManageItem) {
   GURL wallet_manage_addresses_url = controller()->open_tab_url();
   EXPECT_EQ("https", wallet_manage_addresses_url.scheme());
 
-  SuggestionsMenuModel* billing = static_cast<SuggestionsMenuModel*>(
-      controller()->MenuModelForSection(SECTION_CC_BILLING));
+  SuggestionsMenuModel* billing = GetMenuModelForSection(SECTION_CC_BILLING);
   controller()->SuggestionItemSelected(billing, billing->GetItemCount() - 1);
   GURL wallet_manage_instruments_url = controller()->open_tab_url();
   EXPECT_EQ("https", wallet_manage_instruments_url.scheme());
 
   EXPECT_NE(autofill_manage_url, wallet_manage_instruments_url);
   EXPECT_NE(wallet_manage_instruments_url, wallet_manage_addresses_url);
-}
-
-TEST_F(AutofillDialogControllerTest, EditClickedCancelled) {
-  EXPECT_CALL(*controller()->GetView(), ModelChanged()).Times(1);
-
-  AutofillProfile full_profile(test::GetVerifiedProfile());
-  const string16 kEmail = ASCIIToUTF16("first@johndoe.com");
-  full_profile.SetRawInfo(EMAIL_ADDRESS, kEmail);
-  controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-
-  ui::MenuModel* email_model =
-      controller()->MenuModelForSection(SECTION_EMAIL);
-  EXPECT_EQ(3, email_model->GetItemCount());
-
-  // When unedited, the initial_value should be empty.
-  email_model->ActivatedAt(0);
-  const DetailInputs& inputs0 =
-      controller()->RequestedFieldsForSection(SECTION_EMAIL);
-  EXPECT_EQ(string16(), inputs0[0].initial_value);
-  EXPECT_EQ(kEmail,
-            controller()->SuggestionStateForSection(SECTION_EMAIL).
-                vertically_compact_text);
-
-  // When edited, the initial_value should contain the value.
-  controller()->EditClickedForSection(SECTION_EMAIL);
-  const DetailInputs& inputs1 =
-      controller()->RequestedFieldsForSection(SECTION_EMAIL);
-  EXPECT_EQ(kEmail, inputs1[0].initial_value);
-  EXPECT_FALSE(controller()->SuggestionStateForSection(SECTION_EMAIL).visible);
-
-  // When edit is cancelled, the initial_value should be empty.
-  controller()->EditCancelledForSection(SECTION_EMAIL);
-  const DetailInputs& inputs2 =
-      controller()->RequestedFieldsForSection(SECTION_EMAIL);
-  EXPECT_EQ(kEmail,
-            controller()->SuggestionStateForSection(SECTION_EMAIL).
-                vertically_compact_text);
-  EXPECT_EQ(string16(), inputs2[0].initial_value);
-}
-
-// Tests that editing an autofill profile and then submitting works.
-TEST_F(AutofillDialogControllerTest, EditAutofillProfile) {
-  SwitchToAutofill();
-
-  EXPECT_CALL(*controller()->GetView(), ModelChanged()).Times(2);
-
-  AutofillProfile full_profile(test::GetVerifiedProfile());
-  CreditCard credit_card(test::GetVerifiedCreditCard());
-  controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-  controller()->GetTestingManager()->AddTestingCreditCard(&credit_card);
-  controller()->EditClickedForSection(SECTION_SHIPPING);
-
-  DetailOutputMap outputs;
-  const DetailInputs& inputs =
-      controller()->RequestedFieldsForSection(SECTION_SHIPPING);
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    const DetailInput& input = inputs[i];
-    outputs[&input] = input.type == NAME_FULL ? ASCIIToUTF16("Edited Name") :
-                                                input.initial_value;
-  }
-  controller()->GetView()->SetUserInput(SECTION_SHIPPING, outputs);
-
-  // We also have to simulate CC inputs to keep the controller happy.
-  FillCreditCardInputs();
-
-  controller()->OnAccept();
-  const AutofillProfile& edited_profile =
-      controller()->GetTestingManager()->imported_profile();
-
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    const DetailInput& input = inputs[i];
-    EXPECT_EQ(input.type == NAME_FULL ? ASCIIToUTF16("Edited Name") :
-                                        input.initial_value,
-              edited_profile.GetInfo(AutofillType(input.type), "en-US"));
-  }
 }
 
 // Tests that adding an autofill profile and then submitting works.
@@ -1572,48 +1594,6 @@ TEST_F(AutofillDialogControllerTest, AddAutofillProfile) {
     EXPECT_EQ(full_profile2.GetInfo(AutofillType(input.type), "en-US"),
               added_profile.GetInfo(AutofillType(input.type), "en-US"));
   }
-
-  // Also, the currently selected email address should get added to the new
-  // profile.
-  string16 original_email =
-      full_profile.GetInfo(AutofillType(EMAIL_ADDRESS), "en-US");
-  EXPECT_FALSE(original_email.empty());
-  EXPECT_EQ(original_email,
-            added_profile.GetInfo(AutofillType(EMAIL_ADDRESS), "en-US"));
-}
-
-// Makes sure that a newly added email address gets added to an existing profile
-// (as opposed to creating its own profile). http://crbug.com/240926
-TEST_F(AutofillDialogControllerTest, AddEmail) {
-  SwitchToAutofill();
-  EXPECT_CALL(*controller()->GetView(), ModelChanged()).Times(2);
-
-  AutofillProfile full_profile(test::GetVerifiedProfile());
-  CreditCard credit_card(test::GetVerifiedCreditCard());
-  controller()->GetTestingManager()->AddTestingProfile(&full_profile);
-  controller()->GetTestingManager()->AddTestingCreditCard(&credit_card);
-
-  ui::MenuModel* model = controller()->MenuModelForSection(SECTION_EMAIL);
-  ASSERT_TRUE(model);
-  // Activate the "Add email address" menu item.
-  model->ActivatedAt(model->GetItemCount() - 2);
-
-  // Fill in the inputs from the profile.
-  DetailOutputMap outputs;
-  const DetailInputs& inputs =
-      controller()->RequestedFieldsForSection(SECTION_EMAIL);
-  const DetailInput& input = inputs[0];
-  string16 new_email = ASCIIToUTF16("addemailtest@example.com");
-  outputs[&input] = new_email;
-  controller()->GetView()->SetUserInput(SECTION_EMAIL, outputs);
-
-  FillCreditCardInputs();
-  controller()->OnAccept();
-  std::vector<base::string16> email_values;
-  full_profile.GetMultiInfo(
-      AutofillType(EMAIL_ADDRESS), "en-US", &email_values);
-  ASSERT_EQ(2U, email_values.size());
-  EXPECT_EQ(new_email, email_values[1]);
 }
 
 TEST_F(AutofillDialogControllerTest, VerifyCvv) {
@@ -1722,7 +1702,8 @@ TEST_F(AutofillDialogControllerTest, ChangeAccountDuringVerifyCvv) {
 // |WalletClientDelegate::OnDid{Save,Update}*()| call. This can happen if Online
 // Wallet's server validation differs from Chrome's local validation.
 TEST_F(AutofillDialogControllerTest, WalletServerSideValidation) {
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
   controller()->OnAccept();
@@ -1744,7 +1725,8 @@ TEST_F(AutofillDialogControllerTest, WalletServerSideValidation) {
 
 // Simulates receiving unrecoverable Wallet server validation errors.
 TEST_F(AutofillDialogControllerTest, WalletServerSideValidationUnrecoverable) {
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
   controller()->OnAccept();
@@ -1766,61 +1748,42 @@ TEST_F(AutofillDialogControllerTest, WalletServerSideValidationUnrecoverable) {
       DialogNotification::REQUIRED_ACTION).size());
 }
 
-// Test Wallet banners are show in the right situations. These banners explain
-// where Chrome got the user's data (i.e. "Got details from Wallet") or promote
+// Test Wallet banners are show in the right situations. These banners promote
 // saving details into Wallet (i.e. "[x] Save details to Wallet").
 TEST_F(AutofillDialogControllerTest, WalletBanners) {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(switches::kWalletServiceUseProd);
-  PrefService* prefs = profile()->GetPrefs();
 
-  // Simulate first run.
-  prefs->SetBoolean(::prefs::kAutofillDialogHasPaidWithWallet, false);
+  // Simulate non-signed-in case.
   SetUpControllerWithFormData(DefaultFormData());
-
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
+  GoogleServiceAuthError error(GoogleServiceAuthError::NONE);
+  controller()->OnUserNameFetchFailure(error);
   EXPECT_EQ(0U, NotificationsOfType(
       DialogNotification::WALLET_USAGE_CONFIRMATION).size());
 
   // Sign in a user with a completed account.
+  SetUpControllerWithFormData(DefaultFormData());
   controller()->OnDidGetWalletItems(CompleteAndValidWalletItems());
 
   // Full account; should show "Details from Wallet" message.
   EXPECT_EQ(1U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
-  EXPECT_EQ(0U, NotificationsOfType(
       DialogNotification::WALLET_USAGE_CONFIRMATION).size());
-
-  // Full account; no "[x] Save details in Wallet" option should show.
   SwitchToAutofill();
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::WALLET_USAGE_CONFIRMATION).size());
-
-  SetUpControllerWithFormData(DefaultFormData());
-  // |controller()| has already been initialized. Test that should not take
-  // effect until the next call of |SetUpControllerWithFormData()|.
-  prefs->SetBoolean(::prefs::kAutofillDialogHasPaidWithWallet, true);
-
-  // Sign in a user with a incomplete account.
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
-  wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
-  controller()->OnDidGetWalletItems(wallet_items.Pass());
-
-  // Partial account; no "Details from Wallet" message should show, but a
-  // "[x] Save details in Wallet" should.
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
   EXPECT_EQ(1U, NotificationsOfType(
       DialogNotification::WALLET_USAGE_CONFIRMATION).size());
 
-  // Once the usage confirmation banner is shown once, it keeps showing even if
-  // the user switches to Autofill data.
+  // Start over and sign in a user with an incomplete account.
+  SetUpControllerWithFormData(DefaultFormData());
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
+  wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
+  controller()->OnDidGetWalletItems(wallet_items.Pass());
+
+  // Partial account.
+  EXPECT_EQ(1U, NotificationsOfType(
+      DialogNotification::WALLET_USAGE_CONFIRMATION).size());
+
   SwitchToAutofill();
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
   EXPECT_EQ(1U, NotificationsOfType(
       DialogNotification::WALLET_USAGE_CONFIRMATION).size());
 
@@ -1830,103 +1793,7 @@ TEST_F(AutofillDialogControllerTest, WalletBanners) {
   EXPECT_EQ(1U, NotificationsOfType(
       DialogNotification::WALLET_ERROR).size());
   EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
-  EXPECT_EQ(0U, NotificationsOfType(
       DialogNotification::WALLET_USAGE_CONFIRMATION).size());
-
-  SetUpControllerWithFormData(DefaultFormData());
-  // |controller()| is error free and thinks the user has already paid w/Wallet.
-
-  // User has already paid with wallet. Don't show promos.
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::WALLET_USAGE_CONFIRMATION).size());
-
-  controller()->OnDidGetWalletItems(CompleteAndValidWalletItems());
-
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::WALLET_USAGE_CONFIRMATION).size());
-
-  wallet_items = wallet::GetTestWalletItems();
-  wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
-  controller()->OnDidGetWalletItems(wallet_items.Pass());
-
-  SwitchToAutofill();
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::WALLET_USAGE_CONFIRMATION).size());
-}
-
-TEST_F(AutofillDialogControllerTest, OnAutocheckoutError) {
-  SwitchToAutofill();
-  controller()->set_dialog_type(DIALOG_TYPE_AUTOCHECKOUT);
-
-  // We also have to simulate CC inputs to keep the controller happy.
-  FillCreditCardInputs();
-
-  controller()->OnAccept();
-  EXPECT_TRUE(ReadSetVisuallyDeemphasizedIpc());
-  controller()->OnAutocheckoutError();
-
-  EXPECT_FALSE(controller()->GetDialogButtons() & ui::DIALOG_BUTTON_CANCEL);
-  EXPECT_TRUE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::AUTOCHECKOUT_SUCCESS).size());
-  EXPECT_EQ(1U, NotificationsOfType(
-      DialogNotification::AUTOCHECKOUT_ERROR).size());
-
-  controller()->ViewClosed();
-  EXPECT_FALSE(ReadSetVisuallyDeemphasizedIpc());
-}
-
-TEST_F(AutofillDialogControllerTest, OnAutocheckoutSuccess) {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  command_line->AppendSwitch(switches::kWalletServiceUseProd);
-  controller()->set_dialog_type(DIALOG_TYPE_AUTOCHECKOUT);
-
-  // Simulate first run.
-  profile()->GetPrefs()->SetBoolean(::prefs::kAutofillDialogHasPaidWithWallet,
-                                    false);
-  SetUpControllerWithFormData(DefaultFormData());
-  controller()->set_dialog_type(DIALOG_TYPE_AUTOCHECKOUT);
-
-  // Sign in a user with a completed account.
-  controller()->OnDidGetWalletItems(CompleteAndValidWalletItems());
-
-  // Full account; should show "Details from Wallet" message.
-  EXPECT_EQ(1U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::WALLET_USAGE_CONFIRMATION).size());
-
-  AcceptAndLoadFakeFingerprint();
-  EXPECT_TRUE(ReadSetVisuallyDeemphasizedIpc());
-  controller()->OnDidGetFullWallet(wallet::GetTestFullWallet());
-  EXPECT_TRUE(controller()->GetDialogOverlay().image.IsEmpty());
-
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
-
-  controller()->OnAutocheckoutSuccess();
-  EXPECT_TRUE(controller()->GetDialogOverlay().image.IsEmpty());
-
-  EXPECT_FALSE(controller()->GetDialogButtons() & ui::DIALOG_BUTTON_CANCEL);
-  EXPECT_TRUE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
-  EXPECT_EQ(1U, NotificationsOfType(
-      DialogNotification::AUTOCHECKOUT_SUCCESS).size());
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::AUTOCHECKOUT_ERROR).size());
-  EXPECT_EQ(0U, NotificationsOfType(
-      DialogNotification::EXPLANATORY_MESSAGE).size());
-  EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
-      ::prefs::kAutofillDialogHasPaidWithWallet));
-
-  controller()->ViewClosed();
-  EXPECT_FALSE(ReadSetVisuallyDeemphasizedIpc());
 }
 
 TEST_F(AutofillDialogControllerTest, ViewCancelDoesntSetPref) {
@@ -1954,13 +1821,11 @@ TEST_F(AutofillDialogControllerTest, SubmitWithSigninErrorDoesntSetPref) {
       ::prefs::kAutofillDialogPayWithoutWallet));
 }
 
-// Tests that there's an overlay shown while waiting for full wallet items,
-// and on first run an additional expository wallet overlay shown after full
-// wallet items are returned.
+// Tests that there's an overlay shown while waiting for full wallet items.
 // TODO(estade): enable on other platforms when overlays are supported there.
 #if defined(TOOLKIT_VIEWS)
 TEST_F(AutofillDialogControllerTest, WalletFirstRun) {
-  // Simulate first run.
+  // Simulate fist run.
   PrefService* prefs = profile()->GetPrefs();
   prefs->SetBoolean(::prefs::kAutofillDialogHasPaidWithWallet, false);
   SetUpControllerWithFormData(DefaultFormData());
@@ -1977,27 +1842,11 @@ TEST_F(AutofillDialogControllerTest, WalletFirstRun) {
   EXPECT_FALSE(controller()->GetDialogOverlay().image.IsEmpty());
   EXPECT_FALSE(form_structure());
 
-  controller()->OverlayButtonPressed();
-  EXPECT_TRUE(prefs->GetBoolean(::prefs::kAutofillDialogHasPaidWithWallet));
+  // Don't wait for 2 seconds.
+  controller()->ForceFinishSubmit();
   EXPECT_TRUE(form_structure());
 }
 #endif
-
-// On second run, the second overlay doesn't show.
-TEST_F(AutofillDialogControllerTest, WalletSecondRun) {
-  SwitchToWallet();
-  EXPECT_TRUE(controller()->GetDialogOverlay().image.IsEmpty());
-
-  SubmitWithWalletItems(CompleteAndValidWalletItems());
-  EXPECT_FALSE(controller()->GetDialogOverlay().image.IsEmpty());
-
-  EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
-      ::prefs::kAutofillDialogHasPaidWithWallet));
-  controller()->OnDidGetFullWallet(wallet::GetTestFullWallet());
-  EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
-      ::prefs::kAutofillDialogHasPaidWithWallet));
-  EXPECT_TRUE(form_structure());
-}
 
 TEST_F(AutofillDialogControllerTest, ViewSubmitSetsPref) {
   ASSERT_FALSE(profile()->GetPrefs()->HasPrefPath(
@@ -2029,15 +1878,17 @@ TEST_F(AutofillDialogControllerTest, ViewSubmitSetsPref) {
   EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
       ::prefs::kAutofillDialogPayWithoutWallet));
 
-  // Succesfully choosing wallet does set the pref.
+  // Successfully choosing wallet does set the pref.
   SetUpControllerWithFormData(DefaultFormData());
 
   SwitchToWallet();
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
   controller()->OnAccept();
   controller()->OnDidGetFullWallet(wallet::GetTestFullWallet());
+  controller()->ForceFinishSubmit();
 
   EXPECT_TRUE(profile()->GetPrefs()->HasPrefPath(
       ::prefs::kAutofillDialogPayWithoutWallet));
@@ -2048,8 +1899,10 @@ TEST_F(AutofillDialogControllerTest, ViewSubmitSetsPref) {
 TEST_F(AutofillDialogControllerTest, HideWalletEmail) {
   SwitchToAutofill();
 
-  // Email section should be showing when using Autofill.
-  EXPECT_TRUE(controller()->SectionIsActive(SECTION_EMAIL));
+  // Email field should be showing when using Autofill.
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_BILLING));
+  EXPECT_FALSE(controller()->SectionIsActive(SECTION_CC_BILLING));
+  EXPECT_TRUE(SectionContainsField(SECTION_BILLING, EMAIL_ADDRESS));
 
   SwitchToWallet();
 
@@ -2063,12 +1916,16 @@ TEST_F(AutofillDialogControllerTest, HideWalletEmail) {
   controller()->OnDidGetWalletItems(wallet_items.Pass());
   EXPECT_TRUE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
 
-  // Email section should be hidden when using Wallet.
-  EXPECT_FALSE(controller()->SectionIsActive(SECTION_EMAIL));
+  // Email field should be absent when using Wallet.
+  EXPECT_FALSE(controller()->SectionIsActive(SECTION_BILLING));
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_CC_BILLING));
+  EXPECT_FALSE(SectionContainsField(SECTION_CC_BILLING, EMAIL_ADDRESS));
 
   controller()->OnAccept();
   controller()->OnDidGetFullWallet(wallet::GetTestFullWallet());
+  controller()->ForceFinishSubmit();
 
+  ASSERT_TRUE(form_structure());
   size_t i = 0;
   for (; i < form_structure()->field_count(); ++i) {
     if (form_structure()->field(i)->Type().GetStorableType() == EMAIL_ADDRESS) {
@@ -2076,7 +1933,7 @@ TEST_F(AutofillDialogControllerTest, HideWalletEmail) {
       break;
     }
   }
-  ASSERT_LT(i, form_structure()->field_count());
+  EXPECT_LT(i, form_structure()->field_count());
 }
 
 // Test if autofill types of returned form structure are correct for billing
@@ -2085,6 +1942,8 @@ TEST_F(AutofillDialogControllerTest, AutofillTypes) {
   controller()->OnDidGetWalletItems(CompleteAndValidWalletItems());
   controller()->OnAccept();
   controller()->OnDidGetFullWallet(wallet::GetTestFullWallet());
+  controller()->ForceFinishSubmit();
+  ASSERT_TRUE(form_structure());
   ASSERT_EQ(20U, form_structure()->field_count());
   EXPECT_EQ(EMAIL_ADDRESS,
             form_structure()->field(0)->Type().GetStorableType());
@@ -2109,16 +1968,13 @@ TEST_F(AutofillDialogControllerTest, SaveDetailsInChrome) {
   controller()->GetTestingManager()->AddTestingCreditCard(&card);
   EXPECT_FALSE(controller()->ShouldOfferToSaveInChrome());
 
-  controller()->EditClickedForSection(SECTION_EMAIL);
-  EXPECT_TRUE(controller()->ShouldOfferToSaveInChrome());
-
-  controller()->EditCancelledForSection(SECTION_EMAIL);
+  controller()->MenuModelForSection(SECTION_BILLING)->ActivatedAt(0);
   EXPECT_FALSE(controller()->ShouldOfferToSaveInChrome());
 
-  controller()->MenuModelForSection(SECTION_EMAIL)->ActivatedAt(1);
+  controller()->MenuModelForSection(SECTION_BILLING)->ActivatedAt(1);
   EXPECT_TRUE(controller()->ShouldOfferToSaveInChrome());
 
-  profile()->set_incognito(true);
+  profile()->ForceIncognito(true);
   EXPECT_FALSE(controller()->ShouldOfferToSaveInChrome());
 }
 
@@ -2128,7 +1984,8 @@ TEST_F(AutofillDialogControllerTest, UpgradeMinimalAddress) {
   // view. Called once for each incomplete suggestion.
   EXPECT_CALL(*controller()->GetView(), UpdateForErrors()).Times(1);
 
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrumentWithIdAndAddress(
       "id", wallet::GetTestMinimalAddress()));
   scoped_ptr<wallet::Address> address(wallet::GetTestShippingAddress());
@@ -2146,7 +2003,8 @@ TEST_F(AutofillDialogControllerTest, UpgradeMinimalAddress) {
 TEST_F(AutofillDialogControllerTest, RiskNeverLoadsWithPendingLegalDocuments) {
   EXPECT_CALL(*controller(), LoadRiskFingerprintData()).Times(0);
 
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddLegalDocument(wallet::GetTestLegalDocument());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
   controller()->OnAccept();
@@ -2155,7 +2013,8 @@ TEST_F(AutofillDialogControllerTest, RiskNeverLoadsWithPendingLegalDocuments) {
 TEST_F(AutofillDialogControllerTest, RiskLoadsAfterAcceptingLegalDocuments) {
   EXPECT_CALL(*controller(), LoadRiskFingerprintData()).Times(0);
 
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddLegalDocument(wallet::GetTestLegalDocument());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
 
@@ -2172,7 +2031,8 @@ TEST_F(AutofillDialogControllerTest, RiskLoadsAfterAcceptingLegalDocuments) {
 
 TEST_F(AutofillDialogControllerTest, NoManageMenuItemForNewWalletUsers) {
   // Make sure the menu model item is created for a returning Wallet user.
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   wallet_items->AddAddress(wallet::GetTestShippingAddress());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
@@ -2242,16 +2102,19 @@ TEST_F(AutofillDialogControllerTest, ShippingSectionCanBeHiddenForWallet) {
 
   EXPECT_CALL(*controller()->GetTestingWalletClient(),
               GetFullWallet(_)).Times(1);
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   SubmitWithWalletItems(wallet_items.Pass());
   controller()->OnDidGetFullWallet(wallet::GetTestFullWalletInstrumentOnly());
+  controller()->ForceFinishSubmit();
   EXPECT_TRUE(form_structure());
 }
 
 TEST_F(AutofillDialogControllerTest, NotProdNotification) {
   // To make IsPayingWithWallet() true.
-  controller()->OnDidGetWalletItems(wallet::GetTestWalletItems());
+  controller()->OnDidGetWalletItems(
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED));
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   ASSERT_FALSE(command_line->HasSwitch(switches::kWalletServiceUseProd));
@@ -2265,7 +2128,8 @@ TEST_F(AutofillDialogControllerTest, NotProdNotification) {
 
 // Ensure Wallet instruments marked expired by the server are shown as invalid.
 TEST_F(AutofillDialogControllerTest, WalletExpiredCard) {
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrumentExpired());
   controller()->OnDidGetWalletItems(wallet_items.Pass());
 
@@ -2275,7 +2139,8 @@ TEST_F(AutofillDialogControllerTest, WalletExpiredCard) {
   const DetailInputs& inputs =
       controller()->RequestedFieldsForSection(SECTION_CC_BILLING);
   DetailOutputMap outputs;
-  SetOutputValue(inputs, &outputs, COMPANY_NAME, ASCIIToUTF16("Bluth Company"));
+  CopyInitialValues(inputs, &outputs);
+  SetOutputValue(inputs, COMPANY_NAME, ASCIIToUTF16("Bluth Company"), &outputs);
 
   ValidityData validity_data =
       controller()->InputsAreValid(SECTION_CC_BILLING, outputs, VALIDATE_EDIT);
@@ -2283,8 +2148,9 @@ TEST_F(AutofillDialogControllerTest, WalletExpiredCard) {
   EXPECT_EQ(1U, validity_data.count(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
   // Make the local input year differ from the instrument.
-  SetOutputValue(inputs, &outputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
-                 ASCIIToUTF16("3002"));
+  CopyInitialValues(inputs, &outputs);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_4_DIGIT_YEAR,
+                 ASCIIToUTF16("3002"), &outputs);
 
   validity_data =
       controller()->InputsAreValid(SECTION_CC_BILLING, outputs, VALIDATE_EDIT);
@@ -2292,7 +2158,8 @@ TEST_F(AutofillDialogControllerTest, WalletExpiredCard) {
   EXPECT_EQ(0U, validity_data.count(CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
   // Make the local input month differ from the instrument.
-  SetOutputValue(inputs, &outputs, CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("06"));
+  CopyInitialValues(inputs, &outputs);
+  SetOutputValue(inputs, CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("06"), &outputs);
 
   validity_data =
       controller()->InputsAreValid(SECTION_CC_BILLING, outputs, VALIDATE_EDIT);
@@ -2318,102 +2185,6 @@ TEST_F(AutofillDialogControllerTest, ChooseAnotherInstrumentOrAddress) {
       DialogNotification::REQUIRED_ACTION).size());
 }
 
-// Make sure detailed steps for Autocheckout are added
-// and updated correctly.
-TEST_F(AutofillDialogControllerTest, DetailedSteps) {
-  EXPECT_CALL(*controller()->GetTestingWalletClient(),
-              GetFullWallet(_)).Times(1);
-
-  controller()->set_dialog_type(DIALOG_TYPE_AUTOCHECKOUT);
-
-  // Add steps as would normally be done by the AutocheckoutManager.
-  controller()->AddAutocheckoutStep(AUTOCHECKOUT_STEP_SHIPPING);
-  controller()->AddAutocheckoutStep(AUTOCHECKOUT_STEP_DELIVERY);
-  controller()->AddAutocheckoutStep(AUTOCHECKOUT_STEP_BILLING);
-
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
-  wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
-  wallet_items->AddAddress(wallet::GetTestShippingAddress());
-  controller()->OnDidGetWalletItems(wallet_items.Pass());
-  // Initiate flow - should add proxy card step since the user is using wallet
-  // data.
-  controller()->OnAccept();
-  EXPECT_TRUE(ReadSetVisuallyDeemphasizedIpc());
-  controller()->OnDidLoadRiskFingerprintData(GetFakeFingerprint().Pass());
-
-  SuggestionState suggestion_state =
-      controller()->SuggestionStateForSection(SECTION_CC_BILLING);
-  EXPECT_TRUE(suggestion_state.extra_text.empty());
-
-  // There should be four steps total, with the first being the card generation
-  // step added by the dialog controller.
-  EXPECT_EQ(4U, controller()->CurrentAutocheckoutSteps().size());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_PROXY_CARD,
-            controller()->CurrentAutocheckoutSteps()[0].type());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_STARTED,
-            controller()->CurrentAutocheckoutSteps()[0].status());
-
-  // Simulate a wallet error. This should remove the card generation step from
-  // the flow, as we will have to proceed with local data.
-  controller()->OnWalletError(wallet::WalletClient::UNKNOWN_ERROR);
-
-  AutofillProfile shipping_profile(test::GetVerifiedProfile());
-  AutofillProfile billing_profile(test::GetVerifiedProfile2());
-  CreditCard credit_card(test::GetVerifiedCreditCard());
-  controller()->GetTestingManager()->AddTestingProfile(&shipping_profile);
-  controller()->GetTestingManager()->AddTestingProfile(&billing_profile);
-  controller()->GetTestingManager()->AddTestingCreditCard(&credit_card);
-  ui::MenuModel* billing_model =
-      controller()->MenuModelForSection(SECTION_BILLING);
-  billing_model->ActivatedAt(1);
-
-  // Re-initiate flow.
-  controller()->OnAccept();
-  EXPECT_TRUE(ReadSetVisuallyDeemphasizedIpc());
-
-  // All steps should be initially unstarted.
-  EXPECT_EQ(3U, controller()->CurrentAutocheckoutSteps().size());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_SHIPPING,
-            controller()->CurrentAutocheckoutSteps()[0].type());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_UNSTARTED,
-            controller()->CurrentAutocheckoutSteps()[0].status());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_DELIVERY,
-            controller()->CurrentAutocheckoutSteps()[1].type());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_UNSTARTED,
-            controller()->CurrentAutocheckoutSteps()[1].status());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_BILLING,
-            controller()->CurrentAutocheckoutSteps()[2].type());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_UNSTARTED,
-            controller()->CurrentAutocheckoutSteps()[2].status());
-
-  // Update steps in the same manner that we would expect to see from the
-  // AutocheckoutManager while progressing through a flow.
-  controller()->UpdateAutocheckoutStep(AUTOCHECKOUT_STEP_SHIPPING,
-                                       AUTOCHECKOUT_STEP_STARTED);
-  controller()->UpdateAutocheckoutStep(AUTOCHECKOUT_STEP_SHIPPING,
-                                       AUTOCHECKOUT_STEP_COMPLETED);
-  controller()->UpdateAutocheckoutStep(AUTOCHECKOUT_STEP_DELIVERY,
-                                       AUTOCHECKOUT_STEP_STARTED);
-
-  // Verify that the steps were appropriately updated.
-  EXPECT_EQ(3U, controller()->CurrentAutocheckoutSteps().size());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_SHIPPING,
-            controller()->CurrentAutocheckoutSteps()[0].type());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_COMPLETED,
-            controller()->CurrentAutocheckoutSteps()[0].status());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_DELIVERY,
-            controller()->CurrentAutocheckoutSteps()[1].type());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_STARTED,
-            controller()->CurrentAutocheckoutSteps()[1].status());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_BILLING,
-            controller()->CurrentAutocheckoutSteps()[2].type());
-  EXPECT_EQ(AUTOCHECKOUT_STEP_UNSTARTED,
-            controller()->CurrentAutocheckoutSteps()[2].status());
-
-  controller()->ViewClosed();
-  EXPECT_FALSE(ReadSetVisuallyDeemphasizedIpc());
-}
-
 TEST_F(AutofillDialogControllerTest, NewCardBubbleShown) {
   EXPECT_CALL(*test_generated_bubble_controller(), SetupAndShow(_, _)).Times(0);
 
@@ -2430,16 +2201,21 @@ TEST_F(AutofillDialogControllerTest, GeneratedCardBubbleShown) {
 
   SubmitWithWalletItems(CompleteAndValidWalletItems());
   controller()->OnDidGetFullWallet(wallet::GetTestFullWallet());
+  controller()->ForceFinishSubmit();
   controller()->ViewClosed();
 
   EXPECT_EQ(0, mock_new_card_bubble_controller()->bubbles_shown());
 }
 
+// Verify that new Wallet data is fetched when the user switches away from the
+// tab hosting the Autofill dialog and back. Also verify that the user's
+// selection is preserved across this re-fetch.
 TEST_F(AutofillDialogControllerTest, ReloadWalletItemsOnActivation) {
   // Switch into Wallet mode and initialize some Wallet data.
   SwitchToWallet();
 
-  scoped_ptr<wallet::WalletItems> wallet_items = wallet::GetTestWalletItems();
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
   wallet_items->AddAddress(wallet::GetTestNonDefaultShippingAddress());
@@ -2461,10 +2237,10 @@ TEST_F(AutofillDialogControllerTest, ReloadWalletItemsOnActivation) {
   // Select entries other than the defaults.
   cc_billing_model->ActivatedAt(1);
   shipping_model->ActivatedAt(1);
-  // "add", "manage", and 2 suggestions.
+  // 2 suggestions, "add", and "manage".
   ASSERT_EQ(4, cc_billing_model->GetItemCount());
   EXPECT_TRUE(cc_billing_model->IsItemCheckedAt(1));
-  // "use billing", "add", "manage", and 2 suggestions.
+  // "use billing", 2 suggestions, "add", "manage".
   ASSERT_EQ(5, shipping_model->GetItemCount());
   EXPECT_TRUE(shipping_model-> IsItemCheckedAt(1));
 
@@ -2474,7 +2250,7 @@ TEST_F(AutofillDialogControllerTest, ReloadWalletItemsOnActivation) {
   controller()->TabActivated();
 
   // Simulate a response that includes different items.
-  wallet_items = wallet::GetTestWalletItems();
+  wallet_items = wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrumentExpired());
   wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
   wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
@@ -2482,11 +2258,71 @@ TEST_F(AutofillDialogControllerTest, ReloadWalletItemsOnActivation) {
   controller()->OnDidGetWalletItems(wallet_items.Pass());
 
   // The previously selected entries should still be selected.
-  // "add", "manage", and 3 suggestions.
+  // 3 suggestions, "add", and "manage".
   ASSERT_EQ(5, cc_billing_model->GetItemCount());
   EXPECT_TRUE(cc_billing_model->IsItemCheckedAt(2));
-  // "use billing", "add", "manage", and 1 suggestion.
+  // "use billing", 1 suggestion, "add", and "manage".
   ASSERT_EQ(4, shipping_model->GetItemCount());
+  EXPECT_TRUE(shipping_model->IsItemCheckedAt(1));
+}
+
+// Verify that if the default values change when re-fetching Wallet data, these
+// new default values are selected in the dialog.
+TEST_F(AutofillDialogControllerTest,
+       ReloadWalletItemsOnActivationWithNewDefaults) {
+  // Switch into Wallet mode and initialize some Wallet data.
+  SwitchToWallet();
+
+  scoped_ptr<wallet::WalletItems> wallet_items =
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED);
+  wallet_items->AddInstrument(wallet::GetTestMaskedInstrument());
+  wallet_items->AddInstrument(wallet::GetTestNonDefaultMaskedInstrument());
+  wallet_items->AddAddress(wallet::GetTestNonDefaultShippingAddress());
+  wallet_items->AddAddress(wallet::GetTestShippingAddress());
+  controller()->OnDidGetWalletItems(wallet_items.Pass());
+
+  // Initially, the default entries should be selected.
+  ui::MenuModel* cc_billing_model =
+      controller()->MenuModelForSection(SECTION_CC_BILLING);
+  ui::MenuModel* shipping_model =
+      controller()->MenuModelForSection(SECTION_SHIPPING);
+  // 2 suggestions, "add", and "manage".
+  ASSERT_EQ(4, cc_billing_model->GetItemCount());
+  EXPECT_TRUE(cc_billing_model->IsItemCheckedAt(0));
+  // "use billing", 2 suggestions, "add", and "manage".
+  ASSERT_EQ(5, shipping_model->GetItemCount());
+  EXPECT_TRUE(shipping_model->IsItemCheckedAt(2));
+
+  // Simulate switching away from the tab and back.  This should issue a request
+  // for wallet items.
+  EXPECT_CALL(*controller()->GetTestingWalletClient(), GetWalletItems(_));
+  controller()->TabActivated();
+
+  // Simulate a response that includes different default values.
+  wallet_items =
+      wallet::GetTestWalletItemsWithDefaultIds("new_default_instrument_id",
+                                               "new_default_address_id",
+                                               wallet::AMEX_DISALLOWED);
+  scoped_ptr<wallet::Address> other_address = wallet::GetTestShippingAddress();
+  other_address->set_object_id("other_address_id");
+  scoped_ptr<wallet::Address> new_default_address =
+      wallet::GetTestNonDefaultShippingAddress();
+  new_default_address->set_object_id("new_default_address_id");
+
+  wallet_items->AddInstrument(
+      wallet::GetTestMaskedInstrumentWithId("other_instrument_id"));
+  wallet_items->AddInstrument(
+      wallet::GetTestMaskedInstrumentWithId("new_default_instrument_id"));
+  wallet_items->AddAddress(new_default_address.Pass());
+  wallet_items->AddAddress(other_address.Pass());
+  controller()->OnDidGetWalletItems(wallet_items.Pass());
+
+  // The new default entries should be selected.
+  // 2 suggestions, "add", and "manage".
+  ASSERT_EQ(4, cc_billing_model->GetItemCount());
+  EXPECT_TRUE(cc_billing_model->IsItemCheckedAt(1));
+  // "use billing", 2 suggestions, "add", and "manage".
+  ASSERT_EQ(5, shipping_model->GetItemCount());
   EXPECT_TRUE(shipping_model->IsItemCheckedAt(1));
 }
 
@@ -2500,23 +2336,192 @@ TEST_F(AutofillDialogControllerTest, ReloadWithEmptyWalletItems) {
   EXPECT_CALL(*controller()->GetTestingWalletClient(), GetWalletItems(_));
   controller()->TabActivated();
 
-  controller()->OnDidGetWalletItems(wallet::GetTestWalletItems());
+  controller()->OnDidGetWalletItems(
+      wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED));
 
   EXPECT_FALSE(controller()->MenuModelForSection(SECTION_CC_BILLING));
   EXPECT_EQ(
       3, controller()->MenuModelForSection(SECTION_SHIPPING)->GetItemCount());
 }
 
-TEST_F(AutofillDialogControllerTest, GeneratedCardBubbleNotShown) {
-  EXPECT_CALL(*test_generated_bubble_controller(), SetupAndShow(_, _)).Times(0);
+TEST_F(AutofillDialogControllerTest, SaveInChromeByDefault) {
+  EXPECT_TRUE(controller()->ShouldSaveInChrome());
+  SwitchToAutofill();
+  FillCreditCardInputs();
+  controller()->OnAccept();
+  EXPECT_TRUE(controller()->ShouldSaveInChrome());
+}
 
-  SubmitWithWalletItems(CompleteAndValidWalletItems());
-  controller()->set_dialog_type(DIALOG_TYPE_AUTOCHECKOUT);
-  controller()->OnDidGetFullWallet(wallet::GetTestFullWallet());
-  controller()->OnAutocheckoutError();
+TEST_F(AutofillDialogControllerTest,
+       SaveInChromePreferenceNotRememberedOnCancel) {
+  EXPECT_TRUE(controller()->ShouldSaveInChrome());
+  SwitchToAutofill();
+  controller()->GetView()->CheckSaveDetailsLocallyCheckbox(false);
+  controller()->OnCancel();
+  EXPECT_TRUE(controller()->ShouldSaveInChrome());
+}
+
+TEST_F(AutofillDialogControllerTest,
+       SaveInChromePreferenceRememberedOnSuccess) {
+  EXPECT_TRUE(controller()->ShouldSaveInChrome());
+  SwitchToAutofill();
+  FillCreditCardInputs();
+  controller()->GetView()->CheckSaveDetailsLocallyCheckbox(false);
+  controller()->OnAccept();
+  EXPECT_FALSE(controller()->ShouldSaveInChrome());
+}
+
+TEST_F(AutofillDialogControllerTest,
+       SubmitButtonIsDisabled_SpinnerFinishesBeforeDelay) {
+  EXPECT_EQ(1, controller()->get_submit_button_delay_count());
+
+  // Begin the submit button delay.
+  controller()->SimulateSubmitButtonDelayBegin();
+
+  EXPECT_TRUE(controller()->ShouldShowSpinner());
+  EXPECT_FALSE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
+
+  // Stop the spinner.
+  controller()->OnDidGetWalletItems(CompleteAndValidWalletItems());
+
+  EXPECT_FALSE(controller()->ShouldShowSpinner());
+  EXPECT_FALSE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
+
+  // End the submit button delay.
+  controller()->SimulateSubmitButtonDelayEnd();
+
+  EXPECT_FALSE(controller()->ShouldShowSpinner());
+  EXPECT_TRUE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
+}
+
+TEST_F(AutofillDialogControllerTest,
+       SubmitButtonIsDisabled_SpinnerFinishesAfterDelay) {
+  EXPECT_EQ(1, controller()->get_submit_button_delay_count());
+
+  // Begin the submit button delay.
+  controller()->SimulateSubmitButtonDelayBegin();
+
+  EXPECT_TRUE(controller()->ShouldShowSpinner());
+  EXPECT_FALSE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
+
+  // End the submit button delay.
+  controller()->SimulateSubmitButtonDelayEnd();
+
+  EXPECT_TRUE(controller()->ShouldShowSpinner());
+  EXPECT_FALSE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
+
+  // Stop the spinner.
+  controller()->OnDidGetWalletItems(CompleteAndValidWalletItems());
+
+  EXPECT_FALSE(controller()->ShouldShowSpinner());
+  EXPECT_TRUE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
+}
+
+TEST_F(AutofillDialogControllerTest, SubmitButtonIsDisabled_NoSpinner) {
+  EXPECT_EQ(1, controller()->get_submit_button_delay_count());
+
+  // Begin the submit button delay.
+  controller()->SimulateSubmitButtonDelayBegin();
+
+  EXPECT_TRUE(controller()->ShouldShowSpinner());
+  EXPECT_FALSE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
+
+  // There's no spinner in Autofill mode.
+  SwitchToAutofill();
+
+  EXPECT_FALSE(controller()->ShouldShowSpinner());
+  EXPECT_FALSE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
+
+  // End the submit button delay.
+  controller()->SimulateSubmitButtonDelayEnd();
+
+  EXPECT_FALSE(controller()->ShouldShowSpinner());
+  EXPECT_TRUE(controller()->IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK));
+}
+
+TEST_F(AutofillDialogControllerTest, IconsForFields_NoCreditCard) {
+  FieldValueMap values;
+  values[EMAIL_ADDRESS] = ASCIIToUTF16(kFakeEmail);
+  FieldIconMap icons = controller()->IconsForFields(values);
+  EXPECT_TRUE(icons.empty());
+}
+
+TEST_F(AutofillDialogControllerTest, IconsForFields_CreditCardNumberOnly) {
+  FieldValueMap values;
+  values[EMAIL_ADDRESS] = ASCIIToUTF16(kFakeEmail);
+  values[CREDIT_CARD_NUMBER] = ASCIIToUTF16(kTestCCNumberVisa);
+  FieldIconMap icons = controller()->IconsForFields(values);
+  EXPECT_EQ(1UL, icons.size());
+  EXPECT_EQ(1UL, icons.count(CREDIT_CARD_NUMBER));
+}
+
+TEST_F(AutofillDialogControllerTest, IconsForFields_CvcOnly) {
+  FieldValueMap values;
+  values[EMAIL_ADDRESS] = ASCIIToUTF16(kFakeEmail);
+  values[CREDIT_CARD_VERIFICATION_CODE] = ASCIIToUTF16("123");
+  FieldIconMap icons = controller()->IconsForFields(values);
+  EXPECT_EQ(1UL, icons.size());
+  EXPECT_EQ(1UL, icons.count(CREDIT_CARD_VERIFICATION_CODE));
+}
+
+TEST_F(AutofillDialogControllerTest, IconsForFields_BothCreditCardAndCvc) {
+  FieldValueMap values;
+  values[EMAIL_ADDRESS] = ASCIIToUTF16(kFakeEmail);
+  values[CREDIT_CARD_NUMBER] = ASCIIToUTF16(kTestCCNumberVisa);
+  values[CREDIT_CARD_VERIFICATION_CODE] = ASCIIToUTF16("123");
+  FieldIconMap icons = controller()->IconsForFields(values);
+  EXPECT_EQ(2UL, icons.size());
+  EXPECT_EQ(1UL, icons.count(CREDIT_CARD_VERIFICATION_CODE));
+  EXPECT_EQ(1UL, icons.count(CREDIT_CARD_NUMBER));
+}
+
+TEST_F(AutofillDialogControllerTest, FieldControlsIcons) {
+  EXPECT_TRUE(controller()->FieldControlsIcons(CREDIT_CARD_NUMBER));
+  EXPECT_FALSE(controller()->FieldControlsIcons(CREDIT_CARD_VERIFICATION_CODE));
+  EXPECT_FALSE(controller()->FieldControlsIcons(EMAIL_ADDRESS));
+}
+
+TEST_F(AutofillDialogControllerTest, SaveCreditCardIncludesName_NoBilling) {
+  SwitchToAutofill();
+
+  CreditCard test_credit_card(test::GetVerifiedCreditCard());
+  FillInputs(SECTION_CC, test_credit_card);
+
+  AutofillProfile test_profile(test::GetVerifiedProfile());
+  FillInputs(SECTION_BILLING, test_profile);
+
+  UseBillingForShipping();
+
+  controller()->GetView()->CheckSaveDetailsLocallyCheckbox(true);
+  controller()->OnAccept();
+
+  TestPersonalDataManager* test_pdm = controller()->GetTestingManager();
+  const CreditCard& imported_card = test_pdm->imported_credit_card();
+  EXPECT_EQ(test_profile.GetRawInfo(NAME_FULL),
+            imported_card.GetRawInfo(CREDIT_CARD_NAME));
+}
+
+TEST_F(AutofillDialogControllerTest, SaveCreditCardIncludesName_WithBilling) {
+  SwitchToAutofill();
+
+  TestPersonalDataManager* test_pdm = controller()->GetTestingManager();
+  AutofillProfile test_profile(test::GetVerifiedProfile());
+
+  EXPECT_CALL(*controller()->GetView(), ModelChanged()).Times(1);
+  test_pdm->AddTestingProfile(&test_profile);
+  ASSERT_TRUE(controller()->MenuModelForSection(SECTION_BILLING));
+
+  CreditCard test_credit_card(test::GetVerifiedCreditCard());
+  FillInputs(SECTION_CC, test_credit_card);
+
+  controller()->GetView()->CheckSaveDetailsLocallyCheckbox(true);
+  controller()->OnAccept();
+
+  const CreditCard& imported_card = test_pdm->imported_credit_card();
+  EXPECT_EQ(test_profile.GetRawInfo(NAME_FULL),
+            imported_card.GetRawInfo(CREDIT_CARD_NAME));
+
   controller()->ViewClosed();
-
-  EXPECT_EQ(0, mock_new_card_bubble_controller()->bubbles_shown());
 }
 
 }  // namespace autofill

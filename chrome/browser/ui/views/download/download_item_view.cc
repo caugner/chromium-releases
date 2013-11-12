@@ -20,7 +20,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_item_model.h"
-#include "chrome/browser/download/download_util.h"
+#include "chrome/browser/download/drag_download_item.h"
 #include "chrome/browser/safe_browsing/download_feedback_service.h"
 #include "chrome/browser/safe_browsing/download_protection_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -32,15 +32,15 @@
 #include "grit/theme_resources.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "ui/base/animation/slide_animation.h"
-#include "ui/base/events/event.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/base/text/text_elider.h"
 #include "ui/base/theme_provider.h"
+#include "ui/events/event.h"
+#include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/text_elider.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/widget/root_view.h"
@@ -190,9 +190,9 @@ DownloadItemView::DownloadItemView(DownloadItem* download_item,
 
   LoadIcon();
 
-  font_ = rb.GetFont(ui::ResourceBundle::BaseFont);
-  box_height_ = std::max<int>(2 * kVerticalPadding + font_.GetHeight() +
-                                  kVerticalTextPadding + font_.GetHeight(),
+  font_list_ = rb.GetFontList(ui::ResourceBundle::BaseFont);
+  box_height_ = std::max<int>(2 * kVerticalPadding + font_list_.GetHeight() +
+                                  kVerticalTextPadding + font_list_.GetHeight(),
                               2 * kVerticalPadding +
                                   normal_body_image_set_.top_left->height() +
                                   normal_body_image_set_.bottom_left->height());
@@ -202,8 +202,8 @@ DownloadItemView::DownloadItemView(DownloadItem* download_item,
   else
     box_y_ = 0;
 
-  body_hover_animation_.reset(new ui::SlideAnimation(this));
-  drop_hover_animation_.reset(new ui::SlideAnimation(this));
+  body_hover_animation_.reset(new gfx::SlideAnimation(this));
+  drop_hover_animation_.reset(new gfx::SlideAnimation(this));
 
   set_accessibility_focusable(true);
 
@@ -267,9 +267,9 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download_item) {
         break;
       case DownloadItem::INTERRUPTED:
         StopDownloadProgress();
-        complete_animation_.reset(new ui::SlideAnimation(this));
+        complete_animation_.reset(new gfx::SlideAnimation(this));
         complete_animation_->SetSlideDuration(kInterruptedAnimationDurationMs);
-        complete_animation_->SetTweenType(ui::Tween::LINEAR);
+        complete_animation_->SetTweenType(gfx::Tween::LINEAR);
         complete_animation_->Show();
         SchedulePaint();
         LoadIcon();
@@ -280,9 +280,9 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download_item) {
           return;
         }
         StopDownloadProgress();
-        complete_animation_.reset(new ui::SlideAnimation(this));
+        complete_animation_.reset(new gfx::SlideAnimation(this));
         complete_animation_->SetSlideDuration(kCompleteAnimationDurationMs);
-        complete_animation_->SetTweenType(ui::Tween::LINEAR);
+        complete_animation_->SetTweenType(gfx::Tween::LINEAR);
         complete_animation_->Show();
         SchedulePaint();
         LoadIcon();
@@ -299,7 +299,7 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download_item) {
     status_text_ = status_text;
   }
 
-  string16 new_tip = model_.GetTooltipText(font_, kTooltipMaxWidth);
+  string16 new_tip = model_.GetTooltipText(font_list_, kTooltipMaxWidth);
   if (new_tip != tooltip_text_) {
     tooltip_text_ = new_tip;
     TooltipTextChanged();
@@ -359,7 +359,8 @@ gfx::Size DownloadItemView::GetPreferredSize() {
   int width, height;
 
   // First, we set the height to the height of two rows or text plus margins.
-  height = 2 * kVerticalPadding + 2 * font_.GetHeight() + kVerticalTextPadding;
+  height = 2 * kVerticalPadding + 2 * font_list_.GetHeight() +
+      kVerticalTextPadding;
   // Then we increase the size if the progress icon doesn't fit.
   height = std::max<int>(height, DownloadShelf::kSmallProgressIconSize);
 
@@ -416,8 +417,8 @@ bool DownloadItemView::OnMouseDragged(const ui::MouseEvent& event) {
           download()->GetTargetFilePath(), IconLoader::SMALL);
       if (icon) {
         views::Widget* widget = GetWidget();
-        download_util::DragDownload(download(), icon,
-                                    widget ? widget->GetNativeView() : NULL);
+        DragDownloadItem(
+            download(), icon, widget ? widget->GetNativeView() : NULL);
       }
     }
   } else if (ExceededDragThreshold(event.location() - drag_start_point_)) {
@@ -544,7 +545,7 @@ void DownloadItemView::ButtonPressed(
   }
 }
 
-void DownloadItemView::AnimationProgressed(const ui::Animation* animation) {
+void DownloadItemView::AnimationProgressed(const gfx::Animation* animation) {
   // We don't care if what animation (body button/drop button/complete),
   // is calling back, as they all have to go through the same paint call.
   SchedulePaint();
@@ -640,8 +641,8 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
     if (!status_text_.empty()) {
       int mirrored_x = GetMirroredXWithWidthInView(
           DownloadShelf::kSmallProgressIconSize, kTextWidth);
-      // Add font_.height() to compensate for title, which is drawn later.
-      int y = box_y_ + kVerticalPadding + font_.GetHeight() +
+      // Add font_list_.height() to compensate for title, which is drawn later.
+      int y = box_y_ + kVerticalPadding + font_list_.GetHeight() +
               kVerticalTextPadding;
       SkColor file_name_color = GetThemeProvider()->GetColor(
           ThemeProperties::COLOR_BOOKMARK_TEXT);
@@ -655,9 +656,9 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
                                SkColorGetG(file_name_color)),
               static_cast<int>(kDownloadItemLuminanceMod *
                                SkColorGetB(file_name_color)));
-      canvas->DrawStringInt(status_text_, font_,
-                            file_name_color, mirrored_x, y, kTextWidth,
-                            font_.GetHeight());
+      canvas->DrawStringRect(status_text_, font_list_, file_name_color,
+                             gfx::Rect(mirrored_x, y, kTextWidth,
+                                       font_list_.GetHeight()));
     }
   }
 
@@ -747,16 +748,16 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
   if (!IsShowingWarningDialog()) {
     string16 filename;
     if (!disabled_while_opening_) {
-      filename = ui::ElideFilename(download()->GetFileNameToReportUser(),
-                                   font_, kTextWidth);
+      filename = gfx::ElideFilename(download()->GetFileNameToReportUser(),
+                                   font_list_, kTextWidth);
     } else {
       // First, Calculate the download status opening string width.
       string16 status_string =
           l10n_util::GetStringFUTF16(IDS_DOWNLOAD_STATUS_OPENING, string16());
-      int status_string_width = font_.GetStringWidth(status_string);
+      int status_string_width = font_list_.GetStringWidth(status_string);
       // Then, elide the file name.
       string16 filename_string =
-          ui::ElideFilename(download()->GetFileNameToReportUser(), font_,
+          gfx::ElideFilename(download()->GetFileNameToReportUser(), font_list_,
                             kTextWidth - status_string_width);
       // Last, concat the whole string.
       filename = l10n_util::GetStringFUTF16(IDS_DOWNLOAD_STATUS_OPENING,
@@ -769,13 +770,13 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
         ThemeProperties::COLOR_BOOKMARK_TEXT);
     int y =
         box_y_ + (status_text_.empty() ?
-                  ((box_height_ - font_.GetHeight()) / 2) : kVerticalPadding);
+            ((box_height_ - font_list_.GetHeight()) / 2) : kVerticalPadding);
 
     // Draw the file's name.
-    canvas->DrawStringInt(filename, font_,
-                          enabled() ? file_name_color
-                                    : kFileNameDisabledColor,
-                          mirrored_x, y, kTextWidth, font_.GetHeight());
+    canvas->DrawStringRect(
+        filename, font_list_,
+        enabled() ? file_name_color : kFileNameDisabledColor,
+        gfx::Rect(mirrored_x, y, kTextWidth, font_list_.GetHeight()));
   }
 
   // Load the icon.
@@ -1115,7 +1116,7 @@ void DownloadItemView::ShowWarningDialog() {
     case content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
       warning_icon_ = rb.GetImageSkiaNamed(IDR_WARNING);
   }
-  string16 dangerous_label = model_.GetWarningText(font_, kTextWidth);
+  string16 dangerous_label = model_.GetWarningText(font_list_, kTextWidth);
   dangerous_download_label_ = new views::Label(dangerous_label);
   dangerous_download_label_->SetMultiLine(true);
   dangerous_download_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -1263,7 +1264,7 @@ void DownloadItemView::UpdateDropDownButtonPosition() {
 }
 
 void DownloadItemView::AnimateStateTransition(State from, State to,
-                                              ui::SlideAnimation* animation) {
+                                              gfx::SlideAnimation* animation) {
   if (from == NORMAL && to == HOT) {
     animation->Show();
   } else if (from == HOT && to == NORMAL) {

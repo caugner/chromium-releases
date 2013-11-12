@@ -13,6 +13,7 @@
 #include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/search_engines/template_url_id.h"
+#include "ui/gfx/size.h"
 #include "url/gurl.h"
 #include "url/url_parse.h"
 
@@ -50,6 +51,7 @@ class TemplateURLRef {
     SUGGEST,
     INSTANT,
     IMAGE,
+    NEW_TAB,
     INDEXED
   };
 
@@ -115,6 +117,9 @@ class TemplateURLRef {
     // When searching for an image, the URL of the original image. Callers
     // should leave this empty for images specified via data: URLs.
     GURL image_url;
+
+    // When searching for an image, the original size of the image.
+    gfx::Size image_original_size;
   };
 
   TemplateURLRef(TemplateURL* owner, Type type);
@@ -234,6 +239,8 @@ class TemplateURLRef {
     GOOGLE_BASE_URL,
     GOOGLE_BASE_SUGGEST_URL,
     GOOGLE_CURSOR_POSITION,
+    GOOGLE_IMAGE_ORIGINAL_HEIGHT,
+    GOOGLE_IMAGE_ORIGINAL_WIDTH,
     GOOGLE_IMAGE_SEARCH_SOURCE,
     GOOGLE_IMAGE_THUMBNAIL,
     GOOGLE_IMAGE_URL,
@@ -408,6 +415,7 @@ struct TemplateURLData {
   std::string suggestions_url;
   std::string instant_url;
   std::string image_url;
+  std::string new_tab_url;
 
   // The following post_params are comma-separated lists used to specify the
   // post parameters for the corresponding URL.
@@ -525,6 +533,7 @@ class TemplateURL {
   const std::string& suggestions_url() const { return data_.suggestions_url; }
   const std::string& instant_url() const { return data_.instant_url; }
   const std::string& image_url() const { return data_.image_url; }
+  const std::string& new_tab_url() const { return data_.new_tab_url; }
   const std::string& search_url_post_params() const {
     return data_.search_url_post_params;
   }
@@ -579,6 +588,7 @@ class TemplateURL {
   }
   const TemplateURLRef& instant_url_ref() const { return instant_url_ref_; }
   const TemplateURLRef& image_url_ref() const { return image_url_ref_; }
+  const TemplateURLRef& new_tab_url_ref() const { return new_tab_url_ref_; }
 
   // Returns true if |url| supports replacement.
   bool SupportsReplacement() const;
@@ -700,6 +710,7 @@ class TemplateURL {
   TemplateURLRef suggestions_url_ref_;
   TemplateURLRef instant_url_ref_;
   TemplateURLRef image_url_ref_;
+  TemplateURLRef new_tab_url_ref_;
 
   // TODO(sky): Add date last parsed OSD file.
 

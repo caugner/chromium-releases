@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/media_utils.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -26,6 +27,7 @@
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -34,23 +36,24 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/theme_resources.h"
-#include "ui/base/animation/animation.h"
-#include "ui/base/animation/animation_delegate.h"
-#include "ui/base/animation/slide_animation.h"
-#include "ui/base/events/event_constants.h"
-#include "ui/base/events/event_utils.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/events/event_constants.h"
+#include "ui/events/event_utils.h"
+#include "ui/gfx/animation/animation.h"
+#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/focus/view_storage.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "ash/wm/coordinate_conversion.h"
-#include "ash/wm/property_util.h"
-#include "ash/wm/window_util.h"
+#include "ash/wm/window_state.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/gestures/gesture_recognizer.h"
@@ -191,13 +194,13 @@ class DockView : public views::View {
 
 void SetTrackedByWorkspace(gfx::NativeWindow window, bool value) {
 #if defined(USE_ASH)
-  ash::SetTrackedByWorkspace(window, value);
+  ash::wm::GetWindowState(window)->SetTrackedByWorkspace(value);
 #endif
 }
 
 void SetWindowPositionManaged(gfx::NativeWindow window, bool value) {
 #if defined(USE_ASH)
-  ash::wm::SetWindowPositionManaged(window, value);
+  ash::wm::GetWindowState(window)->set_window_position_managed(value);
 #endif
 }
 
@@ -234,7 +237,7 @@ class WindowPositionManagedUpdater : public views::WidgetObserver {
 // possible dock position (as represented by DockInfo). DockDisplayer shows
 // a window with a DockView in it. Two animations are used that correspond to
 // the state of DockInfo::in_enable_area.
-class TabDragController::DockDisplayer : public ui::AnimationDelegate {
+class TabDragController::DockDisplayer : public gfx::AnimationDelegate {
  public:
   DockDisplayer(TabDragController* controller, const DockInfo& info)
       : controller_(controller),
@@ -294,11 +297,11 @@ class TabDragController::DockDisplayer : public ui::AnimationDelegate {
     animation_.Hide();
   }
 
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE {
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE {
     UpdateLayeredAlpha();
   }
 
-  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE {
+  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE {
     if (!hidden_)
       return;
     popup_->Close();
@@ -323,7 +326,7 @@ class TabDragController::DockDisplayer : public ui::AnimationDelegate {
   gfx::NativeView popup_view_;
 
   // Animation for when first made visible.
-  ui::SlideAnimation animation_;
+  gfx::SlideAnimation animation_;
 
   // Have we been hidden?
   bool hidden_;
@@ -360,7 +363,8 @@ TabDragController::TabDragController()
       screen_(NULL),
       host_desktop_type_(chrome::HOST_DESKTOP_TYPE_NATIVE),
       offset_to_width_ratio_(0),
-      old_focused_view_(NULL),
+      old_focused_view_id_(
+          views::ViewStorage::GetInstance()->CreateStorageID()),
       last_move_screen_loc_(0),
       started_drag_(false),
       active_(true),
@@ -370,21 +374,23 @@ TabDragController::TabDragController()
       move_behavior_(REORDER),
       mouse_move_direction_(0),
       is_dragging_window_(false),
+      is_dragging_new_browser_(false),
+      was_source_maximized_(false),
+      was_source_fullscreen_(false),
       end_run_loop_behavior_(END_RUN_LOOP_STOP_DRAGGING),
       waiting_for_run_loop_to_exit_(false),
       tab_strip_to_attach_to_after_exit_(NULL),
       move_loop_widget_(NULL),
-      destroyed_(NULL),
-      is_mutating_(false) {
+      is_mutating_(false),
+      weak_factory_(this) {
   instance_ = this;
 }
 
 TabDragController::~TabDragController() {
+  views::ViewStorage::GetInstance()->RemoveView(old_focused_view_id_);
+
   if (instance_ == this)
     instance_ = NULL;
-
-  if (destroyed_)
-    *destroyed_ = true;
 
   if (move_loop_widget_) {
     move_loop_widget_->RemoveObserver(this);
@@ -422,6 +428,8 @@ void TabDragController::Init(
   DCHECK(!tabs.empty());
   DCHECK(std::find(tabs.begin(), tabs.end(), source_tab) != tabs.end());
   source_tabstrip_ = source_tabstrip;
+  was_source_maximized_ = source_tabstrip->GetWidget()->IsMaximized();
+  was_source_fullscreen_ = source_tabstrip->GetWidget()->IsFullscreen();
   screen_ = gfx::Screen::GetScreenFor(
       source_tabstrip->GetWidget()->GetNativeView());
   host_desktop_type_ = chrome::GetHostDesktopTypeForNativeView(
@@ -498,8 +506,14 @@ void TabDragController::Drag(const gfx::Point& point_in_screen) {
     if (!CanStartDrag(point_in_screen))
       return;  // User hasn't dragged far enough yet.
 
+    // On windows SaveFocus() may trigger a capture lost, which destroys us.
+    {
+      base::WeakPtr<TabDragController> ref(weak_factory_.GetWeakPtr());
+      SaveFocus();
+      if (!ref)
+        return;
+    }
     started_drag_ = true;
-    SaveFocus();
     Attach(source_tabstrip_, gfx::Point());
     if (detach_into_browser_ && static_cast<int>(drag_data_.size()) ==
         GetModel(source_tabstrip_)->count()) {
@@ -561,12 +575,14 @@ WebContents* TabDragController::OpenURLFromTab(
 
 void TabDragController::NavigationStateChanged(const WebContents* source,
                                                unsigned changed_flags) {
-  if (attached_tabstrip_) {
+  if (attached_tabstrip_ ||
+      changed_flags == content::INVALIDATE_TYPE_PAGE_ACTIONS) {
     for (size_t i = 0; i < drag_data_.size(); ++i) {
       if (drag_data_[i].contents == source) {
         // Pass the NavigationStateChanged call to the original delegate so
         // that the title is updated. Do this only when we are attached as
-        // otherwise the Tab isn't in the TabStrip.
+        // otherwise the Tab isn't in the TabStrip (except for page action
+        // updates).
         drag_data_[i].original_delegate->NavigationStateChanged(source,
                                                                 changed_flags);
         break;
@@ -611,6 +627,17 @@ bool TabDragController::ShouldSuppressDialogs() {
 content::JavaScriptDialogManager*
 TabDragController::GetJavaScriptDialogManager() {
   return GetJavaScriptDialogManagerInstance();
+}
+
+void TabDragController::RequestMediaAccessPermission(
+    content::WebContents* web_contents,
+    const content::MediaStreamRequest& request,
+    const content::MediaResponseCallback& callback) {
+  ::RequestMediaAccessPermission(
+      web_contents,
+      Profile::FromBrowserContext(web_contents->GetBrowserContext()),
+      request,
+      callback);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -743,16 +770,25 @@ void TabDragController::UpdateDockInfo(const gfx::Point& point_in_screen) {
 }
 
 void TabDragController::SaveFocus() {
-  DCHECK(!old_focused_view_);  // This should only be invoked once.
   DCHECK(source_tabstrip_);
-  old_focused_view_ = source_tabstrip_->GetFocusManager()->GetFocusedView();
+  views::View* focused_view =
+      source_tabstrip_->GetFocusManager()->GetFocusedView();
+  if (focused_view)
+    views::ViewStorage::GetInstance()->StoreView(old_focused_view_id_,
+                                                 focused_view);
   source_tabstrip_->GetFocusManager()->SetFocusedView(source_tabstrip_);
+  // WARNING: we may have been deleted.
 }
 
 void TabDragController::RestoreFocus() {
-  if (old_focused_view_ && attached_tabstrip_ == source_tabstrip_)
-    old_focused_view_->GetFocusManager()->SetFocusedView(old_focused_view_);
-  old_focused_view_ = NULL;
+  if (attached_tabstrip_ != source_tabstrip_)
+    return;
+  views::View* old_focused_view =
+      views::ViewStorage::GetInstance()->RetrieveView(
+      old_focused_view_id_);
+  if (!old_focused_view)
+    return;
+  old_focused_view->GetFocusManager()->SetFocusedView(old_focused_view);
 }
 
 bool TabDragController::CanStartDrag(const gfx::Point& point_in_screen) const {
@@ -782,6 +818,7 @@ void TabDragController::ContinueDragging(const gfx::Point& point_in_screen) {
   last_point_in_screen_ = point_in_screen;
 
   if (tab_strip_changed) {
+    is_dragging_new_browser_ = false;
     if (detach_into_browser_ &&
         DragBrowserToNewTabStrip(target_tabstrip, point_in_screen) ==
         DRAG_BROWSER_RESULT_STOP) {
@@ -1326,8 +1363,8 @@ void TabDragController::DetachIntoNewBrowserAndRunMoveLoop(
   Detach(DONT_RELEASE_CAPTURE);
   BrowserView* dragged_browser_view =
       BrowserView::GetBrowserViewForBrowser(browser);
-  dragged_browser_view->GetWidget()->SetVisibilityChangedAnimationsEnabled(
-      false);
+  views::Widget* dragged_widget = dragged_browser_view->GetWidget();
+  dragged_widget->SetVisibilityChangedAnimationsEnabled(false);
   Attach(dragged_browser_view->tabstrip(), gfx::Point());
 
   // If the window size has changed, the tab positioning will be quite off.
@@ -1337,7 +1374,7 @@ void TabDragController::DetachIntoNewBrowserAndRunMoveLoop(
     // while maintaining the same relative positions. This scales the tabs
     // down so that they occupy the same relative width on the new tab strip,
     // clamping to minimum tab width.
-      int available_attached_width = attached_tabstrip_->tab_area_width();
+    int available_attached_width = attached_tabstrip_->tab_area_width();
     float x_scale =
         static_cast<float>(available_attached_width) / available_source_width;
     int x_offset = std::ceil((1.0 - x_scale) * drag_bounds[0].x());
@@ -1376,13 +1413,17 @@ void TabDragController::DetachIntoNewBrowserAndRunMoveLoop(
   attached_tabstrip_->SetTabBoundsForDrag(drag_bounds);
 
   WindowPositionManagedUpdater updater;
-  dragged_browser_view->GetWidget()->AddObserver(&updater);
+  dragged_widget->AddObserver(&updater);
   browser->window()->Show();
-  dragged_browser_view->GetWidget()->RemoveObserver(&updater);
-
-  browser->window()->Activate();
-  dragged_browser_view->GetWidget()->SetVisibilityChangedAnimationsEnabled(
-      true);
+  dragged_widget->RemoveObserver(&updater);
+  dragged_widget->SetVisibilityChangedAnimationsEnabled(true);
+  // Activate may trigger a focus loss, destroying us.
+  {
+    base::WeakPtr<TabDragController> ref(weak_factory_.GetWeakPtr());
+    browser->window()->Activate();
+    if (!ref)
+      return;
+  }
   RunMoveLoop(drag_offset);
 }
 
@@ -1396,8 +1437,7 @@ void TabDragController::RunMoveLoop(const gfx::Vector2d& drag_offset) {
   SetTrackedByWorkspace(move_loop_widget_->GetNativeView(), false);
   move_loop_widget_->AddObserver(this);
   is_dragging_window_ = true;
-  bool destroyed = false;
-  destroyed_ = &destroyed;
+  base::WeakPtr<TabDragController> ref(weak_factory_.GetWeakPtr());
   // Running the move loop releases mouse capture on non-ash, which triggers
   // destroying the drag loop. Release mouse capture ourself before this while
   // the DragController isn't owned by the TabStrip.
@@ -1417,9 +1457,8 @@ void TabDragController::RunMoveLoop(const gfx::Vector2d& drag_offset) {
       content::NotificationService::AllBrowserContextsAndSources(),
       content::NotificationService::NoDetails());
 
-  if (destroyed)
+  if (!ref)
     return;
-  destroyed_ = NULL;
   // Under chromeos we immediately set the |move_loop_widget_| to NULL.
   if (move_loop_widget_) {
     move_loop_widget_->RemoveObserver(this);
@@ -1799,6 +1838,19 @@ void TabDragController::CompleteDrag() {
         initial_tab_positions_,
         move_behavior_ == MOVE_VISIBILE_TABS,
         true);
+    if (is_dragging_new_browser_) {
+      // If source window was maximized - maximize the new window as well.
+      if (was_source_maximized_)
+        attached_tabstrip_->GetWidget()->Maximize();
+#if defined(USE_ASH)
+      if (was_source_fullscreen_ &&
+          host_desktop_type_ == chrome::HOST_DESKTOP_TYPE_ASH) {
+        // In fullscreen mode it is only possible to get here if the source
+        // was in "immersive fullscreen" mode, so toggle it back on.
+        ash::Shell::GetInstance()->delegate()->ToggleFullscreen();
+      }
+#endif
+    }
   } else {
     if (dock_info_.type() != DockInfo::NONE) {
       switch (dock_info_.type()) {
@@ -2006,14 +2058,52 @@ void TabDragController::BringWindowUnderPointToFront(
         point_in_screen,
         dock_windows_);
     dock_windows_.erase(dragged_native_view);
+    // Only bring browser windows to front - only windows with a TabStrip can
+    // be tab drag targets.
+    if (!GetTabStripForWindow(window))
+      return;
   }
   if (window) {
     views::Widget* widget_window = views::Widget::GetWidgetForNativeView(
         window);
-    if (widget_window)
-      widget_window->StackAtTop();
-    else
+    if (!widget_window)
       return;
+
+#if defined(USE_ASH)
+    if (host_desktop_type_ == chrome::HOST_DESKTOP_TYPE_ASH) {
+      // TODO(varkha): The code below ensures that the phantom drag widget
+      // is shown on top of browser windows. The code should be moved to ash/
+      // and the phantom should be able to assert its top-most state on its own.
+      // One strategy would be for DragWindowController to
+      // be able to observe stacking changes to the phantom drag widget's
+      // siblings in order to keep it on top. One way is to implement a
+      // notification that is sent to a window parent's observers when a
+      // stacking order is changed among the children of that same parent.
+      // Note that OnWindowStackingChanged is sent only to the child that is the
+      // argument of one of the Window::StackChildX calls and not to all its
+      // siblings affected by the stacking change.
+      aura::Window* browser_window = widget_window->GetNativeView();
+      // Find a topmost non-popup window and stack the recipient browser above
+      // it in order to avoid stacking the browser window on top of the phantom
+      // drag widget created by DragWindowController in a second display.
+      for (aura::Window::Windows::const_reverse_iterator it =
+           browser_window->parent()->children().rbegin();
+           it != browser_window->parent()->children().rend(); ++it) {
+        // If the iteration reached the recipient browser window then it is
+        // already topmost and it is safe to return with no stacking change.
+        if (*it == browser_window)
+          return;
+        if ((*it)->type() != aura::client::WINDOW_TYPE_POPUP) {
+          widget_window->StackAbove(*it);
+          break;
+        }
+      }
+    } else {
+      widget_window->StackAtTop();
+    }
+#else
+    widget_window->StackAtTop();
+#endif
 
     // The previous call made the window appear on top of the dragged window,
     // move the dragged window to the front.
@@ -2052,6 +2142,17 @@ Browser* TabDragController::CreateBrowserForDrag(
   gfx::Point center(0, source->height() / 2);
   views::View::ConvertPointToWidget(source, &center);
   gfx::Rect new_bounds(source->GetWidget()->GetRestoredBounds());
+  if (source->GetWidget()->IsMaximized()) {
+    // If the restore bounds is really small, we don't want to honor it
+    // (dragging a really small window looks wrong), instead make sure the new
+    // window is at least 50% the size of the old.
+    const gfx::Size max_size(
+        source->GetWidget()->GetWindowBoundsInScreen().size());
+    new_bounds.set_width(
+        std::max(max_size.width() / 2, new_bounds.width()));
+    new_bounds.set_height(
+        std::max(max_size.height() / 2, new_bounds.width()));
+  }
   new_bounds.set_y(point_in_screen.y() - center.y());
   switch (GetDetachPosition(point_in_screen)) {
     case DETACH_BEFORE:
@@ -2081,6 +2182,7 @@ Browser* TabDragController::CreateBrowserForDrag(
                                       host_desktop_type_);
   create_params.initial_bounds = new_bounds;
   Browser* browser = new Browser(create_params);
+  is_dragging_new_browser_ = true;
   SetTrackedByWorkspace(browser->window()->GetNativeWindow(), false);
   SetWindowPositionManaged(browser->window()->GetNativeWindow(), false);
   // If the window is created maximized then the bounds we supplied are ignored.

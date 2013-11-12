@@ -13,11 +13,12 @@
 
 namespace chromeos {
 
-class CryptohomeClientStubImpl : public CryptohomeClient {
+class CHROMEOS_EXPORT CryptohomeClientStubImpl : public CryptohomeClient {
  public:
   CryptohomeClientStubImpl();
   virtual ~CryptohomeClientStubImpl();
 
+  virtual void Init(dbus::Bus* bus) OVERRIDE;
   virtual void SetAsyncCallStatusHandlers(
       const AsyncCallStatusHandler& handler,
       const AsyncCallStatusWithDataHandler& data_handler) OVERRIDE;
@@ -90,7 +91,9 @@ class CryptohomeClientStubImpl : public CryptohomeClient {
       const std::string& pca_response,
       const AsyncMethodCallback& callback) OVERRIDE;
   virtual void AsyncTpmAttestationCreateCertRequest(
-      int options,
+      attestation::AttestationCertificateProfile certificate_profile,
+      const std::string& user_email,
+      const std::string& request_origin,
       const AsyncMethodCallback& callback) OVERRIDE;
   virtual void AsyncTpmAttestationFinishCertRequest(
       const std::string& pca_response,

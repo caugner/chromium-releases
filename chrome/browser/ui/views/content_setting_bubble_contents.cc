@@ -146,6 +146,8 @@ ContentSettingBubbleContents::ContentSettingBubbleContents(
     : BubbleDelegateView(anchor_view, arrow),
       content_setting_bubble_model_(content_setting_bubble_model),
       web_contents_(web_contents),
+      cancel_button_(NULL),
+      save_button_(NULL),
       custom_link_(NULL),
       manage_link_(NULL),
       close_button_(NULL) {
@@ -381,51 +383,93 @@ void ContentSettingBubbleContents::Init() {
     bubble_content_empty = false;
   }
 
-  if (!bubble_content_empty) {
+  const int kDoubleColumnSetId = 1;
+  views::ColumnSet* double_column_set =
+      layout->AddColumnSet(kDoubleColumnSetId);
+  if (content_setting_bubble_model_->content_type() ==
+      CONTENT_SETTINGS_TYPE_SAVE_PASSWORD) {
+    double_column_set->AddColumn(GridLayout::TRAILING, GridLayout::CENTER, 1,
+                                 GridLayout::USE_PREF, 0, 0);
+    double_column_set->AddPaddingColumn(
+        0, views::kRelatedControlSmallVerticalSpacing);
+    double_column_set->AddColumn(GridLayout::TRAILING, GridLayout::CENTER, 0,
+                                 GridLayout::USE_PREF, 0, 0);
+
+    const int kSingleColumnRightSetId = 2;
+    views::ColumnSet* right_column_set =
+        layout->AddColumnSet(kSingleColumnRightSetId);
+    right_column_set->AddColumn(GridLayout::LEADING, GridLayout::FILL, 1,
+                                GridLayout::USE_PREF, 0, 0);
+
+    cancel_button_ = new views::LabelButton(
+        this, l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_BLACKLIST_BUTTON));
+    cancel_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+    save_button_ = new views::LabelButton(
+        this, l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SAVE_BUTTON));
+    save_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+    manage_link_ = new views::Link(UTF8ToUTF16(bubble_content.manage_link));
+    manage_link_->set_listener(this);
+
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+
+    layout->StartRow(0, kDoubleColumnSetId);
+    layout->AddView(cancel_button_);
+    layout->AddView(save_button_);
+
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
     layout->StartRow(0, kSingleColumnSetId);
     layout->AddView(new views::Separator(views::Separator::HORIZONTAL), 1, 1,
                     GridLayout::FILL, GridLayout::FILL);
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+
+    layout->StartRow(0, kSingleColumnRightSetId);
+    layout->AddView(manage_link_);
+  } else {
+    if (!bubble_content_empty) {
+      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+      layout->StartRow(0, kSingleColumnSetId);
+      layout->AddView(new views::Separator(views::Separator::HORIZONTAL), 1, 1,
+                      GridLayout::FILL, GridLayout::FILL);
+      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+    }
+
+    double_column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
+                                 GridLayout::USE_PREF, 0, 0);
+    double_column_set->AddPaddingColumn(
+        0, views::kUnrelatedControlHorizontalSpacing);
+    double_column_set->AddColumn(GridLayout::TRAILING, GridLayout::CENTER, 0,
+                                 GridLayout::USE_PREF, 0, 0);
+
+    layout->StartRow(0, kDoubleColumnSetId);
+    manage_link_ = new views::Link(UTF8ToUTF16(bubble_content.manage_link));
+    manage_link_->set_listener(this);
+    layout->AddView(manage_link_);
+
+    close_button_ =
+        new views::LabelButton(this, l10n_util::GetStringUTF16(IDS_DONE));
+    close_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+    layout->AddView(close_button_);
   }
-
-  const int kDoubleColumnSetId = 1;
-  views::ColumnSet* double_column_set =
-      layout->AddColumnSet(kDoubleColumnSetId);
-  double_column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 1,
-                        GridLayout::USE_PREF, 0, 0);
-  double_column_set->AddPaddingColumn(
-      0, views::kUnrelatedControlHorizontalSpacing);
-  double_column_set->AddColumn(GridLayout::TRAILING, GridLayout::CENTER, 0,
-                        GridLayout::USE_PREF, 0, 0);
-
-  layout->StartRow(0, kDoubleColumnSetId);
-  manage_link_ = new views::Link(UTF8ToUTF16(bubble_content.manage_link));
-  manage_link_->set_listener(this);
-  layout->AddView(manage_link_);
-
-  close_button_ = new views::LabelButton(
-      this, l10n_util::GetStringUTF16(IDS_DONE));
-  close_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
-  layout->AddView(close_button_);
 }
 
 void ContentSettingBubbleContents::ButtonPressed(views::Button* sender,
                                                  const ui::Event& event) {
-  if (sender == close_button_) {
-    content_setting_bubble_model_->OnDoneClicked();
-    StartFade(false);
+  RadioGroup::const_iterator i(
+      std::find(radio_group_.begin(), radio_group_.end(), sender));
+  if (i != radio_group_.end()) {
+    content_setting_bubble_model_->OnRadioClicked(i - radio_group_.begin());
     return;
   }
 
-  for (RadioGroup::const_iterator i(radio_group_.begin());
-       i != radio_group_.end(); ++i) {
-    if (sender == *i) {
-      content_setting_bubble_model_->OnRadioClicked(i - radio_group_.begin());
-      return;
-    }
-  }
-  NOTREACHED() << "unknown radio";
+  if (sender == save_button_)
+    content_setting_bubble_model_->OnSaveClicked();
+  else if (sender == cancel_button_)
+    content_setting_bubble_model_->OnCancelClicked();
+  else if (sender == close_button_)
+    content_setting_bubble_model_->OnDoneClicked();
+  else
+    NOTREACHED();
+  StartFade(false);
 }
 
 void ContentSettingBubbleContents::LinkClicked(views::Link* source,

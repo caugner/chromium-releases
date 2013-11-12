@@ -340,7 +340,7 @@ static bool SetUserInputMethodImpl(
   if (input_method.empty())
     return false;
 
-  if (!manager->IsFullLatinKeyboard(input_method)) {
+  if (!manager->IsLoginKeyboard(input_method)) {
     LOG(WARNING) << "SetUserInputMethod('" << username
                  << "'): stored user LRU input method '" << input_method
                  << "' is no longer Full Latin Keyboard Language"
@@ -403,8 +403,14 @@ SigninScreenHandler::SigninScreenHandler(
   DCHECK(error_screen_actor_);
   DCHECK(core_oobe_actor_);
   network_state_informer_->AddObserver(this);
-  CrosSettings::Get()->AddSettingsObserver(kAccountsPrefAllowNewUser, this);
-  CrosSettings::Get()->AddSettingsObserver(kAccountsPrefAllowGuest, this);
+  allow_new_user_subscription_ = CrosSettings::Get()->AddSettingsObserver(
+      kAccountsPrefAllowNewUser,
+      base::Bind(&SigninScreenHandler::UserSettingsChanged,
+                 base::Unretained(this)));
+  allow_guest_subscription_ = CrosSettings::Get()->AddSettingsObserver(
+      kAccountsPrefAllowGuest,
+      base::Bind(&SigninScreenHandler::UserSettingsChanged,
+                 base::Unretained(this)));
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_AUTH_NEEDED,
@@ -426,8 +432,6 @@ SigninScreenHandler::~SigninScreenHandler() {
   if (delegate_)
     delegate_->SetWebUIHandler(NULL);
   network_state_informer_->RemoveObserver(this);
-  CrosSettings::Get()->RemoveSettingsObserver(kAccountsPrefAllowNewUser, this);
-  CrosSettings::Get()->RemoveSettingsObserver(kAccountsPrefAllowGuest, this);
 }
 
 void SigninScreenHandler::DeclareLocalizedValues(
@@ -446,7 +450,6 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("signinButton", IDS_LOGIN_BUTTON);
   builder->Add("shutDown", IDS_SHUTDOWN_BUTTON);
   builder->Add("addUser", IDS_ADD_USER_BUTTON);
-  builder->Add("cancelUserAdding", IDS_CANCEL_USER_ADDING);
   builder->Add("browseAsGuest", IDS_GO_INCOGNITO_BUTTON);
   builder->Add("cancel", IDS_CANCEL);
   builder->Add("signOutUser", IDS_SCREEN_LOCK_SIGN_OUT);
@@ -468,6 +471,9 @@ void SigninScreenHandler::DeclareLocalizedValues(
       g_browser_process->browser_policy_connector()->IsEnterpriseManaged() ?
           IDS_DISABLED_ADD_USER_TOOLTIP_ENTERPRISE :
           IDS_DISABLED_ADD_USER_TOOLTIP);
+  builder->Add("supervisedUserExpiredTokenWarning",
+               IDS_SUPERVISED_USER_EXPIRED_TOKEN_WARNING);
+  builder->Add("multiple-signin-banner-text", IDS_LOGIN_USER_ADDING_BANNER);
 
   // Strings used by password changed dialog.
   builder->Add("passwordChangedTitle", IDS_LOGIN_PASSWORD_CHANGED_TITLE);
@@ -499,6 +505,18 @@ void SigninScreenHandler::DeclareLocalizedValues(
                UTF8ToUTF16(chrome::kSupervisedUserManagementDisplayURL));
   builder->Add("removeUserWarningButtonTitle",
                IDS_LOGIN_POD_USER_REMOVE_WARNING_BUTTON);
+
+  // Strings used by confirm password dialog.
+  builder->Add("confirmPasswordTitle", IDS_LOGIN_CONFIRM_PASSWORD_TITLE);
+  builder->Add("confirmPasswordHint", IDS_LOGIN_CONFIRM_PASSWORD_HINT);
+  builder->Add("confirmPasswordConfirmButton",
+               IDS_LOGIN_CONFIRM_PASSWORD_CONFIRM_BUTTON);
+
+  // Strings used by no password warning dialog.
+  builder->Add("noPasswordWarningTitle", IDS_LOGIN_NO_PASSWORD_WARNING_TITLE);
+  builder->Add("noPasswordWarningBody", IDS_LOGIN_NO_PASSWORD_WARNING);
+  builder->Add("noPasswordWarningOkButton",
+               IDS_LOGIN_NO_PASSWORD_WARNING_DISMISS_BUTTON);
 
   if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
     builder->Add("demoLoginMessage", IDS_KIOSK_MODE_LOGIN_MESSAGE);
@@ -849,6 +867,11 @@ void SigninScreenHandler::RegisterMessages() {
               &SigninScreenHandler::HandleShowLoadingTimeoutError);
   AddCallback("updateOfflineLogin",
               &SigninScreenHandler::HandleUpdateOfflineLogin);
+  AddCallback("focusPod", &SigninScreenHandler::HandleFocusPod);
+
+  // This message is sent by the kiosk app menu, but is handled here
+  // so we can tell the delegate to launch the app.
+  AddCallback("launchKioskApp", &SigninScreenHandler::HandleLaunchKioskApp);
 }
 
 void SigninScreenHandler::RegisterPrefs(PrefRegistrySimple* registry) {
@@ -926,7 +949,7 @@ void SigninScreenHandler::ShowErrorScreen(LoginDisplay::SigninError error_id) {
 }
 
 void SigninScreenHandler::ShowSigninUI(const std::string& email) {
-
+  core_oobe_actor_->ShowSignInUI(email);
 }
 
 void SigninScreenHandler::ShowGaiaPasswordChanged(const std::string& username) {
@@ -974,11 +997,6 @@ void SigninScreenHandler::Observe(int type,
                                   const content::NotificationSource& source,
                                   const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED: {
-      UpdateAuthExtension();
-      UpdateAddButtonStatus();
-      break;
-    }
     case chrome::NOTIFICATION_AUTH_NEEDED: {
       has_pending_auth_ui_ = true;
       break;
@@ -1013,6 +1031,15 @@ void SigninScreenHandler::OnDnsCleared() {
 
 // Update keyboard layout to least recently used by the user.
 void SigninScreenHandler::SetUserInputMethod(const std::string& username) {
+  UserManager* user_manager = UserManager::Get();
+  if (user_manager->IsUserLoggedIn()) {
+    // We are on sign-in screen inside user session (adding new user to
+    // the session or on lock screen), don't switch input methods in this case.
+    // TODO(dpolukhin): adding user and sign-in should be consistent
+    // crbug.com/292774
+    return;
+  }
+
   chromeos::input_method::InputMethodManager* const manager =
       chromeos::input_method::InputMethodManager::Get();
 
@@ -1151,6 +1178,11 @@ void SigninScreenHandler::LoadAuthExtension(
 
   frame_state_ = FRAME_STATE_LOADING;
   CallJS("login.GaiaSigninScreen.loadAuthExtension", params);
+}
+
+void SigninScreenHandler::UserSettingsChanged() {
+  UpdateAuthExtension();
+  UpdateAddButtonStatus();
 }
 
 void SigninScreenHandler::UpdateAuthExtension() {
@@ -1326,13 +1358,21 @@ void SigninScreenHandler::FillUserDictionary(User* user,
       user->GetType() == User::USER_TYPE_PUBLIC_ACCOUNT;
   bool is_locally_managed_user =
       user->GetType() == User::USER_TYPE_LOCALLY_MANAGED;
+  User::OAuthTokenStatus token_status = user->oauth_token_status();
+
+  // If supervised user has unknown token status consider that as valid token.
+  // It will be invalidated inside session in case it has been revoked.
+  if (is_locally_managed_user &&
+      token_status == User::OAUTH_TOKEN_STATUS_UNKNOWN) {
+    token_status = User::OAUTH2_TOKEN_STATUS_VALID;
+  }
 
   user_dict->SetString(kKeyUsername, email);
   user_dict->SetString(kKeyEmailAddress, user->display_email());
   user_dict->SetString(kKeyDisplayName, user->GetDisplayName());
   user_dict->SetBoolean(kKeyPublicAccount, is_public_account);
   user_dict->SetBoolean(kKeyLocallyManagedUser, is_locally_managed_user);
-  user_dict->SetInteger(kKeyOauthTokenStatus, user->oauth_token_status());
+  user_dict->SetInteger(kKeyOauthTokenStatus, token_status);
   user_dict->SetBoolean(kKeySignedIn, user->is_logged_in());
   user_dict->SetBoolean(kKeyIsOwner, is_owner);
 
@@ -1421,12 +1461,8 @@ void SigninScreenHandler::HandleAccountPickerReady() {
   is_account_picker_showing_first_time_ = true;
   MaybePreloadAuthExtension();
 
-  if (ScreenLocker::default_screen_locker()) {
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_LOCK_WEBUI_READY,
-        content::NotificationService::AllSources(),
-        content::NotificationService::NoDetails());
-  }
+  if (ScreenLocker::default_screen_locker())
+    ScreenLocker::default_screen_locker()->delegate()->OnLockWebUIReady();
 
   if (delegate_)
     delegate_->OnSigninScreenReady();
@@ -1434,10 +1470,8 @@ void SigninScreenHandler::HandleAccountPickerReady() {
 
 void SigninScreenHandler::HandleWallpaperReady() {
   if (ScreenLocker::default_screen_locker()) {
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_LOCK_BACKGROUND_DISPLAYED,
-        content::NotificationService::AllSources(),
-        content::NotificationService::NoDetails());
+    ScreenLocker::default_screen_locker()->delegate()->
+        OnLockBackgroundDisplayed();
   }
 }
 
@@ -1598,6 +1632,14 @@ void SigninScreenHandler::HandleShowLoadingTimeoutError() {
 
 void SigninScreenHandler::HandleUpdateOfflineLogin(bool offline_login_active) {
   offline_login_active_ = offline_login_active;
+}
+
+void SigninScreenHandler::HandleFocusPod(const std::string& user_id) {
+  SetUserInputMethod(user_id);
+}
+
+void SigninScreenHandler::HandleLaunchKioskApp(const std::string& app_id) {
+  delegate_->LoginAsKioskApp(app_id);
 }
 
 void SigninScreenHandler::StartClearingDnsCache() {

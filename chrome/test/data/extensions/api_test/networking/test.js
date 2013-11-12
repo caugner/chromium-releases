@@ -5,6 +5,7 @@
 var callbackPass = chrome.test.callbackPass;
 var callbackFail = chrome.test.callbackFail;
 var assertTrue = chrome.test.assertTrue;
+var assertFalse = chrome.test.assertFalse;
 var assertEq = chrome.test.assertEq;
 
 // Test properties for the verification API.
@@ -83,6 +84,29 @@ var availableTests = [
       "nonexistent_path",
       callbackFail("Error.DBusFailed"));
   },
+  function createNetwork() {
+    chrome.networkingPrivate.createNetwork(
+      false,  // shared
+      { "Type": "WiFi",
+        "GUID": "ignored_guid",
+        "WiFi": {
+          "SSID": "wifi_created",
+          "Security": "WEP-PSK"
+        }
+      },
+      callbackPass(function(guid) {
+        assertFalse(guid == "");
+        assertFalse(guid == "ignored_guid");
+        chrome.networkingPrivate.getProperties(
+          guid,
+          callbackPass(function(properties) {
+            assertEq("WiFi", properties.Type);
+            assertEq(guid, properties.GUID);
+            assertEq("wifi_created", properties.WiFi.SSID);
+            assertEq("WEP-PSK", properties.WiFi.Security);
+          }));
+      }));
+  },
   function getVisibleNetworks() {
     chrome.networkingPrivate.getVisibleNetworks(
       "All",
@@ -91,7 +115,10 @@ var availableTests = [
                     "ConnectionState": "Connected",
                     "GUID": "stub_ethernet",
                     "Name": "eth0",
-                    "Type": "Ethernet"
+                    "Type": "Ethernet",
+                    "Ethernet": {
+                      "Authentication": "None"
+                    }
                   },
                   {
                     "ConnectionState": "Connected",
@@ -99,7 +126,6 @@ var availableTests = [
                     "Name": "wifi1",
                     "Type": "WiFi",
                     "WiFi": {
-                      "AutoConnect": false,
                       "Security": "WEP-PSK",
                       "SignalStrength": 0
                     }
@@ -109,9 +135,6 @@ var availableTests = [
                     "GUID": "stub_vpn1",
                     "Name": "vpn1",
                     "Type": "VPN",
-                    "VPN": {
-                      "AutoConnect": false
-                    }
                   },
                   {
                     "ConnectionState": "NotConnected",
@@ -119,7 +142,6 @@ var availableTests = [
                     "Name": "wifi2_PSK",
                     "Type": "WiFi",
                     "WiFi": {
-                      "AutoConnect": false,
                       "Security": "WPA-PSK",
                       "SignalStrength": 80
                     }
@@ -148,7 +170,6 @@ var availableTests = [
                     "Name": "wifi1",
                     "Type": "WiFi",
                     "WiFi": {
-                      "AutoConnect": false,
                       "Security": "WEP-PSK",
                       "SignalStrength": 0
                     }
@@ -159,7 +180,6 @@ var availableTests = [
                     "Name": "wifi2_PSK",
                     "Type": "WiFi",
                     "WiFi": {
-                      "AutoConnect": false,
                       "Security": "WPA-PSK",
                       "SignalStrength": 80
                     }
@@ -282,7 +302,6 @@ var availableTests = [
           "Name": "wifi2_PSK",
           "Type": "WiFi",
           "WiFi": {
-            "AutoConnect": false,
             "Security": "WPA-PSK",
             "SignalStrength": 80
           }

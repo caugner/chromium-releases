@@ -82,6 +82,7 @@ void SetZoomBubbleAutoCloseDelayForTesting(NSTimeInterval time_interval) {
   if ((self = [super initWithWindow:window
                        parentWindow:parentWindow
                          anchoredAt:NSZeroPoint])) {
+    [window setCanBecomeKeyWindow:NO];
     closeObserver_.reset(Block_copy(closeObserver));
 
     ui::NativeTheme* nativeTheme = ui::NativeTheme::instance();
@@ -96,7 +97,7 @@ void SetZoomBubbleAutoCloseDelayForTesting(NSTimeInterval time_interval) {
     trackingArea_.reset([[CrTrackingArea alloc]
         initWithRect:NSZeroRect
              options:NSTrackingMouseEnteredAndExited |
-                     NSTrackingActiveInKeyWindow |
+                     NSTrackingActiveAlways |
                      NSTrackingInVisibleRect
                owner:self
             userInfo:nil]);

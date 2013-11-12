@@ -5,9 +5,9 @@
 from fnmatch import fnmatch
 import logging
 import mimetypes
-import traceback
 from urlparse import urlsplit
 
+from data_source_registry import CreateDataSources
 from file_system import FileNotFoundError
 from servlet import Servlet, Response
 import svn_constants
@@ -50,7 +50,8 @@ class RenderServlet(Servlet):
                                permanent=canonical_result.permanent)
 
     templates = server_instance.template_data_source_factory.Create(
-        self._request, path)
+        self._request,
+        CreateDataSources(server_instance, self._request))
 
     content = None
     content_type = None
@@ -79,16 +80,15 @@ class RenderServlet(Servlet):
       elif path.endswith('.html'):
         content = templates.Render(path)
         content_type = 'text/html'
+      else:
+        content = None
     except FileNotFoundError:
-      logging.warning(traceback.format_exc())
       content = None
 
     headers = {'x-frame-options': 'sameorigin'}
     if content is None:
-      doc_class = path.split('/', 1)[0]
-      content = templates.Render('%s/404' % doc_class)
-      if not content:
-        content = templates.Render('extensions/404')
+      content = (templates.Render('%s/404' % path.split('/', 1)[0]) or
+                 templates.Render('extensions/404'))
       return Response.NotFound(content, headers=headers)
 
     if not content:

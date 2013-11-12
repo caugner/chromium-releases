@@ -16,13 +16,14 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/dbus/cryptohome_client.h"
 #include "ui/aura/env.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -44,7 +45,7 @@ const char kTestUser1[] = "test@domain.com";
 
 }  // namespace
 
-class WallpaperManagerBrowserTest : public CrosInProcessBrowserTest,
+class WallpaperManagerBrowserTest : public InProcessBrowserTest,
                                     public DesktopBackgroundControllerObserver {
  public:
   WallpaperManagerBrowserTest () : controller_(NULL),
@@ -258,43 +259,6 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
   EXPECT_EQ(2, LoadedWallpapers());
 }
 
-// Old custom wallpaper is stored in USER_DATA_DIR. New custom wallpapers will
-// be stored in USER_CUSTOM_WALLPAPER_DIR. The migration is triggered when any
-// of the user fall back to load custom wallpaper from old path.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
-                       MoveCustomWallpaper) {
-  WallpaperManager* wallpaper_manager = WallpaperManager::Get();
-  LogIn(kTestUser1);
-  WaitAsyncWallpaperLoad();
-
-  base::FilePath old_wallpaper_path = wallpaper_manager->
-      GetOriginalWallpaperPathForUser(kTestUser1);
-  SaveUserWallpaperData(kTestUser1,
-                        old_wallpaper_path,
-                        kSmallWallpaperResourceId);
-  // Saves wallpaper info to local state for user |kTestUser1|.
-  WallpaperInfo info = {
-      "DUMMY",
-      WALLPAPER_LAYOUT_CENTER_CROPPED,
-      User::CUSTOMIZED,
-      base::Time::Now().LocalMidnight()
-  };
-  wallpaper_manager->SetUserWallpaperInfo(kTestUser1, info, true);
-  wallpaper_manager->SetUserWallpaper(kTestUser1);
-  WaitAsyncWallpaperLoad();
-  EXPECT_EQ(2, LoadedWallpapers());
-  wallpaper_manager->UpdateWallpaper();
-  // Wait for wallpaper migration and refresh. Note: the migration is guarantee
-  // to finish before wallpaper refresh finish. This is guarantted by sequence
-  // worker pool we use.
-  WaitAsyncWallpaperLoad();
-  EXPECT_EQ(3, LoadedWallpapers());
-  base::FilePath new_wallpaper_path = GetCustomWallpaperPath(
-      kOriginalWallpaperSubDir, kTestUser1, "DUMMY");
-  EXPECT_FALSE(base::PathExists(old_wallpaper_path));
-  EXPECT_TRUE(base::PathExists(new_wallpaper_path));
-}
-
 // Some users have old user profiles which may have legacy wallpapers. And these
 // lagacy wallpapers should migrate to new wallpaper picker version seamlessly.
 // This tests make sure we compatible with migrated old wallpapers.
@@ -419,6 +383,31 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
   WaitAsyncWallpaperLoad();
   // This test should finish normally. If timeout, it is probably because chrome
   // can not handle pre migrated user profile (M21 profile or older).
+}
+
+class WallpaperManagerBrowserTestCrashRestore
+    : public WallpaperManagerBrowserTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitch(chromeos::switches::kDisableLoginAnimations);
+    command_line->AppendSwitch(chromeos::switches::kDisableBootAnimation);
+    command_line->AppendSwitch(::switches::kMultiProfiles);
+    command_line->AppendSwitchASCII(switches::kLoginUser, kTestUser1);
+    command_line->AppendSwitchASCII(switches::kLoginProfile,
+        CryptohomeClient::GetStubSanitizedUsername(kTestUser1));
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCrashRestore,
+                       PRE_RestoreWallpaper) {
+  LogIn(kTestUser1);
+}
+
+// Test for crbug.com/270278. It simulates a browser crash and verifies if user
+// wallpaper is loaded.
+IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCrashRestore,
+                       RestoreWallpaper) {
+  EXPECT_EQ(1, LoadedWallpapers());
 }
 
 }  // namespace chromeos

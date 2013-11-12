@@ -93,7 +93,7 @@ void RenderViewTest::ExecuteJavaScript(const char* js) {
 bool RenderViewTest::ExecuteJavaScriptAndReturnIntValue(
     const string16& script,
     int* int_result) {
-  v8::HandleScope handle_scope;
+  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
   v8::Handle<v8::Value> result =
       GetMainFrame()->executeScriptAndReturnValue(WebScriptSource(script));
   if (result.IsEmpty() || !result->IsInt32())
@@ -169,15 +169,15 @@ void RenderViewTest::SetUp() {
       kOpenerId,
       RendererPreferences(),
       WebPreferences(),
-      new SharedRenderViewCounter(0),
       kRouteId,
       kMainFrameRouteId,
       kSurfaceId,
       kInvalidSessionStorageNamespaceId,
       string16(),
-      false,
-      false,
-      1,
+      false, // is_renderer_created
+      false, // swapped_out
+      false, // hidden
+      1, // next_page_id
       WebKit::WebScreenInfo(),
       AccessibilityModeOff,
       true);
@@ -254,7 +254,7 @@ gfx::Rect RenderViewTest::GetElementBounds(const std::string& element_id) {
   std::string script =
       ReplaceStringPlaceholders(kGetCoordinatesScript, params, NULL);
 
-  v8::HandleScope handle_scope;
+  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
   v8::Handle<v8::Value>  value = GetMainFrame()->executeScriptAndReturnValue(
       WebScriptSource(WebString::fromUTF8(script)));
   if (value.IsEmpty() || !value->IsArray())

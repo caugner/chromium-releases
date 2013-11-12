@@ -12,7 +12,6 @@
 #include "base/synchronization/lock.h"
 #include "chrome/browser/extensions/activity_log/activity_actions.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
-#include "chrome/browser/extensions/api/activity_log_private/activity_log_private_api.h"
 #include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function.h"
@@ -24,7 +23,7 @@ class ActivityLog;
 // The ID of the trusted/whitelisted ActivityLog extension.
 extern const char kActivityLogExtensionId[];
 extern const char kActivityLogTestExtensionId[];
-extern const char kNewActivityEventName[];
+extern const char kActivityLogObsoleteExtensionId[];
 
 // Handles interactions between the Activity Log API and implementation.
 class ActivityLogAPI : public ProfileKeyedAPI,
@@ -74,6 +73,38 @@ class ActivityLogPrivateGetExtensionActivitiesFunction
 
  protected:
   virtual ~ActivityLogPrivateGetExtensionActivitiesFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  void OnLookupCompleted(
+      scoped_ptr<std::vector<scoped_refptr<Action> > > activities);
+};
+
+// The implementation of activityLogPrivate.deleteDatabase
+class ActivityLogPrivateDeleteDatabaseFunction
+    : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("activityLogPrivate.deleteDatabase",
+                             ACTIVITYLOGPRIVATE_DELETEDATABASE)
+
+ protected:
+  virtual ~ActivityLogPrivateDeleteDatabaseFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+};
+
+// The implementation of activityLogPrivate.deleteUrls
+class ActivityLogPrivateDeleteUrlsFunction
+    : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("activityLogPrivate.deleteUrls",
+                             ACTIVITYLOGPRIVATE_DELETEURLS)
+
+ protected:
+  virtual ~ActivityLogPrivateDeleteUrlsFunction() {}
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;

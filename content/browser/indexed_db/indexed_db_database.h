@@ -13,6 +13,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "content/browser/indexed_db/indexed_db.h"
+#include "content/browser/indexed_db/indexed_db_backing_store.h"
 #include "content/browser/indexed_db/indexed_db_callbacks.h"
 #include "content/browser/indexed_db/indexed_db_metadata.h"
 #include "content/browser/indexed_db/indexed_db_transaction_coordinator.h"
@@ -22,7 +23,6 @@ namespace content {
 
 class IndexedDBConnection;
 class IndexedDBDatabaseCallbacks;
-class IndexedDBBackingStore;
 class IndexedDBFactory;
 class IndexedDBKey;
 class IndexedDBKeyPath;
@@ -52,10 +52,15 @@ class CONTENT_EXPORT IndexedDBDatabase
 
   static scoped_refptr<IndexedDBDatabase> Create(
       const string16& name,
-      IndexedDBBackingStore* database,
+      IndexedDBBackingStore* backing_store,
       IndexedDBFactory* factory,
       const Identifier& unique_identifier);
   scoped_refptr<IndexedDBBackingStore> BackingStore() const;
+
+  const Identifier& identifier() { return identifier_; }
+  scoped_refptr<IndexedDBBackingStore> backing_store() {
+    return backing_store_;
+  }
 
   int64 id() const { return metadata_.id; }
   const base::string16& name() const { return metadata_.name; }
@@ -92,7 +97,7 @@ class CONTENT_EXPORT IndexedDBDatabase
                          IndexedDBConnection* connection,
                          const std::vector<int64>& object_store_ids,
                          uint16 mode);
-  void Close(IndexedDBConnection* connection);
+  void Close(IndexedDBConnection* connection, bool forced);
 
   void Commit(int64 transaction_id);
   void Abort(int64 transaction_id);
@@ -173,14 +178,72 @@ class CONTENT_EXPORT IndexedDBDatabase
   // Number of pending deletes, blocked on other connections.
   size_t PendingDeleteCount() const;
 
+  // Asynchronous tasks scheduled within transactions:
+  void CreateObjectStoreOperation(
+      const IndexedDBObjectStoreMetadata& object_store_metadata,
+      IndexedDBTransaction* transaction);
+  void CreateObjectStoreAbortOperation(int64 object_store_id,
+                                       IndexedDBTransaction* transaction);
+  void DeleteObjectStoreOperation(
+      const IndexedDBObjectStoreMetadata& object_store_metadata,
+      IndexedDBTransaction* transaction);
+  void DeleteObjectStoreAbortOperation(
+      const IndexedDBObjectStoreMetadata& object_store_metadata,
+      IndexedDBTransaction* transaction);
+  void VersionChangeOperation(int64 version,
+                              scoped_refptr<IndexedDBCallbacks> callbacks,
+                              scoped_ptr<IndexedDBConnection> connection,
+                              WebKit::WebIDBCallbacks::DataLoss data_loss,
+                              IndexedDBTransaction* transaction);
+  void VersionChangeAbortOperation(const string16& previous_version,
+                                   int64 previous_int_version,
+                                   IndexedDBTransaction* transaction);
+  void CreateIndexOperation(int64 object_store_id,
+                            const IndexedDBIndexMetadata& index_metadata,
+                            IndexedDBTransaction* transaction);
+  void DeleteIndexOperation(int64 object_store_id,
+                            const IndexedDBIndexMetadata& index_metadata,
+                            IndexedDBTransaction* transaction);
+  void CreateIndexAbortOperation(int64 object_store_id,
+                                 int64 index_id,
+                                 IndexedDBTransaction* transaction);
+  void DeleteIndexAbortOperation(int64 object_store_id,
+                                 const IndexedDBIndexMetadata& index_metadata,
+                                 IndexedDBTransaction* transaction);
+  void GetOperation(int64 object_store_id,
+                    int64 index_id,
+                    scoped_ptr<IndexedDBKeyRange> key_range,
+                    indexed_db::CursorType cursor_type,
+                    scoped_refptr<IndexedDBCallbacks> callbacks,
+                    IndexedDBTransaction* transaction);
+  struct PutOperationParams;
+  void PutOperation(scoped_ptr<PutOperationParams> params,
+                    IndexedDBTransaction* transaction);
+  void SetIndexesReadyOperation(size_t index_count,
+                                IndexedDBTransaction* transaction);
+  struct OpenCursorOperationParams;
+  void OpenCursorOperation(scoped_ptr<OpenCursorOperationParams> params,
+                           IndexedDBTransaction* transaction);
+  void CountOperation(int64 object_store_id,
+                      int64 index_id,
+                      scoped_ptr<IndexedDBKeyRange> key_range,
+                      scoped_refptr<IndexedDBCallbacks> callbacks,
+                      IndexedDBTransaction* transaction);
+  void DeleteRangeOperation(int64 object_store_id,
+                            scoped_ptr<IndexedDBKeyRange> key_range,
+                            scoped_refptr<IndexedDBCallbacks> callbacks,
+                            IndexedDBTransaction* transaction);
+  void ClearOperation(int64 object_store_id,
+                      scoped_refptr<IndexedDBCallbacks> callbacks,
+                      IndexedDBTransaction* transaction);
+
  private:
   friend class base::RefCounted<IndexedDBDatabase>;
 
-  IndexedDBDatabase(
-      const string16& name,
-      IndexedDBBackingStore* database,
-      IndexedDBFactory* factory,
-      const Identifier& unique_identifier);
+  IndexedDBDatabase(const string16& name,
+                    IndexedDBBackingStore* backing_store,
+                    IndexedDBFactory* factory,
+                    const Identifier& unique_identifier);
   ~IndexedDBDatabase();
 
   bool IsOpenConnectionBlocked() const;
@@ -215,12 +278,6 @@ class CONTENT_EXPORT IndexedDBDatabase
                                                int64 index_id) const;
   bool ValidateObjectStoreIdAndNewIndexId(int64 object_store_id,
                                           int64 index_id) const;
-
-  class VersionChangeOperation;
-
-  // When a "versionchange" transaction aborts, these restore the back-end
-  // object hierarchy.
-  class VersionChangeAbortOperation;
 
   scoped_refptr<IndexedDBBackingStore> backing_store_;
   IndexedDBDatabaseMetadata metadata_;

@@ -27,12 +27,9 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_launch_error.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_app_launcher.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/contacts/contact_manager.h"
-#include "chrome/browser/chromeos/cros/cert_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/dbus/cros_dbus_service.h"
 #include "chrome/browser/chromeos/display/display_configuration_observer.h"
 #include "chrome/browser/chromeos/extensions/default_app_order.h"
@@ -53,6 +50,7 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/memory/oom_priority_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
+#include "chrome/browser/chromeos/options/cert_library.h"
 #include "chrome/browser/chromeos/power/brightness_observer.h"
 #include "chrome/browser/chromeos/power/idle_action_warning_observer.h"
 #include "chrome/browser/chromeos/power/peripheral_battery_observer.h"
@@ -80,6 +78,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/rlz/rlz.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -202,9 +201,20 @@ bool ShouldAutoLaunchKioskApp(const CommandLine& command_line) {
       KioskAppLaunchError::Get() == KioskAppLaunchError::NONE;
 }
 
+void RunAutoLaunchKioskApp() {
+  ShowLoginWizard(chromeos::WizardController::kAppLaunchSplashScreenName);
+
+  // Login screen is skipped but 'login-prompt-visible' signal is still needed.
+  LOG(INFO) << "Kiosk app auto launch >> login-prompt-visible";
+  DBusThreadManager::Get()->GetSessionManagerClient()->
+      EmitLoginPromptVisible();
+}
+
 void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line,
                                        Profile* profile) {
-  if (parsed_command_line.HasSwitch(switches::kLoginManager)) {
+  if (ShouldAutoLaunchKioskApp(parsed_command_line)) {
+    RunAutoLaunchKioskApp();
+  } else if (parsed_command_line.HasSwitch(switches::kLoginManager)) {
     const std::string first_screen =
         parsed_command_line.HasSwitch(switches::kLoginScreen) ?
             WizardController::kLoginScreenName : std::string();
@@ -227,22 +237,15 @@ void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line,
         parsed_command_line.GetSwitchValueASCII(switches::kLoginPassword));
   } else {
     if (!parsed_command_line.HasSwitch(::switches::kTestName)) {
+      // Enable CrasAudioHandler logging when chrome restarts after crashing.
+      if (chromeos::CrasAudioHandler::IsInitialized())
+        chromeos::CrasAudioHandler::Get()->LogErrors();
+
       // We did not log in (we crashed or are debugging), so we need to
       // restore Sync.
       LoginUtils::Get()->RestoreAuthenticationSession(profile);
     }
   }
-}
-
-void RunAutoLaunchKioskApp() {
-  // KioskAppLauncher deletes itself when done.
-  (new KioskAppLauncher(KioskAppManager::Get(),
-                        KioskAppManager::Get()->GetAutoLaunchApp()))->Start();
-
-  // Login screen is skipped but 'login-prompt-visible' signal is still needed.
-  LOG(INFO) << "Kiosk app auto launch >> login-prompt-visible";
-  DBusThreadManager::Get()->GetSessionManagerClient()->
-      EmitLoginPromptVisible();
 }
 
 }  // namespace
@@ -254,8 +257,7 @@ namespace internal {
 // destructor will get called if and only if this has been instantiated.
 class DBusServices {
  public:
-  explicit DBusServices(const content::MainFunctionParams& parameters)
-      : network_library_initialized_(false) {
+  explicit DBusServices(const content::MainFunctionParams& parameters) {
     if (!base::chromeos::IsRunningOnChromeOS()) {
       // Override this path on the desktop, so that the user policy key can be
       // stored by the stub SessionManagerClient.
@@ -284,17 +286,6 @@ class DBusServices {
     disks::DiskMountManager::Initialize();
     cryptohome::AsyncMethodCaller::Initialize();
 
-    // Initialize NetworkLibrary only for the browser, unless running tests
-    // (which do their own NetworkLibrary setup with
-    // ScopedStubNetworkLibraryEnabler in InProcessBrowserTest).
-    if (!parameters.ui_task) {
-      const bool use_stub = !base::chromeos::IsRunningOnChromeOS();
-      NetworkLibrary::Initialize(use_stub);
-      network_library_initialized_ = true;
-    }
-
-    // Always initialize these handlers which should not conflict with
-    // NetworkLibrary.
     NetworkHandler::Initialize();
     CertLibrary::Initialize();
 
@@ -325,8 +316,6 @@ class DBusServices {
   ~DBusServices() {
     CertLibrary::Shutdown();
     NetworkHandler::Shutdown();
-    if (network_library_initialized_)
-      NetworkLibrary::Shutdown();
 
     cryptohome::AsyncMethodCaller::Shutdown();
     disks::DiskMountManager::Shutdown();
@@ -342,7 +331,6 @@ class DBusServices {
   }
 
  private:
-  bool network_library_initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(DBusServices);
 };
@@ -388,9 +376,8 @@ void ChromeBrowserMainPartsChromeos::PreEarlyInitialization() {
     singleton_command_line->AppendSwitchASCII(
         switches::kLoginUser, UserManager::kStubUser);
     if (!parsed_command_line().HasSwitch(switches::kLoginProfile)) {
-      // This must be kept in sync with TestingProfile::kTestUserProfileDir.
-      singleton_command_line->AppendSwitchASCII(
-          switches::kLoginProfile, "test-user");
+      singleton_command_line->AppendSwitchASCII(switches::kLoginProfile,
+                                                chrome::kTestUserProfileDir);
     }
     LOG(INFO) << "Running as stub user with profile dir: "
               << singleton_command_line->GetSwitchValuePath(
@@ -597,11 +584,7 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // Thus only show login manager in normal (non-testing) mode.
   if (!parameters().ui_task ||
       parsed_command_line().HasSwitch(switches::kForceLoginManagerInTests)) {
-    if (ShouldAutoLaunchKioskApp(parsed_command_line())) {
-      RunAutoLaunchKioskApp();
-    } else {
-      OptionallyRunChromeOSLoginManager(parsed_command_line(), profile());
-    }
+    OptionallyRunChromeOSLoginManager(parsed_command_line(), profile());
   }
 
   // These observers must be initialized after the profile because
@@ -625,10 +608,9 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
 
   peripheral_battery_observer_.reset(new PeripheralBatteryObserver());
 
-  // Initialize the network portal detector for Chrome OS. The network
-  // portal detector starts to listen for notifications from
-  // NetworkLibrary about changes in the NetworkManager and initiates
-  // captive portal detection for active networks.
+  // Initialize the network portal detector for Chrome OS. The network portal
+  // detector starts to listen for notifications from NetworkStateHandler and
+  // initiates captive portal detection for active networks.
   NetworkPortalDetector* detector = NetworkPortalDetector::GetInstance();
   if (NetworkPortalDetector::IsEnabledInCommandLine() && detector) {
     detector->Init();
@@ -703,11 +685,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   g_browser_process->platform_part()->oom_priority_manager()->Stop();
 
   swap_metrics_.reset();
-
-  // Stops LoginUtils background fetchers. This is needed because IO thread is
-  // going to stop soon after this function. The pending background jobs could
-  // cause it to crash during shutdown.
-  LoginUtils::Get()->StopBackgroundFetchers();
 
   // Stops all in-flight OAuth2 token fetchers before the IO thread stops.
   DeviceOAuth2TokenServiceFactory::Shutdown();

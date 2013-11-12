@@ -15,6 +15,7 @@
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/multi_profile_user_controller_delegate.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -22,7 +23,6 @@
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
-#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -36,6 +36,8 @@ struct DeviceLocalAccount;
 
 namespace chromeos {
 
+class MultiProfileFirstRunNotification;
+class MultiProfileUserController;
 class RemoveUserDelegate;
 class SessionLengthLimiter;
 
@@ -43,9 +45,9 @@ class SessionLengthLimiter;
 class UserManagerImpl
     : public UserManager,
       public LoginUtils::Delegate,
-      public ProfileSyncServiceObserver,
       public content::NotificationObserver,
-      public policy::DeviceLocalAccountPolicyService::Observer {
+      public policy::DeviceLocalAccountPolicyService::Observer,
+      public MultiProfileUserControllerDelegate {
  public:
   virtual ~UserManagerImpl();
 
@@ -56,6 +58,8 @@ class UserManagerImpl
   virtual UserList GetUsersAdmittedForMultiProfile() const OVERRIDE;
   virtual const UserList& GetLoggedInUsers() const OVERRIDE;
   virtual const UserList& GetLRULoggedInUsers() OVERRIDE;
+  virtual UserList GetUnlockUsers() const OVERRIDE;
+  virtual const std::string& GetOwnerEmail() OVERRIDE;
   virtual void UserLoggedIn(const std::string& email,
                             const std::string& username_hash,
                             bool browser_restart) OVERRIDE;
@@ -73,6 +77,7 @@ class UserManagerImpl
   virtual User* GetLoggedInUser() OVERRIDE;
   virtual const User* GetActiveUser() const OVERRIDE;
   virtual User* GetActiveUser() OVERRIDE;
+  virtual const User* GetPrimaryUser() const OVERRIDE;
   virtual void SaveUserOAuthStatus(
       const std::string& username,
       User::OAuthTokenStatus oauth_token_status) OVERRIDE;
@@ -106,8 +111,6 @@ class UserManagerImpl
   virtual bool IsLoggedInAsStub() const OVERRIDE;
   virtual bool IsSessionStarted() const OVERRIDE;
   virtual bool UserSessionsRestored() const OVERRIDE;
-  virtual MergeSessionState GetMergeSessionState() const OVERRIDE;
-  virtual void SetMergeSessionState(MergeSessionState status) OVERRIDE;
   virtual bool HasBrowserRestarted() const OVERRIDE;
   virtual bool IsUserNonCryptohomeDataEphemeral(
       const std::string& email) const OVERRIDE;
@@ -141,14 +144,13 @@ class UserManagerImpl
       const std::string& chrome_client_id,
       const std::string& chrome_client_secret) OVERRIDE;
   virtual bool AreLocallyManagedUsersAllowed() const OVERRIDE;
+  virtual base::FilePath GetUserProfileDir(
+      const std::string& email) const OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
-  // ProfileSyncServiceObserver implementation.
-  virtual void OnStateChanged() OVERRIDE;
 
   // policy::DeviceLocalAccountPolicyService::Observer implementation.
   virtual void OnPolicyUpdated(const std::string& user_id) OVERRIDE;
@@ -199,7 +201,7 @@ class UserManagerImpl
   void GuestUserLoggedIn();
 
   // Indicates that a regular user just logged in.
-  void RegularUserLoggedIn(const std::string& email, bool browser_restart);
+  void RegularUserLoggedIn(const std::string& email);
 
   // Indicates that a regular user just logged in as ephemeral.
   void RegularUserLoggedInAsEphemeral(const std::string& email);
@@ -226,11 +228,7 @@ class UserManagerImpl
   void SetCurrentUserIsOwner(bool is_current_user_owner);
 
   // Updates current user ownership on UI thread.
-  void UpdateOwnership(DeviceSettingsService::OwnershipStatus status,
-                       bool is_owner);
-
-  // Triggers an asynchronous ownership check.
-  void CheckOwnership();
+  void UpdateOwnership();
 
   // Removes data stored or cached outside the user's cryptohome (wallpaper,
   // avatar, OAuth token status, display name, display email).
@@ -308,6 +306,9 @@ class UserManagerImpl
   // Sends metrics in response to a regular user logging in.
   void SendRegularUserLoginMetrics(const std::string& email);
 
+  // MultiProfileUserControllerDelegate implementation:
+  virtual void OnUserNotAllowed() OVERRIDE;
+
   // Interface to the signed settings store.
   CrosSettings* cros_settings_;
 
@@ -340,6 +341,10 @@ class UserManagerImpl
   // ephemeral user instance.
   User* active_user_;
 
+  // The primary user of the current session. It is recorded for the first
+  // signed-in user and does not change thereafter.
+  User* primary_user_;
+
   // True if SessionStarted() has been called.
   bool session_started_;
 
@@ -368,14 +373,6 @@ class UserManagerImpl
   // policy yet.
   bool ephemeral_users_enabled_;
 
-  // Cached flag indicating whether the locally managed users are enabled by
-  // policy. Defaults to |false| if the value has not been read from trusted
-  // device policy yet.
-  bool locally_managed_users_enabled_by_policy_;
-
-  // Merge session state (cookie restore process state).
-  MergeSessionState merge_session_state_;
-
   // Cached name of device owner. Defaults to empty string if the value has not
   // been read from trusted device policy yet.
   std::string owner_email_;
@@ -385,11 +382,6 @@ class UserManagerImpl
   std::string chrome_client_secret_;
 
   content::NotificationRegistrar registrar_;
-
-  // Profile sync service which is observed to take actions after sync
-  // errors appear. NOTE: there is no guarantee that it is the current sync
-  // service, so do NOT use it outside |OnStateChanged| method.
-  ProfileSyncService* observed_sync_service_;
 
   ObserverList<UserManager::Observer> observer_list_;
 
@@ -418,6 +410,15 @@ class UserManagerImpl
 
   // Time at which this object was created.
   base::TimeTicks manager_creation_time_;
+
+  scoped_ptr<CrosSettings::ObserverSubscription>
+      local_accounts_subscription_;
+  scoped_ptr<CrosSettings::ObserverSubscription>
+      supervised_users_subscription_;
+
+  scoped_ptr<MultiProfileUserController> multi_profile_user_controller_;
+  scoped_ptr<MultiProfileFirstRunNotification>
+      multi_profile_first_run_notification_;
 
   DISALLOW_COPY_AND_ASSIGN(UserManagerImpl);
 };

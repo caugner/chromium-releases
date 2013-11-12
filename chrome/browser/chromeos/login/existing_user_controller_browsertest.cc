@@ -9,6 +9,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/location.h"
+#include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
@@ -33,6 +34,7 @@
 #include "chrome/browser/policy/cloud/cloud_policy_store.h"
 #include "chrome/browser/policy/cloud/mock_cloud_policy_store.h"
 #include "chrome/browser/policy/cloud/policy_builder.h"
+#include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -99,8 +101,6 @@ class ExistingUserControllerTest : public policy::DevicePolicyCrosBrowserTest,
 
     mock_login_utils_ = new MockLoginUtils();
     LoginUtils::Set(mock_login_utils_);
-    EXPECT_CALL(*mock_login_utils_, StopBackgroundFetchers())
-        .Times(AnyNumber());
     EXPECT_CALL(*mock_login_utils_, DelegateDeleted(_))
         .Times(1);
 
@@ -184,7 +184,7 @@ class ExistingUserControllerTest : public policy::DevicePolicyCrosBrowserTest,
     // deletes its OnlineAttemptHost instance.  However, OnlineAttemptHost must
     // be deleted on the UI thread.
     existing_user_controller_.reset();
-    CrosInProcessBrowserTest::CleanUpOnMainThread();
+    DevicePolicyCrosBrowserTest::InProcessBrowserTest::CleanUpOnMainThread();
     testing_profile_.reset(NULL);
     user_manager_enabler_.reset();
   }
@@ -453,40 +453,34 @@ class ExistingUserControllerPublicSessionTest
         .Times(0);
   }
 
-  scoped_ptr<base::RunLoop> CreateSettingsObserverRunLoop(
-      content::MockNotificationObserver& observer, const char* setting) {
-    base::RunLoop* loop = new base::RunLoop;
-    EXPECT_CALL(observer, Observe(chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED,
-                                  _, HasDetails(setting)))
-        .Times(1)
-        .WillOnce(InvokeWithoutArgs(loop, &base::RunLoop::Quit));
-    CrosSettings::Get()->AddSettingsObserver(setting, &observer);
-    return make_scoped_ptr(loop);
-  }
-
   void SetAutoLoginPolicy(const std::string& username, int delay) {
     // Wait until ExistingUserController has finished auto-login
     // configuration by observing the same settings that trigger
     // ConfigurePublicSessionAutoLogin.
-    content::MockNotificationObserver observer;
 
     em::ChromeDeviceSettingsProto& proto(device_policy()->payload());
 
     // If both settings have changed we need to wait for both to
     // propagate, so check the new values against the old ones.
-    scoped_ptr<base::RunLoop> runner1;
+    scoped_refptr<content::MessageLoopRunner> runner1;
+    scoped_ptr<CrosSettings::ObserverSubscription> subscription1;
     if (!proto.has_device_local_accounts() ||
         !proto.device_local_accounts().has_auto_login_id() ||
         proto.device_local_accounts().auto_login_id() != username) {
-      runner1 = CreateSettingsObserverRunLoop(
-          observer, kAccountsPrefDeviceLocalAccountAutoLoginId);
+      runner1 = new content::MessageLoopRunner;
+      subscription1 = chromeos::CrosSettings::Get()->AddSettingsObserver(
+          chromeos::kAccountsPrefDeviceLocalAccountAutoLoginId,
+          runner1->QuitClosure());
     }
-    scoped_ptr<base::RunLoop> runner2;
+    scoped_refptr<content::MessageLoopRunner> runner2;
+    scoped_ptr<CrosSettings::ObserverSubscription> subscription2;
     if (!proto.has_device_local_accounts() ||
         !proto.device_local_accounts().has_auto_login_delay() ||
         proto.device_local_accounts().auto_login_delay() != delay) {
-      runner2 = CreateSettingsObserverRunLoop(
-          observer, kAccountsPrefDeviceLocalAccountAutoLoginDelay);
+      runner1 = new content::MessageLoopRunner;
+      subscription1 = chromeos::CrosSettings::Get()->AddSettingsObserver(
+          chromeos::kAccountsPrefDeviceLocalAccountAutoLoginDelay,
+          runner1->QuitClosure());
     }
 
     // Update the policy.
@@ -495,18 +489,10 @@ class ExistingUserControllerPublicSessionTest
     RefreshDevicePolicy();
 
     // Wait for ExistingUserController to read the updated settings.
-    if (runner1)
+    if (runner1.get())
       runner1->Run();
-    if (runner2)
+    if (runner2.get())
       runner2->Run();
-
-    // Clean up.
-    CrosSettings::Get()->RemoveSettingsObserver(
-        kAccountsPrefDeviceLocalAccountAutoLoginId,
-        &observer);
-    CrosSettings::Get()->RemoveSettingsObserver(
-        kAccountsPrefDeviceLocalAccountAutoLoginDelay,
-        &observer);
   }
 
   void ConfigureAutoLogin() {

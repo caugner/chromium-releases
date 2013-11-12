@@ -25,6 +25,9 @@ namespace drive {
 
 namespace {
 
+// Dummy value passed for the |expected_file_size| parameter of DownloadFile().
+const int64 kDummyDownloadFileSize = 0;
+
 void CopyResourceIdFromGetResourceEntryCallback(
     std::vector<std::string>* id_list_out,
     const std::string& requested_id,
@@ -254,7 +257,7 @@ TEST_F(JobSchedulerTest, GetChangeList) {
   ASSERT_TRUE(resource_list);
 }
 
-TEST_F(JobSchedulerTest, ContinueGetResourceList) {
+TEST_F(JobSchedulerTest, GetRemainingChangeList) {
   ConnectToWifi();
   fake_drive_service_->set_default_max_results(2);
 
@@ -278,7 +281,42 @@ TEST_F(JobSchedulerTest, ContinueGetResourceList) {
   error = google_apis::GDATA_OTHER_ERROR;
   resource_list.reset();
 
-  scheduler_->ContinueGetResourceList(
+  scheduler_->GetRemainingChangeList(
+      next_url,
+      google_apis::test_util::CreateCopyResultCallback(
+          &error, &resource_list));
+  base::RunLoop().RunUntilIdle();
+
+  ASSERT_EQ(google_apis::HTTP_SUCCESS, error);
+  ASSERT_TRUE(resource_list);
+}
+
+TEST_F(JobSchedulerTest, GetRemainingFileList) {
+  ConnectToWifi();
+  fake_drive_service_->set_default_max_results(2);
+
+  google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+  scoped_ptr<google_apis::ResourceList> resource_list;
+
+  scheduler_->GetResourceListInDirectory(
+      fake_drive_service_->GetRootResourceId(),
+      google_apis::test_util::CreateCopyResultCallback(
+          &error, &resource_list));
+  base::RunLoop().RunUntilIdle();
+
+  ASSERT_EQ(google_apis::HTTP_SUCCESS, error);
+  ASSERT_TRUE(resource_list);
+
+  const google_apis::Link* next_link =
+      resource_list->GetLinkByType(google_apis::Link::LINK_NEXT);
+  ASSERT_TRUE(next_link);
+  // Keep the next url before releasing the |resource_list|.
+  GURL next_url(next_link->href());
+
+  error = google_apis::GDATA_OTHER_ERROR;
+  resource_list.reset();
+
+  scheduler_->GetRemainingFileList(
       next_url,
       google_apis::test_util::CreateCopyResultCallback(
           &error, &resource_list));
@@ -359,6 +397,23 @@ TEST_F(JobSchedulerTest, CopyHostedDocument) {
 
   scheduler_->CopyHostedDocument(
       "document:5_document_resource_id",  // resource ID
+      "New Document",  // new title
+      google_apis::test_util::CreateCopyResultCallback(&error, &entry));
+  base::RunLoop().RunUntilIdle();
+
+  ASSERT_EQ(google_apis::HTTP_SUCCESS, error);
+  ASSERT_TRUE(entry);
+}
+
+TEST_F(JobSchedulerTest, MoveResource) {
+  ConnectToWifi();
+
+  google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+  scoped_ptr<google_apis::ResourceEntry> entry;
+
+  scheduler_->MoveResource(
+      "file:2_file_resource_id",  // resource ID
+      "folder:1_folder_resource_id",  // parent resource ID
       "New Document",  // new title
       google_apis::test_util::CreateCopyResultCallback(&error, &entry));
   base::RunLoop().RunUntilIdle();
@@ -536,6 +591,7 @@ TEST_F(JobSchedulerTest, DownloadFileCellularDisabled) {
   base::FilePath output_file_path;
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
+      kDummyDownloadFileSize,
       kOutputFilePath,
       "file:2_file_resource_id",
       ClientContext(BACKGROUND),
@@ -568,7 +624,7 @@ TEST_F(JobSchedulerTest, DownloadFileCellularDisabled) {
   EXPECT_EQ(google_apis::HTTP_SUCCESS, download_error);
   std::string content;
   EXPECT_EQ(output_file_path, kOutputFilePath);
-  ASSERT_TRUE(file_util::ReadFileToString(output_file_path, &content));
+  ASSERT_TRUE(base::ReadFileToString(output_file_path, &content));
   EXPECT_EQ("This is some test content.", content);
 }
 
@@ -588,6 +644,7 @@ TEST_F(JobSchedulerTest, DownloadFileWimaxDisabled) {
   base::FilePath output_file_path;
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
+      kDummyDownloadFileSize,
       kOutputFilePath,
       "file:2_file_resource_id",
       ClientContext(BACKGROUND),
@@ -620,7 +677,7 @@ TEST_F(JobSchedulerTest, DownloadFileWimaxDisabled) {
   EXPECT_EQ(google_apis::HTTP_SUCCESS, download_error);
   std::string content;
   EXPECT_EQ(output_file_path, kOutputFilePath);
-  ASSERT_TRUE(file_util::ReadFileToString(output_file_path, &content));
+  ASSERT_TRUE(base::ReadFileToString(output_file_path, &content));
   EXPECT_EQ("This is some test content.", content);
 }
 
@@ -640,6 +697,7 @@ TEST_F(JobSchedulerTest, DownloadFileCellularEnabled) {
   base::FilePath output_file_path;
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
+      kDummyDownloadFileSize,
       kOutputFilePath,
       "file:2_file_resource_id",
       ClientContext(BACKGROUND),
@@ -664,7 +722,7 @@ TEST_F(JobSchedulerTest, DownloadFileCellularEnabled) {
   EXPECT_EQ(google_apis::HTTP_SUCCESS, download_error);
   std::string content;
   EXPECT_EQ(output_file_path, kOutputFilePath);
-  ASSERT_TRUE(file_util::ReadFileToString(output_file_path, &content));
+  ASSERT_TRUE(base::ReadFileToString(output_file_path, &content));
   EXPECT_EQ("This is some test content.", content);
 }
 
@@ -684,6 +742,7 @@ TEST_F(JobSchedulerTest, DownloadFileWimaxEnabled) {
   base::FilePath output_file_path;
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
+      kDummyDownloadFileSize,
       kOutputFilePath,
       "file:2_file_resource_id",
       ClientContext(BACKGROUND),
@@ -708,7 +767,7 @@ TEST_F(JobSchedulerTest, DownloadFileWimaxEnabled) {
   EXPECT_EQ(google_apis::HTTP_SUCCESS, download_error);
   std::string content;
   EXPECT_EQ(output_file_path, kOutputFilePath);
-  ASSERT_TRUE(file_util::ReadFileToString(output_file_path, &content));
+  ASSERT_TRUE(base::ReadFileToString(output_file_path, &content));
   EXPECT_EQ("This is some test content.", content);
 }
 
@@ -748,6 +807,7 @@ TEST_F(JobSchedulerTest, JobInfo) {
   expected_types.insert(TYPE_DOWNLOAD_FILE);
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
+      kDummyDownloadFileSize,
       temp_dir.path().AppendASCII("whatever.txt"),
       "file:2_file_resource_id",
       ClientContext(BACKGROUND),
@@ -843,6 +903,7 @@ TEST_F(JobSchedulerTest, JobInfoProgress) {
   // Download job.
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
+      kDummyDownloadFileSize,
       temp_dir.path().AppendASCII("whatever.txt"),
       "file:2_file_resource_id",
       ClientContext(BACKGROUND),

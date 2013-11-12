@@ -10,9 +10,9 @@
 #include "base/logging.h"
 #include "base/memory/shared_memory.h"
 #include "base/metrics/histogram.h"
-#include "base/perftimer.h"
 #include "base/pickle.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/perftimer.h"
 #include "chrome/common/extensions/csp_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -104,8 +104,8 @@ void UserScriptSlave::InitializeIsolatedWorld(int isolated_world_id,
   for (URLPatternSet::const_iterator i = permissions.begin();
        i != permissions.end(); ++i) {
     const char* schemes[] = {
-      chrome::kHttpScheme,
-      chrome::kHttpsScheme,
+      content::kHttpScheme,
+      content::kHttpsScheme,
       chrome::kFileScheme,
       chrome::kChromeUIScheme,
     };
@@ -334,11 +334,7 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
       int isolated_world_id = GetIsolatedWorldIdForExtension(extension, frame);
 
       PerfTimer exec_timer;
-      DOMActivityLogger::AttachToWorld(
-          isolated_world_id,
-          extension->id(),
-          UserScriptSlave::GetDataSourceURLForFrame(frame),
-          frame->document().title());
+      DOMActivityLogger::AttachToWorld(isolated_world_id, extension->id());
       frame->executeScriptInIsolatedWorld(
           isolated_world_id, &sources.front(), sources.size(),
           EXTENSION_GROUP_CONTENT_SCRIPTS);

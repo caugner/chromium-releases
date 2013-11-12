@@ -45,10 +45,6 @@ class MockInputMethodManager : public InputMethodManager {
   virtual bool MigrateKoreanKeyboard(
       const std::string& keyboard_id,
       std::vector<std::string>* input_method_ids) OVERRIDE;
-  virtual bool SetInputMethodConfig(
-      const std::string& section,
-      const std::string& config_name,
-      const InputMethodConfigValue& value) OVERRIDE;
   virtual void ChangeInputMethod(const std::string& input_method_id) OVERRIDE;
   virtual void ActivateInputMethodProperty(const std::string& key) OVERRIDE;
   virtual void AddInputMethodExtension(
@@ -74,7 +70,7 @@ class MockInputMethodManager : public InputMethodManager {
   virtual InputMethodUtil* GetInputMethodUtil() OVERRIDE;
   virtual ComponentExtensionIMEManager*
       GetComponentExtensionIMEManager() OVERRIDE;
-  virtual bool IsFullLatinKeyboard(const std::string& layout) const OVERRIDE;
+  virtual bool IsLoginKeyboard(const std::string& layout) const OVERRIDE;
 
   // Sets an input method ID which will be returned by GetCurrentInputMethod().
   void SetCurrentInputMethodId(const std::string& input_method_id) {

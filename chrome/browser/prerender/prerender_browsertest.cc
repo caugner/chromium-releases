@@ -15,6 +15,7 @@
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
@@ -50,6 +51,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
@@ -360,6 +362,10 @@ class TestPrerenderContents : public PrerenderContents {
     return quit_message_loop_on_destruction_;
   }
 
+  void set_quit_message_loop_on_destruction(bool quit) {
+    quit_message_loop_on_destruction_ = quit;
+  }
+
  private:
   virtual void OnRenderViewHostCreated(
       RenderViewHost* new_render_view_host) OVERRIDE {
@@ -506,11 +512,15 @@ class FakeSafeBrowsingDatabaseManager :  public SafeBrowsingDatabaseManager {
   virtual ~FakeSafeBrowsingDatabaseManager() {}
 
   void OnCheckBrowseURLDone(const GURL& gurl, Client* client) {
+    std::vector<SBThreatType> expected_threats;
+    expected_threats.push_back(SB_THREAT_TYPE_URL_MALWARE);
+    expected_threats.push_back(SB_THREAT_TYPE_URL_PHISHING);
     SafeBrowsingDatabaseManager::SafeBrowsingCheck sb_check(
         std::vector<GURL>(1, gurl),
         std::vector<SBFullHash>(),
         client,
-        safe_browsing_util::MALWARE);
+        safe_browsing_util::MALWARE,
+        expected_threats);
     sb_check.url_results[0] = threat_type_;
     client->OnSafeBrowsingResult(sb_check);
   }
@@ -618,6 +628,26 @@ void CreateNeverStartProtocolHandlerOnIO(const GURL& url) {
   net::URLRequestFilter::GetInstance()->AddUrlProtocolHandler(
       url, never_respond_handler.Pass());
 }
+
+// A ContentBrowserClient that cancels all prerenderers on OpenURL.
+class TestContentBrowserClient : public chrome::ChromeContentBrowserClient {
+ public:
+  TestContentBrowserClient() {}
+  virtual ~TestContentBrowserClient() {}
+
+  // chrome::ChromeContentBrowserClient implementation.
+  virtual bool ShouldAllowOpenURL(content::SiteInstance* site_instance,
+                                  const GURL& url) OVERRIDE {
+    PrerenderManagerFactory::GetForProfile(
+        Profile::FromBrowserContext(site_instance->GetBrowserContext()))
+        ->CancelAllPrerenders();
+    return chrome::ChromeContentBrowserClient::ShouldAllowOpenURL(site_instance,
+                                                                  url);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestContentBrowserClient);
+};
 
 }  // namespace
 
@@ -867,8 +897,14 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
   }
 
   void NavigateToURL(const std::string& dest_html_file) const {
+    NavigateToURLWithDisposition(dest_html_file, CURRENT_TAB, true);
+  }
+
+  void NavigateToURLWithDisposition(const std::string& dest_html_file,
+                                    WindowOpenDisposition disposition,
+                                    bool expect_swap_to_succeed) const {
     GURL dest_url = test_server()->GetURL(dest_html_file);
-    NavigateToURLImpl(dest_url, CURRENT_TAB, true);
+    NavigateToURLImpl(dest_url, disposition, expect_swap_to_succeed);
   }
 
   bool UrlIsInPrerenderManager(const std::string& html_file) const {
@@ -1794,6 +1830,31 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   NavigateToDestURL();
 }
 
+// Checks that the referrer is set when prerendering is cancelled.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderCancelReferrer) {
+  scoped_ptr<TestContentBrowserClient> test_content_browser_client(
+      new TestContentBrowserClient);
+  content::ContentBrowserClient* original_browser_client =
+      content::SetBrowserClientForTesting(test_content_browser_client.get());
+
+  PrerenderTestURL("files/prerender/prerender_referrer.html",
+                   FINAL_STATUS_CANCELLED,
+                   1);
+  GetPrerenderContents()->set_quit_message_loop_on_destruction(false);
+  OpenDestURLViaClick();
+
+  bool display_test_result = false;
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      web_contents,
+      "window.domAutomationController.send(DidDisplayPass())",
+      &display_test_result));
+  EXPECT_TRUE(display_test_result);
+
+  content::SetBrowserClientForTesting(original_browser_client);
+}
+
 // Checks that popups on a prerendered page cause cancellation.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderPopup) {
   PrerenderTestURL("files/prerender/prerender_popup.html",
@@ -1889,7 +1950,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 }
 
 // See crbug.com/131836.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, DISABLED_PrerenderTaskManager) {
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderTaskManager) {
   // Show the task manager. This populates the model.
   chrome::OpenTaskManager(current_browser());
   // Wait for the model of task manager to start.
@@ -1905,7 +1966,9 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, DISABLED_PrerenderTaskManager) {
   string16 prerender_title;
   int num_prerender_tabs = 0;
 
-  const TaskManagerModel* model = GetModel();
+  TaskManagerModel* model = GetModel();
+  // The task manager caches values. Force the titles to be fresh.
+  model->Refresh();
   for (int i = 0; i < model->ResourceCount(); ++i) {
     if (model->GetResourceWebContents(i)) {
       prerender_title = model->GetResourceTitle(i);
@@ -1923,6 +1986,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, DISABLED_PrerenderTaskManager) {
       l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_TAB_PREFIX, string16());
   num_prerender_tabs = 0;
   int num_tabs_with_prerender_page_title = 0;
+  model->Refresh();
   for (int i = 0; i < model->ResourceCount(); ++i) {
     if (model->GetResourceWebContents(i)) {
       string16 tab_title = model->GetResourceTitle(i);
@@ -2052,61 +2116,84 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
   ASSERT_TRUE(IsEmptyPrerenderLinkManager());
 }
 
-// Checks that we correctly use a prerendered page when navigating to a
-// fragment.
-// DISABLED: http://crbug.com/84154
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       DISABLED_PrerenderPageNavigateFragment) {
+                       PrerenderPageWithRedirectedFragment) {
+  PrerenderTestURL(
+      CreateClientRedirect("files/prerender/prerender_page.html#fragment"),
+      FINAL_STATUS_USED,
+      2);
+
+  ChannelDestructionWatcher channel_close_watcher;
+  channel_close_watcher.WatchChannel(browser()->tab_strip_model()->
+      GetActiveWebContents()->GetRenderProcessHost());
+  NavigateToDestURL();
+  channel_close_watcher.WaitForChannelClose();
+
+  ASSERT_TRUE(IsEmptyPrerenderLinkManager());
+}
+
+// Checks that we do not use a prerendered page when navigating from
+// the main page to a fragment.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
+                       PrerenderPageNavigateFragment) {
   PrerenderTestURL("files/prerender/no_prerender_page.html",
                    FINAL_STATUS_APP_TERMINATING,
                    1);
-  NavigateToURL("files/prerender/no_prerender_page.html#fragment");
+  NavigateToURLWithDisposition(
+      "files/prerender/no_prerender_page.html#fragment",
+      CURRENT_TAB, false);
 }
 
-// Checks that we correctly use a prerendered page when we prerender a fragment
+// Checks that we do not use a prerendered page when we prerender a fragment
 // but navigate to the main page.
-// http://crbug.com/83901
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       DISABLED_PrerenderFragmentNavigatePage) {
+                       PrerenderFragmentNavigatePage) {
   PrerenderTestURL("files/prerender/no_prerender_page.html#fragment",
                    FINAL_STATUS_APP_TERMINATING,
                    1);
-  NavigateToURL("files/prerender/no_prerender_page.html");
+  NavigateToURLWithDisposition(
+      "files/prerender/no_prerender_page.html",
+      CURRENT_TAB, false);
 }
 
-// Checks that we correctly use a prerendered page when we prerender a fragment
+// Checks that we do not use a prerendered page when we prerender a fragment
 // but navigate to a different fragment on the same page.
-// DISABLED: http://crbug.com/84154
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       DISABLED_PrerenderFragmentNavigateFragment) {
+                       PrerenderFragmentNavigateFragment) {
   PrerenderTestURL("files/prerender/no_prerender_page.html#other_fragment",
                    FINAL_STATUS_APP_TERMINATING,
                    1);
-  NavigateToURL("files/prerender/no_prerender_page.html#fragment");
+  NavigateToURLWithDisposition(
+      "files/prerender/no_prerender_page.html#fragment",
+      CURRENT_TAB, false);
 }
 
-// Checks that we correctly use a prerendered page when the page uses a client
+// Checks that we do not use a prerendered page when the page uses a client
 // redirect to refresh from a fragment on the same page.
-// http://crbug.com/83901
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       DISABLED_PrerenderClientRedirectFromFragment) {
+                       PrerenderClientRedirectFromFragment) {
+  // The # needs to be percent-encoded. Otherwise it never gets sent
+  // to the server.
   PrerenderTestURL(
-      CreateClientRedirect("files/prerender/no_prerender_page.html#fragment"),
+      CreateClientRedirect("files/prerender/no_prerender_page.html%23fragment"),
       FINAL_STATUS_APP_TERMINATING,
       2);
-  NavigateToURL("files/prerender/no_prerender_page.html");
+  NavigateToURLWithDisposition(
+      "files/prerender/no_prerender_page.html",
+      CURRENT_TAB, false);
 }
 
-// Checks that we correctly use a prerendered page when the page uses a client
+// Checks that we do not use a prerendered page when the page uses a client
 // redirect to refresh to a fragment on the same page.
-// DISABLED: http://crbug.com/84154
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       DISABLED_PrerenderClientRedirectToFragment) {
+                       PrerenderClientRedirectToFragment) {
   PrerenderTestURL(
       CreateClientRedirect("files/prerender/no_prerender_page.html"),
       FINAL_STATUS_APP_TERMINATING,
       2);
-  NavigateToURL("files/prerender/no_prerender_page.html#fragment");
+  NavigateToURLWithDisposition(
+      "files/prerender/no_prerender_page.html#fragment",
+      CURRENT_TAB, false);
 }
 
 // Checks that we correctly use a prerendered page when the page uses JS to set
@@ -2745,6 +2832,32 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
                    FINAL_STATUS_USED,
                    1);
   NavigateToDestURL();
+}
+
+// Checks that the referrer policy is used when prerendering is cancelled.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderCancelReferrerPolicy) {
+  scoped_ptr<TestContentBrowserClient> test_content_browser_client(
+      new TestContentBrowserClient);
+  content::ContentBrowserClient* original_browser_client =
+      content::SetBrowserClientForTesting(test_content_browser_client.get());
+
+  set_loader_path("files/prerender/prerender_loader_with_referrer_policy.html");
+  PrerenderTestURL("files/prerender/prerender_referrer_policy.html",
+                   FINAL_STATUS_CANCELLED,
+                   1);
+  GetPrerenderContents()->set_quit_message_loop_on_destruction(false);
+  OpenDestURLViaClick();
+
+  bool display_test_result = false;
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      web_contents,
+      "window.domAutomationController.send(DidDisplayPass())",
+      &display_test_result));
+  EXPECT_TRUE(display_test_result);
+
+  content::SetBrowserClientForTesting(original_browser_client);
 }
 
 // Test interaction of the webNavigation and tabs API with prerender.

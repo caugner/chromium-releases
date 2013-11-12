@@ -82,7 +82,8 @@ OmniboxPopupContentsView::OmniboxPopupContentsView(
       size_animation_(this),
       left_margin_(0),
       right_margin_(0),
-      outside_vertical_padding_(0) {
+      outside_vertical_padding_(0),
+      in_popup_init_(false) {
   // The contents is owned by the LocationBarView.
   set_owned_by_client();
 
@@ -105,6 +106,7 @@ OmniboxPopupContentsView::~OmniboxPopupContentsView() {
   // We don't need to do anything with |popup_| here.  The OS either has already
   // closed the window, in which case it's been deleted, or it will soon, in
   // which case there's nothing we need to do.
+  CHECK(!in_popup_init_);
 }
 
 gfx::Rect OmniboxPopupContentsView::GetPopupBounds() const {
@@ -165,6 +167,8 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
     // No matches or the IME is showing a popup window which may overlap
     // the omnibox popup window.  Close any existing popup.
     if (popup_ != NULL) {
+      CHECK(!in_popup_init_);
+
       size_animation_.Stop();
 
       // NOTE: Do NOT use CloseNow() here, as we may be deep in a callstack
@@ -215,16 +219,16 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
     params.parent = popup_parent;
     params.bounds = GetPopupBounds();
     params.context = popup_parent;
+    in_popup_init_ = true;
     popup_->Init(params);
+    in_popup_init_ = false;
 #if defined(USE_AURA)
     views::corewm::SetWindowVisibilityAnimationType(
         popup_->GetNativeView(),
         views::corewm::WINDOW_VISIBILITY_ANIMATION_TYPE_VERTICAL);
-#if defined(OS_CHROMEOS)
     // No animation for autocomplete popup appearance.
     views::corewm::SetWindowVisibilityAnimationTransition(
         popup_->GetNativeView(), views::corewm::ANIMATE_HIDE);
-#endif
 #endif
     popup_->SetContentsView(this);
     popup_->StackAbove(omnibox_view_->GetRelativeWindowForPopup());
@@ -247,7 +251,7 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
     popup_->SetBounds(GetPopupBounds());
   }
 
-  SchedulePaint();
+  Layout();
 }
 
 gfx::Rect OmniboxPopupContentsView::GetTargetBounds() {
@@ -284,7 +288,7 @@ gfx::Image OmniboxPopupContentsView::GetIconIfExtensionMatch(
 // OmniboxPopupContentsView, AnimationDelegate implementation:
 
 void OmniboxPopupContentsView::AnimationProgressed(
-    const ui::Animation* animation) {
+    const gfx::Animation* animation) {
   // We should only be running the animation when the popup is already visible.
   DCHECK(popup_ != NULL);
   popup_->SetBounds(GetPopupBounds());

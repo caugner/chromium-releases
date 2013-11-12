@@ -24,7 +24,7 @@
 #include "chrome/browser/policy/policy_types.h"
 #include "chrome/browser/policy/proto/cloud/chrome_extension_policy.pb.h"
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
-#include "chrome/common/policy/policy_schema.h"
+#include "components/policy/core/common/policy_schema.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -107,9 +107,13 @@ class ComponentCloudPolicyServiceTest : public testing::Test {
 
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    cache_ = new ResourceCache(temp_dir_.path());
+    cache_ = new ResourceCache(temp_dir_.path(), loop_.message_loop_proxy());
     service_.reset(new ComponentCloudPolicyService(
-        &delegate_, &store_, make_scoped_ptr(cache_)));
+        &delegate_,
+        &store_,
+        make_scoped_ptr(cache_),
+        loop_.message_loop_proxy(),
+        loop_.message_loop_proxy()));
 
     builder_.policy_data().set_policy_type(
         dm_protocol::kChromeExtensionPolicyType);

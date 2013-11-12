@@ -11,6 +11,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
@@ -34,8 +35,8 @@
 #include "grit/generated_resources.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/clipboard/clipboard.h"
-#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/test/ui_controls.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/menu/menu_controller.h"
@@ -116,13 +117,13 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
         model_(NULL) {}
 
   virtual void SetUp() OVERRIDE {
-    views::MenuController::TurnOffContextMenuSelectionHoldForTest();
+    views::MenuController::TurnOffMenuSelectionHoldForTest();
     BookmarkBarView::DisableAnimationsForTesting(true);
 
     profile_.reset(new TestingProfile());
     profile_->CreateBookmarkModel(true);
     model_ = BookmarkModelFactory::GetForProfile(profile_.get());
-    ui_test_utils::WaitForBookmarkModelToLoad(model_);
+    test::WaitForBookmarkModelToLoad(model_);
     profile_->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, true);
 
     Browser::CreateParams native_params(profile_.get(),

@@ -17,9 +17,9 @@
 #include "content/public/common/content_paths.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
-#include "content/shell/shell.h"
-#include "content/shell/shell_content_browser_client.h"
-#include "content/shell/shell_resource_dispatcher_host_delegate.h"
+#include "content/shell/browser/shell.h"
+#include "content/shell/browser/shell_content_browser_client.h"
+#include "content/shell/browser/shell_resource_dispatcher_host_delegate.h"
 #include "content/test/content_browser_test.h"
 #include "content/test/content_browser_test_utils.h"
 #include "net/base/test_data_directory.h"
@@ -156,9 +156,10 @@ IN_PROC_BROWSER_TEST_F(WorkerTest, LimitPerPage) {
   ASSERT_TRUE(WaitForWorkerProcessCount(max_workers_per_tab));
 }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
-// This test is flaky inside the Linux SUID sandbox.
-// http://crbug.com/130116
+
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_MACOSX)
+// This test is flaky inside the Linux SUID sandbox: http://crbug.com/130116
+// Also flaky on Mac: http://crbug.com/295193
 IN_PROC_BROWSER_TEST_F(WorkerTest, DISABLED_LimitTotal) {
 #else
 // http://crbug.com/36800
@@ -283,6 +284,15 @@ IN_PROC_BROWSER_TEST_F(WorkerTest, WebSocketSharedWorker) {
   NavigateToURL(window, url);
   string16 final_title = title_watcher.WaitAndGetTitle();
   EXPECT_EQ(expected_title, final_title);
+}
+
+IN_PROC_BROWSER_TEST_F(WorkerTest, PassMessagePortToSharedWorker) {
+  RunTest("pass_messageport_to_sharedworker.html", "");
+}
+
+IN_PROC_BROWSER_TEST_F(WorkerTest,
+                       PassMessagePortToSharedWorkerDontWaitForConnect) {
+  RunTest("pass_messageport_to_sharedworker_dont_wait_for_connect.html", "");
 }
 
 }  // namespace content

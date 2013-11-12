@@ -20,6 +20,7 @@ class Widget;
 
 namespace chromeos {
 
+class AppLaunchController;
 class WebUILoginView;
 class WizardController;
 
@@ -82,6 +83,10 @@ class LoginDisplayHost {
   // Result should not be stored.
   virtual WizardController* GetWizardController() = 0;
 
+  // Returns current AppLaunchController, if it exists.
+  // Result should not be stored.
+  virtual AppLaunchController* GetAppLaunchController() = 0;
+
   // Starts screen for adding user into session.
   // |completion_callback| called before display host shutdown.
   // |completion_callback| can be null.
@@ -98,6 +103,9 @@ class LoginDisplayHost {
 
   // Initiates authentication network prewarming.
   virtual void PrewarmAuthentication() = 0;
+
+  // Starts app launch splash screen.
+  virtual void StartAppLaunch(const std::string& app_id) = 0;
 };
 
 }  // namespace chromeos

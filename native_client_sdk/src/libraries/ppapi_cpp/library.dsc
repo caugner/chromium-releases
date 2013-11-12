@@ -1,7 +1,6 @@
 {
   'TOOLS': ['newlib', 'glibc', 'pnacl', 'win', 'linux'],
   'SEARCH': [
-      '.',
       '../../../../ppapi/cpp',
       '../../../../ppapi/cpp/dev',
       '../../../../ppapi/cpp/extensions',
@@ -39,6 +38,8 @@
         'mouse_cursor.cc',
         'mouse_lock.cc',
         'net_address.cc',
+        'network_list.cc',
+        'network_monitor.cc',
         'network_proxy.cc',
         'ppp_entrypoints.cc',
         'rect.cc',
@@ -135,6 +136,8 @@
         'mouse_cursor.h',
         'mouse_lock.h',
         'net_address.h',
+        'network_list.h',
+        'network_monitor.h',
         'network_proxy.h',
         'output_traits.h',
         'pass_ref.h',

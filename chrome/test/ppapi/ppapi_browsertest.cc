@@ -134,11 +134,6 @@ using content::RenderViewHost;
 // Interface tests.
 //
 
-// Disable tests under ASAN.  http://crbug.com/104832.
-// This is a bit heavy handed, but the majority of these tests fail under ASAN.
-// See bug for history.
-#if !defined(ADDRESS_SANITIZER)
-
 TEST_PPAPI_IN_PROCESS(Broker)
 // Flaky, http://crbug.com/111355
 TEST_PPAPI_OUT_OF_PROCESS(DISABLED_Broker)
@@ -291,15 +286,27 @@ TEST_PPAPI_NACL(Graphics2D_Flush)
 TEST_PPAPI_NACL(Graphics2D_FlushOffscreenUpdate)
 TEST_PPAPI_NACL(Graphics2D_BindNull)
 
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
+// In-process and NaCl tests are having flaky failures on Win: crbug.com/242252
+#define MAYBE_IN_Graphics3D DISABLED_Graphics3D
+#define MAYBE_OUT_Graphics3D Graphics3D
+#define MAYBE_NACL_Graphics3D DISABLED_Graphics3D
+#elif defined(OS_WIN) && defined(USE_AURA)
 // These tests fail with the test compositor which is what's used by default for
 // browser tests on Windows Aura. Renable when the software compositor is
 // available.
-// In-process and NaCl tests are having flaky failures on Win: crbug.com/242252
-TEST_PPAPI_IN_PROCESS(DISABLED_Graphics3D)
-TEST_PPAPI_OUT_OF_PROCESS(Graphics3D)
-TEST_PPAPI_NACL(DISABLED_Graphics3D)
+#define MAYBE_IN_Graphics3D DISABLED_Graphics3D
+#define MAYBE_OUT_Graphics3D DISABLED_Graphics3D
+#define MAYBE_NACL_Graphics3D DISABLED_Graphics3D
+#else
+// The tests are failing in-process. crbug.com/280282
+#define MAYBE_IN_Graphics3D DISABLED_Graphics3D
+#define MAYBE_OUT_Graphics3D Graphics3D
+#define MAYBE_NACL_Graphics3D Graphics3D
 #endif
+TEST_PPAPI_IN_PROCESS(MAYBE_IN_Graphics3D)
+TEST_PPAPI_OUT_OF_PROCESS(MAYBE_OUT_Graphics3D)
+TEST_PPAPI_NACL(MAYBE_NACL_Graphics3D)
 
 TEST_PPAPI_IN_PROCESS(ImageData)
 TEST_PPAPI_OUT_OF_PROCESS(ImageData)
@@ -317,6 +324,8 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, TCPSocket) {
       LIST_TEST(TCPSocket_Connect)
       LIST_TEST(TCPSocket_ReadWrite)
       LIST_TEST(TCPSocket_SetOption)
+      LIST_TEST(TCPSocket_Listen)
+      LIST_TEST(TCPSocket_Backlog)
   );
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, TCPSocket) {
@@ -324,6 +333,8 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, TCPSocket) {
       LIST_TEST(TCPSocket_Connect)
       LIST_TEST(TCPSocket_ReadWrite)
       LIST_TEST(TCPSocket_SetOption)
+      LIST_TEST(TCPSocket_Listen)
+      LIST_TEST(TCPSocket_Backlog)
   );
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(TCPSocket)) {
@@ -331,6 +342,8 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(TCPSocket)) {
       LIST_TEST(TCPSocket_Connect)
       LIST_TEST(TCPSocket_ReadWrite)
       LIST_TEST(TCPSocket_SetOption)
+      LIST_TEST(TCPSocket_Listen)
+      LIST_TEST(TCPSocket_Backlog)
   );
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, TCPSocket) {
@@ -338,15 +351,15 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, TCPSocket) {
       LIST_TEST(TCPSocket_Connect)
       LIST_TEST(TCPSocket_ReadWrite)
       LIST_TEST(TCPSocket_SetOption)
+      LIST_TEST(TCPSocket_Listen)
+      LIST_TEST(TCPSocket_Backlog)
   );
 }
 
 TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate)
-TEST_PPAPI_IN_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate)
 TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate)
 
 TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivateTrusted)
-TEST_PPAPI_IN_PROCESS_WITH_SSL_SERVER(TCPSocketPrivateTrusted)
 
 // UDPSocket tests.
 // UDPSocket_Broadcast is disabled for OSX because it requires root permissions
@@ -477,7 +490,13 @@ IN_PROC_BROWSER_TEST_F(PPAPITest, URLLoader) {
       LIST_TEST(URLLoader_PrefetchBufferThreshold)
   );
 }
-IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, URLLoader) {
+// Timing out on Windows dbg. http://crbug.com/95005
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_URLLoader DISABLED_URLLoader
+#else
+#define MAYBE_URLLoader URLLoader
+#endif
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, MAYBE_URLLoader) {
   RunTestViaHTTP(
       LIST_TEST(URLLoader_BasicGET)
       LIST_TEST(URLLoader_BasicPOST)
@@ -948,7 +967,6 @@ TEST_PPAPI_IN_PROCESS_VIA_HTTP(MAYBE_Fullscreen)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_Fullscreen)
 TEST_PPAPI_NACL(MAYBE_Fullscreen)
 
-TEST_PPAPI_IN_PROCESS(X509CertificatePrivate)
 TEST_PPAPI_OUT_OF_PROCESS(X509CertificatePrivate)
 
 // There is no proxy. This is used for PDF metrics reporting, and PDF only
@@ -1051,44 +1069,32 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, NetAddressPrivate) {
 }
 
 // NetworkMonitor tests.
-IN_PROC_BROWSER_TEST_F(PPAPITest, NetworkMonitor) {
-  RunTestViaHTTP(
-      LIST_TEST(NetworkMonitorPrivate_Basic)
-      LIST_TEST(NetworkMonitorPrivate_2Monitors)
-      LIST_TEST(NetworkMonitorPrivate_DeleteInCallback)
-      LIST_TEST(NetworkMonitorPrivate_ListObserver)
-  );
-}
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, NetworkMonitor) {
   RunTestViaHTTP(
-      LIST_TEST(NetworkMonitorPrivate_Basic)
-      LIST_TEST(NetworkMonitorPrivate_2Monitors)
-      LIST_TEST(NetworkMonitorPrivate_DeleteInCallback)
-      LIST_TEST(NetworkMonitorPrivate_ListObserver)
+      LIST_TEST(NetworkMonitor_Basic)
+      LIST_TEST(NetworkMonitor_2Monitors)
+      LIST_TEST(NetworkMonitor_DeleteInCallback)
   );
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, NetworkMonitor) {
   RunTestViaHTTP(
-      LIST_TEST(NetworkMonitorPrivate_Basic)
-      LIST_TEST(NetworkMonitorPrivate_2Monitors)
-      LIST_TEST(NetworkMonitorPrivate_DeleteInCallback)
-      LIST_TEST(NetworkMonitorPrivate_ListObserver)
+      LIST_TEST(NetworkMonitor_Basic)
+      LIST_TEST(NetworkMonitor_2Monitors)
+      LIST_TEST(NetworkMonitor_DeleteInCallback)
   );
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(NetworkMonitor)) {
   RunTestViaHTTP(
-      LIST_TEST(NetworkMonitorPrivate_Basic)
-      LIST_TEST(NetworkMonitorPrivate_2Monitors)
-      LIST_TEST(NetworkMonitorPrivate_DeleteInCallback)
-      LIST_TEST(NetworkMonitorPrivate_ListObserver)
+      LIST_TEST(NetworkMonitor_Basic)
+      LIST_TEST(NetworkMonitor_2Monitors)
+      LIST_TEST(NetworkMonitor_DeleteInCallback)
   );
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, NetworkMonitor) {
   RunTestViaHTTP(
-      LIST_TEST(NetworkMonitorPrivate_Basic)
-      LIST_TEST(NetworkMonitorPrivate_2Monitors)
-      LIST_TEST(NetworkMonitorPrivate_DeleteInCallback)
-      LIST_TEST(NetworkMonitorPrivate_ListObserver)
+      LIST_TEST(NetworkMonitor_Basic)
+      LIST_TEST(NetworkMonitor_2Monitors)
+      LIST_TEST(NetworkMonitor_DeleteInCallback)
   );
 }
 
@@ -1312,41 +1318,56 @@ IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, AudioConfig) {
       LIST_TEST(AudioConfig_InvalidConfigs));
 }
 
-
-IN_PROC_BROWSER_TEST_F(PPAPITest, Audio) {
+// Flaky on ChromeOS dbg, http://crbug.com/277564.
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_Audio DISABLED_Audio
+#else
+#define MAYBE_Audio Audio
+#endif
+IN_PROC_BROWSER_TEST_F(PPAPITest, MAYBE_Audio) {
   RunTest(LIST_TEST(Audio_Creation)
           LIST_TEST(Audio_DestroyNoStop)
           LIST_TEST(Audio_Failures)
           LIST_TEST(Audio_AudioCallback1)
-          LIST_TEST(Audio_AudioCallback2));
+          LIST_TEST(Audio_AudioCallback2)
+          LIST_TEST(Audio_AudioCallback3)
+          LIST_TEST(Audio_AudioCallback4));
 }
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, Audio) {
   RunTest(LIST_TEST(Audio_Creation)
           LIST_TEST(Audio_DestroyNoStop)
           LIST_TEST(Audio_Failures)
           LIST_TEST(Audio_AudioCallback1)
-          LIST_TEST(Audio_AudioCallback2));
+          LIST_TEST(Audio_AudioCallback2)
+          LIST_TEST(Audio_AudioCallback3)
+          LIST_TEST(Audio_AudioCallback4));
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, Audio) {
   RunTestViaHTTP(LIST_TEST(Audio_Creation)
                  LIST_TEST(Audio_DestroyNoStop)
                  LIST_TEST(Audio_Failures)
                  LIST_TEST(Audio_AudioCallback1)
-                 LIST_TEST(Audio_AudioCallback2));
+                 LIST_TEST(Audio_AudioCallback2)
+                 LIST_TEST(Audio_AudioCallback3)
+                 LIST_TEST(Audio_AudioCallback4));
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(Audio)) {
   RunTestViaHTTP(LIST_TEST(Audio_Creation)
                  LIST_TEST(Audio_DestroyNoStop)
                  LIST_TEST(Audio_Failures)
                  LIST_TEST(Audio_AudioCallback1)
-                 LIST_TEST(Audio_AudioCallback2));
+                 LIST_TEST(Audio_AudioCallback2)
+                 LIST_TEST(Audio_AudioCallback3)
+                 LIST_TEST(Audio_AudioCallback4));
 }
 IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, Audio) {
   RunTestViaHTTP(LIST_TEST(Audio_Creation)
                  LIST_TEST(Audio_DestroyNoStop)
                  LIST_TEST(Audio_Failures)
                  LIST_TEST(Audio_AudioCallback1)
-                 LIST_TEST(Audio_AudioCallback2));
+                 LIST_TEST(Audio_AudioCallback2)
+                 LIST_TEST(Audio_AudioCallback3)
+                 LIST_TEST(Audio_AudioCallback4));
 }
 
 TEST_PPAPI_IN_PROCESS(View_CreatedVisible);
@@ -1509,6 +1530,12 @@ TEST_PPAPI_OUT_OF_PROCESS(MAYBE_FlashFullscreen)
 
 TEST_PPAPI_OUT_OF_PROCESS(PDF)
 
+// TODO(dalecurtis): Renable once the platform verification infobar has been
+// implemented; see http://crbug.com/270908
+// #if defined(OS_CHROMEOS)
+// TEST_PPAPI_OUT_OF_PROCESS(PlatformVerificationPrivate)
+// #endif
+
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, FlashDRM) {
   RunTest(
 #if (defined(OS_WIN) && defined(ENABLE_RLZ)) || defined(OS_CHROMEOS)
@@ -1521,5 +1548,3 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, FlashDRM) {
 
 TEST_PPAPI_IN_PROCESS(TalkPrivate)
 TEST_PPAPI_OUT_OF_PROCESS(TalkPrivate)
-
-#endif // ADDRESS_SANITIZER

@@ -4,6 +4,10 @@
 
 #include "base/test/test_launcher.h"
 
+#if defined(OS_POSIX)
+#include <fcntl.h>
+#endif
+
 #include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -11,13 +15,17 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/format_macros.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -40,6 +48,85 @@ const FilePath::CharType kDefaultOutputFile[] = FILE_PATH_LITERAL(
     "test_detail.xml");
 
 namespace {
+
+// Set of live launch test processes with corresponding lock (it is allowed
+// for callers to launch processes on different threads).
+LazyInstance<std::set<ProcessHandle> > g_live_process_handles
+    = LAZY_INSTANCE_INITIALIZER;
+LazyInstance<Lock> g_live_process_handles_lock = LAZY_INSTANCE_INITIALIZER;
+
+#if defined(OS_POSIX)
+// Self-pipe that makes it possible to do complex shutdown handling
+// outside of the signal handler.
+int g_shutdown_pipe[2] = { -1, -1 };
+
+void ShutdownPipeSignalHandler(int signal) {
+  HANDLE_EINTR(write(g_shutdown_pipe[1], "q", 1));
+}
+
+// I/O watcher for the reading end of the self-pipe above.
+// Terminates any launched child processes and exits the process.
+class SignalFDWatcher : public MessageLoopForIO::Watcher {
+ public:
+  SignalFDWatcher() {
+  }
+
+  virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE {
+    fprintf(stdout, "\nCaught signal. Killing spawned test processes...\n");
+    fflush(stdout);
+
+    // Keep the lock until exiting the process to prevent further processes
+    // from being spawned.
+    AutoLock lock(g_live_process_handles_lock.Get());
+
+    fprintf(stdout,
+            "Sending SIGTERM to %" PRIuS " child processes... ",
+            g_live_process_handles.Get().size());
+    fflush(stdout);
+
+    for (std::set<ProcessHandle>::iterator i =
+             g_live_process_handles.Get().begin();
+         i != g_live_process_handles.Get().end();
+         ++i) {
+      kill((-1) * (*i), SIGTERM);  // Send the signal to entire process group.
+    }
+
+    fprintf(stdout,
+            "done.\nGiving processes a chance to terminate cleanly... ");
+    fflush(stdout);
+
+    PlatformThread::Sleep(TimeDelta::FromMilliseconds(500));
+
+    fprintf(stdout, "done.\n");
+    fflush(stdout);
+
+    fprintf(stdout,
+            "Sending SIGKILL to %" PRIuS " child processes... ",
+            g_live_process_handles.Get().size());
+    fflush(stdout);
+
+    for (std::set<ProcessHandle>::iterator i =
+             g_live_process_handles.Get().begin();
+         i != g_live_process_handles.Get().end();
+         ++i) {
+      kill((-1) * (*i), SIGKILL);  // Send the signal to entire process group.
+    }
+
+    fprintf(stdout, "done.\n");
+    fflush(stdout);
+
+    // The signal would normally kill the process, so exit now.
+    exit(1);
+  }
+
+  virtual void OnFileCanWriteWithoutBlocking(int fd) OVERRIDE {
+    NOTREACHED();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SignalFDWatcher);
+};
+#endif  // defined(OS_POSIX)
 
 // Parses the environment variable var as an Int32.  If it is unset, returns
 // default_val.  If it is set, unsets it then converts it to Int32 before
@@ -98,6 +185,8 @@ bool ShouldRunTestOnShard(int total_shards, int shard_index, int test_id) {
   return (test_id % total_shards) == shard_index;
 }
 
+typedef Callback<void(bool)> RunTestsCallback;
+
 // A helper class to output results.
 // Note: as currently XML is the only supported format by gtest, we don't
 // check output format (e.g. "xml:" prefix) here and output an XML file
@@ -109,25 +198,38 @@ bool ShouldRunTestOnShard(int total_shards, int shard_index, int test_id) {
 // detailed failure messages either.
 class ResultsPrinter {
  public:
-  explicit ResultsPrinter(const CommandLine& command_line);
+  ResultsPrinter(const CommandLine& command_line,
+                 const RunTestsCallback& callback);
   ~ResultsPrinter();
+
+  // Called when test named |name| is scheduled to be started.
+  void OnTestStarted(const std::string& name);
+
+  // Called when all tests that were to be started have been scheduled
+  // to be started.
+  void OnAllTestsStarted();
 
   // Adds |result| to the stored test results.
   void AddTestResult(const TestResult& result);
 
-  // Returns list of full names of failed tests.
-  const std::vector<std::string>& failed_tests() const { return failed_tests_; }
-
-  // Returns total number of tests run.
-  size_t test_run_count() const { return test_run_count_; }
+  WeakPtr<ResultsPrinter> GetWeakPtr();
 
  private:
+  // Prints a list of tests that finished with |status|.
+  void PrintTestsByStatus(TestResult::Status status,
+                          const std::string& description);
+
+  ThreadChecker thread_checker_;
+
   // Test results grouped by test case name.
   typedef std::map<std::string, std::vector<TestResult> > ResultsMap;
   ResultsMap results_;
 
   // List of full names of failed tests.
-  std::vector<std::string> failed_tests_;
+  typedef std::map<TestResult::Status, std::vector<std::string> > StatusMap;
+  StatusMap tests_by_status_;
+
+  size_t test_started_count_;
 
   // Total number of tests run.
   size_t test_run_count_;
@@ -135,12 +237,20 @@ class ResultsPrinter {
   // File handle of output file (can be NULL if no file).
   FILE* out_;
 
+  RunTestsCallback callback_;
+
+  WeakPtrFactory<ResultsPrinter> weak_ptr_;
+
   DISALLOW_COPY_AND_ASSIGN(ResultsPrinter);
 };
 
-ResultsPrinter::ResultsPrinter(const CommandLine& command_line)
-    : test_run_count_(0),
-      out_(NULL) {
+ResultsPrinter::ResultsPrinter(const CommandLine& command_line,
+                               const RunTestsCallback& callback)
+    : test_started_count_(0),
+      test_run_count_(0),
+      out_(NULL),
+      callback_(callback),
+      weak_ptr_(this) {
   if (!command_line.HasSwitch(kGTestOutputFlag))
     return;
   std::string flag = command_line.GetSwitchValueASCII(kGTestOutputFlag);
@@ -178,6 +288,8 @@ ResultsPrinter::ResultsPrinter(const CommandLine& command_line)
 }
 
 ResultsPrinter::~ResultsPrinter() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
   if (!out_)
     return;
   fprintf(out_, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -194,7 +306,7 @@ ResultsPrinter::~ResultsPrinter() {
               result.test_name.c_str(),
               result.elapsed_time.InSecondsF(),
               result.test_case_name.c_str());
-      if (!result.success)
+      if (result.status != TestResult::TEST_SUCCESS)
         fprintf(out_, "      <failure message=\"\" type=\"\"></failure>\n");
       fprintf(out_, "    </testcase>\n");
     }
@@ -204,14 +316,89 @@ ResultsPrinter::~ResultsPrinter() {
   fclose(out_);
 }
 
+void ResultsPrinter::OnTestStarted(const std::string& name) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  ++test_started_count_;
+}
+
+void ResultsPrinter::OnAllTestsStarted() {
+  if (test_started_count_ == 0) {
+    fprintf(stdout, "0 tests run\n");
+    fflush(stdout);
+
+    // No tests have actually been started, so fire the callback
+    // to avoid a hang.
+    callback_.Run(true);
+    delete this;
+  }
+}
+
 void ResultsPrinter::AddTestResult(const TestResult& result) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
   ++test_run_count_;
   results_[result.test_case_name].push_back(result);
 
-  if (!result.success) {
-    failed_tests_.push_back(
-        std::string(result.test_case_name) + "." + result.test_name);
+  // TODO(phajdan.jr): Align counter (padding).
+  std::string status_line(StringPrintf("[%" PRIuS "/%" PRIuS "] %s ",
+                                       test_run_count_,
+                                       test_started_count_,
+                                       result.GetFullName().c_str()));
+  if (result.completed()) {
+    status_line.append(StringPrintf("(%" PRId64 " ms)",
+                       result.elapsed_time.InMilliseconds()));
+  } else if (result.status == TestResult::TEST_TIMEOUT) {
+    status_line.append("(TIMED OUT)");
+  } else if (result.status == TestResult::TEST_CRASH) {
+    status_line.append("(CRASHED)");
+  } else if (result.status == TestResult::TEST_UNKNOWN) {
+    status_line.append("(UNKNOWN)");
+  } else {
+    // Fail very loudly so it's not ignored.
+    CHECK(false) << "Unhandled test result status: " << result.status;
   }
+  fprintf(stdout, "%s\n", status_line.c_str());
+  fflush(stdout);
+
+  tests_by_status_[result.status].push_back(result.GetFullName());
+
+  if (test_run_count_ == test_started_count_) {
+    fprintf(stdout, "%" PRIuS " test%s run\n",
+            test_run_count_,
+            test_run_count_ > 1 ? "s" : "");
+    fflush(stdout);
+
+    PrintTestsByStatus(TestResult::TEST_FAILURE, "failed");
+    PrintTestsByStatus(TestResult::TEST_TIMEOUT, "timed out");
+    PrintTestsByStatus(TestResult::TEST_CRASH, "crashed");
+    PrintTestsByStatus(TestResult::TEST_UNKNOWN, "had unknown result");
+
+    callback_.Run(
+        tests_by_status_[TestResult::TEST_SUCCESS].size() == test_run_count_);
+
+    delete this;
+  }
+}
+
+WeakPtr<ResultsPrinter> ResultsPrinter::GetWeakPtr() {
+  return weak_ptr_.GetWeakPtr();
+}
+
+void ResultsPrinter::PrintTestsByStatus(TestResult::Status status,
+                                        const std::string& description) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  const std::vector<std::string>& tests = tests_by_status_[status];
+  if (tests.empty())
+    return;
+  fprintf(stdout,
+          "%" PRIuS " test%s %s:\n",
+          tests.size(),
+          tests.size() != 1 ? "s" : "",
+          description.c_str());
+  for (size_t i = 0; i < tests.size(); i++)
+    fprintf(stdout, "    %s\n", tests[i].c_str());
+  fflush(stdout);
 }
 
 // For a basic pattern matching for gtest_filter options.  (Copied from
@@ -255,9 +442,10 @@ bool MatchesFilter(const std::string& name, const std::string& filter) {
   }
 }
 
-bool RunTests(TestLauncherDelegate* launcher_delegate,
+void RunTests(TestLauncherDelegate* launcher_delegate,
               int total_shards,
-              int shard_index) {
+              int shard_index,
+              const RunTestsCallback& callback) {
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
 
   DCHECK(!command_line->HasSwitch(kGTestListTestsFlag));
@@ -278,7 +466,9 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
 
   int num_runnable_tests = 0;
 
-  ResultsPrinter printer(*command_line);
+  // ResultsPrinter detects when all tests are done and deletes itself.
+  ResultsPrinter* printer = new ResultsPrinter(*command_line, callback);
+
   for (int i = 0; i < unit_test->total_test_case_count(); ++i) {
     const testing::TestCase* test_case = unit_test->GetTestCase(i);
     for (int j = 0; j < test_case->total_test_count(); ++j) {
@@ -293,10 +483,13 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
         continue;
       }
 
+      std::string filtering_test_name =
+          launcher_delegate->GetTestNameForFiltering(test_case, test_info);
+
       // Skip the test that doesn't match the filter string (if given).
       if ((!positive_filter.empty() &&
-           !MatchesFilter(test_name, positive_filter)) ||
-          MatchesFilter(test_name, negative_filter)) {
+           !MatchesFilter(filtering_test_name, positive_filter)) ||
+          MatchesFilter(filtering_test_name, negative_filter)) {
         continue;
       }
 
@@ -305,39 +498,67 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
 
       bool should_run = ShouldRunTestOnShard(total_shards, shard_index,
                                              num_runnable_tests);
-      num_runnable_tests += 1;
+      num_runnable_tests++;
       if (!should_run)
         continue;
 
-      launcher_delegate->RunTest(test_case,
-                                 test_info,
-                                 base::Bind(
-                                     &ResultsPrinter::AddTestResult,
-                                     base::Unretained(&printer)));
+      printer->OnTestStarted(test_name);
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          Bind(&TestLauncherDelegate::RunTest,
+               Unretained(launcher_delegate),
+               test_case,
+               test_info,
+               Bind(&ResultsPrinter::AddTestResult, Unretained(printer))));
     }
   }
 
-  launcher_delegate->RunRemainingTests();
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      Bind(&TestLauncherDelegate::RunRemainingTests,
+      Unretained(launcher_delegate)));
 
-  printf("%" PRIuS " test%s run\n",
-         printer.test_run_count(),
-         printer.test_run_count() > 1 ? "s" : "");
-  printf("%" PRIuS " test%s failed\n",
-         printer.failed_tests().size(),
-         printer.failed_tests().size() != 1 ? "s" : "");
-  if (printer.failed_tests().empty())
-    return true;
-
-  printf("Failing tests:\n");
-  for (size_t i = 0; i < printer.failed_tests().size(); ++i)
-    printf("%s\n", printer.failed_tests()[i].c_str());
-
-  return false;
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      Bind(&ResultsPrinter::OnAllTestsStarted, printer->GetWeakPtr()));
 }
+
+void RunTestIteration(TestLauncherDelegate* launcher_delegate,
+                      int32 total_shards,
+                      int32 shard_index,
+                      int cycles,
+                      int* exit_code,
+                      bool run_tests_success) {
+  if (!run_tests_success) {
+    *exit_code = 1;
+    MessageLoop::current()->Quit();
+    return;
+  }
+
+  if (cycles == 0) {
+    MessageLoop::current()->Quit();
+    return;
+  }
+
+  // Special value "-1" means "repeat indefinitely".
+  int new_cycles = (cycles == -1) ? cycles : cycles - 1;
+
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      Bind(&RunTests, launcher_delegate, total_shards, shard_index,
+           Bind(&RunTestIteration,
+                launcher_delegate,
+                total_shards,
+                shard_index,
+                new_cycles,
+                exit_code)));
+}
+
 
 }  // namespace
 
 const char kGTestFilterFlag[] = "gtest_filter";
+const char kGTestHelpFlag[]   = "gtest_help";
 const char kGTestListTestsFlag[] = "gtest_list_tests";
 const char kGTestRepeatFlag[] = "gtest_repeat";
 const char kGTestRunDisabledTestsFlag[] = "gtest_also_run_disabled_tests";
@@ -345,22 +566,66 @@ const char kGTestOutputFlag[] = "gtest_output";
 
 const char kHelpFlag[]   = "help";
 
-TestResult::TestResult() {
+TestResult::TestResult() : status(TEST_UNKNOWN) {
 }
 
 TestLauncherDelegate::~TestLauncherDelegate() {
+}
+
+void PrintTestOutputSnippetOnFailure(const TestResult& result,
+                                     const std::string& full_output) {
+  if (result.status == TestResult::TEST_SUCCESS)
+    return;
+
+  size_t run_pos = full_output.find(std::string("[ RUN      ] ") +
+                                    result.GetFullName());
+  if (run_pos == std::string::npos)
+    return;
+
+  size_t end_pos = full_output.find(std::string("[  FAILED  ] ") +
+                                    result.GetFullName(),
+                                    run_pos);
+  if (end_pos != std::string::npos) {
+    size_t newline_pos = full_output.find("\n", end_pos);
+    if (newline_pos != std::string::npos)
+      end_pos = newline_pos + 1;
+  }
+
+  std::string snippet(full_output.substr(run_pos));
+  if (end_pos != std::string::npos)
+    snippet = full_output.substr(run_pos, end_pos - run_pos);
+
+  // TODO(phajdan.jr): Indent each line of the snippet so it's more
+  // noticeable.
+  fprintf(stdout, "%s", snippet.c_str());
+  fflush(stdout);
 }
 
 int LaunchChildGTestProcess(const CommandLine& command_line,
                             const std::string& wrapper,
                             base::TimeDelta timeout,
                             bool* was_timeout) {
+  LaunchOptions options;
+
+#if defined(OS_POSIX)
+  // On POSIX, we launch the test in a new process group with pgid equal to
+  // its pid. Any child processes that the test may create will inherit the
+  // same pgid. This way, if the test is abruptly terminated, we can clean up
+  // any orphaned child processes it may have left behind.
+  options.new_process_group = true;
+#endif
+
+  return LaunchChildTestProcessWithOptions(
+      PrepareCommandLineForGTest(command_line, wrapper),
+      options,
+      timeout,
+      was_timeout);
+}
+
+CommandLine PrepareCommandLineForGTest(const CommandLine& command_line,
+                                       const std::string& wrapper) {
   CommandLine new_command_line(command_line.GetProgram());
   CommandLine::SwitchMap switches = command_line.GetSwitches();
-
-  // Strip out gtest_output flag because otherwise we would overwrite results
-  // of the other tests.
-  switches.erase(kGTestOutputFlag);
 
   // Strip out gtest_repeat flag - this is handled by the launcher process.
   switches.erase(kGTestRepeatFlag);
@@ -380,19 +645,55 @@ int LaunchChildGTestProcess(const CommandLine& command_line,
   new_command_line.PrependWrapper(wrapper);
 #endif
 
-  base::ProcessHandle process_handle;
-  base::LaunchOptions options;
+  return new_command_line;
+}
 
+int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
+                                      const LaunchOptions& options,
+                                      base::TimeDelta timeout,
+                                      bool* was_timeout) {
 #if defined(OS_POSIX)
-  // On POSIX, we launch the test in a new process group with pgid equal to
-  // its pid. Any child processes that the test may create will inherit the
-  // same pgid. This way, if the test is abruptly terminated, we can clean up
-  // any orphaned child processes it may have left behind.
-  options.new_process_group = true;
+  // Make sure an option we rely on is present - see LaunchChildGTestProcess.
+  DCHECK(options.new_process_group);
 #endif
 
-  if (!base::LaunchProcess(new_command_line, options, &process_handle))
+  LaunchOptions new_options(options);
+
+#if defined(OS_WIN)
+  DCHECK(!new_options.job_handle);
+
+  win::ScopedHandle job_handle(CreateJobObject(NULL, NULL));
+  if (!job_handle.IsValid()) {
+    LOG(ERROR) << "Could not create JobObject.";
     return -1;
+  }
+
+  // Allow break-away from job since sandbox and few other places rely on it
+  // on Windows versions prior to Windows 8 (which supports nested jobs).
+  // TODO(phajdan.jr): Do not allow break-away on Windows 8.
+  if (!SetJobObjectLimitFlags(job_handle.Get(),
+                              JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+                              JOB_OBJECT_LIMIT_BREAKAWAY_OK)) {
+    LOG(ERROR) << "Could not SetJobObjectLimitFlags.";
+    return -1;
+  }
+
+  new_options.job_handle = job_handle.Get();
+#endif  // defined(OS_WIN)
+
+  base::ProcessHandle process_handle;
+
+  {
+    // Note how we grab the lock before the process possibly gets created.
+    // This ensures that when the lock is held, ALL the processes are registered
+    // in the set.
+    AutoLock lock(g_live_process_handles_lock.Get());
+
+    if (!base::LaunchProcess(command_line, new_options, &process_handle))
+      return -1;
+
+    g_live_process_handles.Get().insert(process_handle);
+  }
 
   int exit_code = 0;
   if (!base::WaitForExitCodeWithTimeout(process_handle,
@@ -405,15 +706,24 @@ int LaunchChildGTestProcess(const CommandLine& command_line,
     base::KillProcess(process_handle, -1, true);
   }
 
+  {
+    // Note how we grab the log before issuing a possibly broad process kill.
+    // Other code parts that grab the log kill processes, so avoid trying
+    // to do that twice and trigger all kinds of log messages.
+    AutoLock lock(g_live_process_handles_lock.Get());
+
 #if defined(OS_POSIX)
-  if (exit_code != 0) {
-    // On POSIX, in case the test does not exit cleanly, either due to a crash
-    // or due to it timing out, we need to clean up any child processes that
-    // it might have created. On Windows, child processes are automatically
-    // cleaned up using JobObjects.
-    base::KillProcessGroup(process_handle);
-  }
+    if (exit_code != 0) {
+      // On POSIX, in case the test does not exit cleanly, either due to a crash
+      // or due to it timing out, we need to clean up any child processes that
+      // it might have created. On Windows, child processes are automatically
+      // cleaned up using JobObjects.
+      base::KillProcessGroup(process_handle);
+    }
 #endif
+
+    g_live_process_handles.Get().erase(process_handle);
+  }
 
   base::CloseProcessHandle(process_handle);
 
@@ -425,6 +735,7 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
                 char** argv) {
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
 
+
   int32 total_shards;
   int32 shard_index;
   InitSharding(&total_shards, &shard_index);
@@ -434,16 +745,41 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
     StringToInt(command_line->GetSwitchValueASCII(kGTestRepeatFlag), &cycles);
 
   int exit_code = 0;
-  while (cycles != 0) {
-    if (!RunTests(launcher_delegate, total_shards, shard_index)) {
-      exit_code = 1;
-      break;
-    }
 
-    // Special value "-1" means "repeat indefinitely".
-    if (cycles != -1)
-      cycles--;
-  }
+#if defined(OS_POSIX)
+  CHECK_EQ(0, pipe(g_shutdown_pipe));
+
+  struct sigaction action;
+  memset(&action, 0, sizeof(action));
+  sigemptyset(&action.sa_mask);
+  action.sa_handler = &ShutdownPipeSignalHandler;
+
+  CHECK_EQ(0, sigaction(SIGINT, &action, NULL));
+  CHECK_EQ(0, sigaction(SIGQUIT, &action, NULL));
+  CHECK_EQ(0, sigaction(SIGTERM, &action, NULL));
+
+  MessageLoopForIO::FileDescriptorWatcher controller;
+  SignalFDWatcher watcher;
+
+  CHECK(MessageLoopForIO::current()->WatchFileDescriptor(
+            g_shutdown_pipe[0],
+            true,
+            MessageLoopForIO::WATCH_READ,
+            &controller,
+            &watcher));
+#endif  // defined(OS_POSIX)
+
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      Bind(&RunTestIteration,
+           launcher_delegate,
+           total_shards,
+           shard_index,
+           cycles,
+           &exit_code,
+           true));
+
+  MessageLoop::current()->Run();
 
   return exit_code;
 }

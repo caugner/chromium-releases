@@ -80,9 +80,9 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/startup_metric_utils.h"
 #include "chrome/common/url_constants.h"
 #include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
+#include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
@@ -97,7 +97,23 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if defined(ENABLE_CONFIGURATION_POLICY)
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
+#include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
+#else
+#include "chrome/browser/policy/cloud/user_cloud_policy_manager.h"
+#include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
+#endif
+#endif
+
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/managed_mode/managed_user_settings_service.h"
+#include "chrome/browser/managed_mode/managed_user_settings_service_factory.h"
+#endif
+
 #if defined(OS_WIN)
+#include "chrome/browser/profiles/file_path_verifier_win.h"
 #include "chrome/installer/util/install_util.h"
 #endif
 
@@ -107,16 +123,6 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#endif
-
-#if defined(ENABLE_CONFIGURATION_POLICY)
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
-#include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
-#else
-#include "chrome/browser/policy/cloud/user_cloud_policy_manager.h"
-#include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
-#endif
 #endif
 
 using base::Time;
@@ -236,6 +242,17 @@ std::string ExitTypeToSessionTypePrefValue(Profile::ExitType type) {
   }
   NOTREACHED();
   return std::string();
+}
+
+void SchedulePrefsFileVerification(const base::FilePath& prefs_file) {
+#if defined(OS_WIN)
+  // Only do prefs file verification on Windows.
+  const int kVerifyPrefsFileDelaySeconds = 60;
+  BrowserThread::GetBlockingPool()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&VerifyPreferencesFile, prefs_file),
+        base::TimeDelta::FromSeconds(kVerifyPrefsFileDelaySeconds));
+#endif
 }
 
 }  // namespace
@@ -407,7 +424,15 @@ ProfileImpl::ProfileImpl(
     chrome::RegisterLoginProfilePrefs(pref_registry_.get());
   else
 #endif
-    chrome::RegisterUserProfilePrefs(pref_registry_.get());
+  chrome::RegisterUserProfilePrefs(pref_registry_.get());
+
+  ManagedUserSettingsService* managed_user_settings = NULL;
+#if defined(ENABLE_MANAGED_USERS)
+  managed_user_settings =
+      ManagedUserSettingsServiceFactory::GetForProfile(this);
+  managed_user_settings->Init(
+      path_, sequenced_task_runner, create_mode == CREATE_MODE_SYNCHRONOUS);
+#endif
 
   {
     // On startup, preference loading is always synchronous so a scoped timer
@@ -418,6 +443,7 @@ ProfileImpl::ProfileImpl(
         GetPrefFilePath(),
         sequenced_task_runner,
         profile_policy_connector_->policy_service(),
+        managed_user_settings,
         new ExtensionPrefStore(
             ExtensionPrefValueMapFactory::GetForProfile(this), false),
         pref_registry_,
@@ -705,9 +731,7 @@ Profile* ProfileImpl::GetOriginalProfile() {
 }
 
 bool ProfileImpl::IsManaged() {
-  // TODO(ibraaaa): migrate away from |prefs::kProfileIsManaged|.
-  return GetPrefs()->GetBoolean(prefs::kProfileIsManaged) ||
-      !GetPrefs()->GetString(prefs::kManagedUserId).empty();
+  return !GetPrefs()->GetString(prefs::kManagedUserId).empty();
 }
 
 ExtensionService* ProfileImpl::GetExtensionService() {
@@ -757,7 +781,7 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
   prefs_->SetBoolean(prefs::kSessionExitedCleanly, true);
 
   BrowserContextDependencyManager::GetInstance()->CreateBrowserContextServices(
-      this, false);
+      this);
 
   DCHECK(!net_pref_observer_);
   {
@@ -767,6 +791,8 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
         prerender::PrerenderManagerFactory::GetForProfile(this),
         predictor_));
   }
+
+  SchedulePrefsFileVerification(GetPrefFilePath());
 
   ChromeVersionService::OnProfileLoaded(prefs_.get(), IsNewProfile());
   DoFinalInit();

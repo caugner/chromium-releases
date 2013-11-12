@@ -18,7 +18,6 @@
 #include "content/public/common/page_transition_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "ui/app_list/signin_delegate_observer.h"
 #include "ui/base/resource/resource_bundle.h"
 
 namespace {
@@ -29,8 +28,13 @@ SigninManagerBase* GetSigninManager(Profile* profile) {
 
 }  // namespace
 
-ChromeSigninDelegate::ChromeSigninDelegate(Profile* profile)
-    : profile_(profile) {}
+ChromeSigninDelegate::ChromeSigninDelegate() {}
+
+ChromeSigninDelegate::~ChromeSigninDelegate() {}
+
+void ChromeSigninDelegate::SetProfile(Profile* profile) {
+  profile_ = profile;
+}
 
 bool ChromeSigninDelegate::NeedSignin()  {
 #if defined(OS_CHROMEOS)
@@ -48,8 +52,6 @@ bool ChromeSigninDelegate::NeedSignin()  {
 
 void ChromeSigninDelegate::ShowSignin() {
   DCHECK(profile_);
-
-  signin_tracker_.reset(new SigninTracker(profile_, this));
 
   Browser* browser = FindOrCreateTabbedBrowser(profile_,
                                                chrome::GetActiveDesktop());
@@ -98,12 +100,4 @@ string16 ChromeSigninDelegate::GetLearnMoreLinkText() {
 string16 ChromeSigninDelegate::GetSettingsLinkText() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   return rb.GetLocalizedString(IDS_APP_LIST_SIGNIN_SETTINGS_TEXT);
-}
-
-ChromeSigninDelegate::~ChromeSigninDelegate() {}
-
-void ChromeSigninDelegate::SigninFailed(const GoogleServiceAuthError& error) {}
-
-void ChromeSigninDelegate::SigninSuccess() {
-  NotifySigninSuccess();
 }

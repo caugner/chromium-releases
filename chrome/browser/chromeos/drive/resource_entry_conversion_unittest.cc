@@ -25,13 +25,14 @@ TEST(ResourceEntryConversionTest, ConvertToResourceEntry_File) {
   ASSERT_TRUE(gdata_resource_entry.get());
 
   ResourceEntry entry;
-  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
+  std::string parent_resource_id;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry,
+                                     &parent_resource_id));
 
-  EXPECT_EQ("File 1.mp3",  entry.title());
-  EXPECT_EQ("File 1.mp3",  entry.base_name());
-  EXPECT_EQ("file:2_file_resource_id",  entry.resource_id());
-  EXPECT_EQ(util::kDriveOtherDirSpecialResourceId,
-            entry.parent_resource_id());
+  EXPECT_EQ("File 1.mp3", entry.title());
+  EXPECT_EQ("File 1.mp3", entry.base_name());
+  EXPECT_EQ("file:2_file_resource_id", entry.resource_id());
+  EXPECT_EQ(util::kDriveOtherDirSpecialResourceId, parent_resource_id);
 
   EXPECT_FALSE(entry.deleted());
   EXPECT_FALSE(entry.shared_with_me());
@@ -83,7 +84,7 @@ TEST(ResourceEntryConversionTest, ConvertToResourceEntry_File) {
             entry.file_specific_info().alternate_url());
 
   // Regular file specific fields.
-  EXPECT_EQ(892721,  entry.file_info().size());
+  EXPECT_EQ(892721, entry.file_info().size());
   EXPECT_EQ("3b4382ebefec6e743578c76bbd0575ce",
             entry.file_specific_info().md5());
   EXPECT_FALSE(entry.file_info().is_directory());
@@ -101,14 +102,15 @@ TEST(ResourceEntryConversionTest,
   ASSERT_TRUE(gdata_resource_entry.get());
 
   ResourceEntry entry;
-  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
+  std::string parent_resource_id;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry,
+                                     &parent_resource_id));
 
-  EXPECT_EQ("Document 1",  entry.title());
-  EXPECT_EQ("Document 1.gdoc",  entry.base_name());  // The suffix added.
+  EXPECT_EQ("Document 1", entry.title());
+  EXPECT_EQ("Document 1.gdoc", entry.base_name());  // The suffix added.
   EXPECT_EQ(".gdoc", entry.file_specific_info().document_extension());
-  EXPECT_EQ("document:5_document_resource_id",  entry.resource_id());
-  EXPECT_EQ(util::kDriveOtherDirSpecialResourceId,
-            entry.parent_resource_id());
+  EXPECT_EQ("document:5_document_resource_id", entry.resource_id());
+  EXPECT_EQ(util::kDriveOtherDirSpecialResourceId, parent_resource_id);
 
   EXPECT_FALSE(entry.deleted());
   EXPECT_FALSE(entry.shared_with_me());
@@ -166,7 +168,7 @@ TEST(ResourceEntryConversionTest,
             entry.file_specific_info().alternate_url());
 
   // The size should be 0 for a hosted document.
-  EXPECT_EQ(0,  entry.file_info().size());
+  EXPECT_EQ(0, entry.file_info().size());
   EXPECT_FALSE(entry.file_info().is_directory());
 }
 
@@ -182,14 +184,16 @@ TEST(ResourceEntryConversionTest,
   ASSERT_TRUE(gdata_resource_entry.get());
 
   ResourceEntry entry;
-  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
+  std::string parent_resource_id;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry,
+                                     &parent_resource_id));
 
-  EXPECT_EQ("Sub Directory Folder",  entry.title());
-  EXPECT_EQ("Sub Directory Folder",  entry.base_name());
-  EXPECT_EQ("folder:sub_dir_folder_resource_id",  entry.resource_id());
+  EXPECT_EQ("Sub Directory Folder", entry.title());
+  EXPECT_EQ("Sub Directory Folder", entry.base_name());
+  EXPECT_EQ("folder:sub_dir_folder_resource_id", entry.resource_id());
   // The parent resource ID should be obtained as this is a sub directory
   // under a non-root directory.
-  EXPECT_EQ("folder:1_folder_resource_id",  entry.parent_resource_id());
+  EXPECT_EQ("folder:1_folder_resource_id", parent_resource_id);
 
   EXPECT_FALSE(entry.deleted());
   EXPECT_FALSE(entry.shared_with_me());
@@ -253,13 +257,14 @@ TEST(ResourceEntryConversionTest,
   ASSERT_TRUE(gdata_resource_entry.get());
 
   ResourceEntry entry;
-  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
+  std::string parent_resource_id;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry,
+                                     &parent_resource_id));
 
-  EXPECT_EQ("Deleted document",  entry.title());
-  EXPECT_EQ("Deleted document.gdoc",  entry.base_name());
-  EXPECT_EQ("document:deleted_in_root_id",  entry.resource_id());
-  EXPECT_EQ(util::kDriveOtherDirSpecialResourceId,
-            entry.parent_resource_id());
+  EXPECT_EQ("Deleted document", entry.title());
+  EXPECT_EQ("Deleted document.gdoc", entry.base_name());
+  EXPECT_EQ("document:deleted_in_root_id", entry.resource_id());
+  EXPECT_EQ(util::kDriveOtherDirSpecialResourceId, parent_resource_id);
 
   EXPECT_TRUE(entry.deleted());  // The document was deleted.
   EXPECT_FALSE(entry.shared_with_me());
@@ -317,7 +322,7 @@ TEST(ResourceEntryConversionTest,
             entry.file_specific_info().alternate_url());
 
   // The size should be 0 for a hosted document.
-  EXPECT_EQ(0,  entry.file_info().size());
+  EXPECT_EQ(0, entry.file_info().size());
 }
 
 TEST(ResourceEntryConversionTest,
@@ -331,8 +336,9 @@ TEST(ResourceEntryConversionTest,
   ASSERT_TRUE(gdata_resource_entry.get());
 
   ResourceEntry entry;
-  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry));
-
+  std::string parent_resource_id;
+  EXPECT_TRUE(ConvertToResourceEntry(*gdata_resource_entry, &entry,
+                                     &parent_resource_id));
   EXPECT_TRUE(entry.shared_with_me());
 }
 

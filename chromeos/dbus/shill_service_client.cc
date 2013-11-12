@@ -52,13 +52,11 @@ void OnGetDictionaryError(
 // The ShillServiceClient implementation.
 class ShillServiceClientImpl : public ShillServiceClient {
  public:
-  explicit ShillServiceClientImpl(dbus::Bus* bus)
-      : bus_(bus),
+  explicit ShillServiceClientImpl()
+      : bus_(NULL),
         helpers_deleter_(&helpers_) {
   }
 
-  /////////////////////////////////////
-  // ShillServiceClient overrides.
   virtual void AddPropertyChangedObserver(
       const dbus::ObjectPath& service_path,
       ShillPropertyChangedObserver* observer) OVERRIDE {
@@ -193,16 +191,6 @@ class ShillServiceClientImpl : public ShillServiceClient {
                                                              error_callback);
   }
 
-  virtual bool CallActivateCellularModemAndBlock(
-      const dbus::ObjectPath& service_path,
-      const std::string& carrier) OVERRIDE {
-    dbus::MethodCall method_call(flimflam::kFlimflamServiceInterface,
-                                 flimflam::kActivateCellularModemFunction);
-    dbus::MessageWriter writer(&method_call);
-    writer.AppendString(carrier);
-    return GetHelper(service_path)->CallVoidMethodAndBlock(&method_call);
-  }
-
   virtual void GetLoadableProfileEntries(
       const dbus::ObjectPath& service_path,
       const DictionaryValueCallback& callback) OVERRIDE {
@@ -217,6 +205,11 @@ class ShillServiceClientImpl : public ShillServiceClient {
 
   virtual ShillServiceClient::TestInterface* GetTestInterface() OVERRIDE {
     return NULL;
+  }
+
+ protected:
+  virtual void Init(dbus::Bus* bus) OVERRIDE {
+    bus_ = bus;
   }
 
  private:
@@ -252,10 +245,9 @@ ShillServiceClient::~ShillServiceClient() {}
 
 // static
 ShillServiceClient* ShillServiceClient::Create(
-    DBusClientImplementationType type,
-    dbus::Bus* bus) {
+    DBusClientImplementationType type) {
   if (type == REAL_DBUS_CLIENT_IMPLEMENTATION)
-    return new ShillServiceClientImpl(bus);
+    return new ShillServiceClientImpl();
   DCHECK_EQ(STUB_DBUS_CLIENT_IMPLEMENTATION, type);
   return new ShillServiceClientStub();
 }

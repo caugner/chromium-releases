@@ -309,7 +309,7 @@ void MockTimeSingleThreadTaskRunner::RunUntilIdle() {
 bool MockTimeSingleThreadTaskRunner::TemporalOrder::operator()(
     const std::pair<base::TimeTicks, base::Closure>& first_task,
     const std::pair<base::TimeTicks, base::Closure>& second_task) const {
-  return first_task.first >= second_task.first;
+  return first_task.first > second_task.first;
 }
 
 MockTimeSingleThreadTaskRunner::~MockTimeSingleThreadTaskRunner() {
@@ -478,8 +478,7 @@ void AutomaticRebootManagerBasicTest::CreateAutomaticRebootManager(
 bool AutomaticRebootManagerBasicTest::ReadUpdateRebootNeededUptimeFromFile(
     base::TimeDelta* uptime) {
   std::string contents;
-  if (!file_util::ReadFileToString(update_reboot_needed_uptime_file_,
-                                   &contents)) {
+  if (!base::ReadFileToString(update_reboot_needed_uptime_file_, &contents)) {
     return false;
   }
   double seconds;

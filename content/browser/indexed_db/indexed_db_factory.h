@@ -11,12 +11,10 @@
 #include "base/basictypes.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "content/browser/indexed_db/indexed_db_callbacks.h"
 #include "content/browser/indexed_db/indexed_db_database.h"
 #include "content/browser/indexed_db/indexed_db_database_callbacks.h"
-#include "content/browser/indexed_db/indexed_db_factory.h"
 #include "content/common/content_export.h"
 
 namespace content {
@@ -29,8 +27,8 @@ class CONTENT_EXPORT IndexedDBFactory
   IndexedDBFactory();
 
   // Notifications from weak pointers.
-  void RemoveIDBDatabaseBackend(
-      const IndexedDBDatabase::Identifier& unique_identifier);
+  void ReleaseDatabase(const IndexedDBDatabase::Identifier& identifier,
+                       bool forcedClose);
 
   void GetDatabaseNames(scoped_refptr<IndexedDBCallbacks> callbacks,
                         const std::string& origin_identifier,
@@ -57,17 +55,26 @@ class CONTENT_EXPORT IndexedDBFactory
 
   virtual ~IndexedDBFactory();
 
-  scoped_refptr<IndexedDBBackingStore> OpenBackingStore(
+  virtual scoped_refptr<IndexedDBBackingStore> OpenBackingStore(
       const std::string& origin_identifier,
       const base::FilePath& data_directory,
-      WebKit::WebIDBCallbacks::DataLoss* data_loss);
+      WebKit::WebIDBCallbacks::DataLoss* data_loss,
+      bool* disk_full);
+
+  void ReleaseBackingStore(const std::string& identifier, bool immediate);
+  void CloseBackingStore(const std::string& identifier);
 
  private:
+  // Called internally after a database is closed, with some delay. If this
+  // factory has the last reference, it will be released.
+  void MaybeCloseBackingStore(const std::string& identifier);
+  bool HasLastBackingStoreReference(const std::string& identifier) const;
+
   typedef std::map<IndexedDBDatabase::Identifier,
                    scoped_refptr<IndexedDBDatabase> > IndexedDBDatabaseMap;
-  IndexedDBDatabaseMap database_backend_map_;
+  IndexedDBDatabaseMap database_map_;
 
-  typedef std::map<std::string, base::WeakPtr<IndexedDBBackingStore> >
+  typedef std::map<std::string, scoped_refptr<IndexedDBBackingStore> >
       IndexedDBBackingStoreMap;
   IndexedDBBackingStoreMap backing_store_map_;
 

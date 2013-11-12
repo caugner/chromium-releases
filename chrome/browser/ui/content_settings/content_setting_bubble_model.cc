@@ -10,7 +10,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
-#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
@@ -18,8 +17,6 @@
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
-#include "chrome/browser/ui/blocked_content/blocked_content_tab_helper_delegate.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
@@ -164,6 +161,8 @@ void ContentSettingTitleAndLinkModel::SetManageLink() {
     {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, IDS_PPAPI_BROKER_BUBBLE_MANAGE_LINK},
     {CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS, IDS_BLOCKED_DOWNLOADS_LINK},
     {CONTENT_SETTINGS_TYPE_MIDI_SYSEX, IDS_MIDI_SYSEX_BUBBLE_MANAGE_LINK},
+    {CONTENT_SETTINGS_TYPE_SAVE_PASSWORD,
+     IDS_OPTIONS_PASSWORDS_MANAGE_PASSWORDS},
   };
   set_manage_link(l10n_util::GetStringUTF8(
       GetIdForContentType(kLinkIDs, arraysize(kLinkIDs), content_type())));
@@ -546,54 +545,69 @@ ContentSettingPopupBubbleModel::ContentSettingPopupBubbleModel(
 
 
 void ContentSettingPopupBubbleModel::SetPopups() {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableBetterPopupBlocking)) {
-    std::map<int32, GURL> blocked_popups =
-        PopupBlockerTabHelper::FromWebContents(web_contents())
-            ->GetBlockedPopupRequests();
-    for (std::map<int32, GURL>::const_iterator iter = blocked_popups.begin();
-         iter != blocked_popups.end();
-         ++iter) {
-      std::string title(iter->second.spec());
-      // The popup may not have a valid URL.
-      if (title.empty())
-        title = l10n_util::GetStringUTF8(IDS_TAB_LOADING_TITLE);
-      PopupItem popup_item(
-          ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-              IDR_DEFAULT_FAVICON),
-          title,
-          iter->first);
-      add_popup(popup_item);
-    }
-    return;
-  }
-  std::vector<WebContents*> blocked_contents;
-  BlockedContentTabHelper::FromWebContents(web_contents())->
-      GetBlockedContents(&blocked_contents);
-  for (std::vector<WebContents*>::const_iterator
-       i = blocked_contents.begin(); i != blocked_contents.end(); ++i) {
-    std::string title(UTF16ToUTF8((*i)->GetTitle()));
-    // The popup may not have committed a load yet, in which case it won't
-    // have a URL or title.
+  std::map<int32, GURL> blocked_popups =
+      PopupBlockerTabHelper::FromWebContents(web_contents())
+          ->GetBlockedPopupRequests();
+  for (std::map<int32, GURL>::const_iterator iter = blocked_popups.begin();
+       iter != blocked_popups.end();
+       ++iter) {
+    std::string title(iter->second.spec());
+    // The popup may not have a valid URL.
     if (title.empty())
       title = l10n_util::GetStringUTF8(IDS_TAB_LOADING_TITLE);
     PopupItem popup_item(
-        FaviconTabHelper::FromWebContents(*i)->GetFavicon(), title, *i);
+        ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+            IDR_DEFAULT_FAVICON),
+        title,
+        iter->first);
     add_popup(popup_item);
   }
 }
 
 void ContentSettingPopupBubbleModel::OnPopupClicked(int index) {
   if (web_contents()) {
-    if (!CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kDisableBetterPopupBlocking)) {
-      PopupBlockerTabHelper::FromWebContents(web_contents())->
-          ShowBlockedPopup(bubble_content().popup_items[index].popup_id);
-    } else {
-      BlockedContentTabHelper::FromWebContents(web_contents())->
-          LaunchForContents(bubble_content().popup_items[index].web_contents);
-    }
+    PopupBlockerTabHelper::FromWebContents(web_contents())->
+        ShowBlockedPopup(bubble_content().popup_items[index].popup_id);
   }
+}
+
+// The model for the save password bubble.
+SavePasswordBubbleModel::SavePasswordBubbleModel(Delegate* delegate,
+                                                 WebContents* web_contents,
+                                                 Profile* profile)
+    : ContentSettingTitleAndLinkModel(delegate, web_contents, profile,
+                                      CONTENT_SETTINGS_TYPE_SAVE_PASSWORD),
+      state_(TabSpecificContentSettings::NO_PASSWORD_TO_BE_SAVED) {
+  DCHECK(profile);
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents);
+  state_ = content_settings->GetPasswordSavingState();
+
+  SetTitle();
+}
+
+SavePasswordBubbleModel::~SavePasswordBubbleModel() {}
+
+void SavePasswordBubbleModel::SetTitle() {
+  int title_id = 0;
+  // If the save password icon was accessed, the icon is displayed and the
+  // bubble is instantiated
+  if (state_ == TabSpecificContentSettings::PASSWORD_TO_BE_SAVED)
+    title_id = IDS_SAVE_PASSWORD;
+
+  set_title(l10n_util::GetStringUTF8(title_id));
+}
+
+void SavePasswordBubbleModel::OnCancelClicked() {
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  content_settings->set_password_action(PasswordFormManager::BLACKLIST);
+}
+
+void SavePasswordBubbleModel::OnSaveClicked() {
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  content_settings->set_password_action(PasswordFormManager::SAVE);
 }
 
 // The model of the content settings bubble for media settings.
@@ -607,7 +621,6 @@ class ContentSettingMediaStreamBubbleModel
   virtual ~ContentSettingMediaStreamBubbleModel();
 
  private:
-  // Sets the title of the bubble.
   void SetTitle();
   // Sets the data for the radio buttons of the bubble.
   void SetRadioGroup();
@@ -717,7 +730,9 @@ void ContentSettingMediaStreamBubbleModel::SetTitle() {
 }
 
 void ContentSettingMediaStreamBubbleModel::SetRadioGroup() {
-  GURL url = web_contents()->GetURL();
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  GURL url = content_settings->media_stream_access_origin();
   RadioGroup radio_group;
   radio_group.url = url;
 
@@ -804,12 +819,15 @@ void ContentSettingMediaStreamBubbleModel::UpdateSettings(
   if (profile()) {
     HostContentSettingsMap* content_settings =
         profile()->GetHostContentSettingsMap();
+    TabSpecificContentSettings* tab_content_settings =
+        TabSpecificContentSettings::FromWebContents(web_contents());
     // The same patterns must be used as in other places (e.g. the infobar) in
     // order to override the existing rule. Otherwise a new rule is created.
     // TODO(markusheintz): Extract to a helper so that there is only a single
     // place to touch.
     ContentSettingsPattern primary_pattern =
-        ContentSettingsPattern::FromURLNoWildcard(web_contents()->GetURL());
+        ContentSettingsPattern::FromURLNoWildcard(
+            tab_content_settings->media_stream_access_origin());
     ContentSettingsPattern secondary_pattern =
         ContentSettingsPattern::Wildcard();
     if (state_ == TabSpecificContentSettings::MICROPHONE_ACCESSED ||
@@ -1257,6 +1275,9 @@ ContentSettingBubbleModel*
         WebContents* web_contents,
         Profile* profile,
         ContentSettingsType content_type) {
+  if (content_type == CONTENT_SETTINGS_TYPE_SAVE_PASSWORD) {
+    return new SavePasswordBubbleModel(delegate, web_contents, profile);
+  }
   if (content_type == CONTENT_SETTINGS_TYPE_COOKIES) {
     return new ContentSettingCookiesBubbleModel(delegate, web_contents, profile,
                                                 content_type);

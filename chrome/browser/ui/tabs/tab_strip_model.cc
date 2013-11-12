@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_order_controller.h"
 #include "chrome/common/url_constants.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
@@ -114,7 +115,8 @@ void CloseTracker::Observe(int type,
 TabStripModel::TabStripModel(TabStripModelDelegate* delegate, Profile* profile)
     : delegate_(delegate),
       profile_(profile),
-      closing_all_(false) {
+      closing_all_(false),
+      in_notify_(false) {
   DCHECK(delegate_);
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                  content::NotificationService::AllBrowserContextsAndSources());
@@ -188,6 +190,11 @@ void TabStripModel::InsertWebContentsAt(int index,
     data->opener = active_contents;
   }
 
+  web_modal::WebContentsModalDialogManager* modal_dialog_manager =
+      web_modal::WebContentsModalDialogManager::FromWebContents(contents);
+  if (modal_dialog_manager)
+    data->blocked = modal_dialog_manager->IsDialogActive();
+
   contents_data_.insert(contents_data_.begin() + index, data);
 
   selection_model_.IncrementFrom(index);
@@ -256,6 +263,7 @@ WebContents* TabStripModel::DiscardWebContentsAt(int index) {
 }
 
 WebContents* TabStripModel::DetachWebContentsAt(int index) {
+  CHECK(!in_notify_);
   if (contents_data_.empty())
     return NULL;
 
@@ -704,10 +712,6 @@ void TabStripModel::AddWebContents(WebContents* contents,
     if ((add_types & ADD_ACTIVE) == 0) {
       contents->GetView()->SizeContents(
           old_contents->GetView()->GetContainerSize());
-      // We need to hide the contents or else we get and execute paints for
-      // background tabs. With enough background tabs they will steal the
-      // backing store of the visible tab causing flashing. See bug 20831.
-      contents->WasHidden();
     }
   }
 }
@@ -1176,11 +1180,14 @@ void TabStripModel::NotifyIfActiveTabChanged(WebContents* old_contents,
     int reason = notify_types == NOTIFY_USER_GESTURE
                  ? TabStripModelObserver::CHANGE_REASON_USER_GESTURE
                  : TabStripModelObserver::CHANGE_REASON_NONE;
+    CHECK(!in_notify_);
+    in_notify_ = true;
     FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
         ActiveTabChanged(old_contents,
                          new_contents,
                          active_index(),
                          reason));
+    in_notify_ = false;
     // Activating a discarded tab reloads it, so it is no longer discarded.
     contents_data_[active_index()]->discarded = false;
   }

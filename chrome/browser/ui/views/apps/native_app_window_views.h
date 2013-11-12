@@ -103,6 +103,8 @@ class NativeAppWindowViews : public apps::NativeAppWindow,
   virtual views::View* GetContentsView() OVERRIDE;
   virtual views::NonClientFrameView* CreateNonClientFrameView(
       views::Widget* widget) OVERRIDE;
+  virtual bool WidgetHasHitTestMask() const OVERRIDE;
+  virtual void GetWidgetHitTestMask(gfx::Path* mask) const OVERRIDE;
   virtual bool ShouldDescendIntoChildForEventHandling(
       gfx::NativeView child,
       const gfx::Point& location) OVERRIDE;
@@ -133,16 +135,20 @@ class NativeAppWindowViews : public apps::NativeAppWindow,
   virtual bool IsDetached() const OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
   virtual void UpdateWindowTitle() OVERRIDE;
+  virtual void UpdateInputRegion(scoped_ptr<SkRegion> region) OVERRIDE;
   virtual void UpdateDraggableRegions(
       const std::vector<extensions::DraggableRegion>& regions) OVERRIDE;
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual void RenderViewHostChanged() OVERRIDE;
   virtual gfx::Insets GetFrameInsets() const OVERRIDE;
+  virtual void HideWithApp() OVERRIDE;
+  virtual void ShowWithApp() OVERRIDE;
 
   // web_modal::WebContentsModalDialogHost implementation.
   virtual gfx::NativeView GetHostView() const OVERRIDE;
   virtual gfx::Point GetDialogPosition(const gfx::Size& size) OVERRIDE;
+  virtual gfx::Size GetMaximumDialogSize() OVERRIDE;
   virtual void AddObserver(
       web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
   virtual void RemoveObserver(
@@ -160,6 +166,10 @@ class NativeAppWindowViews : public apps::NativeAppWindow,
   views::WebView* web_view_;
   views::Widget* window_;
   bool is_fullscreen_;
+
+  // The region of the window that accepts input events.
+  // If this is not set, then the entire window accepts input events.
+  scoped_ptr<SkRegion> input_region_;
 
   scoped_ptr<SkRegion> draggable_region_;
 

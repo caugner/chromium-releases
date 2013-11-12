@@ -32,7 +32,7 @@ void AppListControllerDelegateAsh::PinApp(const std::string& extension_id) {
 }
 
 void AppListControllerDelegateAsh::UnpinApp(const std::string& extension_id) {
-  ChromeLauncherController::instance()->UnpinAppsWithID(extension_id);
+  ChromeLauncherController::instance()->UnpinAppWithID(extension_id);
 }
 
 bool AppListControllerDelegateAsh::CanPin() {
@@ -64,6 +64,12 @@ void AppListControllerDelegateAsh::LaunchApp(
   ChromeLauncherController::instance()->LaunchApp(extension->id(),
                                                   event_flags);
   DismissView();
+}
+
+void AppListControllerDelegateAsh::ShowForProfileByPath(
+    const base::FilePath& profile_path) {
+  // Ash doesn't have profile switching.
+  NOTREACHED();
 }
 
 bool AppListControllerDelegateAsh::ShouldShowUserIcon() {

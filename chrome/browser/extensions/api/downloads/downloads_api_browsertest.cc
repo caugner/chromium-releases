@@ -18,7 +18,7 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_test_file_activity_observer.h"
 #include "chrome/browser/extensions/api/downloads/downloads_api.h"
-#include "chrome/browser/extensions/event_names.h"
+#include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -57,8 +57,6 @@ using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::URLRequestSlowDownloadJob;
-
-namespace events = extensions::event_names;
 
 namespace errors = download_extension_errors;
 
@@ -116,9 +114,9 @@ class DownloadsEventsListener : public content::NotificationObserver {
       if ((profile_ != other.profile_) ||
           (event_name_ != other.event_name_))
         return false;
-      if (((event_name_ == events::kOnDownloadDeterminingFilename) ||
-           (event_name_ == events::kOnDownloadCreated) ||
-           (event_name_ == events::kOnDownloadChanged)) &&
+      if (((event_name_ == api::OnDeterminingFilename::kEventName) ||
+           (event_name_ == api::OnCreated::kEventName) ||
+           (event_name_ == api::OnChanged::kEventName)) &&
           args_.get() &&
           other.args_.get()) {
         base::ListValue* left_list = NULL;
@@ -140,7 +138,7 @@ class DownloadsEventsListener : public content::NotificationObserver {
           }
         }
         return true;
-      } else if ((event_name_ == events::kOnDownloadErased) &&
+      } else if ((event_name_ == api::OnErased::kEventName) &&
                  args_.get() &&
                  other.args_.get()) {
         int my_id = -1, other_id = -1;
@@ -277,17 +275,17 @@ class DownloadExtensionTest : public ExtensionApiTest {
         content::PAGE_TRANSITION_LINK);
     extensions::ExtensionSystem::Get(current_browser()->profile())->
       event_router()->AddEventListener(
-          extensions::event_names::kOnDownloadCreated,
+          api::OnCreated::kEventName,
           tab->GetRenderProcessHost(),
           GetExtensionId());
     extensions::ExtensionSystem::Get(current_browser()->profile())->
       event_router()->AddEventListener(
-          extensions::event_names::kOnDownloadChanged,
+          api::OnChanged::kEventName,
           tab->GetRenderProcessHost(),
           GetExtensionId());
     extensions::ExtensionSystem::Get(current_browser()->profile())->
       event_router()->AddEventListener(
-          extensions::event_names::kOnDownloadErased,
+          api::OnErased::kEventName,
           tab->GetRenderProcessHost(),
           GetExtensionId());
   }
@@ -299,7 +297,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
         content::PAGE_TRANSITION_LINK);
     extensions::ExtensionSystem::Get(current_browser()->profile())->
       event_router()->AddEventListener(
-          extensions::event_names::kOnDownloadDeterminingFilename,
+          api::OnDeterminingFilename::kEventName,
           tab->GetRenderProcessHost(),
           GetExtensionId());
     return tab->GetRenderProcessHost();
@@ -308,7 +306,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
   void RemoveFilenameDeterminer(content::RenderProcessHost* host) {
     extensions::ExtensionSystem::Get(current_browser()->profile())->
       event_router()->RemoveEventListener(
-          extensions::event_names::kOnDownloadDeterminingFilename,
+          api::OnDeterminingFilename::kEventName,
           host,
           GetExtensionId());
   }
@@ -355,10 +353,10 @@ class DownloadExtensionTest : public ExtensionApiTest {
       DownloadItem* item,
       content::DownloadInterruptReason expected_error,
       const std::string& on_created_event) {
-    if (!WaitFor(events::kOnDownloadCreated, on_created_event))
+    if (!WaitFor(api::OnCreated::kEventName, on_created_event))
       return false;
     // Now, onCreated is always fired before interruption.
-    return WaitFor(events::kOnDownloadChanged,
+    return WaitFor(api::OnChanged::kEventName,
         base::StringPrintf("[{\"id\": %d,"
                            "  \"error\": {\"current\": \"%s\"},"
                            "  \"state\": {"
@@ -814,7 +812,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(download_item);
   EXPECT_FALSE(download_item->GetOpened());
   EXPECT_FALSE(download_item->GetOpenWhenComplete());
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"mime\": \"application/octet-stream\","
@@ -1445,21 +1443,21 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"mime\": \"text/plain\","
                          "  \"paused\": false,"
                          "  \"url\": \"%s\"}]",
                          download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -1489,21 +1487,21 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": true,"
                          "  \"mime\": \"text/plain\","
                          "  \"paused\": false,"
                          "  \"url\": \"%s\"}]",
                          download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\":%d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\":%d,"
                          "  \"state\": {"
                          "    \"current\": \"complete\","
@@ -1600,21 +1598,21 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"mime\": \"text/plain\","
                          "  \"paused\": false,"
                          "  \"url\": \"%s\"}]",
                          download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("sub/dir/ect/ory.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -1697,21 +1695,21 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"mime\": \"text/plain\","
                          "  \"paused\": false,"
                          "  \"url\": \"%s\"}]",
                          download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -1738,21 +1736,21 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"mime\": \"text/plain\","
                          "  \"paused\": false,"
                          "  \"url\": \"%s\"}]",
                          download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("data.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -1790,21 +1788,21 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"mime\": \"text/html\","
                           "  \"paused\": false,"
                           "  \"url\": \"%s\"}]",
                           download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"filename\": {"
                           "    \"previous\": \"\","
                           "    \"current\": \"%s\"}}]",
                           result_id,
                           GetFilename("file.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"state\": {"
                           "    \"previous\": \"in_progress\","
@@ -1874,21 +1872,21 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"mime\": \"application/octet-stream\","
                          "  \"paused\": false,"
                          "  \"url\": \"%s\"}]",
                          download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("headers-succeed.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -1962,13 +1960,13 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"mime\": \"text/html\","
                           "  \"paused\": false,"
                           "  \"url\": \"%s\"}]", download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"state\": {"
                           "    \"previous\": \"in_progress\","
@@ -2001,20 +1999,20 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"mime\": \"application/octet-stream\","
                          "  \"paused\": false,"
                          "  \"url\": \"%s\"}]", download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("post-succeed.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -2128,7 +2126,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"mime\": \"application/octet-stream\","
@@ -2138,7 +2136,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                           result_id,
                           download_url.c_str())));
   item->Cancel(true);
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"error\": {\"current\":\"USER_CANCELED\"},"
                           "  \"state\": {"
@@ -2178,29 +2176,28 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"mime\": \"text/plain\","
                           "  \"paused\": false,"
                           "  \"url\": \"%s\"}]",
                           download_url.c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"filename\": {"
                           "    \"previous\": \"\","
                           "    \"current\": \"%s\"}}]",
                           result_id,
                           GetFilename("on_record.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"state\": {"
                           "    \"previous\": \"in_progress\","
                           "    \"current\": \"complete\"}}]",
                           result_id)));
   std::string disk_data;
-  EXPECT_TRUE(file_util::ReadFileToString(item->GetTargetFilePath(),
-                                          &disk_data));
+  EXPECT_TRUE(base::ReadFileToString(item->GetTargetFilePath(), &disk_data));
   EXPECT_STREQ(kPayloadData, disk_data.c_str());
 }
 
@@ -2226,7 +2223,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
   // Wait for the onCreated and onDeterminingFilename events.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2236,7 +2233,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2256,14 +2253,14 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   EXPECT_EQ("", error);
 
   // The download should complete successfully.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -2293,7 +2290,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2303,7 +2300,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2322,7 +2319,7 @@ IN_PROC_BROWSER_TEST_F(
       &error));
   EXPECT_EQ("", error);
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"danger\": {"
                          "    \"previous\":\"safe\","
@@ -2330,13 +2327,13 @@ IN_PROC_BROWSER_TEST_F(
                          result_id)));
 
   item->ValidateDangerousDownload();
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"danger\": {"
                          "    \"previous\":\"file\","
                          "    \"current\":\"accepted\"}}]",
                          result_id)));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"state\": {"
                           "    \"previous\": \"in_progress\","
@@ -2368,7 +2365,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2378,7 +2375,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2396,14 +2393,14 @@ IN_PROC_BROWSER_TEST_F(
       api::FILENAME_CONFLICT_ACTION_UNIQUIFY,
       &error));
   EXPECT_STREQ(errors::kInvalidFilename, error.c_str());
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"filename\": {"
                           "    \"previous\": \"\","
                           "    \"current\": \"%s\"}}]",
                           result_id,
                           GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"state\": {"
                           "    \"previous\": \"in_progress\","
@@ -2433,7 +2430,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2443,7 +2440,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2461,14 +2458,14 @@ IN_PROC_BROWSER_TEST_F(
       api::FILENAME_CONFLICT_ACTION_UNIQUIFY,
       &error));
   EXPECT_STREQ(errors::kInvalidFilename, error.c_str());
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged, base::StringPrintf(
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName, base::StringPrintf(
       "[{\"id\": %d,"
       "  \"filename\": {"
       "    \"previous\": \"\","
       "    \"current\": \"%s\"}}]",
       result_id,
       GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged, base::StringPrintf(
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName, base::StringPrintf(
       "[{\"id\": %d,"
       "  \"state\": {"
       "    \"previous\": \"in_progress\","
@@ -2498,7 +2495,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2508,7 +2505,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2527,14 +2524,14 @@ IN_PROC_BROWSER_TEST_F(
       api::FILENAME_CONFLICT_ACTION_UNIQUIFY,
       &error));
   EXPECT_STREQ(errors::kInvalidFilename, error.c_str());
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged, base::StringPrintf(
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName, base::StringPrintf(
       "[{\"id\": %d,"
       "  \"filename\": {"
       "    \"previous\": \"\","
       "    \"current\": \"%s\"}}]",
       result_id,
       GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged, base::StringPrintf(
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName, base::StringPrintf(
       "[{\"id\": %d,"
       "  \"state\": {"
       "    \"previous\": \"in_progress\","
@@ -2564,7 +2561,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2574,7 +2571,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2592,14 +2589,14 @@ IN_PROC_BROWSER_TEST_F(
       api::FILENAME_CONFLICT_ACTION_UNIQUIFY,
       &error));
   EXPECT_STREQ(errors::kInvalidFilename, error.c_str());
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged, base::StringPrintf(
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName, base::StringPrintf(
       "[{\"id\": %d,"
       "  \"filename\": {"
       "    \"previous\": \"\","
       "    \"current\": \"%s\"}}]",
       result_id,
       GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged, base::StringPrintf(
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName, base::StringPrintf(
       "[{\"id\": %d,"
       "  \"state\": {"
       "    \"previous\": \"in_progress\","
@@ -2629,7 +2626,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2639,7 +2636,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2657,14 +2654,14 @@ IN_PROC_BROWSER_TEST_F(
       api::FILENAME_CONFLICT_ACTION_UNIQUIFY,
       &error));
   EXPECT_STREQ(errors::kInvalidFilename, error.c_str());
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -2694,7 +2691,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2704,7 +2701,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2722,14 +2719,14 @@ IN_PROC_BROWSER_TEST_F(
       api::FILENAME_CONFLICT_ACTION_UNIQUIFY,
       &error));
   EXPECT_STREQ(errors::kInvalidFilename, error.c_str());
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -2759,7 +2756,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2769,7 +2766,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2788,14 +2785,14 @@ IN_PROC_BROWSER_TEST_F(
       &error));
   EXPECT_STREQ(errors::kInvalidFilename, error.c_str());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"filename\": {"
                           "    \"previous\": \"\","
                           "    \"current\": \"%s\"}}]",
                           result_id,
                           GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                           "  \"state\": {"
                           "    \"previous\": \"in_progress\","
@@ -2825,7 +2822,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -2835,7 +2832,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2854,14 +2851,14 @@ IN_PROC_BROWSER_TEST_F(
       &error));
   EXPECT_STREQ(errors::kInvalidFilename, error.c_str());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -2890,7 +2887,7 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"id\": %d,"
@@ -2900,7 +2897,7 @@ IN_PROC_BROWSER_TEST_F(
                          result_id,
                          download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2919,14 +2916,14 @@ IN_PROC_BROWSER_TEST_F(
       &error));
   EXPECT_EQ("", error);
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("slow.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -2945,7 +2942,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller2(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"id\": %d,"
@@ -2955,7 +2952,7 @@ IN_PROC_BROWSER_TEST_F(
                          result_id,
                          download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -2977,14 +2974,14 @@ IN_PROC_BROWSER_TEST_F(
       &error));
   EXPECT_EQ("", error);
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("foo").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -3016,7 +3013,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -3026,7 +3023,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\":\"slow.txt\"}]",
                          result_id)));
@@ -3036,7 +3033,7 @@ IN_PROC_BROWSER_TEST_F(
   // Remove a determiner while waiting for it.
   RemoveFilenameDeterminer(host);
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -3072,7 +3069,7 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
   // Wait for the onCreated and onDeterminingFilename events.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -3082,7 +3079,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"incognito\": false,"
                          "  \"filename\":\"slow.txt\"}]",
@@ -3103,14 +3100,14 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ("", error);
 
   // The download should complete successfully.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("42.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -3130,7 +3127,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller2(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": true,"
                          "  \"id\": %d,"
@@ -3141,7 +3138,7 @@ IN_PROC_BROWSER_TEST_F(
                          download_url.c_str())));
   // On-Record renderers should not see events for off-record items.
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"incognito\": true,"
                          "  \"filename\":\"slow.txt\"}]",
@@ -3162,14 +3159,14 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ("", error);
 
   // The download should complete successfully.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("5.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -3206,7 +3203,7 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
   // Wait for the onCreated and onDeterminingFilename events.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                           "  \"incognito\": false,"
                           "  \"id\": %d,"
@@ -3216,7 +3213,7 @@ IN_PROC_BROWSER_TEST_F(
                           result_id,
                           download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"incognito\": false,"
                          "  \"filename\":\"slow.txt\"}]",
@@ -3237,14 +3234,14 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ("", error);
 
   // The download should complete successfully.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("42.txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -3264,7 +3261,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller2(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": true,"
                          "  \"id\": %d,"
@@ -3274,7 +3271,7 @@ IN_PROC_BROWSER_TEST_F(
                          result_id,
                          download_url.c_str())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"incognito\": true,"
                          "  \"filename\":\"slow.txt\"}]",
@@ -3295,14 +3292,14 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_EQ("", error);
 
   // The download should complete successfully.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
                          "    \"current\": \"%s\"}}]",
                          result_id,
                          GetFilename("42 (1).txt").c_str())));
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -3364,7 +3361,7 @@ IN_PROC_BROWSER_TEST_F(
   ScopedCancellingItem canceller(item);
 
   // Wait for the onCreated and onDeterminingFilename event.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadCreated,
+  ASSERT_TRUE(WaitFor(api::OnCreated::kEventName,
       base::StringPrintf("[{\"danger\": \"safe\","
                          "  \"incognito\": false,"
                          "  \"id\": %d,"
@@ -3372,7 +3369,7 @@ IN_PROC_BROWSER_TEST_F(
                          "  \"paused\": false}]",
                          item->GetId())));
   ASSERT_TRUE(WaitFor(
-      events::kOnDownloadDeterminingFilename,
+      api::OnDeterminingFilename::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"incognito\": false,"
                          "  \"filename\":\"download-unknown-size\"}]",
@@ -3399,7 +3396,7 @@ IN_PROC_BROWSER_TEST_F(
       api::FILENAME_CONFLICT_ACTION_UNIQUIFY,
       &error)) << error;
   EXPECT_EQ("", error);
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"filename\": {"
                          "    \"previous\": \"\","
@@ -3410,7 +3407,7 @@ IN_PROC_BROWSER_TEST_F(
   content::DownloadUpdatedObserver interrupted(item, base::Bind(
       ItemIsInterrupted));
   ASSERT_TRUE(interrupted.WaitForEvent());
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"error\":{\"current\":\"NETWORK_FAILED\"},"
                          "  \"state\":{"
@@ -3429,7 +3426,7 @@ IN_PROC_BROWSER_TEST_F(
   // does not need to be re-done. So, there will not be a second
   // onDeterminingFilename event.
 
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"error\":{\"previous\":\"NETWORK_FAILED\"},"
                          "  \"state\":{"
@@ -3441,7 +3438,7 @@ IN_PROC_BROWSER_TEST_F(
   FinishPendingSlowDownloads();
 
   // The download should complete successfully.
-  ASSERT_TRUE(WaitFor(events::kOnDownloadChanged,
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName,
       base::StringPrintf("[{\"id\": %d,"
                          "  \"state\": {"
                          "    \"previous\": \"in_progress\","
@@ -3471,6 +3468,45 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 
 // TODO(benjhayden) Test that the shelf is shown for download() both with and
 // without a WebContents.
+
+void OnDangerPromptCreated(DownloadDangerPrompt* prompt) {
+  prompt->InvokeActionForTesting(DownloadDangerPrompt::ACCEPT);
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
+                       DownloadExtensionTest_AcceptDanger) {
+  // Download a file that will be marked dangerous; click the browser action
+  // button; the browser action poup will call acceptDanger(); when the
+  // DownloadDangerPrompt is created, pretend that the user clicks the Accept
+  // button; wait until the download completes.
+  LoadExtension("downloads_split");
+  scoped_ptr<base::Value> result(RunFunctionAndReturnResult(
+      new DownloadsDownloadFunction(),
+      "[{\"url\": \"data:,\", \"filename\": \"dangerous.swf\"}]"));
+  ASSERT_TRUE(result.get());
+  int result_id = -1;
+  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
+  ASSERT_TRUE(item);
+  ASSERT_TRUE(WaitFor(api::OnChanged::kEventName, base::StringPrintf(
+      "[{\"id\": %d, "
+      "  \"danger\": {"
+      "    \"previous\": \"safe\","
+      "    \"current\": \"file\"}}]",
+      result_id)));
+  ASSERT_TRUE(item->IsDangerous());
+  ScopedCancellingItem canceller(item);
+  scoped_ptr<content::DownloadTestObserver> observer(
+      new content::DownloadTestObserverTerminal(
+          GetCurrentManager(), 1,
+          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_IGNORE));
+  DownloadsAcceptDangerFunction::OnPromptCreatedCallback callback =
+      base::Bind(&OnDangerPromptCreated);
+  DownloadsAcceptDangerFunction::OnPromptCreatedForTesting(
+      &callback);
+  BrowserActionTestUtil(browser()).Press(0);
+  observer->WaitForFinished();
+}
 
 class DownloadsApiTest : public ExtensionApiTest {
  public:

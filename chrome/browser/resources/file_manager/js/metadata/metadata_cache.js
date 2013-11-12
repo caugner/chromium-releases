@@ -689,7 +689,7 @@ FilesystemProvider.prototype.fetch = function(url, type, callback, opt_entry) {
 /**
  * Provider of drive metadata.
  * This provider returns the following objects:
- *     drive: { pinned, hosted, present, dirty, editUrl, contentUrl, driveApps }
+ *     drive: { pinned, hosted, present, customIconUrl, etc. }
  *     thumbnail: { url, transform }
  *     streaming: { }
  * @constructor
@@ -815,10 +815,9 @@ DriveProvider.prototype.convert_ = function(data, url) {
     present: data.isPresent,
     pinned: data.isPinned,
     hosted: data.isHosted,
-    dirty: data.isDirty,
     availableOffline: DriveProvider.isAvailableOffline(data, url),
     availableWhenMetered: DriveProvider.isAvailableWhenMetered(data),
-    driveApps: data.driveApps || [],
+    customIconUrl: data.customIconUrl || '',
     contentMimeType: data.contentMimeType || '',
     sharedWithMe: data.sharedWithMe
   };

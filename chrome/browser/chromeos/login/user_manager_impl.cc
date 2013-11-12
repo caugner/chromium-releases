@@ -25,28 +25,32 @@
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chromeos/cros/cert_library.h"
+#include "chrome/browser/chromeos/login/auth_sync_observer.h"
+#include "chrome/browser/chromeos/login/auth_sync_observer_factory.h"
 #include "chrome/browser/chromeos/login/default_pinned_apps_field_trial.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/multi_profile_first_run_notification.h"
+#include "chrome/browser/chromeos/login/multi_profile_user_controller.h"
 #include "chrome/browser/chromeos/login/remove_user_delegate.h"
 #include "chrome/browser/chromeos/login/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/session_length_limiter.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/managed_mode/managed_user_service.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "chromeos/login/login_state.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -219,17 +223,17 @@ UserManagerImpl::UserManagerImpl()
       device_local_account_policy_service_(NULL),
       users_loaded_(false),
       active_user_(NULL),
+      primary_user_(NULL),
       session_started_(false),
       user_sessions_restored_(false),
       is_current_user_owner_(false),
       is_current_user_new_(false),
       is_current_user_ephemeral_regular_user_(false),
       ephemeral_users_enabled_(false),
-      locally_managed_users_enabled_by_policy_(false),
-      merge_session_state_(MERGE_STATUS_NOT_STARTED),
-      observed_sync_service_(NULL),
       user_image_manager_(new UserImageManagerImpl),
-      manager_creation_time_(base::TimeTicks::Now()) {
+      manager_creation_time_(base::TimeTicks::Now()),
+      multi_profile_first_run_notification_(
+          new MultiProfileFirstRunNotification) {
   // UserManager instance should be used only on UI thread.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   registrar_.Add(this, chrome::NOTIFICATION_OWNERSHIP_STATUS_CHANGED,
@@ -237,10 +241,16 @@ UserManagerImpl::UserManagerImpl()
   registrar_.Add(this, chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
       content::NotificationService::AllSources());
   RetrieveTrustedDevicePolicies();
-  cros_settings_->AddSettingsObserver(kAccountsPrefDeviceLocalAccounts,
-                                      this);
-  cros_settings_->AddSettingsObserver(kAccountsPrefSupervisedUsersEnabled,
-                                      this);
+  local_accounts_subscription_ = cros_settings_->AddSettingsObserver(
+      kAccountsPrefDeviceLocalAccounts,
+      base::Bind(&UserManagerImpl::RetrieveTrustedDevicePolicies,
+                 base::Unretained(this)));
+  supervised_users_subscription_ = cros_settings_->AddSettingsObserver(
+      kAccountsPrefSupervisedUsersEnabled,
+      base::Bind(&UserManagerImpl::RetrieveTrustedDevicePolicies,
+                 base::Unretained(this)));
+  multi_profile_user_controller_.reset(new MultiProfileUserController(
+      this, g_browser_process->local_state()));
   UpdateLoginState();
 }
 
@@ -261,20 +271,16 @@ UserManagerImpl::~UserManagerImpl() {
 
 void UserManagerImpl::Shutdown() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  cros_settings_->RemoveSettingsObserver(kAccountsPrefDeviceLocalAccounts,
-                                         this);
-  cros_settings_->RemoveSettingsObserver(
-      kAccountsPrefSupervisedUsersEnabled,
-      this);
+  local_accounts_subscription_.reset();
+  supervised_users_subscription_.reset();
   // Stop the session length limiter.
   session_length_limiter_.reset();
 
   if (device_local_account_policy_service_)
     device_local_account_policy_service_->RemoveObserver(this);
 
-  if (observed_sync_service_)
-    observed_sync_service_->RemoveObserver(this);
   user_image_manager_->Shutdown();
+  multi_profile_user_controller_.reset();
 }
 
 UserImageManager* UserManagerImpl::GetUserImageManager() {
@@ -287,11 +293,18 @@ const UserList& UserManagerImpl::GetUsers() const {
 }
 
 UserList UserManagerImpl::GetUsersAdmittedForMultiProfile() const {
+  if (!UserManager::IsMultipleProfilesAllowed())
+    return UserList();
+
   UserList result;
   const UserList& users = GetUsers();
   for (UserList::const_iterator it = users.begin(); it != users.end(); ++it) {
-    if ((*it)->GetType() == User::USER_TYPE_REGULAR && !(*it)->is_logged_in())
+    if ((*it)->GetType() == User::USER_TYPE_REGULAR &&
+        !(*it)->is_logged_in() &&
+        multi_profile_user_controller_->IsUserAllowedInSession(
+            (*it)->email())) {
       result.push_back(*it);
+    }
   }
   return result;
 }
@@ -311,6 +324,17 @@ const UserList& UserManagerImpl::GetLRULoggedInUsers() {
   return lru_logged_in_users_;
 }
 
+UserList UserManagerImpl::GetUnlockUsers() const {
+  UserList unlock_users;
+  CHECK(primary_user_);
+  unlock_users.push_back(primary_user_);
+  return unlock_users;
+}
+
+const std::string& UserManagerImpl::GetOwnerEmail() {
+  return owner_email_;
+}
+
 void UserManagerImpl::UserLoggedIn(const std::string& email,
                                    const std::string& username_hash,
                                    bool browser_restart) {
@@ -319,8 +343,18 @@ void UserManagerImpl::UserLoggedIn(const std::string& email,
   if (!CommandLine::ForCurrentProcess()->HasSwitch(::switches::kMultiProfiles))
     DCHECK(!IsUserLoggedIn());
 
-  if (active_user_)
-    active_user_->set_is_active(false);
+  User* user = FindUserInListAndModify(email);
+  if (active_user_ && user) {
+    user->set_is_logged_in(true);
+    user->set_username_hash(username_hash);
+    logged_in_users_.push_back(user);
+    lru_logged_in_users_.push_back(user);
+    // Reset the new user flag if the user already exists.
+    is_current_user_new_ = false;
+    // Set active user wallpaper back.
+    WallpaperManager::Get()->SetUserWallpaper(active_user_->email());
+    return;
+  }
 
   if (email == UserManager::kGuestUserName) {
     GuestUserLoggedIn();
@@ -331,7 +365,6 @@ void UserManagerImpl::UserLoggedIn(const std::string& email,
   } else {
     EnsureUsersLoaded();
 
-    User* user = FindUserInListAndModify(email);
     if (user && user->GetType() == User::USER_TYPE_PUBLIC_ACCOUNT) {
       PublicAccountUserLoggedIn(user);
     } else if ((user && user->GetType() == User::USER_TYPE_LOCALLY_MANAGED) ||
@@ -345,7 +378,7 @@ void UserManagerImpl::UserLoggedIn(const std::string& email,
                (AreEphemeralUsersEnabled() || browser_restart)) {
       RegularUserLoggedInAsEphemeral(email);
     } else {
-      RegularUserLoggedIn(email, browser_restart);
+      RegularUserLoggedIn(email);
     }
 
     // Initialize the session length limiter and start it only if
@@ -361,6 +394,9 @@ void UserManagerImpl::UserLoggedIn(const std::string& email,
   // Place user who just signed in to the top of the logged in users.
   logged_in_users_.insert(logged_in_users_.begin(), active_user_);
   SetLRUUser(active_user_);
+
+  if (!primary_user_)
+    primary_user_ = active_user_;
 
   UMA_HISTOGRAM_ENUMERATION("UserManager.LoginUserType",
                             active_user_->GetType(), User::NUM_USER_TYPES);
@@ -622,6 +658,11 @@ User* UserManagerImpl::GetActiveUser() {
   return active_user_;
 }
 
+const User* UserManagerImpl::GetPrimaryUser() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return primary_user_;
+}
+
 void UserManagerImpl::SaveUserOAuthStatus(
     const std::string& username,
     User::OAuthTokenStatus oauth_token_status) {
@@ -754,63 +795,25 @@ void UserManagerImpl::Observe(int type,
         if (device_local_account_policy_service_)
           device_local_account_policy_service_->AddObserver(this);
       }
-      CheckOwnership();
       RetrieveTrustedDevicePolicies();
+      UpdateOwnership();
       break;
     case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED:
       if (IsUserLoggedIn() &&
           !IsLoggedInAsGuest() &&
-          !IsLoggedInAsLocallyManagedUser() &&
           !IsLoggedInAsKioskApp()) {
         Profile* profile = content::Details<Profile>(details).ptr();
-        if (!profile->IsOffTheRecord() &&
-            profile == ProfileManager::GetDefaultProfile()) {
-          // TODO(nkostylev): We should observe all logged in user's profiles.
-          // http://crbug.com/230860
-          if (!CommandLine::ForCurrentProcess()->
-                  HasSwitch(::switches::kMultiProfiles)) {
-            DCHECK(NULL == observed_sync_service_);
-            observed_sync_service_ =
-                ProfileSyncServiceFactory::GetForProfile(profile);
-            if (observed_sync_service_)
-              observed_sync_service_->AddObserver(this);
-          }
+        if (!profile->IsOffTheRecord()) {
+          AuthSyncObserver* sync_observer =
+              AuthSyncObserverFactory::GetInstance()->GetForProfile(profile);
+          sync_observer->StartObserving();
+          multi_profile_user_controller_->StartObserving(profile);
+          multi_profile_first_run_notification_->UserProfilePrepared(profile);
         }
       }
       break;
-    case chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED: {
-      std::string changed_setting =
-          *content::Details<const std::string>(details).ptr();
-      DCHECK(changed_setting == kAccountsPrefDeviceLocalAccounts ||
-             changed_setting == kAccountsPrefSupervisedUsersEnabled);
-      RetrieveTrustedDevicePolicies();
-      break;
-    }
     default:
       NOTREACHED();
-  }
-}
-
-void UserManagerImpl::OnStateChanged() {
-  DCHECK(IsLoggedInAsRegularUser());
-  GoogleServiceAuthError::State state =
-      observed_sync_service_->GetAuthError().state();
-  if (state != GoogleServiceAuthError::NONE &&
-      state != GoogleServiceAuthError::CONNECTION_FAILED &&
-      state != GoogleServiceAuthError::SERVICE_UNAVAILABLE &&
-      state != GoogleServiceAuthError::REQUEST_CANCELED) {
-    // Invalidate OAuth token to force Gaia sign-in flow. This is needed
-    // because sign-out/sign-in solution is suggested to the user.
-    // TODO(altimofeev): this code isn't needed after crosbug.com/25978 is
-    // implemented.
-    DVLOG(1) << "Invalidate OAuth token because of a sync error.";
-    // http://crbug.com/230860
-    // TODO(nkostylev): Figure out whether we want to have observers
-    // for each logged in user.
-    // TODO(nkostyelv): Change observer after active user has changed.
-    SaveUserOAuthStatus(
-        active_user_->email(),
-        User::OAUTH2_TOKEN_STATUS_INVALID);
   }
 }
 
@@ -909,19 +912,6 @@ bool UserManagerImpl::IsSessionStarted() const {
 bool UserManagerImpl::UserSessionsRestored() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return user_sessions_restored_;
-}
-
-UserManager::MergeSessionState UserManagerImpl::GetMergeSessionState() const {
-  return merge_session_state_;
-}
-
-void UserManagerImpl::SetMergeSessionState(
-    UserManager::MergeSessionState state) {
-  if (merge_session_state_ == state)
-    return;
-
-  merge_session_state_ = state;
-  NotifyMergeSessionStateChanged();
 }
 
 bool UserManagerImpl::HasBrowserRestarted() const {
@@ -1043,12 +1033,11 @@ void UserManagerImpl::EnsureUsersLoaded() {
        it != regular_users.end(); ++it) {
     User* user = NULL;
     const std::string domain = gaia::ExtractDomainName(*it);
-    if (domain == UserManager::kLocallyManagedUserDomain) {
+    if (domain == UserManager::kLocallyManagedUserDomain)
       user = User::CreateLocallyManagedUser(*it);
-    } else {
+    else
       user = User::CreateRegularUser(*it);
-      user->set_oauth_token_status(LoadUserOAuthStatus(*it));
-    }
+    user->set_oauth_token_status(LoadUserOAuthStatus(*it));
     users_.push_back(user);
 
     string16 display_name;
@@ -1080,7 +1069,6 @@ void UserManagerImpl::EnsureUsersLoaded() {
 
 void UserManagerImpl::RetrieveTrustedDevicePolicies() {
   ephemeral_users_enabled_ = false;
-  locally_managed_users_enabled_by_policy_ = false;
   owner_email_ = "";
 
   // Schedule a callback if device policy has not yet been verified.
@@ -1092,8 +1080,6 @@ void UserManagerImpl::RetrieveTrustedDevicePolicies() {
 
   cros_settings_->GetBoolean(kAccountsPrefEphemeralUsersEnabled,
                              &ephemeral_users_enabled_);
-  cros_settings_->GetBoolean(kAccountsPrefSupervisedUsersEnabled,
-                             &locally_managed_users_enabled_by_policy_);
   cros_settings_->GetString(kDeviceOwner, &owner_email_);
 
   EnsureUsersLoaded();
@@ -1175,8 +1161,7 @@ void UserManagerImpl::GuestUserLoggedIn() {
                                                    false);
 }
 
-void UserManagerImpl::RegularUserLoggedIn(const std::string& email,
-                                          bool browser_restart) {
+void UserManagerImpl::RegularUserLoggedIn(const std::string& email) {
   // Remove the user from the user list.
   active_user_ = RemoveRegularOrLocallyManagedUserFromList(email);
 
@@ -1198,10 +1183,7 @@ void UserManagerImpl::RegularUserLoggedIn(const std::string& email,
 
   user_image_manager_->UserLoggedIn(email, is_current_user_new_, false);
 
-  if (!browser_restart) {
-    // For GAIA login flow, logged in user wallpaper may not be loaded.
-    WallpaperManager::Get()->EnsureLoggedInUserWallpaperLoaded();
-  }
+  WallpaperManager::Get()->EnsureLoggedInUserWallpaperLoaded();
 
   default_pinned_apps_field_trial::SetupForUser(email, is_current_user_new_);
 
@@ -1334,23 +1316,20 @@ void UserManagerImpl::NotifyOnLogin() {
       content::Source<UserManager>(this),
       content::Details<const User>(active_user_));
 
-  // Indicate to DeviceSettingsService that the owner key may have become
-  // available.
-  DeviceSettingsService::Get()->SetUsername(active_user_->email());
+  // Owner must be first user in session. DeviceSettingsService can't deal with
+  // multiple user and will mix up ownership, crbug.com/230018.
+  if (GetLoggedInUsers().size() == 1) {
+    // Indicate to DeviceSettingsService that the owner key may have become
+    // available.
+    DeviceSettingsService::Get()->SetUsername(active_user_->email());
+  }
 }
 
-void UserManagerImpl::UpdateOwnership(
-    DeviceSettingsService::OwnershipStatus status,
-    bool is_owner) {
+void UserManagerImpl::UpdateOwnership() {
+  bool is_owner = DeviceSettingsService::Get()->HasPrivateOwnerKey();
   VLOG(1) << "Current user " << (is_owner ? "is owner" : "is not owner");
 
   SetCurrentUserIsOwner(is_owner);
-}
-
-void UserManagerImpl::CheckOwnership() {
-  DeviceSettingsService::Get()->GetOwnershipStatusAsync(
-      base::Bind(&UserManagerImpl::UpdateOwnership,
-                 base::Unretained(this)));
 }
 
 void UserManagerImpl::RemoveNonCryptohomeData(const std::string& email) {
@@ -1382,6 +1361,8 @@ void UserManagerImpl::RemoveNonCryptohomeData(const std::string& email) {
   DictionaryPrefUpdate manager_emails_update(prefs,
                                              kManagedUserManagerDisplayEmails);
   manager_emails_update->RemoveWithoutPathExpansion(email, NULL);
+
+  multi_profile_user_controller_->RemoveCachedValue(email);
 }
 
 User* UserManagerImpl::RemoveRegularOrLocallyManagedUserFromList(
@@ -1662,9 +1643,48 @@ void UserManagerImpl::SetAppModeChromeClientOAuthInfo(
 }
 
 bool UserManagerImpl::AreLocallyManagedUsersAllowed() const {
+  bool locally_managed_users_allowed = false;
+  cros_settings_->GetBoolean(kAccountsPrefSupervisedUsersEnabled,
+                             &locally_managed_users_allowed);
   return ManagedUserService::AreManagedUsersEnabled() &&
-        (locally_managed_users_enabled_by_policy_ ||
+        (locally_managed_users_allowed ||
          !g_browser_process->browser_policy_connector()->IsEnterpriseManaged());
+}
+
+base::FilePath UserManagerImpl::GetUserProfileDir(
+    const std::string& email) const {
+  // TODO(dpolukhin): Remove Chrome OS specific profile path logic from
+  // ProfileManager and use only this function to construct profile path.
+  // TODO(nkostylev): Cleanup profile dir related code paths crbug.com/294233
+  base::FilePath profile_dir;
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(::switches::kMultiProfiles)) {
+    const User* user = FindUser(email);
+    if (user && !user->username_hash().empty()) {
+      profile_dir = base::FilePath(
+          chrome::kProfileDirPrefix + user->username_hash());
+    }
+  } else if (command_line.HasSwitch(chromeos::switches::kLoginProfile)) {
+    std::string login_profile_value =
+        command_line.GetSwitchValueASCII(chromeos::switches::kLoginProfile);
+    if (login_profile_value == chrome::kLegacyProfileDir ||
+        login_profile_value == chrome::kTestUserProfileDir) {
+      profile_dir = base::FilePath(login_profile_value);
+    } else {
+      profile_dir = base::FilePath(
+          chrome::kProfileDirPrefix + login_profile_value);
+    }
+  } else {
+    // We should never be logged in with no profile dir unless
+    // multi-profiles are enabled.
+    NOTREACHED();
+    profile_dir = base::FilePath();
+  }
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  profile_dir = profile_manager->user_data_dir().Append(profile_dir);
+
+  return profile_dir;
 }
 
 UserFlow* UserManagerImpl::GetDefaultUserFlow() const {
@@ -1679,12 +1699,6 @@ void UserManagerImpl::NotifyUserListChanged() {
       chrome::NOTIFICATION_USER_LIST_CHANGED,
       content::Source<UserManager>(this),
       content::NotificationService::NoDetails());
-}
-
-void UserManagerImpl::NotifyMergeSessionStateChanged() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  FOR_EACH_OBSERVER(UserManager::Observer, observer_list_,
-                    MergeSessionStateChanged(merge_session_state_));
 }
 
 void UserManagerImpl::NotifyActiveUserChanged(const User* active_user) {
@@ -1830,6 +1844,12 @@ void UserManagerImpl::SendRegularUserLoginMetrics(const std::string& email) {
           time_to_login.InSeconds(), 0, kLogoutToLoginDelayMaxSec, 50);
     }
   }
+}
+
+void UserManagerImpl::OnUserNotAllowed() {
+  LOG(ERROR) << "Shutdown session because a user is not allowed to be in the "
+                "current session";
+  chrome::AttemptUserExit();
 }
 
 }  // namespace chromeos

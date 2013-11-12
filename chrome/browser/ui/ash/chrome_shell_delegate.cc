@@ -7,21 +7,15 @@
 #include "apps/native_app_window.h"
 #include "apps/shell_window.h"
 #include "apps/shell_window_registry.h"
-#include "ash/ash_switches.h"
 #include "ash/host/root_window_host_factory.h"
-#include "ash/launcher/launcher_types.h"
 #include "ash/magnifier/magnifier_constants.h"
 #include "ash/session_state_delegate.h"
-#include "ash/shelf/shelf_widget.h"
 #include "ash/system/tray/system_tray_delegate.h"
-#include "ash/wm/window_properties.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
-#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
-#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
@@ -39,18 +33,16 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "chrome/browser/ui/immersive_fullscreen_configuration.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "ui/aura/client/user_action_client.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/default_pinned_apps_field_trial.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #endif
 
 // static
@@ -121,7 +113,20 @@ ChromeShellDelegate::~ChromeShellDelegate() {
 }
 
 bool ChromeShellDelegate::IsMultiProfilesEnabled() const {
-  return CommandLine::ForCurrentProcess()->HasSwitch(switches::kMultiProfiles);
+  // TODO(skuhne): There is a function named profiles::IsMultiProfilesEnabled
+  // which does similar things - but it is not the same. We should investigate
+  // if these two could be folded together.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kMultiProfiles))
+    return false;
+#if defined(OS_CHROMEOS)
+  // If there is a user manager, we need to see that we can at least have 2
+  // simultaneous users to allow this feature.
+  if (chromeos::UserManager::IsInitialized() &&
+      chromeos::UserManager::Get()->GetUsersAdmittedForMultiProfile().size() +
+      chromeos::UserManager::Get()->GetLoggedInUsers().size() <= 1)
+    return false;
+#endif
+  return true;
 }
 
 bool ChromeShellDelegate::IsRunningInForcedAppMode() const {
@@ -154,11 +159,12 @@ void ChromeShellDelegate::ToggleFullscreen() {
   aura::Window* window = ash::wm::GetActiveWindow();
   if (!window)
     return;
+  ash::wm::WindowState* window_state = ash::wm::GetWindowState(window);
 
-  bool is_fullscreen = ash::wm::IsWindowFullscreen(window);
+  bool is_fullscreen = window_state->IsFullscreen();
 
   // Windows which cannot be maximized should not be fullscreened.
-  if (!is_fullscreen && !ash::wm::CanMaximizeWindow(window))
+  if (!is_fullscreen && !window_state->CanMaximize())
     return;
 
   Browser* browser = chrome::FindBrowserWithWindow(window);
@@ -180,7 +186,7 @@ void ChromeShellDelegate::ToggleFullscreen() {
     }
 #endif  // OS_WIN
     if (browser->is_app() && browser->app_type() != Browser::APP_TYPE_CHILD)
-      ash::wm::ToggleMaximizedWindow(window);
+      window_state->ToggleMaximized();
     else
       chrome::ToggleFullscreenMode(browser);
     return;
@@ -203,12 +209,13 @@ void ChromeShellDelegate::ToggleMaximized() {
   if (!window)
     return;
 
+  ash::wm::WindowState* window_state = ash::wm::GetWindowState(window);
   // Get out of fullscreen when in fullscreen mode.
-  if (ash::wm::IsWindowFullscreen(window)) {
+  if (window_state->IsFullscreen()) {
     ToggleFullscreen();
     return;
   }
-  ash::wm::ToggleMaximizedWindow(window);
+  window_state->ToggleMaximized();
 }
 
 void ChromeShellDelegate::RestoreTab() {
@@ -412,6 +419,14 @@ void ChromeShellDelegate::RecordUserMetricsAction(
       break;
     case ash::UMA_WINDOW_MAXIMIZE_BUTTON_SHOW_BUBBLE:
       content::RecordAction(content::UserMetricsAction("MaxButton_ShowBubble"));
+      break;
+    case ash::UMA_WINDOW_OVERVIEW:
+      content::RecordAction(
+          content::UserMetricsAction("WindowSelector_Overview"));
+      break;
+    case ash::UMA_WINDOW_SELECTION:
+      content::RecordAction(
+          content::UserMetricsAction("WindowSelector_Selection"));
       break;
   }
 }

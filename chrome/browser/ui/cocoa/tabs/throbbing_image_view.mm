@@ -4,12 +4,14 @@
 
 #import "chrome/browser/ui/cocoa/tabs/throbbing_image_view.h"
 
-#include "ui/base/animation/animation_delegate.h"
+#include "chrome/browser/ui/tabs/tab_utils.h"
+#include "ui/gfx/animation/animation.h"
+#include "ui/gfx/animation/animation_delegate.h"
 
-class ThrobbingImageViewAnimationDelegate : public ui::AnimationDelegate {
+class ThrobbingImageViewAnimationDelegate : public gfx::AnimationDelegate {
  public:
   ThrobbingImageViewAnimationDelegate(NSView* view) : view_(view) {}
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE {
+  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE {
     [view_ setNeedsDisplay:YES];
   }
  private:
@@ -21,18 +23,18 @@ class ThrobbingImageViewAnimationDelegate : public ui::AnimationDelegate {
 - (id)initWithFrame:(NSRect)rect
        backgroundImage:(NSImage*)backgroundImage
             throbImage:(NSImage*)throbImage
-            durationMS:(int)durationMS
          throbPosition:(ThrobPosition)throbPosition
-    animationContainer:(ui::AnimationContainer*)animationContainer {
+    animationContainer:(gfx::AnimationContainer*)animationContainer {
   if ((self = [super initWithFrame:rect])) {
     backgroundImage_.reset([backgroundImage retain]);
     throbImage_.reset([throbImage retain]);
 
     delegate_.reset(new ThrobbingImageViewAnimationDelegate(self));
-    throbAnimation_.reset(new ui::ThrobAnimation(delegate_.get()));
+
+    throbAnimation_ = chrome::CreateTabRecordingIndicatorAnimation();
+    throbAnimation_->set_delegate(delegate_.get());
     throbAnimation_->SetContainer(animationContainer);
-    throbAnimation_->SetThrobDuration(durationMS);
-    throbAnimation_->StartThrobbing(-1);
+    throbAnimation_->Start();
 
     throbPosition_ = throbPosition;
   }

@@ -8,7 +8,6 @@
 #include "apps/app_restore_service_factory.h"
 #include "apps/shell_window_geometry_cache.h"
 #include "chrome/browser/apps/shortcut_manager_factory.h"
-#include "chrome/browser/autofill/autocheckout_whitelist_manager_factory.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -23,6 +22,7 @@
 #include "chrome/browser/extensions/api/audio/audio_api.h"
 #include "chrome/browser/extensions/api/bluetooth/bluetooth_api_factory.h"
 #include "chrome/browser/extensions/api/bookmarks/bookmarks_api.h"
+#include "chrome/browser/extensions/api/braille_display_private/braille_display_private_api.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/cookies/cookies_api.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api_factory.h"
@@ -37,6 +37,7 @@
 #include "chrome/browser/extensions/api/input/input.h"
 #include "chrome/browser/extensions/api/location/location_manager.h"
 #include "chrome/browser/extensions/api/management/management_api.h"
+#include "chrome/browser/extensions/api/mdns/mdns_api.h"
 #include "chrome/browser/extensions/api/media_galleries_private/media_galleries_private_api.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/api/preference/chrome_direct_setting_api.h"
@@ -44,11 +45,14 @@
 #include "chrome/browser/extensions/api/processes/processes_api.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_api.h"
 #include "chrome/browser/extensions/api/serial/serial_connection.h"
-#include "chrome/browser/extensions/api/session_restore/session_restore_api.h"
+#include "chrome/browser/extensions/api/sessions/sessions_api.h"
+#include "chrome/browser/extensions/api/signed_in_devices/signed_in_devices_manager.h"
 #include "chrome/browser/extensions/api/socket/socket.h"
+#include "chrome/browser/extensions/api/socket/udp_socket.h"
+#include "chrome/browser/extensions/api/sockets_udp/udp_socket_event_dispatcher.h"
 #include "chrome/browser/extensions/api/streams_private/streams_private_api.h"
 #include "chrome/browser/extensions/api/system_info/system_info_api.h"
-#include "chrome/browser/extensions/api/tab_capture/tab_capture_registry_factory.h"
+#include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
 #include "chrome/browser/extensions/api/usb/usb_device_resource.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
@@ -130,7 +134,9 @@
 #include "chrome/browser/ui/gesture_prefs_observer_factory_aura.h"
 #endif
 
-#if !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+#include "chrome/browser/media/protected_media_identifier_permission_context_factory.h"
+#else
 #include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
 #include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
 #endif
@@ -138,6 +144,10 @@
 #if defined(ENABLE_SPELLCHECK)
 #include "chrome/browser/extensions/api/spellcheck/spellcheck_api.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
+#endif
+
+#if defined(ENABLE_MDNS)
+#include "chrome/browser/local_discovery/privet_notifications_factory.h"
 #endif
 
 namespace chrome {
@@ -177,6 +187,9 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   captive_portal::CaptivePortalServiceFactory::GetInstance();
 #endif
   ChromeGeolocationPermissionContextFactory::GetInstance();
+#if defined(OS_ANDROID)
+  ProtectedMediaIdentifierPermissionContextFactory::GetInstance();
+#endif
 #if defined(OS_CHROMEOS)
   chromeos::NetworkingPrivateEventRouterFactory::GetInstance();
 #endif
@@ -193,18 +206,21 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   apps::AppLoadServiceFactory::GetInstance();
   apps::AppRestoreServiceFactory::GetInstance();
   apps::ShellWindowGeometryCache::Factory::GetInstance();
-  autofill::autocheckout::WhitelistManagerFactory::GetInstance();
   extensions::ActivityLogFactory::GetInstance();
   extensions::ActivityLogAPI::GetFactoryInstance();
   extensions::AlarmManager::GetFactoryInstance();
+  extensions::ApiResourceManager<extensions::ResumableUDPSocket>::
+      GetFactoryInstance();
   extensions::ApiResourceManager<extensions::SerialConnection>::
       GetFactoryInstance();
   extensions::ApiResourceManager<extensions::Socket>::GetFactoryInstance();
   extensions::ApiResourceManager<extensions::UsbDeviceResource>::
       GetFactoryInstance();
+  extensions::api::UDPSocketEventDispatcher::GetFactoryInstance();
   extensions::AudioAPI::GetFactoryInstance();
   extensions::BookmarksAPI::GetFactoryInstance();
   extensions::BluetoothAPIFactory::GetInstance();
+  extensions::BrailleDisplayPrivateAPI::GetFactoryInstance();
   extensions::chromedirectsetting::ChromeDirectSettingAPI::GetFactoryInstance();
   extensions::CommandService::GetFactoryInstance();
   extensions::CookiesAPI::GetFactoryInstance();
@@ -229,6 +245,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #endif
   extensions::LocationManager::GetFactoryInstance();
   extensions::ManagementAPI::GetFactoryInstance();
+  extensions::MDnsAPI::GetFactoryInstance();
   extensions::MediaGalleriesPrivateAPI::GetFactoryInstance();
 #if defined(OS_CHROMEOS)
   extensions::MediaPlayerAPI::GetFactoryInstance();
@@ -240,14 +257,15 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::PreferenceAPI::GetFactoryInstance();
   extensions::ProcessesAPI::GetFactoryInstance();
   extensions::PushMessagingAPI::GetFactoryInstance();
-  extensions::SessionRestoreAPI::GetFactoryInstance();
+  extensions::SessionsAPI::GetFactoryInstance();
+  extensions::SignedInDevicesManager::GetFactoryInstance();
 #if defined(ENABLE_SPELLCHECK)
   extensions::SpellcheckAPI::GetFactoryInstance();
 #endif
   extensions::StreamsPrivateAPI::GetFactoryInstance();
   extensions::SystemInfoAPI::GetFactoryInstance();
   extensions::SuggestedLinksRegistryFactory::GetInstance();
-  extensions::TabCaptureRegistryFactory::GetInstance();
+  extensions::TabCaptureRegistry::GetFactoryInstance();
   extensions::TabsWindowsAPI::GetFactoryInstance();
   extensions::TtsAPI::GetFactoryInstance();
   extensions::WebNavigationAPI::GetFactoryInstance();
@@ -266,6 +284,9 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   HistoryServiceFactory::GetInstance();
   invalidation::InvalidationServiceFactory::GetInstance();
   InstantServiceFactory::GetInstance();
+#if defined(ENABLE_MDNS)
+  local_discovery::PrivetNotificationServiceFactory::GetInstance();
+#endif
 #if defined(ENABLE_MANAGED_USERS)
   ManagedUserServiceFactory::GetInstance();
   ManagedUserSyncServiceFactory::GetInstance();

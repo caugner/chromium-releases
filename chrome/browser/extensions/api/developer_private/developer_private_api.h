@@ -151,6 +151,7 @@ class DeveloperPrivateGetItemsInfoFunction : public AsyncExtensionFunction {
 
   // Helper that lists the current inspectable html pages for the extension.
   void GetInspectablePagesForExtensionProcess(
+      const Extension* extension,
       const std::set<content::RenderViewHost*>& views,
       ItemInspectViewList* result);
 
@@ -166,7 +167,8 @@ class DeveloperPrivateGetItemsInfoFunction : public AsyncExtensionFunction {
       const GURL& url,
       int render_process_id,
       int render_view_id,
-      bool incognito);
+      bool incognito,
+      bool generated_background_page);
 };
 
 class DeveloperPrivateInspectFunction : public SyncExtensionFunction {
@@ -238,18 +240,6 @@ class DeveloperPrivateShowPermissionsDialogFunction
   scoped_ptr<ExtensionInstallPrompt> prompt_;
   std::string extension_id_;
 
-};
-
-class DeveloperPrivateRestartFunction : public SyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("developerPrivate.restart",
-                             DEVELOPERPRIVATE_RESTART);
-
- protected:
-  virtual ~DeveloperPrivateRestartFunction();
-
-  // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
 };
 
 class DeveloperPrivateEnableFunction
@@ -355,6 +345,18 @@ class DeveloperPrivateGetStringsFunction : public SyncExtensionFunction {
 
   protected:
    virtual ~DeveloperPrivateGetStringsFunction();
+
+   // ExtensionFunction
+   virtual bool RunImpl() OVERRIDE;
+};
+
+class DeveloperPrivateIsProfileManagedFunction : public SyncExtensionFunction {
+  public:
+   DECLARE_EXTENSION_FUNCTION("developerPrivate.isProfileManaged",
+                              DEVELOPERPRIVATE_ISPROFILEMANAGED);
+
+  protected:
+   virtual ~DeveloperPrivateIsProfileManagedFunction();
 
    // ExtensionFunction
    virtual bool RunImpl() OVERRIDE;

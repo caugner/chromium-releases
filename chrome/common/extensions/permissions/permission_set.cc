@@ -263,6 +263,14 @@ std::vector<string16> PermissionSet::GetWarningMessages(
       }
     }
 
+    // The warning message for declarativeWebRequest permissions speaks about
+    // blocking parts of pages, which is a subset of what the "<all_urls>"
+    // access allows. Therefore we display only the "<all_urls>" warning message
+    // if both permissions are required.
+    if (id == PermissionMessage::kDeclarativeWebRequest &&
+        HasEffectiveAccessToAllHosts())
+      continue;
+
     messages.push_back(i->message());
   }
 
@@ -468,12 +476,24 @@ std::set<PermissionMessage> PermissionSet::GetAPIPermissionMessages() const {
   std::set<PermissionMessage> messages;
   for (APIPermissionSet::const_iterator permission_it = apis_.begin();
        permission_it != apis_.end(); ++permission_it) {
-    DCHECK_GT(PermissionMessage::kNone,
-              PermissionMessage::kUnknown);
     if (permission_it->HasMessages()) {
       PermissionMessages new_messages = permission_it->GetMessages();
       messages.insert(new_messages.begin(), new_messages.end());
     }
+  }
+
+  // A special hack: If kFileSystemWriteDirectory would be displayed, hide
+  // kFileSystemDirectory and and kFileSystemWrite as the write directory
+  // message implies the other two.
+  // TODO(sammc): Remove this. See http://crbug.com/284849.
+  std::set<PermissionMessage>::iterator write_directory_message =
+      messages.find(PermissionMessage(
+          PermissionMessage::kFileSystemWriteDirectory, string16()));
+  if (write_directory_message != messages.end()) {
+    messages.erase(
+        PermissionMessage(PermissionMessage::kFileSystemWrite, string16()));
+    messages.erase(
+        PermissionMessage(PermissionMessage::kFileSystemDirectory, string16()));
   }
   return messages;
 }
@@ -516,6 +536,26 @@ bool PermissionSet::HasLessAPIPrivilegesThan(
   PermissionMsgSet delta_warnings =
       base::STLSetDifference<PermissionMsgSet>(new_warnings, current_warnings);
 
+  // A special hack: the DWR permission is weaker than all hosts permission.
+  if (delta_warnings.size() == 1u &&
+      delta_warnings.begin()->id() ==
+          PermissionMessage::kDeclarativeWebRequest &&
+      HasEffectiveAccessToAllHosts()) {
+    return false;
+  }
+
+  // A special hack: kFileSystemWriteDirectory implies kFileSystemDirectory and
+  // kFileSystemWrite.
+  // TODO(sammc): Remove this. See http://crbug.com/284849.
+  if (current_warnings.find(PermissionMessage(
+          PermissionMessage::kFileSystemWriteDirectory, string16())) !=
+      current_warnings.end()) {
+    delta_warnings.erase(
+        PermissionMessage(PermissionMessage::kFileSystemDirectory, string16()));
+    delta_warnings.erase(
+        PermissionMessage(PermissionMessage::kFileSystemWrite, string16()));
+  }
+
   // We have less privileges if there are additional warnings present.
   return !delta_warnings.empty();
 }
@@ -545,11 +585,9 @@ bool PermissionSet::HasLessHostPrivilegesThan(
   // considered an elevation, even though it is not (http://crbug.com/65337).
   std::set<std::string> new_hosts_set(GetDistinctHosts(new_list, false, false));
   std::set<std::string> old_hosts_set(GetDistinctHosts(old_list, false, false));
-  std::set<std::string> new_hosts_only;
-
-  std::set_difference(new_hosts_set.begin(), new_hosts_set.end(),
-                      old_hosts_set.begin(), old_hosts_set.end(),
-                      std::inserter(new_hosts_only, new_hosts_only.begin()));
+  std::set<std::string> new_hosts_only =
+      base::STLSetDifference<std::set<std::string> >(new_hosts_set,
+                                                     old_hosts_set);
 
   return !new_hosts_only.empty();
 }

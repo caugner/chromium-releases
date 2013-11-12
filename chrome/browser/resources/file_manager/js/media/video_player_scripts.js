@@ -9,13 +9,16 @@
 // with a copyright comment anyway.
 
 //<include src="../../../../../../ui/webui/resources/js/cr.js"/>
-//<include src="../../../../../../ui/webui/resources/js/load_time_data.js"/>
 //<include src="../../../../../../ui/webui/resources/js/cr/event_target.js"/>
+//<include src="../../../../../../ui/webui/resources/js/cr/ui/array_data_model.js"/>
+//<include src="../../../../../../ui/webui/resources/js/load_time_data.js"/>
 
 (function() {
 // 'strict mode' is invoked for this scope.
 
+//<include src="../async_util.js"/>
 //<include src="../util.js"/>
+//<include src="../path_util.js"/>
 //<include src="../file_type.js"/>
 //<include src="../volume_manager.js">
 //<include src="../metadata/metadata_cache.js"/>

@@ -21,7 +21,7 @@
 #include "content/public/browser/web_contents.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "ui/base/clipboard/clipboard.h"
-#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/view.h"
 #include "ui/views/views_delegate.h"
@@ -39,8 +39,7 @@ class FindInPageTest : public InProcessBrowserTest {
   }
 
   string16 GetFindBarText() {
-    FindBarTesting* find_bar =
-        browser()->GetFindBarController()->find_bar()->GetFindBarTesting();
+    FindBar* find_bar = browser()->GetFindBarController()->find_bar();
     return find_bar->GetFindText();
   }
 
@@ -196,9 +195,9 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestoreOnTabSwitch) {
 // Flaky because the test server fails to start? See: http://crbug.com/96594.
 // This tests that whenever you clear values from the Find box and close it that
 // it respects that and doesn't show you the last search, as reported in bug:
-// http://crbug.com/40121.
+// http://crbug.com/40121. For Aura see bug http://crbug.com/292299.
 IN_PROC_BROWSER_TEST_F(FindInPageTest, PrepopulateRespectBlank) {
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(USE_AURA)
   // FindInPage on Mac doesn't use prepopulated values. Search there is global.
   return;
 #endif

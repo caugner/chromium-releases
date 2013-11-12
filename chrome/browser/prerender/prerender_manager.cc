@@ -241,7 +241,7 @@ PrerenderManager::PrerenderManager(Profile* profile,
   // the same thread that it was created on.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (IsLocalPredictorEnabled())
+  if (IsLocalPredictorEnabled(profile))
     local_predictor_.reset(new PrerenderLocalPredictor(this));
 
   if (IsLoggedInPredictorEnabled() && !profile_->IsOffTheRecord()) {
@@ -616,8 +616,7 @@ void PrerenderManager::MoveEntryToPendingDelete(PrerenderContents* entry,
     active_prerenders_.weak_erase(it);
   }
 
-  // Destroy the old WebContents relatively promptly to reduce resource usage,
-  // and in the case of HTML5 media, reduce the chance of playing any sound.
+  // Destroy the old WebContents relatively promptly to reduce resource usage.
   PostCleanupTask();
 }
 
@@ -900,7 +899,7 @@ bool PrerenderManager::IsValidHttpMethod(const std::string& method) {
 
 // static
 bool PrerenderManager::DoesURLHaveValidScheme(const GURL& url) {
-  return (IsWebURL(url) ||
+  return (url.SchemeIsHTTPOrHTTPS() ||
           url.SchemeIs(extensions::kExtensionScheme) ||
           url.SchemeIs("data"));
 }
@@ -1471,7 +1470,7 @@ void PrerenderManager::OnCreatingAudioStream(int render_process_id,
 
 void PrerenderManager::RecordLikelyLoginOnURL(const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!IsWebURL(url))
+  if (!url.SchemeIsHTTPOrHTTPS())
     return;
   if (logged_in_predictor_table_.get()) {
     BrowserThread::PostTask(

@@ -15,6 +15,8 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
+#include "chrome/browser/user_style_sheet_watcher.h"
+#include "chrome/browser/user_style_sheet_watcher_factory.h"
 #include "chrome/common/pref_font_webkit_names.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_names_util.h"
@@ -410,7 +412,8 @@ void OverrideFontFamily(WebPreferences* prefs,
 }  // namespace
 
 PrefsTabHelper::PrefsTabHelper(WebContents* contents)
-    : web_contents_(contents) {
+    : web_contents_(contents),
+      weak_ptr_factory_(this) {
   PrefService* prefs = GetProfile()->GetPrefs();
   pref_change_registrar_.Init(prefs);
   if (prefs) {
@@ -420,6 +423,10 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
     pref_change_registrar_.Add(prefs::kDefaultZoomLevel, renderer_callback);
     pref_change_registrar_.Add(prefs::kEnableDoNotTrack, renderer_callback);
     pref_change_registrar_.Add(prefs::kEnableReferrers, renderer_callback);
+
+#if !defined(OS_MACOSX)
+    pref_change_registrar_.Add(prefs::kFullscreenAllowed, renderer_callback);
+#endif
 
     PrefChangeRegistrar::NamedChangeCallback webkit_callback = base::Bind(
         &PrefsTabHelper::OnWebPrefChanged, base::Unretained(this));
@@ -459,8 +466,13 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
       web_contents_->GetMutableRendererPrefs(), GetProfile());
 
 #if !defined(OS_ANDROID)
-  registrar_.Add(this, chrome::NOTIFICATION_USER_STYLE_SHEET_UPDATED,
-                 content::NotificationService::AllSources());
+  UserStyleSheetWatcher* uss =
+      UserStyleSheetWatcherFactory::GetForProfile(GetProfile());
+  if (uss) {
+    style_sheet_subscription_ = uss->RegisterOnStyleSheetUpdatedCallback(
+        base::Bind(&PrefsTabHelper::UpdateWebPreferences,
+                   weak_ptr_factory_.GetWeakPtr()));
+  }
 #endif
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(ENABLE_THEMES)
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
@@ -649,27 +661,21 @@ void PrefsTabHelper::MigrateUserPrefs(PrefService* prefs) {
 void PrefsTabHelper::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
-  switch (type) {
-#if !defined(OS_ANDROID)
-    case chrome::NOTIFICATION_USER_STYLE_SHEET_UPDATED:
-      UpdateWebPreferences();
-      break;
-#endif // !defined(OS_ANDROID)
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(ENABLE_THEMES)
-    case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
-      UpdateRendererPreferences();
-      break;
-    }
-#endif
-#if defined(USE_AURA)
-    case chrome::NOTIFICATION_BROWSER_FLING_CURVE_PARAMETERS_CHANGED: {
-      UpdateRendererPreferences();
-      break;
-    }
-#endif  // defined(USE_AURA)
-    default:
-      NOTREACHED();
+  if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
+    UpdateRendererPreferences();
+    return;
   }
+#endif
+
+#if defined(USE_AURA)
+  if (type == chrome::NOTIFICATION_BROWSER_FLING_CURVE_PARAMETERS_CHANGED) {
+    UpdateRendererPreferences();
+    return;
+  }
+#endif  // defined(USE_AURA)
+
+  NOTREACHED();
 }
 
 void PrefsTabHelper::UpdateWebPreferences() {

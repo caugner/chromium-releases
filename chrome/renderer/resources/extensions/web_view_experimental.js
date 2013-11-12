@@ -11,19 +11,21 @@
 // permission API would only be available for channels CHANNEL_DEV and
 // CHANNEL_CANARY.
 
-var createEvent = require('webView').CreateEvent;
+var CreateEvent = require('webView').CreateEvent;
+var MessagingNatives = requireNative('messaging_natives');
 var WebRequestEvent = require('webRequestInternal').WebRequestEvent;
-var webRequestSchema =
+var WebRequestSchema =
     requireNative('schema_registry').GetSchema('webRequest');
+var WebViewInternal = require('webView').WebViewInternal;
 var WebView = require('webView').WebView;
 
-var WEB_VIEW_EXPERIMENTAL_EXT_EVENTS = {
+var WEB_VIEW_EXPERIMENTAL_EVENTS = {
   'dialog': {
     cancelable: true,
-    customHandler: function(webview, event, webviewEvent) {
-      webview.maybeSetupExtDialogEvent_(event, webviewEvent);
+    customHandler: function(webViewInternal, event, webViewEvent) {
+      webViewInternal.handleDialogEvent_(event, webViewEvent);
     },
-    evt: createEvent('webview.onDialog'),
+    evt: CreateEvent('webview.onDialog'),
     fields: ['defaultPromptText', 'messageText', 'messageType', 'url']
   }
 };
@@ -31,57 +33,14 @@ var WEB_VIEW_EXPERIMENTAL_EXT_EVENTS = {
 /**
  * @private
  */
-WebView.prototype.maybeSetupExperimentalAPI_ = function() {
-  this.setupWebRequestEvents_();
-};
-
-/**
- * @private
- */
-WebView.prototype.setupWebRequestEvents_ = function() {
-  var self = this;
-  var request = {};
-  var createWebRequestEvent = function(webRequestEvent) {
-    return function() {
-      if (!self[webRequestEvent.name + '_']) {
-        self[webRequestEvent.name + '_'] =
-            new WebRequestEvent(
-                'webview.' + webRequestEvent.name,
-                webRequestEvent.parameters,
-                webRequestEvent.extraParameters, null,
-                self.viewInstanceId_);
-      }
-      return self[webRequestEvent.name + '_'];
-    };
-  };
-
-  // Populate the WebRequest events from the API definition.
-  for (var i = 0; i < webRequestSchema.events.length; ++i) {
-    var webRequestEvent = createWebRequestEvent(webRequestSchema.events[i]);
-    Object.defineProperty(
-        request,
-        webRequestSchema.events[i].name,
-        {
-          get: webRequestEvent,
-          enumerable: true
-        }
-    );
-    Object.defineProperty(
-        this.webviewNode_,
-        webRequestSchema.events[i].name,
-        {
-          get: webRequestEvent,
-          enumerable: true
-        }
-    );
-  }
+WebViewInternal.prototype.maybeAttachWebRequestEventToWebview_ =
+    function(eventName, webRequestEvent) {
   Object.defineProperty(
       this.webviewNode_,
-      'request',
+      eventName,
       {
-        value: request,
-        enumerable: true,
-        writable: false
+        get: webRequestEvent,
+        enumerable: true
       }
   );
 };
@@ -89,7 +48,8 @@ WebView.prototype.setupWebRequestEvents_ = function() {
 /**
  * @private
  */
-WebView.prototype.maybeSetupExtDialogEvent_ = function(event, webviewEvent) {
+WebViewInternal.prototype.handleDialogEvent_ =
+    function(event, webViewEvent) {
   var showWarningMessage = function(dialogType) {
     var VOWELS = ['a', 'e', 'i', 'o', 'u'];
     var WARNING_MSG_DIALOG_BLOCKED = '<webview>: %1 %2 dialog was blocked.';
@@ -106,21 +66,6 @@ WebView.prototype.maybeSetupExtDialogEvent_ = function(event, webviewEvent) {
   var requestId = event.requestId;
   var actionTaken = false;
 
-  var onTrackedObjectGone = function(requestId, dialogType, e) {
-    var detail = e.detail ? JSON.parse(e.detail) : {};
-    if (detail.id != requestId) {
-      return;
-    }
-
-    // Avoid showing a warning message if the decision has already been made.
-    if (actionTaken) {
-      return;
-    }
-
-    chrome.webview.setPermission(self.instanceId_, requestId, false, '');
-    showWarningMessage(dialogType);
-  }
-
   var validateCall = function() {
     var ERROR_MSG_DIALOG_ACTION_ALREADY_TAKEN = '<webview>: ' +
         'An action has already been taken for this "dialog" event.';
@@ -135,17 +80,16 @@ WebView.prototype.maybeSetupExtDialogEvent_ = function(event, webviewEvent) {
     ok: function(user_input) {
       validateCall();
       user_input = user_input || '';
-      chrome.webview.setPermission(
-          self.instanceId_, requestId, true, user_input);
+      WebView.setPermission(self.instanceId_, requestId, true, user_input);
     },
     cancel: function() {
       validateCall();
-      chrome.webview.setPermission(self.instanceId_, requestId, false, '');
+      WebView.setPermission(self.instanceId_, requestId, false, '');
     }
   };
-  webviewEvent.dialog = dialog;
+  webViewEvent.dialog = dialog;
 
-  var defaultPrevented = !webviewNode.dispatchEvent(webviewEvent);
+  var defaultPrevented = !webviewNode.dispatchEvent(webViewEvent);
   if (actionTaken) {
     return;
   }
@@ -153,16 +97,18 @@ WebView.prototype.maybeSetupExtDialogEvent_ = function(event, webviewEvent) {
   if (defaultPrevented) {
     // Tell the JavaScript garbage collector to track lifetime of |dialog| and
     // call back when the dialog object has been collected.
-    var onTrackedObjectGoneWithRequestId =
-        $Function.bind(
-            onTrackedObjectGone, self, requestId, event.messageType);
-    browserPluginNode.addEventListener('-internal-trackedobjectgone',
-        onTrackedObjectGoneWithRequestId);
-    browserPluginNode['-internal-trackObjectLifetime'](dialog, requestId);
+    MessagingNatives.BindToGC(dialog, function() {
+      // Avoid showing a warning message if the decision has already been made.
+      if (actionTaken) {
+        return;
+      }
+      WebView.setPermission(self.instanceId_, requestId, false, '');
+      showWarningMessage(event.messageType);
+    });
   } else {
     actionTaken = true;
     // The default action is equivalent to canceling the dialog.
-    chrome.webview.setPermission(self.instanceId_, requestId, false, '');
+    WebView.setPermission(self.instanceId_, requestId, false, '');
     showWarningMessage(event.messageType);
   }
 };
@@ -170,6 +116,21 @@ WebView.prototype.maybeSetupExtDialogEvent_ = function(event, webviewEvent) {
 /**
  * @private
  */
-WebView.prototype.maybeGetWebviewExperimentalExtEvents_ = function() {
-  return WEB_VIEW_EXPERIMENTAL_EXT_EVENTS;
+WebViewInternal.prototype.maybeGetExperimentalEvents_ = function() {
+  return WEB_VIEW_EXPERIMENTAL_EVENTS;
+};
+
+WebViewInternal.prototype.clearData_ = function(var_args) {
+  if (!this.instanceId_) {
+    return;
+  }
+  var args = $Array.concat([this.instanceId_], $Array.slice(arguments));
+  $Function.apply(WebView.clearData, null, args);
+};
+
+WebViewInternal.maybeRegisterExperimentalAPIs = function(proto, secret) {
+  proto.clearData = function(var_args) {
+    var internal = this.internal_(secret);
+    $Function.apply(internal.clearData_, internal, arguments);
+  };
 };

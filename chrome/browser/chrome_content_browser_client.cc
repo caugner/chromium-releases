@@ -31,8 +31,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/download/download_util.h"
-#include "chrome/browser/extensions/activity_log/activity_log.h"
+#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/browser_permissions_policy_delegate.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -82,6 +81,8 @@
 #include "chrome/browser/ssl/ssl_tab_helper.h"
 #include "chrome/browser/sync_file_system/local/sync_file_system_backend.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/blocked_content/blocked_window_params.h"
+#include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
@@ -101,6 +102,7 @@
 #include "chrome/common/extensions/manifest_handlers/shared_module_info.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/extensions/permissions/socket_permission.h"
+#include "chrome/common/extensions/web_accessible_resources_handler.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pepper_permission_util.h"
 #include "chrome/common/pref_names.h"
@@ -116,7 +118,6 @@
 #include "content/public/browser/browser_url_handler.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/child_process_security_policy.h"
-#include "content/public/browser/compositor_util.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_context.h"
@@ -160,19 +161,17 @@
 #include "chrome/browser/chrome_browser_main_linux.h"
 #elif defined(OS_ANDROID)
 #include "chrome/browser/android/crash_dump_manager.h"
+#include "chrome/browser/android/webapps/single_tab_mode_tab_helper.h"
 #include "chrome/browser/chrome_browser_main_android.h"
+#include "chrome/browser/media/encrypted_media_message_filter_android.h"
 #include "chrome/common/descriptors_android.h"
 #elif defined(OS_POSIX)
 #include "chrome/browser/chrome_browser_main_posix.h"
 #endif
 
-#if defined(OS_LINUX) || defined(OS_OPENBSD) || defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/linux_util.h"
 #include "chrome/browser/crash_handler_host_linux.h"
-#endif
-
-#if !defined(OS_ANDROID)
-#include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #endif
 
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
@@ -205,7 +204,7 @@
 #endif
 
 #if defined(FILE_MANAGER_EXTENSION)
-#include "chrome/browser/chromeos/extensions/file_manager/file_manager_util.h"
+#include "chrome/browser/chromeos/file_manager/app_id.h"
 #endif
 
 #if defined(TOOLKIT_GTK)
@@ -527,64 +526,30 @@ void SetApplicationLocaleOnIOThread(const std::string& locale) {
   g_io_thread_application_locale.Get() = locale;
 }
 
-#if !defined(OS_ANDROID)
-struct BlockedPopupParams {
-  BlockedPopupParams(const GURL& target_url,
-                     const content::Referrer& referrer,
-                     WindowOpenDisposition disposition,
-                     const WebWindowFeatures& features,
-                     bool user_gesture,
-                     bool opener_suppressed,
-                     int render_process_id,
-                     int opener_id)
-      : target_url(target_url),
-        referrer(referrer),
-        disposition(disposition),
-        features(features),
-        user_gesture(user_gesture),
-        opener_suppressed(opener_suppressed),
-        render_process_id(render_process_id),
-        opener_id(opener_id)
-        {}
-
-  GURL target_url;
-  content::Referrer referrer;
-  WindowOpenDisposition disposition;
-  WebWindowFeatures features;
-  bool user_gesture;
-  bool opener_suppressed;
-  int render_process_id;
-  int opener_id;
-};
-
-void HandleBlockedPopupOnUIThread(const BlockedPopupParams& params) {
-  WebContents* tab =
-      tab_util::GetWebContentsByID(params.render_process_id, params.opener_id);
+void HandleBlockedPopupOnUIThread(const BlockedWindowParams& params) {
+  WebContents* tab = tab_util::GetWebContentsByID(params.render_process_id(),
+                                                  params.opener_id());
   if (!tab)
     return;
-
-  prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(
-          Profile::FromBrowserContext(tab->GetBrowserContext()));
-  if (prerender_manager) {
-    prerender_manager->DestroyPrerenderForRenderView(
-        params.render_process_id,
-        params.opener_id,
-        prerender::FINAL_STATUS_CREATE_NEW_WINDOW);
-  }
 
   PopupBlockerTabHelper* popup_helper =
       PopupBlockerTabHelper::FromWebContents(tab);
   if (!popup_helper)
     return;
-  popup_helper->AddBlockedPopup(params.target_url,
-                                params.referrer,
-                                params.disposition,
-                                params.features,
-                                params.user_gesture,
-                                params.opener_suppressed);
+  popup_helper->AddBlockedPopup(params);
 }
-#endif
+
+#if defined(OS_ANDROID)
+void HandleSingleTabModeBlockOnUIThread(const BlockedWindowParams& params) {
+  WebContents* web_contents =
+      tab_util::GetWebContentsByID(params.render_process_id(),
+                                   params.opener_id());
+  if (!web_contents)
+    return;
+
+  SingleTabModeTabHelper::FromWebContents(web_contents)->HandleOpenUrl(params);
+}
+#endif  // defined(OS_ANDROID)
 
 }  // namespace
 
@@ -792,13 +757,6 @@ content::WebContentsViewDelegate*
   return chrome::CreateWebContentsViewDelegate(web_contents);
 }
 
-// Check if the extension activity log is enabled for the profile.
-static bool IsExtensionActivityLogEnabledForProfile(Profile* profile) {
-  // crbug.com/247908 - This should be IsLogEnabled except for an issue
-  // in chrome_frame_net_tests
-  return extensions::ActivityLog::IsLogEnabledOnAnyProfile();
-}
-
 void ChromeContentBrowserClient::GuestWebContentsCreated(
     WebContents* guest_web_contents,
     WebContents* opener_web_contents,
@@ -811,19 +769,9 @@ void ChromeContentBrowserClient::GuestWebContentsCreated(
       return;
     }
 
-    switch (guest->GetViewType()) {
-      case GuestView::WEBVIEW: {
-        *guest_delegate = new WebViewGuest(guest_web_contents);
-        break;
-      }
-      case GuestView::ADVIEW: {
-        *guest_delegate = new AdViewGuest(guest_web_contents);
-        break;
-      }
-      default:
-        NOTREACHED();
-        break;
-    }
+    // Create a new GuestView of the same type as the opener.
+    *guest_delegate =
+        GuestView::Create(guest_web_contents, guest->GetViewType());
     return;
   }
 
@@ -834,13 +782,9 @@ void ChromeContentBrowserClient::GuestWebContentsCreated(
   std::string api_type;
   extra_params->GetString(guestview::kParameterApi, &api_type);
 
-  if (api_type == "adview") {
-    *guest_delegate  = new AdViewGuest(guest_web_contents);
-  } else if (api_type == "webview") {
-    *guest_delegate = new WebViewGuest(guest_web_contents);
-  } else {
-    NOTREACHED();
-  }
+  *guest_delegate =
+      GuestView::Create(guest_web_contents,
+                        GuestView::GetViewTypeFromString(api_type));
 }
 
 void ChromeContentBrowserClient::GuestWebContentsAttached(
@@ -871,9 +815,7 @@ void ChromeContentBrowserClient::GuestWebContentsAttached(
     NOTREACHED();
     return;
   }
-  guest->Attach(embedder_web_contents,
-                extension->id(),
-                extra_params);
+  guest->Attach(embedder_web_contents, extension->id(), extra_params);
 }
 
 void ChromeContentBrowserClient::RenderProcessHostCreated(
@@ -916,12 +858,12 @@ void ChromeContentBrowserClient::RenderProcessHostCreated(
       profile->GetPath(), extension_info_map,
       context));
 #endif
+#if defined(OS_ANDROID)
+  host->GetChannel()->AddFilter(new EncryptedMediaMessageFilterAndroid());
+#endif
 
   host->Send(new ChromeViewMsg_SetIsIncognitoProcess(
       profile->IsOffTheRecord()));
-
-  host->Send(new ChromeViewMsg_SetExtensionActivityLogEnabled(
-      IsExtensionActivityLogEnabledForProfile(profile)));
 
   SendExtensionWebRequestStatusToHost(host);
 
@@ -1075,6 +1017,37 @@ bool ChromeContentBrowserClient::CanCommitURL(
     return false;
   }
 
+  return true;
+}
+
+bool ChromeContentBrowserClient::ShouldAllowOpenURL(
+    content::SiteInstance* site_instance, const GURL& url) {
+  GURL from_url = site_instance->GetSiteURL();
+  // Do not allow pages from the web or other extensions navigate to
+  // non-web-accessible extension resources.
+  if (url.SchemeIs(extensions::kExtensionScheme) &&
+      (from_url.SchemeIsHTTPOrHTTPS() ||
+          from_url.SchemeIs(extensions::kExtensionScheme))) {
+    Profile* profile = Profile::FromBrowserContext(
+        site_instance->GetProcess()->GetBrowserContext());
+    ExtensionService* service =
+        extensions::ExtensionSystem::Get(profile)->extension_service();
+    if (!service)
+      return true;
+    const Extension* extension =
+        service->extensions()->GetExtensionOrAppByURL(url);
+    if (!extension)
+      return true;
+    const Extension* from_extension =
+        service->extensions()->GetExtensionOrAppByURL(
+            site_instance->GetSiteURL());
+    if (from_extension && from_extension->id() == extension->id())
+      return true;
+
+    if (!extensions::WebAccessibleResourcesInfo::IsResourceWebAccessible(
+            extension, url.path()))
+      return false;
+  }
   return true;
 }
 
@@ -1361,14 +1334,14 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       command_line->GetSwitchValueASCII(switches::kProcessType);
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
 
-  if (browser_command_line.HasSwitch(switches::kChromeFrame))
-    command_line->AppendSwitch(switches::kChromeFrame);
+  static const char* const kCommonSwitchNames[] = {
+    switches::kChromeFrame,
+    switches::kUserDataDir,  // Make logs go to the right file.
+  };
+  command_line->CopySwitchesFrom(browser_command_line, kCommonSwitchNames,
+                                 arraysize(kCommonSwitchNames));
 
   if (process_type == switches::kRendererProcess) {
-    base::FilePath user_data_dir =
-        browser_command_line.GetSwitchValuePath(switches::kUserDataDir);
-    if (!user_data_dir.empty())
-      command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
 #if defined(OS_CHROMEOS)
     const std::string& login_profile =
         browser_command_line.GetSwitchValueASCII(
@@ -1424,9 +1397,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
 #endif
     }
 
-    if (content::IsThreadedCompositingEnabled())
-      command_line->AppendSwitch(switches::kEnableThreadedCompositing);
-
     if (message_center::IsRichNotificationEnabled())
       command_line->AppendSwitch(switches::kDisableHTMLNotifications);
 
@@ -1449,6 +1419,7 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kDebugPrint,
       switches::kDisableBundledPpapiFlash,
       switches::kDisableExtensionsResourceWhitelist,
+      switches::kDisablePnacl,
       switches::kDisableScriptedPrintThrottling,
       switches::kEnableAdview,
       switches::kEnableAdviewSrcAttribute,
@@ -1458,7 +1429,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kEnableNaCl,
       switches::kEnableNetBenchmarking,
       switches::kEnablePasswordGeneration,
-      switches::kEnablePnacl,
       switches::kEnableWatchdog,
       switches::kMemoryProfiling,
       switches::kMessageLoopHistogrammer,
@@ -1497,14 +1467,12 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
 #endif
       switches::kMemoryProfiling,
       switches::kSilentDumpOnDCHECK,
-      switches::kUserDataDir,
     };
 
     command_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
                                    arraysize(kSwitchNames));
   } else if (process_type == switches::kZygoteProcess) {
     static const char* const kSwitchNames[] = {
-      switches::kUserDataDir,  // Make logs go to the right file.
       // Load (in-process) Pepper plugins in-process in the zygote pre-sandbox.
       switches::kDisableBundledPpapiFlash,
       switches::kPpapiFlashInProcess,
@@ -1515,10 +1483,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
     command_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
                                    arraysize(kSwitchNames));
   } else if (process_type == switches::kGpuProcess) {
-    base::FilePath user_data_dir =
-        browser_command_line.GetSwitchValuePath(switches::kUserDataDir);
-    if (!user_data_dir.empty())
-      command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
     // If --ignore-gpu-blacklist is passed in, don't send in crash reports
     // because GPU is expected to be unreliable.
     if (browser_command_line.HasSwitch(switches::kIgnoreGpuBlacklist) &&
@@ -2013,10 +1977,12 @@ bool ChromeContentBrowserClient::CanCreateWindow(
     return false;
   }
 
-#if !defined(OS_ANDROID)
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableBetterPopupBlocking)) {
-    return true;
+  if (g_browser_process->prerender_tracker() &&
+      g_browser_process->prerender_tracker()->TryCancelOnIOThread(
+          render_process_id,
+          opener_id,
+          prerender::FINAL_STATUS_CREATE_NEW_WINDOW)) {
+    return false;
   }
 
   if (is_guest)
@@ -2028,28 +1994,36 @@ bool ChromeContentBrowserClient::CanCreateWindow(
 
   HostContentSettingsMap* content_settings =
       ProfileIOData::FromResourceContext(context)->GetHostContentSettingsMap();
+  BlockedWindowParams blocked_params(target_url,
+                                    referrer,
+                                    disposition,
+                                    features,
+                                    user_gesture,
+                                    opener_suppressed,
+                                    render_process_id,
+                                    opener_id);
 
   if (!user_gesture && !CommandLine::ForCurrentProcess()->HasSwitch(
         switches::kDisablePopupBlocking)) {
     if (content_settings->GetContentSetting(opener_top_level_frame_url,
                                             opener_top_level_frame_url,
                                             CONTENT_SETTINGS_TYPE_POPUPS,
-                                            std::string()) ==
+                                            std::string()) !=
         CONTENT_SETTING_ALLOW) {
-      return true;
+      BrowserThread::PostTask(BrowserThread::UI,
+                              FROM_HERE,
+                              base::Bind(&HandleBlockedPopupOnUIThread,
+                                         blocked_params));
+      return false;
     }
+  }
 
+#if defined(OS_ANDROID)
+  if (SingleTabModeTabHelper::IsRegistered(render_process_id, opener_id)) {
     BrowserThread::PostTask(BrowserThread::UI,
                             FROM_HERE,
-                            base::Bind(&HandleBlockedPopupOnUIThread,
-                                       BlockedPopupParams(target_url,
-                                                          referrer,
-                                                          disposition,
-                                                          features,
-                                                          user_gesture,
-                                                          opener_suppressed,
-                                                          render_process_id,
-                                                          opener_id)));
+                            base::Bind(&HandleSingleTabModeBlockOnUIThread,
+                                       blocked_params));
     return false;
   }
 #endif
@@ -2227,9 +2201,6 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
   }
   DCHECK(!web_prefs->default_encoding.empty());
 
-  if (content::IsForceCompositingModeEnabled())
-    web_prefs->force_compositing_mode = true;
-
   WebContents* web_contents = WebContents::FromRenderViewHost(rvh);
   extensions::ViewType view_type = extensions::GetViewType(web_contents);
   ExtensionService* service =
@@ -2261,7 +2232,7 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
   // file manager, which is implemented using WebUI but wants HW acceleration
   // for video decode & render.
   if (url.SchemeIs(extensions::kExtensionScheme) &&
-      url.host() == kFileBrowserDomain) {
+      url.host() == file_manager::kFileManagerAppId) {
     web_prefs->accelerated_compositing_enabled = true;
     web_prefs->accelerated_2d_canvas_enabled = true;
   }
@@ -2323,7 +2294,7 @@ void ChromeContentBrowserClient::ClearCookies(RenderViewHost* rvh) {
 }
 
 base::FilePath ChromeContentBrowserClient::GetDefaultDownloadDirectory() {
-  return download_util::GetDefaultDownloadDirectory();
+  return DownloadPrefs::GetDefaultDownloadDirectory();
 }
 
 std::string ChromeContentBrowserClient::GetDefaultDownloadName() {
@@ -2380,7 +2351,7 @@ bool ChromeContentBrowserClient::AllowPepperSocketAPI(
     content::BrowserContext* browser_context,
     const GURL& url,
     bool private_api,
-    const content::SocketPermissionRequest& params) {
+    const content::SocketPermissionRequest* params) {
 #if defined(ENABLE_PLUGINS)
   Profile* profile = Profile::FromBrowserContext(browser_context);
   const ExtensionSet* extension_set = NULL;
@@ -2401,11 +2372,19 @@ bool ChromeContentBrowserClient::AllowPepperSocketAPI(
         extension_set) {
       const Extension* extension = extension_set->GetByID(url.host());
       if (extension) {
-        extensions::SocketPermission::CheckParam check_params(
-            params.type, params.host, params.port);
-        if (extensions::PermissionsData::CheckAPIPermissionWithParam(
-                extension, extensions::APIPermission::kSocket, &check_params)) {
-          return true;
+        if (params) {
+          extensions::SocketPermission::CheckParam check_params(
+              params->type, params->host, params->port);
+          if (extensions::PermissionsData::CheckAPIPermissionWithParam(
+                  extension, extensions::APIPermission::kSocket,
+                  &check_params)) {
+            return true;
+          }
+        } else {
+          if (extensions::PermissionsData::HasAPIPermission(
+                  extension, extensions::APIPermission::kSocket)) {
+            return true;
+          }
         }
       }
     }
@@ -2458,7 +2437,9 @@ void ChromeContentBrowserClient::GetAdditionalFileSystemBackends(
   additional_backends->push_back(backend);
 #endif
 
-  additional_backends->push_back(new sync_file_system::SyncFileSystemBackend());
+  additional_backends->push_back(
+      new sync_file_system::SyncFileSystemBackend(
+          Profile::FromBrowserContext(browser_context)));
 }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -2472,16 +2453,10 @@ void ChromeContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
   DCHECK(!data_path.empty());
 
   int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
-  base::FilePath chrome_pak = data_path.AppendASCII("chrome.pak");
-  base::PlatformFile f =
-      base::CreatePlatformFile(chrome_pak, flags, NULL, NULL);
-  DCHECK(f != base::kInvalidPlatformFileValue);
-  mappings->push_back(FileDescriptorInfo(kAndroidChromePakDescriptor,
-                                         FileDescriptor(f, true)));
-
   base::FilePath chrome_resources_pak =
       data_path.AppendASCII("chrome_100_percent.pak");
-  f = base::CreatePlatformFile(chrome_resources_pak, flags, NULL, NULL);
+  base::PlatformFile f =
+      base::CreatePlatformFile(chrome_resources_pak, flags, NULL, NULL);
   DCHECK(f != base::kInvalidPlatformFileValue);
   mappings->push_back(FileDescriptorInfo(kAndroidChrome100PercentPakDescriptor,
                                          FileDescriptor(f, true)));

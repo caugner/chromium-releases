@@ -15,11 +15,18 @@ class ChromeAppHostDistribution : public BrowserDistribution {
  public:
   virtual string16 GetAppGuid() OVERRIDE;
 
+  virtual string16 GetDisplayName() OVERRIDE;
+
+  virtual string16 GetBrowserProgIdPrefix() OVERRIDE;
+
+  virtual string16 GetBrowserProgIdDesc() OVERRIDE;
+
+  // This can only be called with SHORTCUT_APP_LAUNCHER for |shortcut_type|.
+  virtual string16 GetShortcutName(ShortcutType shortcut_type) OVERRIDE;
+
+  virtual string16 GetIconFilename() OVERRIDE;
+
   virtual string16 GetBaseAppName() OVERRIDE;
-
-  virtual string16 GetAppShortCutName() OVERRIDE;
-
-  virtual string16 GetAlternateApplicationName() OVERRIDE;
 
   virtual string16 GetBaseAppId() OVERRIDE;
 
@@ -50,8 +57,6 @@ class ChromeAppHostDistribution : public BrowserDistribution {
   virtual bool CanSetAsDefault() OVERRIDE;
 
   virtual bool CanCreateDesktopShortcuts() OVERRIDE;
-
-  virtual string16 GetIconFilename() OVERRIDE;
 
   virtual bool GetCommandExecuteImplClsid(
       string16* handler_class_uuid) OVERRIDE;

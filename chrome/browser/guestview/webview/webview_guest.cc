@@ -4,11 +4,14 @@
 
 #include "chrome/browser/guestview/webview/webview_guest.h"
 
+#include "base/command_line.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/extension_renderer_state.h"
 #include "chrome/browser/extensions/script_executor.h"
+#include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/guestview/guestview_constants.h"
 #include "chrome/browser/guestview/webview/webview_constants.h"
+#include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
@@ -16,8 +19,10 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_request_details.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "net/base/net_errors.h"
 
@@ -69,10 +74,17 @@ void RemoveWebViewEventListenersOnIOThread(
     void* profile,
     const std::string& extension_id,
     int embedder_process_id,
-    int guest_instance_id) {
+    int view_instance_id) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
   ExtensionWebRequestEventRouter::GetInstance()->RemoveWebViewEventListeners(
-      profile, extension_id, embedder_process_id, guest_instance_id);
+      profile,
+      extension_id,
+      embedder_process_id,
+      view_instance_id);
+}
+
+void AttachWebViewHelpers(WebContents* contents) {
+  FaviconTabHelper::CreateForWebContents(contents);
 }
 
 }  // namespace
@@ -90,6 +102,8 @@ WebViewGuest::WebViewGuest(WebContents* guest_web_contents)
   notification_registrar_.Add(
       this, content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
       content::Source<WebContents>(guest_web_contents));
+
+  AttachWebViewHelpers(guest_web_contents);
 }
 
 // static
@@ -141,6 +155,24 @@ void WebViewGuest::Close() {
   DispatchEvent(new GuestView::Event(webview::kEventClose, args.Pass()));
 }
 
+void WebViewGuest::EmbedderDestroyed() {
+  // TODO(fsamuel): WebRequest event listeners for <webview> should survive
+  // reparenting of a <webview> within a single embedder. Right now, we keep
+  // around the browser state for the listener for the lifetime of the embedder.
+  // Ideally, the lifetime of the listeners should match the lifetime of the
+  // <webview> DOM node. Once http://crbug.com/156219 is resolved we can move
+  // the call to RemoveWebViewEventListenersOnIOThread back to
+  // WebViewGuest::WebContentsDestroyed.
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(
+          &RemoveWebViewEventListenersOnIOThread,
+          browser_context(), extension_id(),
+          embedder_render_process_id(),
+          view_instance_id()));
+}
+
 void WebViewGuest::GuestProcessGone(base::TerminationStatus status) {
   scoped_ptr<DictionaryValue> args(new DictionaryValue());
   args->SetInteger(webview::kProcessId,
@@ -180,6 +212,39 @@ bool WebViewGuest::HandleKeyboardEvent(
   }
 #endif
   return false;
+}
+
+bool WebViewGuest::IsDragAndDropEnabled() {
+#if defined(OS_CHROMEOS)
+  return true;
+#else
+  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+  if (channel != chrome::VersionInfo::CHANNEL_STABLE &&
+      channel != chrome::VersionInfo::CHANNEL_BETA) {
+    // Drag and drop is enabled in canary and dev channel.
+    return true;
+  }
+
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableBrowserPluginDragDrop);
+#endif
+}
+
+void WebViewGuest::LoadProgressed(double progress) {
+  scoped_ptr<DictionaryValue> args(new DictionaryValue());
+  args->SetString(guestview::kUrl, web_contents()->GetURL().spec());
+  args->SetDouble(webview::kProgress, progress);
+  DispatchEvent(new GuestView::Event(webview::kEventLoadProgress, args.Pass()));
+}
+
+void WebViewGuest::LoadAbort(bool is_top_level,
+                             const GURL& url,
+                             const std::string& error_type) {
+  scoped_ptr<DictionaryValue> args(new DictionaryValue());
+  args->SetBoolean(guestview::kIsTopLevel, is_top_level);
+  args->SetString(guestview::kUrl, url.possibly_invalid_spec());
+  args->SetString(guestview::kReason, error_type);
+  DispatchEvent(new GuestView::Event(webview::kEventLoadAbort, args.Pass()));
 }
 
 // TODO(fsamuel): Find a reliable way to test the 'responsive' and
@@ -294,6 +359,26 @@ void WebViewGuest::Terminate() {
     base::KillProcess(process_handle, content::RESULT_CODE_KILLED, false);
 }
 
+bool WebViewGuest::ClearData(const base::Time remove_since,
+                             uint32 removal_mask,
+                             const base::Closure& callback) {
+  content::StoragePartition* partition =
+      content::BrowserContext::GetStoragePartition(
+          web_contents()->GetBrowserContext(),
+          web_contents()->GetSiteInstance());
+
+  if (!partition)
+    return false;
+
+  partition->ClearDataForRange(
+      removal_mask,
+      content::StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL,
+      remove_since,
+      base::Time::Now(),
+      callback);
+  return true;
+}
+
 WebViewGuest::~WebViewGuest() {
 }
 
@@ -325,12 +410,7 @@ void WebViewGuest::DidFailProvisionalLoad(
   // Translate the |error_code| into an error string.
   std::string error_type;
   RemoveChars(net::ErrorToString(error_code), "net::", &error_type);
-
-  scoped_ptr<DictionaryValue> args(new DictionaryValue());
-  args->SetBoolean(guestview::kIsTopLevel, is_main_frame);
-  args->SetString(guestview::kUrl, validated_url.spec());
-  args->SetString(guestview::kReason, error_type);
-  DispatchEvent(new GuestView::Event(webview::kEventLoadAbort, args.Pass()));
+  LoadAbort(is_main_frame, validated_url, error_type);
 }
 
 void WebViewGuest::DidStartProvisionalLoadForFrame(
@@ -354,14 +434,6 @@ void WebViewGuest::DidStopLoading(content::RenderViewHost* render_view_host) {
 
 void WebViewGuest::WebContentsDestroyed(WebContents* web_contents) {
   RemoveWebViewFromExtensionRendererState(web_contents);
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(
-          &RemoveWebViewEventListenersOnIOThread,
-          browser_context(), extension_id(),
-          embedder_render_process_id(),
-          view_instance_id()));
 }
 
 void WebViewGuest::LoadHandlerCalled() {
@@ -382,7 +454,6 @@ void WebViewGuest::LoadRedirect(const GURL& old_url,
 void WebViewGuest::AddWebViewToExtensionRendererState() {
   ExtensionRendererState::WebViewInfo webview_info;
   webview_info.embedder_process_id = embedder_render_process_id();
-  webview_info.embedder_routing_id = embedder_web_contents()->GetRoutingID();
   webview_info.instance_id = view_instance_id();
 
   content::BrowserThread::PostTask(
@@ -405,4 +476,14 @@ void WebViewGuest::RemoveWebViewFromExtensionRendererState(
           base::Unretained(ExtensionRendererState::GetInstance()),
           web_contents->GetRenderProcessHost()->GetID(),
           web_contents->GetRoutingID()));
+}
+
+void WebViewGuest::SizeChanged(const gfx::Size& old_size,
+                               const gfx::Size& new_size) {
+  scoped_ptr<DictionaryValue> args(new DictionaryValue());
+  args->SetInteger(webview::kOldHeight, old_size.height());
+  args->SetInteger(webview::kOldWidth, old_size.width());
+  args->SetInteger(webview::kNewHeight, new_size.height());
+  args->SetInteger(webview::kNewWidth, new_size.width());
+  DispatchEvent(new GuestView::Event(webview::kEventSizeChanged, args.Pass()));
 }

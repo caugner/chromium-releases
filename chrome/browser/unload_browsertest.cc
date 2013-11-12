@@ -481,12 +481,15 @@ class FastTabCloseTabStripModelObserver : public TabStripModelObserver {
 
 // Test that fast-tab-close works when closing a tab with an unload handler
 // (http://crbug.com/142458).
-IN_PROC_BROWSER_TEST_F(FastUnloadTest, UnloadHidden) {
+// Flaky on Windows bots (http://crbug.com/267597).
 #if defined(OS_WIN)
-  // Flaky on Win7+ bots (http://crbug.com/267597).
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
-    return;
+#define MAYBE_UnloadHidden \
+    DISABLED_UnloadHidden
+#else
+#define MAYBE_UnloadHidden \
+    UnloadHidden
 #endif
+IN_PROC_BROWSER_TEST_F(FastUnloadTest, MAYBE_UnloadHidden) {
   NavigateToPage("no_listeners");
   NavigateToPageInNewTab("unload_sets_cookie");
   EXPECT_EQ("", GetCookies("no_listeners"));
@@ -560,12 +563,16 @@ IN_PROC_BROWSER_TEST_F(FastUnloadTest, PRE_WindowCloseFinishesUnload) {
   chrome::CloseWindow(browser());
   window_observer.Wait();
 }
-IN_PROC_BROWSER_TEST_F(FastUnloadTest, WindowCloseFinishesUnload) {
+
+// Flaky on Windows bots (http://crbug.com/279267).
 #if defined(OS_WIN)
-  // Flaky on Win7+ bots (http://crbug.com/267597).
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
-    return;
+#define MAYBE_WindowCloseFinishesUnload \
+    DISABLED_WindowCloseFinishesUnload
+#else
+#define MAYBE_WindowCloseFinishesUnload \
+    WindowCloseFinishesUnload
 #endif
+IN_PROC_BROWSER_TEST_F(FastUnloadTest, MAYBE_WindowCloseFinishesUnload) {
   // Check for cookie set in unload during PRE_ test.
   NavigateToPage("no_listeners");
   EXPECT_EQ("unloaded=ohyeah", GetCookies("no_listeners"));

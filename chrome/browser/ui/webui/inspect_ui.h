@@ -16,6 +16,10 @@
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_data_source.h"
 
+namespace base {
+class Value;
+}
+
 class InspectUI : public content::WebUIController,
                   public content::NotificationObserver,
                   public DevToolsAdbBridge::Listener {
@@ -25,6 +29,7 @@ class InspectUI : public content::WebUIController,
 
   void InitUI();
   void InspectRemotePage(const std::string& page_id);
+  void ActivateRemotePage(const std::string& page_id);
   void CloseRemotePage(const std::string& page_id);
   void ReloadRemotePage(const std::string& page_id);
   void OpenRemotePage(const std::string& browser_id, const std::string& url);
@@ -50,6 +55,10 @@ class InspectUI : public content::WebUIController,
 
   void UpdatePortForwardingEnabled();
   void UpdatePortForwardingConfig();
+
+  void SetPortForwardingDefaults();
+
+  const base::Value* GetPrefValue(const char* name);
 
   scoped_refptr<WorkerCreationDestructionListener> observer_;
 

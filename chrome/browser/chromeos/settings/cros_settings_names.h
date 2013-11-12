@@ -18,7 +18,6 @@ extern const char kAccountsPrefDeviceLocalAccounts[];
 extern const char kAccountsPrefDeviceLocalAccountsKeyId[];
 extern const char kAccountsPrefDeviceLocalAccountsKeyType[];
 extern const char kAccountsPrefDeviceLocalAccountsKeyKioskAppId[];
-extern const char kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL[];
 extern const char kAccountsPrefDeviceLocalAccountAutoLoginId[];
 extern const char kAccountsPrefDeviceLocalAccountAutoLoginDelay[];
 extern const char kAccountsPrefDeviceLocalAccountAutoLoginBailoutEnabled[];
@@ -73,6 +72,8 @@ extern const char kKioskDisableBailoutShortcut[];
 extern const char kVariationsRestrictParameter[];
 
 extern const char kDeviceAttestationEnabled[];
+extern const char kAttestationForContentProtectionEnabled[];
+
 }  // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_SETTINGS_CROS_SETTINGS_NAMES_H_

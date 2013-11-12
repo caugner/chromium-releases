@@ -52,6 +52,7 @@ class LocalTranslator {
   void TranslateFields();
 
  private:
+  void TranslateEthernet();
   void TranslateOpenVPN();
   void TranslateVPN();
   void TranslateWiFi();
@@ -86,6 +87,8 @@ class LocalTranslator {
 void LocalTranslator::TranslateFields() {
   if (onc_signature_ == &kNetworkConfigurationSignature)
     TranslateNetworkConfiguration();
+  else if (onc_signature_ == &kEthernetSignature)
+    TranslateEthernet();
   else if (onc_signature_ == &kVPNSignature)
     TranslateVPN();
   else if (onc_signature_ == &kOpenVPNSignature)
@@ -96,6 +99,20 @@ void LocalTranslator::TranslateFields() {
     TranslateEAP();
   else
     CopyFieldsAccordingToSignature();
+}
+
+void LocalTranslator::TranslateEthernet() {
+  std::string authentication;
+  onc_object_->GetStringWithoutPathExpansion(ethernet::kAuthentication,
+                                             &authentication);
+
+  const char* shill_type = flimflam::kTypeEthernet;
+  if (authentication == ethernet::k8021X)
+    shill_type = shill::kTypeEthernetEap;
+  shill_dictionary_->SetStringWithoutPathExpansion(flimflam::kTypeProperty,
+                                                   shill_type);
+
+  CopyFieldsAccordingToSignature();
 }
 
 void LocalTranslator::TranslateOpenVPN() {
@@ -171,14 +188,17 @@ void LocalTranslator::TranslateEAP() {
 void LocalTranslator::TranslateNetworkConfiguration() {
   std::string type;
   onc_object_->GetStringWithoutPathExpansion(network_config::kType, &type);
-  TranslateWithTableAndSet(type, kNetworkTypeTable, flimflam::kTypeProperty);
+
+  // Set the type except for Ethernet which is set in TranslateEthernet.
+  if (type != network_type::kEthernet)
+    TranslateWithTableAndSet(type, kNetworkTypeTable, flimflam::kTypeProperty);
 
   // Shill doesn't allow setting the name for non-VPN networks.
   if (type == network_type::kVPN) {
     std::string name;
     onc_object_->GetStringWithoutPathExpansion(network_config::kName, &name);
-    shill_dictionary_->SetStringWithoutPathExpansion(
-        flimflam::kNameProperty, name);
+    shill_dictionary_->SetStringWithoutPathExpansion(flimflam::kNameProperty,
+                                                     name);
   }
 
   CopyFieldsAccordingToSignature();
@@ -197,7 +217,6 @@ void LocalTranslator::AddValueAccordingToSignature(
     scoped_ptr<base::Value> value) {
   if (!value || !field_translation_table_)
     return;
-
   std::string shill_property_name;
   if (!GetShillPropertyName(onc_name,
                             field_translation_table_,
@@ -232,8 +251,24 @@ void LocalTranslator::TranslateWithTableAndSet(
 void TranslateONCHierarchy(const OncValueSignature& signature,
                            const base::DictionaryValue& onc_object,
                            base::DictionaryValue* shill_dictionary) {
-  // Translates fields of |onc_object| and writes them to |shill_dictionary_|.
-  LocalTranslator translator(signature, onc_object, shill_dictionary);
+  base::DictionaryValue* target_shill_dictionary = shill_dictionary;
+  std::vector<std::string> path_to_shill_dictionary =
+      GetPathToNestedShillDictionary(signature);
+  for (std::vector<std::string>::const_iterator it =
+           path_to_shill_dictionary.begin();
+       it != path_to_shill_dictionary.end();
+       ++it) {
+    base::DictionaryValue* nested_shill_dict = NULL;
+    target_shill_dictionary->GetDictionaryWithoutPathExpansion(
+        *it, &nested_shill_dict);
+    if (!nested_shill_dict)
+      nested_shill_dict = new base::DictionaryValue;
+    target_shill_dictionary->SetWithoutPathExpansion(*it, nested_shill_dict);
+    target_shill_dictionary = nested_shill_dict;
+  }
+  // Translates fields of |onc_object| and writes them to
+  // |target_shill_dictionary_| nested in |shill_dictionary|.
+  LocalTranslator translator(signature, onc_object, target_shill_dictionary);
   translator.TranslateFields();
 
   // Recurse into nested objects.

@@ -50,7 +50,7 @@
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 
 
 namespace autofill {
@@ -200,30 +200,32 @@ class TestAutofillExternalDelegate : public AutofillExternalDelegate {
                                AutofillDriver* autofill_driver)
       : AutofillExternalDelegate(web_contents, autofill_manager,
                                  autofill_driver),
-        keyboard_listener_(NULL) {
+        key_press_event_callback_(NULL) {
   }
 
   virtual ~TestAutofillExternalDelegate() {}
 
   // AutofillExternalDelegate:
-  virtual void OnPopupShown(content::KeyboardListener* listener) OVERRIDE {
-    AutofillExternalDelegate::OnPopupShown(listener);
-    keyboard_listener_ = listener;
+  virtual void OnPopupShown(
+      content::RenderWidgetHost::KeyPressEventCallback* callback) OVERRIDE {
+    AutofillExternalDelegate::OnPopupShown(callback);
+    key_press_event_callback_ = callback;
   }
 
-  virtual void OnPopupHidden(content::KeyboardListener* listener) OVERRIDE {
-    keyboard_listener_ = NULL;
-    AutofillExternalDelegate::OnPopupHidden(listener);
+  virtual void OnPopupHidden(
+      content::RenderWidgetHost::KeyPressEventCallback* callback) OVERRIDE {
+    key_press_event_callback_ = NULL;
+    AutofillExternalDelegate::OnPopupHidden(callback);
   }
 
-  content::KeyboardListener* keyboard_listener() {
-    return keyboard_listener_;
+  content::RenderWidgetHost::KeyPressEventCallback* keyboard_listener() {
+    return key_press_event_callback_;
   }
 
  private:
-  // The popup that is currently registered as a keyboard listener, or NULL if
-  // there is none.
-  content::KeyboardListener* keyboard_listener_;
+  // The popup that is currently registered as a key press event callback, or
+  // NULL if there is none.
+  content::RenderWidgetHost::KeyPressEventCallback* key_press_event_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillExternalDelegate);
 };
@@ -363,7 +365,8 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
         "      };"
         "    }"
         "  };"
-        "})();";
+        "})();"
+        "cr.googleTranslate.onTranslateElementLoad();";
 
     fetcher->set_url(fetcher->GetOriginalURL());
     fetcher->set_status(status);
@@ -410,7 +413,7 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
     content::NativeWebKeyboardEvent event;
     event.windowsKeyCode = key;
     test_delegate_.Reset();
-    GetExternalDelegate()->keyboard_listener()->HandleKeyPressEvent(event);
+    GetExternalDelegate()->keyboard_listener()->Run(event);
     test_delegate_.Wait();
   }
 
@@ -818,9 +821,7 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillAfterReload) {
   TryBasicFormFill();
 }
 
-// DISABLED: http://crbug.com/150084
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
-                       DISABLED_AutofillAfterTranslate) {
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillAfterTranslate) {
   CreateTestProfile();
 
   GURL url(std::string(kDataURIPrefix) +
@@ -853,15 +854,20 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
                " </select><br>"
                "<label for=\"ph\">Phone number:</label>"
                " <input type=\"text\" id=\"ph\"><br>"
-               "</form>");
-  ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(browser(), url));
+               "</form>"
+               // Add additional Japanese characters to ensure the translate bar
+               // will appear.
+               "我々は重要な、興味深いものになるが、時折状況が発生するため苦労や痛みは"
+               "彼にいくつかの素晴らしいを調達することができます。それから、いくつかの利");
 
-  // Get translation bar.
-  LanguageDetectionDetails details;
-  details.adopted_language = "ja";
-  content::RenderViewHostTester::TestOnMessageReceived(
-      GetRenderViewHost(),
-      ChromeViewHostMsg_TranslateLanguageDetermined(0, details, true));
+  content::WindowedNotificationObserver infobar_observer(
+      chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
+      content::NotificationService::AllSources());
+  ASSERT_NO_FATAL_FAILURE(
+      ui_test_utils::NavigateToURL(browser(), url));
+
+  // Wait for the translation bar to appear and get it.
+  infobar_observer.Wait();
   TranslateInfoBarDelegate* delegate = InfoBarService::FromWebContents(
       browser()->tab_strip_model()->GetActiveWebContents())->infobar_at(0)->
           AsTranslateInfoBarDelegate();
@@ -872,19 +878,13 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
   // Simulate translation button press.
   delegate->Translate();
 
-  // Simulate the translate script being retrieved.
-  // Pass fake google.translate lib as the translate script.
-  SimulateURLFetch(true);
-
   content::WindowedNotificationObserver translation_observer(
       chrome::NOTIFICATION_PAGE_TRANSLATED,
       content::NotificationService::AllSources());
 
-  // Simulate translation to kick onTranslateElementLoad.
-  // But right now, the call stucks here.
-  // Once click the text field, it starts again.
-  ASSERT_TRUE(content::ExecuteScript(
-      GetRenderViewHost(), "cr.googleTranslate.onTranslateElementLoad();"));
+  // Simulate the translate script being retrieved.
+  // Pass fake google.translate lib as the translate script.
+  SimulateURLFetch(true);
 
   // Simulate the render notifying the translation has been done.
   translation_observer.Wait();
@@ -1031,7 +1031,7 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
   // TODO(isherman): verify entire form.
 }
 
-// http://crbug.com/150084
+// http://crbug.com/281527
 #if defined(OS_MACOSX)
 #define MAYBE_FormFillLatencyAfterSubmit FormFillLatencyAfterSubmit
 #else
@@ -1128,7 +1128,7 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
   // autofilled form.
   content::NativeWebKeyboardEvent event;
   event.windowsKeyCode = ui::VKEY_DOWN;
-  GetExternalDelegate()->keyboard_listener()->HandleKeyPressEvent(event);
+  GetExternalDelegate()->keyboard_listener()->Run(event);
 
   // Wait for any IPCs to complete by performing an action that generates an
   // IPC that's easy to wait for.  Chrome shouldn't crash.

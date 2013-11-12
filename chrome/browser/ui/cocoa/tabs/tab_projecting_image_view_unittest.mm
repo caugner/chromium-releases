@@ -37,13 +37,12 @@ class TabProjectingImageViewTest : public CocoaTest {
                                       backgroundImage:backgroundImage
                                        projectorImage:projectorImage
                                            throbImage:throbImage
-                                           durationMS:20
                                    animationContainer:NULL]);
     view_ = view.get();
     [[test_window() contentView] addSubview:view_];
   }
 
-  base::MessageLoopForUI message_loop_;  // Needed for ui::ThrobAnimation.
+  base::MessageLoopForUI message_loop_;  // Needed for gfx::ThrobAnimation.
   TabProjectingImageView* view_;
 };
 

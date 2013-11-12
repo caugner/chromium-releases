@@ -49,9 +49,9 @@ class WebUILoginView : public views::View,
   virtual ~WebUILoginView();
 
   // Initializes the webui login view.
-  virtual void Init(views::Widget* login_window);
+  virtual void Init();
 
-  // Overridden from views::Views:
+  // Overridden from views::View:
   virtual bool AcceleratorPressed(
       const ui::Accelerator& accelerator) OVERRIDE;
   virtual const char* GetClassName() const OVERRIDE;
@@ -63,20 +63,14 @@ class WebUILoginView : public views::View,
   // Overridden from web_modal::WebContentsModalDialogHost:
   virtual gfx::NativeView GetHostView() const OVERRIDE;
   virtual gfx::Point GetDialogPosition(const gfx::Size& size) OVERRIDE;
+  virtual gfx::Size GetMaximumDialogSize() OVERRIDE;
   virtual void AddObserver(
       web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
   virtual void RemoveObserver(
       web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
 
-  // Called when WebUI window is created.
-  virtual void OnWindowCreated();
-
   // Gets the native window from the view widget.
   gfx::NativeWindow GetNativeWindow() const;
-
-  // Invokes SetWindowType for the window. This is invoked during startup and
-  // after we've painted.
-  void UpdateWindowType();
 
   // Loads given page. Should be called after Init() has been called.
   void LoadURL(const GURL& url);
@@ -100,6 +94,8 @@ class WebUILoginView : public views::View,
   void SetUIEnabled(bool enabled);
 
   void set_is_hidden(bool hidden) { is_hidden_ = hidden; }
+
+  bool webui_visible() const { return webui_visible_; }
 
   // Let suppress emission of this signal.
   void set_should_emit_login_prompt_visible(bool emit) {
@@ -151,23 +147,17 @@ class WebUILoginView : public views::View,
 
   content::NotificationRegistrar registrar_;
 
-  // Login window which shows the view.
-  views::Widget* login_window_;
-
   // Converts keyboard events on the WebContents to accelerators.
   views::UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
 
   // Maps installed accelerators to OOBE webui accelerator identifiers.
   AccelMap accel_map_;
 
-  // Whether the host window is frozen.
-  bool host_window_frozen_;
-
   // True when WebUI is being initialized hidden.
   bool is_hidden_;
 
-  // True is login-prompt-visible event has been already handled.
-  bool login_prompt_visible_handled_;
+  // True when the WebUI has finished initializing and is visible.
+  bool webui_visible_;
 
   // Should we emit the login-prompt-visible signal when the login page is
   // displayed?

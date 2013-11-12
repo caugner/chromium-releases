@@ -224,6 +224,17 @@ CrxComponent::CrxComponent()
 CrxComponent::~CrxComponent() {
 }
 
+std::string GetCrxComponentID(const CrxComponent& component) {
+  return HexStringToID(StringToLowerASCII(base::HexEncode(&component.pk_hash[0],
+                                          component.pk_hash.size()/2)));
+}
+
+CrxComponentInfo::CrxComponentInfo() {
+}
+
+CrxComponentInfo::~CrxComponentInfo() {
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // The one and only implementation of the ComponentUpdateService interface. In
 // charge of running the show. The main method is ProcessPendingItems() which
@@ -247,7 +258,9 @@ class CrxUpdateService : public ComponentUpdateService {
   virtual Status Start() OVERRIDE;
   virtual Status Stop() OVERRIDE;
   virtual Status RegisterComponent(const CrxComponent& component) OVERRIDE;
-  virtual Status CheckForUpdateSoon(const CrxComponent& component) OVERRIDE;
+  virtual Status CheckForUpdateSoon(const std::string& component_id) OVERRIDE;
+  virtual void GetComponents(
+      std::vector<CrxComponentInfo>* components) OVERRIDE;
 
   // The only purpose of this class is to forward the
   // UtilityProcessHostClient callbacks so CrxUpdateService does
@@ -314,6 +327,12 @@ class CrxUpdateService : public ComponentUpdateService {
     kInstallError,
   };
 
+  enum StepDelayInterval {
+    kStepDelayShort = 0,
+    kStepDelayMedium,
+    kStepDelayLong,
+  };
+
   // See ManifestParserBridge.
   void OnParseUpdateManifestSucceeded(const UpdateManifest::Results& results);
 
@@ -324,7 +343,7 @@ class CrxUpdateService : public ComponentUpdateService {
 
   void ProcessPendingItems();
 
-  void ScheduleNextRun(bool step_delay);
+  void ScheduleNextRun(StepDelayInterval step_delay);
 
   void ParseManifest(const std::string& xml);
 
@@ -376,7 +395,7 @@ CrxUpdateService::CrxUpdateService(ComponentUpdateService::Configurator* config)
           config->RequestContext())),
       chrome_version_(chrome::VersionInfo().Version()),
       running_(false) {
- }
+}
 
 CrxUpdateService::~CrxUpdateService() {
   // Because we are a singleton, at this point only the UI thread should be
@@ -384,7 +403,7 @@ CrxUpdateService::~CrxUpdateService() {
   // flight in other threads.
   Stop();
   STLDeleteElements(&work_items_);
- }
+}
 
 ComponentUpdateService::Status CrxUpdateService::Start() {
   // Note that RegisterComponent will call Start() when the first
@@ -411,10 +430,13 @@ ComponentUpdateService::Status CrxUpdateService::Stop() {
 
 // This function sets the timer which will call ProcessPendingItems() or
 // ProcessRequestedItem() if there is an important requested item.  There
-// are two kinds of waits: a short step_delay (when step_status is
-// kPrevInProgress) and a long one when a full check/update cycle
-// has completed either successfully or with an error.
-void CrxUpdateService::ScheduleNextRun(bool step_delay) {
+// are three kinds of waits:
+//  - a short delay, when there is immediate work to be done.
+//  - a medium delay, when there are updates to be applied within the current
+//    update cycle, or there are components that are still unchecked.
+//  - a long delay when a full check/update cycle has completed for all
+//    components.
+void CrxUpdateService::ScheduleNextRun(StepDelayInterval step_delay) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(url_fetcher_.get() == NULL);
   CHECK(!timer_.IsRunning());
@@ -426,18 +448,32 @@ void CrxUpdateService::ScheduleNextRun(bool step_delay) {
 
   // Keep the delay short if in the middle of an update (step_delay),
   // or there are new requested_work_items_ that have not been processed yet.
-  int64 delay = (step_delay || requested_work_items_.size() > 0)
-      ? config_->StepDelay() : config_->NextCheckDelay();
+  int64 delay_seconds = 0;
+  if (requested_work_items_.empty()) {
+    switch (step_delay) {
+      case kStepDelayShort:
+        delay_seconds = config_->StepDelay();
+        break;
+      case kStepDelayMedium:
+        delay_seconds = config_->StepDelayMedium();
+        break;
+      case kStepDelayLong:
+        delay_seconds = config_->NextCheckDelay();
+        break;
+    }
+  } else {
+    delay_seconds = config_->StepDelay();
+  }
 
-  if (!step_delay) {
+  if (step_delay != kStepDelayShort) {
     NotifyComponentObservers(ComponentObserver::COMPONENT_UPDATER_SLEEPING, 0);
 
     // Zero is only used for unit tests.
-    if (0 == delay)
+    if (0 == delay_seconds)
       return;
   }
 
-  timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(delay),
+  timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(delay_seconds),
                this, &CrxUpdateService::ProcessPendingItems);
 }
 
@@ -540,19 +576,11 @@ bool CrxUpdateService::AddItemToUpdateCheck(CrxUpdateItem* item,
 
 // Start the process of checking for an update, for a particular component
 // that was previously registered.
+// |component_id| is a value returned from GetCrxComponentID().
 ComponentUpdateService::Status CrxUpdateService::CheckForUpdateSoon(
-    const CrxComponent& component) {
-  if (component.pk_hash.empty() ||
-      !component.version.IsValid() ||
-      !component.installer)
-    return kError;
-
-  std::string id =
-    HexStringToID(StringToLowerASCII(base::HexEncode(&component.pk_hash[0],
-                                     component.pk_hash.size()/2)));
-
+    const std::string& component_id) {
   CrxUpdateItem* uit;
-  uit = FindUpdateItemById(id);
+  uit = FindUpdateItemById(component_id);
   if (!uit)
     return kError;
 
@@ -593,6 +621,20 @@ ComponentUpdateService::Status CrxUpdateService::CheckForUpdateSoon(
   }
 
   return kOk;
+}
+
+void CrxUpdateService::GetComponents(
+    std::vector<CrxComponentInfo>* components) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  for (UpdateItems::const_iterator it = work_items_.begin();
+       it != work_items_.end(); ++it) {
+    const CrxUpdateItem* item = *it;
+    CrxComponentInfo info;
+    info.id = GetCrxComponentID(item->component);
+    info.version = item->component.version.GetString();
+    info.name = item->component.name;
+    components->push_back(info);
+  }
 }
 
 // Here is where the work gets scheduled. Given that our |work_items_| list
@@ -693,7 +735,7 @@ void CrxUpdateService::ProcessPendingItems() {
   }
 
   // No components to update. Next check after the long sleep.
-  ScheduleNextRun(false);
+  ScheduleNextRun(kStepDelayLong);
 }
 
 // Called when we got a response from the update server. It consists of an xml
@@ -786,8 +828,9 @@ void CrxUpdateService::OnParseUpdateManifestSucceeded(
   // consider them up to date.
   ChangeItemStatus(CrxUpdateItem::kChecking, CrxUpdateItem::kUpToDate);
 
-  // If there are updates pending we do a short wait.
-  ScheduleNextRun(update_pending > 0);
+  // If there are updates pending we do a short wait, otherwise we take
+  // a longer delay until we check the components again.
+  ScheduleNextRun(update_pending > 0 ? kStepDelayShort : kStepDelayMedium);
 }
 
 void CrxUpdateService::OnParseUpdateManifestFailed(
@@ -796,7 +839,7 @@ void CrxUpdateService::OnParseUpdateManifestFailed(
   size_t count = ChangeItemStatus(CrxUpdateItem::kChecking,
                                   CrxUpdateItem::kNoUpdate);
   DCHECK_GT(count, 0ul);
-  ScheduleNextRun(false);
+  ScheduleNextRun(kStepDelayLong);
 }
 
 // Called when the CRX package has been downloaded to a temporary location.
@@ -805,9 +848,11 @@ void CrxUpdateService::OnParseUpdateManifestFailed(
 void CrxUpdateService::OnURLFetchComplete(const net::URLFetcher* source,
                                           CRXContext* context) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  scoped_ptr<CRXContext> crx_context(context);
   int error_code = net::OK;
 
-  CrxUpdateItem* crx = FindUpdateItemById(context->id);
+  CrxUpdateItem* crx = FindUpdateItemById(crx_context->id);
   DCHECK(crx->status == CrxUpdateItem::kDownloadingDiff ||
          crx->status == CrxUpdateItem::kDownloading);
 
@@ -821,7 +866,7 @@ void CrxUpdateService::OnURLFetchComplete(const net::URLFetcher* source,
       DCHECK_EQ(count, 1ul);
       url_fetcher_.reset();
 
-      ScheduleNextRun(true);
+      ScheduleNextRun(kStepDelayShort);
       return;
     }
     crx->error_category = kNetworkError;
@@ -835,7 +880,8 @@ void CrxUpdateService::OnURLFetchComplete(const net::URLFetcher* source,
     // the update for this component has finished with an error.
     ping_manager_->OnUpdateComplete(crx);
 
-    ScheduleNextRun(false);
+    // Move on to the next update, if there is one available.
+    ScheduleNextRun(kStepDelayMedium);
   } else {
     base::FilePath temp_crx_path;
     CHECK(source->GetResponseAsFilePath(true, &temp_crx_path));
@@ -863,7 +909,7 @@ void CrxUpdateService::OnURLFetchComplete(const net::URLFetcher* source,
         FROM_HERE,
         base::Bind(&CrxUpdateService::Install,
                    base::Unretained(this),
-                   context,
+                   crx_context.release(),
                    temp_crx_path),
         base::TimeDelta::FromMilliseconds(config_->StepDelay()));
   }
@@ -921,12 +967,12 @@ void CrxUpdateService::DoneInstalling(const std::string& component_id,
     item->diff_error_category = error_category;
     item->diff_error_code = error;
     item->diff_extra_code1 = extra_code;
-      item->diff_update_failed = true;
-      size_t count = ChangeItemStatus(CrxUpdateItem::kUpdatingDiff,
-                                      CrxUpdateItem::kCanUpdate);
-      DCHECK_EQ(count, 1ul);
-      ScheduleNextRun(true);
-      return;
+    item->diff_update_failed = true;
+    size_t count = ChangeItemStatus(CrxUpdateItem::kUpdatingDiff,
+                                    CrxUpdateItem::kCanUpdate);
+    DCHECK_EQ(count, 1ul);
+    ScheduleNextRun(kStepDelayShort);
+    return;
     }
 
   if (is_success) {
@@ -942,7 +988,8 @@ void CrxUpdateService::DoneInstalling(const std::string& component_id,
 
   ping_manager_->OnUpdateComplete(item);
 
-  ScheduleNextRun(false);
+  // Move on to the next update, if there is one available.
+  ScheduleNextRun(kStepDelayMedium);
 }
 
 void CrxUpdateService::NotifyComponentObservers(

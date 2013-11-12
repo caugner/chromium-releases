@@ -65,8 +65,6 @@ base::FilePath GetMediaTestDir() {
 
 }  // namespace
 
-namespace chrome {
-
 class MediaFileValidatorTest : public InProcessBrowserTest {
  public:
   MediaFileValidatorTest() : test_file_size_(0) {}
@@ -154,7 +152,7 @@ class MediaFileValidatorTest : public InProcessBrowserTest {
                                  const base::FilePath& source,
                                  bool expected_result) {
     std::string content;
-    ASSERT_TRUE(file_util::ReadFileToString(source, &content));
+    ASSERT_TRUE(base::ReadFileToString(source, &content));
     SetupOnFileThread(filename, content, expected_result);
   }
 
@@ -279,5 +277,3 @@ IN_PROC_BROWSER_TEST_F(MediaFileValidatorTest, ValidVideo) {
   test_file = test_file.AppendASCII("bear-320x240-multitrack.webm");
   MoveTestFromFile("multitrack.webm", test_file, true);
 }
-
-}  // namespace chrome

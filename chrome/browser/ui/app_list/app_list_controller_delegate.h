@@ -11,6 +11,10 @@
 
 class Profile;
 
+namespace base {
+class FilePath;
+}
+
 namespace extensions {
 class Extension;
 }
@@ -31,9 +35,6 @@ class AppListControllerDelegate {
 
   // Handle the view being closed.
   virtual void ViewClosing();
-
-  // Handle the view being activated or deactivated.
-  virtual void ViewActivationChanged(bool active);
 
   // Get app list window.
   virtual gfx::NativeWindow GetAppListWindow() = 0;
@@ -69,6 +70,9 @@ class AppListControllerDelegate {
   virtual void LaunchApp(Profile* profile,
                          const extensions::Extension* extension,
                          int event_flags) = 0;
+
+  // Show the app list for the profile specified by |profile_path|.
+  virtual void ShowForProfileByPath(const base::FilePath& profile_path) = 0;
 
   // Whether or not the icon indicating which user is logged in should be
   // visible.

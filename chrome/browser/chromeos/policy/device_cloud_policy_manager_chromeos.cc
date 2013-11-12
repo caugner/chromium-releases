@@ -80,11 +80,13 @@ bool GetMachineFlag(const std::string& key, bool default_value) {
 
 DeviceCloudPolicyManagerChromeOS::DeviceCloudPolicyManagerChromeOS(
     scoped_ptr<DeviceCloudPolicyStoreChromeOS> store,
+    const scoped_refptr<base::SequencedTaskRunner>& task_runner,
     EnterpriseInstallAttributes* install_attributes)
     : CloudPolicyManager(
           PolicyNamespaceKey(dm_protocol::kChromeDevicePolicyType,
                              std::string()),
-          store.get()),
+          store.get(),
+          task_runner),
       device_store_(store.Pass()),
       install_attributes_(install_attributes),
       device_management_service_(NULL),
@@ -239,7 +241,7 @@ void DeviceCloudPolicyManagerChromeOS::EnrollmentCompleted(
     EnrollmentStatus status) {
   if (status.status() == EnrollmentStatus::STATUS_SUCCESS) {
     core()->Connect(enrollment_handler_->ReleaseClient());
-    StartRefreshScheduler();
+    core()->StartRefreshScheduler();
     core()->TrackRefreshDelayPref(local_state_,
                                   prefs::kDevicePolicyRefreshRate);
     attestation_policy_observer_.reset(
@@ -260,7 +262,7 @@ void DeviceCloudPolicyManagerChromeOS::StartIfManaged() {
       store()->is_managed() &&
       !service()) {
     core()->Connect(CreateClient());
-    StartRefreshScheduler();
+    core()->StartRefreshScheduler();
     core()->TrackRefreshDelayPref(local_state_,
                                   prefs::kDevicePolicyRefreshRate);
     attestation_policy_observer_.reset(

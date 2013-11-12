@@ -22,7 +22,7 @@
 #include "chrome/browser/extensions/api/developer_private/developer_private_api_factory.h"
 #include "chrome/browser/extensions/api/developer_private/entry_picker.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/event_names.h"
+#include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_disabled_ui.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -32,7 +32,7 @@
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync_file_system/drive_backend/drive_file_sync_service.h"
+#include "chrome/browser/sync_file_system/drive_backend_v1/drive_file_sync_service.h"
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
@@ -58,8 +58,10 @@
 #include "extensions/common/switches.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/webui/web_ui_util.h"
 #include "webkit/browser/fileapi/file_system_context.h"
 #include "webkit/browser/fileapi/file_system_operation.h"
@@ -72,7 +74,7 @@ using content::RenderViewHost;
 
 namespace extensions {
 
-namespace events = event_names;
+namespace developer_private = api::developer_private;
 
 namespace {
 
@@ -81,6 +83,45 @@ const base::FilePath::CharType kUnpackedAppsFolder[]
 
 ExtensionUpdater* GetExtensionUpdater(Profile* profile) {
     return profile->GetExtensionService()->updater();
+}
+
+GURL GetImageURLFromData(std::string contents) {
+  std::string contents_base64;
+  if (!base::Base64Encode(contents, &contents_base64))
+    return GURL();
+
+  // TODO(dvh): make use of chrome::kDataScheme. Filed as crbug/297301.
+  const char kDataURLPrefix[] = "data:image;base64,";
+  return GURL(kDataURLPrefix + contents_base64);
+}
+
+GURL GetDefaultImageURL(developer_private::ItemType type) {
+  int icon_resource_id;
+  switch (type) {
+    case developer::ITEM_TYPE_LEGACY_PACKAGED_APP:
+    case developer::ITEM_TYPE_HOSTED_APP:
+    case developer::ITEM_TYPE_PACKAGED_APP:
+      icon_resource_id = IDR_APP_DEFAULT_ICON;
+      break;
+    default:
+      icon_resource_id = IDR_EXTENSION_DEFAULT_ICON;
+      break;
+  }
+
+  return GetImageURLFromData(
+      ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
+          icon_resource_id, ui::SCALE_FACTOR_100P).as_string());
+}
+
+// TODO(dvh): This code should be refactored and moved to
+// extensions::ImageLoader. Also a resize should be performed to avoid
+// potential huge URLs: crbug/297298.
+GURL ToDataURL(const base::FilePath& path, developer_private::ItemType type) {
+  std::string contents;
+  if (path.empty() || !base::ReadFileToString(path, &contents))
+    return GetDefaultImageURL(type);
+
+  return GetImageURLFromData(contents);
 }
 
 std::vector<base::FilePath> ListFolder(const base::FilePath path) {
@@ -129,7 +170,6 @@ namespace GetItemsInfo = api::developer_private::GetItemsInfo;
 namespace Inspect = api::developer_private::Inspect;
 namespace PackDirectory = api::developer_private::PackDirectory;
 namespace Reload = api::developer_private::Reload;
-namespace Restart = api::developer_private::Restart;
 
 DeveloperPrivateAPI* DeveloperPrivateAPI::Get(Profile* profile) {
   return DeveloperPrivateAPIFactory::GetForProfile(profile);
@@ -212,7 +252,7 @@ void DeveloperPrivateEventRouter::Observe(
   scoped_ptr<ListValue> args(new ListValue());
   args->Append(event_data.ToValue().release());
 
-  event_name = events::kDeveloperPrivateOnItemStateChanged;
+  event_name = developer_private::OnItemStateChanged::kEventName;
   scoped_ptr<Event> event(new Event(event_name, args.Pass()));
   ExtensionSystem::Get(profile)->event_router()->BroadcastEvent(event.Pass());
 }
@@ -223,7 +263,7 @@ void DeveloperPrivateAPI::SetLastUnpackedDirectory(const base::FilePath& path) {
 
 void DeveloperPrivateAPI::RegisterNotifications() {
   ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
-      this, events::kDeveloperPrivateOnItemStateChanged);
+      this, developer_private::OnItemStateChanged::kEventName);
 }
 
 DeveloperPrivateAPI::~DeveloperPrivateAPI() {}
@@ -240,7 +280,7 @@ void DeveloperPrivateAPI::OnListenerAdded(
 void DeveloperPrivateAPI::OnListenerRemoved(
     const EventListenerInfo& details) {
   if (!ExtensionSystem::Get(profile_)->event_router()->HasEventListener(
-          event_names::kDeveloperPrivateOnItemStateChanged))
+          developer_private::OnItemStateChanged::kEventName))
     developer_private_event_router_.reset(NULL);
 }
 
@@ -250,7 +290,7 @@ bool DeveloperPrivateAutoUpdateFunction::RunImpl() {
   ExtensionUpdater* updater = GetExtensionUpdater(profile());
   if (updater)
     updater->CheckNow(ExtensionUpdater::CheckParams());
-  SetResult(Value::CreateBooleanValue(true));
+  SetResult(new base::FundamentalValue(true));
   return true;
 }
 
@@ -271,14 +311,6 @@ scoped_ptr<developer::ItemInfo>
   info->offline_enabled = OfflineEnabledInfo::IsOfflineEnabled(&item);
   info->version = item.VersionString();
   info->description = item.description();
-
-  GURL url =
-      ExtensionIconSource::GetIconURL(&item,
-                                      extension_misc::EXTENSION_ICON_MEDIUM,
-                                      ExtensionIconSet::MATCH_BIGGER,
-                                      false,
-                                      NULL);
-  info->icon_url = url.spec();
 
   if (item.is_app()) {
     if (item.is_legacy_packaged_app())
@@ -304,7 +336,6 @@ scoped_ptr<developer::ItemInfo>
              item.install_warnings().begin();
          it != item.install_warnings().end(); ++it) {
       developer::InstallWarning* warning = new developer::InstallWarning();
-      warning->is_html = (it->format == InstallWarning::FORMAT_HTML);
       warning->message = it->message;
       info->install_warnings.push_back(make_linked_ptr(warning));
     }
@@ -343,10 +374,34 @@ scoped_ptr<developer::ItemInfo>
   return info.Pass();
 }
 
+void DeveloperPrivateGetItemsInfoFunction::GetIconsOnFileThread(
+    ItemInfoList item_list,
+    const std::map<std::string, ExtensionResource> idToIcon) {
+  for (ItemInfoList::iterator iter = item_list.begin();
+       iter != item_list.end(); ++iter) {
+    developer_private::ItemInfo* info = iter->get();
+    std::map<std::string, ExtensionResource>::const_iterator resource_ptr
+        = idToIcon.find(info->id);
+    if (resource_ptr != idToIcon.end()) {
+      info->icon_url =
+          ToDataURL(resource_ptr->second.GetFilePath(), info->type).spec();
+    }
+  }
+
+  results_ = developer::GetItemsInfo::Results::Create(item_list);
+  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+      base::Bind(&DeveloperPrivateGetItemsInfoFunction::SendResponse,
+                 this,
+                 true));
+}
+
 void DeveloperPrivateGetItemsInfoFunction::
     GetInspectablePagesForExtensionProcess(
+        const Extension* extension,
         const std::set<content::RenderViewHost*>& views,
         ItemInspectViewList* result) {
+  bool has_generated_background_page =
+      BackgroundInfo::HasGeneratedBackgroundPage(extension);
   for (std::set<content::RenderViewHost*>::const_iterator iter = views.begin();
        iter != views.end(); ++iter) {
     content::RenderViewHost* host = *iter;
@@ -358,11 +413,14 @@ void DeveloperPrivateGetItemsInfoFunction::
       continue;
 
     content::RenderProcessHost* process = host->GetProcess();
-    result->push_back(
-        constructInspectView(web_contents->GetURL(),
-                             process->GetID(),
-                             host->GetRoutingID(),
-                             process->GetBrowserContext()->IsOffTheRecord()));
+    bool is_background_page =
+        (web_contents->GetURL() == BackgroundInfo::GetBackgroundURL(extension));
+    result->push_back(constructInspectView(
+        web_contents->GetURL(),
+        process->GetID(),
+        host->GetRoutingID(),
+        process->GetBrowserContext()->IsOffTheRecord(),
+        is_background_page && has_generated_background_page));
   }
 }
 
@@ -376,16 +434,21 @@ void DeveloperPrivateGetItemsInfoFunction::
   const ShellWindowRegistry::ShellWindowList windows =
       registry->GetShellWindowsForApp(extension->id());
 
+  bool has_generated_background_page =
+      BackgroundInfo::HasGeneratedBackgroundPage(extension);
   for (ShellWindowRegistry::const_iterator it = windows.begin();
        it != windows.end(); ++it) {
     content::WebContents* web_contents = (*it)->web_contents();
     RenderViewHost* host = web_contents->GetRenderViewHost();
     content::RenderProcessHost* process = host->GetProcess();
-    result->push_back(
-        constructInspectView(web_contents->GetURL(),
-                             process->GetID(),
-                             host->GetRoutingID(),
-                             process->GetBrowserContext()->IsOffTheRecord()));
+    bool is_background_page =
+        (web_contents->GetURL() == BackgroundInfo::GetBackgroundURL(extension));
+    result->push_back(constructInspectView(
+        web_contents->GetURL(),
+        process->GetID(),
+        host->GetRoutingID(),
+        process->GetBrowserContext()->IsOffTheRecord(),
+        is_background_page && has_generated_background_page));
   }
 }
 
@@ -394,7 +457,8 @@ linked_ptr<developer::ItemInspectView> DeveloperPrivateGetItemsInfoFunction::
         const GURL& url,
         int render_process_id,
         int render_view_id,
-        bool incognito) {
+        bool incognito,
+        bool generated_background_page) {
   linked_ptr<developer::ItemInspectView> view(new developer::ItemInspectView());
 
   if (url.scheme() == kExtensionScheme) {
@@ -408,6 +472,7 @@ linked_ptr<developer::ItemInspectView> DeveloperPrivateGetItemsInfoFunction::
   view->render_process_id = render_process_id;
   view->render_view_id = render_view_id;
   view->incognito = incognito;
+  view->generated_background_page = generated_background_page;
   return view;
 }
 
@@ -421,6 +486,7 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
   ExtensionProcessManager* process_manager =
       ExtensionSystem::Get(profile())->process_manager();
   GetInspectablePagesForExtensionProcess(
+      extension,
       process_manager->GetRenderViewHostsForExtension(extension->id()),
       &result);
 
@@ -432,7 +498,11 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
       extension_is_enabled &&
       !process_manager->GetBackgroundHostForExtension(extension->id())) {
     result.push_back(constructInspectView(
-        BackgroundInfo::GetBackgroundURL(extension), -1, -1, false));
+        BackgroundInfo::GetBackgroundURL(extension),
+        -1,
+        -1,
+        false,
+        BackgroundInfo::HasGeneratedBackgroundPage(extension)));
   }
 
   ExtensionService* service = profile()->GetExtensionService();
@@ -443,6 +513,7 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
     process_manager = ExtensionSystem::Get(
         service->profile()->GetOffTheRecordProfile())->process_manager();
     GetInspectablePagesForExtensionProcess(
+        extension,
         process_manager->GetRenderViewHostsForExtension(extension->id()),
         &result);
 
@@ -450,7 +521,11 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
         extension_is_enabled &&
         !process_manager->GetBackgroundHostForExtension(extension->id())) {
     result.push_back(constructInspectView(
-        BackgroundInfo::GetBackgroundURL(extension), -1, -1, false));
+        BackgroundInfo::GetBackgroundURL(extension),
+        -1,
+        -1,
+        false,
+        BackgroundInfo::HasGeneratedBackgroundPage(extension)));
     }
   }
 
@@ -479,11 +554,18 @@ bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
     items.InsertAll(*service->terminated_extensions());
   }
 
+  std::map<std::string, ExtensionResource> id_to_icon;
   ItemInfoList item_list;
 
   for (ExtensionSet::const_iterator iter = items.begin();
        iter != items.end(); ++iter) {
     const Extension& item = *iter->get();
+
+    ExtensionResource item_resource =
+        IconsInfo::GetIconResource(&item,
+                                   extension_misc::EXTENSION_ICON_MEDIUM,
+                                   ExtensionIconSet::MATCH_BIGGER);
+    id_to_icon[item.id()] = item_resource;
 
     // Don't show component extensions and invisible apps.
     if (item.ShouldNotBeVisible())
@@ -494,8 +576,11 @@ bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
             item, service->IsExtensionEnabled(item.id())).release()));
   }
 
-  results_ = developer::GetItemsInfo::Results::Create(item_list);
-  SendResponse(true);
+  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
+      base::Bind(&DeveloperPrivateGetItemsInfoFunction::GetIconsOnFileThread,
+                 this,
+                 item_list,
+                 id_to_icon));
 
   return true;
 }
@@ -617,23 +702,6 @@ DeveloperPrivateShowPermissionsDialogFunction::
 DeveloperPrivateShowPermissionsDialogFunction::
     ~DeveloperPrivateShowPermissionsDialogFunction() {}
 
-bool DeveloperPrivateRestartFunction::RunImpl() {
-  scoped_ptr<Restart::Params> params(Restart::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
-
-  apps::AppLoadService* service = apps::AppLoadService::Get(profile());
-  EXTENSION_FUNCTION_VALIDATE(!params->item_id.empty());
-  ExtensionService* extension_service = profile()->GetExtensionService();
-  // Don't restart disabled applications.
-  if (!extension_service->IsExtensionEnabled(params->item_id))
-    return false;
-
-  service->RestartApplication(params->item_id);
-  return true;
-}
-
-DeveloperPrivateRestartFunction::~DeveloperPrivateRestartFunction() {}
-
 DeveloperPrivateEnableFunction::DeveloperPrivateEnableFunction() {}
 
 bool DeveloperPrivateEnableFunction::RunImpl() {
@@ -650,7 +718,7 @@ bool DeveloperPrivateEnableFunction::RunImpl() {
   if (!extension ||
       !management_policy->UserMayModifySettings(extension, NULL)) {
     LOG(ERROR) << "Attempt to enable an extension that is non-usermanagable "
-               "was made. Extension id: " << extension->id();
+               "was made. Extension id: " << extension_id.c_str();
     return false;
   }
 
@@ -730,7 +798,7 @@ bool DeveloperPrivateInspectFunction::RunImpl() {
         options.extension_id);
     DCHECK(extension);
     // Wakes up the background page and  opens the inspect window.
-    service->InspectBackgroundPage(extension);
+    devtools_util::InspectBackgroundPage(extension, profile());
     return false;
   }
 
@@ -846,10 +914,9 @@ bool DeveloperPrivatePackDirectoryFunction::RunImpl() {
   key_path_str_ = params->private_key_path;
 
   base::FilePath root_directory =
-      base::FilePath::FromWStringHack(UTF8ToWide(item_path_str_));
+      base::FilePath::FromUTF8Unsafe(item_path_str_);
 
-  base::FilePath key_file =
-      base::FilePath::FromWStringHack(UTF8ToWide(key_path_str_));
+  base::FilePath key_file = base::FilePath::FromUTF8Unsafe(key_path_str_);
 
   developer::PackDirectoryResponse response;
   if (root_directory.empty()) {
@@ -1084,7 +1151,7 @@ void DeveloperPrivateLoadProjectFunction::GetUnpackedExtension(
   const Extension* extension = GetExtensionByPath(extensions, path);
   bool success = true;
   if (extension) {
-    SetResult(base::Value::CreateStringValue(extension->id()));
+    SetResult(new base::StringValue(extension->id()));
   } else {
     SetError("unable to load the project");
     success = false;
@@ -1143,8 +1210,7 @@ bool DeveloperPrivateChoosePathFunction::RunImpl() {
 
 void DeveloperPrivateChoosePathFunction::FileSelected(
     const base::FilePath& path) {
-  SetResult(base::Value::CreateStringValue(
-      UTF16ToUTF8(path.LossyDisplayName())));
+  SetResult(new base::StringValue(UTF16ToUTF8(path.LossyDisplayName())));
   SendResponse(true);
   Release();
 }
@@ -1187,6 +1253,7 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
              IDS_EXTENSIONS_INSTALL_WARNINGS);
   SET_STRING("viewIncognito", IDS_EXTENSIONS_VIEW_INCOGNITO);
   SET_STRING("viewInactive", IDS_EXTENSIONS_VIEW_INACTIVE);
+  SET_STRING("backgroundPage", IDS_EXTENSIONS_BACKGROUND_PAGE);
   SET_STRING("extensionSettingsEnable", IDS_EXTENSIONS_ENABLE);
   SET_STRING("extensionSettingsEnabled", IDS_EXTENSIONS_ENABLED);
   SET_STRING("extensionSettingsRemove", IDS_EXTENSIONS_REMOVE);
@@ -1196,9 +1263,9 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
              IDS_EXTENSIONS_ALLOW_FILE_ACCESS);
   SET_STRING("extensionSettingsReloadTerminated",
              IDS_EXTENSIONS_RELOAD_TERMINATED);
-  SET_STRING("extensionSettingsReloadUnpacked", IDS_EXTENSIONS_RELOAD_UNPACKED);
+  SET_STRING("extensionSettingsReloadUnpacked",
+             IDS_APPS_DEV_TOOLS_RELOAD_UNPACKED);
   SET_STRING("extensionSettingsLaunch", IDS_EXTENSIONS_LAUNCH);
-  SET_STRING("extensionSettingsRestart", IDS_EXTENSIONS_RESTART);
   SET_STRING("extensionSettingsOptions", IDS_EXTENSIONS_OPTIONS_LINK);
   SET_STRING("extensionSettingsPermissions", IDS_EXTENSIONS_PERMISSIONS_LINK);
   SET_STRING("extensionSettingsVisitWebsite", IDS_EXTENSIONS_VISIT_WEBSITE);
@@ -1225,13 +1292,13 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("extensionSettingsShowLogsButton", IDS_EXTENSIONS_SHOW_LOGS);
   SET_STRING("extensionSettingsMoreDetailsButton", IDS_EXTENSIONS_MORE_DETAILS);
   SET_STRING("extensionSettingsVersion", IDS_EXTENSIONS_VERSION);
-  SET_STRING("extensionSettingsDelete", IDS_EXTENSIONS_DELETE);
+  SET_STRING("extensionSettingsDelete", IDS_EXTENSIONS_ADT_DELETE);
   SET_STRING("extensionSettingsPack", IDS_EXTENSIONS_PACK);
 
 // Pack Extension strings
   SET_STRING("packExtensionOverlay", IDS_EXTENSION_PACK_DIALOG_TITLE);
   SET_STRING("packExtensionHeading", IDS_EXTENSION_ADT_PACK_DIALOG_HEADING);
-  SET_STRING("packExtensionCommit", IDS_EXTENSION_PACK_BUTTON);
+  SET_STRING("packButton", IDS_EXTENSION_ADT_PACK_BUTTON);
   SET_STRING("ok", IDS_OK);
   SET_STRING("cancel", IDS_CANCEL);
   SET_STRING("packExtensionRootDir",
@@ -1242,6 +1309,8 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("packExtensionProceedAnyway", IDS_EXTENSION_PROCEED_ANYWAY);
   SET_STRING("packExtensionWarningTitle", IDS_EXTENSION_PACK_WARNING_TITLE);
   SET_STRING("packExtensionErrorTitle", IDS_EXTENSION_PACK_ERROR_TITLE);
+  SET_STRING("packAppOverlay", IDS_EXTENSION_PACK_APP_DIALOG_TITLE);
+  SET_STRING("packAppHeading", IDS_EXTENSION_ADT_PACK_APP_DIALOG_HEADING);
 
 // Delete confirmation dialog.
   SET_STRING("deleteConfirmationDeleteButton",
@@ -1253,11 +1322,28 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
   SET_STRING("deleteConfirmationMessageExtension",
       IDS_APPS_DEVTOOL_DELETE_CONFIRMATION_MESSAGE_EXTENSION);
 
+// Dialog when profile is managed.
+  SET_STRING("managedProfileDialogCloseButton",
+      IDS_APPS_DEVTOOL_MANAGED_PROFILE_DIALOG_CLOSE_BUTTON);
+  SET_STRING("managedProfileDialogTitle",
+      IDS_APPS_DEVTOOL_MANAGED_PROFILE_DIALOG_TITLE);
+  SET_STRING("managedProfileDialogDescription",
+      IDS_APPS_DEVTOOL_MANAGED_PROFILE_DIALOG_DESCRIPTION);
+
   #undef   SET_STRING
   return true;
 }
 
 DeveloperPrivateGetStringsFunction::~DeveloperPrivateGetStringsFunction() {}
+
+bool DeveloperPrivateIsProfileManagedFunction::RunImpl() {
+  SetResult(new base::FundamentalValue(profile_->IsManaged()));
+  return true;
+}
+
+DeveloperPrivateIsProfileManagedFunction::
+    ~DeveloperPrivateIsProfileManagedFunction() {
+}
 
 } // namespace api
 

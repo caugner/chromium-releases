@@ -76,6 +76,13 @@ const char kLTRHtmlTextDirection[] = "ltr";
 
 static base::LazyInstance<std::set<const WebUIController*> > g_live_new_tabs;
 
+const char* GetHtmlTextDirection(const string16& text) {
+  if (base::i18n::IsRTL() && base::i18n::StringContainsStrongRTLChars(text))
+    return kRTLHtmlTextDirection;
+  else
+    return kLTRHtmlTextDirection;
+}
+
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -116,7 +123,7 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
     // Android doesn't have a sync promo/username on NTP.
     web_ui->AddMessageHandler(new NewTabPageSyncHandler());
 
-    if (ShouldShowApps()) {
+    if (MightShowApps()) {
       ExtensionService* service = GetProfile()->GetExtensionService();
       // We might not have an ExtensionService (on ChromeOS when not logged in
       // for example).
@@ -269,6 +276,16 @@ void NewTabUI::RegisterProfilePrefs(
 }
 
 // static
+bool NewTabUI::MightShowApps() {
+// Android does not have apps.
+#if defined(OS_ANDROID)
+  return false;
+#else
+  return true;
+#endif
+}
+
+// static
 bool NewTabUI::ShouldShowApps() {
 // Ash shows apps in app list thus should not show apps page in NTP4.
 // Android does not have apps.
@@ -313,15 +330,20 @@ void NewTabUI::SetUrlTitleAndDirection(DictionaryValue* dictionary,
   // title will be rendered as "!Yahoo" if its "dir" attribute is not set to
   // "ltr".
   std::string direction;
-  if (!using_url_as_the_title &&
-      base::i18n::IsRTL() &&
-      base::i18n::StringContainsStrongRTLChars(title)) {
-    direction = kRTLHtmlTextDirection;
-  } else {
+  if (using_url_as_the_title)
     direction = kLTRHtmlTextDirection;
-  }
+  else
+    direction = GetHtmlTextDirection(title);
+
   dictionary->SetString("title", title_to_set);
   dictionary->SetString("direction", direction);
+}
+
+// static
+void NewTabUI::SetFullNameAndDirection(const string16& full_name,
+                                       base::DictionaryValue* dictionary) {
+  dictionary->SetString("full_name", full_name);
+  dictionary->SetString("full_name_direction", GetHtmlTextDirection(full_name));
 }
 
 // static
@@ -382,10 +404,11 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(
 
   content::RenderProcessHost* render_host =
       content::RenderProcessHost::FromID(render_process_id);
-  bool is_incognito = render_host->GetBrowserContext()->IsOffTheRecord();
+  NTPResourceCache::WindowType win_type = NTPResourceCache::GetWindowType(
+      profile_, render_host);
   scoped_refptr<base::RefCountedMemory> html_bytes(
       NTPResourceCacheFactory::GetForProfile(profile_)->
-      GetNewTabHTML(is_incognito));
+      GetNewTabHTML(win_type));
 
   callback.Run(html_bytes.get());
 }

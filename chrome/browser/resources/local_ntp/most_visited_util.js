@@ -9,6 +9,26 @@
 
 <include src="instant_iframe_validation.js">
 
+/**
+ * Enum for the different types of events that are logged from the NTP.
+ * @enum {number}
+ * @const
+ */
+var NTP_LOGGING_EVENT_TYPE = {
+  // The user moused over an NTP tile or title.
+  NTP_MOUSEOVER: 0,
+  // The page attempted to load a thumbnail image.
+  NTP_THUMBNAIL_ATTEMPT: 1,
+  // There was an error in loading both the thumbnail image and the fallback
+  // (if it was provided), resulting in a grey tile.
+  NTP_THUMBNAIL_ERROR: 2,
+  // The page attempted to load a thumbnail URL while a fallback thumbnail was
+  // provided.
+  NTP_FALLBACK_THUMBNAIL_REQUESTED: 3,
+  // The primary thumbnail image failed to load and caused us to use the
+  // secondary thumbnail as a fallback.
+  NTP_FALLBACK_THUMBNAIL_USED: 4
+};
 
 /**
  * Parses query parameters from Location.
@@ -62,7 +82,7 @@ function createMostVisitedLink(params, href, title, text) {
     link.textContent = text;
   link.addEventListener('mouseover', function() {
     var ntpApiHandle = chrome.embeddedSearch.newTabPage;
-    ntpApiHandle.logEvent('NewTabPage.NumberOfMouseOvers');
+    ntpApiHandle.logEvent(NTP_LOGGING_EVENT_TYPE.NTP_MOUSEOVER);
   });
   return link;
 }
@@ -114,8 +134,10 @@ function fillMostVisited(location, fill) {
     // Means that we get suggestion data from the server. Create data object.
     data.url = params.url;
     data.thumbnailUrl = params.tu || '';
+    data.thumbnailUrl2 = params.tu2 || '';
     data.title = params.ti || '';
     data.direction = params.di || '';
+    data.domain = params.dom || '';
   } else {
     var apiHandle = chrome.embeddedSearch.searchBox;
     data = apiHandle.getMostVisitedItemData(params.rid);
@@ -123,7 +145,8 @@ function fillMostVisited(location, fill) {
       return;
   }
   if (/^javascript:/i.test(data.url) ||
-      /^javascript:/i.test(data.thumbnailUrl))
+      /^javascript:/i.test(data.thumbnailUrl) ||
+      /^javascript:/i.test(data.thumbnailUrl2))
     return;
   if (data.direction)
     document.body.dir = data.direction;

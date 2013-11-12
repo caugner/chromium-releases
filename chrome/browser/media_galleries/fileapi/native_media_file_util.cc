@@ -22,8 +22,6 @@
 #include "webkit/browser/fileapi/native_file_util.h"
 #include "webkit/common/blob/shareable_file_reference.h"
 
-namespace chrome {
-
 namespace {
 
 // Used to skip the hidden folders and files. Returns true if the file specified
@@ -207,6 +205,7 @@ void NativeMediaFileUtil::CopyFileLocal(
     scoped_ptr<fileapi::FileSystemOperationContext> context,
     const fileapi::FileSystemURL& src_url,
     const fileapi::FileSystemURL& dest_url,
+    const CopyFileProgressCallback& progress_callback,
     const StatusCallback& callback) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
   fileapi::FileSystemOperationContext* context_ptr = context.get();
@@ -625,5 +624,3 @@ NativeMediaFileUtil::GetFilteredLocalFilePathForExistingFileOrDirectory(
   *local_file_path = file_path;
   return base::PLATFORM_FILE_OK;
 }
-
-}  // namespace chrome

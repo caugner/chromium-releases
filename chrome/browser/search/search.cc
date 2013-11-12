@@ -39,7 +39,7 @@ namespace chrome {
 namespace {
 
 // Configuration options for Embedded Search.
-// InstantExtended field trials are named in such a way that we can parse out
+// EmbeddedSearch field trials are named in such a way that we can parse out
 // the experiment configuration from the trial's group name in order to give
 // us maximum flexability in running experiments.
 // Field trial groups should be named things like "Group7 espv:2 instant:1".
@@ -62,10 +62,19 @@ const char kHideVerbatimFlagName[] = "hide_verbatim";
 const char kUseRemoteNTPOnStartupFlagName[] = "use_remote_ntp_on_startup";
 const char kShowNtpFlagName[] = "show_ntp";
 const char kRecentTabsOnNTPFlagName[] = "show_recent_tabs";
+const char kUseCacheableNTP[] = "use_cacheable_ntp";
+const char kPrefetchSearchResultsOnSRP[] = "prefetch_results_srp";
 const char kSuppressInstantExtendedOnSRPFlagName[] = "suppress_on_srp";
 
 // Constants for the field trial name and group prefix.
+// Note in M30 and below this field trial was named "InstantExtended" and in
+// M31 was renamed to EmbeddedSearch for clarity and cleanliness.  Since we
+// can't easilly sync up Finch configs with the pushing of this change to
+// Dev & Canary, for now the code accepts both names.
+// TODO(dcblack): Remove the InstantExtended name once M31 hits the Beta
+// channel.
 const char kInstantExtendedFieldTrialName[] = "InstantExtended";
+const char kEmbeddedSearchFieldTrialName[] = "EmbeddedSearch";
 const char kGroupNumberPrefix[] = "Group";
 
 // If the field trial's group name ends with this string its configuration will
@@ -125,8 +134,8 @@ bool MatchesOrigin(const GURL& my_url, const GURL& other_url) {
   return my_url.host() == other_url.host() &&
          my_url.port() == other_url.port() &&
          (my_url.scheme() == other_url.scheme() ||
-          (my_url.SchemeIs(chrome::kHttpsScheme) &&
-           other_url.SchemeIs(chrome::kHttpScheme)));
+          (my_url.SchemeIs(content::kHttpsScheme) &&
+           other_url.SchemeIs(content::kHttpScheme)));
 }
 
 bool MatchesAnySearchURL(const GURL& url, TemplateURL* template_url) {
@@ -192,13 +201,6 @@ bool IsSuitableURLForInstant(const GURL& url, const TemplateURL* template_url) {
        google_util::StartsWithCommandLineGoogleBaseURL(url));
 }
 
-// Returns true if |url| matches --instant-new-tab-url.
-bool IsCommandLineInstantNTPURL(const GURL& url) {
-  const GURL ntp_url(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-      switches::kInstantNewTabURL));
-  return ntp_url.is_valid() && MatchesOriginAndPath(ntp_url, url);
-}
-
 // Returns true if |url| can be used as an Instant URL for |profile|.
 bool IsInstantURL(const GURL& url, Profile* profile) {
   if (!IsInstantExtendedAPIEnabled())
@@ -207,7 +209,8 @@ bool IsInstantURL(const GURL& url, Profile* profile) {
   if (!url.is_valid())
     return false;
 
-  if (IsCommandLineInstantNTPURL(url))
+  const GURL new_tab_url(GetNewTabPageURL(profile));
+  if (new_tab_url.is_valid() && MatchesOriginAndPath(url, new_tab_url))
     return true;
 
   TemplateURL* template_url = GetDefaultSearchProviderTemplateURL(profile);
@@ -291,9 +294,7 @@ uint64 EmbeddedSearchPageVersion() {
 
   FieldTrialFlags flags;
   uint64 group_num = 0;
-  if (GetFieldTrialInfo(
-          base::FieldTrialList::FindFullName(kInstantExtendedFieldTrialName),
-          &flags, &group_num)) {
+  if (GetFieldTrialInfo(&flags, &group_num)) {
     if (group_num == 0)
       return kEmbeddedPageVersionDisabled;
     return GetUInt64ValueForFlagWithDefault(kEmbeddedPageVersionFlagName,
@@ -381,20 +382,24 @@ bool IsInstantNTP(const content::WebContents* contents) {
 
 bool NavEntryIsInstantNTP(const content::WebContents* contents,
                           const content::NavigationEntry* entry) {
-  if (!contents || !entry)
+  if (!contents || !entry || !IsInstantExtendedAPIEnabled())
     return false;
 
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
-  if (!IsInstantExtendedAPIEnabled() ||
-      !IsRenderedInInstantProcess(contents, profile))
+  if (!IsRenderedInInstantProcess(contents, profile))
     return false;
 
-  if (IsInstantURL(entry->GetVirtualURL(), profile) ||
-      entry->GetVirtualURL() == GetLocalInstantURL(profile))
-    return GetSearchTermsImpl(contents, entry).empty();
+  if (entry->GetVirtualURL() == GetLocalInstantURL(profile))
+    return true;
 
-  return entry->GetVirtualURL() == GURL(chrome::kChromeUINewTabURL) &&
-      IsCommandLineInstantNTPURL(entry->GetURL());
+  if (ShouldUseCacheableNTP()) {
+    GURL new_tab_url(GetNewTabPageURL(profile));
+    return new_tab_url.is_valid() &&
+        MatchesOriginAndPath(entry->GetURL(), new_tab_url);
+  }
+
+  return IsInstantURL(entry->GetVirtualURL(), profile) &&
+      GetSearchTermsImpl(contents, entry).empty();
 }
 
 bool IsSuggestPrefEnabled(Profile* profile) {
@@ -423,7 +428,7 @@ GURL GetInstantURL(Profile* profile, int start_margin) {
       google_util::StartsWithCommandLineGoogleBaseURL(instant_url))
     return instant_url;
   GURL::Replacements replacements;
-  const std::string secure_scheme(chrome::kHttpsScheme);
+  const std::string secure_scheme(content::kHttpsScheme);
   replacements.SetSchemeStr(secure_scheme);
   return instant_url.ReplaceComponents(replacements);
 }
@@ -444,9 +449,7 @@ bool ShouldPreferRemoteNTPOnStartup() {
     return true;
 
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(
-      base::FieldTrialList::FindFullName(kInstantExtendedFieldTrialName),
-      &flags, NULL)) {
+  if (GetFieldTrialInfo(&flags, NULL)) {
     return GetBoolValueForFlagWithDefault(kUseRemoteNTPOnStartupFlagName, true,
                                           flags);
   }
@@ -455,25 +458,32 @@ bool ShouldPreferRemoteNTPOnStartup() {
 
 bool ShouldHideTopVerbatimMatch() {
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(
-      base::FieldTrialList::FindFullName(kInstantExtendedFieldTrialName),
-      &flags, NULL)) {
+  if (GetFieldTrialInfo(&flags, NULL)) {
     return GetBoolValueForFlagWithDefault(kHideVerbatimFlagName, false, flags);
   }
   return false;
 }
 
-bool ShouldShowInstantNTP() {
-  // If the instant-new-tab-url flag is set, we'll always just load the NTP
-  // directly instead of preloading contents using InstantNTP.
+bool ShouldUseCacheableNTP() {
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kInstantNewTabURL))
+  if (command_line->HasSwitch(switches::kUseCacheableNewTabPage))
+    return true;
+
+  FieldTrialFlags flags;
+  if (GetFieldTrialInfo(&flags, NULL)) {
+    return GetBoolValueForFlagWithDefault(kUseCacheableNTP, false, flags);
+  }
+  return false;
+}
+
+bool ShouldShowInstantNTP() {
+  // If using the cacheable NTP, load the NTP directly instead of preloading its
+  // contents using InstantNTP.
+  if (ShouldUseCacheableNTP())
     return false;
 
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(
-          base::FieldTrialList::FindFullName(kInstantExtendedFieldTrialName),
-          &flags, NULL)) {
+  if (GetFieldTrialInfo(&flags, NULL)) {
     return GetBoolValueForFlagWithDefault(kShowNtpFlagName, true, flags);
   }
   return true;
@@ -481,9 +491,7 @@ bool ShouldShowInstantNTP() {
 
 bool ShouldShowRecentTabsOnNTP() {
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(
-          base::FieldTrialList::FindFullName(kInstantExtendedFieldTrialName),
-          &flags, NULL)) {
+  if (GetFieldTrialInfo(&flags, NULL)) {
     return GetBoolValueForFlagWithDefault(
         kRecentTabsOnNTPFlagName, false, flags);
   }
@@ -493,9 +501,7 @@ bool ShouldShowRecentTabsOnNTP() {
 
 bool ShouldSuppressInstantExtendedOnSRP() {
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(
-          base::FieldTrialList::FindFullName(kInstantExtendedFieldTrialName),
-          &flags, NULL)) {
+  if (GetFieldTrialInfo(&flags, NULL)) {
     return GetBoolValueForFlagWithDefault(
         kSuppressInstantExtendedOnSRPFlagName, false, flags);
   }
@@ -542,9 +548,7 @@ GURL GetEffectiveURLForInstant(const GURL& url, Profile* profile) {
 int GetInstantLoaderStalenessTimeoutSec() {
   int timeout_sec = kStalePageTimeoutDefault;
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(
-      base::FieldTrialList::FindFullName(kInstantExtendedFieldTrialName),
-      &flags, NULL)) {
+  if (GetFieldTrialInfo(&flags, NULL)) {
     timeout_sec = GetUInt64ValueForFlagWithDefault(kStalePageTimeoutFlagName,
                                                    kStalePageTimeoutDefault,
                                                    flags);
@@ -587,12 +591,12 @@ bool HandleNewTabURLRewrite(GURL* url,
       url->host() != chrome::kChromeUINewTabHost)
     return false;
 
-  const GURL ntp_url(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-      switches::kInstantNewTabURL));
-  if (!ntp_url.is_valid())
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  GURL new_tab_url(GetNewTabPageURL(profile));
+  if (!new_tab_url.is_valid())
     return false;
 
-  *url = ntp_url;
+  *url = new_tab_url;
   return true;
 }
 
@@ -601,9 +605,9 @@ bool HandleNewTabURLReverseRewrite(GURL* url,
   if (!IsInstantExtendedAPIEnabled())
     return false;
 
-  const GURL ntp_url(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-      switches::kInstantNewTabURL));
-  if (!MatchesOriginAndPath(ntp_url, *url))
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  GURL new_tab_url(GetNewTabPageURL(profile));
+  if (!new_tab_url.is_valid() || !MatchesOriginAndPath(new_tab_url, *url))
     return false;
 
   *url = GURL(chrome::kChromeUINewTabURL);
@@ -628,6 +632,23 @@ InstantSupportState GetInstantSupportStateFromNavigationEntry(
   return StringToInstantSupportState(value);
 }
 
+bool ShouldPrefetchSearchResultsOnSRP() {
+  // Check the command-line/about:flags setting first, which should have
+  // precedence and allows the trial to not be reported (if it's never queried).
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kDisableInstantExtendedAPI) ||
+      command_line->HasSwitch(switches::kEnableInstantExtendedAPI)) {
+    return false;
+  }
+
+  FieldTrialFlags flags;
+  if (GetFieldTrialInfo(&flags, NULL)) {
+    return GetBoolValueForFlagWithDefault(kPrefetchSearchResultsOnSRP, false,
+                                          flags);
+  }
+  return false;
+}
+
 void EnableInstantExtendedAPIForTesting() {
   CommandLine* cl = CommandLine::ForCurrentProcess();
   cl->AppendSwitch(switches::kEnableInstantExtendedAPI);
@@ -638,9 +659,17 @@ void DisableInstantExtendedAPIForTesting() {
   cl->AppendSwitch(switches::kDisableInstantExtendedAPI);
 }
 
-bool GetFieldTrialInfo(const std::string& group_name,
-                       FieldTrialFlags* flags,
+bool GetFieldTrialInfo(FieldTrialFlags* flags,
                        uint64* group_number) {
+  // Get the group name.  If the EmbeddedSearch trial doesn't exist, look for
+  // the older InstantExtended name.
+  std::string group_name = base::FieldTrialList::FindFullName(
+      kEmbeddedSearchFieldTrialName);
+  if (group_name.empty()) {
+    group_name = base::FieldTrialList::FindFullName(
+        kInstantExtendedFieldTrialName);
+  }
+
   if (EndsWith(group_name, kDisablingSuffix, true))
     return false;
 
@@ -709,6 +738,21 @@ bool GetBoolValueForFlagWithDefault(const std::string& flag,
                                     bool default_value,
                                     const FieldTrialFlags& flags) {
   return !!GetUInt64ValueForFlagWithDefault(flag, default_value ? 1 : 0, flags);
+}
+
+GURL GetNewTabPageURL(Profile* profile) {
+  if (!ShouldUseCacheableNTP())
+    return GURL();
+
+  if (!profile || !IsSuggestPrefEnabled(profile))
+    return GURL();
+
+  TemplateURL* template_url = GetDefaultSearchProviderTemplateURL(profile);
+  if (!template_url)
+    return GURL();
+
+  return TemplateURLRefToGURL(template_url->new_tab_url_ref(),
+                              kDisableStartMargin, false);
 }
 
 void ResetInstantExtendedOptInStateGateForTest() {

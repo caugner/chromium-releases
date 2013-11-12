@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
@@ -245,6 +246,10 @@ class TabDragController : public content::WebContentsDelegate,
   virtual bool ShouldSuppressDialogs() OVERRIDE;
   virtual content::JavaScriptDialogManager*
       GetJavaScriptDialogManager() OVERRIDE;
+  virtual void RequestMediaAccessPermission(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback) OVERRIDE;
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -535,10 +540,10 @@ class TabDragController : public content::WebContentsDelegate,
   // attached to the hidden frame and the frame moved back to these bounds.
   gfx::Rect restore_bounds_;
 
-  // The last view that had focus in the window containing |source_tab_|. This
-  // is saved so that focus can be restored properly when a drag begins and
-  // ends within this same window.
-  views::View* old_focused_view_;
+  // ID of the last view that had focus in the window containing
+  // |source_tab_|. This is saved so that focus can be restored properly when a
+  // drag begins and ends within this same window.
+  const int old_focused_view_id_;
 
   // The position along the major axis of the mouse cursor in screen coordinates
   // at the time of the last re-order event.
@@ -601,6 +606,16 @@ class TabDragController : public content::WebContentsDelegate,
   // See description above getter.
   bool is_dragging_window_;
 
+  // True if |attached_tabstrip_| is in a browser specifically created for
+  // the drag.
+  bool is_dragging_new_browser_;
+
+  // True if |source_tabstrip_| was maximized before the drag.
+  bool was_source_maximized_;
+
+  // True if |source_tabstrip_| was in immersive fullscreen before the drag.
+  bool was_source_fullscreen_;
+
   EndRunLoopBehavior end_run_loop_behavior_;
 
   // If true, we're waiting for a move loop to complete.
@@ -612,11 +627,10 @@ class TabDragController : public content::WebContentsDelegate,
   // Non-null for the duration of RunMoveLoop.
   views::Widget* move_loop_widget_;
 
-  // If non-null set to true from destructor.
-  bool* destroyed_;
-
   // See description above getter.
   bool is_mutating_;
+
+  base::WeakPtrFactory<TabDragController> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TabDragController);
 };

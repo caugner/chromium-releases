@@ -32,8 +32,6 @@
 using fileapi::FileSystemOperation;
 using fileapi::FileSystemURL;
 
-namespace chrome {
-
 namespace {
 
 typedef FileSystemOperation::FileEntryList FileEntryList;
@@ -305,7 +303,9 @@ TEST_F(NativeMediaFileUtilTest, CopySourceFiltering) {
         expectation = base::PLATFORM_FILE_ERROR_INVALID_OPERATION;
       }
       operation_runner()->Copy(
-          url, dest_url, base::Bind(&ExpectEqHelper, test_name, expectation));
+          url, dest_url,
+          fileapi::FileSystemOperationRunner::CopyProgressCallback(),
+          base::Bind(&ExpectEqHelper, test_name, expectation));
       base::MessageLoop::current()->RunUntilIdle();
     }
   }
@@ -367,7 +367,9 @@ TEST_F(NativeMediaFileUtilTest, CopyDestFiltering) {
         }
       }
       operation_runner()->Copy(
-          src_url, url, base::Bind(&ExpectEqHelper, test_name, expectation));
+          src_url, url,
+          fileapi::FileSystemOperationRunner::CopyProgressCallback(),
+          base::Bind(&ExpectEqHelper, test_name, expectation));
       base::MessageLoop::current()->RunUntilIdle();
     }
   }
@@ -534,5 +536,3 @@ TEST_F(NativeMediaFileUtilTest, CreateSnapshot) {
     ASSERT_EQ(expected_error, error);
   }
 }
-
-}  // namespace chrome

@@ -17,7 +17,6 @@
 #include "chrome/common/extensions/chrome_extensions_client.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/update_manifest.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
 #include "chrome/utility/extensions/unpacker.h"
@@ -26,6 +25,7 @@
 #include "content/public/child/image_decoder_utils.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/utility/utility_thread.h"
+#include "extensions/common/manifest.h"
 #include "media/base/media.h"
 #include "media/base/media_file_checker.h"
 #include "printing/page_range.h"
@@ -54,12 +54,13 @@
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
 #if defined(ENABLE_FULL_PRINTING)
-#include "chrome/common/child_process_logging.h"
+#include "chrome/common/crash_keys.h"
 #include "printing/backend/print_backend.h"
 #endif
 
 #if defined(ENABLE_MDNS)
 #include "chrome/utility/local_discovery/service_discovery_message_handler.h"
+#include "content/public/common/content_switches.h"
 #endif  // ENABLE_MDNS
 
 namespace chrome {
@@ -82,7 +83,10 @@ ChromeContentUtilityClient::ChromeContentUtilityClient() {
 #endif  // OS_ANDROID
 
 #if defined(ENABLE_MDNS)
-  handlers_.push_back(new local_discovery::ServiceDiscoveryMessageHandler());
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUtilityProcessEnableMDns)) {
+    handlers_.push_back(new local_discovery::ServiceDiscoveryMessageHandler());
+  }
 #endif  // ENABLE_MDNS
 }
 
@@ -147,6 +151,8 @@ bool ChromeContentUtilityClient::OnMessageReceived(
                         OnParseITunesLibraryXmlFile)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParsePicasaPMPDatabase,
                         OnParsePicasaPMPDatabase)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_IndexPicasaAlbumsContents,
+                        OnIndexPicasaAlbumsContents)
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -354,7 +360,6 @@ DWORD WINAPI UtilityProcess_GetFontDataPatch(
 
     LOGFONT logfont;
     if (GetObject(font, sizeof(LOGFONT), &logfont)) {
-      std::vector<char> font_data;
       content::UtilityThread::Get()->PreCacheFont(logfont);
       rv = GetFontData(hdc, table, offset, buffer, length);
       content::UtilityThread::Get()->ReleaseCachedFonts();
@@ -499,7 +504,7 @@ void ChromeContentUtilityClient::OnGetPrinterCapsAndDefaults(
       printing::PrintBackend::CreateInstance(NULL);
   printing::PrinterCapsAndDefaults printer_info;
 
-  child_process_logging::ScopedPrinterInfoSetter prn_info(
+  crash_keys::ScopedPrinterInfo crash_key(
       print_backend->GetPrinterDriverInfo(printer_name));
 
   if (print_backend->GetPrinterCapsAndDefaults(printer_name, &printer_info)) {
@@ -591,15 +596,11 @@ void ChromeContentUtilityClient::OnParsePicasaPMPDatabase(
   ReleaseProcessIfNeeded();
 }
 
-void OnIndexPicasaAlbumsContents(
+void ChromeContentUtilityClient::OnIndexPicasaAlbumsContents(
     const picasa::AlbumUIDSet& album_uids,
     const std::vector<picasa::FolderINIContents>& folders_inis) {
   picasa::PicasaAlbumsIndexer indexer(album_uids);
-  for (std::vector<picasa::FolderINIContents>::const_iterator it =
-           folders_inis.begin();
-       it != folders_inis.end(); ++it) {
-    indexer.ParseFolderINI(it->folder_path, it->ini_contents);
-  }
+  indexer.ParseFolderINI(folders_inis);
 
   Send(new ChromeUtilityHostMsg_IndexPicasaAlbumsContents_Finished(
       indexer.albums_images()));
