@@ -9,7 +9,9 @@
 #include "net/quic/congestion_control/receive_algorithm_interface.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
 #include "net/quic/quic_connection.h"
+#include "net/quic/quic_packet_writer.h"
 #include "net/quic/test_tools/quic_framer_peer.h"
+#include "net/quic/test_tools/quic_test_writer.h"
 
 namespace net {
 namespace test {
@@ -50,14 +52,14 @@ QuicPacketCreator* QuicConnectionPeer::GetPacketCreator(
   return &connection->packet_creator_;
 }
 
-bool QuicConnectionPeer::GetReceivedTruncatedAck(QuicConnection* connection) {
-    return connection->received_truncated_ack_;
+// static
+QuicCongestionManager* QuicConnectionPeer::GetCongestionManager(
+    QuicConnection* connection) {
+  return &connection->congestion_manager_;
 }
 
-// static
-size_t QuicConnectionPeer::GetNumRetransmissionTimeouts(
-    QuicConnection* connection) {
-  return connection->retransmission_timeouts_.size();
+bool QuicConnectionPeer::GetReceivedTruncatedAck(QuicConnection* connection) {
+    return connection->received_truncated_ack_;
 }
 
 // static
@@ -70,7 +72,9 @@ QuicTime::Delta QuicConnectionPeer::GetNetworkTimeout(
 bool QuicConnectionPeer::IsSavedForRetransmission(
     QuicConnection* connection,
     QuicPacketSequenceNumber sequence_number) {
-  return connection->sent_packet_manager_.IsUnacked(sequence_number);
+  return connection->sent_packet_manager_.IsUnacked(sequence_number) &&
+      connection->sent_packet_manager_.HasRetransmittableFrames(
+          sequence_number);
 }
 
 // static
@@ -107,6 +111,17 @@ QuicPacketEntropyHash QuicConnectionPeer::ReceivedEntropyHash(
 }
 
 // static
+bool QuicConnectionPeer::IsWriteBlocked(QuicConnection* connection) {
+  return connection->write_blocked_;
+}
+
+// static
+void QuicConnectionPeer::SetIsWriteBlocked(QuicConnection* connection,
+                                           bool write_blocked) {
+  connection->write_blocked_ = write_blocked;
+}
+
+// static
 bool QuicConnectionPeer::IsServer(QuicConnection* connection) {
   return connection->is_server_;
 }
@@ -137,16 +152,9 @@ void QuicConnectionPeer::SwapCrypters(QuicConnection* connection,
 }
 
 // static
-void QuicConnectionPeer:: SetMaxPacketsPerRetransmissionAlarm(
-    QuicConnection* connection,
-    int max_packets) {
-  connection->max_packets_per_retransmission_alarm_ = max_packets;
-}
-
-// static
 QuicConnectionHelperInterface* QuicConnectionPeer::GetHelper(
     QuicConnection* connection) {
-  return connection->helper_.get();
+  return connection->helper_;
 }
 
 // static
@@ -177,8 +185,25 @@ QuicAlarm* QuicConnectionPeer::GetSendAlarm(QuicConnection* connection) {
 }
 
 // static
+QuicAlarm* QuicConnectionPeer::GetResumeWritesAlarm(
+    QuicConnection* connection) {
+  return connection->resume_writes_alarm_.get();
+}
+
+// static
 QuicAlarm* QuicConnectionPeer::GetTimeoutAlarm(QuicConnection* connection) {
   return connection->timeout_alarm_.get();
+}
+
+// static
+QuicPacketWriter* QuicConnectionPeer::GetWriter(QuicConnection* connection) {
+  return connection->writer_;
+}
+
+// static
+void QuicConnectionPeer::SetWriter(QuicConnection* connection,
+                                   QuicTestWriter* writer) {
+  connection->writer_ = writer;
 }
 
 }  // namespace test

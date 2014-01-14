@@ -40,20 +40,9 @@ class LocalDiscoveryUIHandler : public content::WebUIMessageHandler,
                                 public CloudPrintPrinterList::Delegate,
                                 content::NotificationObserver {
  public:
-  class Factory {
-   public:
-    virtual ~Factory() {}
-    virtual LocalDiscoveryUIHandler* CreateLocalDiscoveryUIHandler() = 0;
-  };
-
   LocalDiscoveryUIHandler();
-  // This constructor should only used by tests.
-  explicit LocalDiscoveryUIHandler(
-      scoped_ptr<PrivetDeviceLister> privet_lister);
   virtual ~LocalDiscoveryUIHandler();
 
-  static LocalDiscoveryUIHandler* Create();
-  static void SetFactory(Factory* factory);
   static bool GetHasVisible();
 
   // WebUIMessageHandler implementation.
@@ -77,10 +66,9 @@ class LocalDiscoveryUIHandler : public content::WebUIMessageHandler,
       const std::string& device_id) OVERRIDE;
 
   // PrivetDeviceLister::Delegate implementation.
-  virtual void DeviceChanged(
-      bool added,
-      const std::string& name,
-      const DeviceDescription& description) OVERRIDE;
+  virtual void DeviceChanged(bool added,
+                             const std::string& name,
+                             const DeviceDescription& description) OVERRIDE;
 
   virtual void DeviceRemoved(const std::string& name) OVERRIDE;
 
@@ -158,6 +146,10 @@ class LocalDiscoveryUIHandler : public content::WebUIMessageHandler,
 
   void CheckUserLoggedIn();
 
+  void ScheduleQuery(int timeout_seconds);
+
+  void SendQuery(int next_timeout_seconds);
+
 #if defined(CLOUD_PRINT_CONNECTOR_UI_AVAILABLE)
   void StartCloudPrintConnector();
   void OnCloudPrintPrefsChanged();
@@ -195,15 +187,11 @@ class LocalDiscoveryUIHandler : public content::WebUIMessageHandler,
   // Whether or not the page is marked as visible.
   bool is_visible_;
 
-  // Device whose state must be updated to "registered" to complete
-  // registration.
-  std::string new_register_device_;
-
   // List of printers from cloud print.
   scoped_ptr<CloudPrintPrinterList> cloud_print_printer_list_;
 
-  // Announcement timeout for registration.
-  base::CancelableCallback<void()> registration_announce_timeout_;
+  // Callback for requery.
+  base::CancelableCallback<void()> requery_callback_;
 
 #if defined(CLOUD_PRINT_CONNECTOR_UI_AVAILABLE)
   StringPrefMember cloud_print_connector_email_;

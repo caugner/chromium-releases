@@ -146,8 +146,7 @@ IndexedDBDatabase::IndexedDBDatabase(const string16& name,
                 kInvalidId),
       identifier_(unique_identifier),
       factory_(factory),
-      running_version_change_transaction_(NULL),
-      closing_connection_(false) {
+      running_version_change_transaction_(NULL) {
   DCHECK(!metadata_.name.empty());
 }
 
@@ -217,10 +216,6 @@ IndexedDBDatabase::~IndexedDBDatabase() {
   DCHECK(transactions_.empty());
   DCHECK(pending_open_calls_.empty());
   DCHECK(pending_delete_calls_.empty());
-}
-
-scoped_refptr<IndexedDBBackingStore> IndexedDBDatabase::BackingStore() const {
-  return backing_store_;
 }
 
 IndexedDBTransaction* IndexedDBDatabase::GetTransaction(
@@ -883,18 +878,17 @@ void IndexedDBDatabase::SetIndexKeys(int64 transaction_id,
     return;
   DCHECK_EQ(transaction->mode(), indexed_db::TRANSACTION_VERSION_CHANGE);
 
-  scoped_refptr<IndexedDBBackingStore> store = BackingStore();
   // TODO(alecflett): This method could be asynchronous, but we need to
   // evaluate if it's worth the extra complexity.
   IndexedDBBackingStore::RecordIdentifier record_identifier;
   bool found = false;
-  bool ok =
-      store->KeyExistsInObjectStore(transaction->BackingStoreTransaction(),
-                                    metadata_.id,
-                                    object_store_id,
-                                    *primary_key,
-                                    &record_identifier,
-                                    &found);
+  bool ok = backing_store_->KeyExistsInObjectStore(
+      transaction->BackingStoreTransaction(),
+      metadata_.id,
+      object_store_id,
+      *primary_key,
+      &record_identifier,
+      &found);
   if (!ok) {
     transaction->Abort(
         IndexedDBDatabaseError(WebKit::WebIDBDatabaseExceptionUnknownError,
@@ -916,7 +910,7 @@ void IndexedDBDatabase::SetIndexKeys(int64 transaction_id,
   const IndexedDBObjectStoreMetadata& object_store_metadata =
       metadata_.object_stores[object_store_id];
   bool backing_store_success = MakeIndexWriters(transaction,
-                                                store,
+                                                backing_store_,
                                                 id(),
                                                 object_store_metadata,
                                                 *primary_key,
@@ -941,7 +935,7 @@ void IndexedDBDatabase::SetIndexKeys(int64 transaction_id,
   for (size_t i = 0; i < index_writers.size(); ++i) {
     IndexWriter* index_writer = index_writers[i];
     index_writer->WriteIndexKeys(record_identifier,
-                                 store,
+                                 backing_store_,
                                  transaction->BackingStoreTransaction(),
                                  id(),
                                  object_store_id);
@@ -1244,6 +1238,7 @@ void IndexedDBDatabase::VersionChangeOperation(
     scoped_refptr<IndexedDBCallbacks> callbacks,
     scoped_ptr<IndexedDBConnection> connection,
     WebKit::WebIDBCallbacks::DataLoss data_loss,
+    std::string data_loss_message,
     IndexedDBTransaction* transaction) {
   IDB_TRACE("IndexedDBDatabase::VersionChangeOperation");
   int64 old_version = metadata_.int_version;
@@ -1266,7 +1261,7 @@ void IndexedDBDatabase::VersionChangeOperation(
   pending_second_half_open_.reset(new PendingSuccessCall(
       callbacks, connection.get(), transaction->id(), version));
   callbacks->OnUpgradeNeeded(
-      old_version, connection.Pass(), metadata(), data_loss);
+      old_version, connection.Pass(), metadata(), data_loss, data_loss_message);
 }
 
 void IndexedDBDatabase::TransactionStarted(IndexedDBTransaction* transaction) {
@@ -1319,6 +1314,10 @@ void IndexedDBDatabase::TransactionFinishedAndCompleteFired(
     }
     ProcessPendingCalls();
   }
+}
+
+void IndexedDBDatabase::TransactionCommitFailed() {
+  factory_->HandleBackingStoreFailure(backing_store_->origin_url());
 }
 
 size_t IndexedDBDatabase::ConnectionCount() const {
@@ -1397,7 +1396,10 @@ void IndexedDBDatabase::CreateTransaction(
     const std::vector<int64>& object_store_ids,
     uint16 mode) {
 
-  DCHECK(connections_.has(connection));
+  DCHECK(connections_.count(connection));
+  DCHECK(transactions_.find(transaction_id) == transactions_.end());
+  if (transactions_.find(transaction_id) != transactions_.end())
+    return;
 
   scoped_refptr<IndexedDBTransaction> transaction = new IndexedDBTransaction(
       transaction_id,
@@ -1405,7 +1407,6 @@ void IndexedDBDatabase::CreateTransaction(
       std::set<int64>(object_store_ids.begin(), object_store_ids.end()),
       static_cast<indexed_db::TransactionMode>(mode),
       this);
-  DCHECK(transactions_.find(transaction_id) == transactions_.end());
   transactions_[transaction_id] = transaction;
 }
 
@@ -1423,7 +1424,7 @@ void IndexedDBDatabase::OpenConnection(
   const WebKit::WebIDBCallbacks::DataLoss kDataLoss =
       WebKit::WebIDBCallbacks::DataLossNone;
   OpenConnection(
-      callbacks, database_callbacks, transaction_id, version, kDataLoss);
+      callbacks, database_callbacks, transaction_id, version, kDataLoss, "");
 }
 
 void IndexedDBDatabase::OpenConnection(
@@ -1431,7 +1432,8 @@ void IndexedDBDatabase::OpenConnection(
     scoped_refptr<IndexedDBDatabaseCallbacks> database_callbacks,
     int64 transaction_id,
     int64 version,
-    WebKit::WebIDBCallbacks::DataLoss data_loss) {
+    WebKit::WebIDBCallbacks::DataLoss data_loss,
+    std::string data_loss_message) {
   DCHECK(backing_store_);
 
   // TODO(jsbell): Should have a priority queue so that higher version
@@ -1499,8 +1501,12 @@ void IndexedDBDatabase::OpenConnection(
 
   if (version > metadata_.int_version) {
     connections_.insert(connection.get());
-    RunVersionChangeTransaction(
-        callbacks, connection.Pass(), transaction_id, version, data_loss);
+    RunVersionChangeTransaction(callbacks,
+                                connection.Pass(),
+                                transaction_id,
+                                version,
+                                data_loss,
+                                data_loss_message);
     return;
   }
   if (version < metadata_.int_version) {
@@ -1521,10 +1527,11 @@ void IndexedDBDatabase::RunVersionChangeTransaction(
     scoped_ptr<IndexedDBConnection> connection,
     int64 transaction_id,
     int64 requested_version,
-    WebKit::WebIDBCallbacks::DataLoss data_loss) {
+    WebKit::WebIDBCallbacks::DataLoss data_loss,
+    std::string data_loss_message) {
 
   DCHECK(callbacks);
-  DCHECK(connections_.has(connection.get()));
+  DCHECK(connections_.count(connection.get()));
   if (ConnectionCount() > 1) {
     DCHECK_NE(WebKit::WebIDBCallbacks::DataLossTotal, data_loss);
     // Front end ensures the event is not fired at connections that have
@@ -1551,7 +1558,8 @@ void IndexedDBDatabase::RunVersionChangeTransaction(
                                    connection.Pass(),
                                    transaction_id,
                                    requested_version,
-                                   data_loss);
+                                   data_loss,
+                                   data_loss_message);
 }
 
 void IndexedDBDatabase::RunVersionChangeTransactionFinal(
@@ -1565,7 +1573,8 @@ void IndexedDBDatabase::RunVersionChangeTransactionFinal(
                                    connection.Pass(),
                                    transaction_id,
                                    requested_version,
-                                   kDataLoss);
+                                   kDataLoss,
+                                   "");
 }
 
 void IndexedDBDatabase::RunVersionChangeTransactionFinal(
@@ -1573,7 +1582,8 @@ void IndexedDBDatabase::RunVersionChangeTransactionFinal(
     scoped_ptr<IndexedDBConnection> connection,
     int64 transaction_id,
     int64 requested_version,
-    WebKit::WebIDBCallbacks::DataLoss data_loss) {
+    WebKit::WebIDBCallbacks::DataLoss data_loss,
+    std::string data_loss_message) {
 
   std::vector<int64> object_store_ids;
   CreateTransaction(transaction_id,
@@ -1589,7 +1599,8 @@ void IndexedDBDatabase::RunVersionChangeTransactionFinal(
                  requested_version,
                  callbacks,
                  base::Passed(&connection),
-                 data_loss),
+                 data_loss,
+                 data_loss_message),
       base::Bind(&IndexedDBDatabase::VersionChangeAbortOperation,
                  this,
                  metadata_.version,
@@ -1642,13 +1653,14 @@ void IndexedDBDatabase::DeleteDatabaseFinal(
 }
 
 void IndexedDBDatabase::Close(IndexedDBConnection* connection, bool forced) {
-  DCHECK(connections_.has(connection));
+  DCHECK(connections_.count(connection));
+  DCHECK(connection->IsConnected());
+  DCHECK(connection->database() == this);
 
-  // Close outstanding transactions from the closing connection. This
+  // Abort outstanding transactions from the closing connection. This
   // can not happen if the close is requested by the connection itself
   // as the front-end defers the close until all transactions are
-  // complete, so something unusual has happened e.g. unexpected
-  // process termination.
+  // complete, but can occur on process termination or forced close.
   {
     TransactionMap transactions(transactions_);
     for (TransactionMap::const_iterator it = transactions.begin(),
@@ -1671,14 +1683,6 @@ void IndexedDBDatabase::Close(IndexedDBConnection* connection, bool forced) {
     pending_second_half_open_.reset();
   }
 
-  // process_pending_calls allows the inspector to process a pending open call
-  // and call close, reentering IndexedDBDatabase::close. Then the
-  // backend would be removed both by the inspector closing its connection, and
-  // by the connection that first called close.
-  // To avoid that situation, don't proceed in case of reentrancy.
-  if (closing_connection_)
-    return;
-  base::AutoReset<bool> ClosingConnection(&closing_connection_, true);
   ProcessPendingCalls();
 
   // TODO(jsbell): Add a test for the pending_open_calls_ cases below.
@@ -1686,17 +1690,15 @@ void IndexedDBDatabase::Close(IndexedDBConnection* connection, bool forced) {
       !pending_delete_calls_.size()) {
     DCHECK(transactions_.empty());
 
+    const GURL origin_url = backing_store_->origin_url();
+    backing_store_ = NULL;
+
     // factory_ should only be null in unit tests.
     // TODO(jsbell): DCHECK(factory_ || !in_unit_tests) - somehow.
     if (factory_) {
-      DCHECK(backing_store_.get());
-      factory_->ReleaseDatabase(identifier_, forced);
+      factory_->ReleaseDatabase(identifier_, origin_url, forced);
       factory_ = NULL;
     }
-
-    // Drop reference to backing store after informing factory, so
-    // that factory can do accounting on it.
-    backing_store_ = NULL;
   }
 }
 

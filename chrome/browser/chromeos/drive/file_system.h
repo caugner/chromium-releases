@@ -36,6 +36,7 @@ class JobScheduler;
 
 namespace internal {
 class ChangeListLoader;
+class FileCache;
 class ResourceMetadata;
 class SyncClient;
 }  // namespace internal
@@ -91,9 +92,11 @@ class FileSystem : public FileSystemInterface,
                         const OpenFileCallback& callback) OVERRIDE;
   virtual void Copy(const base::FilePath& src_file_path,
                     const base::FilePath& dest_file_path,
+                    bool preserve_last_modified,
                     const FileOperationCallback& callback) OVERRIDE;
   virtual void Move(const base::FilePath& src_file_path,
                     const base::FilePath& dest_file_path,
+                    bool preserve_last_modified,
                     const FileOperationCallback& callback) OVERRIDE;
   virtual void Remove(const base::FilePath& file_path,
                       bool is_recursive,
@@ -253,13 +256,6 @@ class FileSystem : public FileSystemInterface,
       const GetShareUrlCallback& callback,
       google_apis::GDataErrorCode status,
       const GURL& share_url);
-
-  // Reloads the metadata for the directory to refresh stale thumbnail URLs.
-  void RefreshDirectory(const base::FilePath& directory_path);
-  void RefreshDirectoryAfterGetResourceEntry(
-      const base::FilePath& directory_path,
-      FileError error,
-      scoped_ptr<ResourceEntry> entry);
 
   // Used to get Drive related preferences.
   PrefService* pref_service_;

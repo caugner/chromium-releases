@@ -15,8 +15,6 @@ if (!chrome.embeddedSearch) {
       // =======================================================================
       native function Focus();
       native function GetDisplayInstantResults();
-      native function GetFont();
-      native function GetFontSize();
       native function GetMostVisitedItemData();
       native function GetQuery();
       native function GetRightToLeft();
@@ -33,8 +31,6 @@ if (!chrome.embeddedSearch) {
       //                           Exported functions
       // =======================================================================
       this.__defineGetter__('displayInstantResults', GetDisplayInstantResults);
-      this.__defineGetter__('font', GetFont);
-      this.__defineGetter__('fontSize', GetFontSize);
       this.__defineGetter__('isFocused', IsFocused);
       this.__defineGetter__('isKeyCaptureEnabled', IsKeyCaptureEnabled);
       this.__defineGetter__('rtl', GetRightToLeft);
@@ -84,6 +80,7 @@ if (!chrome.embeddedSearch) {
       // =======================================================================
       //                            Private functions
       // =======================================================================
+      native function CheckIsUserSignedInToChromeAs();
       native function DeleteMostVisitedItem();
       native function GetAppLauncherEnabled();
       native function GetMostVisitedItems();
@@ -127,6 +124,10 @@ if (!chrome.embeddedSearch) {
         DeleteMostVisitedItem(restrictedId);
       };
 
+      this.checkIsUserSignedIntoChromeAs = function(identity) {
+        CheckIsUserSignedInToChromeAs(identity);
+      };
+
       // This method is restricted to chrome-search://most-visited pages by
       // checking the invoking context's origin in searchbox_extension.cc.
       this.logEvent = function(histogram_name) {
@@ -145,6 +146,7 @@ if (!chrome.embeddedSearch) {
         UndoMostVisitedDeletion(restrictedId);
       };
 
+      this.onsignedincheckdone = null;
       this.oninputcancel = null;
       this.oninputstart = null;
       this.onmostvisitedchange = null;

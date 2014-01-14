@@ -77,8 +77,9 @@ class ExtensionProcessManager : public content::NotificationObserver {
 
   // Creates a new UI-less extension instance.  Like CreateViewHost, but not
   // displayed anywhere.
-  virtual void CreateBackgroundHost(const extensions::Extension* extension,
-                                    const GURL& url);
+  virtual extensions::ExtensionHost* CreateBackgroundHost(
+      const extensions::Extension* extension,
+      const GURL& url);
 
   // Gets the ExtensionHost for the background page for an extension, or NULL if
   // the extension isn't running or doesn't have a background page.
@@ -198,6 +199,10 @@ class ExtensionProcessManager : public content::NotificationObserver {
   // Potentially registers a RenderViewHost, if it is associated with an
   // extension. Does nothing if this is not an extension renderer.
   void RegisterRenderViewHost(content::RenderViewHost* render_view_host);
+
+  // Unregister RenderViewHosts and clear background page data for an extension
+  // which has been unloaded.
+  void UnregisterExtension(const std::string& extension_id);
 
   // Clears background page data for this extension.
   void ClearBackgroundPageData(const std::string& extension_id);

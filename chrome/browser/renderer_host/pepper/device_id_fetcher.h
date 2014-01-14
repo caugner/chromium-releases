@@ -31,7 +31,7 @@ namespace chrome {
 // or on error.
 class DeviceIDFetcher : public base::RefCountedThreadSafe<DeviceIDFetcher> {
  public:
-  typedef base::Callback<void(const std::string&)> IDCallback;
+  typedef base::Callback<void(const std::string&, int32_t)> IDCallback;
 
   explicit DeviceIDFetcher(int render_process_id);
 
@@ -63,7 +63,8 @@ class DeviceIDFetcher : public base::RefCountedThreadSafe<DeviceIDFetcher> {
 
   // Runs the callback passed into Start() on the IO thread with the device ID
   // or the empty string on failure.
-  void RunCallbackOnIOThread(const std::string& id);
+  void RunCallbackOnIOThread(const std::string& id,
+                             int32_t result);
 
   friend class base::RefCountedThreadSafe<DeviceIDFetcher>;
 

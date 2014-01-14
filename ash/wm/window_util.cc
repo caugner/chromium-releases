@@ -62,10 +62,6 @@ void CenterWindow(aura::Window* window) {
   window->SetBoundsInScreen(center, display);
 }
 
-void SetAnimateToFullscreen(aura::Window* window, bool animate) {
-  window->SetProperty(ash::internal::kAnimateToFullscreenKey, animate);
-}
-
 void AdjustBoundsToEnsureMinimumWindowVisibility(const gfx::Rect& visible_area,
                                                  gfx::Rect* bounds) {
   AdjustBoundsToEnsureWindowVisibility(
@@ -92,13 +88,15 @@ void AdjustBoundsToEnsureWindowVisibility(const gfx::Rect& visible_area,
   } else if (bounds->bottom() - min_height < 0) {
     bounds->set_y(min_height - bounds->height());
   }
+  if (bounds->y() < 0)
+    bounds->set_y(0);
 }
 
 bool MoveWindowToEventRoot(aura::Window* window, const ui::Event& event) {
   views::View* target = static_cast<views::View*>(event.target());
   if (!target)
     return false;
-  aura::RootWindow* target_root =
+  aura::Window* target_root =
       target->GetWidget()->GetNativeView()->GetRootWindow();
   if (!target_root || target_root == window->GetRootWindow())
     return false;
@@ -107,6 +105,18 @@ bool MoveWindowToEventRoot(aura::Window* window, const ui::Event& event) {
   // Move the window to the target launcher.
   window_container->AddChild(window);
   return true;
+}
+
+void ReparentChildWithTransientChildren(aura::Window* window,
+                                        aura::Window* child) {
+  window->AddChild(child);
+  ReparentTransientChildrenOfChild(window, child);
+}
+
+void ReparentTransientChildrenOfChild(aura::Window* window,
+                                      aura::Window* child) {
+  for (size_t i = 0; i < child->transient_children().size(); ++i)
+    ReparentChildWithTransientChildren(window, child->transient_children()[i]);
 }
 
 }  // namespace wm

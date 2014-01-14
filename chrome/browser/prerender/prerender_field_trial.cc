@@ -88,7 +88,7 @@ void SetupPrefetchFieldTrial() {
   scoped_refptr<FieldTrial> trial(
       FieldTrialList::FactoryGetFieldTrial(
           "Prefetch", divisor, "ContentPrefetchPrefetchOff",
-          2013, 12, 31, FieldTrial::SESSION_RANDOMIZED, NULL));
+          2014, 12, 31, FieldTrial::SESSION_RANDOMIZED, NULL));
   const int kPrefetchOnGroup = trial->AppendGroup("ContentPrefetchPrefetchOn",
                                                   prefetch_probability);
   PrerenderManager::SetIsPrefetchEnabled(trial->group() == kPrefetchOnGroup);
@@ -150,7 +150,7 @@ void SetupPrerenderFieldTrial() {
   scoped_refptr<FieldTrial> trial(
       FieldTrialList::FactoryGetFieldTrial(
           "Prerender", divisor, "PrerenderEnabled",
-          2013, 12, 31, FieldTrial::SESSION_RANDOMIZED,
+          2014, 12, 31, FieldTrial::SESSION_RANDOMIZED,
           &prerender_enabled_group));
   const int control_group =
       trial->AppendGroup("PrerenderControl",
@@ -260,7 +260,7 @@ void ConfigureOmniboxPrerender() {
   scoped_refptr<FieldTrial> omnibox_prerender_trial(
       FieldTrialList::FactoryGetFieldTrial(
           kOmniboxTrialName, kDivisor, "OmniboxPrerenderEnabled",
-          2013, 12, 31, FieldTrial::SESSION_RANDOMIZED,
+          2014, 12, 31, FieldTrial::SESSION_RANDOMIZED,
           &g_omnibox_trial_default_group_number));
   omnibox_prerender_trial->AppendGroup("OmniboxPrerenderDisabled",
                                        kDisabledProbability);
@@ -326,7 +326,7 @@ bool IsUnencryptedSyncEnabled(Profile* profile) {
 
 // Indicates whether the Local Predictor is enabled based on field trial
 // selection.
-bool IsLocalPredictorEnabledBasedOnSelection() {
+bool IsLocalPredictorEnabled() {
 #if defined(OS_ANDROID) || defined(OS_IOS)
   return false;
 #endif
@@ -337,27 +337,19 @@ bool IsLocalPredictorEnabledBasedOnSelection() {
   return GetLocalPredictorSpecValue(kLocalPredictorKeyName) == kEnabledGroup;
 }
 
-// Usually, we enable the Local Predictor based on field trial selection
-// (see above), so we can just return that setting.
-// However, via Finch, we can specify to not create a LocalPredictor if
-// UnencryptedSync is not enabled. Therefore, we have to perform this additional
-// check to determine whether or not we actually want to enable the
-// LocalPredictor.
-bool IsLocalPredictorEnabled(Profile* profile) {
-  if (GetLocalPredictorSpecValue(kLocalPredictorUnencryptedSyncOnlyKeyName) ==
+bool DisableLocalPredictorBasedOnSyncAndConfiguration(Profile* profile) {
+  return
+      GetLocalPredictorSpecValue(kLocalPredictorUnencryptedSyncOnlyKeyName) ==
       kEnabledGroup &&
-      !IsUnencryptedSyncEnabled(profile)) {
-    return false;
-  }
-  return IsLocalPredictorEnabledBasedOnSelection();
+      !IsUnencryptedSyncEnabled(profile);
 }
 
 bool IsLoggedInPredictorEnabled() {
-  return IsLocalPredictorEnabledBasedOnSelection();
+  return IsLocalPredictorEnabled();
 }
 
 bool IsSideEffectFreeWhitelistEnabled() {
-  return IsLocalPredictorEnabledBasedOnSelection() &&
+  return IsLocalPredictorEnabled() &&
       GetLocalPredictorSpecValue(kSideEffectFreeWhitelistKeyName) !=
       kDisabledGroup;
 }

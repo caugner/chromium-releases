@@ -21,51 +21,78 @@ var GraphView = function(profiler) {
  * @private
  */
 GraphView.prototype.generateLines_ = function(models) {
-  function getLeaves(node, categories) {
-    if ('children' in node) {
-      node.children.forEach(function(child) {
-        getLeaves(child, categories);
+  function mergeCategoryTree(snapNode, treeNode) {
+    if ('children' in snapNode) {
+      // If |snapNode| is not a leaf node, we should go deeper.
+      if (!('children' in treeNode))
+        treeNode.children = {};
+      snapNode.children.forEach(function(child) {
+        if (!(child.id in treeNode.children))
+          treeNode.children[child.id] = {};
+        mergeCategoryTree(child, treeNode.children[child.id]);
       });
     } else {
-      categories.push(node);
+      treeNode.name = snapNode.name;
     }
   }
 
-  var lines = {};
-  var categoryMap = {};
-  var snapshotNum = models.length;
-  // Initialize lines with all zero.
+  function getCategoriesMap(node, id, categories) {
+    if ('children' in node) {
+      Object.keys(node.children).forEach(function(id) {
+        getCategoriesMap(node.children[id], id, categories);
+      });
+    } else {
+      if (!(id in categories)) {
+        categories[id] = {
+          name: node.name,
+          data: []
+        };
+        for (var i = 0; i < models.length; ++i)
+          categories[id].data.push([models[i].time - models[0].time, 0]);
+      }
+    }
+  }
+
+  function getLineValues(snapNode, index, categories) {
+    if ('children' in snapNode) {
+      snapNode.children.forEach(function(child) {
+        getLineValues(child, index, categories);
+      });
+    } else {
+      categories[snapNode.id].data[index][1] = snapNode.size;
+    }
+  }
+
+  // TODO(dmikurube): Remove this function after adding "color" attribute
+  //     in each category.
+  function getHashColorCode(id) {
+    var color = 0;
+    for (var i = 0; i < id.length; ++i)
+      color = (color * 0x57 + id.charCodeAt(i)) & 0xffffff;
+    color = color.toString(16);
+    while (color.length < 6)
+      color = '0' + color;
+    return '#' + color;
+  }
+
+  var categoryTree = {};
   models.forEach(function(model) {
-    var categories = [];
-    getLeaves(model, categories);
-    categories.forEach(function(category) {
-      var id = category.id;
-      if (lines[id])
-        return;
-      lines[id] = [];
-      for (var i = 0; i < snapshotNum; ++i)
-        lines[id].push([i, 0]);
-      categoryMap[id] = category;
-    });
+    mergeCategoryTree(model, categoryTree);
   });
-
-  // Assignment lines with values of models.
+  // Convert layout of categories from tree style to hash map style.
+  var categoryMap = {};
+  getCategoriesMap(categoryTree, '', categoryMap);
+  // Get size of each category.
   models.forEach(function(model, index) {
-    var categories = [];
-    getLeaves(model, categories);
-    categories.forEach(function(category) {
-      var id = category.id;
-      var size = category.size;
-      lines[id][index] = [index, size];
-    });
+    getLineValues(model, index, categoryMap);
   });
 
-  return Object.keys(lines).map(function(id) {
-    var name = categoryMap[id].name;
+  return Object.keys(categoryMap).map(function(id) {
     return {
+      color: getHashColorCode(id),
+      data: categoryMap[id].data,
       id: id,
-      label: name,
-      data: lines[id]
+      label: categoryMap[id].name
     };
   });
 };
@@ -128,10 +155,12 @@ GraphView.prototype.redraw_ = function(models) {
       }
 
       // If pos.y is higher than all lines, return.
-      if (i === lines.length)
+      if (i === lines.length) {
+        self.profiler_.setSelected(null);
         return;
+      }
 
-      self.profiler_.setSelected(lines[i].id);
+      self.profiler_.setSelected(lines[i].id, pos);
     });
   } else {
     this.graph_.setData(data);

@@ -23,8 +23,8 @@
 using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::InSequence;
-using testing::SaveArg;
 using ::testing::Return;
+using ::testing::SaveArg;
 
 namespace content {
 
@@ -49,18 +49,15 @@ class MockFrameObserver : public VideoCaptureControllerEventHandler {
 
   virtual void OnBufferCreated(const VideoCaptureControllerID& id,
                                base::SharedMemoryHandle handle,
-                               int length, int buffer_id) OVERRIDE {};
-  virtual void OnBufferReady(const VideoCaptureControllerID& id,
-                             int buffer_id,
-                             base::Time timestamp) OVERRIDE {};
-  virtual void OnFrameInfo(
+                               int length, int buffer_id) OVERRIDE {}
+  virtual void OnBufferDestroyed(const VideoCaptureControllerID& id,
+                               int buffer_id) OVERRIDE {}
+  virtual void OnBufferReady(
       const VideoCaptureControllerID& id,
-      const media::VideoCaptureCapability& format) OVERRIDE {};
-  virtual void OnFrameInfoChanged(const VideoCaptureControllerID& id,
-                                  int width,
-                                  int height,
-                                  int frame_rate) OVERRIDE {};
-  virtual void OnEnded(const VideoCaptureControllerID& id) OVERRIDE {};
+      int buffer_id,
+      base::Time timestamp,
+      const media::VideoCaptureFormat& format) OVERRIDE {}
+  virtual void OnEnded(const VideoCaptureControllerID& id) OVERRIDE {}
 
   void OnGotControllerCallback(VideoCaptureControllerID) {}
 };
@@ -103,9 +100,8 @@ class VideoCaptureManagerTest : public testing::Test {
   VideoCaptureControllerID StartClient(int session_id, bool expect_success) {
     media::VideoCaptureParams params;
     params.session_id = session_id;
-    params.width = 320;
-    params.height = 240;
-    params.frame_rate = 30;
+    params.requested_format = media::VideoCaptureFormat(
+        320, 240, 30, media::ConstantResolutionVideoCaptureDevice);
 
     VideoCaptureControllerID client_id(next_client_id_++);
     base::RunLoop run_loop;
@@ -243,7 +239,7 @@ TEST_F(VideoCaptureManagerTest, OpenNotExisting) {
   MediaStreamType stream_type = MEDIA_DEVICE_VIDEO_CAPTURE;
   std::string device_name("device_doesnt_exist");
   std::string device_id("id_doesnt_exist");
-  StreamDeviceInfo dummy_device(stream_type, device_name, device_id, false);
+  StreamDeviceInfo dummy_device(stream_type, device_name, device_id);
 
   // This should fail with an error to the controller.
   int session_id = vcm_->Open(dummy_device);
@@ -254,24 +250,6 @@ TEST_F(VideoCaptureManagerTest, OpenNotExisting) {
   vcm_->Close(session_id);
   message_loop_->RunUntilIdle();
 
-  vcm_->Unregister();
-}
-
-// Start a device using "magic" id, i.e. call Start without calling Open.
-TEST_F(VideoCaptureManagerTest, StartUsingId) {
-  InSequence s;
-  EXPECT_CALL(*listener_, Opened(MEDIA_DEVICE_VIDEO_CAPTURE, _)).Times(1);
-  EXPECT_CALL(*listener_, Closed(MEDIA_DEVICE_VIDEO_CAPTURE, _)).Times(1);
-
-  // Start shall trigger the Open callback.
-  VideoCaptureControllerID client_id = StartClient(
-      VideoCaptureManager::kStartOpenSessionId, true);
-
-  // Stop shall trigger the Close callback
-  StopClient(client_id);
-
-  // Wait to check callbacks before removing the listener.
-  message_loop_->RunUntilIdle();
   vcm_->Unregister();
 }
 

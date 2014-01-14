@@ -6,11 +6,11 @@
 #define ASH_WM_OVERVIEW_SCOPED_TRANSFORM_OVERVIEW_WINDOW_H_
 
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_vector.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/transform.h"
 
 namespace aura {
-class RootWindow;
 class Window;
 }
 
@@ -24,6 +24,8 @@ class Widget;
 
 namespace ash {
 
+class ScopedWindowCopy;
+
 // Manages a window in the overview mode. This class allows transforming the
 // window with a helper to determine the best fit in certain bounds and
 // copies the window if being moved to another display. The window's state is
@@ -33,11 +35,15 @@ class ScopedTransformOverviewWindow {
   // The duration of transitions used for window transforms.
   static const int kTransitionMilliseconds;
 
-  // Returns the transform necessary to fit |rect| into |bounds| preserving
-  // aspect ratio and centering.
-  static gfx::Transform GetTransformForRectPreservingAspectRatio(
+  // Returns |rect| having been shrunk to fit within |bounds| (preserving the
+  // aspect ratio).
+  static gfx::Rect ShrinkRectToFitPreservingAspectRatio(
       const gfx::Rect& rect,
       const gfx::Rect& bounds);
+
+  // Returns the transform turning |src_rect| into |dst_rect|.
+  static gfx::Transform GetTransformForRect(const gfx::Rect& src_rect,
+                                            const gfx::Rect& dst_rect);
 
   explicit ScopedTransformOverviewWindow(aura::Window* window);
   virtual ~ScopedTransformOverviewWindow();
@@ -45,6 +51,9 @@ class ScopedTransformOverviewWindow {
   // Returns true if this window selector window contains the |target|. This is
   // used to determine if an event targetted this window.
   bool Contains(const aura::Window* target) const;
+
+  // Returns the original bounds of all transformed windows.
+  gfx::Rect GetBoundsInScreen() const;
 
   // Restores the window if it was minimized.
   void RestoreWindow();
@@ -58,35 +67,42 @@ class ScopedTransformOverviewWindow {
   // anything on the window at destruction time.
   void OnWindowDestroyed();
 
+  // Prepares for overview mode by doing any necessary actions before entering.
+  virtual void PrepareForOverview();
+
   // Sets |transform| on the window and a copy of the window if the target
-  // |root_window| is not the window's root window.
-  void SetTransform(aura::RootWindow* root_window,
-                    const gfx::Transform& transform);
+  // |root_window| is not the window's root window. If |animate| the transform
+  // is animated in, otherwise it is immediately applied.
+  void SetTransform(aura::Window* root_window,
+                    const gfx::Transform& transform,
+                    bool animate);
 
   aura::Window* window() const { return window_; }
 
- protected:
-  // Dispatched when the overview of this window has started.
-  virtual void OnOverviewStarted();
-
  private:
+  // Creates copies of |window| and all of its modal transient parents on the
+  // root window |target_root|.
+  void CopyWindowAndTransientParents(aura::Window* target_root,
+                                     aura::Window* window);
+
   // Applies the |transform| to the overview window and all of its transient
-  // children using animations.
-  void AnimateTransformOnWindowAndTransientChildren(
-      const gfx::Transform& transform);
+  // children using animations. If |animate| the transform is animated in,
+  // otherwise it is applied immediately.
+  void SetTransformOnWindowAndTransientChildren(const gfx::Transform& transform,
+                                                bool animate);
 
   // A weak pointer to the real window in the overview.
   aura::Window* window_;
 
-  // A copy of the window used to transition the window to another root.
-  views::Widget* window_copy_;
-
-  // A weak pointer to a deep copy of the window's layers.
-  ui::Layer* layer_;
+  // Copies of the window and transient parents for a different root window.
+  ScopedVector<ScopedWindowCopy> window_copies_;
 
   // If true, the window was minimized and should be restored if the window
   // was not selected.
   bool minimized_;
+
+  // Tracks if this window was ignored by the shelf.
+  bool ignored_by_shelf_;
 
   // True if the window has been transformed for overview mode.
   bool overview_started_;

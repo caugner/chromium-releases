@@ -47,6 +47,9 @@ using content_settings::SETTING_SOURCE_USER;
 using content_settings::SETTING_SOURCE_NONE;
 
 namespace {
+
+const int kAllowButtonIndex = 0;
+
 struct ContentSettingsTypeIdEntry {
   ContentSettingsType type;
   int id;
@@ -220,6 +223,7 @@ class ContentSettingSingleRadioGroup
 
  protected:
   bool settings_changed() const;
+  int selected_item() const { return selected_item_; }
 
  private:
   void SetRadioGroup();
@@ -246,7 +250,9 @@ ContentSettingSingleRadioGroup::ContentSettingSingleRadioGroup(
 ContentSettingSingleRadioGroup::~ContentSettingSingleRadioGroup() {
   if (settings_changed()) {
     ContentSetting setting =
-        selected_item_ == 0 ? CONTENT_SETTING_ALLOW : block_setting_;
+        selected_item_ == kAllowButtonIndex ?
+                          CONTENT_SETTING_ALLOW :
+                          block_setting_;
     const std::set<std::string>& resources =
         bubble_content().resource_identifiers;
     if (resources.empty()) {
@@ -368,6 +374,7 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
       CookieSettings::Factory::GetForProfile(profile()).get();
   ContentSetting most_restrictive_setting;
   SettingSource most_restrictive_setting_source = SETTING_SOURCE_NONE;
+  bool most_restrictive_setting_is_wildcard = false;
 
   if (resources.empty()) {
     if (content_type() == CONTENT_SETTINGS_TYPE_COOKIES) {
@@ -380,29 +387,46 @@ void ContentSettingSingleRadioGroup::SetRadioGroup() {
       most_restrictive_setting =
           content_settings::ValueToContentSetting(value.get());
       most_restrictive_setting_source = info.source;
+      most_restrictive_setting_is_wildcard =
+          info.primary_pattern == ContentSettingsPattern::Wildcard() &&
+          info.secondary_pattern == ContentSettingsPattern::Wildcard();
     }
   } else {
     most_restrictive_setting = CONTENT_SETTING_ALLOW;
     for (std::set<std::string>::const_iterator it = resources.begin();
          it != resources.end(); ++it) {
       SettingInfo info;
-      scoped_ptr<Value> value(map->GetWebsiteSetting(
+      scoped_ptr<Value> val(map->GetWebsiteSetting(
           url, url, content_type(), *it, &info));
       ContentSetting setting =
-          content_settings::ValueToContentSetting(value.get());
+          content_settings::ValueToContentSetting(val.get());
       if (setting == CONTENT_SETTING_BLOCK) {
         most_restrictive_setting = CONTENT_SETTING_BLOCK;
         most_restrictive_setting_source = info.source;
+        most_restrictive_setting_is_wildcard =
+            info.primary_pattern == ContentSettingsPattern::Wildcard() &&
+            info.secondary_pattern == ContentSettingsPattern::Wildcard();
         break;
       }
       if (setting == CONTENT_SETTING_ASK) {
         most_restrictive_setting = CONTENT_SETTING_ASK;
         most_restrictive_setting_source = info.source;
+        most_restrictive_setting_is_wildcard =
+            info.primary_pattern == ContentSettingsPattern::Wildcard() &&
+            info.secondary_pattern == ContentSettingsPattern::Wildcard();
       }
     }
   }
-  if (most_restrictive_setting == CONTENT_SETTING_ALLOW) {
-    radio_group.default_item = 0;
+
+  if (content_type() == CONTENT_SETTINGS_TYPE_PLUGINS &&
+      most_restrictive_setting == CONTENT_SETTING_ALLOW &&
+      most_restrictive_setting_is_wildcard) {
+    // In the corner case of unrecognized plugins (which are now blocked by
+    // default) we indicate the blocked state in the UI and allow the user to
+    // whitelist.
+    radio_group.default_item = 1;
+  } else if (most_restrictive_setting == CONTENT_SETTING_ALLOW) {
+    radio_group.default_item = kAllowButtonIndex;
     // |block_setting_| is already set to |CONTENT_SETTING_BLOCK|.
   } else {
     radio_group.default_item = 1;
@@ -485,7 +509,7 @@ class ContentSettingPluginBubbleModel : public ContentSettingSingleRadioGroup {
                                   Profile* profile,
                                   ContentSettingsType content_type);
 
-  virtual ~ContentSettingPluginBubbleModel() {}
+  virtual ~ContentSettingPluginBubbleModel();
 
  private:
   virtual void OnCustomLinkClicked() OVERRIDE;
@@ -502,6 +526,14 @@ ContentSettingPluginBubbleModel::ContentSettingPluginBubbleModel(
   set_custom_link_enabled(web_contents &&
                           TabSpecificContentSettings::FromWebContents(
                               web_contents)->load_plugins_link_enabled());
+}
+
+ContentSettingPluginBubbleModel::~ContentSettingPluginBubbleModel() {
+  if (settings_changed()) {
+    // If the user elected to allow all plugins then run plugins at this time.
+    if (selected_item() == kAllowButtonIndex)
+      OnCustomLinkClicked();
+  }
 }
 
 void ContentSettingPluginBubbleModel::OnCustomLinkClicked() {
@@ -602,6 +634,12 @@ void SavePasswordBubbleModel::OnCancelClicked() {
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents());
   content_settings->set_password_action(PasswordFormManager::BLACKLIST);
+}
+
+void SavePasswordBubbleModel::OnDoneClicked() {
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  content_settings->set_password_action(PasswordFormManager::DO_NOTHING);
 }
 
 void SavePasswordBubbleModel::OnSaveClicked() {
@@ -862,6 +900,13 @@ void ContentSettingMediaStreamBubbleModel::UpdateDefaultDeviceForType(
 }
 
 void ContentSettingMediaStreamBubbleModel::SetMediaMenus() {
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  const std::string& requested_microphone =
+       content_settings->media_stream_requested_audio_device();
+   const std::string& requested_camera =
+       content_settings->media_stream_requested_video_device();
+
   // Add microphone menu.
   PrefService* prefs = profile()->GetPrefs();
   MediaCaptureDevicesDispatcher* dispatcher =
@@ -885,8 +930,18 @@ void ContentSettingMediaStreamBubbleModel::SetMediaMenus() {
     MediaMenu mic_menu;
     mic_menu.label = l10n_util::GetStringUTF8(IDS_MEDIA_SELECTED_MIC_LABEL);
     if (!microphones.empty()) {
-      std::string preferred_mic =
-          prefs->GetString(prefs::kDefaultAudioCaptureDevice);
+      std::string preferred_mic;
+      if (requested_microphone.empty()) {
+        preferred_mic = prefs->GetString(prefs::kDefaultAudioCaptureDevice);
+        mic_menu.disabled = false;
+      } else {
+        // Set the |disabled| to true in order to disable the device selection
+        // menu on the media settings bubble. This must be done if the website
+        // manages the microphone devices itself.
+        preferred_mic = requested_microphone;
+        mic_menu.disabled = true;
+      }
+
       mic_menu.default_device = GetMediaDeviceById(preferred_mic, microphones);
       mic_menu.selected_device = mic_menu.default_device;
     }
@@ -900,8 +955,17 @@ void ContentSettingMediaStreamBubbleModel::SetMediaMenus() {
     camera_menu.label =
         l10n_util::GetStringUTF8(IDS_MEDIA_SELECTED_CAMERA_LABEL);
     if (!cameras.empty()) {
-      std::string preferred_camera =
-          prefs->GetString(prefs::kDefaultVideoCaptureDevice);
+      std::string preferred_camera;
+      if (requested_camera.empty()) {
+        preferred_camera = prefs->GetString(prefs::kDefaultVideoCaptureDevice);
+        camera_menu.disabled = false;
+      } else {
+        // Disable the menu since the website is managing the camera devices
+        // itself.
+        preferred_camera = requested_camera;
+        camera_menu.disabled = true;
+      }
+
       camera_menu.default_device =
           GetMediaDeviceById(preferred_camera, cameras);
       camera_menu.selected_device = camera_menu.default_device;
@@ -1339,6 +1403,10 @@ ContentSettingBubbleModel::RadioGroup::~RadioGroup() {}
 ContentSettingBubbleModel::DomainList::DomainList() {}
 
 ContentSettingBubbleModel::DomainList::~DomainList() {}
+
+ContentSettingBubbleModel::MediaMenu::MediaMenu() : disabled(false) {}
+
+ContentSettingBubbleModel::MediaMenu::~MediaMenu() {}
 
 ContentSettingBubbleModel::BubbleContent::BubbleContent()
     : radio_group_enabled(false),

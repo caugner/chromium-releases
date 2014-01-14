@@ -38,6 +38,12 @@ Vp8Encoder::Vp8Encoder(const VideoSenderConfig& video_config,
       timestamp_(0),
       last_encoded_frame_id_(kStartFrameId),
       number_of_repeated_buffers_(0) {
+  // TODO(pwestin): we need to figure out how to synchronize the acking with the
+  // internal state of the encoder, ideally the encoder will tell if we can
+  // send another frame.
+  DCHECK(!use_multiple_video_buffers_ ||
+         max_number_of_repeated_buffers_in_a_row_ == 0) <<  "Invalid config";
+
   // VP8 have 3 buffers available for prediction, with
   // max_number_of_video_buffers_used set to 1 we maximize the coding efficiency
   // however in this mode we can not skip frames in the receiver to catch up
@@ -158,7 +164,7 @@ bool Vp8Encoder::Encode(const I420VideoFrame& input_image,
   // Get encoded frame.
   const vpx_codec_cx_pkt_t *pkt = NULL;
   vpx_codec_iter_t iter = NULL;
-  int total_size = 0;
+  size_t total_size = 0;
   while ((pkt = vpx_codec_get_cx_data(encoder_, &iter)) != NULL) {
     if (pkt->kind == VPX_CODEC_CX_FRAME_PKT) {
       total_size += pkt->data.frame.sz;
@@ -182,6 +188,9 @@ bool Vp8Encoder::Encode(const I420VideoFrame& input_image,
   encoded_image->codec = kVp8;
   encoded_image->last_referenced_frame_id = latest_frame_id_to_reference;
   encoded_image->frame_id = ++last_encoded_frame_id_;
+
+  VLOG(1) << "VP8 encoded frame:" << static_cast<int>(encoded_image->frame_id)
+          << " sized:" << total_size;
 
   if (encoded_image->key_frame) {
     key_frame_requested_ = false;
@@ -267,12 +276,15 @@ Vp8Encoder::Vp8Buffers Vp8Encoder::GetNextBufferToUpdate() {
     switch (last_used_vp8_buffer_) {
       case kAltRefBuffer:
         buffer_to_update = kLastBuffer;
+        VLOG(1) << "VP8 update last buffer";
         break;
       case kLastBuffer:
         buffer_to_update = kGoldenBuffer;
+        VLOG(1) << "VP8 update golden buffer";
         break;
       case kGoldenBuffer:
         buffer_to_update = kAltRefBuffer;
+        VLOG(1) << "VP8 update alt-ref buffer";
         break;
       case kNoBuffer:
         DCHECK(false) << "Invalid state";
@@ -310,7 +322,11 @@ void Vp8Encoder::GetCodecUpdateFlags(Vp8Buffers buffer_to_update,
 }
 
 void Vp8Encoder::UpdateRates(uint32 new_bitrate) {
-  config_->rc_target_bitrate = new_bitrate / 1000;  // In kbit/s.
+  uint32 new_bitrate_kbit = new_bitrate / 1000;
+  if (config_->rc_target_bitrate == new_bitrate_kbit) return;
+
+  config_->rc_target_bitrate = new_bitrate_kbit;
+
   // Update encoder context.
   if (vpx_codec_enc_config_set(encoder_, config_.get())) {
     DCHECK(false) << "Invalid return value";
@@ -320,6 +336,7 @@ void Vp8Encoder::UpdateRates(uint32 new_bitrate) {
 void Vp8Encoder::LatestFrameIdToReference(uint8 frame_id) {
   if (!use_multiple_video_buffers_) return;
 
+  VLOG(1) << "VP8 ok to reference frame:" << static_cast<int>(frame_id);
   for (int i = 0; i < kNumberOfVp8VideoBuffers; ++i) {
     if (frame_id == used_buffers_frame_id_[i]) {
       acked_frame_buffers_[i] = true;

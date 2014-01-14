@@ -22,21 +22,21 @@
 #include "base/nix/xdg_util.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
-#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -234,8 +234,7 @@ BrowserWindowGtk::BrowserWindowGtk(Browser* browser)
        show_state_after_show_(ui::SHOW_STATE_DEFAULT),
        suppress_window_raise_(false),
        accel_group_(NULL),
-       fullscreen_exit_bubble_type_(
-           FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION) {
+       is_fullscreen_(false) {
 }
 
 BrowserWindowGtk::~BrowserWindowGtk() {
@@ -719,6 +718,11 @@ bool BrowserWindowGtk::IsAlwaysOnTop() const {
   return false;
 }
 
+void BrowserWindowGtk::SetAlwaysOnTop(bool always_on_top) {
+  // Not implemented for browser windows.
+  NOTIMPLEMENTED();
+}
+
 gfx::NativeWindow BrowserWindowGtk::GetNativeWindow() {
   return window_;
 }
@@ -790,6 +794,35 @@ void BrowserWindowGtk::SetStarredState(bool is_starred) {
   toolbar_->GetLocationBarView()->SetStarred(is_starred);
 }
 
+void BrowserWindowGtk::OnActiveTabChanged(WebContents* old_contents,
+                                          WebContents* new_contents,
+                                          int index,
+                                          int reason) {
+  TRACE_EVENT0("ui::gtk", "BrowserWindowGtk::ActiveTabChanged");
+  if (old_contents && !old_contents->IsBeingDestroyed())
+    old_contents->GetView()->StoreFocus();
+
+  // Update various elements that are interested in knowing the current
+  // WebContents.
+  UpdateDevToolsForContents(new_contents);
+  infobar_container_->ChangeInfoBarService(
+      InfoBarService::FromWebContents(new_contents));
+  contents_container_->SetTab(new_contents);
+
+  // TODO(estade): after we manage browser activation, add a check to make sure
+  // we are the active browser before calling RestoreFocus().
+  if (!browser_->tab_strip_model()->closing_all()) {
+    new_contents->GetView()->RestoreFocus();
+    FindTabHelper* find_tab_helper =
+        FindTabHelper::FromWebContents(new_contents);
+    if (find_tab_helper->find_ui_active())
+      browser_->GetFindBarController()->find_bar()->SetFocusAndSelection();
+  }
+
+  // Update all the UI bits.
+  UpdateTitleBar();
+  MaybeShowBookmarkBar(false);
+}
 void BrowserWindowGtk::ZoomChangedForActiveTab(bool can_show_bubble) {
   toolbar_->GetLocationBarView()->ZoomChangedForActiveTab(
       can_show_bubble && !toolbar_->IsWrenchMenuShowing());
@@ -839,16 +872,30 @@ bool BrowserWindowGtk::ShouldDrawContentDropShadow() const {
 }
 
 void BrowserWindowGtk::EnterFullscreen(
-      const GURL& url, FullscreenExitBubbleType type) {
+    const GURL& url, FullscreenExitBubbleType type) {
+  if (IsFullscreen())
+    return;  // Nothing to do.
+  is_fullscreen_ = true;
+
   // gtk_window_(un)fullscreen asks the window manager to toggle the EWMH
   // for fullscreen windows.  Not all window managers support this.
   gtk_window_fullscreen(window_);
-  fullscreen_exit_bubble_type_ = type;
+
+  browser_->WindowFullscreenStateChanged();
+  UpdateCustomFrame();
+  toolbar_->Hide();
+  tabstrip_->Hide();
+  if (bookmark_bar_.get())
+    gtk_widget_hide(bookmark_bar_->widget());
+  if (!chrome::IsRunningInAppMode()) {
+    UpdateFullscreenExitBubbleContent(url, type);
+  }
+  gtk_widget_hide(titlebar_widget());
+  gtk_widget_hide(toolbar_border_);
 }
 
 void BrowserWindowGtk::UpdateFullscreenExitBubbleContent(
-     const GURL& url,
-      FullscreenExitBubbleType bubble_type) {
+    const GURL& url, FullscreenExitBubbleType bubble_type) {
   if (!window_) {
     // Don't create a fullscreen bubble for a closing window.
     return;
@@ -866,6 +913,10 @@ void BrowserWindowGtk::UpdateFullscreenExitBubbleContent(
 }
 
 void BrowserWindowGtk::ExitFullscreen() {
+  if (!IsFullscreen())
+    return;  // Nothing to do.
+  is_fullscreen_ = false;
+
   // Work around a bug where if we try to unfullscreen, metacity immediately
   // fullscreens us again.  This is a little flickery and not necessary if
   // there's a gnome-panel, but it's not easy to detect whether there's a
@@ -879,6 +930,12 @@ void BrowserWindowGtk::ExitFullscreen() {
 
   if (unmaximize_before_unfullscreen)
     gtk_window_maximize(window_);
+
+  browser_->WindowFullscreenStateChanged();
+  gtk_widget_show(titlebar_widget());
+  UpdateFullscreenExitBubbleContent(GURL(), FEB_TYPE_NONE);
+  UpdateCustomFrame();
+  ShowSupportedWindowFeatures();
 }
 
 bool BrowserWindowGtk::ShouldHideUIForFullscreen() const {
@@ -886,7 +943,7 @@ bool BrowserWindowGtk::ShouldHideUIForFullscreen() const {
 }
 
 bool BrowserWindowGtk::IsFullscreen() const {
-  return (state_ & GDK_WINDOW_STATE_FULLSCREEN);
+  return is_fullscreen_;
 }
 
 bool BrowserWindowGtk::IsFullscreenBubbleVisible() const {
@@ -963,10 +1020,6 @@ void BrowserWindowGtk::ConfirmAddSearchProvider(TemplateURL* template_url,
   new EditSearchEngineDialog(window_, template_url, NULL, profile);
 }
 
-void BrowserWindowGtk::ToggleBookmarkBar() {
-  chrome::ToggleBookmarkBarWhenVisible(browser_->profile());
-}
-
 void BrowserWindowGtk::ShowUpdateChromeDialog() {
   UpdateRecommendedDialog::Show(window_);
 }
@@ -974,6 +1027,11 @@ void BrowserWindowGtk::ShowUpdateChromeDialog() {
 void BrowserWindowGtk::ShowBookmarkBubble(const GURL& url,
                                           bool already_bookmarked) {
   toolbar_->GetLocationBarView()->ShowStarBubble(url, !already_bookmarked);
+}
+
+void BrowserWindowGtk::ShowTranslateBubble(
+    content::WebContents* contents,
+    TranslateBubbleModel::ViewState view_state) {
 }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
@@ -1120,11 +1178,6 @@ void BrowserWindowGtk::HandleKeyboardEvent(
     gtk_window_activate_key(window_, os_event);
 }
 
-void BrowserWindowGtk::ShowCreateChromeAppShortcutsDialog(
-    Profile* profile, const extensions::Extension* app) {
-  CreateChromeApplicationShortcutsDialogGtk::Show(window_, profile, app);
-}
-
 void BrowserWindowGtk::Cut() {
   gtk_window_util::DoCut(
       window_, browser_->tab_strip_model()->GetActiveWebContents());
@@ -1214,36 +1267,6 @@ void BrowserWindowGtk::TabDetachedAt(WebContents* contents, int index) {
     UpdateDevToolsForContents(NULL);
   }
   contents_container_->DetachTab(contents);
-}
-
-void BrowserWindowGtk::ActiveTabChanged(WebContents* old_contents,
-                                        WebContents* new_contents,
-                                        int index,
-                                        int reason) {
-  TRACE_EVENT0("ui::gtk", "BrowserWindowGtk::ActiveTabChanged");
-  if (old_contents && !old_contents->IsBeingDestroyed())
-    old_contents->GetView()->StoreFocus();
-
-  // Update various elements that are interested in knowing the current
-  // WebContents.
-  UpdateDevToolsForContents(new_contents);
-  infobar_container_->ChangeInfoBarService(
-      InfoBarService::FromWebContents(new_contents));
-  contents_container_->SetTab(new_contents);
-
-  // TODO(estade): after we manage browser activation, add a check to make sure
-  // we are the active browser before calling RestoreFocus().
-  if (!browser_->tab_strip_model()->closing_all()) {
-    new_contents->GetView()->RestoreFocus();
-    FindTabHelper* find_tab_helper =
-        FindTabHelper::FromWebContents(new_contents);
-    if (find_tab_helper->find_ui_active())
-      browser_->GetFindBarController()->find_bar()->SetFocusAndSelection();
-  }
-
-  // Update all the UI bits.
-  UpdateTitleBar();
-  MaybeShowBookmarkBar(false);
 }
 
 void BrowserWindowGtk::ActiveWindowChanged(GdkWindow* active_window) {
@@ -1359,35 +1382,6 @@ void BrowserWindowGtk::OnDebouncedBoundsChanged() {
 gboolean BrowserWindowGtk::OnWindowState(GtkWidget* sender,
                                          GdkEventWindowState* event) {
   state_ = event->new_window_state;
-
-  if (event->changed_mask & GDK_WINDOW_STATE_FULLSCREEN) {
-    browser_->WindowFullscreenStateChanged();
-    if (state_ & GDK_WINDOW_STATE_FULLSCREEN) {
-      UpdateCustomFrame();
-      toolbar_->Hide();
-      tabstrip_->Hide();
-      if (bookmark_bar_.get())
-        gtk_widget_hide(bookmark_bar_->widget());
-      bool is_kiosk =
-          CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode);
-      if (!is_kiosk && !fullscreen_exit_bubble_.get()) {
-        fullscreen_exit_bubble_.reset(new FullscreenExitBubbleGtk(
-            GTK_FLOATING_CONTAINER(render_area_floating_container_),
-            browser(),
-            GURL(),
-            fullscreen_exit_bubble_type_));
-      }
-      gtk_widget_hide(titlebar_widget());
-      gtk_widget_hide(toolbar_border_);
-    } else {
-      fullscreen_exit_bubble_type_ =
-          FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION;
-      gtk_widget_show(titlebar_widget());
-      fullscreen_exit_bubble_.reset();
-      UpdateCustomFrame();
-      ShowSupportedWindowFeatures();
-    }
-  }
 
   if (event->changed_mask & GDK_WINDOW_STATE_MAXIMIZED) {
     content::NotificationService::current()->Notify(
@@ -1676,8 +1670,11 @@ void BrowserWindowGtk::InitWidgets() {
 
   status_bubble_.reset(new StatusBubbleGtk(browser_->profile()));
 
-  contents_container_.reset(new TabContentsContainerGtk(status_bubble_.get()));
-  devtools_container_.reset(new TabContentsContainerGtk(NULL));
+  contents_container_.reset(new TabContentsContainerGtk(
+      status_bubble_.get(),
+      implicit_cast<content::WebContentsDelegate*>(browser_.get())->
+          EmbedsFullscreenWidget()));
+  devtools_container_.reset(new TabContentsContainerGtk(NULL, false));
   ViewIDUtil::SetID(devtools_container_->widget(), VIEW_ID_DEV_TOOLS_DOCKED);
 
   contents_hsplit_ = gtk_hpaned_new();

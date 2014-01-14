@@ -16,9 +16,9 @@ class JavaHeapProfiler(profiler.Profiler):
   _DEFAULT_DEVICE_DIR = '/data/local/tmp/javaheap'
   # TODO(bulach): expose this as a command line option somehow.
   _DEFAULT_INTERVAL = 20
-  def __init__(self, browser_backend, platform_backend, output_path):
+  def __init__(self, browser_backend, platform_backend, output_path, state):
     super(JavaHeapProfiler, self).__init__(
-        browser_backend, platform_backend, output_path)
+        browser_backend, platform_backend, output_path, state)
     self._run_count = 1
 
     self._DumpJavaHeap(False)
@@ -56,15 +56,21 @@ class JavaHeapProfiler(profiler.Profiler):
     self._DumpJavaHeap(False)
 
   def _DumpJavaHeap(self, wait_for_completion):
+    if not self._browser_backend.adb.Adb().FileExistsOnDevice(
+        self._DEFAULT_DEVICE_DIR):
+      self._browser_backend.adb.RunShellCommand(
+          'mkdir -p ' + self._DEFAULT_DEVICE_DIR)
+      self._browser_backend.adb.RunShellCommand(
+          'chmod 777 ' + self._DEFAULT_DEVICE_DIR)
+
     device_dump_file = None
     for pid in self._GetProcessOutputFileMap().iterkeys():
-      device_dump_file = '%s%s.%s.aprof' % (self._DEFAULT_DEVICE_DIR, pid,
-                                            self._run_count)
+      device_dump_file = '%s/%s.%s.aprof' % (self._DEFAULT_DEVICE_DIR, pid,
+                                             self._run_count)
       self._browser_backend.adb.RunShellCommand('am dumpheap %s %s' %
                                                 (pid, device_dump_file))
     if device_dump_file and wait_for_completion:
-      util.WaitFor(lambda: self._FileSize(device_dump_file) > 0,
-                   timeout=2, poll_interval=0.5)
+      util.WaitFor(lambda: self._FileSize(device_dump_file) > 0, timeout=2)
     self._run_count += 1
 
   def _FileSize(self, file_name):

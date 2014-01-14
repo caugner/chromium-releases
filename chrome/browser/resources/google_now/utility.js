@@ -22,16 +22,32 @@
  *     when a task completes.
  */
 
-// TODO(vadimt): Figure out the server name. Use it in the manifest and for
-// NOTIFICATION_CARDS_URL. Meanwhile, to use the feature, you need to manually
-// set the server name via local storage.
+// TODO(vadimt): Use server name in the manifest.
 
 /**
  * Notification server URL.
  */
-var NOTIFICATION_CARDS_URL = localStorage['server_url'];
+var NOTIFICATION_CARDS_URL = 'https://www.googleapis.com/chromenow/v1';
 
 var DEBUG_MODE = localStorage['debug_mode'];
+
+/**
+ * Initializes for debug or release modes of operation.
+ */
+function initializeDebug() {
+  if (DEBUG_MODE) {
+    NOTIFICATION_CARDS_URL =
+        localStorage['server_url'] || NOTIFICATION_CARDS_URL;
+  }
+}
+
+initializeDebug();
+
+/**
+ * Location Card Storage.
+ */
+if (localStorage['locationCardsShown'] === undefined)
+  localStorage['locationCardsShown'] = 0;
 
 /**
  * Builds an error object with a message that may be sent to the server.
@@ -58,16 +74,18 @@ function verify(condition, message) {
 
 /**
  * Builds a request to the notification server.
+ * @param {string} method Request method.
  * @param {string} handlerName Server handler to send the request to.
- * @param {string} contentType Value for the Content-type header.
+ * @param {string=} contentType Value for the Content-type header.
  * @return {XMLHttpRequest} Server request.
  */
-function buildServerRequest(handlerName, contentType) {
+function buildServerRequest(method, handlerName, contentType) {
   var request = new XMLHttpRequest();
 
   request.responseType = 'text';
-  request.open('POST', NOTIFICATION_CARDS_URL + '/' + handlerName, true);
-  request.setRequestHeader('Content-type', contentType);
+  request.open(method, NOTIFICATION_CARDS_URL + '/' + handlerName, true);
+  if (contentType)
+    request.setRequestHeader('Content-type', contentType);
 
   return request;
 }
@@ -87,8 +105,8 @@ function sendErrorReport(error) {
   if (topFrame) {
     // Examples of a frame:
     // 1. '\n    at someFunction (chrome-extension://
-    //     pmofbkohncoogjjhahejjfbppikbjigm/background.js:915:15)\n'
-    // 2. '\n    at chrome-extension://pmofbkohncoogjjhahejjfbppikbjigm/
+    //     pafkbggdmjlpgkdkcbjmhmfcdpncadgh/background.js:915:15)\n'
+    // 2. '\n    at chrome-extension://pafkbggdmjlpgkdkcbjmhmfcdpncadgh/
     //     utility.js:269:18\n'
     // 3. '\n    at Function.target.(anonymous function) (extensions::
     //     SafeBuiltins:19:14)\n'
@@ -105,7 +123,7 @@ function sendErrorReport(error) {
 
     var topFrameElements = errorLocation.split(':');
     // topFrameElements is an array that ends like:
-    // [N-3] //pmofbkohncoogjjhahejjfbppikbjigm/utility.js
+    // [N-3] //pafkbggdmjlpgkdkcbjmhmfcdpncadgh/utility.js
     // [N-2] 308
     // [N-1] 19
     if (topFrameElements.length >= 3) {
@@ -118,17 +136,24 @@ function sendErrorReport(error) {
   if (error.canSendMessageToServer)
     errorText = errorText + ': ' + error.message;
 
-  var requestParameters =
-      'error=' + encodeURIComponent(errorText) +
-      '&script=' + encodeURIComponent(file) +
-      '&line=' + encodeURIComponent(line) +
-      '&trace=' + encodeURIComponent(filteredStack);
-  var request = buildServerRequest('jserror',
-                                   'application/x-www-form-urlencoded');
+  var errorObject = {
+    message: errorText,
+    file: file,
+    line: line,
+    trace: filteredStack
+  };
+
+  var request = buildServerRequest('POST', 'jserrors', 'application/json');
   request.onloadend = function(event) {
     console.log('sendErrorReport status: ' + request.status);
   };
-  request.send(requestParameters);
+
+  chrome.identity.getAuthToken({interactive: false}, function(token) {
+    if (token) {
+      request.setRequestHeader('Authorization', 'Bearer ' + token);
+      request.send(JSON.stringify(errorObject));
+    }
+  });
 }
 
 // Limiting 1 error report per background page load.
@@ -380,7 +405,9 @@ var wrapper = (function() {
 wrapper.instrumentChromeApiFunction('alarms.get', 1);
 wrapper.instrumentChromeApiFunction('alarms.onAlarm.addListener', 0);
 wrapper.instrumentChromeApiFunction('identity.getAuthToken', 1);
+wrapper.instrumentChromeApiFunction('identity.onSignInChanged.addListener', 0);
 wrapper.instrumentChromeApiFunction('identity.removeCachedAuthToken', 1);
+wrapper.instrumentChromeApiFunction('webstorePrivate.getBrowserLogin', 0);
 
 /**
  * Builds the object to manage tasks (mutually exclusive chains of events).
@@ -393,7 +420,7 @@ function buildTaskManager(areConflicting) {
   /**
    * Queue of scheduled tasks. The first element, if present, corresponds to the
    * currently running task.
-   * @type {Array.<Object.<string, function(function())>>}
+   * @type {Array.<Object.<string, function()>>}
    */
   var queue = [];
 
@@ -427,7 +454,7 @@ function buildTaskManager(areConflicting) {
     var entry = queue[0];
     console.log('Starting task ' + entry.name);
 
-    entry.task(function() {});  // TODO(vadimt): Don't pass parameter.
+    entry.task();
 
     verify(isInTask, 'startFirst: not in task at exit');
     isInTask = false;
@@ -457,8 +484,7 @@ function buildTaskManager(areConflicting) {
    * If any task in the queue is not compatible with the task, ignores the new
    * task. Otherwise, stores the task for future execution.
    * @param {string} taskName Name of the task.
-   * @param {function(function())} task Function to run. Takes a callback
-   *     parameter. Call this callback on completion.
+   * @param {function()} task Function to run.
    */
   function add(taskName, task) {
     wrapper.checkInWrappedCallback();
@@ -534,8 +560,7 @@ function buildTaskManager(areConflicting) {
   });
 
   return {
-    add: add,
-    debugSetStepName: function() {}  // TODO(vadimt): remove
+    add: add
   };
 }
 
@@ -652,10 +677,7 @@ function buildAttemptManager(
   };
 }
 
-// TODO(robliao): Ideally, the authentication watcher infrastructure
-// below would be an API change to chrome.identity.
-// When this happens, remove the code below.
-
+// TODO(robliao): Use signed-in state change watch API when it's available.
 /**
  * Wraps chrome.identity to provide limited listening support for
  * the sign in state by polling periodically for the auth token.
@@ -665,15 +687,24 @@ function buildAuthenticationManager() {
   var alarmName = 'sign-in-alarm';
 
   /**
-   * Determines if the user is signed in and provides a token if signed in.
+   * Gets an OAuth2 access token.
    * @param {function(string=)} callback Called on completion.
-   *     If the user is signed in, the string contains the token.
+   *     The string contains the token. It's undefined if there was an error.
    */
-  function isSignedIn(callback) {
+  function getAuthToken(callback) {
     instrumented.identity.getAuthToken({interactive: false}, function(token) {
       token = chrome.runtime.lastError ? undefined : token;
       callback(token);
-      checkAndNotifyListeners(!!token);
+    });
+  }
+
+  /**
+   * Determines whether there is an account attached to the profile.
+   * @param {function(boolean)} callback Called on completion.
+   */
+  function isSignedIn(callback) {
+    instrumented.webstorePrivate.getBrowserLogin(function(accountInfo) {
+      callback(!!accountInfo.login);
     });
   }
 
@@ -684,10 +715,8 @@ function buildAuthenticationManager() {
    */
   function removeToken(token, callback) {
     instrumented.identity.removeCachedAuthToken({token: token}, function() {
-      // Removing the token from the cache will change the sign in state.
-      // Repoll now to check the state and notify listeners.
-      // This also lets Chrome now about a possible problem with the token.
-      isSignedIn(function() {});
+      // Let Chrome now about a possible problem with the token.
+      getAuthToken(function() {});
       callback();
     });
   }
@@ -704,28 +733,33 @@ function buildAuthenticationManager() {
   }
 
   /**
-   * Checks if the last signed in state matches the specified one.
+   * Checks if the last signed in state matches the current one.
    * If it doesn't, it notifies the listeners of the change.
-   * @param {boolean} currentSignedInState The current signed in state.
    */
-  function checkAndNotifyListeners(currentSignedInState) {
-    instrumented.storage.local.get('lastSignedInState', function(items) {
-      items = items || {};
-      if (items.lastSignedInState != currentSignedInState) {
-        chrome.storage.local.set(
-            {lastSignedInState: currentSignedInState});
-        if (items.lastSignedInState != undefined) {
-          listeners.forEach(function(callback) {
-            callback();
-          });
+  function checkAndNotifyListeners() {
+    isSignedIn(function(signedIn) {
+      instrumented.storage.local.get('lastSignedInState', function(items) {
+        items = items || {};
+        if (items.lastSignedInState != signedIn) {
+          chrome.storage.local.set(
+              {lastSignedInState: signedIn});
+          if (items.lastSignedInState != undefined) {
+            listeners.forEach(function(callback) {
+              callback();
+            });
+          }
         }
-      }
+      });
     });
   }
 
+  instrumented.identity.onSignInChanged.addListener(function() {
+    checkAndNotifyListeners();
+  });
+
   instrumented.alarms.onAlarm.addListener(function(alarm) {
     if (alarm.name == alarmName)
-      isSignedIn(function() {});
+      checkAndNotifyListeners();
   });
 
   // Poll for the sign in state every hour.
@@ -734,6 +768,7 @@ function buildAuthenticationManager() {
 
   return {
     addListener: addListener,
+    getAuthToken: getAuthToken,
     isSignedIn: isSignedIn,
     removeToken: removeToken
   };

@@ -17,8 +17,6 @@
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/bluetooth/bluetooth_observer.h"
-#include "ash/system/brightness/brightness_observer.h"
-#include "ash/system/chromeos/network/network_connect.h"
 #include "ash/system/date/clock_observer.h"
 #include "ash/system/drive/drive_observer.h"
 #include "ash/system/ime/ime_observer.h"
@@ -35,19 +33,20 @@
 #include "ash/wm/lock_state_controller.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/sys_info.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_pairing_dialog.h"
+#include "chrome/browser/chromeos/charger_replace/charger_replacement_dialog.h"
 #include "chrome/browser/chromeos/choose_mobile_network_dialog.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/job_list.h"
@@ -59,6 +58,7 @@
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
+#include "chrome/browser/chromeos/login/supervised_user_manager.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -66,8 +66,6 @@
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
-#include "chrome/browser/chromeos/status/data_promo_notification.h"
-#include "chrome/browser/chromeos/system/timezone_settings.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/drive/drive_service_interface.h"
 #include "chrome/browser/feedback/tracing_manager.h"
@@ -81,25 +79,20 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/chromeos/charger_replacement_handler.h"
 #include "chrome/browser/ui/webui/chromeos/mobile_setup_dialog.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
-#include "chromeos/dbus/system_clock_client.h"
 #include "chromeos/ime/extension_ime_util.h"
 #include "chromeos/ime/input_method_manager.h"
 #include "chromeos/ime/xkeyboard.h"
 #include "chromeos/login/login_state.h"
-#include "chromeos/network/network_event_log.h"
-#include "chromeos/network/network_state.h"
-#include "chromeos/network/network_state_handler.h"
-#include "chromeos/network/shill_property_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
@@ -224,108 +217,29 @@ void BluetoothDeviceConnectError(
   // TODO(sad): Do something?
 }
 
-void ShowNetworkSettingsPage(const std::string& service_path) {
-  std::string page = chrome::kInternetOptionsSubPage;
-  const NetworkState* network = service_path.empty() ? NULL :
-      NetworkHandler::Get()->network_state_handler()->GetNetworkState(
-          service_path);
-  if (network) {
-    std::string name(network->name());
-    if (name.empty() && network->Matches(NetworkTypePattern::Ethernet()))
-      name = l10n_util::GetStringUTF8(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET);
-    page += base::StringPrintf(
-        "?servicePath=%s&networkType=%s&networkName=%s",
-        net::EscapeUrlEncodedData(service_path, true).c_str(),
-        net::EscapeUrlEncodedData(network->type(), true).c_str(),
-        net::EscapeUrlEncodedData(name, false).c_str());
-  }
-  content::RecordAction(
-      content::UserMetricsAction("OpenInternetOptionsDialog"));
-  Browser* browser = chrome::FindOrCreateTabbedBrowser(
+// Shows the settings sub page in the last active browser. If there is no such
+// browser, creates a new browser with the settings sub page.
+void ShowSettingsSubPageForAppropriateBrowser(const std::string& sub_page) {
+  chrome::ScopedTabbedBrowserDisplayer displayer(
       ProfileManager::GetDefaultProfileOrOffTheRecord(),
       chrome::HOST_DESKTOP_TYPE_ASH);
-  chrome::ShowSettingsSubPage(browser, page);
+  chrome::ShowSettingsSubPage(displayer.browser(), sub_page);
 }
 
-void HandleUnconfiguredNetwork(const std::string& service_path,
-                               gfx::NativeWindow parent_window) {
-  const NetworkState* network = NetworkHandler::Get()->network_state_handler()->
-      GetNetworkState(service_path);
-  if (!network) {
-    NET_LOG_ERROR("Configuring unknown network", service_path);
-    return;
-  }
-
-  if (network->type() == flimflam::kTypeWifi) {
-    // Only show the config view for secure networks, otherwise do nothing.
-    if (network->security() != flimflam::kSecurityNone)
-      NetworkConfigView::Show(service_path, parent_window);
-    return;
-  }
-
-  if (network->type() == flimflam::kTypeWimax ||
-      network->type() == flimflam::kTypeVPN) {
-    NetworkConfigView::Show(service_path, parent_window);
-    return;
-  }
-
-  if (network->type() == flimflam::kTypeCellular) {
-    if (network->RequiresActivation()) {
-      ash::network_connect::ActivateCellular(service_path);
-      return;
-    }
-    if (network->cellular_out_of_credits()) {
-      ash::network_connect::ShowMobileSetup(service_path);
-      return;
-    }
-    // No special configure or setup for |network|, show the settings UI.
-    if (LoginState::Get()->IsUserLoggedIn())
-      ShowNetworkSettingsPage(service_path);
-    return;
-  }
-  NOTREACHED();
-}
-
-void EnrollmentComplete(const std::string& service_path) {
-  NET_LOG_USER("Enrollment Complete", service_path);
-}
-
-bool EnrollNetwork(const std::string& service_path,
-                   gfx::NativeWindow parent_window) {
-  const NetworkState* network = NetworkHandler::Get()->network_state_handler()->
-      GetNetworkState(service_path);
-  if (!network) {
-    NET_LOG_ERROR("Enrolling Unknown network", service_path);
-    return false;
-  }
-  // We skip certificate patterns for device policy ONC so that an unmanaged
-  // user can't get to the place where a cert is presented for them
-  // involuntarily.
-  if (network->ui_data().onc_source() == onc::ONC_SOURCE_DEVICE_POLICY)
-    return false;
-
-  const CertificatePattern& certificate_pattern =
-      network->ui_data().certificate_pattern();
-  if (certificate_pattern.Empty())
-    return false;
-
-  NET_LOG_USER("Enrolling", service_path);
-
-  EnrollmentDelegate* enrollment = CreateEnrollmentDelegate(
-      parent_window, network->name(), ProfileManager::GetDefaultProfile());
-  return enrollment->Enroll(certificate_pattern.enrollment_uri_list(),
-                            base::Bind(&EnrollmentComplete, service_path));
+void ShowNetworkSettingsPage(const std::string& service_path) {
+  std::string page = chrome::kInternetOptionsSubPage;
+  page += "?servicePath=" + net::EscapeUrlEncodedData(service_path, true);
+  content::RecordAction(
+      content::UserMetricsAction("OpenInternetOptionsDialog"));
+  ShowSettingsSubPageForAppropriateBrowser(page);
 }
 
 class SystemTrayDelegate : public ash::SystemTrayDelegate,
-                           public PowerManagerClient::Observer,
                            public SessionManagerClient::Observer,
                            public drive::JobListObserver,
                            public content::NotificationObserver,
                            public input_method::InputMethodManager::Observer,
-                           public system::TimezoneSettings::Observer,
                            public chromeos::LoginState::Observer,
-                           public chromeos::SystemClockClient::Observer,
                            public device::BluetoothAdapter::Observer,
                            public SystemKeyEventListener::CapsLockObserver,
                            public policy::CloudPolicyStore::Observer,
@@ -340,7 +254,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         screen_locked_(false),
         have_session_start_time_(false),
         have_session_length_limit_(false),
-        data_promo_notification_(new DataPromoNotification()),
         volume_control_delegate_(new VolumeController()) {
     // Register notifications on construction so that events such as
     // PROFILE_CREATED do not get missed if they happen before Initialize().
@@ -377,14 +290,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   virtual void Initialize() OVERRIDE {
-    DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
     DBusThreadManager::Get()->GetSessionManagerClient()->AddObserver(this);
 
     input_method::InputMethodManager::Get()->AddObserver(this);
     UpdateClockType();
-
-    system::TimezoneSettings::GetInstance()->AddObserver(this);
-    DBusThreadManager::Get()->GetSystemClockClient()->AddObserver(this);
 
     if (SystemKeyEventListener::GetInstance())
       SystemKeyEventListener::GetInstance()->AddCapsLockObserver(this);
@@ -401,7 +310,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   virtual void Shutdown() OVERRIDE {
-    data_promo_notification_.reset();
   }
 
   void InitializeOnAdapterReady(
@@ -443,10 +351,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     registrar_.reset();
 
     DBusThreadManager::Get()->GetSessionManagerClient()->RemoveObserver(this);
-    DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
-    DBusThreadManager::Get()->GetSystemClockClient()->RemoveObserver(this);
     input_method::InputMethodManager::Get()->RemoveObserver(this);
-    system::TimezoneSettings::GetInstance()->RemoveObserver(this);
     if (SystemKeyEventListener::GetInstance())
       SystemKeyEventListener::GetInstance()->RemoveCapsLockObserver(this);
     bluetooth_adapter_->RemoveObserver(this);
@@ -504,7 +409,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   virtual bool IsOobeCompleted() const OVERRIDE {
-    if (!base::chromeos::IsRunningOnChromeOS() &&
+    if (!base::SysInfo::IsRunningOnChromeOS() &&
         LoginState::Get()->IsUserLoggedIn())
       return true;
     return StartupUtils::IsOobeCompleted();
@@ -513,8 +418,8 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   virtual void ChangeProfilePicture() OVERRIDE {
     content::RecordAction(
         content::UserMetricsAction("OpenChangeProfilePictureDialog"));
-    chrome::ShowSettingsSubPage(GetAppropriateBrowser(),
-                                chrome::kChangeProfilePictureSubPage);
+    ShowSettingsSubPageForAppropriateBrowser(
+        chrome::kChangeProfilePictureSubPage);
   }
 
   virtual const std::string GetEnterpriseDomain() const OVERRIDE {
@@ -531,15 +436,17 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   virtual const std::string GetLocallyManagedUserManager() const OVERRIDE {
     if (GetUserLoginStatus() != ash::user::LOGGED_IN_LOCALLY_MANAGED)
       return std::string();
-    return UserManager::Get()->GetManagerDisplayEmailForManagedUser(
-        chromeos::UserManager::Get()->GetActiveUser()->email());
+    return UserManager::Get()->GetSupervisedUserManager()->
+        GetManagerDisplayEmail(
+            chromeos::UserManager::Get()->GetActiveUser()->email());
   }
 
   virtual const string16 GetLocallyManagedUserManagerName() const OVERRIDE {
     if (GetUserLoginStatus() != ash::user::LOGGED_IN_LOCALLY_MANAGED)
       return string16();
-    return UserManager::Get()->GetManagerDisplayNameForManagedUser(
-        chromeos::UserManager::Get()->GetActiveUser()->email());
+    return UserManager::Get()->GetSupervisedUserManager()->
+        GetManagerDisplayName(
+            chromeos::UserManager::Get()->GetActiveUser()->email());
   }
 
   virtual const string16 GetLocallyManagedUserMessage() const OVERRIDE {
@@ -559,7 +466,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   virtual void ShowSettings() OVERRIDE {
-    chrome::ShowSettings(GetAppropriateBrowser());
+    chrome::ScopedTabbedBrowserDisplayer displayer(
+         ProfileManager::GetDefaultProfileOrOffTheRecord(),
+         chrome::HOST_DESKTOP_TYPE_ASH);
+    chrome::ShowSettings(displayer.browser());
   }
 
   virtual bool ShouldShowSettings() OVERRIDE {
@@ -570,7 +480,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     content::RecordAction(content::UserMetricsAction("ShowDateOptions"));
     std::string sub_page = std::string(chrome::kSearchSubPage) + "#" +
         l10n_util::GetStringUTF8(IDS_OPTIONS_SETTINGS_SECTION_TITLE_DATETIME);
-    chrome::ShowSettingsSubPage(GetAppropriateBrowser(), sub_page);
+    ShowSettingsSubPageForAppropriateBrowser(sub_page);
   }
 
   virtual void ShowNetworkSettings(const std::string& service_path) OVERRIDE {
@@ -585,12 +495,14 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
   virtual void ShowDisplaySettings() OVERRIDE {
     content::RecordAction(content::UserMetricsAction("ShowDisplayOptions"));
-    chrome::ShowSettingsSubPage(GetAppropriateBrowser(),
-                                kDisplaySettingsSubPageName);
+    ShowSettingsSubPageForAppropriateBrowser(kDisplaySettingsSubPageName);
   }
 
   virtual void ShowChromeSlow() OVERRIDE {
-    chrome::ShowSlow(GetAppropriateBrowser());
+    chrome::ScopedTabbedBrowserDisplayer displayer(
+         ProfileManager::GetDefaultProfileOrOffTheRecord(),
+         chrome::HOST_DESKTOP_TYPE_ASH);
+    chrome::ShowSlow(displayer.browser());
   }
 
   virtual bool ShouldShowDisplayNotification() OVERRIDE {
@@ -622,22 +534,27 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     // For now just show search result for downoads settings.
     std::string sub_page = std::string(chrome::kSearchSubPage) + "#" +
         l10n_util::GetStringUTF8(IDS_OPTIONS_DOWNLOADLOCATION_GROUP_NAME);
-    chrome::ShowSettingsSubPage(GetAppropriateBrowser(), sub_page);
+    ShowSettingsSubPageForAppropriateBrowser(sub_page);
   }
 
   virtual void ShowIMESettings() OVERRIDE {
     content::RecordAction(
         content::UserMetricsAction("OpenLanguageOptionsDialog"));
-    chrome::ShowSettingsSubPage(GetAppropriateBrowser(),
-                                chrome::kLanguageOptionsSubPage);
+    ShowSettingsSubPageForAppropriateBrowser(chrome::kLanguageOptionsSubPage);
   }
 
   virtual void ShowHelp() OVERRIDE {
-    chrome::ShowHelp(GetAppropriateBrowser(), chrome::HELP_SOURCE_MENU);
+    chrome::ShowHelpForProfile(
+        ProfileManager::GetDefaultProfileOrOffTheRecord(),
+        chrome::HOST_DESKTOP_TYPE_ASH,
+        chrome::HELP_SOURCE_MENU);
   }
 
   virtual void ShowAccessibilityHelp() OVERRIDE {
-    accessibility::ShowAccessibilityHelp(GetAppropriateBrowser());
+    chrome::ScopedTabbedBrowserDisplayer displayer(
+         ProfileManager::GetDefaultProfileOrOffTheRecord(),
+         chrome::HOST_DESKTOP_TYPE_ASH);
+    accessibility::ShowAccessibilityHelp(displayer.browser());
   }
 
   virtual void ShowAccessibilitySettings() OVERRIDE {
@@ -646,11 +563,14 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     std::string sub_page = std::string(chrome::kSearchSubPage) + "#" +
         l10n_util::GetStringUTF8(
             IDS_OPTIONS_SETTINGS_SECTION_TITLE_ACCESSIBILITY);
-    chrome::ShowSettingsSubPage(GetAppropriateBrowser(), sub_page);
+    ShowSettingsSubPageForAppropriateBrowser(sub_page);
   }
 
   virtual void ShowPublicAccountInfo() OVERRIDE {
-    chrome::ShowPolicy(GetAppropriateBrowser());
+    chrome::ScopedTabbedBrowserDisplayer displayer(
+         ProfileManager::GetDefaultProfileOrOffTheRecord(),
+         chrome::HOST_DESKTOP_TYPE_ASH);
+    chrome::ShowPolicy(displayer.browser());
   }
 
   virtual void ShowLocallyManagedUserInfo() OVERRIDE {
@@ -668,7 +588,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     } else {
       GURL url(google_util::StringAppendGoogleLocaleParam(
           chrome::kLearnMoreEnterpriseURL));
-      chrome::ShowSingletonTab(GetAppropriateBrowser(), url);
+      chrome::ScopedTabbedBrowserDisplayer displayer(
+          ProfileManager::GetDefaultProfileOrOffTheRecord(),
+          chrome::HOST_DESKTOP_TYPE_ASH);
+      chrome::ShowSingletonTab(displayer.browser(), url);
     }
   }
 
@@ -693,6 +616,20 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     // Launch sign in screen to add another user to current session.
     if (UserManager::Get()->GetUsersAdmittedForMultiProfile().size())
       UserAddingScreen::Get()->Start();
+  }
+
+  virtual void ShowSpringChargerReplacementDialog() OVERRIDE {
+    if (!ChargerReplacementDialog::ShouldShowDialog())
+      return;
+
+    ChargerReplacementDialog* dialog =
+        new ChargerReplacementDialog(GetNativeWindow());
+    dialog->Show();
+  }
+
+  virtual bool HasUserConfirmedSafeSpringCharger() OVERRIDE {
+    return ChargerReplacementHandler::GetChargerStatusPref() ==
+        ChargerReplacementHandler::CONFIRM_SAFE_CHARGER;
   }
 
   virtual void ShutDown() OVERRIDE {
@@ -836,16 +773,14 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         integration_service->job_list()->GetJobInfoList());
   }
 
-  virtual void ConfigureNetwork(const std::string& network_id) OVERRIDE {
-    HandleUnconfiguredNetwork(network_id, GetNativeWindow());
+  virtual void ShowNetworkConfigure(const std::string& network_id,
+                                    gfx::NativeWindow parent_window) OVERRIDE {
+    NetworkConfigView::Show(network_id, parent_window);
   }
 
-  virtual void EnrollOrConfigureNetwork(
-      const std::string& network_id,
-      gfx::NativeWindow parent_window) OVERRIDE {
-    if (EnrollNetwork(network_id, parent_window))
-      return;
-    HandleUnconfiguredNetwork(network_id, parent_window);
+  virtual bool EnrollNetwork(const std::string& network_id,
+                             gfx::NativeWindow parent_window) OVERRIDE {
+    return enrollment::CreateDialog(network_id, parent_window);
   }
 
   virtual void ManageBluetoothDevices() OVERRIDE {
@@ -853,7 +788,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         content::UserMetricsAction("ShowBluetoothSettingsPage"));
     std::string sub_page = std::string(chrome::kSearchSubPage) + "#" +
         l10n_util::GetStringUTF8(IDS_OPTIONS_SETTINGS_SECTION_TITLE_BLUETOOTH);
-    chrome::ShowSettingsSubPage(GetAppropriateBrowser(), sub_page);
+    ShowSettingsSubPageForAppropriateBrowser(sub_page);
   }
 
   virtual void ToggleBluetooth() OVERRIDE {
@@ -871,16 +806,12 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     MobileSetupDialog::Show(service_path);
   }
 
-  virtual void ShowOtherWifi() OVERRIDE {
-    NetworkConfigView::ShowForType(flimflam::kTypeWifi, GetNativeWindow());
-  }
-
-  virtual void ShowOtherVPN() OVERRIDE {
-    NetworkConfigView::ShowForType(flimflam::kTypeVPN, GetNativeWindow());
-  }
-
-  virtual void ShowOtherCellular() OVERRIDE {
-    ChooseMobileNetworkDialog::ShowDialog(GetNativeWindow());
+  virtual void ShowOtherNetworkDialog(const std::string& type) OVERRIDE {
+    if (type == shill::kTypeCellular) {
+      ChooseMobileNetworkDialog::ShowDialog(GetNativeWindow());
+      return;
+    }
+    NetworkConfigView::ShowForType(type, GetNativeWindow());
   }
 
   virtual bool GetBluetoothAvailable() OVERRIDE {
@@ -936,14 +867,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     return ash::Shell::GetInstance()->system_tray_notifier();
   }
 
-  // Returns the last active browser. If there is no such browser, creates a new
-  // browser window with an empty tab and returns it.
-  Browser* GetAppropriateBrowser() {
-    return chrome::FindOrCreateTabbedBrowser(
-        ProfileManager::GetDefaultProfileOrOffTheRecord(),
-        chrome::HOST_DESKTOP_TYPE_ASH);
-  }
-
   void SetProfile(Profile* profile) {
     // Stop observing the current |user_profile_| on Drive integration status.
     UnobserveDriveUpdates();
@@ -970,6 +893,11 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
                    base::Unretained(this)));
     user_pref_registrar_->Add(
         prefs::kLargeCursorEnabled,
+        base::Bind(&SystemTrayDelegate::OnAccessibilityModeChanged,
+                   base::Unretained(this),
+                   ash::A11Y_NOTIFICATION_NONE));
+    user_pref_registrar_->Add(
+        prefs::kAutoclickEnabled,
         base::Bind(&SystemTrayDelegate::OnAccessibilityModeChanged,
                    base::Unretained(this),
                    ash::A11Y_NOTIFICATION_NONE));
@@ -1089,17 +1017,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     UpdateClockType();
   }
 
-  // Overridden from PowerManagerClient::Observer.
-  virtual void BrightnessChanged(int level, bool user_initiated) OVERRIDE {
-    double leveld = static_cast<double>(level);
-    GetSystemTrayNotifier()->NotifyBrightnessChanged(leveld, user_initiated);
-  }
-
-  // Overridden from PowerManagerClient::Observer:
-  virtual void SystemResumed(const base::TimeDelta& sleep_duration) OVERRIDE {
-    GetSystemTrayNotifier()->NotifyRefreshClock();
-  }
-
   // Overridden from SessionManagerClient::Observer.
   virtual void LockScreen() OVERRIDE {
     screen_locked_ = true;
@@ -1112,8 +1029,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     ash::Shell::GetInstance()->UpdateAfterLoginStatusChange(
         GetUserLoginStatus());
   }
-
-  // TODO(sad): Override more from PowerManagerClient::Observer here.
 
   gfx::NativeWindow GetNativeWindow() const {
     bool session_started = ash::Shell::GetInstance()->session_state_delegate()
@@ -1247,16 +1162,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         DriveIntegrationServiceFactory::FindForProfile(user_profile_) : NULL;
   }
 
-  // Overridden from system::TimezoneSettings::Observer.
-  virtual void TimezoneChanged(const icu::TimeZone& timezone) OVERRIDE {
-    GetSystemTrayNotifier()->NotifyRefreshClock();
-  }
-
-  // Overridden from SystemClockClient::Observer.
-  virtual void SystemClockUpdated() OVERRIDE {
-    GetSystemTrayNotifier()->NotifySystemClockTimeUpdated();
-  }
-
   // Overridden from BluetoothAdapter::Observer.
   virtual void AdapterPresentChanged(device::BluetoothAdapter* adapter,
                                      bool present) OVERRIDE {
@@ -1291,7 +1196,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   // Overridden from SystemKeyEventListener::CapsLockObserver.
   virtual void OnCapsLockChange(bool enabled) OVERRIDE {
     bool search_mapped_to_caps_lock = false;
-    if (!base::chromeos::IsRunningOnChromeOS() ||
+    if (!base::SysInfo::IsRunningOnChromeOS() ||
         search_key_mapped_to_ == input_method::kCapsLockKey)
       search_mapped_to_caps_lock = true;
     GetSystemTrayNotifier()->NotifyCapsLockChanged(
@@ -1321,12 +1226,15 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     GetSystemTrayNotifier()->NotifyUserUpdate();
   }
 
+  virtual void UserAddedToSession(const std::string& user_id) OVERRIDE {
+    GetSystemTrayNotifier()->NotifyUserAddedToSession();
+  }
+
   scoped_ptr<base::WeakPtrFactory<SystemTrayDelegate> > ui_weak_ptr_factory_;
   scoped_ptr<content::NotificationRegistrar> registrar_;
   scoped_ptr<PrefChangeRegistrar> local_state_registrar_;
   scoped_ptr<PrefChangeRegistrar> user_pref_registrar_;
   Profile* user_profile_;
-  std::string active_network_path_;
   base::HourClockType clock_type_;
   int search_key_mapped_to_;
   bool screen_locked_;
@@ -1337,7 +1245,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   std::string enterprise_domain_;
 
   scoped_refptr<device::BluetoothAdapter> bluetooth_adapter_;
-  scoped_ptr<DataPromoNotification> data_promo_notification_;
   scoped_ptr<ash::VolumeControlDelegate> volume_control_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemTrayDelegate);

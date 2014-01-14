@@ -18,7 +18,6 @@
 #endif
 
 static const int kTransparentAlpha = 200;
-static const int kOpaqueAlpha = 255;
 static const int kDragFrameBorderSize = 2;
 static const int kTwiceDragFrameBorderSize = 2 * kDragFrameBorderSize;
 static const float kScalingFactor = 0.5;
@@ -138,7 +137,7 @@ gfx::Size DraggedTabView::GetPreferredSize() {
 void DraggedTabView::PaintDetachedView(gfx::Canvas* canvas) {
   gfx::Size ps = GetPreferredSize();
   // TODO(pkotwicz): DIP enable this class.
-  gfx::Canvas scale_canvas(ps, ui::SCALE_FACTOR_100P, false);
+  gfx::Canvas scale_canvas(ps, 1.0f, false);
   SkBitmap& bitmap_device = const_cast<SkBitmap&>(
       skia::GetTopDevice(*scale_canvas.sk_canvas())->accessBitmap(true));
   bitmap_device.eraseARGB(0, 0, 0, 0);

@@ -5,20 +5,23 @@
 #include "ash/launcher/launcher.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/launcher_test_api.h"
-#include "ash/test/launcher_view_test_api.h"
+#include "ash/test/shelf_view_test_api.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/test/test_launcher_delegate.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/window_selector.h"
 #include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_vector.h"
 #include "base/run_loop.h"
+#include "ui/aura/client/activation_delegate.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/focus_client.h"
@@ -34,6 +37,67 @@
 namespace ash {
 namespace internal {
 
+namespace {
+
+class NonActivatableActivationDelegate
+    : public aura::client::ActivationDelegate {
+ public:
+  virtual bool ShouldActivate() const OVERRIDE {
+    return false;
+  }
+};
+
+bool IsWindowAbove(aura::Window* w1, aura::Window* w2) {
+  aura::Window* parent = w1->parent();
+  DCHECK_EQ(parent, w2->parent());
+  for (aura::Window::Windows::const_iterator iter = parent->children().begin();
+       iter != parent->children().end(); ++iter) {
+    if (*iter == w1)
+      return false;
+    if (*iter == w2)
+      return true;
+  }
+  NOTREACHED();
+  return false;
+}
+
+aura::Window* GetWindowByName(aura::Window* container,
+                              const std::string& name) {
+  aura::Window* window = NULL;
+  for (aura::Window::Windows::const_iterator iter =
+       container->children().begin(); iter != container->children().end();
+       ++iter) {
+    if ((*iter)->name() == name) {
+      // The name should be unique.
+      DCHECK(!window);
+      window = *iter;
+    }
+  }
+  return window;
+}
+
+// Returns the copy of |window| created for overview. It is found using the
+// window name which should be the same as the source window's name with a
+// special suffix, and in the same container as the source window.
+aura::Window* GetCopyWindow(aura::Window* window) {
+  aura::Window* copy_window = NULL;
+  std::string copy_name = window->name() + " (Copy)";
+  std::vector<aura::Window*> containers(
+      Shell::GetContainersFromAllRootWindows(window->parent()->id(), NULL));
+  for (std::vector<aura::Window*>::iterator iter = containers.begin();
+       iter != containers.end(); ++iter) {
+    aura::Window* found = GetWindowByName(*iter, copy_name);
+    if (found) {
+      // There should only be one copy window.
+      DCHECK(!copy_window);
+      copy_window = found;
+    }
+  }
+  return copy_window;
+}
+
+}  // namespace
+
 class WindowSelectorTest : public test::AshTestBase {
  public:
   WindowSelectorTest() {}
@@ -43,20 +107,28 @@ class WindowSelectorTest : public test::AshTestBase {
     test::AshTestBase::SetUp();
     ASSERT_TRUE(test::TestLauncherDelegate::instance());
 
-    launcher_view_test_.reset(new test::LauncherViewTestAPI(
-        test::LauncherTestAPI(Launcher::ForPrimaryDisplay()).launcher_view()));
-    launcher_view_test_->SetAnimationDuration(1);
+    shelf_view_test_.reset(new test::ShelfViewTestAPI(
+        test::LauncherTestAPI(Launcher::ForPrimaryDisplay()).shelf_view()));
+    shelf_view_test_->SetAnimationDuration(1);
   }
 
   aura::Window* CreateWindow(const gfx::Rect& bounds) {
-    return CreateTestWindowInShellWithDelegate(&wd, -1, bounds);
+    return CreateTestWindowInShellWithDelegate(&delegate_, -1, bounds);
+  }
+
+  aura::Window* CreateNonActivatableWindow(const gfx::Rect& bounds) {
+    aura::Window* window = CreateWindow(bounds);
+    aura::client::SetActivationDelegate(window,
+                                        &non_activatable_activation_delegate_);
+    EXPECT_FALSE(ash::wm::CanActivateWindow(window));
+    return window;
   }
 
   aura::Window* CreatePanelWindow(const gfx::Rect& bounds) {
     aura::Window* window = CreateTestWindowInShellWithDelegateAndType(
         NULL, aura::client::WINDOW_TYPE_PANEL, 0, bounds);
     test::TestLauncherDelegate::instance()->AddLauncherItem(window);
-    launcher_view_test()->RunMessageLoopUntilAnimationsDone();
+    shelf_view_test()->RunMessageLoopUntilAnimationsDone();
     return window;
   }
 
@@ -132,13 +204,14 @@ class WindowSelectorTest : public test::AshTestBase {
         Shell::GetPrimaryRootWindow())->GetFocusedWindow();
   }
 
-  test::LauncherViewTestAPI* launcher_view_test() {
-    return launcher_view_test_.get();
+  test::ShelfViewTestAPI* shelf_view_test() {
+    return shelf_view_test_.get();
   }
 
  private:
-  aura::test::TestWindowDelegate wd;
-  scoped_ptr<test::LauncherViewTestAPI> launcher_view_test_;
+  aura::test::TestWindowDelegate delegate_;
+  NonActivatableActivationDelegate non_activatable_activation_delegate_;
+  scoped_ptr<test::ShelfViewTestAPI> shelf_view_test_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowSelectorTest);
 };
@@ -146,7 +219,7 @@ class WindowSelectorTest : public test::AshTestBase {
 // Tests entering overview mode with two windows and selecting one.
 TEST_F(WindowSelectorTest, Basic) {
   gfx::Rect bounds(0, 0, 400, 400);
-  aura::RootWindow* root_window = Shell::GetPrimaryRootWindow();
+  aura::Window* root_window = Shell::GetPrimaryRootWindow();
   scoped_ptr<aura::Window> window1(CreateWindow(bounds));
   scoped_ptr<aura::Window> window2(CreateWindow(bounds));
   scoped_ptr<aura::Window> panel1(CreatePanelWindow(bounds));
@@ -157,6 +230,8 @@ TEST_F(WindowSelectorTest, Basic) {
   EXPECT_FALSE(wm::IsActiveWindow(window1.get()));
   EXPECT_TRUE(wm::IsActiveWindow(window2.get()));
   EXPECT_EQ(window2.get(), GetFocusedWindow());
+  // Hide the cursor before entering overview to test that it will be shown.
+  aura::client::GetCursorClient(root_window)->HideCursor();
 
   // In overview mode the windows should no longer overlap and focus should
   // be removed from the window.
@@ -168,9 +243,11 @@ TEST_F(WindowSelectorTest, Basic) {
   // item.
   EXPECT_TRUE(WindowsOverlapping(panel1.get(), panel2.get()));
 
-  // The cursor should be locked as a pointer
-  EXPECT_EQ(ui::kCursorPointer, root_window->last_cursor().native_type());
-  EXPECT_TRUE(GetCursorClient(root_window)->IsCursorLocked());
+  // The cursor should be visible and locked as a pointer
+  EXPECT_EQ(ui::kCursorPointer,
+            root_window->GetDispatcher()->last_cursor().native_type());
+  EXPECT_TRUE(aura::client::GetCursorClient(root_window)->IsCursorLocked());
+  EXPECT_TRUE(aura::client::GetCursorClient(root_window)->IsCursorVisible());
 
   // Clicking window 1 should activate it.
   ClickWindow(window1.get());
@@ -179,7 +256,87 @@ TEST_F(WindowSelectorTest, Basic) {
   EXPECT_EQ(window1.get(), GetFocusedWindow());
 
   // Cursor should have been unlocked.
-  EXPECT_FALSE(GetCursorClient(root_window)->IsCursorLocked());
+  EXPECT_FALSE(aura::client::GetCursorClient(root_window)->IsCursorLocked());
+}
+
+// Tests that the shelf dimming state is removed while in overview and restored
+// on exiting overview.
+TEST_F(WindowSelectorTest, OverviewUndimsShelf) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  wm::WindowState* window_state = wm::GetWindowState(window1.get());
+  window_state->Maximize();
+  ash::ShelfWidget* shelf = Shell::GetPrimaryRootWindowController()->shelf();
+  EXPECT_TRUE(shelf->GetDimsShelf());
+  ToggleOverview();
+  EXPECT_FALSE(shelf->GetDimsShelf());
+  ToggleOverview();
+  EXPECT_TRUE(shelf->GetDimsShelf());
+}
+
+// Tests that beginning window selection hides the app list.
+TEST_F(WindowSelectorTest, SelectingHidesAppList) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
+  Shell::GetInstance()->ToggleAppList(NULL);
+  EXPECT_TRUE(Shell::GetInstance()->GetAppListTargetVisibility());
+  ToggleOverview();
+  EXPECT_FALSE(Shell::GetInstance()->GetAppListTargetVisibility());
+  ToggleOverview();
+
+  // The app list uses an animation to fade out. If it is toggled on immediately
+  // after being removed the old widget is re-used and it does not gain focus.
+  // When running under normal circumstances this shouldn't be possible, but
+  // it is in a test without letting the message loop run.
+  RunAllPendingInMessageLoop();
+
+  Shell::GetInstance()->ToggleAppList(NULL);
+  EXPECT_TRUE(Shell::GetInstance()->GetAppListTargetVisibility());
+  Cycle(WindowSelector::FORWARD);
+  EXPECT_FALSE(Shell::GetInstance()->GetAppListTargetVisibility());
+  StopCycling();
+}
+
+// Tests that a minimized window's visibility and layer visibility is correctly
+// changed when entering overview and restored when leaving overview mode.
+TEST_F(WindowSelectorTest, MinimizedWindowVisibility) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  wm::WindowState* window_state = wm::GetWindowState(window1.get());
+  window_state->Minimize();
+  EXPECT_FALSE(window1->IsVisible());
+  EXPECT_FALSE(window1->layer()->GetTargetVisibility());
+  {
+    ui::ScopedAnimationDurationScaleMode normal_duration_mode(
+        ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+    ToggleOverview();
+    EXPECT_TRUE(window1->IsVisible());
+    EXPECT_TRUE(window1->layer()->GetTargetVisibility());
+  }
+  {
+    ui::ScopedAnimationDurationScaleMode normal_duration_mode(
+        ui::ScopedAnimationDurationScaleMode::NORMAL_DURATION);
+    ToggleOverview();
+    EXPECT_FALSE(window1->IsVisible());
+    EXPECT_FALSE(window1->layer()->GetTargetVisibility());
+  }
+}
+
+// Tests that a bounds change during overview is corrected for.
+TEST_F(WindowSelectorTest, BoundsChangeDuringOverview) {
+  scoped_ptr<aura::Window> window(CreateWindow(gfx::Rect(0, 0, 400, 400)));
+  ToggleOverview();
+  gfx::Rect overview_bounds =
+      ToEnclosingRect(GetTransformedTargetBounds(window.get()));
+  window->SetBounds(gfx::Rect(200, 0, 200, 200));
+  gfx::Rect new_overview_bounds =
+      ToEnclosingRect(GetTransformedTargetBounds(window.get()));
+  EXPECT_EQ(overview_bounds.x(), new_overview_bounds.x());
+  EXPECT_EQ(overview_bounds.y(), new_overview_bounds.y());
+  EXPECT_EQ(overview_bounds.width(), new_overview_bounds.width());
+  EXPECT_EQ(overview_bounds.height(), new_overview_bounds.height());
+  ToggleOverview();
 }
 
 // Tests entering overview mode with three windows and cycling through them.
@@ -197,12 +354,86 @@ TEST_F(WindowSelectorTest, BasicCycle) {
 
   Cycle(WindowSelector::FORWARD);
   EXPECT_TRUE(IsSelecting());
+  EXPECT_TRUE(wm::IsActiveWindow(window2.get()));
+
   Cycle(WindowSelector::FORWARD);
+  EXPECT_TRUE(wm::IsActiveWindow(window3.get()));
+
   StopCycling();
   EXPECT_FALSE(IsSelecting());
   EXPECT_FALSE(wm::IsActiveWindow(window1.get()));
   EXPECT_FALSE(wm::IsActiveWindow(window2.get()));
   EXPECT_TRUE(wm::IsActiveWindow(window3.get()));
+}
+
+// Tests that cycling through windows preserves the window stacking order.
+TEST_F(WindowSelectorTest, CyclePreservesStackingOrder) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window3(CreateWindow(bounds));
+  wm::ActivateWindow(window3.get());
+  wm::ActivateWindow(window2.get());
+  wm::ActivateWindow(window1.get());
+  // Window order from top to bottom is 1, 2, 3.
+  EXPECT_TRUE(IsWindowAbove(window1.get(), window2.get()));
+  EXPECT_TRUE(IsWindowAbove(window2.get(), window3.get()));
+
+  // On window 2.
+  Cycle(WindowSelector::FORWARD);
+  EXPECT_TRUE(IsWindowAbove(window2.get(), window1.get()));
+  EXPECT_TRUE(IsWindowAbove(window1.get(), window3.get()));
+
+  // On window 3.
+  Cycle(WindowSelector::FORWARD);
+  EXPECT_TRUE(IsWindowAbove(window3.get(), window1.get()));
+  EXPECT_TRUE(IsWindowAbove(window1.get(), window2.get()));
+
+  // Back on window 1.
+  Cycle(WindowSelector::FORWARD);
+  EXPECT_TRUE(IsWindowAbove(window1.get(), window2.get()));
+  EXPECT_TRUE(IsWindowAbove(window2.get(), window3.get()));
+  StopCycling();
+}
+
+// Tests that cycling through windows shows and minimizes windows as they
+// are passed.
+TEST_F(WindowSelectorTest, CyclePreservesMinimization) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
+  wm::ActivateWindow(window2.get());
+  wm::GetWindowState(window2.get())->Minimize();
+  wm::ActivateWindow(window1.get());
+  EXPECT_TRUE(wm::IsWindowMinimized(window2.get()));
+
+  // On window 2.
+  Cycle(WindowSelector::FORWARD);
+  EXPECT_FALSE(wm::IsWindowMinimized(window2.get()));
+
+  // Back on window 1.
+  Cycle(WindowSelector::FORWARD);
+  EXPECT_TRUE(wm::IsWindowMinimized(window2.get()));
+
+  StopCycling();
+  EXPECT_TRUE(wm::IsWindowMinimized(window2.get()));
+}
+
+// Tests beginning cycling while in overview mode.
+TEST_F(WindowSelectorTest, OverviewTransitionToCycle) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
+  wm::ActivateWindow(window2.get());
+  wm::ActivateWindow(window1.get());
+
+  ToggleOverview();
+  Cycle(WindowSelector::FORWARD);
+  StopCycling();
+
+  EXPECT_TRUE(wm::IsActiveWindow(window2.get()));
+  EXPECT_FALSE(wm::IsActiveWindow(window1.get()));
+  EXPECT_EQ(window2.get(), GetFocusedWindow());
 }
 
 // Tests cycles between panel and normal windows.
@@ -228,6 +459,20 @@ TEST_F(WindowSelectorTest, CyclePanels) {
   Cycle(WindowSelector::FORWARD);
   StopCycling();
   EXPECT_TRUE(wm::IsActiveWindow(panel1.get()));
+}
+
+// Tests the visibility of panel windows during cycling.
+TEST_F(WindowSelectorTest, CyclePanelVisibility) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> panel1(CreatePanelWindow(bounds));
+  wm::ActivateWindow(panel1.get());
+  wm::ActivateWindow(window1.get());
+
+  Cycle(WindowSelector::FORWARD);
+  FireOverviewStartTimer();
+  EXPECT_EQ(1.0f, panel1->layer()->GetTargetOpacity());
+  StopCycling();
 }
 
 // Tests cycles between panel and normal windows.
@@ -383,6 +628,66 @@ TEST_F(WindowSelectorTest, QuickReentryRestoresInitialTransform) {
       GetTransformedTargetBounds(window.get())));
 }
 
+// Tests that non-activatable windows are hidden when entering overview mode.
+TEST_F(WindowSelectorTest, NonActivatableWindowsHidden) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
+  scoped_ptr<aura::Window> non_activatable_window(
+      CreateNonActivatableWindow(Shell::GetPrimaryRootWindow()->bounds()));
+  EXPECT_TRUE(non_activatable_window->IsVisible());
+  ToggleOverview();
+  EXPECT_FALSE(non_activatable_window->IsVisible());
+  ToggleOverview();
+  EXPECT_TRUE(non_activatable_window->IsVisible());
+
+  // Test that a window behind the fullscreen non-activatable window can be
+  // clicked.
+  non_activatable_window->parent()->StackChildAtTop(
+      non_activatable_window.get());
+  ToggleOverview();
+  ClickWindow(window1.get());
+  EXPECT_FALSE(IsSelecting());
+  EXPECT_TRUE(wm::IsActiveWindow(window1.get()));
+}
+
+// Tests that windows with modal child windows are transformed with the modal
+// child even though not activatable themselves.
+TEST_F(WindowSelectorTest, ModalChild) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> child1(CreateWindow(bounds));
+  child1->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_WINDOW);
+  window1->AddTransientChild(child1.get());
+  EXPECT_EQ(window1->parent(), child1->parent());
+  ToggleOverview();
+  EXPECT_TRUE(window1->IsVisible());
+  EXPECT_TRUE(child1->IsVisible());
+  EXPECT_EQ(ToEnclosingRect(GetTransformedTargetBounds(child1.get())),
+      ToEnclosingRect(GetTransformedTargetBounds(window1.get())));
+  ToggleOverview();
+}
+
+// Tests that clicking a modal window's parent activates the modal window in
+// overview.
+TEST_F(WindowSelectorTest, ClickModalWindowParent) {
+  scoped_ptr<aura::Window> window1(CreateWindow(gfx::Rect(0, 0, 180, 180)));
+  scoped_ptr<aura::Window> child1(CreateWindow(gfx::Rect(200, 0, 180, 180)));
+  child1->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_WINDOW);
+  window1->AddTransientChild(child1.get());
+  EXPECT_FALSE(WindowsOverlapping(window1.get(), child1.get()));
+  EXPECT_EQ(window1->parent(), child1->parent());
+  ToggleOverview();
+  // Given that their relative positions are preserved, the windows should still
+  // not overlap.
+  EXPECT_FALSE(WindowsOverlapping(window1.get(), child1.get()));
+  ClickWindow(window1.get());
+  EXPECT_FALSE(IsSelecting());
+
+  // Clicking on window1 should activate child1.
+  EXPECT_TRUE(wm::IsActiveWindow(child1.get()));
+}
+
 // Tests that windows remain on the display they are currently on in overview
 // mode.
 TEST_F(WindowSelectorTest, MultipleDisplays) {
@@ -446,7 +751,7 @@ TEST_F(WindowSelectorTest, MultipleDisplays) {
 }
 
 // Verifies that the single display overview used during alt tab cycling uses
-// the display of the currently selected window.
+// the display of the selected window by default.
 TEST_F(WindowSelectorTest, CycleOverviewUsesCurrentDisplay) {
   if (!SupportsMultipleDisplays())
     return;
@@ -469,6 +774,142 @@ TEST_F(WindowSelectorTest, CycleOverviewUsesCurrentDisplay) {
       ToEnclosingRect(GetTransformedTargetBounds(window1.get()))));
   EXPECT_TRUE(root_windows[1]->GetBoundsInScreen().Contains(
       ToEnclosingRect(GetTransformedTargetBounds(window2.get()))));
+  StopCycling();
+}
+
+// Verifies that the windows being shown on another display are copied.
+TEST_F(WindowSelectorTest, CycleMultipleDisplaysCopiesWindows) {
+  if (!SupportsMultipleDisplays())
+    return;
+
+  UpdateDisplay("400x400,400x400");
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+
+  gfx::Rect root1_rect(0, 0, 100, 100);
+  gfx::Rect root2_rect(450, 0, 100, 100);
+  scoped_ptr<aura::Window> unmoved1(CreateWindow(root2_rect));
+  scoped_ptr<aura::Window> unmoved2(CreateWindow(root2_rect));
+  scoped_ptr<aura::Window> moved1_trans_parent(CreateWindow(root1_rect));
+  scoped_ptr<aura::Window> moved1(CreateWindow(root1_rect));
+  unmoved1->SetName("unmoved1");
+  unmoved2->SetName("unmoved2");
+  moved1->SetName("moved1");
+  moved1->SetProperty(aura::client::kModalKey,
+                      ui::MODAL_TYPE_WINDOW);
+  moved1_trans_parent->AddTransientChild(moved1.get());
+  moved1_trans_parent->SetName("moved1_trans_parent");
+
+  EXPECT_EQ(root_windows[0], moved1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], moved1_trans_parent->GetRootWindow());
+  EXPECT_EQ(root_windows[1], unmoved1->GetRootWindow());
+  EXPECT_EQ(root_windows[1], unmoved2->GetRootWindow());
+  wm::ActivateWindow(unmoved2.get());
+  wm::ActivateWindow(unmoved1.get());
+
+  Cycle(WindowSelector::FORWARD);
+  FireOverviewStartTimer();
+
+  // All windows are moved to second root window.
+  EXPECT_TRUE(root_windows[1]->GetBoundsInScreen().Contains(
+      ToEnclosingRect(GetTransformedTargetBounds(unmoved1.get()))));
+  EXPECT_TRUE(root_windows[1]->GetBoundsInScreen().Contains(
+      ToEnclosingRect(GetTransformedTargetBounds(unmoved2.get()))));
+  EXPECT_TRUE(root_windows[1]->GetBoundsInScreen().Contains(
+      ToEnclosingRect(GetTransformedTargetBounds(moved1.get()))));
+  EXPECT_TRUE(root_windows[1]->GetBoundsInScreen().Contains(
+      ToEnclosingRect(GetTransformedTargetBounds(moved1_trans_parent.get()))));
+
+  // unmoved1 and unmoved2 were already on the correct display and should not
+  // have been copied.
+  EXPECT_TRUE(!GetCopyWindow(unmoved1.get()));
+  EXPECT_TRUE(!GetCopyWindow(unmoved2.get()));
+
+  // moved1 and its transient parent moved1_trans_parent should have also been
+  // copied for displaying on root_windows[1].
+  aura::Window* copy1 = GetCopyWindow(moved1.get());
+  aura::Window* copy1_trans_parent = GetCopyWindow(moved1_trans_parent.get());
+  ASSERT_FALSE(!copy1);
+  ASSERT_FALSE(!copy1_trans_parent);
+
+  // Verify that the bounds and transform of the copy match the original window
+  // but that it is on the other root window.
+  EXPECT_EQ(root_windows[1], copy1->GetRootWindow());
+  EXPECT_EQ(moved1->GetBoundsInScreen(), copy1->GetBoundsInScreen());
+  EXPECT_EQ(moved1->layer()->GetTargetTransform(),
+            copy1->layer()->GetTargetTransform());
+  StopCycling();
+
+  // After cycling the copy windows should have been destroyed.
+  RunAllPendingInMessageLoop();
+  EXPECT_TRUE(!GetCopyWindow(moved1.get()));
+  EXPECT_TRUE(!GetCopyWindow(moved1_trans_parent.get()));
+}
+
+// Tests that beginning to cycle from overview mode moves windows to the
+// active display.
+TEST_F(WindowSelectorTest, MultipleDisplaysOverviewTransitionToCycle) {
+  if (!SupportsMultipleDisplays())
+    return;
+
+  UpdateDisplay("400x400,400x400");
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+
+  scoped_ptr<aura::Window> window1(CreateWindow(gfx::Rect(0, 0, 100, 100)));
+  scoped_ptr<aura::Window> window2(CreateWindow(gfx::Rect(450, 0, 100, 100)));
+  EXPECT_EQ(root_windows[0], window1->GetRootWindow());
+  EXPECT_EQ(root_windows[1], window2->GetRootWindow());
+  wm::ActivateWindow(window2.get());
+  wm::ActivateWindow(window1.get());
+
+  ToggleOverview();
+  EXPECT_TRUE(root_windows[0]->GetBoundsInScreen().Contains(
+      ToEnclosingRect(GetTransformedTargetBounds(window1.get()))));
+  EXPECT_TRUE(root_windows[1]->GetBoundsInScreen().Contains(
+      ToEnclosingRect(GetTransformedTargetBounds(window2.get()))));
+
+  Cycle(WindowSelector::FORWARD);
+  EXPECT_TRUE(root_windows[0]->GetBoundsInScreen().Contains(
+      ToEnclosingRect(GetTransformedTargetBounds(window1.get()))));
+  EXPECT_TRUE(root_windows[0]->GetBoundsInScreen().Contains(
+      ToEnclosingRect(GetTransformedTargetBounds(window2.get()))));
+  StopCycling();
+}
+
+// Tests that a bounds change during overview is corrected for.
+TEST_F(WindowSelectorTest, BoundsChangeDuringCycleOnOtherDisplay) {
+  if (!SupportsMultipleDisplays())
+    return;
+
+  UpdateDisplay("400x400,400x400");
+  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+
+  scoped_ptr<aura::Window> window1(CreateWindow(gfx::Rect(0, 0, 100, 100)));
+  scoped_ptr<aura::Window> window2(CreateWindow(gfx::Rect(450, 0, 100, 100)));
+  scoped_ptr<aura::Window> window3(CreateWindow(gfx::Rect(450, 0, 100, 100)));
+  EXPECT_EQ(root_windows[0], window1->GetRootWindow());
+  EXPECT_EQ(root_windows[1], window2->GetRootWindow());
+  EXPECT_EQ(root_windows[1], window3->GetRootWindow());
+  wm::ActivateWindow(window1.get());
+  wm::ActivateWindow(window2.get());
+  wm::ActivateWindow(window3.get());
+
+  Cycle(WindowSelector::FORWARD);
+  FireOverviewStartTimer();
+
+  gfx::Rect overview_bounds(
+      ToEnclosingRect(GetTransformedTargetBounds(window1.get())));
+  EXPECT_TRUE(root_windows[1]->GetBoundsInScreen().Contains(overview_bounds));
+
+  // Change the position and size of window1 (being displayed on the second
+  // root window) and it should remain within the same bounds.
+  window1->SetBounds(gfx::Rect(100, 0, 200, 200));
+  gfx::Rect new_overview_bounds =
+      ToEnclosingRect(GetTransformedTargetBounds(window1.get()));
+  EXPECT_EQ(overview_bounds.x(), new_overview_bounds.x());
+  EXPECT_EQ(overview_bounds.y(), new_overview_bounds.y());
+  EXPECT_EQ(overview_bounds.width(), new_overview_bounds.width());
+  EXPECT_EQ(overview_bounds.height(), new_overview_bounds.height());
+  StopCycling();
 }
 
 }  // namespace internal

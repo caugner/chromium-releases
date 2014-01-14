@@ -40,6 +40,7 @@
 #include "chrome/browser/prerender/prerender_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/common/chrome_switches.h"
@@ -114,7 +115,8 @@ bool NeedMatchCompleteDummyForFinalStatus(FinalStatus final_status) {
       final_status != FINAL_STATUS_CANCELLED &&
       final_status != FINAL_STATUS_DEVTOOLS_ATTACHED &&
       final_status != FINAL_STATUS_CROSS_SITE_NAVIGATION_PENDING &&
-      final_status != FINAL_STATUS_PAGE_BEING_CAPTURED;
+      final_status != FINAL_STATUS_PAGE_BEING_CAPTURED &&
+      final_status != FINAL_STATUS_NAVIGATION_UNCOMMITTED;
 }
 
 void CheckIfCookiesExistForDomainResultOnUIThread(
@@ -241,7 +243,7 @@ PrerenderManager::PrerenderManager(Profile* profile,
   // the same thread that it was created on.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (IsLocalPredictorEnabled(profile))
+  if (IsLocalPredictorEnabled())
     local_predictor_.reset(new PrerenderLocalPredictor(this));
 
   if (IsLoggedInPredictorEnabled() && !profile_->IsOffTheRecord()) {
@@ -408,10 +410,16 @@ void PrerenderManager::CancelAllPrerenders() {
   }
 }
 
-bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
-                                               const GURL& url) {
+bool PrerenderManager::MaybeUsePrerenderedPage(const GURL& url,
+                                               chrome::NavigateParams* params) {
   DCHECK(CalledOnValidThread());
+
+  content::WebContents* web_contents = params->target_contents;
   DCHECK(!IsWebContentsPrerendering(web_contents, NULL));
+
+  // Don't prerender if the navigation involves some special parameters.
+  if (params->uses_post || !params->extra_headers.empty())
+    return false;
 
   DeleteOldEntries();
   to_delete_prerenders_.clear();
@@ -435,8 +443,11 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
     // there is a pending entry, it may not commit.
     // TODO(creis): If there is a pending navigation and no last committed
     // entry, we might be able to transfer the network request instead.
-    if (!new_web_contents->GetController().CanPruneAllButVisible())
+    if (!new_web_contents->GetController().CanPruneAllButVisible()) {
+      // Abort this prerender so it is not used later. http://crbug.com/292121
+      prerender_data->contents()->Destroy(FINAL_STATUS_NAVIGATION_UNCOMMITTED);
       return false;
+    }
   }
 
   // Do not use the prerendered version if there is an opener object.
@@ -541,6 +552,9 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
   CoreTabHelper::FromWebContents(old_web_contents)->delegate()->
       SwapTabContents(old_web_contents, new_web_contents);
   prerender_contents->CommitHistory(new_web_contents);
+
+  // Record the new target_contents for the callers.
+  params->target_contents = new_web_contents;
 
   GURL icon_url = prerender_contents->icon_url();
 

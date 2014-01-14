@@ -8,6 +8,7 @@
 #include "base/gtest_prod_util.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/views/bubble/bubble_border.h"
+#include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
@@ -59,10 +60,10 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   bool close_on_deactivate() const { return close_on_deactivate_; }
   void set_close_on_deactivate(bool close) { close_on_deactivate_ = close; }
 
-  View* anchor_view() const { return anchor_view_; }
+  View* GetAnchorView() const;
   Widget* anchor_widget() const { return anchor_widget_; }
 
-  // The anchor rect is used in the absence of an anchor view.
+  // The anchor rect is used in the absence of an assigned anchor view.
   const gfx::Rect& anchor_rect() const { return anchor_rect_; }
 
   BubbleBorder::Arrow arrow() const { return arrow_; }
@@ -104,6 +105,10 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // Get the arrow's anchor rect in screen space.
   virtual gfx::Rect GetAnchorRect();
 
+  // Allows delegates to provide custom parameters before widget initialization.
+  virtual void OnBeforeBubbleWidgetInit(Widget::InitParams* params,
+                                        Widget* widget) const;
+
   // Fade the bubble in or out by animation Widget transparency.
   // Fade-in calls Widget::Show; fade-out calls Widget::Close upon completion.
   void StartFade(bool fade_in);
@@ -141,8 +146,14 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   // Perform view initialization on the contents for bubble sizing.
   virtual void Init();
 
-  // Set the anchor view or rect; set these before CreateBubble or Show.
-  void set_anchor_view(View* anchor_view) { anchor_view_ = anchor_view; }
+  // Whether |arrow()| should automatically flip while in RTL.
+  virtual bool ShouldFlipArrowForRtl() const;
+
+  // Set the anchor view or rect; set these before CreateBubble or Show. Note
+  // that if a valid view gets passed, the anchor rect will get ignored. If the
+  // view gets deleted, but no new view gets set, the last known anchor postion
+  // will get returned.
+  void SetAnchorView(View* anchor_view);
   void set_anchor_rect(const gfx::Rect& rect) { anchor_rect_ = rect; }
 
   // Resize and potentially move the bubble to fit the content's preferred size.
@@ -174,8 +185,10 @@ class VIEWS_EXPORT BubbleDelegateView : public WidgetDelegateView,
   bool close_on_esc_;
   bool close_on_deactivate_;
 
-  // The view and widget to which this bubble is anchored.
-  View* anchor_view_;
+  // The view and widget to which this bubble is anchored. Since an anchor view
+  // can be deleted without notice, we store it in the ViewStorage and retrieve
+  // it from there. It will make sure that the view is still valid.
+  const int anchor_view_storage_id_;
   Widget* anchor_widget_;
 
   // The anchor rect used in the absence of an anchor view.

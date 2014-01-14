@@ -36,12 +36,40 @@ enum OutputState {
   STATE_DUAL_EXTENDED,
 };
 
+// Video output types.
+enum OutputType {
+  OUTPUT_TYPE_NONE = 0,
+  OUTPUT_TYPE_UNKNOWN = 1 << 0,
+  OUTPUT_TYPE_INTERNAL = 1 << 1,
+  OUTPUT_TYPE_VGA = 1 << 2,
+  OUTPUT_TYPE_HDMI = 1 << 3,
+  OUTPUT_TYPE_DVI = 1 << 4,
+  OUTPUT_TYPE_DISPLAYPORT = 1 << 5,
+  OUTPUT_TYPE_NETWORK = 1 << 6,
+};
+
+// Content protection methods applied on video output.
+enum OutputProtectionMethod {
+  OUTPUT_PROTECTION_METHOD_NONE = 0,
+  OUTPUT_PROTECTION_METHOD_HDCP = 1 << 0,
+};
+
+// HDCP protection state.
+enum HDCPState {
+  HDCP_STATE_UNDESIRED,
+  HDCP_STATE_DESIRED,
+  HDCP_STATE_ENABLED
+};
+
 // This class interacts directly with the underlying Xrandr API to manipulate
 // CTRCs and Outputs.
 class CHROMEOS_EXPORT OutputConfigurator
     : public base::MessageLoop::Dispatcher,
       public base::MessagePumpObserver {
  public:
+  typedef uint64_t OutputProtectionClientId;
+  static const OutputProtectionClientId kInvalidClientId = 0;
+
   struct ModeInfo {
     ModeInfo();
     ModeInfo(int width, int height, bool interlaced, float refresh_rate);
@@ -95,8 +123,12 @@ class CHROMEOS_EXPORT OutputConfigurator
     uint64 width_mm;
     uint64 height_mm;
 
+    // TODO(kcwu): Remove this. Check type == OUTPUT_TYPE_INTERNAL instead.
     bool is_internal;
     bool is_aspect_preserving_scaling;
+
+    // The type of output.
+    OutputType type;
 
     // Map from mode IDs to details about the corresponding modes.
     ModeInfoMap mode_infos;
@@ -190,7 +222,8 @@ class CHROMEOS_EXPORT OutputConfigurator
 
     // Returns information about the current outputs. This method may block for
     // 60 milliseconds or more. The returned outputs are not fully initialized;
-    // the rest of the work happens in OutputConfigurator::GetOutputs().
+    // the rest of the work happens in
+    // OutputConfigurator::UpdateCachedOutputs().
     virtual std::vector<OutputSnapshot> GetOutputs() = 0;
 
     // Adds |mode| to |output|.
@@ -222,6 +255,12 @@ class CHROMEOS_EXPORT OutputConfigurator
     // Sends a D-Bus message to the power manager telling it that the
     // machine is or is not projecting.
     virtual void SendProjectingStateToPowerManager(bool projecting) = 0;
+
+    // Gets HDCP state of output.
+    virtual bool GetHDCPState(RROutput id, HDCPState* state) = 0;
+
+    // Sets HDCP state of output.
+    virtual bool SetHDCPState(RROutput id, HDCPState state) = 0;
   };
 
   // Helper class used by tests.
@@ -231,6 +270,10 @@ class CHROMEOS_EXPORT OutputConfigurator
         : configurator_(configurator),
           xrandr_event_base_(xrandr_event_base) {}
     ~TestApi() {}
+
+    const std::vector<OutputSnapshot>& cached_outputs() const {
+      return configurator_->cached_outputs_;
+    }
 
     // Dispatches an RRScreenChangeNotify event to |configurator_|.
     void SendScreenChangeEvent();
@@ -335,8 +378,7 @@ class CHROMEOS_EXPORT OutputConfigurator
   // Overridden from base::MessagePumpObserver:
   virtual base::EventStatus WillProcessEvent(
       const base::NativeEvent& event) OVERRIDE;
-  virtual void DidProcessEvent(
-      const base::NativeEvent& event) OVERRIDE;
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -358,16 +400,49 @@ class CHROMEOS_EXPORT OutputConfigurator
   // so that time-consuming ConfigureOutputs() won't be called multiple times.
   void ScheduleConfigureOutputs();
 
- private:
-  // Returns currently-connected outputs. This method is a wrapper around
-  // |delegate_->GetOutputs()| that does additional work, like finding the
-  // mirror mode and setting user-preferred modes. Note that the server must
-  // be grabbed via |delegate_->GrabServer()| first.
-  std::vector<OutputSnapshot> GetOutputs();
+  // Registers a client for output protection and requests a client id. Returns
+  // 0 if requesting failed.
+  OutputProtectionClientId RegisterOutputProtectionClient();
 
-  // Helper method for GetOutputs() that initializes the passed-in outputs'
-  // |mirror_mode| fields by looking for a mode in |internal_output| and
-  // |external_output| having the same resolution. Returns false if a shared
+  // Unregisters the client.
+  void UnregisterOutputProtectionClient(OutputProtectionClientId client_id);
+
+  // Queries link status and protection status.
+  // |link_mask| is the type of connected output links, which is a bitmask of
+  // OutputType values. |protection_mask| is the desired protection methods,
+  // which is a bitmask of the OutputProtectionMethod values.
+  // Returns true on success.
+  bool QueryOutputProtectionStatus(
+      OutputProtectionClientId client_id,
+      int64 display_id,
+      uint32_t* link_mask,
+      uint32_t* protection_mask);
+
+  // Requests the desired protection methods.
+  // |protection_mask| is the desired protection methods, which is a bitmask
+  // of the OutputProtectionMethod values.
+  // Returns true when the protection request has been made.
+  bool EnableOutputProtection(
+      OutputProtectionClientId client_id,
+      int64 display_id,
+      uint32_t desired_protection_mask);
+
+ private:
+  // Mapping a display_id to a protection request bitmask.
+  typedef std::map<int64, uint32_t> DisplayProtections;
+  // Mapping a client to its protection request.
+  typedef std::map<OutputProtectionClientId,
+                   DisplayProtections> ProtectionRequests;
+
+  // Updates |cached_outputs_| to contain currently-connected outputs. Calls
+  // |delegate_->GetOutputs()| and then does additional work, like finding the
+  // mirror mode and setting user-preferred modes. Note that the server must be
+  // grabbed via |delegate_->GrabServer()| first.
+  void UpdateCachedOutputs();
+
+  // Helper method for UpdateCachedOutputs() that initializes the passed-in
+  // outputs' |mirror_mode| fields by looking for a mode in |internal_output|
+  // and |external_output| having the same resolution. Returns false if a shared
   // mode wasn't found or created.
   //
   // |try_panel_fitting| allows creating a panel-fitting mode for
@@ -395,20 +470,16 @@ class CHROMEOS_EXPORT OutputConfigurator
   // and returns true.
   bool EnterStateOrFallBackToSoftwareMirroring(
       OutputState output_state,
-      DisplayPowerState power_state,
-      const std::vector<OutputSnapshot>& outputs);
+      DisplayPowerState power_state);
 
   // Switches to the state specified in |output_state| and |power_state|.
   // On success, updates |output_state_|, |power_state_|, and
   // |cached_outputs_| and returns true.
-  bool EnterState(OutputState output_state,
-                  DisplayPowerState power_state,
-                  const std::vector<OutputSnapshot>& outputs);
+  bool EnterState(OutputState output_state, DisplayPowerState power_state);
 
-  // Returns the output state that should be used with |outputs| connected
-  // while in |power_state|.
-  OutputState GetOutputState(const std::vector<OutputSnapshot>& outputs,
-                             DisplayPowerState power_state) const;
+  // Returns the output state that should be used with |cached_outputs_| while
+  // in |power_state|.
+  OutputState ChooseOutputState(DisplayPowerState power_state) const;
 
   // Computes the relevant transformation for mirror mode.
   // |output| is the output on which mirror mode is being applied.
@@ -420,6 +491,9 @@ class CHROMEOS_EXPORT OutputConfigurator
   // (mirror_mode_width * mirrow_mode_height) / (native_width * native_height)
   float GetMirroredDisplayAreaRatio(
       const OutputConfigurator::OutputSnapshot& output);
+
+  // Applies output protections according to requests.
+  bool ApplyProtections(const DisplayProtections& requests);
 
   StateController* state_controller_;
   SoftwareMirroringController* mirroring_controller_;
@@ -462,6 +536,12 @@ class CHROMEOS_EXPORT OutputConfigurator
   // The timer to delay configuring outputs. See also the comments in
   // Dispatch().
   scoped_ptr<base::OneShotTimer<OutputConfigurator> > configure_timer_;
+
+  // Id for next output protection client.
+  OutputProtectionClientId next_output_protection_client_id_;
+
+  // Output protection requests of each client.
+  ProtectionRequests client_protection_requests_;
 
   DISALLOW_COPY_AND_ASSIGN(OutputConfigurator);
 };

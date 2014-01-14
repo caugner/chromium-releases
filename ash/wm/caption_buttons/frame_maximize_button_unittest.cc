@@ -13,13 +13,12 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "base/command_line.h"
-#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/window.h"
-#include "ui/base/gestures/gesture_configuration.h"
 #include "ui/events/event_utils.h"
+#include "ui/events/gestures/gesture_configuration.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -226,7 +225,7 @@ TEST_F(FrameMaximizeButtonTest, MAYBE_ResizeButtonDrag) {
 
     EXPECT_FALSE(window_state->IsMaximized());
     EXPECT_FALSE(window_state->IsMinimized());
-    internal::SnapSizer sizer(window, center,
+    internal::SnapSizer sizer(window_state, center,
         internal::SnapSizer::RIGHT_EDGE,
         internal::SnapSizer::OTHER_INPUT);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
@@ -243,7 +242,7 @@ TEST_F(FrameMaximizeButtonTest, MAYBE_ResizeButtonDrag) {
 
     EXPECT_FALSE(window_state->IsMaximized());
     EXPECT_FALSE(window_state->IsMinimized());
-    internal::SnapSizer sizer(window, center,
+    internal::SnapSizer sizer(window_state, center,
         internal::SnapSizer::LEFT_EDGE,
         internal::SnapSizer::OTHER_INPUT);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
@@ -294,7 +293,7 @@ TEST_F(FrameMaximizeButtonTest, MAYBE_ResizeButtonDrag) {
 
     EXPECT_FALSE(window_state->IsMaximized());
     EXPECT_FALSE(window_state->IsMinimized());
-    internal::SnapSizer sizer(window, center,
+    internal::SnapSizer sizer(window_state, center,
         internal::SnapSizer::LEFT_EDGE,
         internal::SnapSizer::OTHER_INPUT);
     EXPECT_EQ(sizer.target_bounds().ToString(), window->bounds().ToString());
@@ -474,6 +473,7 @@ TEST_F(FrameMaximizeButtonTest, MaximizeLeftButtonDragOut) {
 // maximize left button) will do the requested action.
 TEST_F(FrameMaximizeButtonTest, MaximizeLeftByButton) {
   aura::Window* window = widget()->GetNativeWindow();
+
   ash::FrameMaximizeButton* maximize_button =
       FrameMaximizeButtonTest::maximize_button();
   maximize_button->set_bubble_appearance_delay_ms(0);
@@ -502,7 +502,7 @@ TEST_F(FrameMaximizeButtonTest, MaximizeLeftByButton) {
   wm::WindowState* window_state = wm::GetWindowState(window);
   EXPECT_FALSE(window_state->IsMaximized());
   EXPECT_FALSE(window_state->IsMinimized());
-  internal::SnapSizer sizer(window, button_pos,
+  internal::SnapSizer sizer(window_state, button_pos,
                             internal::SnapSizer::LEFT_EDGE,
                             internal::SnapSizer::OTHER_INPUT);
   sizer.SelectDefaultSizeAndDisableResize();
@@ -535,7 +535,7 @@ TEST_F(FrameMaximizeButtonTest, MaximizeKeepFocus) {
 
 TEST_F(FrameMaximizeButtonTest, MaximizeTap) {
   aura::Window* window = widget()->GetNativeWindow();
-  aura::RootWindow* root_window = window->GetRootWindow();
+  aura::Window* root_window = window->GetRootWindow();
   ash::FrameMaximizeButton* maximize_button =
       FrameMaximizeButtonTest::maximize_button();
   gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
@@ -544,12 +544,13 @@ TEST_F(FrameMaximizeButtonTest, MaximizeTap) {
       ui::GestureConfiguration::default_radius();
   ui::GestureConfiguration::set_default_radius(0);
 
+  aura::WindowEventDispatcher* dispatcher = root_window->GetDispatcher();
   const int kTouchId = 2;
   ui::TouchEvent press(ui::ET_TOUCH_PRESSED,
                        button_pos,
                        kTouchId,
                        ui::EventTimeForNow());
-  root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
+  dispatcher->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
 
   button_pos.Offset(9, 8);
   ui::TouchEvent release(
@@ -557,7 +558,7 @@ TEST_F(FrameMaximizeButtonTest, MaximizeTap) {
       button_pos,
       kTouchId,
       press.time_stamp() + base::TimeDelta::FromMilliseconds(50));
-  root_window->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
+  dispatcher->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
 
   ui::GestureConfiguration::set_default_radius(touch_default_radius);
 }
@@ -713,7 +714,7 @@ TEST_F(FrameMaximizeButtonTest, MaximizeMaximizeLeftRestore) {
 }
 
 // Left/right maximize, maximize and then restore should work.
-TEST_F(FrameMaximizeButtonTest, MaximizeLeftMaximizeRestore) {
+TEST_F(FrameMaximizeButtonTest, MaximizeSnapLeftRestore) {
   aura::Window* window = widget()->GetNativeWindow();
   gfx::Rect initial_bounds = widget()->GetWindowBoundsInScreen();
   ash::FrameMaximizeButton* maximize_button =
@@ -821,6 +822,48 @@ TEST_F(FrameMaximizeButtonTest, MaximizeButtonDragLeftEscapeExits) {
             initial_bounds.size().ToString());
   // Check that there is no phantom window left open.
   EXPECT_FALSE(maximize_button->phantom_window_open());
+}
+
+// Test that hovering over a button in the maximizer bubble and switching
+// activation without moving the mouse properly aborts.
+TEST_F(FrameMaximizeButtonTest, LossOfActivationWhileMaximizeBubbleOpenAborts) {
+  aura::Window* window = widget()->GetNativeWindow();
+  ash::FrameMaximizeButton* maximize_button =
+      FrameMaximizeButtonTest::maximize_button();
+  maximize_button->set_bubble_appearance_delay_ms(0);
+
+  gfx::Rect initial_bounds = window->GetBoundsInScreen();
+  EXPECT_TRUE(wm::GetWindowState(window)->IsNormalShowState());
+  EXPECT_TRUE(widget()->IsActive());
+
+  // Move the mouse over the maximize button in order to bring up the maximizer
+  // bubble.
+  gfx::Point button_pos = maximize_button->GetBoundsInScreen().CenterPoint();
+  gfx::Point off_pos(button_pos.x() + 100, button_pos.y() + 100);
+  aura::test::EventGenerator generator(window->GetRootWindow(), off_pos);
+  generator.MoveMouseTo(button_pos);
+  EXPECT_TRUE(maximize_button->maximizer());
+
+  // Hover the mouse over the left maximize button in the maximizer bubble to
+  // show the phantom window.
+  gfx::Point left_max_pos = maximize_button->maximizer()->
+      GetButtonForUnitTest(SNAP_LEFT)->GetBoundsInScreen().CenterPoint();
+  generator.MoveMouseTo(left_max_pos);
+  EXPECT_TRUE(maximize_button->phantom_window_open());
+
+  // Change activation by creating a new window. This could be done via an
+  // accelerator. The root window takes ownership of |just_created|.
+  views::Widget* just_created = views::Widget::CreateWindowWithContextAndBounds(
+      NULL, widget()->GetNativeWindow(), gfx::Rect(100, 100));
+  just_created->Show();
+  just_created->Activate();
+  EXPECT_FALSE(widget()->IsActive());
+
+  // Test that we have properly reset the state of the now inactive window.
+  EXPECT_FALSE(maximize_button->maximizer());
+  EXPECT_FALSE(maximize_button->phantom_window_open());
+  EXPECT_TRUE(wm::GetWindowState(window)->IsNormalShowState());
+  EXPECT_EQ(initial_bounds.ToString(), window->GetBoundsInScreen().ToString());
 }
 
 }  // namespace test

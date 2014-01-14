@@ -21,8 +21,18 @@ class NetworkUIData;
 
 namespace shill_property_util {
 
-// Generates a name from properties."Wifi.HexSSID" if present, otherwise
-// validates properties.Name and returns a valid utf8 version.
+// Sets the |ssid| in |properties|.
+CHROMEOS_EXPORT void SetSSID(const std::string ssid,
+                             base::DictionaryValue* properties);
+
+// Returns the SSID from |properties| in UTF-8 encoding. If |unknown_encoding|
+// is not NULL, it is set to whether the SSID is of unknown encoding.
+CHROMEOS_EXPORT std::string GetSSIDFromProperties(
+    const base::DictionaryValue& properties,
+    bool* unknown_encoding);
+
+// Returns the name for the network represented by the Shill |properties|. For
+// WiFi it refers to the HexSSID.
 CHROMEOS_EXPORT std::string GetNameFromProperties(
     const std::string& service_path,
     const base::DictionaryValue& properties);
@@ -75,7 +85,7 @@ class CHROMEOS_EXPORT NetworkTypePattern {
 
   // Matches only networks of exactly the type |shill_network_type|, which must
   // be one of the types defined in service_constants.h (e.g.
-  // flimflam::kTypeWifi).
+  // shill::kTypeWifi).
   // Note: Shill distinguishes Ethernet without EAP from Ethernet with EAP. If
   // unsure, better use one of the matchers above.
   static NetworkTypePattern Primitive(const std::string& shill_network_type);

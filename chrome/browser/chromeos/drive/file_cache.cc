@@ -9,6 +9,7 @@
 #include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
@@ -16,9 +17,12 @@
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/resource_metadata_storage.h"
-#include "chrome/browser/google_apis/task_util.h"
+#include "chrome/browser/drive/drive_api_util.h"
 #include "chromeos/chromeos_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "net/base/mime_sniffer.h"
+#include "net/base/mime_util.h"
+#include "net/base/net_util.h"
 
 using content::BrowserThread;
 
@@ -26,36 +30,9 @@ namespace drive {
 namespace internal {
 namespace {
 
-typedef std::map<std::string, FileCacheEntry> CacheMap;
-
 // Returns ID extracted from the path.
 std::string GetIdFromPath(const base::FilePath& path) {
   return util::UnescapeCacheFileName(path.BaseName().AsUTF8Unsafe());
-}
-
-// Scans cache subdirectory and insert found files to |cache_map|.
-void ScanCacheDirectory(const base::FilePath& directory_path,
-                        CacheMap* cache_map) {
-  base::FileEnumerator enumerator(directory_path,
-                                  false,  // not recursive
-                                  base::FileEnumerator::FILES);
-  for (base::FilePath current = enumerator.Next(); !current.empty();
-       current = enumerator.Next()) {
-    std::string id = GetIdFromPath(current);
-
-    // Calculate MD5.
-    std::string md5 = util::GetMd5Digest(current);
-    if (md5.empty())
-      continue;
-
-    // Determine cache state.
-    FileCacheEntry cache_entry;
-    cache_entry.set_md5(md5);
-    cache_entry.set_is_present(true);
-
-    // Create and insert new entry into cache map.
-    cache_map->insert(std::make_pair(id, cache_entry));
-  }
 }
 
 // Runs callback with pointers dereferenced.
@@ -68,25 +45,6 @@ void RunGetFileFromCacheCallback(const GetFileFromCacheCallback& callback,
   DCHECK(file_path);
 
   callback.Run(error, *file_path);
-}
-
-// Runs callback with pointers dereferenced.
-// Used to implement GetCacheEntry().
-void RunGetCacheEntryCallback(const GetCacheEntryCallback& callback,
-                              FileCacheEntry* cache_entry,
-                              bool success) {
-  DCHECK(cache_entry);
-  DCHECK(!callback.is_null());
-  callback.Run(success, *cache_entry);
-}
-
-// Calls |iteration_callback| with each entry in |cache|.
-void IterateCache(FileCache* cache,
-                  const CacheIterateCallback& iteration_callback) {
-  scoped_ptr<FileCache::Iterator> it = cache->GetIterator();
-  for (; !it->IsAtEnd(); it->Advance())
-    iteration_callback.Run(it->GetID(), it->GetValue());
-  DCHECK(!it->HasError());
 }
 
 }  // namespace
@@ -124,42 +82,10 @@ bool FileCache::IsUnderFileCacheDirectory(const base::FilePath& path) const {
   return cache_file_directory_.IsParent(path);
 }
 
-void FileCache::GetCacheEntryOnUIThread(const std::string& id,
-                                        const GetCacheEntryCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  FileCacheEntry* cache_entry = new FileCacheEntry;
-  base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
-      base::Bind(&FileCache::GetCacheEntry,
-                 base::Unretained(this),
-                 id,
-                 cache_entry),
-      base::Bind(
-          &RunGetCacheEntryCallback, callback, base::Owned(cache_entry)));
-}
-
 bool FileCache::GetCacheEntry(const std::string& id, FileCacheEntry* entry) {
   DCHECK(entry);
   AssertOnSequencedWorkerPool();
   return storage_->GetCacheEntry(id, entry);
-}
-
-void FileCache::IterateOnUIThread(
-    const CacheIterateCallback& iteration_callback,
-    const base::Closure& completion_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!iteration_callback.is_null());
-  DCHECK(!completion_callback.is_null());
-
-  blocking_task_runner_->PostTaskAndReply(
-      FROM_HERE,
-      base::Bind(&IterateCache,
-                 base::Unretained(this),
-                 google_apis::CreateRelayCallback(iteration_callback)),
-      completion_callback);
 }
 
 scoped_ptr<FileCache::Iterator> FileCache::GetIterator() {
@@ -205,23 +131,6 @@ bool FileCache::FreeDiskSpaceIfNeededFor(int64 num_bytes) {
   return HasEnoughSpaceFor(num_bytes, cache_file_directory_);
 }
 
-void FileCache::GetFileOnUIThread(const std::string& id,
-                                  const GetFileFromCacheCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  base::FilePath* cache_file_path = new base::FilePath;
-  base::PostTaskAndReplyWithResult(blocking_task_runner_.get(),
-                                   FROM_HERE,
-                                   base::Bind(&FileCache::GetFile,
-                                              base::Unretained(this),
-                                              id,
-                                              cache_file_path),
-                                   base::Bind(&RunGetFileFromCacheCallback,
-                                              callback,
-                                              base::Owned(cache_file_path)));
-}
-
 FileError FileCache::GetFile(const std::string& id,
                              base::FilePath* cache_file_path) {
   AssertOnSequencedWorkerPool();
@@ -234,25 +143,6 @@ FileError FileCache::GetFile(const std::string& id,
 
   *cache_file_path = GetCacheFilePath(id);
   return FILE_ERROR_OK;
-}
-
-void FileCache::StoreOnUIThread(const std::string& id,
-                                const std::string& md5,
-                                const base::FilePath& source_path,
-                                FileOperationType file_operation_type,
-                                const FileOperationCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  base::PostTaskAndReplyWithResult(blocking_task_runner_.get(),
-                                   FROM_HERE,
-                                   base::Bind(&FileCache::Store,
-                                              base::Unretained(this),
-                                              id,
-                                              md5,
-                                              source_path,
-                                              file_operation_type),
-                                   callback);
 }
 
 FileError FileCache::Store(const std::string& id,
@@ -383,18 +273,6 @@ void FileCache::MarkAsUnmountedOnUIThread(
       callback);
 }
 
-void FileCache::MarkDirtyOnUIThread(const std::string& id,
-                                    const FileOperationCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
-      base::Bind(&FileCache::MarkDirty, base::Unretained(this), id),
-      callback);
-}
-
 FileError FileCache::MarkDirty(const std::string& id) {
   AssertOnSequencedWorkerPool();
 
@@ -439,18 +317,6 @@ FileError FileCache::ClearDirty(const std::string& id, const std::string& md5) {
   cache_entry.set_is_dirty(false);
   return storage_->PutCacheEntry(id, cache_entry) ?
       FILE_ERROR_OK : FILE_ERROR_FAILED;
-}
-
-void FileCache::RemoveOnUIThread(const std::string& id,
-                                 const FileOperationCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!callback.is_null());
-
-  base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
-      base::Bind(&FileCache::Remove, base::Unretained(this), id),
-      callback);
 }
 
 FileError FileCache::Remove(const std::string& id) {
@@ -503,16 +369,8 @@ bool FileCache::ClearAll() {
 bool FileCache::Initialize() {
   AssertOnSequencedWorkerPool();
 
-  RenameCacheFilesToNewFormat();
-
-  if (storage_->cache_file_scan_is_needed()) {
-    CacheMap cache_map;
-    ScanCacheDirectory(cache_file_directory_, &cache_map);
-    for (CacheMap::const_iterator it = cache_map.begin();
-         it != cache_map.end(); ++it) {
-      storage_->PutCacheEntry(it->first, it->second);
-    }
-  }
+  if (!RenameCacheFilesToNewFormat())
+    return false;
   return true;
 }
 
@@ -530,27 +388,102 @@ void FileCache::Destroy() {
       base::Bind(&FileCache::DestroyOnBlockingPool, base::Unretained(this)));
 }
 
-bool FileCache::CanonicalizeIDs(
-    const ResourceIdCanonicalizer& id_canonicalizer) {
-  scoped_ptr<Iterator> it = GetIterator();
-  for (; !it->IsAtEnd(); it->Advance()) {
-    const std::string id_canonicalized = id_canonicalizer.Run(it->GetID());
-    if (id_canonicalized != it->GetID()) {
-      // Replace the existing entry and rename the file when needed.
-      const base::FilePath path_old = GetCacheFilePath(it->GetID());
-      const base::FilePath path_new = GetCacheFilePath(id_canonicalized);
-      if (!storage_->RemoveCacheEntry(it->GetID()) ||
-          (base::PathExists(path_old) && !base::Move(path_old, path_new)) ||
-          !storage_->PutCacheEntry(id_canonicalized, it->GetValue()))
-        return false;
-    }
-  }
-  return !it->HasError();
-}
-
 void FileCache::DestroyOnBlockingPool() {
   AssertOnSequencedWorkerPool();
   delete this;
+}
+
+bool FileCache::RecoverFilesFromCacheDirectory(
+    const base::FilePath& dest_directory,
+    const ResourceMetadataStorage::RecoveredCacheInfoMap&
+        recovered_cache_info) {
+  int file_number = 1;
+
+  base::FileEnumerator enumerator(cache_file_directory_,
+                                  false,  // not recursive
+                                  base::FileEnumerator::FILES);
+  for (base::FilePath current = enumerator.Next(); !current.empty();
+       current = enumerator.Next()) {
+    const std::string& id = GetIdFromPath(current);
+    FileCacheEntry entry;
+    if (storage_->GetCacheEntry(id, &entry)) {
+      // This file is managed by FileCache, no need to recover it.
+      continue;
+    }
+
+    // If a cache entry which is non-dirty and has matching MD5 is found in
+    // |recovered_cache_entries|, it means the current file is already uploaded
+    // to the server. Just delete it instead of recovering it.
+    ResourceMetadataStorage::RecoveredCacheInfoMap::const_iterator it =
+        recovered_cache_info.find(id);
+    if (it != recovered_cache_info.end()) {
+      // Due to the DB corruption, cache info might be recovered from old
+      // revision. Perform MD5 check even when is_dirty is false just in case.
+      if (!it->second.is_dirty &&
+          it->second.md5 == util::GetMd5Digest(current)) {
+        base::DeleteFile(current, false /* recursive */);
+        continue;
+      }
+    }
+
+    // Read file contents to sniff mime type.
+    std::vector<char> content(net::kMaxBytesToSniff);
+    const int read_result =
+        file_util::ReadFile(current, &content[0], content.size());
+    if (read_result < 0) {
+      LOG(WARNING) << "Cannot read: " << current.value();
+      return false;
+    }
+    if (read_result == 0)  // Skip empty files.
+      continue;
+
+    // Use recovered file name if available, otherwise decide file name with
+    // sniffed mime type.
+    base::FilePath dest_base_name(FILE_PATH_LITERAL("file"));
+    std::string mime_type;
+    if (it != recovered_cache_info.end() && !it->second.title.empty()) {
+      // We can use a file name recovered from the trashed DB.
+      dest_base_name = base::FilePath::FromUTF8Unsafe(it->second.title);
+    } else if (net::SniffMimeType(&content[0], read_result,
+                                  net::FilePathToFileURL(current),
+                                  std::string(), &mime_type) ||
+               net::SniffMimeTypeFromLocalData(&content[0], read_result,
+                                               &mime_type)) {
+      // Change base name for common mime types.
+      if (net::MatchesMimeType("image/*", mime_type)) {
+        dest_base_name = base::FilePath(FILE_PATH_LITERAL("image"));
+      } else if (net::MatchesMimeType("video/*", mime_type)) {
+        dest_base_name = base::FilePath(FILE_PATH_LITERAL("video"));
+      } else if (net::MatchesMimeType("audio/*", mime_type)) {
+        dest_base_name = base::FilePath(FILE_PATH_LITERAL("audio"));
+      }
+
+      // Estimate extension from mime type.
+      std::vector<base::FilePath::StringType> extensions;
+      base::FilePath::StringType extension;
+      if (net::GetPreferredExtensionForMimeType(mime_type, &extension))
+        extensions.push_back(extension);
+      else
+        net::GetExtensionsForMimeType(mime_type, &extensions);
+
+      // Add extension if possible.
+      if (!extensions.empty())
+        dest_base_name = dest_base_name.AddExtension(extensions[0]);
+    }
+
+    // Add file number to the file name and move.
+    const base::FilePath& dest_path = dest_directory.Append(dest_base_name)
+        .InsertBeforeExtensionASCII(base::StringPrintf("%08d", file_number++));
+    if (!file_util::CreateDirectory(dest_directory) ||
+        !base::Move(current, dest_path)) {
+      LOG(WARNING) << "Failed to move: " << current.value()
+                   << " to " << dest_path.value();
+      return false;
+    }
+  }
+  UMA_HISTOGRAM_COUNTS("Drive.NumberOfCacheFilesRecoveredAfterDBCorruption",
+                       file_number - 1);
+  return true;
 }
 
 FileError FileCache::StoreInternal(const std::string& id,
@@ -637,27 +570,25 @@ bool FileCache::HasEnoughSpaceFor(int64 num_bytes,
   return (free_space >= num_bytes);
 }
 
-void FileCache::RenameCacheFilesToNewFormat() {
-  // First, remove all files with multiple extensions just in case.
-  {
-    base::FileEnumerator enumerator(cache_file_directory_,
-                                    false,  // not recursive
-                                    base::FileEnumerator::FILES,
-                                    "*.*.*");
-    for (base::FilePath current = enumerator.Next(); !current.empty();
-         current = enumerator.Next())
-      base::DeleteFile(current, false /* recursive */);
+bool FileCache::RenameCacheFilesToNewFormat() {
+  base::FileEnumerator enumerator(cache_file_directory_,
+                                  false,  // not recursive
+                                  base::FileEnumerator::FILES);
+  for (base::FilePath current = enumerator.Next(); !current.empty();
+       current = enumerator.Next()) {
+    base::FilePath new_path = current.RemoveExtension();
+    if (!new_path.Extension().empty()) {
+      // Delete files with multiple extensions.
+      if (!base::DeleteFile(current, false /* recursive */))
+        return false;
+      continue;
+    }
+    const std::string& id = GetIdFromPath(new_path);
+    new_path = GetCacheFilePath(util::CanonicalizeResourceId(id));
+    if (new_path != current && !base::Move(current, new_path))
+      return false;
   }
-
-  // Rename files.
-  {
-    base::FileEnumerator enumerator(cache_file_directory_,
-                                    false,  // not recursive
-                                    base::FileEnumerator::FILES);
-    for (base::FilePath current = enumerator.Next(); !current.empty();
-         current = enumerator.Next())
-      base::Move(current, current.RemoveExtension());
-  }
+  return true;
 }
 
 }  // namespace internal

@@ -25,11 +25,11 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/omnibox/alternate_nav_url_fetcher.h"
 #include "chrome/browser/ui/omnibox/location_bar_util.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
@@ -50,11 +50,13 @@
 #include "chrome/browser/ui/views/location_bar/script_bubble_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/selected_keyword_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
+#include "chrome/browser/ui/views/location_bar/translate_icon_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_views.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
@@ -114,39 +116,50 @@ Browser* GetBrowserFromDelegate(LocationBarView::Delegate* delegate) {
   return contents ? chrome::FindBrowserWithWebContents(contents) : NULL;
 }
 
-// Given a containing |height| and a base |font_list|, shrinks the fonts until
-// the primary font will fit within |height| while having its cap height
-// vertically centered.  Returns the |font_y_offset| needed to produce this
-// centering.
-void CalculateFontAndOffsetForHeight(int height,
-                                     gfx::FontList* font_list,
-                                     int* font_y_offset) {
-#if defined(OS_WIN)
-  base::win::ScopedGetDC screen_dc(NULL);
-#endif
-
-  while (true) {
-    // TODO(pkasting): Expand the gfx::Font metrics (and underlying Skia
-    // metrics) enough to expose the cap height directly.
-#if defined(OS_WIN)
-    const gfx::Font& font = font_list->GetPrimaryFont();
-    base::win::ScopedSelectObject font_in_dc(screen_dc, font.GetNativeFont());
-    TEXTMETRIC tm = {0};
-    GetTextMetrics(screen_dc, &tm);
-    int cap_height = font.GetBaseline() - tm.tmInternalLeading;
-    *font_y_offset = ((height - cap_height) / 2) - tm.tmInternalLeading;
-#else
-    // Without cap height available, we fall back to centering the full height.
-    *font_y_offset = (height - font_list->GetHeight()) / 2;
-#endif
-
-    const int font_size = font_list->GetFontSize();
-    if (((*font_y_offset >= 0) &&
-         ((*font_y_offset + font_list->GetHeight()) <= height)) ||
-        (font_size <= 1))
-      return;
-    *font_list = font_list->DeriveFontListWithSize(font_size - 1);
+// Given a containing |height| and a |base_font_list|, shrinks the font size
+// until the font list will fit within |height| while having its cap height
+// vertically centered.  Returns the correctly-sized font list.
+//
+// The expected layout:
+//   +--------+-----------------------------------------------+------------+
+//   |        | y offset                                      | space      |
+//   |        +--------+-------------------+------------------+ above      |
+//   |        |        |                   | internal leading | cap height |
+//   | box    | font   | ascent (baseline) +------------------+------------+
+//   | height | height |                   | cap height                    |
+//   |        |        |-------------------+------------------+------------+
+//   |        |        | descent (height - baseline)          | space      |
+//   |        +--------+--------------------------------------+ below      |
+//   |        | space at bottom                               | cap height |
+//   +--------+-----------------------------------------------+------------+
+// Goal:
+//     center of box height == center of cap height
+//     (i.e. space above cap height == space below cap height)
+// Restrictions:
+//     y offset >= 0
+//     space at bottom >= 0
+//     (i.e. Entire font must be visible inside the box.)
+gfx::FontList GetLargestFontListWithHeightBound(
+    const gfx::FontList& base_font_list,
+    int height) {
+  gfx::FontList font_list = base_font_list;
+  for (int font_size = font_list.GetFontSize(); font_size > 1; --font_size) {
+    const int internal_leading =
+        font_list.GetBaseline() - font_list.GetCapHeight();
+    // Some platforms don't support getting the cap height, and simply return
+    // the entire font ascent from GetCapHeight().  Centering the ascent makes
+    // the font look too low, so if GetCapHeight() returns the ascent, center
+    // the entire font height instead.
+    const int space =
+        height - ((internal_leading != 0) ?
+                  font_list.GetCapHeight() : font_list.GetHeight());
+    const int y_offset = space / 2 - internal_leading;
+    const int space_at_bottom = height - (y_offset + font_list.GetHeight());
+    if ((y_offset >= 0) && (space_at_bottom >= 0))
+      break;
+    font_list = font_list.DeriveFontListWithSizeDelta(-1);
   }
+  return font_list;
 }
 
 }  // namespace
@@ -166,14 +179,10 @@ LocationBarView::LocationBarView(Browser* browser,
                                  CommandUpdater* command_updater,
                                  Delegate* delegate,
                                  bool is_popup_mode)
-    : browser_(browser),
+    : OmniboxEditController(command_updater),
+      browser_(browser),
       profile_(profile),
-      command_updater_(command_updater),
       delegate_(delegate),
-      disposition_(CURRENT_TAB),
-      transition_(content::PageTransitionFromInt(
-          content::PAGE_TRANSITION_TYPED |
-          content::PAGE_TRANSITION_FROM_ADDRESS_BAR)),
       location_icon_view_(NULL),
       ev_bubble_view_(NULL),
       location_entry_view_(NULL),
@@ -187,6 +196,7 @@ LocationBarView::LocationBarView(Browser* browser,
       open_pdf_in_reader_view_(NULL),
       script_bubble_icon_view_(NULL),
       star_view_(NULL),
+      translate_icon_view_(NULL),
       is_popup_mode_(is_popup_mode),
       show_focus_rect_(false),
       template_url_service_(NULL),
@@ -253,41 +263,35 @@ void LocationBarView::Init() {
     font_list = font_list.DeriveFontListWithSize(desired_font_size);
   // Shrink large fonts to make them fit.
   // TODO(pkasting): Stretch the location bar instead in this case.
-  int location_height = GetInternalHeight(true);
-  int font_y_offset;
-  CalculateFontAndOffsetForHeight(location_height, &font_list, &font_y_offset);
+  const int location_height = GetInternalHeight(true);
+  font_list = GetLargestFontListWithHeightBound(font_list, location_height);
 
-  // Determine the font for use inside the bubbles.
-  gfx::FontList bubble_font_list(font_list);
-  int bubble_font_y_offset;
-  // The bubble background images have 1 px thick edges, which we don't want to
-  // overlap.
+  // Determine the font for use inside the bubbles.  The bubble background
+  // images have 1 px thick edges, which we don't want to overlap.
   const int kBubbleInteriorVerticalPadding = 1;
-  CalculateFontAndOffsetForHeight(
-      location_height - ((kBubblePadding + kBubbleInteriorVerticalPadding) * 2),
-      &bubble_font_list, &bubble_font_y_offset);
-  bubble_font_y_offset += kBubbleInteriorVerticalPadding;
+  const int bubble_vertical_padding =
+      (kBubblePadding + kBubbleInteriorVerticalPadding) * 2;
+  const gfx::FontList bubble_font_list(
+      GetLargestFontListWithHeightBound(
+          font_list, location_height - bubble_vertical_padding));
 
   const SkColor background_color =
       GetColor(ToolbarModel::NONE, LocationBarView::BACKGROUND);
   ev_bubble_view_ = new EVBubbleView(
-      bubble_font_list, bubble_font_y_offset,
-      GetColor(ToolbarModel::EV_SECURE, SECURITY_TEXT), background_color, this);
+      bubble_font_list, GetColor(ToolbarModel::EV_SECURE, SECURITY_TEXT),
+      background_color, this);
   ev_bubble_view_->set_drag_controller(this);
   AddChildView(ev_bubble_view_);
 
   // Initialize the Omnibox view.
-  location_entry_.reset(CreateOmniboxView(this, profile_, command_updater_,
-                                          is_popup_mode_, this, font_list,
-                                          font_y_offset));
+  location_entry_.reset(CreateOmniboxView(this, profile_, command_updater(),
+                                          is_popup_mode_, this, font_list));
   SetLocationEntryFocusable(true);
   location_entry_view_ = location_entry_->AddToView(this);
 
   // Initialize the inline autocomplete view which is visible only when IME is
   // turned on.  Use the same font with the omnibox and highlighted background.
   ime_inline_autocomplete_view_ = new views::Label(string16(), font_list);
-  ime_inline_autocomplete_view_->set_border(
-      views::Border::CreateEmptyBorder(font_y_offset, 0, 0, 0));
   ime_inline_autocomplete_view_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   ime_inline_autocomplete_view_->SetAutoColorReadabilityEnabled(false);
   ime_inline_autocomplete_view_->set_background(
@@ -301,13 +305,10 @@ void LocationBarView::Init() {
 
   const SkColor text_color = GetColor(ToolbarModel::NONE, TEXT);
   selected_keyword_view_ = new SelectedKeywordView(
-      bubble_font_list, bubble_font_y_offset, text_color, background_color,
-      profile_);
+      bubble_font_list, text_color, background_color, profile_);
   AddChildView(selected_keyword_view_);
 
   suggested_text_view_ = new views::Label(string16(), font_list);
-  suggested_text_view_->set_border(
-      views::Border::CreateEmptyBorder(font_y_offset, 0, 0, 0));
   suggested_text_view_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   suggested_text_view_->SetAutoColorReadabilityEnabled(false);
   suggested_text_view_->SetEnabledColor(GetColor(
@@ -316,7 +317,7 @@ void LocationBarView::Init() {
   AddChildView(suggested_text_view_);
 
   keyword_hint_view_ = new KeywordHintView(
-      profile_, font_list, font_y_offset,
+      profile_, font_list,
       GetColor(ToolbarModel::NONE, LocationBarView::DEEMPHASIZED_TEXT),
       background_color);
   AddChildView(keyword_hint_view_);
@@ -339,8 +340,8 @@ void LocationBarView::Init() {
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
     ContentSettingImageView* content_blocked_view =
         new ContentSettingImageView(static_cast<ContentSettingsType>(i), this,
-                                    bubble_font_list, bubble_font_y_offset,
-                                    text_color, background_color);
+                                    bubble_font_list, text_color,
+                                    background_color);
     content_setting_views_.push_back(content_blocked_view);
     content_blocked_view->SetVisible(false);
     AddChildView(content_blocked_view);
@@ -360,9 +361,16 @@ void LocationBarView::Init() {
   script_bubble_icon_view_->SetVisible(false);
   AddChildView(script_bubble_icon_view_);
 
-  star_view_ = new StarView(command_updater_);
+  star_view_ = new StarView(command_updater());
   star_view_->SetVisible(false);
   AddChildView(star_view_);
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableTranslateNewUX)) {
+    translate_icon_view_ = new TranslateIconView(command_updater());
+    translate_icon_view_->SetVisible(false);
+    AddChildView(translate_icon_view_);
+  }
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_LOCATION_BAR_UPDATED,
@@ -476,38 +484,6 @@ void LocationBarView::SetFocusAndSelection(bool select_all) {
 
 void LocationBarView::SetAnimationOffset(int offset) {
   animation_offset_ = offset;
-}
-
-void LocationBarView::Update(const WebContents* contents) {
-  mic_search_view_->SetVisible(
-      !GetToolbarModel()->input_in_progress() && browser_ &&
-      browser_->search_model()->voice_search_supported());
-  UpdateContentSettingViewsPreLayout();
-  generated_credit_card_view_->Update();
-  ZoomBubbleView::CloseBubble();
-  RefreshZoomView();
-  RefreshPageActionViews();
-  RefreshScriptBubble();
-  open_pdf_in_reader_view_->Update(
-      GetToolbarModel()->input_in_progress() ? NULL : GetWebContents());
-
-  bool star_enabled = browser_defaults::bookmarks_enabled && !is_popup_mode_ &&
-      star_view_ && !GetToolbarModel()->input_in_progress() &&
-      edit_bookmarks_enabled_.GetValue();
-
-  command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, star_enabled);
-  command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE_FROM_STAR,
-                                         star_enabled);
-  if (star_view_)
-    star_view_->SetVisible(star_enabled);
-
-  if (contents)
-    location_entry_->OnTabChanged(contents);
-  else
-    location_entry_->Update();
-
-  OnChanged();  // NOTE: Calls Layout().
-  UpdateContentSettingViewsPostLayout();
 }
 
 void LocationBarView::UpdateContentSettingsIcons() {
@@ -704,7 +680,8 @@ void LocationBarView::Layout() {
       const TemplateURL* template_url =
           TemplateURLServiceFactory::GetForProfile(profile_)->
           GetTemplateURLForKeyword(keyword);
-      if (template_url && template_url->IsExtensionKeyword()) {
+      if (template_url &&
+          (template_url->GetType() == TemplateURL::OMNIBOX_API_EXTENSION)) {
         gfx::Image image = extensions::OmniboxAPI::Get(profile_)->
             GetOmniboxIcon(template_url->GetExtensionId());
         selected_keyword_view_->SetImage(image.AsImageSkia());
@@ -734,6 +711,12 @@ void LocationBarView::Layout() {
     trailing_decorations.AddDecoration(
         vertical_edge_thickness(), location_height,
         GetBuiltInHorizontalPaddingForChildViews(), star_view_);
+  }
+  if (translate_icon_view_ && translate_icon_view_->visible()) {
+    trailing_decorations.AddDecoration(
+        vertical_edge_thickness(), location_height,
+        GetBuiltInHorizontalPaddingForChildViews(),
+        translate_icon_view_);
   }
   if (script_bubble_icon_view_ && script_bubble_icon_view_->visible()) {
     trailing_decorations.AddDecoration(
@@ -841,8 +824,9 @@ void LocationBarView::Layout() {
       location_needed_width =
           std::min(location_needed_width,
                    location_bounds.width() - suggested_text_size.width());
-      gfx::Rect suggested_text_bounds(location_bounds.origin(),
-                                      suggested_text_size);
+      gfx::Rect suggested_text_bounds(location_bounds.x(), location_bounds.y(),
+                                      suggested_text_size.width(),
+                                      location_bounds.height());
       // TODO(sky): figure out why this needs the -1.
       suggested_text_bounds.Offset(location_needed_width - 1, 0);
       // For non-views the omnibox needs to be shrunk so that the suggest text
@@ -892,8 +876,7 @@ void LocationBarView::Layout() {
     location_bounds.set_width(x);
     ime_inline_autocomplete_view_->SetBounds(
         location_bounds.right(), location_bounds.y(),
-        std::min(width, entry_width),
-        ime_inline_autocomplete_view_->GetPreferredSize().height());
+        std::min(width, entry_width), location_bounds.height());
   }
 
   location_entry_view_->SetBoundsRect(location_bounds);
@@ -1007,40 +990,37 @@ views::View* LocationBarView::generated_credit_card_view() {
   return generated_credit_card_view_;
 }
 
-void LocationBarView::OnAutocompleteAccept(
-    const GURL& url,
-    WindowOpenDisposition disposition,
-    content::PageTransition transition,
-    const GURL& alternate_nav_url) {
-  // WARNING: don't add an early return here. The calls after the if must
-  // happen.
-  if (url.is_valid()) {
-    location_input_ = UTF8ToUTF16(url.spec());
-    disposition_ = disposition;
-    transition_ = content::PageTransitionFromInt(
-        transition | content::PAGE_TRANSITION_FROM_ADDRESS_BAR);
+void LocationBarView::Update(const WebContents* contents) {
+  mic_search_view_->SetVisible(
+      !GetToolbarModel()->input_in_progress() && browser_ &&
+      browser_->search_model()->voice_search_supported());
+  UpdateContentSettingViewsPreLayout();
+  generated_credit_card_view_->Update();
+  ZoomBubbleView::CloseBubble();
+  RefreshZoomView();
+  RefreshPageActionViews();
+  RefreshScriptBubble();
+  RefreshTranslateIcon();
+  open_pdf_in_reader_view_->Update(
+      GetToolbarModel()->input_in_progress() ? NULL : GetWebContents());
 
-    if (command_updater_) {
-      if (!alternate_nav_url.is_valid()) {
-        command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
-      } else {
-        AlternateNavURLFetcher* fetcher =
-            new AlternateNavURLFetcher(alternate_nav_url);
-        // The AlternateNavURLFetcher will listen for the pending navigation
-        // notification that will be issued as a result of the "open URL." It
-        // will automatically install itself into that navigation controller.
-        command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
-        if (fetcher->state() == AlternateNavURLFetcher::NOT_STARTED) {
-          // I'm not sure this should be reachable, but I'm not also sure enough
-          // that it shouldn't to stick in a NOTREACHED().  In any case, this is
-          // harmless.
-          delete fetcher;
-        } else {
-          // The navigation controller will delete the fetcher.
-        }
-      }
-    }
-  }
+  bool star_enabled = browser_defaults::bookmarks_enabled && !is_popup_mode_ &&
+      star_view_ && !GetToolbarModel()->input_in_progress() &&
+      edit_bookmarks_enabled_.GetValue();
+
+  command_updater()->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, star_enabled);
+  command_updater()->UpdateCommandEnabled(IDC_BOOKMARK_PAGE_FROM_STAR,
+                                          star_enabled);
+  if (star_view_)
+    star_view_->SetVisible(star_enabled);
+
+  if (contents)
+    location_entry_->OnTabChanged(contents);
+  else
+    location_entry_->Update();
+
+  OnChanged();  // NOTE: Calls Layout().
+  UpdateContentSettingViewsPostLayout();
 }
 
 void LocationBarView::OnChanged() {
@@ -1052,32 +1032,8 @@ void LocationBarView::OnChanged() {
   SchedulePaint();
 }
 
-void LocationBarView::OnSelectionBoundsChanged() {
-}
-
-void LocationBarView::OnInputInProgress(bool in_progress) {
-  delegate_->OnInputInProgress(in_progress);
-}
-
-void LocationBarView::OnKillFocus() {
-}
-
 void LocationBarView::OnSetFocus() {
-  views::FocusManager* focus_manager = GetFocusManager();
-  if (!focus_manager) {
-    NOTREACHED();
-    return;
-  }
-  focus_manager->SetFocusedView(this);
-}
-
-gfx::Image LocationBarView::GetFavicon() const {
-  return FaviconTabHelper::FromWebContents(
-      delegate_->GetWebContents())->GetFavicon();
-}
-
-string16 LocationBarView::GetTitle() const {
-  return delegate_->GetWebContents()->GetTitle();
+  GetFocusManager()->SetFocusedView(this);
 }
 
 InstantController* LocationBarView::GetInstant() {
@@ -1165,7 +1121,7 @@ void LocationBarView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
 void LocationBarView::ButtonPressed(views::Button* sender,
                                     const ui::Event& event) {
   DCHECK_EQ(mic_search_view_, sender);
-  command_updater_->ExecuteCommand(IDC_TOGGLE_SPEECH_INPUT);
+  command_updater()->ExecuteCommand(IDC_TOGGLE_SPEECH_INPUT);
 }
 
 void LocationBarView::WriteDragDataForView(views::View* sender,
@@ -1217,16 +1173,16 @@ void LocationBarView::ShowFirstRunBubble() {
   ShowFirstRunBubbleInternal();
 }
 
-string16 LocationBarView::GetInputString() const {
-  return location_input_;
+GURL LocationBarView::GetDestinationURL() const {
+  return destination_url();
 }
 
 WindowOpenDisposition LocationBarView::GetWindowOpenDisposition() const {
-  return disposition_;
+  return disposition();
 }
 
 content::PageTransition LocationBarView::GetPageTransition() const {
-  return transition_;
+  return transition();
 }
 
 void LocationBarView::AcceptInput() {
@@ -1505,6 +1461,23 @@ void LocationBarView::RefreshZoomView() {
   ZoomController* zoom_controller =
       ZoomController::FromWebContents(web_contents);
   zoom_view_->Update(zoom_controller);
+}
+
+void LocationBarView::RefreshTranslateIcon() {
+  if (!translate_icon_view_)
+    return;
+
+  WebContents* web_contents = GetWebContents();
+  if (!web_contents)
+    return;
+
+  TranslateTabHelper* translate_tab_helper =
+      TranslateTabHelper::FromWebContents(web_contents);
+  bool enabled =
+      translate_tab_helper->language_state().translate_enabled();
+
+  command_updater()->UpdateCommandEnabled(IDC_TRANSLATE_PAGE, enabled);
+  translate_icon_view_->SetVisible(enabled);
 }
 
 #if defined(OS_WIN) && !defined(USE_AURA)

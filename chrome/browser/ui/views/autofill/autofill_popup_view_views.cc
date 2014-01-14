@@ -19,6 +19,10 @@
 #include "ui/views/event_utils.h"
 #include "ui/views/widget/widget.h"
 
+#if defined(USE_AURA)
+#include "ui/views/corewm/window_animations.h"
+#endif
+
 using WebKit::WebAutofillClient;
 
 namespace {
@@ -182,6 +186,11 @@ void AutofillPopupViewViews::Show() {
     params.parent = controller_->container_view();
     widget->Init(params);
     widget->SetContentsView(this);
+#if defined(USE_AURA)
+    // No animation for popup appearance (too distracting).
+    views::corewm::SetWindowVisibilityAnimationTransition(
+        widget->GetNativeView(), views::corewm::ANIMATE_HIDE);
+#endif
   }
 
   set_border(views::Border::CreateSolidBorder(kBorderThickness, kBorderColor));
@@ -238,13 +247,14 @@ void AutofillPopupViewViews::DrawAutofillEntry(gfx::Canvas* canvas,
   if (!controller_->icons()[index].empty()) {
     int icon = controller_->GetIconResourceID(controller_->icons()[index]);
     DCHECK_NE(-1, icon);
-    int icon_y = entry_rect.y() + (row_height - kAutofillIconHeight) / 2;
+    const gfx::ImageSkia* image = rb.GetImageSkiaNamed(icon);
+    int icon_y = entry_rect.y() + (row_height - image->height()) / 2;
 
-    x_align_left += is_rtl ? 0 : -kAutofillIconWidth;
+    x_align_left += is_rtl ? 0 : -image->width();
 
-    canvas->DrawImageInt(*rb.GetImageSkiaNamed(icon), x_align_left, icon_y);
+    canvas->DrawImageInt(*image, x_align_left, icon_y);
 
-    x_align_left += is_rtl ? kAutofillIconWidth + kIconPadding : -kIconPadding;
+    x_align_left += is_rtl ? image->width() + kIconPadding : -kIconPadding;
   }
 
   // Draw the name text.

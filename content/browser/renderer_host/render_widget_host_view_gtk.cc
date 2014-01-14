@@ -140,6 +140,8 @@ class RenderWidgetHostViewGtkWidget {
                      G_CALLBACK(OnRealize), host_view);
     g_signal_connect(widget, "configure-event",
                      G_CALLBACK(OnConfigureEvent), host_view);
+    g_signal_connect(widget, "size-allocate",
+                     G_CALLBACK(OnSizeAllocate), host_view);
     g_signal_connect(widget, "key-press-event",
                      G_CALLBACK(OnKeyPressReleaseEvent), host_view);
     g_signal_connect(widget, "key-release-event",
@@ -180,7 +182,7 @@ class RenderWidgetHostViewGtkWidget {
   static gboolean OnExposeEvent(GtkWidget* widget,
                                 GdkEventExpose* expose,
                                 RenderWidgetHostViewGtk* host_view) {
-    if (host_view->is_hidden_)
+    if (host_view->host_->is_hidden())
       return FALSE;
     const gfx::Rect damage_rect(expose->area);
     host_view->Paint(damage_rect);
@@ -202,6 +204,14 @@ class RenderWidgetHostViewGtkWidget {
                                    RenderWidgetHostViewGtk* host_view) {
     host_view->MarkCachedWidgetCenterStale();
     host_view->UpdateScreenInfo(host_view->GetNativeView());
+    return FALSE;
+  }
+
+  static gboolean OnSizeAllocate(GtkWidget* widget,
+                                 GdkRectangle* allocation,
+                                 RenderWidgetHostViewGtk* host_view) {
+    if (!host_view->IsPopup() && !host_view->is_fullscreen_)
+      host_view->SetSize(gfx::Size(allocation->width, allocation->height));
     return FALSE;
   }
 
@@ -541,7 +551,6 @@ class RenderWidgetHostViewGtkWidget {
 RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
     : host_(RenderWidgetHostImpl::From(widget_host)),
       about_to_validate_and_paint_(false),
-      is_hidden_(false),
       is_loading_(false),
       parent_(NULL),
       is_popup_first_mouse_release_(true),
@@ -556,8 +565,6 @@ RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
       compositing_surface_(gfx::kNullPluginWindow),
       last_mouse_down_(NULL) {
   host_->SetView(this);
-  if (host_->is_hidden())
-    WasHidden();
 }
 
 RenderWidgetHostViewGtk::~RenderWidgetHostViewGtk() {
@@ -683,24 +690,18 @@ RenderWidgetHost* RenderWidgetHostViewGtk::GetRenderWidgetHost() const {
 }
 
 void RenderWidgetHostViewGtk::WasShown() {
-  if (!host_ || !is_hidden_)
+  if (!host_ || !host_->is_hidden())
     return;
 
   if (web_contents_switch_paint_time_.is_null())
     web_contents_switch_paint_time_ = base::TimeTicks::Now();
-  is_hidden_ = false;
 
   host_->WasShown();
 }
 
 void RenderWidgetHostViewGtk::WasHidden() {
-  if (!host_ || is_hidden_)
+  if (!host_ || host_->is_hidden())
     return;
-
-  // If we receive any more paint messages while we are hidden, we want to
-  // ignore them so we don't re-allocate the backing store.  We will paint
-  // everything again when we become selected again.
-  is_hidden_ = true;
 
   // If we have a renderer, then inform it that we are being hidden so it can
   // reduce its resource utilization.
@@ -854,7 +855,7 @@ void RenderWidgetHostViewGtk::DidUpdateBackingStore(
   TRACE_EVENT0("ui::gtk", "RenderWidgetHostViewGtk::DidUpdateBackingStore");
   software_latency_info_.MergeWith(latency_info);
 
-  if (is_hidden_)
+  if (host_->is_hidden())
     return;
 
   // TODO(darin): Implement the equivalent of Win32's ScrollWindowEX.  Can that
@@ -962,10 +963,10 @@ void RenderWidgetHostViewGtk::SelectionChanged(const string16& text,
     return;
   }
 
-  // Set the BUFFER_SELECTION to the ui::Clipboard.
+  // Set the CLIPBOARD_TYPE SELECTION to the ui::Clipboard.
   ui::ScopedClipboardWriter clipboard_writer(
       ui::Clipboard::GetForCurrentThread(),
-      ui::Clipboard::BUFFER_SELECTION);
+      ui::CLIPBOARD_TYPE_SELECTION);
   clipboard_writer.WriteText(text.substr(pos, n));
 }
 
@@ -1069,7 +1070,7 @@ void RenderWidgetHostViewGtk::AcceleratedSurfaceBuffersSwapped(
   ack_params.sync_point = 0;
   RenderWidgetHostImpl::AcknowledgeBufferPresent(
       params.route_id, gpu_host_id, ack_params);
-  host_->FrameSwapped(params.latency_info);
+  RenderWidgetHostImpl::CompositorFrameDrawn(params.latency_info);
 }
 
 void RenderWidgetHostViewGtk::AcceleratedSurfacePostSubBuffer(
@@ -1079,7 +1080,7 @@ void RenderWidgetHostViewGtk::AcceleratedSurfacePostSubBuffer(
   ack_params.sync_point = 0;
   RenderWidgetHostImpl::AcknowledgeBufferPresent(
       params.route_id, gpu_host_id, ack_params);
-  host_->FrameSwapped(params.latency_info);
+  RenderWidgetHostImpl::CompositorFrameDrawn(params.latency_info);
 }
 
 void RenderWidgetHostViewGtk::AcceleratedSurfaceSuspend() {
@@ -1209,7 +1210,8 @@ void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
       // recorded.
       web_contents_switch_paint_time_ = base::TimeTicks();
     }
-    software_latency_info_.swap_timestamp = base::TimeTicks::HighResNow();
+    software_latency_info_.AddLatencyNumber(
+        ui::INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT, 0, 0);
     render_widget_host->FrameSwapped(software_latency_info_);
     software_latency_info_.Clear();
   } else {
@@ -1292,6 +1294,16 @@ gfx::GLSurfaceHandle RenderWidgetHostViewGtk::GetCompositingSurface() {
     }
   }
   return gfx::GLSurfaceHandle(compositing_surface_, gfx::NATIVE_TRANSPORT);
+}
+
+void RenderWidgetHostViewGtk::ResizeCompositingSurface(const gfx::Size& size) {
+  GtkWidget* widget = view_.get();
+  GdkWindow* window = gtk_widget_get_window(widget);
+  if (window) {
+    Display* display = GDK_WINDOW_XDISPLAY(window);
+    gdk_window_resize(window, size.width(), size.height());
+    XSync(display, False);
+  }
 }
 
 bool RenderWidgetHostViewGtk::LockMouse() {

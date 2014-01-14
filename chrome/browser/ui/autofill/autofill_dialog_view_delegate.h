@@ -16,6 +16,7 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/range/range.h"
 
+class GURL;
 class Profile;
 
 namespace content {
@@ -58,9 +59,15 @@ class AutofillDialogViewDelegate {
   // Whether the sign-in link should be disabled.
   virtual bool ShouldDisableSignInLink() const = 0;
 
-  // Whether the dialog is in a not exactly well-defined state
-  // (while attempting to sign-in or retrieving the wallet data etc).
+  // Whether a loading animation should be shown (e.g. while signing in,
+  // retreiving Wallet data, etc.).
   virtual bool ShouldShowSpinner() const = 0;
+
+  // Whether the sign in web view should be displayed.
+  virtual bool ShouldShowSignInWebView() const = 0;
+
+  // The URL to sign in to Google.
+  virtual GURL SignInUrl() const = 0;
 
   // Whether to show the checkbox to save data locally (in Autofill).
   virtual bool ShouldOfferToSaveInChrome() const = 0;
@@ -119,11 +126,6 @@ class AutofillDialogViewDelegate {
   // Returns the current state of suggestions for |section|.
   virtual SuggestionState SuggestionStateForSection(DialogSection section) = 0;
 
-  // TODO(groby): Remove this deprecated method after Mac starts using
-  // IconsForFields. http://crbug.com/292876
-  virtual gfx::Image IconForField(ServerFieldType type,
-                                  const string16& user_input) const = 0;
-
   // Returns the icons to be displayed along with the given |user_inputs| in a
   // section.
   virtual FieldIconMap IconsForFields(
@@ -132,6 +134,13 @@ class AutofillDialogViewDelegate {
   // Returns true if the value of this field |type| controls the icons for the
   // rest of the fields in a section.
   virtual bool FieldControlsIcons(ServerFieldType type) const = 0;
+
+  // Returns a tooltip for the given field, or an empty string if none exists.
+  virtual string16 TooltipForField(ServerFieldType type) const = 0;
+
+  // Whether a particular DetailInput in |section| should be edited or not.
+  virtual bool InputIsEditable(const DetailInput& input,
+                               DialogSection section) = 0;
 
   // Decides whether input of |value| is valid for a field of type |type|. If
   // valid, the returned string will be empty. Otherwise it will contain an
@@ -142,11 +151,9 @@ class AutofillDialogViewDelegate {
 
 
   // Decides whether the combination of all |inputs| is valid, returns a
-  // map of field types to error strings.
-  virtual ValidityData InputsAreValid(
-      DialogSection section,
-      const DetailOutputMap& inputs,
-      ValidationType validation_type) = 0;
+  // map of field types to validity messages.
+  virtual ValidityMessages InputsAreValid(DialogSection section,
+                                          const DetailOutputMap& inputs) = 0;
 
   // Called when the user changes the contents of a text field or activates it
   // (by focusing and then clicking it). |was_edit| is true when the function
@@ -165,6 +172,9 @@ class AutofillDialogViewDelegate {
 
   // Called when focus has changed position within the view.
   virtual void FocusMoved() = 0;
+
+  // Whether the view should show a validation error bubble.
+  virtual bool ShouldShowErrorBubble() const = 0;
 
   // Miscellany ----------------------------------------------------------------
 

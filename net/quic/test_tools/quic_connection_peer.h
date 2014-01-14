@@ -15,16 +15,20 @@ namespace net {
 struct QuicAckFrame;
 struct QuicPacketHeader;
 class QuicAlarm;
+class QuicCongestionManager;
 class QuicConnection;
 class QuicConnectionHelperInterface;
 class QuicConnectionVisitorInterface;
 class QuicFecGroup;
 class QuicFramer;
 class QuicPacketCreator;
+class QuicPacketWriter;
 class ReceiveAlgorithmInterface;
 class SendAlgorithmInterface;
 
 namespace test {
+
+class QuicTestWriter;
 
 // Peer to make public a number of otherwise private QuicConnection methods.
 class QuicConnectionPeer {
@@ -44,9 +48,10 @@ class QuicConnectionPeer {
 
   static QuicPacketCreator* GetPacketCreator(QuicConnection* connection);
 
-  static bool GetReceivedTruncatedAck(QuicConnection* connection);
+  static QuicCongestionManager* GetCongestionManager(
+      QuicConnection* connection);
 
-  static size_t GetNumRetransmissionTimeouts(QuicConnection* connection);
+  static bool GetReceivedTruncatedAck(QuicConnection* connection);
 
   static QuicTime::Delta GetNetworkTimeout(QuicConnection* connection);
 
@@ -71,6 +76,10 @@ class QuicConnectionPeer {
       QuicConnection* connection,
       QuicPacketSequenceNumber sequence_number);
 
+  static bool IsWriteBlocked(QuicConnection* connection);
+
+  static void SetIsWriteBlocked(QuicConnection* connection, bool write_blocked);
+
   static bool IsServer(QuicConnection* connection);
 
   static void SetIsServer(QuicConnection* connection, bool is_server);
@@ -83,9 +92,6 @@ class QuicConnectionPeer {
 
   static void SwapCrypters(QuicConnection* connection, QuicFramer* framer);
 
-  static void SetMaxPacketsPerRetransmissionAlarm(QuicConnection* connection,
-                                                  int max_packets);
-
   static QuicConnectionHelperInterface* GetHelper(QuicConnection* connection);
 
   static QuicFramer* GetFramer(QuicConnection* connection);
@@ -96,7 +102,11 @@ class QuicConnectionPeer {
   static QuicAlarm* GetAckAlarm(QuicConnection* connection);
   static QuicAlarm* GetRetransmissionAlarm(QuicConnection* connection);
   static QuicAlarm* GetSendAlarm(QuicConnection* connection);
+  static QuicAlarm* GetResumeWritesAlarm(QuicConnection* connection);
   static QuicAlarm* GetTimeoutAlarm(QuicConnection* connection);
+
+  static QuicPacketWriter* GetWriter(QuicConnection* connection);
+  static void SetWriter(QuicConnection* connection, QuicTestWriter* writer);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);

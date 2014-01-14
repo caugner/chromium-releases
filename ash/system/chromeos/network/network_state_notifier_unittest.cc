@@ -14,6 +14,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_service_client.h"
+#include "chromeos/login/login_state.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/message_center/message_center.h"
 
@@ -40,6 +41,7 @@ class NetworkStateNotifierTest : public AshTestBase {
 
   virtual void SetUp() OVERRIDE {
     DBusThreadManager::InitializeWithStub();
+    chromeos::LoginState::Initialize();
     SetupDefaultShillState();
     RunAllPendingInMessageLoop();
     AshTestBase::SetUp();
@@ -47,6 +49,7 @@ class NetworkStateNotifierTest : public AshTestBase {
 
   virtual void TearDown() OVERRIDE {
     AshTestBase::TearDown();
+    chromeos::LoginState::Shutdown();
     DBusThreadManager::Shutdown();
   }
 
@@ -57,9 +60,9 @@ class NetworkStateNotifierTest : public AshTestBase {
         DBusThreadManager::Get()->GetShillDeviceClient()->GetTestInterface();
     device_test->ClearDevices();
     device_test->AddDevice("/device/stub_wifi_device1",
-                           flimflam::kTypeWifi, "stub_wifi_device1");
+                           shill::kTypeWifi, "stub_wifi_device1");
     device_test->AddDevice("/device/stub_cellular_device1",
-                           flimflam::kTypeCellular, "stub_cellular_device1");
+                           shill::kTypeCellular, "stub_cellular_device1");
 
     ShillServiceClient::TestInterface* service_test =
         DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
@@ -68,16 +71,16 @@ class NetworkStateNotifierTest : public AshTestBase {
     const bool add_to_visible = true;
     // Create wifi and cellular networks and set to online.
     service_test->AddService("wifi1", "wifi1",
-                             flimflam::kTypeWifi, flimflam::kStateIdle,
+                             shill::kTypeWifi, shill::kStateIdle,
                              add_to_visible, add_to_watchlist);
     service_test->SetServiceProperty("wifi1",
-                                     flimflam::kSecurityProperty,
-                                     base::StringValue(flimflam::kSecurityWep));
+                                     shill::kSecurityProperty,
+                                     base::StringValue(shill::kSecurityWep));
     service_test->SetServiceProperty("wifi1",
-                                     flimflam::kConnectableProperty,
+                                     shill::kConnectableProperty,
                                      base::FundamentalValue(true));
     service_test->SetServiceProperty("wifi1",
-                                     flimflam::kPassphraseProperty,
+                                     shill::kPassphraseProperty,
                                      base::StringValue("failure"));
     RunAllPendingInMessageLoop();
   }

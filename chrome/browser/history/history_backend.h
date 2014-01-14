@@ -242,6 +242,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                     const std::vector<ui::ScaleFactor>& desired_scale_factors,
                     std::vector<chrome::FaviconBitmapResult>* bitmap_results);
 
+  void GetLargestFaviconForURL(
+      const GURL& page_url,
+      const std::vector<int>& icon_types,
+      int minimum_size_in_pixels,
+      chrome::FaviconBitmapResult* bitmap_result);
+
   void GetFaviconsForURL(
       const GURL& page_url,
       int icon_types,
@@ -318,6 +324,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       TemplateURLID keyword_id,
       const string16& prefix,
       int max_count);
+
+  void DeleteKeywordSearchTermForURL(const GURL& url);
 
 #if defined(OS_ANDROID)
   // Android Provider ---------------------------------------------------------
@@ -504,7 +512,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, RemoveVisitsSource);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, RemoveVisitsTransitions);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MigrationVisitSource);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MigrationIconMapping);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            SetFaviconMappingsForPageAndRedirects);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,

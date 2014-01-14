@@ -76,6 +76,9 @@ class ToolbarView : public views::AccessiblePaneView,
   // Returns the view to which the bookmark bubble should be anchored.
   views::View* GetBookmarkBubbleAnchor();
 
+  // Returns the view to which the Translate bubble should be anchored.
+  views::View* GetTranslateBubbleAnchor();
+
   // Accessors...
   Browser* browser() const { return browser_; }
   BrowserActionsContainer* browser_actions() const { return browser_actions_; }
@@ -105,7 +108,6 @@ class ToolbarView : public views::AccessiblePaneView,
   virtual void ShowWebsiteSettings(content::WebContents* web_contents,
                                    const GURL& url,
                                    const content::SSLStatus& ssl) OVERRIDE;
-  virtual void OnInputInProgress(bool in_progress) OVERRIDE;
 
   // Overridden from CommandObserver:
   virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
@@ -140,6 +142,10 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // Whether the wrench/hotdogs menu is currently showing.
   bool IsWrenchMenuShowing() const;
+
+  // Whether the toolbar view needs its background painted by the
+  // BrowserNonClientFrameView.
+  bool ShouldPaintBackground() const;
 
   // The apparent horizontal space between most items, and the vertical padding
   // above and below them.

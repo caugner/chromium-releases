@@ -210,8 +210,13 @@ class BrowserOptions(object):
     self.browser_user_agent_type = None
 
     self.clear_sytem_cache_for_browser_and_profile_on_start = False
+    self.startup_url = None
 
     self.keep_test_server_ports = False
+
+    # Background pages of built-in component extensions can interfere with
+    # performance measurements.
+    self.disable_component_extensions_with_background_pages = True
 
   def AddCommandLineOptions(self, parser):
     group = optparse.OptionGroup(parser, 'Browser options')
@@ -248,6 +253,12 @@ class BrowserOptions(object):
              'not be reset.')
     parser.add_option_group(group)
 
+    group = optparse.OptionGroup(parser, 'Compatibility options')
+    group.add_option('--gtest_output',
+        help='Ignored argument for compatibility with runtest.py harness')
+    parser.add_option_group(group)
+
+
   def UpdateFromParseResults(self, finder_options):
     """Copies our options from finder_options"""
     browser_options_list = [
@@ -279,6 +290,10 @@ class BrowserOptions(object):
     if self.profile_dir and self.profile_type != 'clean':
       raise Exception("It's illegal to specify both --profile-type and"
           " --profile-dir.")
+
+    if self.profile_dir and not os.path.isdir(self.profile_dir):
+      raise Exception("Directory specified by --profile-dir (%s) doesn't"
+          " exist or isn't a directory." % (self.profile_dir))
 
     if not self.profile_dir:
       self.profile_dir = profile_types.GetProfileDir(self.profile_type)

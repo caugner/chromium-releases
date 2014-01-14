@@ -162,91 +162,67 @@ void PrintDialogGtk::UseDefaultSettings() {
       gtk_print_settings_copy(g_last_used_settings.Get().settings());
   page_setup_ = gtk_page_setup_new();
 
-  // No page range to initialize for default settings.
-  PageRanges ranges_vector;
   PrintSettings settings;
-  InitPrintSettings(ranges_vector, &settings);
+  InitPrintSettings(&settings);
 }
 
-bool PrintDialogGtk::UpdateSettings(const base::DictionaryValue& job_settings,
-                                    const printing::PageRanges& ranges,
-                                    printing::PrintSettings* settings) {
-  bool collate;
-  int color;
-  bool landscape;
-  bool print_to_pdf;
-  int copies;
-  int duplex_mode;
-  std::string device_name;
-
-  if (!job_settings.GetBoolean(printing::kSettingLandscape, &landscape) ||
-      !job_settings.GetBoolean(printing::kSettingCollate, &collate) ||
-      !job_settings.GetInteger(printing::kSettingColor, &color) ||
-      !job_settings.GetBoolean(printing::kSettingPrintToPDF, &print_to_pdf) ||
-      !job_settings.GetInteger(printing::kSettingDuplexMode, &duplex_mode) ||
-      !job_settings.GetInteger(printing::kSettingCopies, &copies) ||
-      !job_settings.GetString(printing::kSettingDeviceName, &device_name)) {
-    return false;
-  }
-
-  bool is_cloud_print = job_settings.HasKey(printing::kSettingCloudPrintId);
-
+bool PrintDialogGtk::UpdateSettings(printing::PrintSettings* settings) {
   if (!gtk_settings_) {
     gtk_settings_ =
         gtk_print_settings_copy(g_last_used_settings.Get().settings());
   }
 
-  if (!print_to_pdf && !is_cloud_print) {
-    scoped_ptr<GtkPrinterList> printer_list(new GtkPrinterList);
-    printer_ = printer_list->GetPrinterWithName(device_name);
-    if (printer_) {
-      g_object_ref(printer_);
-      gtk_print_settings_set_printer(gtk_settings_,
-                                     gtk_printer_get_name(printer_));
-      if (!page_setup_) {
-        page_setup_ = gtk_printer_get_default_page_size(printer_);
-      }
+  scoped_ptr<GtkPrinterList> printer_list(new GtkPrinterList);
+  printer_ = printer_list->GetPrinterWithName(
+      UTF16ToUTF8(settings->device_name()));
+  if (printer_) {
+    g_object_ref(printer_);
+    gtk_print_settings_set_printer(gtk_settings_,
+                                   gtk_printer_get_name(printer_));
+    if (!page_setup_) {
+      page_setup_ = gtk_printer_get_default_page_size(printer_);
     }
+  }
 
-    gtk_print_settings_set_n_copies(gtk_settings_, copies);
-    gtk_print_settings_set_collate(gtk_settings_, collate);
+  gtk_print_settings_set_n_copies(gtk_settings_, settings->copies());
+  gtk_print_settings_set_collate(gtk_settings_, settings->collate());
 
 #if defined(USE_CUPS)
-    std::string color_value;
-    std::string color_setting_name;
-    printing::GetColorModelForMode(color, &color_setting_name, &color_value);
-    gtk_print_settings_set(gtk_settings_, color_setting_name.c_str(),
-                           color_value.c_str());
+  std::string color_value;
+  std::string color_setting_name;
+  printing::GetColorModelForMode(settings->color(), &color_setting_name,
+                                 &color_value);
+  gtk_print_settings_set(gtk_settings_, color_setting_name.c_str(),
+                         color_value.c_str());
 
-    if (duplex_mode != printing::UNKNOWN_DUPLEX_MODE) {
-      const char* cups_duplex_mode = NULL;
-      switch (duplex_mode) {
-        case printing::LONG_EDGE:
-          cups_duplex_mode = kDuplexNoTumble;
-          break;
-        case printing::SHORT_EDGE:
-          cups_duplex_mode = kDuplexTumble;
-          break;
-        case printing::SIMPLEX:
-          cups_duplex_mode = kDuplexNone;
-          break;
-        default:  // UNKNOWN_DUPLEX_MODE
-          NOTREACHED();
-          break;
-      }
-      gtk_print_settings_set(gtk_settings_, kCUPSDuplex, cups_duplex_mode);
+  if (settings->duplex_mode() != printing::UNKNOWN_DUPLEX_MODE) {
+    const char* cups_duplex_mode = NULL;
+    switch (settings->duplex_mode()) {
+      case printing::LONG_EDGE:
+        cups_duplex_mode = kDuplexNoTumble;
+        break;
+      case printing::SHORT_EDGE:
+        cups_duplex_mode = kDuplexTumble;
+        break;
+      case printing::SIMPLEX:
+        cups_duplex_mode = kDuplexNone;
+        break;
+      default:  // UNKNOWN_DUPLEX_MODE
+        NOTREACHED();
+        break;
     }
-#endif
+    gtk_print_settings_set(gtk_settings_, kCUPSDuplex, cups_duplex_mode);
   }
+#endif
   if (!page_setup_)
     page_setup_ = gtk_page_setup_new();
 
   gtk_print_settings_set_orientation(
       gtk_settings_,
-      landscape ? GTK_PAGE_ORIENTATION_LANDSCAPE :
-                  GTK_PAGE_ORIENTATION_PORTRAIT);
+      settings->landscape() ? GTK_PAGE_ORIENTATION_LANDSCAPE :
+                              GTK_PAGE_ORIENTATION_PORTRAIT);
 
-  InitPrintSettings(ranges, settings);
+  InitPrintSettings(settings);
   return true;
 }
 
@@ -387,9 +363,10 @@ void PrintDialogGtk::OnResponse(GtkWidget* dialog, int response_id) {
       }
 
       PrintSettings settings;
+      settings.set_ranges(ranges_vector);
+      settings.set_selection_only(print_selection_only);
       printing::PrintSettingsInitializerGtk::InitPrintSettings(
-          gtk_settings_, page_setup_, ranges_vector, print_selection_only,
-          &settings);
+          gtk_settings_, page_setup_, &settings);
       context_->InitWithSettings(settings);
       callback_.Run(PrintingContextGtk::OK);
       callback_.Reset();
@@ -452,9 +429,8 @@ void PrintDialogGtk::OnJobCompleted(GtkPrintJob* print_job, GError* error) {
   Release();
 }
 
-void PrintDialogGtk::InitPrintSettings(const PageRanges& page_ranges,
-                                       PrintSettings* settings) {
+void PrintDialogGtk::InitPrintSettings(PrintSettings* settings) {
   printing::PrintSettingsInitializerGtk::InitPrintSettings(
-      gtk_settings_, page_setup_, page_ranges, false, settings);
+      gtk_settings_, page_setup_, settings);
   context_->InitWithSettings(*settings);
 }

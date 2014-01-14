@@ -4,7 +4,6 @@
 
 #include "media/midi/midi_manager_mac.h"
 
-#include <iostream>
 #include <string>
 
 #include "base/debug/trace_event.h"
@@ -110,6 +109,7 @@ MIDIManagerMac::~MIDIManagerMac() {
     MIDIPortDispose(coremidi_output_);
 }
 
+// static
 void MIDIManagerMac::ReadMIDIDispatch(const MIDIPacketList* packet_list,
                                       void* read_proc_refcon,
                                       void* src_conn_refcon) {
@@ -133,7 +133,7 @@ void MIDIManagerMac::ReadMIDI(MIDIEndpointRef source,
   uint32 port_index = source_map_[source];
 
   // Go through each packet and process separately.
-  for(size_t i = 0; i < packet_list->numPackets; i++) {
+  for (size_t i = 0; i < packet_list->numPackets; i++) {
     // Each packet contains MIDI data for one or more messages (like note-on).
     const MIDIPacket &packet = packet_list->packet[i];
     double timestamp_seconds = MIDITimeStampToSeconds(packet.timeStamp);
@@ -177,34 +177,57 @@ void MIDIManagerMac::SendMIDIData(MIDIManagerClient* client,
   client->AccumulateMIDIBytesSent(data.size());
 }
 
+// static
 MIDIPortInfo MIDIManagerMac::GetPortInfoFromEndpoint(
     MIDIEndpointRef endpoint) {
   SInt32 id_number = 0;
   MIDIObjectGetIntegerProperty(endpoint, kMIDIPropertyUniqueID, &id_number);
   string id = IntToString(id_number);
 
+  string manufacturer;
   CFStringRef manufacturer_ref = NULL;
-  MIDIObjectGetStringProperty(
+  OSStatus result = MIDIObjectGetStringProperty(
       endpoint, kMIDIPropertyManufacturer, &manufacturer_ref);
-  string manufacturer = SysCFStringRefToUTF8(manufacturer_ref);
+  if (result == noErr) {
+    manufacturer = SysCFStringRefToUTF8(manufacturer_ref);
+  } else {
+    // kMIDIPropertyManufacturer is not supported in IAC driver providing
+    // endpoints, and the result will be kMIDIUnknownProperty (-10835).
+    DLOG(WARNING) << "Failed to get kMIDIPropertyManufacturer with status "
+                  << result;
+  }
 
+  string name;
   CFStringRef name_ref = NULL;
-  MIDIObjectGetStringProperty(endpoint, kMIDIPropertyName, &name_ref);
-  string name = SysCFStringRefToUTF8(name_ref);
+  result = MIDIObjectGetStringProperty(endpoint, kMIDIPropertyName, &name_ref);
+  if (result == noErr)
+    name = SysCFStringRefToUTF8(name_ref);
+  else
+    DLOG(WARNING) << "Failed to get kMIDIPropertyName with status " << result;
 
+  string version;
   SInt32 version_number = 0;
-  MIDIObjectGetIntegerProperty(
+  result = MIDIObjectGetIntegerProperty(
       endpoint, kMIDIPropertyDriverVersion, &version_number);
-  string version = IntToString(version_number);
+  if (result == noErr) {
+    version = IntToString(version_number);
+  } else {
+    // kMIDIPropertyDriverVersion is not supported in IAC driver providing
+    // endpoints, and the result will be kMIDIUnknownProperty (-10835).
+    DLOG(WARNING) << "Failed to get kMIDIPropertyDriverVersion with status "
+                  << result;
+  }
 
   return MIDIPortInfo(id, manufacturer, name, version);
 }
 
+// static
 double MIDIManagerMac::MIDITimeStampToSeconds(MIDITimeStamp timestamp) {
   UInt64 nanoseconds = AudioConvertHostTimeToNanos(timestamp);
   return static_cast<double>(nanoseconds) / 1.0e9;
 }
 
+// static
 MIDITimeStamp MIDIManagerMac::SecondsToMIDITimeStamp(double seconds) {
   UInt64 nanos = UInt64(seconds * 1.0e9);
   return AudioConvertNanosToHostTime(nanos);

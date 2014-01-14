@@ -43,15 +43,15 @@
 /* This is a bodge to allow this code to be compiled against older NSS
  * headers. */
 #ifndef CKM_NSS_CHACHA20_POLY1305
-#define CKM_NSS_CHACHA20_POLY1305               (CKM_NSS + 25)
+#define CKM_NSS_CHACHA20_POLY1305               (CKM_NSS + 26)
 
-typedef struct CK_AEAD_PARAMS {
-  CK_BYTE_PTR  pIv;  /* This is the nonce. */
-  CK_ULONG     ulIvLen;
-  CK_BYTE_PTR  pAAD;
-  CK_ULONG     ulAADLen;
-  CK_ULONG     ulTagBits;
-} CK_AEAD_PARAMS;
+typedef struct CK_NSS_AEAD_PARAMS {
+    CK_BYTE_PTR  pIv;  /* This is the nonce. */
+    CK_ULONG     ulIvLen;
+    CK_BYTE_PTR  pAAD;
+    CK_ULONG     ulAADLen;
+    CK_ULONG     ulTagLen;
+} CK_NSS_AEAD_PARAMS;
 
 #endif
 
@@ -631,8 +631,9 @@ void SSL_AtomicIncrementLong(long * x)
 }
 
 static PRBool
-ssl3_CipherSuiteAllowedForVersion(ssl3CipherSuite cipherSuite,
-				  SSL3ProtocolVersion version)
+ssl3_CipherSuiteAllowedForVersionRange(
+    ssl3CipherSuite cipherSuite,
+    const SSLVersionRange *vrange)
 {
     switch (cipherSuite) {
     /* See RFC 4346 A.5. Export cipher suites must not be used in TLS 1.1 or
@@ -649,7 +650,9 @@ ssl3_CipherSuiteAllowedForVersion(ssl3CipherSuite cipherSuite,
      *   SSL_DH_ANON_EXPORT_WITH_RC4_40_MD5:     never implemented
      *   SSL_DH_ANON_EXPORT_WITH_DES40_CBC_SHA:  never implemented
      */
-	return version <= SSL_LIBRARY_VERSION_TLS_1_0;
+	return vrange->min <= SSL_LIBRARY_VERSION_TLS_1_0;
+    case TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305:
+    case TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305:
     case TLS_DHE_RSA_WITH_AES_256_CBC_SHA256:
     case TLS_RSA_WITH_AES_256_CBC_SHA256:
     case TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256:
@@ -661,7 +664,7 @@ ssl3_CipherSuiteAllowedForVersion(ssl3CipherSuite cipherSuite,
     case TLS_RSA_WITH_AES_128_CBC_SHA256:
     case TLS_RSA_WITH_AES_128_GCM_SHA256:
     case TLS_RSA_WITH_NULL_SHA256:
-	return version >= SSL_LIBRARY_VERSION_TLS_1_2;
+	return vrange->max >= SSL_LIBRARY_VERSION_TLS_1_2;
     default:
 	return PR_TRUE;
     }
@@ -804,7 +807,8 @@ ssl3_config_match_init(sslSocket *ss)
 }
 
 
-/* return PR_TRUE if suite matches policy and enabled state */
+/* return PR_TRUE if suite matches policy, enabled state and is applicable to
+ * the given version range. */
 /* It would be a REALLY BAD THING (tm) if we ever permitted the use
 ** of a cipher that was NOT_ALLOWED.  So, if this is ever called with
 ** policy == SSL_NOT_ALLOWED, report no match.
@@ -812,7 +816,8 @@ ssl3_config_match_init(sslSocket *ss)
 /* adjust suite enabled to the availability of a token that can do the
  * cipher suite. */
 static PRBool
-config_match(ssl3CipherSuiteCfg *suite, int policy, PRBool enabled)
+config_match(ssl3CipherSuiteCfg *suite, int policy, PRBool enabled,
+	     const SSLVersionRange *vrange)
 {
     PORT_Assert(policy != SSL_NOT_ALLOWED && enabled != PR_FALSE);
     if (policy == SSL_NOT_ALLOWED || !enabled)
@@ -820,10 +825,13 @@ config_match(ssl3CipherSuiteCfg *suite, int policy, PRBool enabled)
     return (PRBool)(suite->enabled &&
                     suite->isPresent &&
 	            suite->policy != SSL_NOT_ALLOWED &&
-		    suite->policy <= policy);
+		    suite->policy <= policy &&
+		    ssl3_CipherSuiteAllowedForVersionRange(
+                        suite->cipher_suite, vrange));
 }
 
-/* return number of cipher suites that match policy and enabled state */
+/* return number of cipher suites that match policy, enabled state and are
+ * applicable for the configured protocol version range. */
 /* called from ssl3_SendClientHello and ssl3_ConstructV2CipherSpecsHack */
 static int
 count_cipher_suites(sslSocket *ss, int policy, PRBool enabled)
@@ -834,7 +842,7 @@ count_cipher_suites(sslSocket *ss, int policy, PRBool enabled)
     	return 0;
     }
     for (i = 0; i < ssl_V3_SUITES_IMPLEMENTED; i++) {
-	if (config_match(&ss->cipherSuites[i], policy, enabled))
+	if (config_match(&ss->cipherSuites[i], policy, enabled, &ss->vrange))
 	    count++;
     }
     if (count <= 0) {
@@ -851,6 +859,11 @@ static SECStatus
 Null_Cipher(void *ctx, unsigned char *output, int *outputLen, int maxOutputLen,
 	    const unsigned char *input, int inputLen)
 {
+    if (inputLen > maxOutputLen) {
+        *outputLen = 0;  /* Match PK11_CipherOp in setting outputLen */
+        PORT_SetError(SEC_ERROR_OUTPUT_LEN);
+        return SECFailure;
+    }
     *outputLen = inputLen;
     if (input != output)
 	PORT_Memcpy(output, input, inputLen);
@@ -2056,18 +2069,18 @@ ssl3_ChaCha20Poly1305(
     SECItem            param;
     SECStatus          rv = SECFailure;
     unsigned int       uOutLen;
-    CK_AEAD_PARAMS     aeadParams;
+    CK_NSS_AEAD_PARAMS aeadParams;
     static const int   tagSize = 16;
 
     param.type = siBuffer;
     param.len = sizeof(aeadParams);
     param.data = (unsigned char *) &aeadParams;
-    memset(&aeadParams, 0, sizeof(CK_AEAD_PARAMS));
+    memset(&aeadParams, 0, sizeof(aeadParams));
     aeadParams.pIv = (unsigned char *) additionalData;
     aeadParams.ulIvLen = 8;
     aeadParams.pAAD = (unsigned char *) additionalData;
     aeadParams.ulAADLen = additionalDataLen;
-    aeadParams.ulTagBits = tagSize * 8;
+    aeadParams.ulTagLen = tagSize;
 
     if (doDecrypt) {
 	rv = pk11_decrypt(keys->write_key, CKM_NSS_CHACHA20_POLY1305, &param,
@@ -2857,12 +2870,14 @@ ssl3_CompressMACEncryptRecord(ssl3CipherSpec *   cwSpec,
  *    Forces the use of the provided epoch
  * ssl_SEND_FLAG_CAP_RECORD_VERSION
  *    Caps the record layer version number of TLS ClientHello to { 3, 1 }
- *    (TLS 1.0). Some TLS 1.0 servers (which seem to use F5 BIG-IP) ignore 
+ *    (TLS 1.0). Some TLS 1.0 servers (which seem to use F5 BIG-IP) ignore
  *    ClientHello.client_version and use the record layer version number
  *    (TLSPlaintext.version) instead when negotiating protocol versions. In
  *    addition, if the record layer version number of ClientHello is { 3, 2 }
- *    (TLS 1.1) or higher, these servers reset the TCP connections. Set this
- *    flag to work around such servers.
+ *    (TLS 1.1) or higher, these servers reset the TCP connections. Lastly,
+ *    some F5 BIG-IP servers hang if a record containing a ClientHello has a
+ *    version greater than 0x0301 and a length greater than 255. Set this flag
+ *    to work around such servers.
  */
 PRInt32
 ssl3_SendRecord(   sslSocket *        ss,
@@ -2880,7 +2895,7 @@ ssl3_SendRecord(   sslSocket *        ss,
     SSL_TRC(3, ("%d: SSL3[%d] SendRecord type: %s nIn=%d",
 		SSL_GETPID(), ss->fd, ssl3_DecodeContentType(type),
 		nIn));
-    PRINT_BUF(3, (ss, "Send record (plain text)", pIn, nIn));
+    PRINT_BUF(50, (ss, "Send record (plain text)", pIn, nIn));
 
     PORT_Assert( ss->opt.noLocks || ssl_HaveXmitBufLock(ss) );
 
@@ -5294,7 +5309,7 @@ ssl3_SendClientHello(sslSocket *ss, PRBool resending)
     }
     for (i = 0; i < ssl_V3_SUITES_IMPLEMENTED; i++) {
 	ssl3CipherSuiteCfg *suite = &ss->cipherSuites[i];
-	if (config_match(suite, ss->ssl3.policy, PR_TRUE)) {
+	if (config_match(suite, ss->ssl3.policy, PR_TRUE, &ss->vrange)) {
 	    actual_count++;
 	    if (actual_count > num_suites) {
 		/* set error card removal/insertion error */
@@ -5355,7 +5370,7 @@ ssl3_SendClientHello(sslSocket *ss, PRBool resending)
     }
 
     flags = 0;
-    if (!ss->firstHsDone && !requestingResume && !IS_DTLS(ss)) {
+    if (!ss->firstHsDone && !IS_DTLS(ss)) {
 	flags |= ssl_SEND_FLAG_CAP_RECORD_VERSION;
     }
     rv = ssl3_FlushHandshake(ss, flags);
@@ -6359,14 +6374,18 @@ ssl3_HandleServerHello(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
     for (i = 0; i < ssl_V3_SUITES_IMPLEMENTED; i++) {
 	ssl3CipherSuiteCfg *suite = &ss->cipherSuites[i];
 	if (temp == suite->cipher_suite) {
-	    if (!config_match(suite, ss->ssl3.policy, PR_TRUE)) {
+	    SSLVersionRange vrange = {ss->version, ss->version};
+	    if (!config_match(suite, ss->ssl3.policy, PR_TRUE, &vrange)) {
+		/* config_match already checks whether the cipher suite is
+		 * acceptable for the version, but the check is repeated here
+		 * in order to give a more precise error code. */
+		if (!ssl3_CipherSuiteAllowedForVersionRange(temp, &vrange)) {
+		    desc    = handshake_failure;
+		    errCode = SSL_ERROR_CIPHER_DISALLOWED_FOR_VERSION;
+		    goto alert_loser;
+		}
+
 		break;	/* failure */
-	    }
-	    if (!ssl3_CipherSuiteAllowedForVersion(suite->cipher_suite,
-						   ss->version)) {
-		desc    = handshake_failure;
-		errCode = SSL_ERROR_CIPHER_DISALLOWED_FOR_VERSION;
-		goto alert_loser;
 	    }
 	
 	    suite_found = PR_TRUE;
@@ -7330,35 +7349,42 @@ ssl3_RestartHandshakeAfterCertReq(sslSocket *         ss,
     return rv;
 }
 
-PRBool
-ssl3_CanFalseStart(sslSocket *ss) {
-    PRBool rv;
+static SECStatus
+ssl3_CheckFalseStart(sslSocket *ss)
+{
+    SECStatus rv;
+    PRBool maybeFalseStart = PR_TRUE;
 
     PORT_Assert( ss->opt.noLocks || ssl_HaveSSL3HandshakeLock(ss) );
+    PORT_Assert( !ss->ssl3.hs.authCertificatePending );
 
-    /* XXX: does not take into account whether we are waiting for
-     * SSL_AuthCertificateComplete or SSL_RestartHandshakeAfterCertReq. If/when
-     * that is done, this function could return different results each time it
-     * would be called.
-     */
+    /* An attacker can control the selected ciphersuite so we only wish to
+     * do False Start in the case that the selected ciphersuite is
+     * sufficiently strong that the attack can gain no advantage.
+     * Therefore we always require an 80-bit cipher. */
 
     ssl_GetSpecReadLock(ss);
-    rv = ss->opt.enableFalseStart &&
-	 !ss->sec.isServer &&
-	 !ss->ssl3.hs.isResuming &&
-	 ss->ssl3.cwSpec &&
-
-	 /* An attacker can control the selected ciphersuite so we only wish to
-	  * do False Start in the case that the selected ciphersuite is
-	  * sufficiently strong that the attack can gain no advantage.
-	  * Therefore we require an 80-bit cipher and a forward-secret key
-	  * exchange. */
-	 ss->ssl3.cwSpec->cipher_def->secret_key_size >= 10 &&
-	(ss->ssl3.hs.kea_def->kea == kea_dhe_dss ||
-	 ss->ssl3.hs.kea_def->kea == kea_dhe_rsa ||
-	 ss->ssl3.hs.kea_def->kea == kea_ecdhe_ecdsa ||
-	 ss->ssl3.hs.kea_def->kea == kea_ecdhe_rsa);
+    if (ss->ssl3.cwSpec->cipher_def->secret_key_size < 10) {
+	ss->ssl3.hs.canFalseStart = PR_FALSE;
+	maybeFalseStart = PR_FALSE;
+    }
     ssl_ReleaseSpecReadLock(ss);
+    if (!maybeFalseStart) {
+	return SECSuccess;
+    }
+
+    if (!ss->canFalseStartCallback) {
+	rv = SSL_DefaultCanFalseStart(ss->fd, &ss->ssl3.hs.canFalseStart);
+    } else {
+	rv = (ss->canFalseStartCallback)(ss->fd,
+ 					 ss->canFalseStartCallbackData,
+					 &ss->ssl3.hs.canFalseStart);
+    }
+
+    if (rv != SECSuccess) {
+	ss->ssl3.hs.canFalseStart = PR_FALSE;
+    }
+
     return rv;
 }
 
@@ -7486,18 +7512,57 @@ ssl3_SendClientSecondRound(sslSocket *ss)
 	goto loser;	/* err code was set. */
     }
 
-    /* XXX: If the server's certificate hasn't been authenticated by this
-     * point, then we may be leaking this NPN message to an attacker.
+    /* This must be done after we've set ss->ssl3.cwSpec in
+     * ssl3_SendChangeCipherSpecs because SSL_GetChannelInfo uses information
+     * from cwSpec. This must be done before we call ssl3_CheckFalseStart
+     * because the false start callback (if any) may need the information from
+     * the functions that depend on this being set.
      */
+    ss->enoughFirstHsDone = PR_TRUE;
+
     if (!ss->firstHsDone) {
+	/* XXX: If the server's certificate hasn't been authenticated by this
+	 * point, then we may be leaking this NPN message to an attacker.
+	 */
 	rv = ssl3_SendNextProto(ss);
 	if (rv != SECSuccess) {
 	    goto loser;	/* err code was set. */
 	}
     }
+
     rv = ssl3_SendEncryptedExtensions(ss);
     if (rv != SECSuccess) {
 	goto loser; /* err code was set. */
+    }
+
+    if (!ss->firstHsDone) {
+	if (ss->opt.enableFalseStart) {
+	    if (!ss->ssl3.hs.authCertificatePending) {
+		/* When we fix bug 589047, we will need to know whether we are
+		 * false starting before we try to flush the client second
+		 * round to the network. With that in mind, we purposefully
+		 * call ssl3_CheckFalseStart before calling ssl3_SendFinished,
+		 * which includes a call to ssl3_FlushHandshake, so that
+		 * no application develops a reliance on such flushing being
+                 * done before its false start callback is called.
+		 */
+		ssl_ReleaseXmitBufLock(ss);
+		rv = ssl3_CheckFalseStart(ss);
+		ssl_GetXmitBufLock(ss);
+		if (rv != SECSuccess) {
+		    goto loser;
+		}
+	    } else {
+		/* The certificate authentication and the server's Finished
+		 * message are racing each other. If the certificate
+		 * authentication wins, then we will try to false start in
+		 * ssl3_AuthCertificateComplete.
+		 */
+		SSL_TRC(3, ("%d: SSL3[%p]: deferring false start check because"
+			    " certificate authentication is still pending.",
+			    SSL_GETPID(), ss->fd));
+	    }
+	}
     }
 
     rv = ssl3_SendFinished(ss, 0);
@@ -7512,8 +7577,16 @@ ssl3_SendClientSecondRound(sslSocket *ss)
     else
 	ss->ssl3.hs.ws = wait_change_cipher;
 
-    /* Do the handshake callback for sslv3 here, if we can false start. */
-    if (ss->handshakeCallback != NULL && ssl3_CanFalseStart(ss)) {
+    if (ss->handshakeCallback &&
+	(ss->ssl3.hs.canFalseStart && !ss->canFalseStartCallback)) {
+	/* Call the handshake callback here for backwards compatibility with
+	 * applications that were using false start before
+	 * canFalseStartCallback was added. Note that we do this after calling
+	 * ssl3_SendFinished, which includes a call to ssl3_FlushHandshake,
+	 * just in case the application is relying on having the handshake
+	 * messages flushed to the network before its handshake callback is
+	 * called.
+	 */
 	(ss->handshakeCallback)(ss->fd, ss->handshakeCallbackData);
     }
 
@@ -8008,6 +8081,9 @@ ssl3_HandleClientHello(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
     */
     if (sid) do {
 	ssl3CipherSuiteCfg *suite;
+#ifdef PARANOID
+	SSLVersionRange vrange = {ss->version, ss->version};
+#endif
 
 	/* Check that the cached compression method is still enabled. */
 	if (!compressionEnabled(ss, sid->u.ssl3.compression))
@@ -8036,7 +8112,7 @@ ssl3_HandleClientHello(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	 * The product policy won't change during the process lifetime.  
 	 * Implemented ("isPresent") shouldn't change for servers.
 	 */
-	if (!config_match(suite, ss->ssl3.policy, PR_TRUE))
+	if (!config_match(suite, ss->ssl3.policy, PR_TRUE, &vrange))
 	    break;
 #else
 	if (!suite->enabled)
@@ -8084,9 +8160,8 @@ ssl3_HandleClientHello(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
     */
     for (j = 0; j < ssl_V3_SUITES_IMPLEMENTED; j++) {
 	ssl3CipherSuiteCfg *suite = &ss->cipherSuites[j];
-	if (!config_match(suite, ss->ssl3.policy, PR_TRUE) ||
-	    !ssl3_CipherSuiteAllowedForVersion(suite->cipher_suite,
-					       ss->version)) {
+	SSLVersionRange vrange = {ss->version, ss->version};
+	if (!config_match(suite, ss->ssl3.policy, PR_TRUE, &vrange)) {
 	    continue;
 	}
 	for (i = 0; i + 1 < suites.len; i += 2) {
@@ -8619,9 +8694,8 @@ ssl3_HandleV2ClientHello(sslSocket *ss, unsigned char *buffer, int length)
     */
     for (j = 0; j < ssl_V3_SUITES_IMPLEMENTED; j++) {
 	ssl3CipherSuiteCfg *suite = &ss->cipherSuites[j];
-	if (!config_match(suite, ss->ssl3.policy, PR_TRUE) ||
-	    !ssl3_CipherSuiteAllowedForVersion(suite->cipher_suite,
-					       ss->version)) {
+	SSLVersionRange vrange = {ss->version, ss->version};
+	if (!config_match(suite, ss->ssl3.policy, PR_TRUE, &vrange)) {
 	    continue;
 	}
 	for (i = 0; i+2 < suite_length; i += 3) {
@@ -10132,13 +10206,6 @@ ssl3_AuthCertificate(sslSocket *ss)
 
 	    ss->ssl3.hs.authCertificatePending = PR_TRUE;
 	    rv = SECSuccess;
-
-	    /* XXX: Async cert validation and False Start don't work together
-	     * safely yet; if we leave False Start enabled, we may end up false
-	     * starting (sending application data) before we
-	     * SSL_AuthCertificateComplete has been called.
-	     */
-	    ss->opt.enableFalseStart = PR_FALSE;
 	}
 
 	if (rv != SECSuccess) {
@@ -10263,6 +10330,12 @@ ssl3_AuthCertificateComplete(sslSocket *ss, PRErrorCode error)
     } else if (ss->ssl3.hs.restartTarget != NULL) {
 	sslRestartTarget target = ss->ssl3.hs.restartTarget;
 	ss->ssl3.hs.restartTarget = NULL;
+
+	if (target == ssl3_FinishHandshake) {
+	    SSL_TRC(3,("%d: SSL3[%p]: certificate authentication lost the race"
+		       " with peer's finished message", SSL_GETPID(), ss->fd));
+	}
+
 	rv = target(ss);
 	/* Even if we blocked here, we have accomplished enough to claim
 	 * success. Any remaining work will be taken care of by subsequent
@@ -10272,7 +10345,39 @@ ssl3_AuthCertificateComplete(sslSocket *ss, PRErrorCode error)
 	    rv = SECSuccess;
 	}
     } else {
-	rv = SECSuccess;
+	SSL_TRC(3, ("%d: SSL3[%p]: certificate authentication won the race"
+        	    " with peer's finished message", SSL_GETPID(), ss->fd));
+
+	PORT_Assert(!ss->firstHsDone);
+	PORT_Assert(!ss->sec.isServer);
+	PORT_Assert(!ss->ssl3.hs.isResuming);
+	PORT_Assert(ss->ssl3.hs.ws == wait_change_cipher ||
+		    ss->ssl3.hs.ws == wait_finished ||		
+		    ss->ssl3.hs.ws == wait_new_session_ticket);
+
+	/* ssl3_SendClientSecondRound deferred the false start check because
+	 * certificate authentication was pending, so we have to do it now.
+	 */
+	if (ss->opt.enableFalseStart &&
+	    !ss->firstHsDone &&
+	    !ss->sec.isServer &&
+	    !ss->ssl3.hs.isResuming &&
+	    (ss->ssl3.hs.ws == wait_change_cipher ||
+	     ss->ssl3.hs.ws == wait_finished ||		
+	     ss->ssl3.hs.ws == wait_new_session_ticket)) {
+	    rv = ssl3_CheckFalseStart(ss);
+	    if (rv == SECSuccess &&
+		ss->handshakeCallback &&
+		(ss->ssl3.hs.canFalseStart && !ss->canFalseStartCallback)) {
+		/* Call the handshake callback here for backwards compatibility
+		 * with applications that were using false start before
+		 * canFalseStartCallback was added.
+		 */
+		(ss->handshakeCallback)(ss->fd, ss->handshakeCallbackData);
+	    }
+	} else {
+	    rv = SECSuccess;
+	}
     }
 
 done:
@@ -10968,6 +11073,8 @@ xmit_loser:
 SECStatus
 ssl3_FinishHandshake(sslSocket * ss)
 {
+    PRBool falseStarted;
+
     PORT_Assert( ss->opt.noLocks || ssl_HaveRecvBufLock(ss) );
     PORT_Assert( ss->opt.noLocks || ssl_HaveSSL3HandshakeLock(ss) );
     PORT_Assert( ss->ssl3.hs.restartTarget == NULL );
@@ -10975,6 +11082,7 @@ ssl3_FinishHandshake(sslSocket * ss)
     /* The first handshake is now completed. */
     ss->handshake           = NULL;
     ss->firstHsDone         = PR_TRUE;
+    ss->enoughFirstHsDone   = PR_TRUE;
 
     if (ss->ssl3.hs.cacheSID) {
 	(*ss->sec.cache)(ss->sec.ci.sid);
@@ -10982,9 +11090,14 @@ ssl3_FinishHandshake(sslSocket * ss)
     }
 
     ss->ssl3.hs.ws = idle_handshake;
+    falseStarted = ss->ssl3.hs.canFalseStart;
+    ss->ssl3.hs.canFalseStart = PR_FALSE; /* False Start phase is complete */
 
-    /* Do the handshake callback for sslv3 here, if we cannot false start. */
-    if (ss->handshakeCallback != NULL && !ssl3_CanFalseStart(ss)) {
+    /* Call the handshake callback for sslv3 here, unless we called it already
+     * for the case where false start was done without a canFalseStartCallback.
+     */
+    if (ss->handshakeCallback &&
+	!(falseStarted && !ss->canFalseStartCallback)) {
 	(ss->handshakeCallback)(ss->fd, ss->handshakeCallbackData);
     }
 
@@ -12324,7 +12437,7 @@ ssl3_ConstructV2CipherSpecsHack(sslSocket *ss, unsigned char *cs, int *size)
     /* ssl3_config_match_init was called by the caller of this function. */
     for (i = 0; i < ssl_V3_SUITES_IMPLEMENTED; i++) {
 	ssl3CipherSuiteCfg *suite = &ss->cipherSuites[i];
-	if (config_match(suite, SSL_ALLOWED, PR_TRUE)) {
+	if (config_match(suite, SSL_ALLOWED, PR_TRUE, &ss->vrange)) {
 	    if (cs != NULL) {
 		*cs++ = 0x00;
 		*cs++ = (suite->cipher_suite >> 8) & 0xFF;

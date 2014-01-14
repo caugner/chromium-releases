@@ -5,7 +5,7 @@
 #ifndef ASH_WM_APP_LIST_CONTROLLER_H_
 #define ASH_WM_APP_LIST_CONTROLLER_H_
 
-#include "ash/launcher/launcher_icon_observer.h"
+#include "ash/shelf/shelf_icon_observer.h"
 #include "ash/shell_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -45,7 +45,7 @@ class AppListController : public ui::EventHandler,
                           public ui::ImplicitAnimationObserver,
                           public views::WidgetObserver,
                           public ShellObserver,
-                          public LauncherIconObserver,
+                          public ShelfIconObserver,
                           public app_list::PaginationModelObserver {
  public:
   AppListController();
@@ -65,6 +65,9 @@ class AppListController : public ui::EventHandler,
 
   // Returns app list window or NULL if it is not visible.
   aura::Window* GetWindow();
+
+  // Returns app list view or NULL if it is not visible.
+  app_list::AppListView* GetView() { return view_; }
 
  private:
   friend class test::AppListControllerTestApi;
@@ -108,10 +111,10 @@ class AppListController : public ui::EventHandler,
   virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
   // ShellObserver overrides:
-  virtual void OnShelfAlignmentChanged(aura::RootWindow* root_window) OVERRIDE;
+  virtual void OnShelfAlignmentChanged(aura::Window* root_window) OVERRIDE;
 
-  // LauncherIconObserver overrides:
-  virtual void OnLauncherIconPositionsChanged() OVERRIDE;
+  // ShelfIconObserver overrides:
+  virtual void OnShelfIconPositionsChanged() OVERRIDE;
 
   // app_list::PaginationModelObserver overrides:
   virtual void TotalPagesChanged() OVERRIDE;

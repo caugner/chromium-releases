@@ -33,13 +33,6 @@ const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
 const char kAshDebugShowPreferredNetworks[] =
     "ash-debug-show-preferred-networks";
 
-// Default wallpaper to use in guest mode (as paths to trusted,
-// non-user-writable JPEG files).
-const char kAshDefaultGuestWallpaperLarge[] =
-    "ash-default-guest-wallpaper-large";
-const char kAshDefaultGuestWallpaperSmall[] =
-    "ash-default-guest-wallpaper-small";
-
 // Default wallpaper to use (as paths to trusted, non-user-writable JPEG files).
 const char kAshDefaultWallpaperLarge[] = "ash-default-wallpaper-large";
 const char kAshDefaultWallpaperSmall[] = "ash-default-wallpaper-small";
@@ -68,17 +61,7 @@ const char kAshDisableAutoMaximizing[] = "ash-disable-auto-maximizing";
 const char kAshDisableDisplayChangeLimiter[] =
     "ash-disable-display-change-limiter";
 
-// If present new lock animations are enabled.
-const char kAshDisableNewLockAnimations[] = "ash-disable-new-lock-animations";
-
-// Disable immersive fullscreen mode, regardless of default setting.
-const char kAshDisableImmersiveFullscreen[] =
-    "ash-disable-immersive-fullscreen";
-
 #if defined(OS_CHROMEOS)
-// Disable compositor based mirroring.
-const char kAshDisableSoftwareMirroring[] = "ash-disable-software-mirroring";
-
 // Disable the notification when a low-power USB charger is connected.
 const char kAshDisableUsbChargerNotification[] =
     "ash-disable-usb-charger-notification";
@@ -111,22 +94,21 @@ const char kAshEnableDockedWindows[] = "ash-enable-docked-windows";
 // Disable dragging items off the shelf to unpin them.
 const char kAshDisableDragOffShelf[] = "ash-disable-drag-off-shelf";
 
-// Enable immersive fullscreen mode, regardless of default setting.
-const char kAshEnableImmersiveFullscreen[] = "ash-enable-immersive-fullscreen";
+#if defined(OS_CHROMEOS)
+// Enables the "full multi profile mode" - as it was in M-31.
+const char kAshEnableFullMultiProfileMode[] =
+    "ash-enable-full-multi-profile-mode";
+#endif
 
 #if defined(OS_LINUX)
 // Enable memory monitoring.
 const char kAshEnableMemoryMonitor[] = "ash-enable-memory-monitor";
 #endif
-#if defined(OS_CHROMEOS)
-// Enable the shelf menu for multi profile usage.
-const char kAshEnableMultiProfileShelfMenu[] = "ash-enable-multi-profile-shelf";
-#endif
 // Enables the Oak tree viewer.
 const char kAshEnableOak[] = "ash-enable-oak";
 
-// Enables overview mode for window switching.
-const char kAshEnableOverviewMode[] = "ash-enable-overview-mode";
+// Disables overview mode for window switching.
+const char kAshDisableOverviewMode[] = "ash-disable-overview-mode";
 
 // Enables software based mirroring.
 const char kAshEnableSoftwareMirroring[] = "ash-enable-software-mirroring";
@@ -140,6 +122,11 @@ const char kAshEnableTrayDragging[] = "ash-enable-tray-dragging";
 // Forces chrome to use mirror mode when an external display is connected.
 const char kAshForceMirrorMode[] = "ash-force-mirror-mode";
 
+// Wallpaper to use in guest mode (as paths to trusted, non-user-writable JPEG
+// files).
+const char kAshGuestWallpaperLarge[] = "ash-guest-wallpaper-large";
+const char kAshGuestWallpaperSmall[] = "ash-guest-wallpaper-small";
+
 // Hides notifications that are irrelevant to Chrome OS device factory testing,
 // such as battery level updates.
 const char kAshHideNotificationsForFactory[] =
@@ -151,10 +138,13 @@ const char kAshHideNotificationsForFactory[] =
 // "1024x768*2" sets the scale factor to 2 for a high DPI display.
 const char kAshHostWindowBounds[] = "ash-host-window-bounds";
 
-// Hides the small tab indicators at the top of the screen during immersive
-// fullscreen mode.
-const char kAshImmersiveHideTabIndicators[] =
-    "ash-immersive-hide-tab-indicators";
+// OEM-supplied wallpaper (as paths to trusted, non-user-writable JPEG files).
+const char kAshOemWallpaperLarge[] = "ash-oem-wallpaper-large";
+const char kAshOemWallpaperSmall[] = "ash-oem-wallpaper-small";
+
+// Specifies the delay in milliseconds before beginning overview mode after
+// getting an alt tab keypress.
+const char kAshOverviewDelayOnAltTab[] = "ash-overview-delay-on-alt-tab";
 
 // Specifies the layout mode and offsets for the secondary display for
 // testing. The format is "<t|r|b|l>,<offset>" where t=TOP, r=RIGHT,
@@ -199,10 +189,6 @@ const char kForceAshToDesktop[] = "ash-force-desktop";
 const char kAshDisableDragAndDropAppListToLauncher[] =
     "ash-disable-drag-and-drop-applist-to-launcher";
 
-// Enables a mode which enforces all browser & application windows to be created
-// in maximized mode.
-const char kForcedMaximizeMode[] = "forced-maximize-mode";
-
 bool UseAlternateFrameCaptionButtonStyle() {
   return CommandLine::ForCurrentProcess()->
       HasSwitch(kAshEnableAlternateFrameCaptionButtonStyle);
@@ -223,14 +209,18 @@ bool ShowShelfAlignmentMenu() {
       HasSwitch(kHideShelfAlignmentMenu);
 }
 
-// Returns true if the MultiProfile shelf menu should be shown.
-bool ShowMultiProfileShelfMenu() {
+// Returns true if the full multi profile mode (M-31 version) is active.
+bool UseFullMultiProfileMode() {
 #if defined(OS_CHROMEOS)
   return CommandLine::ForCurrentProcess()->
-      HasSwitch(kAshEnableMultiProfileShelfMenu);
+      HasSwitch(kAshEnableFullMultiProfileMode);
 #else
   return false;
 #endif
+}
+
+bool UseOverviewMode() {
+  return !CommandLine::ForCurrentProcess()->HasSwitch(kAshDisableOverviewMode);
 }
 
 #if defined(OS_CHROMEOS)

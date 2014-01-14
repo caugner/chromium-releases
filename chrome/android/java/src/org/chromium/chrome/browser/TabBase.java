@@ -5,12 +5,16 @@
 package org.chromium.chrome.browser;
 
 import android.app.Activity;
+import android.app.Dialog;
 import android.content.Context;
 import android.graphics.Color;
 import android.view.View;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ObserverList;
+import org.chromium.chrome.browser.RepostFormWarningDialog;
+import org.chromium.chrome.browser.infobar.AutoLoginProcessor;
+import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ui.toolbar.ToolbarModelSecurityLevel;
 import org.chromium.content.browser.ContentView;
@@ -22,6 +26,7 @@ import org.chromium.content.browser.PageInfo;
 import org.chromium.content.browser.WebContentsObserverAndroid;
 import org.chromium.ui.WindowAndroid;
 
+import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -67,6 +72,12 @@ public abstract class TabBase implements NavigationClient {
     /** The {@link ContentView} showing the current page or {@code null} if the tab is frozen. */
     private ContentView mContentView;
 
+    /** InfoBar container to show InfoBars for this tab. */
+    private InfoBarContainer mInfoBarContainer;
+
+    /** The sync id of the TabBase if session sync is enabled. */
+    private int mSyncId;
+
     /**
      * The {@link ContentViewCore} for the current page, provided for convenience. This always
      * equals {@link ContentView#getContentViewCore()}, or {@code null} if mContentView is
@@ -74,11 +85,15 @@ public abstract class TabBase implements NavigationClient {
      */
     private ContentViewCore mContentViewCore;
 
-    // Observers and Delegates.
+    /**
+     * A list of TabBase observers.  These are used to broadcast TabBase events to listeners.
+     */
+    private final ObserverList<TabObserver> mObservers = new ObserverList<TabObserver>();
+
+    // Content layer Observers and Delegates
     private ContentViewClient mContentViewClient;
     private WebContentsObserverAndroid mWebContentsObserver;
     private TabBaseChromeWebContentsDelegateAndroid mWebContentsDelegate;
-    private ObserverList<TabObserver> mObservers = new ObserverList<TabObserver>();
 
     /**
      * A basic {@link ChromeWebContentsDelegateAndroid} that forwards some calls to the registered
@@ -96,6 +111,53 @@ public abstract class TabBase implements NavigationClient {
         @Override
         public void onUpdateUrl(String url) {
             for (TabObserver observer : mObservers) observer.onUpdateUrl(TabBase.this, url);
+        }
+
+        @Override
+        public void showRepostFormWarningDialog(final ContentViewCore contentViewCore) {
+            RepostFormWarningDialog warningDialog = new RepostFormWarningDialog(
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            contentViewCore.cancelPendingReload();
+                        }
+                    }, new Runnable() {
+                        @Override
+                        public void run() {
+                            contentViewCore.continuePendingReload();
+                        }
+                    });
+            Activity activity = (Activity)mContext;
+            warningDialog.show(activity.getFragmentManager(), null);
+        }
+
+        @Override
+        public void toggleFullscreenModeForTab(boolean enableFullscreen) {
+            for (TabObserver observer: mObservers) {
+                observer.onToggleFullscreenMode(TabBase.this, enableFullscreen);
+            }
+        }
+    }
+
+    private class TabBaseWebContentsObserverAndroid extends WebContentsObserverAndroid {
+        public TabBaseWebContentsObserverAndroid(ContentViewCore contentViewCore) {
+            super(contentViewCore);
+        }
+
+        @Override
+        public void navigationEntryCommitted() {
+            if (getNativePage() != null) {
+                pushNativePageStateToNavigationEntry();
+            }
+        }
+
+        @Override
+        public void didFailLoad(boolean isProvisionalLoad, boolean isMainFrame, int errorCode,
+                String description, String failingUrl) {
+            for (TabObserver observer : mObservers) {
+                observer.onDidFailLoad(TabBase.this, isProvisionalLoad, isMainFrame, errorCode,
+                        description, failingUrl);
+            }
         }
     }
 
@@ -187,6 +249,20 @@ public abstract class TabBase implements NavigationClient {
     }
 
     /**
+     * Loads the current navigation if there is a pending lazy load (after tab restore).
+     */
+    public void loadIfNecessary() {
+        if (mContentViewCore != null) mContentViewCore.loadIfNecessary();
+    }
+
+    /**
+     * Requests the current navigation to be loaded upon the next call to loadIfNecessary().
+     */
+    protected void requestRestoreLoad() {
+        if (mContentViewCore != null) mContentViewCore.requestRestoreLoad();
+    }
+
+    /**
      * @return Whether or not the {@link TabBase} is currently showing an interstitial page, such as
      *         a bad HTTPS page.
      */
@@ -236,12 +312,30 @@ public abstract class TabBase implements NavigationClient {
     }
 
     /**
+     *
+     * @return The infobar container.
+     */
+    public final InfoBarContainer getInfoBarContainer() {
+        return mInfoBarContainer;
+    }
+
+    /**
+     * Create an {@code AutoLoginProcessor} to decide how to handle login
+     * requests.
+     */
+    protected abstract AutoLoginProcessor createAutoLoginProcessor();
+
+    /**
      * Reloads the current page content if it is a {@link ContentView}.
      */
     public void reload() {
         // TODO(dtrainor): Should we try to rebuild the ContentView if it's frozen?
-        ContentViewCore contentViewCore = getContentViewCore();
-        if (contentViewCore != null) contentViewCore.reload();
+        if (mContentViewCore != null) mContentViewCore.reload();
+    }
+
+    /** Stop the current navigation. */
+    public void stopLoading() {
+        if (mContentViewCore != null) mContentViewCore.stopLoading();
     }
 
     /**
@@ -262,6 +356,7 @@ public abstract class TabBase implements NavigationClient {
     /**
      * @return The id representing this tab.
      */
+    @CalledByNative
     public int getId() {
         return mId;
     }
@@ -343,6 +438,31 @@ public abstract class TabBase implements NavigationClient {
     }
 
     /**
+     * @return The sync id of the tab if session sync is enabled, {@code 0} otherwise.
+     */
+    @CalledByNative
+    protected int getSyncId() {
+        return mSyncId;
+    }
+
+    /**
+     * @param syncId The sync id of the tab if session sync is enabled.
+     */
+    @CalledByNative
+    protected void setSyncId(int syncId) {
+        mSyncId = syncId;
+    }
+
+    /**
+     * @return An {@link ObserverList.RewindableIterator} instance that points to all of
+     *         the current {@link TabObserver}s on this class.  Note that calling
+     *         {@link Iterator#remove()} will throw an {@link UnsupportedOperationException}.
+     */
+    protected ObserverList.RewindableIterator<TabObserver> getTabObservers() {
+        return mObservers.rewindableIterator();
+    }
+
+    /**
      * @return The {@link ContentViewClient} currently bound to any {@link ContentViewCore}
      *         associated with the current page.  There can still be a {@link ContentViewClient}
      *         even when there is no {@link ContentViewCore}.
@@ -379,6 +499,7 @@ public abstract class TabBase implements NavigationClient {
         if (mNativePage == nativePage) return;
         destroyNativePageInternal();
         mNativePage = nativePage;
+        pushNativePageStateToNavigationEntry();
         for (TabObserver observer : mObservers) observer.onContentChanged(this);
     }
 
@@ -420,13 +541,25 @@ public abstract class TabBase implements NavigationClient {
 
         mContentViewCore = mContentView.getContentViewCore();
         mWebContentsDelegate = createWebContentsDelegate();
-        mWebContentsObserver = createWebContentsObserverAndroid(mContentViewCore);
+        mWebContentsObserver = new TabBaseWebContentsObserverAndroid(mContentViewCore);
 
         if (mContentViewClient != null) mContentViewCore.setContentViewClient(mContentViewClient);
 
         assert mNativeTabAndroid != 0;
         nativeInitWebContents(
-                mNativeTabAndroid, mId, mIncognito, mContentViewCore, mWebContentsDelegate);
+                mNativeTabAndroid, mIncognito, mContentViewCore, mWebContentsDelegate);
+
+        // In the case where restoring a Tab or showing a prerendered one we already have a
+        // valid infobar container, no need to recreate one.
+        if (mInfoBarContainer == null) {
+            // The InfoBarContainer needs to be created after the ContentView has been natively
+            // initialized.
+            mInfoBarContainer = new InfoBarContainer(
+                    (Activity) mContext, createAutoLoginProcessor(), getId(), getContentView(),
+                    nativeWebContents);
+        } else {
+            mInfoBarContainer.onParentViewChanged(getId(), getContentView());
+        }
     }
 
     /**
@@ -439,6 +572,42 @@ public abstract class TabBase implements NavigationClient {
 
         destroyNativePageInternal();
         destroyContentView(true);
+        if (mInfoBarContainer != null) {
+            mInfoBarContainer.destroy();
+            mInfoBarContainer = null;
+        }
+    }
+
+    /**
+     * @return Whether or not this Tab has a live native component.
+     */
+    public boolean isInitialized() {
+        return mNativeTabAndroid != 0;
+    }
+
+    /**
+     * @return The url associated with the tab.
+     */
+    @CalledByNative
+    public String getUrl() {
+        return mContentView != null ? mContentView.getUrl() : "";
+    }
+
+    /**
+     * @return The tab title.
+     */
+    @CalledByNative
+    public String getTitle() {
+        return getPageInfo() != null ? getPageInfo().getTitle() : "";
+    }
+
+    /**
+     * Restores the tab if it is frozen or crashed.
+     * @return true iff tab restore was triggered.
+     */
+    @CalledByNative
+    public boolean restoreIfNeeded() {
+        return false;
     }
 
     private void destroyNativePageInternal() {
@@ -457,6 +626,9 @@ public abstract class TabBase implements NavigationClient {
 
         destroyContentViewInternal(mContentView);
 
+        if (mInfoBarContainer != null && mInfoBarContainer.getParent() != null) {
+            mInfoBarContainer.removeFromParentView();
+        }
         if (mContentViewCore != null) mContentViewCore.destroy();
 
         mContentView = null;
@@ -483,16 +655,6 @@ public abstract class TabBase implements NavigationClient {
      */
     protected TabBaseChromeWebContentsDelegateAndroid createWebContentsDelegate() {
         return new TabBaseChromeWebContentsDelegateAndroid();
-    }
-
-    /**
-     * A helper method to allow subclasses to build their own observer.
-     * @param contentViewCore The {@link ContentViewCore} this observer should be built for.
-     * @return An instance of a {@link WebContentsObserverAndroid}.
-     */
-    protected WebContentsObserverAndroid createWebContentsObserverAndroid(
-            ContentViewCore contentViewCore) {
-        return null;
     }
 
     /**
@@ -544,10 +706,11 @@ public abstract class TabBase implements NavigationClient {
     /** This is currently called when committing a pre-rendered page. */
     @CalledByNative
     private void swapWebContents(final int newWebContents) {
+        if (mContentViewCore != null) mContentViewCore.onHide();
         destroyContentView(false);
         initContentView(newWebContents);
-
         mContentViewCore.onShow();
+        mContentViewCore.attachImeAdapter();
         for (TabObserver observer : mObservers) observer.onContentChanged(this);
     }
 
@@ -561,6 +724,11 @@ public abstract class TabBase implements NavigationClient {
     private void setNativePtr(int nativePtr) {
         assert mNativeTabAndroid == 0;
         mNativeTabAndroid = nativePtr;
+    }
+
+    @CalledByNative
+    private int getNativeInfoBarContainer() {
+        return getInfoBarContainer().getNative();
     }
 
     /**
@@ -583,6 +751,12 @@ public abstract class TabBase implements NavigationClient {
         return sIdCounter.getAndIncrement();
     }
 
+    private void pushNativePageStateToNavigationEntry() {
+        assert mNativeTabAndroid != 0 && getNativePage() != null;
+        nativeSetActiveNavigationEntryTitleForUrl(mNativeTabAndroid, getNativePage().getUrl(),
+                getNativePage().getTitle());
+    }
+
     /**
      * Ensures the counter is at least as high as the specified value.  The counter should always
      * point to an unused ID (which will be handed out next time a request comes in).  Exposed so
@@ -599,10 +773,12 @@ public abstract class TabBase implements NavigationClient {
         sIdCounter.addAndGet(diff);
     }
 
-    private native void nativeInitWebContents(int nativeTabAndroid, int id, boolean incognito,
+    private native void nativeInitWebContents(int nativeTabAndroid, boolean incognito,
             ContentViewCore contentViewCore, ChromeWebContentsDelegateAndroid delegate);
     private native void nativeDestroyWebContents(int nativeTabAndroid, boolean deleteNative);
     private native Profile nativeGetProfileAndroid(int nativeTabAndroid);
     private native void nativeLaunchBlockedPopups(int nativeTabAndroid);
     private native int nativeGetSecurityLevel(int nativeTabAndroid);
+    private native void nativeSetActiveNavigationEntryTitleForUrl(int nativeTabAndroid, String url,
+            String title);
 }

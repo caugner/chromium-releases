@@ -59,7 +59,7 @@ MediaPlayerAndroid* BrowserMediaPlayerManager::CreateMediaPlayer(
     int demuxer_client_id,
     bool hide_url_log,
     MediaPlayerManager* manager,
-    media::DemuxerAndroid* demuxer) {
+    BrowserDemuxerAndroid* demuxer) {
   switch (type) {
     case MEDIA_PLAYER_TYPE_URL: {
       MediaPlayerBridge* media_player_bridge = new MediaPlayerBridge(
@@ -70,7 +70,7 @@ MediaPlayerAndroid* BrowserMediaPlayerManager::CreateMediaPlayer(
 
     case MEDIA_PLAYER_TYPE_MEDIA_SOURCE: {
       return new MediaSourcePlayer(
-          player_id, manager, demuxer_client_id, demuxer);
+          player_id, manager, demuxer->CreateDemuxer(demuxer_client_id));
     }
   }
 
@@ -81,8 +81,9 @@ MediaPlayerAndroid* BrowserMediaPlayerManager::CreateMediaPlayer(
 
 BrowserMediaPlayerManager::BrowserMediaPlayerManager(
     RenderViewHost* render_view_host)
-    : RenderViewHostObserver(render_view_host),
+    : WebContentsObserver(WebContents::FromRenderViewHost(render_view_host)),
       fullscreen_player_id_(-1),
+      pending_fullscreen_player_id_(-1),
       web_contents_(WebContents::FromRenderViewHost(render_view_host)),
       weak_ptr_factory_(this) {
 }
@@ -139,8 +140,10 @@ void BrowserMediaPlayerManager::FullscreenPlayerPause() {
 
 void BrowserMediaPlayerManager::FullscreenPlayerSeek(int msec) {
   MediaPlayerAndroid* player = GetFullscreenPlayer();
-  if (player)
-    player->SeekTo(base::TimeDelta::FromMilliseconds(msec));
+  if (player) {
+    OnSeekRequest(fullscreen_player_id_,
+                  base::TimeDelta::FromMilliseconds(msec));
+  }
 }
 
 void BrowserMediaPlayerManager::ExitFullscreen(bool release_media_player) {
@@ -202,10 +205,16 @@ void BrowserMediaPlayerManager::OnBufferingUpdate(
     video_view_->OnBufferingUpdate(percentage);
 }
 
-void BrowserMediaPlayerManager::OnSeekComplete(int player_id,
-                                               base::TimeDelta current_time) {
-  Send(new MediaPlayerMsg_MediaSeekCompleted(
-      routing_id(), player_id, current_time));
+void BrowserMediaPlayerManager::OnSeekRequest(
+    int player_id,
+    const base::TimeDelta& time_to_seek) {
+  Send(new MediaPlayerMsg_SeekRequest(routing_id(), player_id, time_to_seek));
+}
+
+void BrowserMediaPlayerManager::OnSeekComplete(
+    int player_id,
+    const base::TimeDelta& current_time) {
+  Send(new MediaPlayerMsg_SeekCompleted(routing_id(), player_id, current_time));
 }
 
 void BrowserMediaPlayerManager::OnError(int player_id, int error) {
@@ -257,7 +266,7 @@ void BrowserMediaPlayerManager::ReleaseMediaResources(int player_id) {
 media::MediaResourceGetter*
 BrowserMediaPlayerManager::GetMediaResourceGetter() {
   if (!media_resource_getter_.get()) {
-    RenderProcessHost* host = render_view_host()->GetProcess();
+    RenderProcessHost* host = web_contents()->GetRenderProcessHost();
     BrowserContext* context = host->GetBrowserContext();
     StoragePartition* partition = host->GetStoragePartition();
     fileapi::FileSystemContext* file_system_context =
@@ -302,11 +311,20 @@ void BrowserMediaPlayerManager::DestroyAllMediaPlayers() {
 void BrowserMediaPlayerManager::OnProtectedSurfaceRequested(int player_id) {
   if (fullscreen_player_id_ == player_id)
     return;
+
   if (fullscreen_player_id_ != -1) {
     // TODO(qinmin): Determine the correct error code we should report to WMPA.
     OnError(player_id, MediaPlayerAndroid::MEDIA_ERROR_DECODE);
     return;
   }
+
+  // If the player is pending approval, wait for the approval to happen.
+  if (media_keys_ids_pending_approval_.end() !=
+      media_keys_ids_pending_approval_.find(player_id)) {
+    pending_fullscreen_player_id_ = player_id;
+    return;
+  }
+
   OnEnterFullscreen(player_id);
 }
 
@@ -361,6 +379,20 @@ void BrowserMediaPlayerManager::OnNotifyExternalSurface(
 }
 #endif
 
+void BrowserMediaPlayerManager::DisableFullscreenEncryptedMediaPlayback() {
+  if (fullscreen_player_id_ == -1)
+    return;
+
+  // If the fullscreen player is not playing back encrypted video, do nothing.
+  MediaDrmBridge* drm_bridge = GetDrmBridge(fullscreen_player_id_);
+  if (!drm_bridge)
+    return;
+
+  // Exit fullscreen.
+  pending_fullscreen_player_id_ = fullscreen_player_id_;
+  OnExitFullscreen(fullscreen_player_id_);
+}
+
 void BrowserMediaPlayerManager::OnEnterFullscreen(int player_id) {
   DCHECK_EQ(fullscreen_player_id_, -1);
 
@@ -371,10 +403,8 @@ void BrowserMediaPlayerManager::OnEnterFullscreen(int player_id) {
     // In Android WebView, two ContentViewCores could both try to enter
     // fullscreen video, we just ignore the second one.
     fullscreen_player_id_ = player_id;
-    WebContents* web_contents =
-        WebContents::FromRenderViewHost(render_view_host());
     ContentViewCoreImpl* content_view_core_impl =
-        ContentViewCoreImpl::FromWebContents(web_contents);
+        ContentViewCoreImpl::FromWebContents(web_contents());
     video_view_.reset(new ContentVideoView(content_view_core_impl->GetContext(),
         content_view_core_impl->GetContentVideoViewClient(), this));
   }
@@ -401,8 +431,8 @@ void BrowserMediaPlayerManager::OnInitialize(
 
   RemovePlayer(player_id);
 
-  RenderProcessHostImpl* host =
-      static_cast<RenderProcessHostImpl*>(render_view_host()->GetProcess());
+  RenderProcessHostImpl* host = static_cast<RenderProcessHostImpl*>(
+      web_contents()->GetRenderProcessHost());
   AddPlayer(CreateMediaPlayer(
       type, player_id, url, first_party_for_cookies, demuxer_client_id,
       host->GetBrowserContext()->IsOffTheRecord(), this,
@@ -415,7 +445,9 @@ void BrowserMediaPlayerManager::OnStart(int player_id) {
     player->Start();
 }
 
-void BrowserMediaPlayerManager::OnSeek(int player_id, base::TimeDelta time) {
+void BrowserMediaPlayerManager::OnSeek(
+    int player_id,
+    const base::TimeDelta& time) {
   MediaPlayerAndroid* player = GetPlayer(player_id);
   if (player)
     player->SeekTo(time);
@@ -484,10 +516,12 @@ void BrowserMediaPlayerManager::OnGenerateKeyRequest(
     return;
   }
 
-  WebContents* web_contents =
-      WebContents::FromRenderViewHost(render_view_host());
-  web_contents->GetDelegate()->RequestProtectedMediaIdentifierPermission(
-      web_contents,
+  if (media_keys_ids_approved_.find(media_keys_id) ==
+      media_keys_ids_approved_.end()) {
+    media_keys_ids_pending_approval_.insert(media_keys_id);
+  }
+  web_contents()->GetDelegate()->RequestProtectedMediaIdentifierPermission(
+      web_contents(),
       drm_bridge->frame_url(),
       base::Bind(&BrowserMediaPlayerManager::GenerateKeyIfAllowed,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -533,12 +567,21 @@ void BrowserMediaPlayerManager::OnCancelKeyRequest(
 void BrowserMediaPlayerManager::AddPlayer(MediaPlayerAndroid* player) {
   DCHECK(!GetPlayer(player->player_id()));
   players_.push_back(player);
+  if (player->IsRemote()) {
+    Send(new MediaPlayerMsg_ConnectedToRemoteDevice(routing_id(),
+                                                    player->player_id()));
+  }
 }
 
 void BrowserMediaPlayerManager::RemovePlayer(int player_id) {
   for (ScopedVector<MediaPlayerAndroid>::iterator it = players_.begin();
       it != players_.end(); ++it) {
-    if ((*it)->player_id() == player_id) {
+    MediaPlayerAndroid* player = *it;
+    if (player->player_id() == player_id) {
+      if (player->IsRemote()) {
+        Send(new MediaPlayerMsg_DisconnectedFromRemoteDevice(
+            routing_id(), player->player_id()));
+      }
       players_.erase(it);
       break;
     }
@@ -554,6 +597,13 @@ scoped_ptr<media::MediaPlayerAndroid> BrowserMediaPlayerManager::SwapPlayer(
       previous_player = *it;
       players_.weak_erase(it);
       players_.push_back(player);
+      if (!previous_player->IsRemote() && player->IsRemote()) {
+        Send(new MediaPlayerMsg_ConnectedToRemoteDevice(
+            routing_id(), player->player_id()));
+      } else if (previous_player->IsRemote() && !player->IsRemote()) {
+        Send(new MediaPlayerMsg_DisconnectedFromRemoteDevice(
+            routing_id(), player->player_id()));
+      }
       break;
     }
   }
@@ -619,8 +669,19 @@ void BrowserMediaPlayerManager::GenerateKeyIfAllowed(
     OnKeyError(media_keys_id, "", media::MediaKeys::kUnknownError, 0);
     return;
   }
-
+  media_keys_ids_pending_approval_.erase(media_keys_id);
+  media_keys_ids_approved_.insert(media_keys_id);
   drm_bridge->GenerateKeyRequest(type, &init_data[0], init_data.size());
+
+  // TODO(qinmin): currently |media_keys_id| and player ID are identical.
+  // This might not be true in the future.
+  if (pending_fullscreen_player_id_ != media_keys_id)
+    return;
+
+  pending_fullscreen_player_id_ = -1;
+  MediaPlayerAndroid* player = GetPlayer(media_keys_id);
+  if (player->IsPlaying())
+    OnProtectedSurfaceRequested(media_keys_id);
 }
 
 }  // namespace content

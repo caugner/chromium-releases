@@ -6,10 +6,6 @@
 
 var wrapper = {instrumentChromeApiFunction: emptyMock};
 
-function buildTaskManager() {
-  return {debugSetStepName: emptyMock};
-}
-
 function buildAuthenticationManager() {
   return {
     addListener: emptyMock
@@ -17,6 +13,7 @@ function buildAuthenticationManager() {
 }
 
 var instrumentApiFunction = emptyMock;
+var buildTaskManager = emptyMock;
 var buildAttemptManager = emptyMock;
 var buildCardSet = emptyMock;
 
@@ -25,8 +22,10 @@ mockChromeEvent(instrumented, 'location.onLocationUpdate');
 mockChromeEvent(instrumented, 'notifications.onButtonClicked');
 mockChromeEvent(instrumented, 'notifications.onClicked');
 mockChromeEvent(instrumented, 'notifications.onClosed');
-mockChromeEvent(instrumented, 'omnibox.onInputEntered');
+mockChromeEvent(instrumented, 'notifications.onPermissionLevelChanged');
+mockChromeEvent(instrumented, 'notifications.onShowSettings');
 mockChromeEvent(
     instrumented, 'preferencesPrivate.googleGeolocationAccessEnabled.onChange');
+mockChromeEvent(instrumented, 'pushMessaging.onMessage');
 mockChromeEvent(instrumented, 'runtime.onInstalled');
 mockChromeEvent(instrumented, 'runtime.onStartup');

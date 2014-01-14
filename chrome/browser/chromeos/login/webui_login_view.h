@@ -16,6 +16,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -38,6 +39,7 @@ namespace chromeos {
 // WebUI based start up and lock screens. It contains a WebView.
 class WebUILoginView : public views::View,
                        public content::WebContentsDelegate,
+                       public content::WebContentsObserver,
                        public content::NotificationObserver,
                        public ChromeWebModalDialogManagerDelegate,
                        public web_modal::WebContentsModalDialogHost {
@@ -65,9 +67,9 @@ class WebUILoginView : public views::View,
   virtual gfx::Point GetDialogPosition(const gfx::Size& size) OVERRIDE;
   virtual gfx::Size GetMaximumDialogSize() OVERRIDE;
   virtual void AddObserver(
-      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::ModalDialogHostObserver* observer) OVERRIDE;
   virtual void RemoveObserver(
-      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::ModalDialogHostObserver* observer) OVERRIDE;
 
   // Gets the native window from the view widget.
   gfx::NativeWindow GetNativeWindow() const;
@@ -135,6 +137,16 @@ class WebUILoginView : public views::View,
       const content::MediaStreamRequest& request,
       const content::MediaResponseCallback& callback) OVERRIDE;
 
+  // Overridden from content::WebContentsObserver.
+  virtual void DidFailProvisionalLoad(
+      int64 frame_id,
+      const string16& frame_unique_name,
+      bool is_main_frame,
+      const GURL& validated_url,
+      int error_code,
+      const string16& error_description,
+      content::RenderViewHost* render_view_host) OVERRIDE;
+
   // Performs series of actions when login prompt is considered
   // to be ready and visible.
   // 1. Emits LoginPromptVisible signal if needed
@@ -168,7 +180,7 @@ class WebUILoginView : public views::View,
 
   scoped_ptr<ScopedGaiaAuthExtension> auth_extension_;
 
-  ObserverList<web_modal::WebContentsModalDialogHostObserver> observer_list_;
+  ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUILoginView);
 };

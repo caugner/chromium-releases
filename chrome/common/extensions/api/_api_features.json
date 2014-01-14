@@ -100,12 +100,36 @@
     "dependencies": ["manifest:browser_action"],
     "contexts": ["blessed_extension"]
   },
+  // This API is whitelisted on stable and should not be enabled for a wider
+  // audience without resolving security issues raised in API proposal and
+  // review (https://codereview.chromium.org/25305002).
+  "browserAction.openPopup": [{
+    "channel": "dev",
+    "dependencies": ["manifest:browser_action"],
+    "contexts": ["blessed_extension"]
+  }, {
+    "channel": "stable",
+    "dependencies": ["manifest:browser_action"],
+    "whitelist": [
+      "enhhojjnijigcajfphajepfemndkmdlo",  // Dev
+      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // Trusted Tester
+      "fmfcbgogabcbclcofgocippekhfcmgfj",  // Staging
+      "hfaagokkkhdbgiakmmlclaapfelnkoah",  // Canary
+      "F155646B5D1CA545F7E1E4E20D573DFDD44C2540",  // Trusted Tester (public)
+      "16CA7A47AAE4BE49B1E75A6B960C3875E945B264"   // Release
+    ],
+    "contexts": ["blessed_extension"]
+  }],
   "browsingData": {
     "dependencies": ["permission:browsingData"],
     "contexts": ["blessed_extension"]
   },
+  "cast.channel": {
+    "dependencies": ["permission:cast"],
+    "contexts": ["blessed_extension"]
+  },
   "chromeosInfoPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:chromeosInfoPrivate"],
     "contexts": ["blessed_extension"]
   },
@@ -153,6 +177,18 @@
     "dependencies": ["permission:developerPrivate"],
     "contexts": ["blessed_extension"]
   },
+  "devtools.inspectedWindow": {
+    "dependencies": ["manifest:devtools_page"],
+    "contexts": ["blessed_extension"]
+  },
+  "devtools.network": {
+    "dependencies": ["manifest:devtools_page"],
+    "contexts": ["blessed_extension"]
+  },
+  "devtools.panels": {
+    "dependencies": ["manifest:devtools_page"],
+    "contexts": ["blessed_extension"]
+  },
   "diagnostics": {
     "dependencies": ["permission:diagnostics"],
     "extension_types": ["platform_app"],
@@ -176,18 +212,19 @@
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
   "echoPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:echoPrivate"],
     "contexts": ["blessed_extension"]
   },
   "enterprise.platformKeysPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:enterprise.platformKeysPrivate"],
     "contexts": ["blessed_extension"]
   },
   "events": {
     "internal": true,
     "channel": "stable",
+    "extension_types": ["platform_app", "extension"],
     "contexts": [
       "blessed_extension", "unblessed_extension", "content_script", "web_page"
     ],
@@ -195,6 +232,16 @@
   },
   "experimental.accessibility": {
     "dependencies": ["permission:experimental"],
+    "contexts": ["blessed_extension"]
+  },
+  "experimental.devtools.audits": {
+    "dependencies": ["permission:experimental", "manifest:devtools_page"],
+    "extension_types": ["platform_app"],
+    "contexts": ["blessed_extension"]
+  },
+  "experimental.devtools.console": {
+    "dependencies": ["permission:experimental", "manifest:devtools_page"],
+    "extension_types": ["platform_app"],
     "contexts": ["blessed_extension"]
   },
   "experimental.discovery": {
@@ -233,23 +280,22 @@
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
   "feedbackPrivate": {
-    "platform": "chromeos",
     "dependencies": ["permission:feedbackPrivate"],
     "contexts": ["blessed_extension"]
   },
   "fileBrowserHandler": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:fileBrowserHandler"],
     "contexts": ["blessed_extension"]
   },
   "fileBrowserHandlerInternal": {
     "internal": true,
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "channel": "stable",
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
   "fileBrowserPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:fileBrowserPrivate"],
     "contexts": ["blessed_extension"]
   },
@@ -261,6 +307,17 @@
     "dependencies": ["permission:fontSettings"],
     "contexts": ["blessed_extension"]
   },
+  "hangoutsPrivate": {
+    "channel": "stable",
+    "contexts": ["blessed_extension"],
+    "whitelist": [
+      // http://crbug.com/309737
+      "nckgahadagoaajjgafhacjanaoiihapd",
+      "ljclpkphhpbpinifbeabbhlfddcpfdde",
+      "ppleadejekpmccmnpjdimmlfljlkdfej",
+      "eggnbpckecmjlblplehfpjjdhhidfdoj"
+    ]
+  },
   "history": {
     "dependencies": ["permission:history"],
     "contexts": ["blessed_extension"]
@@ -271,6 +328,11 @@
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
   "identity": {
+    "dependencies": ["permission:identity"],
+    "contexts": ["blessed_extension"]
+  },
+  "identity.onSignInChanged": {
+    "channel": "dev",
     "dependencies": ["permission:identity"],
     "contexts": ["blessed_extension"]
   },
@@ -291,12 +353,12 @@
     "contexts": ["blessed_extension"]
   },
   "input.ime": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:input"],
     "contexts": ["blessed_extension"]
   },
   "inputMethodPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:inputMethodPrivate"],
     "contexts": ["blessed_extension"]
   },
@@ -328,7 +390,7 @@
   "manifestTypes": {
     "internal": true,
     "channel": "stable",
-    "contexts": "all"
+    "contexts": ["blessed_extension"]
   },
   "mediaGalleries": {
     "dependencies": ["permission:mediaGalleries"],
@@ -339,7 +401,7 @@
     "contexts": ["blessed_extension"]
   },
   "mediaPlayerPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:mediaPlayerPrivate"],
     "contexts": ["blessed_extension"]
   },
@@ -356,7 +418,7 @@
     "contexts": ["blessed_extension"]
   },
   "networkingPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:networkingPrivate"],
     "contexts": ["blessed_extension"]
   },
@@ -392,6 +454,10 @@
   },
   "preferencesPrivate": {
     "dependencies": ["permission:preferencesPrivate"],
+    "contexts": ["blessed_extension"]
+  },
+  "principalsPrivate": {
+    "dependencies": ["permission:principalsPrivate"],
     "contexts": ["blessed_extension"]
   },
   "privacy": {
@@ -481,8 +547,18 @@
     "dependencies": ["permission:socket"],
     "contexts": ["blessed_extension"]
   },
+  "sockets.tcp": {
+    "dependencies": ["manifest:sockets"],
+    "channel": "dev",
+    "contexts": ["blessed_extension"]
+  },
+  "sockets.tcpServer": {
+    "dependencies": ["manifest:sockets"],
+    "channel": "dev",
+    "contexts": ["blessed_extension"]
+  },
   "sockets.udp": {
-    "dependencies": ["permission:sockets.udp"],
+    "dependencies": ["manifest:sockets"],
     "channel": "dev",
     "contexts": ["blessed_extension"]
   },
@@ -518,6 +594,9 @@
     "dependencies": ["permission:system.storage"],
     "contexts": ["blessed_extension"]
   },
+  "system.storage.getAvailableCapacity": {
+    "channel": "dev"
+  },
   "systemPrivate": {
     "dependencies": ["permission:systemPrivate"],
     "contexts": ["blessed_extension"]
@@ -532,7 +611,7 @@
     "contexts": ["blessed_extension"]
   },
   "terminalPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:terminalPrivate"],
     "contexts": ["blessed_extension"]
   },
@@ -568,17 +647,17 @@
     "contexts": ["blessed_extension"]
   },
   "virtualKeyboardPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:virtualKeyboardPrivate"],
     "contexts": ["blessed_extension"]
   },
   "wallpaper": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:wallpaper"],
     "contexts": ["blessed_extension"]
   },
   "wallpaperPrivate": {
-    "platform": "chromeos",
+    "platforms": ["chromeos"],
     "dependencies": ["permission:wallpaperPrivate"],
     "contexts": ["blessed_extension"]
   },
@@ -595,6 +674,14 @@
     "channel": "stable",
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
+  "webrtcAudioPrivate": {
+    "dependencies": ["permission:webrtcAudioPrivate"],
+    "contexts": ["blessed_extension"]
+  },
+  "webrtcLoggingPrivate": {
+    "dependencies": ["permission:webrtcLoggingPrivate"],
+    "contexts": ["blessed_extension"]
+  },
   "webstore": {
     // Hosted apps can use the webstore API from within a blessed context.
     "channel": "stable",
@@ -607,8 +694,22 @@
     "dependencies": ["permission:webstorePrivate"],
     "contexts": ["blessed_extension"]
   },
+  "webrtc.castSendTransport": {
+    "dependencies": ["permission:webrtc"],
+    "contexts": ["blessed_extension"]
+  },
+  "webrtc.castUdpTransport": {
+    "dependencies": ["permission:webrtc"],
+    "contexts": ["blessed_extension"]
+  },
   "webview": {
     "internal": true,
+    "dependencies": ["permission:webview"],
+    "contexts": ["blessed_extension", "unblessed_extension"]
+  },
+  "webviewTag": {
+    "internal": true,
+    "channel": "stable",
     "dependencies": ["permission:webview"],
     "contexts": ["blessed_extension"]
   },

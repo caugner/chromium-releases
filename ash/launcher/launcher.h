@@ -33,17 +33,17 @@ namespace ash {
 
 namespace internal {
 class FocusCycler;
-class LauncherView;
 class ShelfLayoutManager;
+class ShelfView;
 }
 
 namespace test {
 class LauncherTestAPI;
 }
 
-class LauncherIconObserver;
 class LauncherDelegate;
 class LauncherModel;
+class ShelfIconObserver;
 class ShelfWidget;
 
 class ASH_EXPORT Launcher {
@@ -82,8 +82,8 @@ class ASH_EXPORT Launcher {
   // Cycles the window focus linearly over the current launcher items.
   void CycleWindowLinear(CycleDirection direction);
 
-  void AddIconObserver(LauncherIconObserver* observer);
-  void RemoveIconObserver(LauncherIconObserver* observer);
+  void AddIconObserver(ShelfIconObserver* observer);
+  void RemoveIconObserver(ShelfIconObserver* observer);
 
   // Returns true if the Launcher is showing a context menu.
   bool IsShowingMenu() const;
@@ -103,9 +103,13 @@ class ASH_EXPORT Launcher {
 
   ShelfWidget* shelf_widget() { return shelf_widget_; }
 
-  // Set the bounds of the launcher view.
-  void SetLauncherViewBounds(gfx::Rect bounds);
-  gfx::Rect GetLauncherViewBounds() const;
+  // Set the bounds of the shelf view.
+  void SetShelfViewBounds(gfx::Rect bounds);
+  gfx::Rect GetShelfViewBounds() const;
+
+  // Returns rectangle bounding all visible launcher items. Used screen
+  // coordinate system.
+  gfx::Rect GetVisibleItemsBoundsInScreen() const;
 
   // Returns ApplicationDragAndDropHost for this Launcher.
   app_list::ApplicationDragAndDropHost* GetDragAndDropHostForAppList();
@@ -113,8 +117,8 @@ class ASH_EXPORT Launcher {
  private:
   friend class ash::test::LauncherTestAPI;
 
-  // LauncherView used to display icons.
-  internal::LauncherView* launcher_view_;
+  // ShelfView used to display icons.
+  internal::ShelfView* shelf_view_;
 
   ShelfAlignment alignment_;
 

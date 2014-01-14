@@ -113,6 +113,9 @@ void NotificationList::UpdateNotificationMessage(
   Notification* old = *iter;
   notifications_.erase(iter);
   delete old;
+
+  // We really don't want duplicate IDs.
+  DCHECK(GetNotification(new_notification->id()) == notifications_.end());
   notifications_.insert(new_notification.release());
 }
 
@@ -333,7 +336,9 @@ void NotificationList::PushNotification(scoped_ptr<Notification> notification) {
     // TODO(mukai): needs to distinguish if a notification is dismissed by
     // the quiet mode or user operation.
     notification->set_is_read(false);
-    notification->set_shown_as_popup(message_center_visible_ || quiet_mode_);
+    notification->set_shown_as_popup(message_center_visible_
+                                     || quiet_mode_
+                                     || notification->shown_as_popup());
     if (notification->priority() > MIN_PRIORITY)
       ++unread_count_;
   }

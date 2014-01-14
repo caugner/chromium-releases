@@ -20,6 +20,7 @@
 #include "chrome/browser/google_apis/gdata_wapi_requests.h"
 #include "chrome/browser/google_apis/request_sender.h"
 #include "content/public/browser/browser_thread.h"
+#include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserThread;
 using google_apis::AppList;
@@ -83,11 +84,16 @@ const char kDriveAppsReadonlyScope[] =
 // Mime type to create a directory.
 const char kFolderMimeType[] = "application/vnd.google-apps.folder";
 
-// Expected max number of files resources in a http request.
-// Be careful not to use something too small because it might overload the
-// server. Be careful not to use something too large because it takes longer
-// time to fetch the result without UI response.
-const int kMaxNumFilesResourcePerRequest = 500;
+// Max number of file entries to be fetched in a single http request.
+//
+// The larger the number is,
+// - The total running time to fetch the whole file list will become shorter.
+// - The running time for a single request tends to become longer.
+// Since the file list fetching is a completely background task, for our side,
+// only the total time matters. However, the server seems to have a time limit
+// per single request, which disables us to set the largest value (1000).
+// TODO(kinaba): make it larger when the server gets faster.
+const int kMaxNumFilesResourcePerRequest = 250;
 const int kMaxNumFilesResourcePerRequestForSearch = 50;
 
 // For performance, we declare all fields we use.
@@ -95,20 +101,25 @@ const char kAboutResourceFields[] =
     "kind,quotaBytesTotal,quotaBytesUsed,largestChangeId,rootFolderId";
 const char kFileResourceFields[] =
     "kind,id,title,createdDate,sharedWithMeDate,downloadUrl,mimeType,"
-    "md5Checksum,fileSize,labels/trashed,etag,parents/parentLink,selfLink,"
-    "thumbnailLink,alternateLink,embedLink,modifiedDate,lastViewedByMeDate";
+    "md5Checksum,fileSize,labels/trashed,imageMediaMetadata/width,"
+    "imageMediaMetadata/height,imageMediaMetadata/rotation,etag,"
+    "parents/parentLink,selfLink,thumbnailLink,alternateLink,embedLink,"
+    "modifiedDate,lastViewedByMeDate";
 const char kFileResourceOpenWithLinksFields[] =
     "kind,id,openWithLinks/*";
 const char kFileListFields[] =
     "kind,items(kind,id,title,createdDate,sharedWithMeDate,downloadUrl,"
-    "mimeType,md5Checksum,fileSize,labels/trashed,etag,parents/parentLink,"
-    "selfLink,thumbnailLink,alternateLink,embedLink,modifiedDate,"
-    "lastViewedByMeDate),nextLink";
+    "mimeType,md5Checksum,fileSize,labels/trashed,imageMediaMetadata/width,"
+    "imageMediaMetadata/height,imageMediaMetadata/rotation,etag,"
+    "parents/parentLink,selfLink,thumbnailLink,alternateLink,embedLink,"
+    "modifiedDate,lastViewedByMeDate),nextLink";
 const char kChangeListFields[] =
     "kind,items(file(kind,id,title,createdDate,sharedWithMeDate,downloadUrl,"
-    "mimeType,md5Checksum,fileSize,labels/trashed,etag,parents/parentLink,"
-    "selfLink,thumbnailLink,alternateLink,embedLink,modifiedDate,"
-    "lastViewedByMeDate),deleted,id,fileId),nextLink,largestChangeId";
+    "mimeType,md5Checksum,fileSize,labels/trashed,imageMediaMetadata/width,"
+    "imageMediaMetadata/height,imageMediaMetadata/rotation,etag,"
+    "parents/parentLink,selfLink,thumbnailLink,alternateLink,embedLink,"
+    "modifiedDate,lastViewedByMeDate),deleted,id,fileId),nextLink,"
+    "largestChangeId";
 
 // Callback invoked when the parsing of resource list is completed,
 // regardless whether it is succeeded or not.
@@ -305,9 +316,9 @@ void DriveAPIService::Initialize(const std::string& account_id) {
   sender_.reset(new RequestSender(
       new google_apis::AuthService(oauth2_token_service_,
                                    account_id,
-                                   url_request_context_getter_,
+                                   url_request_context_getter_.get(),
                                    scopes),
-      url_request_context_getter_,
+      url_request_context_getter_.get(),
       blocking_task_runner_.get(),
       custom_user_agent_));
   sender_->auth_service()->AddObserver(this);
@@ -578,6 +589,7 @@ CancelCallback DriveAPIService::CopyResource(
     const std::string& resource_id,
     const std::string& parent_resource_id,
     const std::string& new_title,
+    const base::Time& last_modified,
     const GetResourceEntryCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -588,6 +600,7 @@ CancelCallback DriveAPIService::CopyResource(
   request->set_file_id(resource_id);
   request->add_parent(parent_resource_id);
   request->set_title(new_title);
+  request->set_modified_date(last_modified);
   request->set_fields(kFileResourceFields);
   return sender_->StartRequestWithRetry(request);
 }
@@ -612,6 +625,7 @@ CancelCallback DriveAPIService::MoveResource(
     const std::string& resource_id,
     const std::string& parent_resource_id,
     const std::string& new_title,
+    const base::Time& last_modified,
     const GetResourceEntryCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -623,6 +637,10 @@ CancelCallback DriveAPIService::MoveResource(
   request->set_title(new_title);
   if (!parent_resource_id.empty())
     request->add_parent(parent_resource_id);
+  if (!last_modified.is_null()) {
+    request->set_set_modified_date(true);
+    request->set_modified_date(last_modified);
+  }
   request->set_fields(kFileResourceFields);
   return sender_->StartRequestWithRetry(request);
 }

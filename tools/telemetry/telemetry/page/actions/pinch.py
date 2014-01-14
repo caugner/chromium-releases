@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 import os
 
-from telemetry.core import util
 from telemetry.page.actions import page_action
 
 class PinchAction(page_action.PageAction):
@@ -16,6 +15,10 @@ class PinchAction(page_action.PageAction):
         js = f.read()
         tab.ExecuteJavaScript(js)
 
+    # Fail if browser doesn't support synthetic pinch gestures.
+    if not tab.EvaluateJavaScript('window.__PinchAction_SupportedByBrowser()'):
+      raise page_action.PageActionNotSupported(
+          'Synthetic pinch not supported for this browser')
 
     done_callback = 'function() { window.__pinchActionDone = true; }'
     tab.ExecuteJavaScript("""
@@ -35,9 +38,7 @@ class PinchAction(page_action.PageAction):
     tab.ExecuteJavaScript('window.__pinchAction.start(%s, %f)'
                           % ("true" if zoom_in else "false", pixels_to_move))
 
-    # Poll for pinch action completion.
-    util.WaitFor(lambda: tab.EvaluateJavaScript(
-        'window.__pinchActionDone'), 60)
+    tab.WaitForJavaScriptExpression('window.__pinchActionDone', 60)
 
   def CanBeBound(self):
     return True
@@ -51,3 +52,6 @@ class PinchAction(page_action.PageAction):
         window.__pinchAction.beginMeasuringHook = function() { %s };
         window.__pinchAction.endMeasuringHook = function() { %s };
     """ % (start_js, stop_js))
+
+  def GetTimelineMarkerLabel(self):
+    return 'SyntheticGestureController::running'

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/automation/testing_automation_provider.h"
 
+#include "ash/new_window_delegate.h"
 #include "ash/shell.h"
-#include "ash/shell_delegate.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
@@ -34,8 +34,6 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/net/proxy_config_handler.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/cros_settings_names.h"
-#include "chrome/browser/chromeos/system/timezone_settings.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -45,6 +43,8 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/update_engine_client.h"
+#include "chromeos/settings/cros_settings_names.h"
+#include "chromeos/settings/timezone_settings.h"
 #include "content/public/browser/web_contents.h"
 #include "policy/policy_constants.h"
 #include "ui/views/widget/widget.h"
@@ -600,7 +600,7 @@ void TestingAutomationProvider::OpenCrosh(DictionaryValue* args,
                                           IPC::Message* reply_message) {
   new NavigationNotificationObserver(
       NULL, this, reply_message, 1, false, true);
-  ash::Shell::GetInstance()->delegate()->OpenCrosh();
+  ash::Shell::GetInstance()->new_window_delegate()->OpenCrosh();
 }
 
 void TestingAutomationProvider::AddChromeosObservers() {

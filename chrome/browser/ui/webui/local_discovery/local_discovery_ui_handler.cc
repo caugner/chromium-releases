@@ -55,9 +55,10 @@ namespace local_discovery {
 
 namespace {
 const char kPrivetAutomatedClaimURLFormat[] = "%s/confirm?token=%s";
-const int kRegistrationAnnouncementTimeoutSeconds = 5;
 
-LocalDiscoveryUIHandler::Factory* g_factory = NULL;
+const int kInitialRequeryTimeSeconds = 1;
+const int kMaxRequeryTimeSeconds = 2; // Time for last requery
+
 int g_num_visible = 0;
 
 }  // namespace
@@ -79,25 +80,9 @@ LocalDiscoveryUIHandler::LocalDiscoveryUIHandler() : is_visible_(false) {
 #endif  // !defined(OS_MACOSX)
 }
 
-LocalDiscoveryUIHandler::LocalDiscoveryUIHandler(
-    scoped_ptr<PrivetDeviceLister> privet_lister) : is_visible_(false) {
-  privet_lister.swap(privet_lister_);
-}
-
 LocalDiscoveryUIHandler::~LocalDiscoveryUIHandler() {
   ResetCurrentRegistration();
   SetIsVisible(false);
-}
-
-// static
-LocalDiscoveryUIHandler* LocalDiscoveryUIHandler::Create() {
-  if (g_factory) return g_factory->CreateLocalDiscoveryUIHandler();
-  return new LocalDiscoveryUIHandler();
-}
-
-// static
-void LocalDiscoveryUIHandler::SetFactory(Factory* factory) {
-  g_factory = factory;
 }
 
 // static
@@ -158,7 +143,7 @@ void LocalDiscoveryUIHandler::HandleStart(const base::ListValue* args) {
   }
 
   privet_lister_->Start();
-  privet_lister_->DiscoverNewDevices(false);
+  SendQuery(kInitialRequeryTimeSeconds);
 
 #if defined(CLOUD_PRINT_CONNECTOR_UI_AVAILABLE)
   StartCloudPrintConnector();
@@ -166,6 +151,7 @@ void LocalDiscoveryUIHandler::HandleStart(const base::ListValue* args) {
 
   CheckUserLoggedIn();
 
+  notification_registrar_.RemoveAll();
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
                               content::Source<Profile>(profile));
@@ -308,7 +294,21 @@ void LocalDiscoveryUIHandler::OnPrivetRegisterError(
     PrivetRegisterOperation::FailureReason reason,
     int printer_http_code,
     const DictionaryValue* json) {
-  // TODO(noamsml): Add detailed error message.
+  std::string error;
+
+  if (reason == PrivetRegisterOperation::FAILURE_JSON_ERROR &&
+      json->GetString(kPrivetKeyError, &error)) {
+    if (error == kPrivetErrorTimeout) {
+        web_ui()->CallJavascriptFunction(
+            "local_discovery.onRegistrationTimeout");
+      return;
+    } else if (error == kPrivetErrorCancel) {
+      web_ui()->CallJavascriptFunction(
+            "local_discovery.onRegistrationCanceledPrinter");
+      return;
+    }
+  }
+
   SendRegisterError();
 }
 
@@ -320,30 +320,20 @@ void LocalDiscoveryUIHandler::OnPrivetRegisterDone(
   current_register_operation_.reset();
   current_http_client_.reset();
 
+  // HACK(noamsml): Generate network traffic so the Windows firewall doesn't
+  // block the printer's announcement.
+  privet_lister_->DiscoverNewDevices(false);
+
   DeviceDescriptionMap::iterator found = device_descriptions_.find(name);
 
-  if (found == device_descriptions_.end() || found->second.id.empty()) {
-    // HACK(noamsml): Generate network traffic so the Windows firewall doesn't
-    // block the printer's announcement.
-    privet_lister_->DiscoverNewDevices(false);
-
-    new_register_device_ = name;
-    registration_announce_timeout_.Reset(base::Bind(
-        &LocalDiscoveryUIHandler::OnAnnouncementTimeoutReached,
-        base::Unretained(this)));
-
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        registration_announce_timeout_.callback(),
-        base::TimeDelta::FromSeconds(kRegistrationAnnouncementTimeoutSeconds));
+  if (found == device_descriptions_.end()) {
+    // TODO(noamsml): Handle the case where a printer's record is not present at
+    // the end of registration.
+    SendRegisterError();
+    return;
   }
-}
 
-void LocalDiscoveryUIHandler::OnAnnouncementTimeoutReached() {
-  new_register_device_.clear();
-  registration_announce_timeout_.Cancel();
-
-  SendRegisterError();
+  SendRegisterDone(found->second);
 }
 
 void LocalDiscoveryUIHandler::OnConfirmDone(
@@ -352,7 +342,6 @@ void LocalDiscoveryUIHandler::OnConfirmDone(
     confirm_api_call_flow_.reset();
     current_register_operation_->CompleteRegistration();
   } else {
-    // TODO(noamsml): Add detailed error message.
     SendRegisterError();
   }
 }
@@ -380,11 +369,6 @@ void LocalDiscoveryUIHandler::DeviceChanged(
     web_ui()->CallJavascriptFunction(
         "local_discovery.onUnregisteredDeviceUpdate",
         service_name, *null_value);
-
-    if (name == new_register_device_) {
-      new_register_device_.clear();
-      SendRegisterDone(description);
-    }
   }
 }
 
@@ -399,7 +383,7 @@ void LocalDiscoveryUIHandler::DeviceRemoved(const std::string& name) {
 
 void LocalDiscoveryUIHandler::DeviceCacheFlushed() {
   web_ui()->CallJavascriptFunction("local_discovery.onDeviceCacheFlushed");
-  privet_lister_->DiscoverNewDevices(false);
+  SendQuery(kInitialRequeryTimeSeconds);
 }
 
 void LocalDiscoveryUIHandler::OnCloudPrintPrinterListReady() {
@@ -519,6 +503,24 @@ void LocalDiscoveryUIHandler::CheckUserLoggedIn() {
   base::FundamentalValue logged_in_value(!GetSyncAccount().empty());
   web_ui()->CallJavascriptFunction("local_discovery.setUserLoggedIn",
                                    logged_in_value);
+}
+
+void LocalDiscoveryUIHandler::ScheduleQuery(int timeout_seconds) {
+  if (timeout_seconds <= kMaxRequeryTimeSeconds) {
+    requery_callback_.Reset(base::Bind(&LocalDiscoveryUIHandler::SendQuery,
+                                       base::Unretained(this),
+                                       timeout_seconds * 2));
+
+    base::MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        requery_callback_.callback(),
+        base::TimeDelta::FromSeconds(timeout_seconds));
+  }
+}
+
+void LocalDiscoveryUIHandler::SendQuery(int next_timeout_seconds) {
+  privet_lister_->DiscoverNewDevices(false);
+  ScheduleQuery(next_timeout_seconds);
 }
 
 #if defined(CLOUD_PRINT_CONNECTOR_UI_AVAILABLE)

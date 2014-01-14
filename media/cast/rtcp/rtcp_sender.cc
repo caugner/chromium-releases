@@ -16,8 +16,8 @@
 namespace media {
 namespace cast {
 
-static const int kRtcpMaxNackFields = 253;
-static const int kRtcpMaxCastLossFields = 100;
+static const size_t kRtcpMaxNackFields = 253;
+static const size_t kRtcpMaxCastLossFields = 100;
 
 RtcpSender::RtcpSender(PacedPacketSender* outgoing_transport,
                        uint32 sending_ssrc,
@@ -105,7 +105,7 @@ void RtcpSender::BuildSR(const RtcpSenderInfo& sender_info,
   big_endian_writer.WriteU32(sender_info.ntp_fraction);
   big_endian_writer.WriteU32(sender_info.rtp_timestamp);
   big_endian_writer.WriteU32(sender_info.send_packet_count);
-  big_endian_writer.WriteU32(sender_info.send_octet_count);
+  big_endian_writer.WriteU32(static_cast<uint32>(sender_info.send_octet_count));
 
   if (report_block) {
     AddReportBlocks(*report_block, packet);  // Adds 24 bytes.
@@ -175,7 +175,7 @@ void RtcpSender::BuildSdec(std::vector<uint8>* packet) const {
   big_endian_writer.WriteU8(202);
 
   // Handle SDES length later on.
-  uint32 sdes_length_position = start_size + 3;
+  uint32 sdes_length_position = static_cast<uint32>(start_size) + 3;
   big_endian_writer.WriteU16(0);
   big_endian_writer.WriteU32(ssrc_);  // Add our own SSRC.
   big_endian_writer.WriteU8(1);  // CNAME = 1
@@ -199,7 +199,7 @@ void RtcpSender::BuildSdec(std::vector<uint8>* packet) const {
   sdes_length += padding;
 
   // In 32-bit words minus one and we don't count the header.
-  uint8 buffer_length = (sdes_length / 4) - 1;
+  uint8 buffer_length = static_cast<uint8>((sdes_length / 4) - 1);
   (*packet)[sdes_length_position] = buffer_length;
 }
 
@@ -302,11 +302,11 @@ void RtcpSender::BuildRemb(const RtcpRembMessage* remb,
   big_endian_writer.WriteU8(0x80 + FMT);
   big_endian_writer.WriteU8(206);
   big_endian_writer.WriteU8(0);
-  big_endian_writer.WriteU8(remb->remb_ssrcs.size() + 4);
+  big_endian_writer.WriteU8(static_cast<uint8>(remb->remb_ssrcs.size() + 4));
   big_endian_writer.WriteU32(ssrc_);  // Add our own SSRC.
   big_endian_writer.WriteU32(0);  // Remote SSRC must be 0.
   big_endian_writer.WriteU32(kRemb);
-  big_endian_writer.WriteU8(remb->remb_ssrcs.size());
+  big_endian_writer.WriteU8(static_cast<uint8>(remb->remb_ssrcs.size()));
 
   // 6 bit exponent and a 18 bit mantissa.
   uint8 bitrate_exponent;
@@ -342,16 +342,16 @@ void RtcpSender::BuildNack(const RtcpNackMessage* nack,
   big_endian_writer.WriteU8(0x80 + FMT);
   big_endian_writer.WriteU8(205);
   big_endian_writer.WriteU8(0);
-  int nack_size_pos = start_size + 3;
+  size_t nack_size_pos = start_size + 3;
   big_endian_writer.WriteU8(3);
   big_endian_writer.WriteU32(ssrc_);  // Add our own SSRC.
   big_endian_writer.WriteU32(nack->remote_ssrc);  // Add the remote SSRC.
 
   // Build NACK bitmasks and write them to the Rtcp message.
   // The nack list should be sorted and not contain duplicates.
-  int number_of_nack_fields = 0;
-  int max_number_of_nack_fields =
-      std::min<int>(kRtcpMaxNackFields, (kIpPacketSize - packet->size()) / 4);
+  size_t number_of_nack_fields = 0;
+  size_t max_number_of_nack_fields = std::min<size_t>(kRtcpMaxNackFields,
+      (kIpPacketSize - packet->size()) / 4);
 
   std::list<uint16>::const_iterator it = nack->nack_list.begin();
   while (it != nack->nack_list.end() &&
@@ -379,6 +379,7 @@ void RtcpSender::BuildNack(const RtcpNackMessage* nack,
     big_endian_nack_writer.WriteU16(bitmask);
     number_of_nack_fields++;
   }
+  DCHECK_GE(kRtcpMaxNackFields, number_of_nack_fields);
   (*packet)[nack_size_pos] = static_cast<uint8>(2 + number_of_nack_fields);
   TRACE_COUNTER_ID1("cast_rtcp", "RtcpSender::NACK", ssrc_,
                     nack->nack_list.size());
@@ -472,22 +473,22 @@ void RtcpSender::BuildCast(const RtcpCastMessage* cast,
   big_endian_writer.WriteU8(0x80 + FMT);
   big_endian_writer.WriteU8(206);
   big_endian_writer.WriteU8(0);
-  int cast_size_pos = start_size + 3;  // Save length position.
+  size_t cast_size_pos = start_size + 3; // Save length position.
   big_endian_writer.WriteU8(4);
   big_endian_writer.WriteU32(ssrc_);  // Add our own SSRC.
   big_endian_writer.WriteU32(cast->media_ssrc_);  // Remote SSRC.
   big_endian_writer.WriteU32(kCast);
   big_endian_writer.WriteU8(cast->ack_frame_id_);
-  int cast_loss_field_pos = start_size + 17;  // Save loss field position.
+  size_t cast_loss_field_pos = start_size + 17;  // Save loss field position.
   big_endian_writer.WriteU8(0);  // Overwritten with number_of_loss_fields.
   big_endian_writer.WriteU8(0);  // Reserved.
   big_endian_writer.WriteU8(0);  // Reserved.
 
-  int number_of_loss_fields = 0;
-  int max_number_of_loss_fields = std::min<int>(kRtcpMaxCastLossFields,
+  size_t number_of_loss_fields = 0;
+  size_t max_number_of_loss_fields = std::min<size_t>(kRtcpMaxCastLossFields,
       (kIpPacketSize - packet->size()) / 4);
 
-  std::map<uint8, std::set<uint16> >::const_iterator frame_it =
+  MissingFramesAndPacketsMap::const_iterator frame_it =
       cast->missing_frames_and_packets_.begin();
 
   for (; frame_it != cast->missing_frames_and_packets_.end() &&
@@ -503,7 +504,7 @@ void RtcpSender::BuildCast(const RtcpCastMessage* cast,
       big_endian_nack_writer.WriteU8(0);
       ++number_of_loss_fields;
     } else {
-      std::set<uint16>::const_iterator packet_it = frame_it->second.begin();
+      PacketIdSet::const_iterator packet_it = frame_it->second.begin();
       while (packet_it != frame_it->second.end()) {
         uint16 packet_id = *packet_it;
 
@@ -532,6 +533,7 @@ void RtcpSender::BuildCast(const RtcpCastMessage* cast,
       }
     }
   }
+  DCHECK_LE(number_of_loss_fields, kRtcpMaxCastLossFields);
   (*packet)[cast_size_pos] = static_cast<uint8>(4 + number_of_loss_fields);
   (*packet)[cast_loss_field_pos] = static_cast<uint8>(number_of_loss_fields);
 

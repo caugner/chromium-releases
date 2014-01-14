@@ -33,7 +33,6 @@
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_state_handler_observer.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -45,8 +44,8 @@
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/webui/jstemplate_builder.h"
-#include "ui/webui/web_ui_util.h"
+#include "ui/base/webui/jstemplate_builder.h"
+#include "ui/base/webui/web_ui_util.h"
 #include "url/gurl.h"
 
 using chromeos::MobileActivator;
@@ -88,8 +87,7 @@ void DataRequestFailed(
 // Converts the network properties into a JS object.
 void GetDeviceInfo(const DictionaryValue& properties, DictionaryValue* value) {
   std::string name;
-  properties.GetStringWithoutPathExpansion(
-      flimflam::kNameProperty, &name);
+  properties.GetStringWithoutPathExpansion(shill::kNameProperty, &name);
   bool activate_over_non_cellular_networks = false;
   properties.GetBooleanWithoutPathExpansion(
       shill::kActivateOverNonCellularNetworkProperty,
@@ -97,13 +95,13 @@ void GetDeviceInfo(const DictionaryValue& properties, DictionaryValue* value) {
   const DictionaryValue* payment_dict;
   std::string payment_url, post_method, post_data;
   if (properties.GetDictionaryWithoutPathExpansion(
-          flimflam::kPaymentPortalProperty, &payment_dict)) {
+          shill::kPaymentPortalProperty, &payment_dict)) {
     payment_dict->GetStringWithoutPathExpansion(
-        flimflam::kPaymentPortalURL, &payment_url);
+        shill::kPaymentPortalURL, &payment_url);
     payment_dict->GetStringWithoutPathExpansion(
-        flimflam::kPaymentPortalMethod, &post_method);
+        shill::kPaymentPortalMethod, &post_method);
     payment_dict->GetStringWithoutPathExpansion(
-        flimflam::kPaymentPortalPostData, &post_data);
+        shill::kPaymentPortalPostData, &post_data);
   }
 
   value->SetBoolean("activate_over_non_cellular_network",
@@ -116,7 +114,7 @@ void GetDeviceInfo(const DictionaryValue& properties, DictionaryValue* value) {
   // Use the cached DeviceState properties.
   std::string device_path;
   if (!properties.GetStringWithoutPathExpansion(
-          flimflam::kDeviceProperty, &device_path) ||
+          shill::kDeviceProperty, &device_path) ||
       device_path.empty()) {
     return;
   }
@@ -131,52 +129,15 @@ void GetDeviceInfo(const DictionaryValue& properties, DictionaryValue* value) {
   value->SetString("MDN", device->mdn());
 }
 
+void SetActivationStateAndError(MobileActivator::PlanActivationState state,
+                                const std::string& error_description,
+                                DictionaryValue* value) {
+  value->SetInteger("state", state);
+  if (!error_description.empty())
+    value->SetString("error", error_description);
+}
+
 }  // namespace
-
-// Observes IPC messages from the rederer and notifies JS if frame loading error
-// appears.
-class PortalFrameLoadObserver : public content::RenderViewHostObserver {
- public:
-  PortalFrameLoadObserver(const base::WeakPtr<MobileSetupUI>& parent,
-                          RenderViewHost* host)
-      : content::RenderViewHostObserver(host), parent_(parent) {
-    Send(new ChromeViewMsg_StartFrameSniffer(routing_id(),
-                                             UTF8ToUTF16("paymentForm")));
-  }
-
-  // IPC::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
-    bool handled = true;
-    IPC_BEGIN_MESSAGE_MAP(PortalFrameLoadObserver, message)
-      IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FrameLoadingError, OnFrameLoadError)
-      IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FrameLoadingCompleted,
-                          OnFrameLoadCompleted)
-      IPC_MESSAGE_UNHANDLED(handled = false)
-    IPC_END_MESSAGE_MAP()
-    return handled;
-  }
-
- private:
-  void OnFrameLoadError(int error) {
-    if (!parent_.get())
-      return;
-
-    base::FundamentalValue result_value(error);
-    parent_->web_ui()->CallJavascriptFunction(kJsPortalFrameLoadFailedCallback,
-                                              result_value);
-  }
-
-  void OnFrameLoadCompleted() {
-    if (!parent_.get())
-      return;
-
-    parent_->web_ui()->CallJavascriptFunction(
-        kJsPortalFrameLoadCompletedCallback);
-  }
-
-  base::WeakPtr<MobileSetupUI> parent_;
-  DISALLOW_COPY_AND_ASSIGN(PortalFrameLoadObserver);
-};
 
 class MobileSetupUIHTMLSource : public content::URLDataSource {
  public:
@@ -329,21 +290,21 @@ void MobileSetupUIHTMLSource::GetPropertiesAndStartDataRequest(
   const DictionaryValue* payment_dict;
   std::string name, usage_url, activation_state, payment_url;
   if (!properties.GetStringWithoutPathExpansion(
-          flimflam::kNameProperty, &name) ||
+          shill::kNameProperty, &name) ||
       !properties.GetStringWithoutPathExpansion(
-          flimflam::kUsageURLProperty, &usage_url) ||
+          shill::kUsageURLProperty, &usage_url) ||
       !properties.GetStringWithoutPathExpansion(
-          flimflam::kActivationStateProperty, &activation_state) ||
+          shill::kActivationStateProperty, &activation_state) ||
       !properties.GetDictionaryWithoutPathExpansion(
-          flimflam::kPaymentPortalProperty, &payment_dict) ||
+          shill::kPaymentPortalProperty, &payment_dict) ||
       !payment_dict->GetStringWithoutPathExpansion(
-          flimflam::kPaymentPortalURL, &payment_url)) {
+          shill::kPaymentPortalURL, &payment_url)) {
     DataRequestFailed(service_path, callback);
     return;
   }
 
   if (payment_url.empty() && usage_url.empty() &&
-      activation_state != flimflam::kActivationStateActivated) {
+      activation_state != shill::kActivationStateActivated) {
     DataRequestFailed(service_path, callback);
     return;
   }
@@ -381,7 +342,7 @@ void MobileSetupUIHTMLSource::GetPropertiesAndStartDataRequest(
   // network is activated, the webui goes straight to portal. Otherwise the
   // webui is used for activation flow.
   std::string full_html;
-  if (activation_state == flimflam::kActivationStateActivated) {
+  if (activation_state == shill::kActivationStateActivated) {
     static const base::StringPiece html_for_activated(
         ResourceBundle::GetSharedInstance().GetRawDataResource(
             IDR_MOBILE_SETUP_PORTAL_PAGE_HTML));
@@ -432,6 +393,15 @@ void MobileSetupHandler::OnActivationStateChanged(
   DCHECK_EQ(TYPE_ACTIVATION, type_);
   if (!web_ui())
     return;
+
+  if (!network) {
+    DictionaryValue device_dict;
+    SetActivationStateAndError(state, error_description, &device_dict);
+    web_ui()->CallJavascriptFunction(kJsDeviceStatusChangedCallback,
+                                     device_dict);
+    return;
+  }
+
   NetworkHandler::Get()->network_configuration_handler()->GetProperties(
       network->path(),
       base::Bind(&MobileSetupHandler::GetPropertiesAndCallStatusChanged,
@@ -451,11 +421,8 @@ void MobileSetupHandler::GetPropertiesAndCallStatusChanged(
     const base::DictionaryValue& properties) {
   DictionaryValue device_dict;
   GetDeviceInfo(properties, &device_dict);
-  device_dict.SetInteger("state", state);
-  if (error_description.length())
-    device_dict.SetString("error", error_description);
-  web_ui()->CallJavascriptFunction(
-      kJsDeviceStatusChangedCallback, device_dict);
+  SetActivationStateAndError(state, error_description, &device_dict);
+  web_ui()->CallJavascriptFunction(kJsDeviceStatusChangedCallback, device_dict);
 }
 
 void MobileSetupHandler::RegisterMessages() {
@@ -547,9 +514,8 @@ void MobileSetupHandler::HandleGetDeviceInfo(const ListValue* args) {
   // network changes, but only for LTE networks. The other networks should
   // ignore network status.
   if (type_ == TYPE_UNDETERMINED) {
-    if (network->network_technology() == flimflam::kNetworkTechnologyLte ||
-        network->network_technology() ==
-            flimflam::kNetworkTechnologyLteAdvanced) {
+    if (network->network_technology() == shill::kNetworkTechnologyLte ||
+        network->network_technology() == shill::kNetworkTechnologyLteAdvanced) {
       type_ = TYPE_PORTAL_LTE;
       nsh->AddObserver(this, FROM_HERE);
       // Update the network status and notify the webui. This is the initial
@@ -639,7 +605,7 @@ void MobileSetupHandler::UpdatePortalReachability(
   bool portal_reachable =
       (network->IsConnectedState() ||
        (nsh->DefaultNetwork() &&
-        nsh->DefaultNetwork()->connection_state() == flimflam::kStateOnline));
+        nsh->DefaultNetwork()->connection_state() == shill::kStateOnline));
 
   if (force_notification || portal_reachable != lte_portal_reachable_) {
     web_ui()->CallJavascriptFunction(kJsConnectivityChangedCallback,
@@ -663,9 +629,36 @@ MobileSetupUI::MobileSetupUI(content::WebUI* web_ui)
   // Set up the chrome://mobilesetup/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
   content::URLDataSource::Add(profile, html_source);
+
+  content::WebContentsObserver::Observe(web_ui->GetWebContents());
 }
 
-void MobileSetupUI::RenderViewCreated(RenderViewHost* host) {
-  // Destroyed by the corresponding RenderViewHost
-  new PortalFrameLoadObserver(AsWeakPtr(), host);
+void MobileSetupUI::DidCommitProvisionalLoadForFrame(
+    int64 frame_id,
+    const string16& frame_unique_name,
+    bool is_main_frame,
+    const GURL& url,
+    content::PageTransition transition_type,
+    content::RenderViewHost* render_view_host) {
+  if (frame_unique_name != UTF8ToUTF16("paymentForm"))
+    return;
+
+  web_ui()->CallJavascriptFunction(
+        kJsPortalFrameLoadCompletedCallback);
+}
+
+void MobileSetupUI::DidFailProvisionalLoad(
+    int64 frame_id,
+    const string16& frame_unique_name,
+    bool is_main_frame,
+    const GURL& validated_url,
+    int error_code,
+    const string16& error_description,
+    content::RenderViewHost* render_view_host) {
+  if (frame_unique_name != UTF8ToUTF16("paymentForm"))
+    return;
+
+  base::FundamentalValue result_value(-error_code);
+  web_ui()->CallJavascriptFunction(kJsPortalFrameLoadFailedCallback,
+                                   result_value);
 }

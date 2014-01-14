@@ -16,30 +16,30 @@ CANNED_CHANNELS = OrderedDict([
 
 CANNED_BRANCHES = OrderedDict([
   ('trunk', 'trunk'),
-  (28, 1500),
-  (27, 1453),
-  (26, 1410),
-  (25, 1364),
-  (24, 1312),
-  (23, 1271),
-  (22, 1229),
-  (21, 1180),
-  (20, 1132),
-  (19, 1084),
-  (18, 1025),
-  (17, 963),
-  (16, 912),
-  (15, 874),
-  (14, 835),
-  (13, 782),
-  (12, 742),
-  (11, 696),
-  (10, 648),
-  ( 9, 597),
-  ( 8, 552),
-  ( 7, 544),
-  ( 6, 495),
-  ( 5, 396)
+  (28, '1500'),
+  (27, '1453'),
+  (26, '1410'),
+  (25, '1364'),
+  (24, '1312'),
+  (23, '1271'),
+  (22, '1229'),
+  (21, '1180'),
+  (20, '1132'),
+  (19, '1084'),
+  (18, '1025'),
+  (17, '963'),
+  (16, '912'),
+  (15, '874'),
+  (14, '835'),
+  (13, '782'),
+  (12, '742'),
+  (11, '696'),
+  (10, '648'),
+  ( 9, '597'),
+  ( 8, '552'),
+  ( 7, '544'),
+  ( 6, '495'),
+  ( 5, '396'),
 ])
 
 
@@ -181,11 +181,11 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'trunk'
         }
       }),
-      'idle.json': 'idle contents',
-      'input_ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'tabs.json': 'tabs contents',
-      'windows.json': 'windows contents'
+      'idle.json': '{}',
+      'input_ime.json': '{}',
+      'menus.json': '{}',
+      'tabs.json': '{}',
+      'windows.json': '{}'
     },
     'docs': {
       'templates': {
@@ -280,11 +280,11 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'beta'
         }
       }),
-      'idle.json': 'idle contents',
-      'input_ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'tabs.json': 'tabs contents',
-      'windows.json': 'windows contents'
+      'idle.json': '{}',
+      'input_ime.json': '{}',
+      'menus.json': '{}',
+      'tabs.json': '{}',
+      'windows.json': '{}'
     }
   },
   '1453': {
@@ -348,11 +348,11 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'dev'
         }
       }),
-      'idle.json': 'idle contents',
-      'input_ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'tabs.json': 'tabs contents',
-      'windows.json': 'windows contents'
+      'idle.json': '{}',
+      'input_ime.json': '{}',
+      'menus.json': '{}',
+      'tabs.json': '{}',
+      'windows.json': '{}'
     }
   },
   '1410': {
@@ -399,11 +399,11 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'stable'
         }
       }),
-      'idle.json': 'idle contents',
-      'input_ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'tabs.json': 'tabs contents',
-      'windows.json': 'windows contents'
+      'idle.json': '{}',
+      'input_ime.json': '{}',
+      'menus.json': '{}',
+      'tabs.json': '{}',
+      'windows.json': '{}'
     }
   },
   '1364': {
@@ -430,11 +430,11 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'stable'
         }
       }),
-      'idle.json': 'idle contents',
-      'input_ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'tabs.json': 'tabs contents',
-      'windows.json': 'windows contents'
+      'idle.json': '{}',
+      'input_ime.json': '{}',
+      'menus.json': '{}',
+      'tabs.json': '{}',
+      'windows.json': '{}'
     }
   },
   '1312': {
@@ -461,11 +461,11 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'stable'
         }
       }),
-      'idle.json': 'idle contents',
-      'input_ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'tabs.json': 'tabs contents',
-      'windows.json': 'windows contents'
+      'idle.json': '{}',
+      'input_ime.json': '{}',
+      'menus.json': '{}',
+      'tabs.json': '{}',
+      'windows.json': '{}'
     }
   },
   '1271': {
@@ -492,12 +492,12 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'stable'
         }
       }),
-      'alarms.idl': 'alarms contents',
-      'idle.json': 'idle contents',
-      'input_ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'tabs.json': 'tabs contents',
-      'windows.json': 'windows contents'
+      'alarms.idl': '{}',
+      'idle.json': '{}',
+      'input_ime.json': '{}',
+      'menus.json': '{}',
+      'tabs.json': '{}',
+      'windows.json': '{}'
     }
   },
   '1229': {
@@ -521,12 +521,12 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'beta'
         }
       }),
-      'alarms.idl': 'alarms contents',
-      'idle.json': 'idle contents',
-      'input_ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'system_info_display.idl': 'systemInfo.display contents',
-      'tabs.json': 'tabs contents'
+      'alarms.idl': '{}',
+      'idle.json': '{}',
+      'input_ime.json': '{}',
+      'menus.json': '{}',
+      'system_info_display.idl': '{}',
+      'tabs.json': '{}'
     }
   },
   '1180': {
@@ -547,11 +547,11 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'stable'
         }
       }),
-      'bookmarks.json': 'bookmarks contents',
-      'idle.json': 'idle contents',
-      'input_ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'tabs.json': 'tabs contents'
+      'bookmarks.json': '{}',
+      'idle.json': '{}',
+      'input_ime.json': '{}',
+      'menus.json': '{}',
+      'tabs.json': '{}'
     }
   },
   '1132': {
@@ -569,11 +569,11 @@ CANNED_API_FILE_SYSTEM_DATA = {
           'channel': 'stable'
         }
       }),
-      'bookmarks.json': 'bookmarks contents',
-      'idle.json': 'idle contents',
-      'input.ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'tabs.json': 'tabs contents'
+      'bookmarks.json': '{}',
+      'idle.json': '{}',
+      'input.ime.json': '{}',
+      'menus.json': '{}',
+      'tabs.json': '{}'
     }
   },
   '1084': {
@@ -581,22 +581,22 @@ CANNED_API_FILE_SYSTEM_DATA = {
       '_manifest_features.json': json.dumps({
         'contents': 'nothing of interest here,really'
       }),
-      'idle.json': 'idle contents',
-      'input.ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'pageAction.json': 'pageAction contents',
-      'tabs.json': 'tabs contents',
-      'webRequest.json': 'webRequest contents'
+      'idle.json': '{}',
+      'input.ime.json': '{}',
+      'menus.json': '{}',
+      'pageAction.json': '{}',
+      'tabs.json': '{}',
+      'webRequest.json': '{}'
     }
   },
   '1025': {
     'api': {
-      'idle.json': 'idle contents',
-      'input.ime.json': 'input.ime contents',
-      'menus.json': 'menus contents',
-      'pageAction.json': 'pageAction contents',
-      'tabs.json': 'tabs contents',
-      'webRequest.json': 'webRequest contents'
+      'idle.json': '{}',
+      'input.ime.json': '{}',
+      'menus.json': '{}',
+      'pageAction.json': '{}',
+      'tabs.json': '{}',
+      'webRequest.json': '{}'
     }
   },
   '963': {

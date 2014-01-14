@@ -18,6 +18,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/pref_names.h"
@@ -49,7 +50,6 @@
 #include "chromeos/chromeos_switches.h"
 #include "content/public/browser/storage_partition.h"
 #include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/sandbox_file_system_backend.h"
 #endif
 
 #if defined(ENABLE_APP_LIST)
@@ -286,6 +286,11 @@ void ComponentLoader::AddFileManagerExtension() {
 #endif  // defined(FILE_MANAGER_EXTENSION)
 }
 
+void ComponentLoader::AddHangoutServicesExtension() {
+  Add(IDR_HANGOUT_SERVICES_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("hangout_services")));
+}
+
 void ComponentLoader::AddImageLoaderExtension() {
 #if defined(IMAGE_LOADER_EXTENSION)
 #ifndef NDEBUG
@@ -300,6 +305,15 @@ void ComponentLoader::AddImageLoaderExtension() {
   Add(IDR_IMAGE_LOADER_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("image_loader")));
 #endif  // defined(IMAGE_LOADER_EXTENSION)
+}
+
+void ComponentLoader::AddBookmarksExtensions() {
+  Add(IDR_BOOKMARKS_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
+#if defined(ENABLE_ENHANCED_BOOKMARKS)
+  Add(IDR_ENHANCED_BOOKMARKS_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("enhanced_bookmark_manager")));
+#endif
 }
 
 void ComponentLoader::AddWithName(int manifest_resource_id,
@@ -374,16 +388,14 @@ void ComponentLoader::AddDefaultComponentExtensions(
   if (!skip_session_components) {
     const CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (!command_line->HasSwitch(chromeos::switches::kGuestSession))
-      Add(IDR_BOOKMARKS_MANIFEST,
-          base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
+      AddBookmarksExtensions();
 
     Add(IDR_CROSH_BUILTIN_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
         "/usr/share/chromeos-assets/crosh_builtin")));
   }
 #else  // !defined(OS_CHROMEOS)
   DCHECK(!skip_session_components);
-  Add(IDR_BOOKMARKS_MANIFEST,
-      base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
+  AddBookmarksExtensions();
   // Cloud Print component app. Not required on Chrome OS.
   Add(IDR_CLOUDPRINT_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("cloud_print")));
@@ -407,7 +419,8 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
   // because they generate a lot of background behavior that can interfere.
   if (!enable_background_extensions_during_testing &&
       (command_line->HasSwitch(switches::kTestType) ||
-          command_line->HasSwitch(switches::kMetricsRecordingOnly))) {
+          command_line->HasSwitch(
+              switches::kDisableComponentExtensionsWithBackgroundPages))) {
     return;
   }
 
@@ -419,7 +432,9 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
           base::FilePath(FILE_PATH_LITERAL("apps_debugger")));
     }
 
+
     AddFileManagerExtension();
+    AddHangoutServicesExtension();
     AddImageLoaderExtension();
 
 #if defined(ENABLE_SETTINGS_APP)
@@ -428,15 +443,17 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 #endif
   }
 
+  // If (!enable_background_extensions_during_testing || this isn't a test)
+  //   install_feedback = false;
+  bool install_feedback = enable_background_extensions_during_testing;
 #if defined(GOOGLE_CHROME_BUILD)
-    Add(IDR_FEEDBACK_MANIFEST, base::FilePath(FILE_PATH_LITERAL("feedback")));
+  install_feedback = true;
 #endif  // defined(GOOGLE_CHROME_BUILD)
+  if (install_feedback)
+    Add(IDR_FEEDBACK_MANIFEST, base::FilePath(FILE_PATH_LITERAL("feedback")));
 
 #if defined(OS_CHROMEOS)
   if (!skip_session_components) {
-    Add(IDR_WALLPAPERMANAGER_MANIFEST,
-        base::FilePath(FILE_PATH_LITERAL("chromeos/wallpaper_manager")));
-
 #if defined(GOOGLE_CHROME_BUILD)
     if (!command_line->HasSwitch(
             chromeos::switches::kDisableQuickofficeComponentApp)) {
@@ -469,6 +486,11 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     }
     Add(IDR_ECHO_MANIFEST, echo_extension_path);
 
+    if (!command_line->HasSwitch(chromeos::switches::kGuestSession)) {
+      Add(IDR_WALLPAPERMANAGER_MANIFEST,
+          base::FilePath(FILE_PATH_LITERAL("chromeos/wallpaper_manager")));
+    }
+
     Add(IDR_NETWORK_CONFIGURATION_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("chromeos/network_configuration")));
 
@@ -493,12 +515,30 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
   std::string enable_prefix(kEnablePrefix);
   std::string field_trial_result =
       base::FieldTrialList::FindFullName(kFieldTrialName);
-  if ((field_trial_result.compare(
-          0,
-          enable_prefix.length(),
-          enable_prefix) == 0) ||
+
+  bool enabled_via_field_trial = field_trial_result.compare(
+      0,
+      enable_prefix.length(),
+      enable_prefix) == 0;
+
+  // Enable the feature on trybots.
+  bool enabled_via_trunk_build = chrome::VersionInfo::GetChannel() ==
+      chrome::VersionInfo::CHANNEL_UNKNOWN;
+
+  bool enabled_via_flag =
+      chrome::VersionInfo::GetChannel() !=
+          chrome::VersionInfo::CHANNEL_STABLE &&
       CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableGoogleNowIntegration)) {
+          switches::kEnableGoogleNowIntegration);
+
+  bool enabled =
+      enabled_via_field_trial || enabled_via_trunk_build || enabled_via_flag;
+
+  bool disabled_via_flag =
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableGoogleNowIntegration);
+
+  if (enabled && !disabled_via_flag) {
     Add(IDR_GOOGLE_NOW_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("google_now")));
   }

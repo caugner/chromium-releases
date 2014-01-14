@@ -21,11 +21,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/overscroll_configuration.h"
 #include "content/public/common/renderer_preferences.h"
-#include "ui/base/gestures/gesture_configuration.h"
-
-#if defined(USE_ASH)
-#include "chrome/browser/ui/immersive_fullscreen_configuration.h"
-#endif  // USE_ASH
+#include "ui/events/gestures/gesture_configuration.h"
 
 using ui::GestureConfiguration;
 
@@ -66,13 +62,6 @@ const std::vector<OverscrollPref>& GetOverscrollPrefs() {
   return overscroll_prefs;
 }
 
-#if defined(USE_ASH)
-const char* kImmersiveModePrefs[] = {
-  prefs::kImmersiveModeRevealDelayMs,
-  prefs::kImmersiveModeRevealXThresholdPixels,
-};
-#endif  // USE_ASH
-
 // This class manages gesture configuration preferences.
 class GesturePrefsObserver : public BrowserContextKeyedService {
  public:
@@ -96,8 +85,6 @@ class GesturePrefsObserver : public BrowserContextKeyedService {
   // content.
   void UpdateOverscrollPrefs();
 
-  void UpdateImmersiveModePrefs();
-
   PrefChangeRegistrar registrar_;
   PrefService* prefs_;
 
@@ -106,7 +93,7 @@ class GesturePrefsObserver : public BrowserContextKeyedService {
 
 // The list of prefs we want to observe.
 // Note that this collection of settings should correspond to the settings used
-// in ui/base/gestures/gesture_configuration.h
+// in ui/events/gestures/gesture_configuration.h
 const char* kPrefsToObserve[] = {
   prefs::kFlingAccelerationCurveCoefficient0,
   prefs::kFlingAccelerationCurveCoefficient1,
@@ -171,11 +158,6 @@ GesturePrefsObserver::GesturePrefsObserver(PrefService* prefs)
     for (size_t i = 0; i < arraysize(kFlingTouchscreenPrefs); ++i)
       prefs->ClearPref(kFlingTouchscreenPrefs[i]);
 
-#if defined(USE_ASH)
-    for (size_t i = 0; i < arraysize(kImmersiveModePrefs); ++i)
-      prefs->ClearPref(kImmersiveModePrefs[i]);
-#endif  // USE_ASH
-
     prefs->SetBoolean(prefs::kGestureConfigIsTrustworthy, true);
   }
 
@@ -199,10 +181,6 @@ GesturePrefsObserver::GesturePrefsObserver(PrefService* prefs)
   for (size_t i = 0; i < arraysize(kFlingTouchscreenPrefs); ++i)
     registrar_.Add(kFlingTouchscreenPrefs[i], notify_callback);
 
-#if defined(USE_ASH)
-  for (size_t i = 0; i < arraysize(kImmersiveModePrefs); ++i)
-    registrar_.Add(kImmersiveModePrefs[i], callback);
-#endif  // USE_ASH
   Update();
 }
 
@@ -291,9 +269,10 @@ void GesturePrefsObserver::Update() {
           prefs::kRailStartProportion));
   GestureConfiguration::set_scroll_prediction_seconds(
       prefs_->GetDouble(prefs::kScrollPredictionSeconds));
+  GestureConfiguration::set_show_press_delay_in_ms(
+      prefs_->GetInteger(prefs::kShowPressDelayInMS));
 
   UpdateOverscrollPrefs();
-  UpdateImmersiveModePrefs();
 }
 
 void GesturePrefsObserver::UpdateOverscrollPrefs() {
@@ -302,16 +281,6 @@ void GesturePrefsObserver::UpdateOverscrollPrefs() {
     content::SetOverscrollConfig(overscroll_prefs[i].config,
         static_cast<float>(prefs_->GetDouble(overscroll_prefs[i].pref_name)));
   }
-}
-
-void GesturePrefsObserver::UpdateImmersiveModePrefs() {
-#if defined(USE_ASH)
-  ImmersiveFullscreenConfiguration::set_immersive_mode_reveal_delay_ms(
-      prefs_->GetInteger(prefs::kImmersiveModeRevealDelayMs));
-  ImmersiveFullscreenConfiguration::
-      set_immersive_mode_reveal_x_threshold_pixels(
-          prefs_->GetInteger(prefs::kImmersiveModeRevealXThresholdPixels));
-#endif  // USE_ASH
 }
 
 void GesturePrefsObserver::Notify() {
@@ -371,21 +340,6 @@ void GesturePrefsObserverFactoryAura::RegisterFlingCurveParameters(
         kFlingTouchscreenPrefs[i],
         def_prefs.touchscreen_fling_profile[i],
         user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-}
-
-void GesturePrefsObserverFactoryAura::RegisterImmersiveModePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-#if defined(USE_ASH)
-  registry->RegisterIntegerPref(
-      prefs::kImmersiveModeRevealDelayMs,
-      ImmersiveFullscreenConfiguration::immersive_mode_reveal_delay_ms(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      prefs::kImmersiveModeRevealXThresholdPixels,
-      ImmersiveFullscreenConfiguration::
-          immersive_mode_reveal_x_threshold_pixels(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-#endif  // USE_ASH
 }
 
 void GesturePrefsObserverFactoryAura::RegisterProfilePrefs(
@@ -506,6 +460,10 @@ void GesturePrefsObserverFactoryAura::RegisterProfilePrefs(
       prefs::kScrollPredictionSeconds,
       GestureConfiguration::scroll_prediction_seconds(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(
+      prefs::kShowPressDelayInMS,
+      GestureConfiguration::show_press_delay_in_ms(),
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   // Register for migration.
   registry->RegisterDoublePref(
@@ -515,7 +473,6 @@ void GesturePrefsObserverFactoryAura::RegisterProfilePrefs(
 
   RegisterOverscrollPrefs(registry);
   RegisterFlingCurveParameters(registry);
-  RegisterImmersiveModePrefs(registry);
 
   // Register pref for a one-time wipe of all gesture preferences.
   registry->RegisterBooleanPref(

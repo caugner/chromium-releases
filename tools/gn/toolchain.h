@@ -58,23 +58,19 @@ class Toolchain : public Item {
     Tool();
     ~Tool();
 
-    bool empty() const {
-      return command.empty() && depfile.empty() && deps.empty() &&
-             description.empty() && pool.empty() && restat.empty() &&
-             rspfile.empty() && rspfile_content.empty();
-    }
-
     std::string command;
     std::string depfile;
     std::string deps;
     std::string description;
+    std::string lib_dir_prefix;
+    std::string lib_prefix;
     std::string pool;
     std::string restat;
     std::string rspfile;
     std::string rspfile_content;
   };
 
-  Toolchain(const Label& label);
+  Toolchain(const Settings* settings, const Label& label);
   virtual ~Toolchain();
 
   // Item overrides.
@@ -91,9 +87,6 @@ class Toolchain : public Item {
   const std::string& environment() const { return environment_; }
   void set_environment(const std::string& env) { environment_ = env; }
 
-  bool is_default() const { return is_default_; }
-  void set_is_default(bool id) { is_default_ = id; }
-
   // Specifies build argument overrides that will be set on the base scope. It
   // will be as if these arguments were passed in on the command line. This
   // allows a toolchain to override the OS type of the default toolchain or
@@ -104,7 +97,6 @@ class Toolchain : public Item {
  private:
   Tool tools_[TYPE_NUMTYPES];
 
-  bool is_default_;
   Scope::KeyValueMap args_;
 
   std::string environment_;

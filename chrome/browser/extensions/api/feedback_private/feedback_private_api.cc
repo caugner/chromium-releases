@@ -7,6 +7,7 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/feedback_private/feedback_service.h"
@@ -15,8 +16,21 @@
 #include "chrome/browser/feedback/tracing_manager.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/webui/web_ui_util.h"
+#include "ui/base/webui/web_ui_util.h"
 #include "url/url_util.h"
+
+namespace {
+
+// Getting the filename of a blob prepends a "C:\fakepath" to the filename.
+// This is undesirable, strip it if it exists.
+std::string StripFakepath(const std::string& path) {
+  const char kFakePathStr[] = "C:\\fakepath\\";
+  if (StartsWithASCII(path, kFakePathStr, false))
+    return path.substr(arraysize(kFakePathStr) - 1);
+  return path;
+}
+
+}  // namespace
 
 namespace extensions {
 
@@ -24,6 +38,8 @@ namespace feedback_private = api::feedback_private;
 
 using feedback_private::SystemInformation;
 using feedback_private::FeedbackInfo;
+
+char kFeedbackExtensionId[] = "gfdkimpbcpahaombhbimeihdjnejgicl";
 
 static base::LazyInstance<ProfileKeyedAPIFactory<FeedbackPrivateAPI> >
     g_factory = LAZY_INSTANCE_INITIALIZER;
@@ -51,8 +67,9 @@ FeedbackService* FeedbackPrivateAPI::GetService() const {
 void FeedbackPrivateAPI::RequestFeedback(
     const std::string& description_template,
     const std::string& category_tag,
-    const GURL& page_url,
-    const gfx::Rect& screen_size) {
+    const GURL& page_url) {
+  // TODO(rkc): Remove logging once crbug.com/284662 is closed.
+  LOG(WARNING) << "FEEDBACK_DEBUG: Feedback requested.";
   if (profile_ && ExtensionSystem::Get(profile_)->event_router()) {
     FeedbackInfo info;
     info.description = description_template;
@@ -64,22 +81,21 @@ void FeedbackPrivateAPI::RequestFeedback(
       info.trace_id.reset(new int(manager->RequestTrace()));
     }
 
-    FeedbackService::PopulateSystemInfo(
-        info.system_information.get(), FeedbackData::kScreensizeHeightKey,
-        base::IntToString(screen_size.height()));
-    FeedbackService::PopulateSystemInfo(
-        info.system_information.get(), FeedbackData::kScreensizeWidthKey,
-        base::IntToString(screen_size.width()));
-
     scoped_ptr<base::ListValue> args(new base::ListValue());
     args->Append(info.ToValue().release());
 
     scoped_ptr<Event> event(new Event(
         feedback_private::OnFeedbackRequested::kEventName, args.Pass()));
-    ExtensionSystem::Get(profile_)->event_router()->BroadcastEvent(
+    // TODO(rkc): Remove logging once crbug.com/284662 is closed.
+    LOG(WARNING) << "FEEDBACK_DEBUG: Dispatching onFeedbackRequested event.";
+    ExtensionSystem::Get(profile_)->event_router()->DispatchEventToExtension(
+        kFeedbackExtensionId,
         event.Pass());
   }
 }
+
+// static
+base::Closure* FeedbackPrivateGetStringsFunction::test_callback_ = NULL;
 
 bool FeedbackPrivateGetStringsFunction::RunImpl() {
   DictionaryValue* dict = new DictionaryValue();
@@ -105,22 +121,30 @@ bool FeedbackPrivateGetStringsFunction::RunImpl() {
 #undef SET_STRING
 
   webui::SetFontAndTextDirection(dict);
+
+  if (test_callback_ && !test_callback_->is_null())
+    test_callback_->Run();
+
   return true;
 }
 
 bool FeedbackPrivateGetUserEmailFunction::RunImpl() {
-  FeedbackService* service =
-      FeedbackPrivateAPI::GetFactoryInstance()->GetForProfile(
-          profile())->GetService();
+  // TODO(rkc): Remove logging once crbug.com/284662 is closed.
+  LOG(WARNING) << "FEEDBACK_DEBUG: User e-mail requested.";
+  FeedbackService* service = FeedbackPrivateAPI::GetFactoryInstance()
+                                 ->GetForProfile(GetProfile())
+                                 ->GetService();
   DCHECK(service);
   SetResult(new base::StringValue(service->GetUserEmail()));
   return true;
 }
 
 bool FeedbackPrivateGetSystemInformationFunction::RunImpl() {
-  FeedbackService* service =
-      FeedbackPrivateAPI::GetFactoryInstance()->GetForProfile(
-          profile())->GetService();
+  // TODO(rkc): Remove logging once crbug.com/284662 is closed.
+  LOG(WARNING) << "FEEDBACK_DEBUG: System information requested.";
+  FeedbackService* service = FeedbackPrivateAPI::GetFactoryInstance()
+                                 ->GetForProfile(GetProfile())
+                                 ->GetService();
   DCHECK(service);
   service->GetSystemInformation(
       base::Bind(
@@ -142,18 +166,19 @@ bool FeedbackPrivateSendFeedbackFunction::RunImpl() {
 
   const FeedbackInfo &feedback_info = params->feedback;
 
-  std::string attached_file_url, screenshot_url;
-  if (feedback_info.attached_file_blob_url.get() &&
-      !feedback_info.attached_file_blob_url->empty())
-    attached_file_url = *feedback_info.attached_file_blob_url;
+  std::string attached_file_uuid;
+  if (feedback_info.attached_file_blob_uuid.get() &&
+      !feedback_info.attached_file_blob_uuid->empty())
+    attached_file_uuid = *feedback_info.attached_file_blob_uuid;
 
-  if (feedback_info.screenshot_blob_url.get() &&
-      !feedback_info.screenshot_blob_url->empty())
-    screenshot_url = *feedback_info.screenshot_blob_url;
+  std::string screenshot_uuid;
+  if (feedback_info.screenshot_blob_uuid.get() &&
+      !feedback_info.screenshot_blob_uuid->empty())
+    screenshot_uuid = *feedback_info.screenshot_blob_uuid;
 
   // Populate feedback data.
   scoped_refptr<FeedbackData> feedback_data(new FeedbackData());
-  feedback_data->set_profile(profile_);
+  feedback_data->set_profile(GetProfile());
   feedback_data->set_description(feedback_info.description);
 
   if (feedback_info.category_tag.get())
@@ -163,14 +188,14 @@ bool FeedbackPrivateSendFeedbackFunction::RunImpl() {
   if (feedback_info.email.get())
     feedback_data->set_user_email(*feedback_info.email.get());
 
-  if (!attached_file_url.empty()) {
+  if (!attached_file_uuid.empty()) {
     feedback_data->set_attached_filename(
-        (*feedback_info.attached_file.get()).name);
-    feedback_data->set_attached_file_url(GURL(attached_file_url));
+        StripFakepath((*feedback_info.attached_file.get()).name));
+    feedback_data->set_attached_file_uuid(attached_file_uuid);
   }
 
-  if (!screenshot_url.empty())
-    feedback_data->set_screenshot_url(GURL(screenshot_url));
+  if (!screenshot_uuid.empty())
+    feedback_data->set_screenshot_uuid(screenshot_uuid);
 
   if (feedback_info.trace_id.get()) {
     feedback_data->set_trace_id(*feedback_info.trace_id.get());
@@ -186,13 +211,14 @@ bool FeedbackPrivateSendFeedbackFunction::RunImpl() {
   }
   feedback_data->SetAndCompressSystemInfo(sys_logs.Pass());
 
-  FeedbackService* service = FeedbackPrivateAPI::GetFactoryInstance()->
-      GetForProfile(profile())->GetService();
+  FeedbackService* service = FeedbackPrivateAPI::GetFactoryInstance()
+                                 ->GetForProfile(GetProfile())
+                                 ->GetService();
   DCHECK(service);
-  service->SendFeedback(profile(),
-      feedback_data, base::Bind(
-          &FeedbackPrivateSendFeedbackFunction::OnCompleted,
-          this));
+  service->SendFeedback(
+      GetProfile(),
+      feedback_data,
+      base::Bind(&FeedbackPrivateSendFeedbackFunction::OnCompleted, this));
   return true;
 }
 

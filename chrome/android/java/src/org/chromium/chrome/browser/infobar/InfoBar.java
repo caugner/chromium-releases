@@ -53,6 +53,9 @@ public abstract class InfoBar implements InfoBarView {
     private boolean mIsDismissed;
     private boolean mControlsEnabled;
 
+    // This cannot be private until the swap in place infrastructure is
+    // improved since subclasses need to access a possibly replaced native
+    // pointer.
     protected int mNativeInfoBarPtr;
 
     // Used by tests to reference infobars.
@@ -98,9 +101,11 @@ public abstract class InfoBar implements InfoBarView {
 
     // Determine if the infobar should be dismissed when |url| is loaded.  Calling
     // setExpireOnNavigation(true/false) causes this method always to return true/false.
-    // For more control, subclasses can override this method and take the url into account.
-    public boolean shouldExpire(String url) {
-        return mExpireOnNavigation;
+    // This only applies to java-only infobars. C++ infobars will use the same logic
+    // as other platforms so they are not attempted to be dismissed twice.
+    // It should really be removed once all infobars have a C++ counterpart.
+    public final boolean shouldExpire(String url) {
+        return mExpireOnNavigation && mNativeInfoBarPtr == 0;
     }
 
     // Sets whether the bar should be dismissed when a navigation occurs.
@@ -147,20 +152,16 @@ public abstract class InfoBar implements InfoBarView {
     }
 
     /**
-     * Used to close an infobar from java. In addition to closing the infobar, notifies native
-     * that the bar needs closing.
+     * Used to close a java only infobar.
      */
-    public void dismiss() {
-        if (closeInfoBar() && mNativeInfoBarPtr != 0) {
-            // We are being closed from Java, notify C++.
-            nativeOnInfoBarClosed(mNativeInfoBarPtr);
-            mNativeInfoBarPtr = 0;
+    public void dismissJavaOnlyInfoBar() {
+        assert mNativeInfoBarPtr == 0;
+        if (closeInfoBar() && mListener != null) {
+            mListener.onInfoBarDismissed(this);
         }
     }
 
     /**
-     * Used to close an infobar from native.
-     *
      * @return whether the infobar actually needed closing.
      */
     @CalledByNative
@@ -170,9 +171,6 @@ public abstract class InfoBar implements InfoBarView {
             if (!mContainer.hasBeenDestroyed()) {
                 // If the container was destroyed, it's already been emptied of all its infobars.
                 mContainer.removeInfoBar(this);
-            }
-            if (mListener != null) {
-                mListener.onInfoBarDismissed(this);
             }
             return true;
         }
@@ -223,8 +221,8 @@ public abstract class InfoBar implements InfoBarView {
     }
 
     @Override
-    public void onCloseButtonClicked() {
-        dismiss();
+    public void onLinkClicked() {
+        nativeOnLinkClicked(mNativeInfoBarPtr);
     }
 
     @Override
@@ -258,7 +256,7 @@ public abstract class InfoBar implements InfoBarView {
         mListener = listener;
     }
 
-    protected native void nativeOnInfoBarClosed(int nativeInfoBarAndroid);
+    protected native void nativeOnLinkClicked(int nativeInfoBarAndroid);
     protected native void nativeOnButtonClicked(
             int nativeInfoBarAndroid, int action, String actionValue);
     protected native void nativeOnCloseButtonClicked(int nativeInfoBarAndroid);

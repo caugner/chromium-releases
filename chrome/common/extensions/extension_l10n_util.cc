@@ -58,12 +58,50 @@ base::DictionaryValue* LoadMessageFile(const base::FilePath& locale_path,
   return static_cast<base::DictionaryValue*>(dictionary);
 }
 
-}  // namespace
+// Localizes manifest value of string type for a given key.
+bool LocalizeManifestValue(const std::string& key,
+                           const extensions::MessageBundle& messages,
+                           base::DictionaryValue* manifest,
+                           std::string* error) {
+  std::string result;
+  if (!manifest->GetString(key, &result))
+    return true;
 
-static std::string& GetProcessLocale() {
+  if (!messages.ReplaceMessages(&result, error))
+    return false;
+
+  manifest->SetString(key, result);
+  return true;
+}
+
+// Localizes manifest value of list type for a given key.
+bool LocalizeManifestListValue(const std::string& key,
+                               const extensions::MessageBundle& messages,
+                               base::DictionaryValue* manifest,
+                               std::string* error) {
+  ListValue* list = NULL;
+  if (!manifest->GetList(key, &list))
+    return true;
+
+  bool ret = true;
+  for (size_t i = 0; i < list->GetSize(); ++i) {
+    std::string result;
+    if (list->GetString(i, &result)) {
+      if (messages.ReplaceMessages(&result, error))
+        list->Set(i, new StringValue(result));
+      else
+        ret = false;
+    }
+  }
+  return ret;
+}
+
+std::string& GetProcessLocale() {
   CR_DEFINE_STATIC_LOCAL(std::string, locale, ());
   return locale;
 }
+
+}  // namespace
 
 namespace extension_l10n_util {
 
@@ -93,22 +131,6 @@ bool ShouldRelocalizeManifest(const base::DictionaryValue* manifest) {
   return manifest_current_locale != CurrentLocaleOrDefault();
 }
 
-// Localizes manifest value for a given key.
-static bool LocalizeManifestValue(const std::string& key,
-                                  const extensions::MessageBundle& messages,
-                                  base::DictionaryValue* manifest,
-                                  std::string* error) {
-  std::string result;
-  if (!manifest->GetString(key, &result))
-    return true;
-
-  if (!messages.ReplaceMessages(&result, error))
-    return false;
-
-  manifest->SetString(key, result);
-  return true;
-}
-
 bool LocalizeManifest(const extensions::MessageBundle& messages,
                       base::DictionaryValue* manifest,
                       std::string* error) {
@@ -121,6 +143,10 @@ bool LocalizeManifest(const extensions::MessageBundle& messages,
   if (!LocalizeManifestValue(keys::kName, messages, manifest, error)) {
     return false;
   }
+
+  // Initialize short name.
+  if (!LocalizeManifestValue(keys::kShortName, messages, manifest, error))
+    return false;
 
   // Initialize description.
   if (!LocalizeManifestValue(keys::kDescription, messages, manifest, error))
@@ -207,6 +233,21 @@ bool LocalizeManifest(const extensions::MessageBundle& messages,
       key.assign(base::StringPrintf("commands.%s.description",
                                     iter.key().c_str()));
       if (!LocalizeManifestValue(key, messages, manifest, error))
+        return false;
+    }
+  }
+
+  // Initialize search_provider fields.
+  base::DictionaryValue* search_provider = NULL;
+  if (manifest->GetDictionary(keys::kSearchProvider, &search_provider)) {
+    for (DictionaryValue::Iterator iter(*search_provider); !iter.IsAtEnd();
+        iter.Advance()) {
+      key.assign(base::StringPrintf("%s.%s", keys::kSearchProvider,
+                                    iter.key().c_str()));
+      bool success = (key == keys::kSettingsOverrideAlternateUrls) ?
+          LocalizeManifestListValue(key, messages, manifest, error) :
+          LocalizeManifestValue(key, messages, manifest, error);
+      if (!success)
         return false;
     }
   }

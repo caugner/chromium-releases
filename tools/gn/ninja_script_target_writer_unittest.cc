@@ -21,7 +21,7 @@ TEST(NinjaScriptTargetWriter, WriteOutputFilesForBuildLine) {
       SourceFile("//out/Debug/gen/{{source_name_part}}.cc"));
 
   std::ostringstream out;
-  NinjaScriptTargetWriter writer(&target, out);
+  NinjaScriptTargetWriter writer(&target, setup.toolchain(), out);
 
   FileTemplate output_template = writer.GetOutputTemplate();
 
@@ -42,7 +42,7 @@ TEST(NinjaScriptTargetWriter, WriteArgsSubstitutions) {
   Target target(setup.settings(), Label(SourceDir("//foo/"), "bar"));
 
   std::ostringstream out;
-  NinjaScriptTargetWriter writer(&target, out);
+  NinjaScriptTargetWriter writer(&target, setup.toolchain(), out);
 
   std::vector<std::string> args;
   args.push_back("-i");
@@ -84,25 +84,30 @@ TEST(NinjaScriptTargetWriter, InvokeOverSources) {
   // Posix.
   {
     setup.settings()->set_target_os(Settings::LINUX);
+    setup.build_settings()->set_python_path(base::FilePath(FILE_PATH_LITERAL(
+        "/usr/bin/python")));
 
     std::ostringstream out;
-    NinjaScriptTargetWriter writer(&target, out);
+    NinjaScriptTargetWriter writer(&target, setup.toolchain(), out);
     writer.Run();
 
     const char expected_linux[] =
         "rule __foo_bar___rule\n"
-        "  command = cd ../../foo; $pythonpath ../../foo/script.py -i ${source} \"--out=foo$ bar${source_name_part}.o\"\n"
+        "  command = /usr/bin/python ../../foo/script.py -i ${source} "
+            "\"--out=foo$ bar${source_name_part}.o\"\n"
         "  description = CUSTOM //foo:bar()\n"
         "  restat = 1\n"
         "\n"
-        "build input1.out: __foo_bar___rule../../foo/input1.txt | ../../foo/included.txt\n"
+        "build input1.out: __foo_bar___rule ../../foo/input1.txt | "
+            "../../foo/included.txt\n"
         "  source = ../../foo/input1.txt\n"
         "  source_name_part = input1\n"
-        "build input2.out: __foo_bar___rule../../foo/input2.txt | ../../foo/included.txt\n"
+        "build input2.out: __foo_bar___rule ../../foo/input2.txt | "
+            "../../foo/included.txt\n"
         "  source = ../../foo/input2.txt\n"
         "  source_name_part = input2\n"
         "\n"
-        "build obj/foo/bar.stamp: tc_stamp input1.out input2.out\n";
+        "build obj/foo/bar.stamp: stamp input1.out input2.out\n";
 
     std::string out_str = out.str();
 #if defined(OS_WIN)
@@ -113,33 +118,40 @@ TEST(NinjaScriptTargetWriter, InvokeOverSources) {
 
   // Windows.
   {
+    // Note: we use forward slashes here so that the output will be the same on
+    // Linux and Windows.
+    setup.build_settings()->set_python_path(base::FilePath(FILE_PATH_LITERAL(
+        "C:/python/python.exe")));
     setup.settings()->set_target_os(Settings::WIN);
 
     std::ostringstream out;
-    NinjaScriptTargetWriter writer(&target, out);
+    NinjaScriptTargetWriter writer(&target, setup.toolchain(), out);
     writer.Run();
 
     // TODO(brettw) I think we'll need to worry about backslashes here
     // depending if we're on actual Windows or Linux pretending to be Windows.
     const char expected_win[] =
-        "arch = environment.x86\n"
         "rule __foo_bar___rule\n"
-        "  command = $pythonpath gyp-win-tool action-wrapper $arch __foo_bar___rule.$unique_name.rsp\n"
+        "  command = C:/python/python.exe gyp-win-tool action-wrapper "
+            "environment.x86 __foo_bar___rule.$unique_name.rsp\n"
         "  description = CUSTOM //foo:bar()\n"
         "  restat = 1\n"
         "  rspfile = __foo_bar___rule.$unique_name.rsp\n"
-        "  rspfile_content = $pythonpath ../../foo/script.py -i ${source} \"--out=foo$ bar${source_name_part}.o\"\n"
+        "  rspfile_content = C:/python/python.exe ../../foo/script.py -i "
+            "${source} \"--out=foo$ bar${source_name_part}.o\"\n"
         "\n"
-        "build input1.out: __foo_bar___rule../../foo/input1.txt | ../../foo/included.txt\n"
+        "build input1.out: __foo_bar___rule ../../foo/input1.txt | "
+            "../../foo/included.txt\n"
         "  unique_name = 0\n"
         "  source = ../../foo/input1.txt\n"
         "  source_name_part = input1\n"
-        "build input2.out: __foo_bar___rule../../foo/input2.txt | ../../foo/included.txt\n"
+        "build input2.out: __foo_bar___rule ../../foo/input2.txt | "
+            "../../foo/included.txt\n"
         "  unique_name = 1\n"
         "  source = ../../foo/input2.txt\n"
         "  source_name_part = input2\n"
         "\n"
-        "build obj/foo/bar.stamp: tc_stamp input1.out input2.out\n";
+        "build obj/foo/bar.stamp: stamp input1.out input2.out\n";
     std::string out_str = out.str();
 #if defined(OS_WIN)
     std::replace(out_str.begin(), out_str.end(), '\\', '/');

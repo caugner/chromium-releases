@@ -6,8 +6,9 @@ package org.chromium.chrome.testshell;
 
 import android.content.Intent;
 
-import org.chromium.base.ChromiumApplication;
+import org.chromium.base.CalledByNative;
 import org.chromium.base.PathUtils;
+import org.chromium.chrome.browser.ChromiumApplication;
 import org.chromium.chrome.browser.UmaUtils;
 import org.chromium.content.browser.ResourceExtractor;
 import org.chromium.content.common.CommandLine;
@@ -65,5 +66,17 @@ public class ChromiumTestShellApplication extends ChromiumApplication {
     public static void initCommandLine() {
         if (!CommandLine.isInitialized())
             CommandLine.initFromFile(COMMAND_LINE_FILE);
+    }
+
+    @Override
+    protected void openProtectedContentSettings() {
+    }
+
+    @Override
+    protected void showSyncSettings() {
+    }
+
+    @Override
+    protected void showTermsOfServiceDialog() {
     }
 }

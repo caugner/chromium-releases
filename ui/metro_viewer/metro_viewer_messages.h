@@ -50,9 +50,8 @@ IPC_MESSAGE_CONTROL4(MetroViewerHostMsg_Character,
                      uint32,       /* repeat count */
                      uint32,       /* scan code */
                      uint32        /* key state */);
-// Informs the browser that the visibiliy of the viewer has changed.
-IPC_MESSAGE_CONTROL1(MetroViewerHostMsg_VisibilityChanged,
-                     bool          /* visible */);
+// Informs the browser that the Metro window has been activated.
+IPC_MESSAGE_CONTROL0(MetroViewerHostMsg_WindowActivated);
 
 IPC_MESSAGE_CONTROL4(MetroViewerHostMsg_TouchDown,
                      int32,           /* x-coordinate */
@@ -90,7 +89,16 @@ IPC_MESSAGE_CONTROL2(MetroViewerHostMsg_SelectFolderDone,
                      bool,           /* success */
                      base::FilePath) /* filepath*/
 
+// Informs the browser of the result of a activate desktop (shellexecute)
+// operation.
+IPC_MESSAGE_CONTROL0(MetroViewerHostMsg_ActivateDesktopDone)
+
 // Messages sent from the browser to the viewer:
+
+// Requests the viewer to activate desktop mode.
+IPC_MESSAGE_CONTROL2(MetroViewerHostMsg_ActivateDesktop,
+                     base::FilePath /* shortcut */,
+                     bool           /* ash exit */);
 
 // Requests the viewer to open a URL in desktop mode.
 IPC_MESSAGE_CONTROL2(MetroViewerHostMsg_OpenURLOnDesktop,

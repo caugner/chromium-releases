@@ -40,7 +40,6 @@ class FakePowerManagerClient : public PowerManagerClient {
   virtual void RequestStatusUpdate() OVERRIDE;
   virtual void RequestRestart() OVERRIDE;
   virtual void RequestShutdown() OVERRIDE;
-  virtual void RequestIdleNotification(int64 threshold_secs) OVERRIDE;
   virtual void NotifyUserActivity(
       power_manager::UserActivityType type) OVERRIDE;
   virtual void NotifyVideoActivity(bool is_fullscreen) OVERRIDE;
@@ -48,6 +47,7 @@ class FakePowerManagerClient : public PowerManagerClient {
       const power_manager::PowerManagementPolicy& policy) OVERRIDE;
   virtual void SetIsProjecting(bool is_projecting) OVERRIDE;
   virtual base::Closure GetSuspendReadinessCallback() OVERRIDE;
+  virtual int GetNumPendingSuspendReadinessCallbacks() OVERRIDE;
 
   power_manager::PowerManagementPolicy& get_policy() { return policy_; }
 

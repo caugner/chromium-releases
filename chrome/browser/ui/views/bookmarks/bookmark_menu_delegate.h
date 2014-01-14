@@ -11,7 +11,7 @@
 #include "base/compiler_specific.h"
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_context_menu.h"
 #include "ui/views/controls/menu/menu_delegate.h"
 
@@ -53,7 +53,8 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
   BookmarkMenuDelegate(Browser* browser,
                        content::PageNavigator* navigator,
                        views::Widget* parent,
-                       int first_menu_id);
+                       int first_menu_id,
+                       int max_menu_id);
   virtual ~BookmarkMenuDelegate();
 
   // Creates the menus from the model.
@@ -62,7 +63,7 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
             const BookmarkNode* node,
             int start_child_index,
             ShowOptions show_options,
-            bookmark_utils::BookmarkLaunchLocation location);
+            BookmarkLaunchLocation location);
 
   // Sets the PageNavigator.
   void SetPageNavigator(content::PageNavigator* navigator);
@@ -158,6 +159,10 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
                  views::MenuItemView* menu,
                  int* next_menu_id);
 
+  // Returns true if |menu_id_| is outside the range of minimum and maximum menu
+  // ID's allowed.
+  bool IsOutsideMenuIdRange(int menu_id) const;
+
   Browser* browser_;
   Profile* profile_;
 
@@ -190,13 +195,17 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
   // ID of the next menu item.
   int next_menu_id_;
 
+  // Minimum and maximum ID's to use for menu items.
+  const int min_menu_id_;
+  const int max_menu_id_;
+
   views::MenuDelegate* real_delegate_;
 
   // Is the model being changed?
   bool is_mutating_model_;
 
   // The location where this bookmark menu will be displayed (for UMA).
-  bookmark_utils::BookmarkLaunchLocation location_;
+  BookmarkLaunchLocation location_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkMenuDelegate);
 };

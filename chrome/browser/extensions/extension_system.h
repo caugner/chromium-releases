@@ -9,7 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "extensions/common/one_shot_event.h"
 
@@ -17,6 +17,16 @@ class ExtensionInfoMap;
 class ExtensionProcessManager;
 class ExtensionService;
 class Profile;
+
+#if defined(OS_CHROMEOS)
+namespace chromeos {
+class DeviceLocalAccountManagementPolicyProvider;
+}
+#endif  // defined(OS_CHROMEOS)
+
+namespace content {
+class BrowserContext;
+}
 
 namespace extensions {
 class Blacklist;
@@ -46,6 +56,10 @@ class ExtensionSystem : public BrowserContextKeyedService {
   // Returns the instance for the given profile, or NULL if none. This is
   // a convenience wrapper around ExtensionSystemFactory::GetForProfile.
   static ExtensionSystem* Get(Profile* profile);
+
+  // Returns the same instance as Get() above.
+  static ExtensionSystem* GetForBrowserContext(
+      content::BrowserContext* profile);
 
   // BrowserContextKeyedService implementation.
   virtual void Shutdown() OVERRIDE {}
@@ -110,7 +124,7 @@ class ExtensionSystem : public BrowserContextKeyedService {
   // EXTENSION_UNLOADED notification have finished running.
   virtual void UnregisterExtensionWithRequestContexts(
       const std::string& extension_id,
-      const extension_misc::UnloadedExtensionReason reason) {}
+      const UnloadedExtensionInfo::Reason reason) {}
 
   // Signaled when the extension system has completed its startup tasks.
   virtual const OneShotEvent& ready() const = 0;
@@ -151,7 +165,7 @@ class ExtensionSystemImpl : public ExtensionSystem {
 
   virtual void UnregisterExtensionWithRequestContexts(
       const std::string& extension_id,
-      const extension_misc::UnloadedExtensionReason reason) OVERRIDE;
+      const UnloadedExtensionInfo::Reason reason) OVERRIDE;
 
   virtual const OneShotEvent& ready() const OVERRIDE;
 
@@ -212,6 +226,11 @@ class ExtensionSystemImpl : public ExtensionSystem {
     scoped_ptr<ExtensionWarningService> extension_warning_service_;
     scoped_ptr<ExtensionWarningBadgeService> extension_warning_badge_service_;
     scoped_ptr<ErrorConsole> error_console_;
+
+#if defined(OS_CHROMEOS)
+    scoped_ptr<chromeos::DeviceLocalAccountManagementPolicyProvider>
+        device_local_account_management_policy_provider_;
+#endif
 
     OneShotEvent ready_;
   };

@@ -5,6 +5,7 @@
 #ifndef LIBRARIES_NACL_IO_MOUNT_NODE_H_
 #define LIBRARIES_NACL_IO_MOUNT_NODE_H_
 
+#include <stdarg.h>
 #include <string>
 
 #include "nacl_io/error.h"
@@ -17,10 +18,15 @@
 #include "sdk_util/scoped_ref.h"
 #include "sdk_util/simple_lock.h"
 
+#define S_IRALL (S_IRUSR | S_IRGRP | S_IROTH)
+#define S_IWALL (S_IWUSR | S_IWGRP | S_IWOTH)
+#define S_IXALL (S_IXUSR | S_IXGRP | S_IXOTH)
+
 namespace nacl_io {
 
 class Mount;
 class MountNode;
+struct HandleAttr;
 
 typedef sdk_util::ScopedRef<MountNode> ScopedMountNode;
 
@@ -32,11 +38,13 @@ class MountNode : public sdk_util::RefObject {
   virtual ~MountNode();
 
  protected:
-  // Initialize with node specific flags, in this case stat permissions.
-  virtual Error Init(int flags);
+  virtual Error Init(int open_flags);
   virtual void Destroy();
 
  public:
+  // Return true if the node permissions match the given open mode.
+  virtual bool CanOpen(int open_flags);
+
   // Returns the emitter for this Node if it has one, if not, assume this
   // object can not block.
   virtual EventEmitter* GetEventEmitter();
@@ -57,11 +65,15 @@ class MountNode : public sdk_util::RefObject {
   // Assume that |stat| is non-NULL.
   virtual Error GetStat(struct stat* stat);
   // Assume that |arg| is non-NULL.
-  virtual Error Ioctl(int request, char* arg);
+  Error Ioctl(int request, ...);
+  virtual Error VIoctl(int request, va_list args);
   // Assume that |buf| and |out_bytes| are non-NULL.
-  virtual Error Read(size_t offs, void* buf, size_t count, int* out_bytes);
+  virtual Error Read(const HandleAttr& attr,
+                     void* buf,
+                     size_t count,
+                     int* out_bytes);
   // Assume that |buf| and |out_bytes| are non-NULL.
-  virtual Error Write(size_t offs,
+  virtual Error Write(const HandleAttr& attr,
                       const void* buf,
                       size_t count,
                       int* out_bytes);
@@ -80,13 +92,13 @@ class MountNode : public sdk_util::RefObject {
   virtual int GetLinks();
   virtual int GetMode();
   virtual int GetType();
+  virtual void SetType(int type);
   // Assume that |out_size| is non-NULL.
   virtual Error GetSize(size_t* out_size);
   virtual bool IsaDir();
   virtual bool IsaFile();
   virtual bool IsaSock();
   virtual bool IsaTTY();
-
 
   // Number of children for this node (directory)
   virtual int ChildCount();

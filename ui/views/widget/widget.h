@@ -56,6 +56,7 @@ class DesktopRootWindowHost;
 class InputMethod;
 class NativeWidget;
 class NonClientFrameView;
+class TooltipManager;
 class View;
 class WidgetDelegate;
 class WidgetObserver;
@@ -114,6 +115,15 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   enum MoveLoopSource {
     MOVE_LOOP_SOURCE_MOUSE,
     MOVE_LOOP_SOURCE_TOUCH,
+  };
+
+  // Behavior when escape is pressed during a move loop.
+  enum MoveLoopEscapeBehavior {
+    // Indicates the window should be hidden.
+    MOVE_LOOP_ESCAPE_BEHAVIOR_HIDE,
+
+    // Indicates the window should not be hidden.
+    MOVE_LOOP_ESCAPE_BEHAVIOR_DONT_HIDE,
   };
 
   struct VIEWS_EXPORT InitParams {
@@ -395,7 +405,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // corner of the window to the point where the cursor is dragging, and is used
   // to offset the bounds of the window from the cursor.
   MoveLoopResult RunMoveLoop(const gfx::Vector2d& drag_offset,
-                             MoveLoopSource source);
+                             MoveLoopSource source,
+                             MoveLoopEscapeBehavior escape_behavior);
 
   // Stops a previously started move loop. This is not immediate.
   void EndMoveLoop();
@@ -408,7 +419,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Places the widget below the specified NativeView.
   void StackBelow(gfx::NativeView native_view);
 
-  // Sets a shape on the widget. This takes ownership of shape.
+  // Sets a shape on the widget. Passing a NULL |shape| reverts the widget to
+  // be rectangular. Takes ownership of |shape|.
   void SetShape(gfx::NativeRegion shape);
 
   // Hides the widget then closes it after a return to the message loop.
@@ -449,6 +461,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Sets the widget to be on top of all other widgets in the windowing system.
   void SetAlwaysOnTop(bool on_top);
+
+  // Returns whether the widget has been set to be on top of most other widgets
+  // in the windowing system.
+  bool IsAlwaysOnTop() const;
 
   // Maximizes/minimizes/restores the window.
   void Maximize();
@@ -650,8 +666,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     auto_release_capture_ = auto_release_capture;
   }
 
-  // Invoked when the tooltip text changes for the specified views.
-  void TooltipTextChanged(View* view);
+  // Returns the font used for tooltips.
+  TooltipManager* GetTooltipManager();
+  const TooltipManager* GetTooltipManager() const;
 
   // Sets-up the focus manager with the view that should have focus when the
   // window is shown the first time.  Returns true if the initial focus has been

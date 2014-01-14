@@ -5,12 +5,12 @@
 #include "cc/resources/resource_update_controller.h"
 
 #include "base/test/test_simple_task_runner.h"
-#include "cc/debug/test_web_graphics_context_3d.h"
 #include "cc/resources/prioritized_resource_manager.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/fake_proxy.h"
 #include "cc/test/scheduler_test_common.h"
+#include "cc/test/test_web_graphics_context_3d.h"
 #include "cc/test/tiled_layer_test_common.h"
 #include "cc/trees/single_thread_proxy.h"  // For DebugScopedSetImplThread
 #include "testing/gtest/include/gtest/gtest.h"
@@ -39,8 +39,8 @@ class WebGraphicsContext3DForUploadTest : public TestWebGraphicsContext3D {
     test_capabilities_.shallow_flush = true;
   }
 
-  virtual void flush(void) OVERRIDE;
-  virtual void shallowFlushCHROMIUM(void) OVERRIDE;
+  virtual void flush() OVERRIDE;
+  virtual void shallowFlushCHROMIUM() OVERRIDE;
   virtual void texSubImage2D(
       WGC3Denum target,
       WGC3Dint level,
@@ -51,7 +51,7 @@ class WebGraphicsContext3DForUploadTest : public TestWebGraphicsContext3D {
       WGC3Denum format,
       WGC3Denum type,
       const void* pixels) OVERRIDE;
-  virtual GrGLInterface* onCreateGrGLInterface() OVERRIDE { return NULL; }
+  virtual GrGLInterface* createGrGLInterface() OVERRIDE { return NULL; }
 
   virtual void getQueryObjectuivEXT(
       WebGLId id,
@@ -137,7 +137,7 @@ class ResourceUpdateControllerTest : public Test {
     CHECK(output_surface_->BindToClient(&output_surface_client_));
 
     resource_provider_ =
-        ResourceProvider::Create(output_surface_.get(), 0, false);
+        ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1);
   }
 
   void AppendFullUploadsOfIndexedTextureToUpdateQueue(int count,
@@ -214,9 +214,9 @@ class ResourceUpdateControllerTest : public Test {
   int num_total_flushes_;
 };
 
-void WebGraphicsContext3DForUploadTest::flush(void) { test_->OnFlush(); }
+void WebGraphicsContext3DForUploadTest::flush() { test_->OnFlush(); }
 
-void WebGraphicsContext3DForUploadTest::shallowFlushCHROMIUM(void) {
+void WebGraphicsContext3DForUploadTest::shallowFlushCHROMIUM() {
   test_->OnFlush();
 }
 

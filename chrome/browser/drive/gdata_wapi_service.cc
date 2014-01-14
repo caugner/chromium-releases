@@ -19,6 +19,7 @@
 #include "chrome/browser/google_apis/gdata_wapi_url_generator.h"
 #include "chrome/browser/google_apis/request_sender.h"
 #include "content/public/browser/browser_thread.h"
+#include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserThread;
 using google_apis::AboutResource;
@@ -122,9 +123,6 @@ void ConvertAppListAndRun(
   callback.Run(error, app_list.Pass());
 }
 
-// Returns the argument string.
-std::string Identity(const std::string& resource_id) { return resource_id; }
-
 }  // namespace
 
 GDataWapiService::GDataWapiService(
@@ -160,9 +158,9 @@ void GDataWapiService::Initialize(const std::string& account_id) {
   sender_.reset(new RequestSender(
       new AuthService(oauth2_token_service_,
                       account_id,
-                      url_request_context_getter_,
+                      url_request_context_getter_.get(),
                       scopes),
-      url_request_context_getter_,
+      url_request_context_getter_.get(),
       blocking_task_runner_.get(),
       custom_user_agent_));
 
@@ -184,7 +182,7 @@ bool GDataWapiService::CanSendRequest() const {
 }
 
 ResourceIdCanonicalizer GDataWapiService::GetResourceIdCanonicalizer() const {
-  return base::Bind(&Identity);
+  return util::GetIdentityResourceIdCanonicalizer();
 }
 
 std::string GDataWapiService::GetRootResourceId() const {
@@ -406,6 +404,7 @@ CancelCallback GDataWapiService::CopyResource(
     const std::string& resource_id,
     const std::string& parent_resource_id,
     const std::string& new_title,
+    const base::Time& last_modified,
     const GetResourceEntryCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -437,6 +436,7 @@ CancelCallback GDataWapiService::MoveResource(
     const std::string& resource_id,
     const std::string& parent_resource_id,
     const std::string& new_title,
+    const base::Time& last_modified,
     const google_apis::GetResourceEntryCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());

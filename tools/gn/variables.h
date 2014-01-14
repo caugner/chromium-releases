@@ -13,9 +13,21 @@ namespace variables {
 
 // Builtin vars ----------------------------------------------------------------
 
+extern const char kBuildCpuArch[];
+extern const char kBuildCpuArch_HelpShort[];
+extern const char kBuildCpuArch_Help[];
+
+extern const char kBuildOs[];
+extern const char kBuildOs_HelpShort[];
+extern const char kBuildOs_Help[];
+
 extern const char kComponentMode[];
 extern const char kComponentMode_HelpShort[];
 extern const char kComponentMode_Help[];
+
+extern const char kCpuArch[];
+extern const char kCpuArch_HelpShort[];
+extern const char kCpuArch_Help[];
 
 extern const char kCurrentToolchain[];
 extern const char kCurrentToolchain_HelpShort[];
@@ -25,21 +37,9 @@ extern const char kDefaultToolchain[];
 extern const char kDefaultToolchain_HelpShort[];
 extern const char kDefaultToolchain_Help[];
 
-extern const char kIsLinux[];
-extern const char kIsLinux_HelpShort[];
-extern const char kIsLinux_Help[];
-
-extern const char kIsMac[];
-extern const char kIsMac_HelpShort[];
-extern const char kIsMac_Help[];
-
-extern const char kIsPosix[];
-extern const char kIsPosix_HelpShort[];
-extern const char kIsPosix_Help[];
-
-extern const char kIsWin[];
-extern const char kIsWin_HelpShort[];
-extern const char kIsWin_Help[];
+extern const char kOs[];
+extern const char kOs_HelpShort[];
+extern const char kOs_Help[];
 
 extern const char kPythonPath[];
 extern const char kPythonPath_HelpShort[];
@@ -127,17 +127,29 @@ extern const char kForwardDependentConfigsFrom[];
 extern const char kForwardDependentConfigsFrom_HelpShort[];
 extern const char kForwardDependentConfigsFrom_Help[];
 
+extern const char kGypFile[];
+extern const char kGypFile_HelpShort[];
+extern const char kGypFile_Help[];
+
 extern const char kHardDep[];
 extern const char kHardDep_HelpShort[];
 extern const char kHardDep_Help[];
 
-extern const char kIncludes[];
-extern const char kIncludes_HelpShort[];
-extern const char kIncludes_Help[];
+extern const char kIncludeDirs[];
+extern const char kIncludeDirs_HelpShort[];
+extern const char kIncludeDirs_Help[];
 
 extern const char kLdflags[];
 extern const char kLdflags_HelpShort[];
 extern const char kLdflags_Help[];
+
+extern const char kLibDirs[];
+extern const char kLibDirs_HelpShort[];
+extern const char kLibDirs_Help[];
+
+extern const char kLibs[];
+extern const char kLibs_HelpShort[];
+extern const char kLibs_Help[];
 
 extern const char kOutputName[];
 extern const char kOutputName_HelpShort[];

@@ -78,8 +78,10 @@ UserCloudPolicyManagerChromeOS*
 scoped_ptr<UserCloudPolicyManagerChromeOS>
     UserCloudPolicyManagerFactoryChromeOS::CreateForProfile(
         Profile* profile,
-        bool force_immediate_load) {
-  return GetInstance()->CreateManagerForProfile(profile, force_immediate_load);
+        bool force_immediate_load,
+        scoped_refptr<base::SequencedTaskRunner> background_task_runner) {
+  return GetInstance()->CreateManagerForProfile(
+      profile, force_immediate_load, background_task_runner);
 }
 
 UserCloudPolicyManagerFactoryChromeOS::UserCloudPolicyManagerFactoryChromeOS()
@@ -102,7 +104,8 @@ UserCloudPolicyManagerChromeOS*
 scoped_ptr<UserCloudPolicyManagerChromeOS>
     UserCloudPolicyManagerFactoryChromeOS::CreateManagerForProfile(
         Profile* profile,
-        bool force_immediate_load) {
+        bool force_immediate_load,
+        scoped_refptr<base::SequencedTaskRunner> background_task_runner) {
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   // Don't initialize cloud policy for the signin profile.
   if (chromeos::ProfileHelper::IsSigninProfile(profile))
@@ -112,7 +115,7 @@ scoped_ptr<UserCloudPolicyManagerChromeOS>
   // created as part of the Profile creation, which happens right after
   // sign-in. The just-signed-in User is the active user during that time.
   chromeos::UserManager* user_manager = chromeos::UserManager::Get();
-  chromeos::User* user = user_manager->GetActiveUser();
+  chromeos::User* user = user_manager->GetUserByProfile(profile);
   CHECK(user);
 
   // Only USER_TYPE_REGULAR users have user cloud policy.
@@ -156,6 +159,7 @@ scoped_ptr<UserCloudPolicyManagerChromeOS>
       new UserCloudPolicyStoreChromeOS(
           chromeos::DBusThreadManager::Get()->GetCryptohomeClient(),
           chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
+          background_task_runner,
           username, policy_key_dir, token_cache_file, policy_cache_file));
 
   scoped_refptr<base::SequencedTaskRunner> backend_task_runner =

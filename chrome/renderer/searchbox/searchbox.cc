@@ -149,8 +149,6 @@ SearchBox::SearchBox(content::RenderView* render_view)
     is_key_capture_enabled_(false),
     display_instant_results_(false),
     most_visited_items_cache_(kMaxInstantMostVisitedItemCacheSize),
-    omnibox_font_(),
-    omnibox_font_size_(12),
     query_(),
     start_margin_(0),
     width_(0) {
@@ -162,6 +160,11 @@ SearchBox::~SearchBox() {
 void SearchBox::LogEvent(NTPLoggingEventType event) {
   render_view()->Send(new ChromeViewHostMsg_LogEvent(
       render_view()->GetRoutingID(), render_view()->GetPageId(), event));
+}
+
+void SearchBox::CheckIsUserSignedInToChromeAs(const string16& identity) {
+  render_view()->Send(new ChromeViewHostMsg_ChromeIdentityCheck(
+      render_view()->GetRoutingID(), render_view()->GetPageId(), identity));
 }
 
 void SearchBox::DeleteMostVisitedItem(
@@ -230,12 +233,11 @@ void SearchBox::Focus() {
 }
 
 void SearchBox::NavigateToURL(const GURL& url,
-                              content::PageTransition transition,
                               WindowOpenDisposition disposition,
-                              bool is_search_type) {
+                              bool is_most_visited_item_url) {
   render_view()->Send(new ChromeViewHostMsg_SearchBoxNavigate(
-      render_view()->GetRoutingID(), render_view()->GetPageId(),
-      url, transition, disposition, is_search_type));
+      render_view()->GetRoutingID(), render_view()->GetPageId(), url,
+      disposition, is_most_visited_item_url));
 }
 
 void SearchBox::Paste(const string16& text) {
@@ -276,11 +278,11 @@ void SearchBox::UndoMostVisitedDeletion(
 bool SearchBox::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SearchBox, message)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_ChromeIdentityCheckResult,
+                        OnChromeIdentityCheckResult)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_DetermineIfPageSupportsInstant,
                         OnDetermineIfPageSupportsInstant)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxFocusChanged, OnFocusChanged)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxFontInformation,
-                        OnFontInformationReceived)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxMarginChange, OnMarginChange)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxMostVisitedItemsChanged,
                         OnMostVisitedChanged)
@@ -300,6 +302,14 @@ bool SearchBox::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
+}
+
+void SearchBox::OnChromeIdentityCheckResult(const string16& identity,
+                                            bool identity_match) {
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchChromeIdentityCheckResult(
+        render_view()->GetWebView()->mainFrame(), identity, identity_match);
+  }
 }
 
 void SearchBox::OnDetermineIfPageSupportsInstant() {
@@ -343,12 +353,6 @@ void SearchBox::OnFocusChanged(OmniboxFocusState new_focus_state,
           render_view()->GetWebView()->mainFrame());
     }
   }
-}
-
-void SearchBox::OnFontInformationReceived(const string16& omnibox_font,
-                                          size_t omnibox_font_size) {
-  omnibox_font_ = omnibox_font;
-  omnibox_font_size_ = omnibox_font_size;
 }
 
 void SearchBox::OnMarginChange(int margin, int width) {

@@ -21,7 +21,7 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sender.h"
-#include "ui/base/gestures/gesture_sequence.h"
+#include "ui/events/gestures/gesture_sequence.h"
 #include "ui/metro_viewer/metro_viewer_messages.h"
 #include "win8/metro_driver/file_picker_ash.h"
 #include "win8/metro_driver/metro_driver.h"
@@ -50,15 +50,15 @@ typedef winfoundtn::ITypedEventHandler<
 
 typedef winfoundtn::ITypedEventHandler<
     winui::Core::CoreWindow*,
-    winui::Core::VisibilityChangedEventArgs*> VisibilityChangedHandler;
-
-typedef winfoundtn::ITypedEventHandler<
-    winui::Core::CoreWindow*,
     winui::Core::WindowActivatedEventArgs*> WindowActivatedHandler;
 
 typedef winfoundtn::ITypedEventHandler<
     winui::Core::CoreWindow*,
     winui::Core::WindowSizeChangedEventArgs*> SizeChangedHandler;
+
+typedef winfoundtn::ITypedEventHandler<
+    winui::Input::EdgeGesture*,
+    winui::Input::EdgeGestureEventArgs*> EdgeEventHandler;
 
 // This function is exported by chrome.exe.
 typedef int (__cdecl *BreakpadExceptionHandler)(EXCEPTION_POINTERS* info);
@@ -72,18 +72,88 @@ struct Globals {
 
 namespace {
 
-// TODO(robertshield): Share this with chrome_app_view.cc
-void MetroExit() {
-  globals.app_exit->Exit();
+enum KeyModifier {
+  NONE,
+  SHIFT = 1,
+  CONTROL = 2,
+  ALT = 4
+};
+
+// Helper function to send keystrokes via the SendInput function.
+// mnemonic_char: The keystroke to be sent.
+// modifiers: Combination with Alt, Ctrl, Shift, etc.
+void SendMnemonic(
+    WORD mnemonic_char, KeyModifier modifiers) {
+  INPUT keys[4] = {0};  // Keyboard events
+  int key_count = 0;  // Number of generated events
+
+  if (modifiers & SHIFT) {
+    keys[key_count].type = INPUT_KEYBOARD;
+    keys[key_count].ki.wVk = VK_SHIFT;
+    keys[key_count].ki.wScan = MapVirtualKey(VK_SHIFT, 0);
+    key_count++;
+  }
+
+  if (modifiers & CONTROL) {
+    keys[key_count].type = INPUT_KEYBOARD;
+    keys[key_count].ki.wVk = VK_CONTROL;
+    keys[key_count].ki.wScan = MapVirtualKey(VK_CONTROL, 0);
+    key_count++;
+  }
+
+  if (modifiers & ALT) {
+    keys[key_count].type = INPUT_KEYBOARD;
+    keys[key_count].ki.wVk = VK_MENU;
+    keys[key_count].ki.wScan = MapVirtualKey(VK_MENU, 0);
+    key_count++;
+  }
+
+  keys[key_count].type = INPUT_KEYBOARD;
+  keys[key_count].ki.wVk = mnemonic_char;
+  keys[key_count].ki.wScan = MapVirtualKey(mnemonic_char, 0);
+  key_count++;
+
+  bool should_sleep = key_count > 1;
+
+  // Send key downs.
+  for (int i = 0; i < key_count; i++) {
+    SendInput(1, &keys[ i ], sizeof(keys[0]));
+    keys[i].ki.dwFlags |= KEYEVENTF_KEYUP;
+    if (should_sleep)
+      Sleep(10);
+  }
+
+  // Now send key ups in reverse order.
+  for (int i = key_count; i; i--) {
+    SendInput(1, &keys[ i - 1 ], sizeof(keys[0]));
+    if (should_sleep)
+      Sleep(10);
+  }
+}
+
+// Helper function to Exit metro chrome cleanly. If we are in the foreground
+// then we try and exit by sending an Alt+F4 key combination to the core
+// window which ensures that the chrome application tile does not show up in
+// the running metro apps list on the top left corner.
+void MetroExit(HWND core_window) {
+  if ((core_window != NULL) && (core_window == ::GetForegroundWindow())) {
+    DVLOG(1) << "We are in the foreground. Exiting via Alt F4";
+    SendMnemonic(VK_F4, ALT);
+  } else {
+    globals.app_exit->Exit();
+  }
 }
 
 class ChromeChannelListener : public IPC::Listener {
  public:
   ChromeChannelListener(base::MessageLoop* ui_loop, ChromeAppViewAsh* app_view)
-      : ui_proxy_(ui_loop->message_loop_proxy()), app_view_(app_view) {}
+      : ui_proxy_(ui_loop->message_loop_proxy()),
+        app_view_(app_view) {}
 
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
     IPC_BEGIN_MESSAGE_MAP(ChromeChannelListener, message)
+      IPC_MESSAGE_HANDLER(MetroViewerHostMsg_ActivateDesktop,
+                          OnActivateDesktop)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_OpenURLOnDesktop,
                           OnOpenURLOnDesktop)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_SetCursor, OnSetCursor)
@@ -100,11 +170,23 @@ class ChromeChannelListener : public IPC::Listener {
   }
 
   virtual void OnChannelError() OVERRIDE {
-    DVLOG(1) << "Channel error";
-    MetroExit();
+    DVLOG(1) << "Channel error. Exiting.";
+    MetroExit(app_view_->core_window_hwnd());
+    // In early Windows 8 versions the code above sometimes fails so we call
+    // it a second time with a NULL window which just calls Exit().
+    ui_proxy_->PostDelayedTask(FROM_HERE,
+        base::Bind(&MetroExit, HWND(NULL)),
+        base::TimeDelta::FromMilliseconds(100));
   }
 
  private:
+  void OnActivateDesktop(const base::FilePath& shortcut, bool ash_exit) {
+    ui_proxy_->PostTask(FROM_HERE,
+        base::Bind(&ChromeAppViewAsh::OnActivateDesktop,
+        base::Unretained(app_view_),
+        shortcut, ash_exit));
+  }
+
   void OnOpenURLOnDesktop(const base::FilePath& shortcut,
                           const string16& url) {
     ui_proxy_->PostTask(FROM_HERE,
@@ -177,13 +259,13 @@ bool WaitForChromeIPCConnection(const std::string& channel_name) {
 // This class helps decoding the pointer properties of an event.
 class PointerInfoHandler {
  public:
-  PointerInfoHandler() :
-      x_(0),
-      y_(0),
-      wheel_delta_(0),
-      update_kind_(winui::Input::PointerUpdateKind_Other),
-      timestamp_(0),
-      pointer_id_(0) {}
+  PointerInfoHandler()
+      : x_(0),
+        y_(0),
+        wheel_delta_(0),
+        update_kind_(winui::Input::PointerUpdateKind_Other),
+        timestamp_(0),
+        pointer_id_(0) {}
 
   HRESULT Init(winui::Core::IPointerEventArgs* args) {
     HRESULT hr = args->get_CurrentPoint(&pointer_point_);
@@ -421,14 +503,25 @@ ChromeAppViewAsh::SetWindow(winui::Core::ICoreWindow* window) {
       &character_received_token_);
   CheckHR(hr);
 
-  hr = window_->add_VisibilityChanged(mswr::Callback<VisibilityChangedHandler>(
-      this, &ChromeAppViewAsh::OnVisibilityChanged).Get(),
-      &visibility_changed_token_);
-  CheckHR(hr);
-
   hr = window_->add_Activated(mswr::Callback<WindowActivatedHandler>(
       this, &ChromeAppViewAsh::OnWindowActivated).Get(),
       &window_activated_token_);
+  CheckHR(hr);
+
+  // Register for edge gesture notifications.
+  mswr::ComPtr<winui::Input::IEdgeGestureStatics> edge_gesture_statics;
+  hr = winrt_utils::CreateActivationFactory(
+      RuntimeClass_Windows_UI_Input_EdgeGesture,
+      edge_gesture_statics.GetAddressOf());
+  CheckHR(hr);
+
+  mswr::ComPtr<winui::Input::IEdgeGesture> edge_gesture;
+  hr = edge_gesture_statics->GetForCurrentView(&edge_gesture);
+  CheckHR(hr);
+
+  hr = edge_gesture->add_Completed(mswr::Callback<EdgeEventHandler>(
+      this, &ChromeAppViewAsh::OnEdgeGestureCompleted).Get(),
+      &edgeevent_token_);
   CheckHR(hr);
 
   // By initializing the direct 3D swap chain with the corewindow
@@ -532,6 +625,37 @@ HRESULT ChromeAppViewAsh::Unsnap() {
   return hr;
 }
 
+void ChromeAppViewAsh::OnActivateDesktop(const base::FilePath& file_path,
+                                         bool ash_exit) {
+  DLOG(INFO) << "ChannelAppViewAsh::OnActivateDesktop\n";
+
+  if (ash_exit) {
+    // As we are the top level window, the exiting is done async so we manage
+    // to execute  the entire function including the final Send().
+    MetroExit(core_window_hwnd());
+  }
+
+  // We are just executing delegate_execute here without parameters. Assumption
+  // here is that this process will be reused by shell when asking for
+  // IExecuteCommand interface.
+
+  // TODO(shrikant): Consolidate ShellExecuteEx with SEE_MASK_FLAG_LOG_USAGE
+  // and place it metro.h or similar accessible file from all code code paths
+  // using this function.
+  SHELLEXECUTEINFO sei = { sizeof(sei) };
+  sei.fMask = SEE_MASK_FLAG_LOG_USAGE;
+  sei.nShow = SW_SHOWNORMAL;
+  sei.lpFile = file_path.value().c_str();
+  sei.lpParameters = NULL;
+  if (!ash_exit)
+    sei.fMask |= SEE_MASK_NOCLOSEPROCESS;
+  ::ShellExecuteExW(&sei);
+  if (!ash_exit) {
+    ::TerminateProcess(sei.hProcess, 0);
+    ::CloseHandle(sei.hProcess);
+  }
+  ui_channel_->Send(new MetroViewerHostMsg_ActivateDesktopDone());
+}
 
 void ChromeAppViewAsh::OnOpenURLOnDesktop(const base::FilePath& shortcut,
     const string16& url) {
@@ -712,6 +836,7 @@ HRESULT ChromeAppViewAsh::OnPointerPressed(
     return hr;
 
   if (pointer.IsMouse()) {
+    // TODO: this is wrong, more than one pointer may be down at a time.
     mouse_down_flags_ = pointer.flags();
     ui_channel_->Send(new MetroViewerHostMsg_MouseButton(
         pointer.x(),
@@ -739,6 +864,7 @@ HRESULT ChromeAppViewAsh::OnPointerReleased(
     return hr;
 
   if (pointer.IsMouse()) {
+    // TODO: this is wrong, more than one pointer may be down at a time.
     mouse_down_flags_ = ui::EF_NONE;
     ui_channel_->Send(new MetroViewerHostMsg_MouseButton(
         pointer.x(),
@@ -877,18 +1003,6 @@ HRESULT ChromeAppViewAsh::OnCharacterReceived(
   return S_OK;
 }
 
-HRESULT ChromeAppViewAsh::OnVisibilityChanged(
-    winui::Core::ICoreWindow* sender,
-    winui::Core::IVisibilityChangedEventArgs* args) {
-  boolean visible = false;
-  HRESULT hr = args->get_Visible(&visible);
-  if (FAILED(hr))
-    return hr;
-
-  ui_channel_->Send(new MetroViewerHostMsg_VisibilityChanged(!!visible));
-  return S_OK;
-}
-
 HRESULT ChromeAppViewAsh::OnWindowActivated(
     winui::Core::ICoreWindow* sender,
     winui::Core::IWindowActivatedEventArgs* args) {
@@ -896,6 +1010,14 @@ HRESULT ChromeAppViewAsh::OnWindowActivated(
   HRESULT hr = args->get_WindowActivationState(&state);
   if (FAILED(hr))
     return hr;
+
+  // Treat both full activation (Ash was reopened from the Start Screen or from
+  // any other Metro entry point in Windows) and pointer activation (user
+  // clicked back in Ash after using another app on another monitor) the same.
+  if (state == winui::Core::CoreWindowActivationState_CodeActivated ||
+      state == winui::Core::CoreWindowActivationState_PointerActivated) {
+    ui_channel_->Send(new MetroViewerHostMsg_WindowActivated());
+  }
   return S_OK;
 }
 
@@ -944,6 +1066,17 @@ HRESULT ChromeAppViewAsh::HandleProtocolRequest(
                     base::Bind(&ChromeAppViewAsh::OnNavigateToUrl,
                                base::Unretained(this),
                                actual_url));
+  return S_OK;
+}
+
+HRESULT ChromeAppViewAsh::OnEdgeGestureCompleted(
+    winui::Input::IEdgeGesture* gesture,
+    winui::Input::IEdgeGestureEventArgs* args) {
+  // Swipe from edge gesture (and win+z) is equivalent to pressing F11.
+  // TODO(cpu): Make this cleaner for m33.
+  ui_channel_->Send(new MetroViewerHostMsg_KeyDown(VK_F11, 1, 0, 0));
+  ::Sleep(15);
+  ui_channel_->Send(new MetroViewerHostMsg_KeyUp(VK_F11, 1, 0, 0));
   return S_OK;
 }
 

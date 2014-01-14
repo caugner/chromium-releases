@@ -75,6 +75,7 @@
 #include "ui/base/ui_base_paths.h"
 
 #if defined(USE_AURA)
+#include "ui/aura/env.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/desktop_aura/desktop_screen.h"
 #endif
@@ -334,7 +335,13 @@ void FilterDisabledTests() {
     "URLRequestTest*.*_GetFullRequestHeaders",
 
     // IE redirects to data: URLs differently.
-    "URLRequestTestHTTP.RestrictDataRedirects"
+    "URLRequestTestHTTP.RestrictDataRedirects",
+
+    // Chrome frame doesn't use URLRequestHttpJob, so doesn't call into
+    // NetworkDelegates in OnStartCompleted, unlike Chrome.
+    "URLRequestTestHTTP.NetworkDelegateInfo",
+    "URLRequestTestHTTP.NetworkDelegateInfoAuth",
+    "URLRequestTestHTTP.NetworkDelegateInfoRedirect",
   };
 
   const char* ie9_disabled_tests[] = {
@@ -522,6 +529,11 @@ void FakeExternalTab::Initialize() {
 
   ResourceBundle::InitSharedInstanceWithLocale("en-US", NULL);
 
+  base::FilePath resources_pack_path;
+  PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
+  ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+    resources_pack_path, ui::SCALE_FACTOR_NONE);
+
   CommandLine* cmd = CommandLine::ForCurrentProcess();
   // Disable Device Discovery with switch because this test does not respect
   // BrowserContextKeyedBaseFactory::ServiceIsNULLWhileTesting.
@@ -553,6 +565,7 @@ void FakeExternalTab::Initialize() {
 
 void FakeExternalTab::InitializePostThreadsCreated() {
 #if defined(USE_AURA)
+  aura::Env::CreateInstance();
   gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE,
                                  views::CreateDesktopScreen());
 #endif

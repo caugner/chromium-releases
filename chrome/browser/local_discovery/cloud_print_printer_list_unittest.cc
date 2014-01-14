@@ -12,15 +12,17 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
+#include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_impl.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
+using testing::Mock;
 using testing::NiceMock;
 using testing::StrictMock;
-using testing::Mock;
 
 namespace local_discovery {
 
@@ -102,10 +104,10 @@ class CloudPrintPrinterListTest : public testing::Test {
 };
 
 TEST_F(CloudPrintPrinterListTest, SuccessOAuth2) {
-  fetcher_factory_->SetFakeResponse("http://SoMeUrL.com/cloudprint/search",
-                                   kSampleSuccessResponseOAuth,
-                                   true);
-
+  fetcher_factory_->SetFakeResponse(
+      GURL("http://SoMeUrL.com/cloudprint/search"),
+      kSampleSuccessResponseOAuth,
+      net::HTTP_OK);
 
   CloudPrintBaseApiFlow* cloudprint_flow =
       printer_list_->GetOAuth2ApiFlowForTests();

@@ -12,6 +12,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "ui/app_list/app_list_constants.h"
+#include "ui/app_list/app_list_folder_item.h"
 #include "ui/app_list/app_list_item_model.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_view_delegate.h"
@@ -43,13 +44,13 @@ class AppListMainView::IconLoader : public AppListItemModelObserver {
  public:
   IconLoader(AppListMainView* owner,
              AppListItemModel* item,
-             ui::ScaleFactor scale_factor)
+             float scale)
       : owner_(owner),
         item_(item) {
     item_->AddObserver(this);
 
     // Triggers icon loading for given |scale_factor|.
-    item_->icon().GetRepresentation(scale_factor);
+    item_->icon().GetRepresentation(scale);
   }
 
   virtual ~IconLoader() {
@@ -96,7 +97,11 @@ AppListMainView::AppListMainView(AppListViewDelegate* delegate,
   search_box_view_ = new SearchBoxView(this, delegate, model_);
   AddChildView(search_box_view_);
 
-  contents_view_ = new ContentsView(this, pagination_model, model_);
+  contents_view_ =
+      new ContentsView(this,
+                       pagination_model,
+                       model_,
+                       delegate ? delegate->GetStartPageContents() : NULL);
   AddChildView(contents_view_);
 
   search_box_view_->set_contents_view(contents_view_);
@@ -148,6 +153,7 @@ void AppListMainView::PreloadIcons(PaginationModel* pagination_model,
   if (parent)
     scale_factor = ui::GetScaleFactorForNativeView(parent);
 
+  float scale = ui::GetImageScale(scale_factor);
   // |pagination_model| could have -1 as the initial selected page and
   // assumes first page (i.e. index 0) will be used in this case.
   const int selected_page = std::max(0, pagination_model->selected_page());
@@ -155,16 +161,16 @@ void AppListMainView::PreloadIcons(PaginationModel* pagination_model,
   const int tiles_per_page = kPreferredCols * kPreferredRows;
   const int start_model_index = selected_page * tiles_per_page;
   const int end_model_index = std::min(
-      static_cast<int>(model_->apps()->item_count()),
+      static_cast<int>(model_->item_list()->item_count()),
       start_model_index + tiles_per_page);
 
   pending_icon_loaders_.clear();
   for (int i = start_model_index; i < end_model_index; ++i) {
-    AppListItemModel* item = model_->apps()->GetItemAt(i);
-    if (item->icon().HasRepresentation(scale_factor))
+    AppListItemModel* item = model_->item_list()->item_at(i);
+    if (item->icon().HasRepresentation(scale))
       continue;
 
-    pending_icon_loaders_.push_back(new IconLoader(this, item, scale_factor));
+    pending_icon_loaders_.push_back(new IconLoader(this, item, scale));
   }
 }
 
@@ -185,8 +191,11 @@ void AppListMainView::OnItemIconLoaded(IconLoader* loader) {
 }
 
 void AppListMainView::ActivateApp(AppListItemModel* item, int event_flags) {
-  if (delegate_)
-    delegate_->ActivateAppListItem(item, event_flags);
+  // TODO(jennyz): Activate the folder via AppListModel notification.
+  if (item->GetAppType() == AppListFolderItem::kAppType)
+    contents_view_->ShowFolderContent(static_cast<AppListFolderItem*>(item));
+  else
+    item->Activate(event_flags);
 }
 
 void AppListMainView::GetShortcutPathForApp(

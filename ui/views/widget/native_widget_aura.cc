@@ -11,12 +11,12 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/drag_drop_client.h"
+#include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/screen_position_client.h"
-#include "ui/aura/client/stacking_client.h"
 #include "ui/aura/client/window_move_client.h"
+#include "ui/aura/client/window_tree_client.h"
 #include "ui/aura/client/window_types.h"
 #include "ui/aura/env.h"
-#include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
@@ -33,7 +33,6 @@
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #include "ui/views/widget/drop_helper.h"
-#include "ui/views/widget/native_widget_aura_window_observer.h"
 #include "ui/views/widget/native_widget_delegate.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/tooltip_manager_aura.h"
@@ -153,8 +152,8 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   if (parent) {
     parent->AddChild(window_);
   } else {
-    window_->SetDefaultParentByRootWindow(context->GetRootWindow(),
-                                          window_bounds);
+    aura::client::ParentWindowWithContext(
+        window_, context->GetRootWindow(), window_bounds);
   }
 
   // Wait to set the bounds until we have a parent. That way we can know our
@@ -170,7 +169,7 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
       params.type != Widget::InitParams::TYPE_TOOLTIP;
   DCHECK(GetWidget()->GetRootView());
   if (params.type != Widget::InitParams::TYPE_TOOLTIP)
-    tooltip_manager_.reset(new views::TooltipManagerAura(window_, GetWidget()));
+    tooltip_manager_.reset(new views::TooltipManagerAura(GetWidget()));
 
   drop_helper_.reset(new DropHelper(GetWidget()->GetRootView()));
   if (params.type != Widget::InitParams::TYPE_TOOLTIP &&
@@ -277,7 +276,7 @@ bool NativeWidgetAura::HasCapture() const {
 InputMethod* NativeWidgetAura::CreateInputMethod() {
   if (!window_)
     return NULL;
-  aura::RootWindow* root_window = window_->GetRootWindow();
+  aura::Window* root_window = window_->GetRootWindow();
   ui::InputMethod* host =
       root_window->GetProperty(aura::client::kRootWindowInputMethodKey);
   return new InputMethodBridge(this, host, true);
@@ -392,7 +391,7 @@ void NativeWidgetAura::SetBounds(const gfx::Rect& bounds) {
   if (!window_)
     return;
 
-  aura::RootWindow* root = window_->GetRootWindow();
+  aura::Window* root = window_->GetRootWindow();
   if (root) {
     aura::client::ScreenPositionClient* screen_position_client =
         aura::client::GetScreenPositionClient(root);
@@ -524,7 +523,7 @@ bool NativeWidgetAura::IsActive() const {
 
   // We may up here during destruction of the root, in which case
   // GetRootWindow() returns NULL (~RootWindow() has run and we're in ~Window).
-  aura::RootWindow* root = window_->GetRootWindow();
+  aura::Window* root = window_->GetRootWindow();
   return root &&
       aura::client::GetActivationClient(root)->GetActiveWindow() == window_;
 }
@@ -532,6 +531,10 @@ bool NativeWidgetAura::IsActive() const {
 void NativeWidgetAura::SetAlwaysOnTop(bool on_top) {
   if (window_)
     window_->SetProperty(aura::client::kAlwaysOnTopKey, on_top);
+}
+
+bool NativeWidgetAura::IsAlwaysOnTop() const {
+  return window_ && window_->GetProperty(aura::client::kAlwaysOnTopKey);
 }
 
 void NativeWidgetAura::Maximize() {
@@ -635,21 +638,12 @@ gfx::Rect NativeWidgetAura::GetWorkAreaBoundsInScreen() const {
       GetDisplayNearestWindow(window_).work_area();
 }
 
-void NativeWidgetAura::SetInactiveRenderingDisabled(bool value) {
-  if (!window_)
-    return;
-
-  if (!value) {
-    active_window_observer_.reset();
-  } else {
-    active_window_observer_.reset(
-        new NativeWidgetAuraWindowObserver(window_, delegate_));
-  }
-}
-
 Widget::MoveLoopResult NativeWidgetAura::RunMoveLoop(
     const gfx::Vector2d& drag_offset,
-    Widget::MoveLoopSource source) {
+    Widget::MoveLoopSource source,
+    Widget::MoveLoopEscapeBehavior escape_behavior) {
+  // |escape_behavior| is only needed on windows when running the native message
+  // loop.
   if (window_ && window_->parent() &&
       aura::client::GetWindowMoveClient(window_->parent())) {
     SetCapture();
@@ -840,6 +834,7 @@ void NativeWidgetAura::OnMouseEvent(ui::MouseEvent* event) {
 
   if (tooltip_manager_.get())
     tooltip_manager_->UpdateTooltip();
+  TooltipManagerAura::UpdateTooltipManagerForCapture(GetWidget());
   delegate_->OnMouseEvent(event);
 }
 
@@ -1115,7 +1110,7 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
   } else {
     // The following looks weird, but it's the equivalent of what aura has
     // always done. (The previous behaviour of aura::Window::SetParent() used
-    // NULL as a special value that meant ask the StackingClient where things
+    // NULL as a special value that meant ask the WindowTreeClient where things
     // should go.)
     //
     // This probably isn't strictly correct, but its an invariant that a Window
@@ -1124,9 +1119,9 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
     // in this case is the stacking client of the current RootWindow. This
     // matches our previous behaviour; the global stacking client would almost
     // always reattach the window to the same RootWindow.
-    aura::RootWindow* root_window = native_view->GetRootWindow();
-    native_view->SetDefaultParentByRootWindow(
-        root_window, root_window->GetBoundsInScreen());
+    aura::Window* root_window = native_view->GetRootWindow();
+    aura::client::ParentWindowWithContext(
+        native_view, root_window, root_window->GetBoundsInScreen());
   }
 
   // And now, notify them that they have a brand new parent.
@@ -1138,7 +1133,7 @@ void NativeWidgetPrivate::ReparentNativeView(gfx::NativeView native_view,
 
 // static
 bool NativeWidgetPrivate::IsMouseButtonDown() {
-  return aura::Env::GetInstance()->is_mouse_button_down();
+  return aura::Env::GetInstance()->IsMouseButtonDown();
 }
 
 // static

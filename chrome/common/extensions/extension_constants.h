@@ -54,6 +54,13 @@ namespace extension_urls {
   // The greatest common prefixes of the main extensions gallery's browse and
   // download URLs.
   extern const char kGalleryBrowsePrefix[];
+
+  // Field to use with webstore URL for tracking launch source.
+  extern const char kWebstoreSourceField[];
+
+  // Values to use with webstore URL launch source field.
+  extern const char kLaunchSourceAppList[];
+  extern const char kLaunchSourceAppListSearch[];
 }  // namespace extension_urls
 
 namespace extension_misc {
@@ -276,14 +283,6 @@ namespace extension_misc {
     INSTALL_CAUSE_EXTERNAL_FILE,
     INSTALL_CAUSE_AUTOMATION,
     NUM_INSTALL_CAUSES
-  };
-
-  enum UnloadedExtensionReason {
-    UNLOAD_REASON_DISABLE,    // Extension is being disabled.
-    UNLOAD_REASON_UPDATE,     // Extension is being updated to a newer version.
-    UNLOAD_REASON_UNINSTALL,  // Extension is being uninstalled.
-    UNLOAD_REASON_TERMINATE,  // Extension has terminated.
-    UNLOAD_REASON_BLACKLIST,  // Extension has been blacklisted.
   };
 
   // The states that an app can be in, as reported by chrome.app.installState

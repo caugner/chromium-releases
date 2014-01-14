@@ -11,14 +11,13 @@
 #include "ash/shell.h"
 #include "ash/wm/always_on_top_controller.h"
 #include "ash/wm/base_layout_manager.h"
-#include "ash/wm/frame_painter.h"
+#include "ash/wm/header_painter.h"
 #include "ash/wm/window_animations.h"
+#include "ash/wm/window_positioner.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/workspace/auto_window_management.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/ui_base_types.h"
@@ -56,7 +55,7 @@ void MoveToDisplayForRestore(wm::WindowState* window_state) {
         Shell::GetInstance()->display_controller();
     const gfx::Display& display =
         display_controller->GetDisplayMatching(restore_bounds);
-    aura::RootWindow* new_root =
+    aura::Window* new_root =
         display_controller->GetRootWindowForDisplayId(display.id());
     if (new_root != window_state->window()->GetRootWindow()) {
       aura::Window* new_container =
@@ -72,7 +71,7 @@ WorkspaceLayoutManager::WorkspaceLayoutManager(aura::Window* window)
     : BaseLayoutManager(window->GetRootWindow()),
       shelf_(NULL),
       window_(window),
-      work_area_(ScreenAsh::GetDisplayWorkAreaBoundsInParent(
+      work_area_in_parent_(ScreenAsh::GetDisplayWorkAreaBoundsInParent(
           window->parent())) {
 }
 
@@ -87,13 +86,13 @@ void WorkspaceLayoutManager::OnWindowAddedToLayout(Window* child) {
   AdjustWindowBoundsWhenAdded(wm::GetWindowState(child));
   BaseLayoutManager::OnWindowAddedToLayout(child);
   UpdateDesktopVisibility();
-  RearrangeVisibleWindowOnShow(child);
+  WindowPositioner::RearrangeVisibleWindowOnShow(child);
 }
 
 void WorkspaceLayoutManager::OnWillRemoveWindowFromLayout(Window* child) {
   BaseLayoutManager::OnWillRemoveWindowFromLayout(child);
   if (child->TargetVisibility())
-    RearrangeVisibleWindowOnHideOrRemove(child);
+    WindowPositioner::RearrangeVisibleWindowOnHideOrRemove(child);
 }
 
 void WorkspaceLayoutManager::OnWindowRemovedFromLayout(Window* child) {
@@ -104,10 +103,15 @@ void WorkspaceLayoutManager::OnWindowRemovedFromLayout(Window* child) {
 void WorkspaceLayoutManager::OnChildWindowVisibilityChanged(Window* child,
                                                             bool visible) {
   BaseLayoutManager::OnChildWindowVisibilityChanged(child, visible);
-  if (child->TargetVisibility())
-    RearrangeVisibleWindowOnShow(child);
-  else
-    RearrangeVisibleWindowOnHideOrRemove(child);
+  if (child->TargetVisibility()) {
+    WindowPositioner::RearrangeVisibleWindowOnShow(child);
+  } else {
+    if (wm::GetWindowState(child)->IsFullscreen()) {
+      ash::Shell::GetInstance()->NotifyFullscreenStateChange(
+          false, child->GetRootWindow());
+    }
+    WindowPositioner::RearrangeVisibleWindowOnHideOrRemove(child);
+  }
   UpdateDesktopVisibility();
 }
 
@@ -123,9 +127,10 @@ void WorkspaceLayoutManager::SetChildBounds(
   if (!SetMaximizedOrFullscreenBounds(wm::GetWindowState(child))) {
     // Non-maximized/full-screen windows have their size constrained to the
     // work-area.
-    child_bounds.set_width(std::min(work_area_.width(), child_bounds.width()));
+    child_bounds.set_width(std::min(work_area_in_parent_.width(),
+                                    child_bounds.width()));
     child_bounds.set_height(
-        std::min(work_area_.height(), child_bounds.height()));
+        std::min(work_area_in_parent_.height(), child_bounds.height()));
     SetChildBoundsDirect(child, child_bounds);
   }
   UpdateDesktopVisibility();
@@ -134,58 +139,68 @@ void WorkspaceLayoutManager::SetChildBounds(
 void WorkspaceLayoutManager::OnDisplayWorkAreaInsetsChanged() {
   const gfx::Rect work_area(ScreenAsh::GetDisplayWorkAreaBoundsInParent(
       window_->parent()));
-  if (work_area != work_area_) {
+  if (work_area != work_area_in_parent_) {
     AdjustAllWindowsBoundsForWorkAreaChange(
         ADJUST_WINDOW_WORK_AREA_INSETS_CHANGED);
   }
 }
 
-void WorkspaceLayoutManager::OnTrackedByWorkspaceChanged(Window* window,
-                                                         bool old){
-  if (wm::GetWindowState(window)->tracked_by_workspace())
-    SetMaximizedOrFullscreenBounds(wm::GetWindowState(window));
-}
-
 void WorkspaceLayoutManager::OnWindowPropertyChanged(Window* window,
                                                      const void* key,
                                                      intptr_t old) {
-  wm::WindowState* window_state = wm::GetWindowState(window);
-  if (key == aura::client::kShowStateKey) {
-    ui::WindowShowState old_state = static_cast<ui::WindowShowState>(old);
-    ui::WindowShowState new_state = window_state->GetShowState();
-    if (old_state != ui::SHOW_STATE_MINIMIZED &&
-        !window_state->HasRestoreBounds() &&
-        window_state->IsMaximizedOrFullscreen() &&
-        !wm::WindowState::IsMaximizedOrFullscreenState(old_state)) {
-      window_state->SaveCurrentBoundsForRestore();
-    }
-    // When restoring from a minimized state, we want to restore to the
-    // previous (maybe L/R maximized) state. Since we do also want to keep the
-    // restore rectangle, we set the restore rectangle to the rectangle we want
-    // to restore to and restore it after we switched so that it is preserved.
-    gfx::Rect restore;
-    if (old_state == ui::SHOW_STATE_MINIMIZED &&
-        (new_state == ui::SHOW_STATE_NORMAL ||
-         new_state == ui::SHOW_STATE_DEFAULT) &&
-        window_state->HasRestoreBounds() &&
-        !window_state->always_restores_to_restore_bounds()) {
-      restore = window_state->GetRestoreBoundsInScreen();
-      window_state->SaveCurrentBoundsForRestore();
-    }
-
-    UpdateBoundsFromShowState(window_state, old_state);
-    ShowStateChanged(window_state, old_state);
-
-    // Set the restore rectangle to the previously set restore rectangle.
-    if (!restore.IsEmpty())
-      window_state->SetRestoreBoundsInScreen(restore);
-  }
-
   if (key == aura::client::kAlwaysOnTopKey &&
       window->GetProperty(aura::client::kAlwaysOnTopKey)) {
     GetRootWindowController(window->GetRootWindow())->
         always_on_top_controller()->GetContainer(window)->AddChild(window);
   }
+}
+
+void WorkspaceLayoutManager::OnTrackedByWorkspaceChanged(
+    wm::WindowState* window_state,
+    bool old){
+  if (window_state->tracked_by_workspace())
+    SetMaximizedOrFullscreenBounds(window_state);
+}
+
+void WorkspaceLayoutManager::OnWindowShowTypeChanged(
+    wm::WindowState* window_state,
+    wm::WindowShowType old_type) {
+  ui::WindowShowState old_state = ToWindowShowState(old_type);
+  ui::WindowShowState new_state = window_state->GetShowState();
+  if (old_state != ui::SHOW_STATE_MINIMIZED &&
+      !window_state->HasRestoreBounds() &&
+      window_state->IsMaximizedOrFullscreen() &&
+      !wm::WindowState::IsMaximizedOrFullscreenState(old_state)) {
+    window_state->SaveCurrentBoundsForRestore();
+  }
+  // When restoring from a minimized state, we want to restore to the
+  // previous (maybe L/R maximized) state. Since we do also want to keep the
+  // restore rectangle, we set the restore rectangle to the rectangle we want
+  // to restore to and restore it after we switched so that it is preserved.
+  gfx::Rect restore;
+  if (old_state == ui::SHOW_STATE_MINIMIZED &&
+      (new_state == ui::SHOW_STATE_NORMAL ||
+       new_state == ui::SHOW_STATE_DEFAULT) &&
+      window_state->HasRestoreBounds() &&
+      !window_state->always_restores_to_restore_bounds()) {
+    restore = window_state->GetRestoreBoundsInScreen();
+    window_state->SaveCurrentBoundsForRestore();
+  }
+  // Notify observers that fullscreen state may be changing.
+  if (old_state != new_state &&
+      (new_state == ui::SHOW_STATE_FULLSCREEN ||
+       old_state == ui::SHOW_STATE_FULLSCREEN)) {
+    ash::Shell::GetInstance()->NotifyFullscreenStateChange(
+        new_state == ui::SHOW_STATE_FULLSCREEN,
+        window_state->window()->GetRootWindow());
+  }
+
+  UpdateBoundsFromShowState(window_state, old_state);
+  ShowStateChanged(window_state, old_state);
+
+  // Set the restore rectangle to the previously set restore rectangle.
+  if (!restore.IsEmpty())
+    window_state->SetRestoreBoundsInScreen(restore);
 }
 
 void WorkspaceLayoutManager::ShowStateChanged(
@@ -197,7 +212,8 @@ void WorkspaceLayoutManager::ShowStateChanged(
 
 void WorkspaceLayoutManager::AdjustAllWindowsBoundsForWorkAreaChange(
     AdjustWindowReason reason) {
-  work_area_ = ScreenAsh::GetDisplayWorkAreaBoundsInParent(window_->parent());
+  work_area_in_parent_ =
+      ScreenAsh::GetDisplayWorkAreaBoundsInParent(window_->parent());
   BaseLayoutManager::AdjustAllWindowsBoundsForWorkAreaChange(reason);
 }
 
@@ -227,10 +243,11 @@ void WorkspaceLayoutManager::AdjustWindowBoundsForWorkAreaChange(
     case ADJUST_WINDOW_DISPLAY_SIZE_CHANGED:
       // The work area may be smaller than the full screen.  Put as much of the
       // window as possible within the display area.
-      bounds.AdjustToFit(work_area_);
+      bounds.AdjustToFit(work_area_in_parent_);
       break;
     case ADJUST_WINDOW_WORK_AREA_INSETS_CHANGED:
-      ash::wm::AdjustBoundsToEnsureMinimumWindowVisibility(work_area_, &bounds);
+      ash::wm::AdjustBoundsToEnsureMinimumWindowVisibility(
+          work_area_in_parent_, &bounds);
       break;
   }
   if (window_state->window()->bounds() != bounds)
@@ -261,8 +278,8 @@ void WorkspaceLayoutManager::AdjustWindowBoundsWhenAdded(
   // be further shrunk by the docked area. The logic ensures 30%
   // visibility which should be enough to see where the window gets
   // moved.
-  gfx::Rect display_area =
-      Shell::GetScreen()->GetDisplayNearestWindow(window).bounds();
+  gfx::Rect display_area = ScreenAsh::GetDisplayBoundsInParent(window);
+
   ash::wm::AdjustBoundsToEnsureWindowVisibility(
       display_area, min_width, min_height, &bounds);
   if (window->bounds() != bounds)
@@ -272,7 +289,7 @@ void WorkspaceLayoutManager::AdjustWindowBoundsWhenAdded(
 void WorkspaceLayoutManager::UpdateDesktopVisibility() {
   if (shelf_)
     shelf_->UpdateVisibilityState();
-  FramePainter::UpdateSoloWindowHeader(window_->GetRootWindow());
+  HeaderPainter::UpdateSoloWindowHeader(window_->GetRootWindow());
 }
 
 void WorkspaceLayoutManager::UpdateBoundsFromShowState(
@@ -290,13 +307,13 @@ void WorkspaceLayoutManager::UpdateBoundsFromShowState(
       if (window_state->HasRestoreBounds()) {
         bounds_in_parent = window_state->GetRestoreBoundsInParent();
         ash::wm::AdjustBoundsToEnsureMinimumWindowVisibility(
-            work_area_, &bounds_in_parent);
+            work_area_in_parent_, &bounds_in_parent);
       } else {
         // Minimized windows have no restore bounds.
         // Use the current bounds instead.
         bounds_in_parent = window->bounds();
         ash::wm::AdjustBoundsToEnsureMinimumWindowVisibility(
-            work_area_, &bounds_in_parent);
+            work_area_in_parent_, &bounds_in_parent);
         // Don't start animation if the bounds didn't change.
         if (bounds_in_parent == window->bounds())
           bounds_in_parent.SetRect(0, 0, 0, 0);
@@ -332,7 +349,7 @@ void WorkspaceLayoutManager::UpdateBoundsFromShowState(
       MoveToDisplayForRestore(window_state);
       gfx::Rect new_bounds = ScreenAsh::GetDisplayBoundsInParent(
           window->parent()->parent());
-      if (window->GetProperty(kAnimateToFullscreenKey) &&
+      if (window_state->animate_to_fullscreen() &&
           last_show_state != ui::SHOW_STATE_MINIMIZED) {
         CrossFadeToBounds(window, new_bounds);
       } else {

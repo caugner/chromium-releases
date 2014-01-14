@@ -23,8 +23,9 @@
 
 namespace {
 
-// Feedback bucket label.
-const char kProfileResetFeedbackBucket[] = "ProfileResetReport";
+// Feedback bucket labels.
+const char kProfileResetPromptBucket[] = "SamplingOfSettingsResetPrompt";
+const char kProfileResetWebUIBucket[] = "ProfileResetReport";
 
 // Dictionary keys for feedback report.
 const char kDefaultSearchEnginePath[] = "default_search_engine";
@@ -34,7 +35,8 @@ const char kHomepagePath[] = "homepage";
 const char kStartupTypePath[] = "startup_type";
 const char kStartupURLPath[] = "startup_urls";
 
-void AddPair(ListValue* list, const string16& key, const string16& value) {
+template <class StringType>
+void AddPair(ListValue* list, const string16& key, const StringType& value) {
   DictionaryValue* results = new DictionaryValue();
   results->SetString("key", key);
   results->SetString("value", value);
@@ -77,18 +79,8 @@ ResettableSettingsSnapshot::~ResettableSettingsSnapshot() {}
 
 void ResettableSettingsSnapshot::Subtract(
     const ResettableSettingsSnapshot& snapshot) {
-  std::vector<GURL> urls;
-  std::set_difference(startup_.urls.begin(), startup_.urls.end(),
-                      snapshot.startup_.urls.begin(),
-                      snapshot.startup_.urls.end(),
-                      std::back_inserter(urls));
-  startup_.urls.swap(urls);
-
-  ExtensionList extensions;
-  std::set_difference(enabled_extensions_.begin(), enabled_extensions_.end(),
-                      snapshot.enabled_extensions_.begin(),
-                      snapshot.enabled_extensions_.end(),
-                      std::back_inserter(extensions));
+  ExtensionList extensions = base::STLSetDifference<ExtensionList>(
+      enabled_extensions_, snapshot.enabled_extensions_);
   enabled_extensions_.swap(extensions);
 }
 
@@ -96,18 +88,13 @@ int ResettableSettingsSnapshot::FindDifferentFields(
     const ResettableSettingsSnapshot& snapshot) const {
   int bit_mask = 0;
 
-  if (startup_.urls != snapshot.startup_.urls) {
-    bit_mask |= STARTUP_URLS;
-  }
+  if (startup_.type != snapshot.startup_.type ||
+      startup_.urls != snapshot.startup_.urls)
+    bit_mask |= STARTUP_MODE;
 
-  if (startup_.type != snapshot.startup_.type)
-    bit_mask |= STARTUP_TYPE;
-
-  if (homepage_ != snapshot.homepage_)
+  if (homepage_is_ntp_ != snapshot.homepage_is_ntp_ ||
+      homepage_ != snapshot.homepage_)
     bit_mask |= HOMEPAGE;
-
-  if (homepage_is_ntp_ != snapshot.homepage_is_ntp_)
-    bit_mask |= HOMEPAGE_IS_NTP;
 
   if (dse_url_ != snapshot.dse_url_)
     bit_mask |= DSE_URL;
@@ -115,7 +102,7 @@ int ResettableSettingsSnapshot::FindDifferentFields(
   if (enabled_extensions_ != snapshot.enabled_extensions_)
     bit_mask |= EXTENSIONS;
 
-  COMPILE_ASSERT(ResettableSettingsSnapshot::ALL_FIELDS == 63,
+  COMPILE_ASSERT(ResettableSettingsSnapshot::ALL_FIELDS == 15,
                  add_new_field_here);
 
   return bit_mask;
@@ -125,23 +112,20 @@ std::string SerializeSettingsReport(const ResettableSettingsSnapshot& snapshot,
                                     int field_mask) {
   DictionaryValue dict;
 
-  if (field_mask & ResettableSettingsSnapshot::STARTUP_URLS) {
+  if (field_mask & ResettableSettingsSnapshot::STARTUP_MODE) {
     ListValue* list = new ListValue;
     const std::vector<GURL>& urls = snapshot.startup_urls();
     for (std::vector<GURL>::const_iterator i = urls.begin();
          i != urls.end(); ++i)
       list->AppendString(i->spec());
     dict.Set(kStartupURLPath, list);
+    dict.SetInteger(kStartupTypePath, snapshot.startup_type());
   }
 
-  if (field_mask & ResettableSettingsSnapshot::STARTUP_TYPE)
-    dict.SetInteger(kStartupTypePath, snapshot.startup_type());
-
-  if (field_mask & ResettableSettingsSnapshot::HOMEPAGE)
+  if (field_mask & ResettableSettingsSnapshot::HOMEPAGE) {
     dict.SetString(kHomepagePath, snapshot.homepage());
-
-  if (field_mask & ResettableSettingsSnapshot::HOMEPAGE_IS_NTP)
     dict.SetBoolean(kHomepageIsNewTabPage, snapshot.homepage_is_ntp());
+  }
 
   if (field_mask & ResettableSettingsSnapshot::DSE_URL)
     dict.SetString(kDefaultSearchEnginePath, snapshot.dse_url());
@@ -160,7 +144,7 @@ std::string SerializeSettingsReport(const ResettableSettingsSnapshot& snapshot,
     dict.Set(kEnabledExtensions, list);
   }
 
-  COMPILE_ASSERT(ResettableSettingsSnapshot::ALL_FIELDS == 63,
+  COMPILE_ASSERT(ResettableSettingsSnapshot::ALL_FIELDS == 15,
                  serialize_new_field_here);
 
   std::string json;
@@ -168,9 +152,20 @@ std::string SerializeSettingsReport(const ResettableSettingsSnapshot& snapshot,
   return json;
 }
 
-void SendSettingsFeedback(const std::string& report, Profile* profile) {
+void SendSettingsFeedback(const std::string& report,
+                          Profile* profile,
+                          SnapshotCaller caller) {
   scoped_refptr<FeedbackData> feedback_data = new FeedbackData();
-  feedback_data->set_category_tag(kProfileResetFeedbackBucket);
+  std::string bucket;
+  switch (caller) {
+    case PROFILE_RESET_WEBUI:
+      bucket = kProfileResetWebUIBucket;
+      break;
+    case PROFILE_RESET_PROMPT:
+      bucket = kProfileResetPromptBucket;
+      break;
+  }
+  feedback_data->set_category_tag(bucket);
   feedback_data->set_description(report);
 
   feedback_data->set_image(scoped_ptr<std::string>(new std::string));
@@ -186,16 +181,16 @@ ListValue* GetReadableFeedback(Profile* profile) {
   DCHECK(profile);
   ListValue* list = new ListValue;
   AddPair(list, l10n_util::GetStringUTF16(IDS_RESET_PROFILE_SETTINGS_LOCALE),
-          ASCIIToUTF16(g_browser_process->GetApplicationLocale()));
+          g_browser_process->GetApplicationLocale());
   AddPair(list,
           l10n_util::GetStringUTF16(IDS_RESET_PROFILE_SETTINGS_USER_AGENT),
-          ASCIIToUTF16(content::GetUserAgent(GURL())));
+          content::GetUserAgent(GURL()));
   chrome::VersionInfo version_info;
   std::string version = version_info.Version();
   version += chrome::VersionInfo::GetVersionStringModifier();
   AddPair(list,
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
-          ASCIIToUTF16(version));
+          version);
 
   // Add snapshot data.
   ResettableSettingsSnapshot snapshot(profile);
@@ -209,7 +204,7 @@ ListValue* GetReadableFeedback(Profile* profile) {
     startup_urls.erase(startup_urls.end() - 1);
     AddPair(list,
             l10n_util::GetStringUTF16(IDS_RESET_PROFILE_SETTINGS_STARTUP_URLS),
-            ASCIIToUTF16(startup_urls));
+            startup_urls);
   }
 
   string16 startup_type;
@@ -234,7 +229,7 @@ ListValue* GetReadableFeedback(Profile* profile) {
   if (!snapshot.homepage().empty()) {
     AddPair(list,
             l10n_util::GetStringUTF16(IDS_RESET_PROFILE_SETTINGS_HOMEPAGE),
-            ASCIIToUTF16(snapshot.homepage()));
+            snapshot.homepage());
   }
 
   int is_ntp_message_id = snapshot.homepage_is_ntp() ?
@@ -251,21 +246,21 @@ ListValue* GetReadableFeedback(Profile* profile) {
   if (dse) {
     AddPair(list,
             l10n_util::GetStringUTF16(IDS_RESET_PROFILE_SETTINGS_DSE),
-            ASCIIToUTF16(TemplateURLService::GenerateSearchURL(dse).host()));
+            TemplateURLService::GenerateSearchURL(dse).host());
   }
 
   const ResettableSettingsSnapshot::ExtensionList& extensions =
       snapshot.enabled_extensions();
-  std::string extension_ids;
+  std::string extension_names;
   for (ResettableSettingsSnapshot::ExtensionList::const_iterator i =
        extensions.begin(); i != extensions.end(); ++i) {
-    (extension_ids += i->second) += '\n';
+    (extension_names += i->second) += '\n';
   }
-  if (!extension_ids.empty()) {
-    extension_ids.erase(extension_ids.end() - 1);
+  if (!extension_names.empty()) {
+    extension_names.erase(extension_names.end() - 1);
     AddPair(list,
             l10n_util::GetStringUTF16(IDS_RESET_PROFILE_SETTINGS_EXTENSIONS),
-            ASCIIToUTF16(extension_ids));
+            extension_names);
   }
   return list;
 }

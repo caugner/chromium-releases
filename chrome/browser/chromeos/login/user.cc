@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "grit/theme_resources.h"
@@ -103,7 +104,7 @@ class PublicAccountUser : public User {
   DISALLOW_COPY_AND_ASSIGN(PublicAccountUser);
 };
 
-UserContext::UserContext() {
+UserContext::UserContext() : using_oauth(true) {
 }
 
 UserContext::UserContext(const std::string& username,
@@ -111,7 +112,8 @@ UserContext::UserContext(const std::string& username,
                          const std::string& auth_code)
     : username(username),
       password(password),
-      auth_code(auth_code) {
+      auth_code(auth_code),
+      using_oauth(true) {
 }
 
 UserContext::UserContext(const std::string& username,
@@ -121,7 +123,20 @@ UserContext::UserContext(const std::string& username,
     : username(username),
       password(password),
       auth_code(auth_code),
-      username_hash(username_hash) {
+      username_hash(username_hash),
+      using_oauth(true) {
+}
+
+UserContext::UserContext(const std::string& username,
+                         const std::string& password,
+                         const std::string& auth_code,
+                         const std::string& username_hash,
+                         bool using_oauth)
+    :  username(username),
+       password(password),
+       auth_code(auth_code),
+       username_hash(username_hash),
+       using_oauth(using_oauth) {
 }
 
 UserContext::~UserContext() {
@@ -131,7 +146,8 @@ bool UserContext::operator==(const UserContext& context) const {
   return context.username == username &&
          context.password == password &&
          context.auth_code == auth_code &&
-         context.username_hash == username_hash;
+         context.username_hash == username_hash &&
+         context.using_oauth == using_oauth;
 }
 
 string16 User::GetDisplayName() const {
@@ -207,10 +223,15 @@ User::User(const std::string& email)
       image_is_stub_(false),
       image_is_loading_(false),
       is_logged_in_(false),
-      is_active_(false) {
+      is_active_(false),
+      profile_is_created_(false) {
 }
 
 User::~User() {}
+
+void User::SetAccountLocale(const std::string& resolved_account_locale) {
+  account_locale_.reset(new std::string(resolved_account_locale));
+}
 
 void User::SetImage(const UserImage& user_image, int image_index) {
   user_image_ = user_image;
@@ -307,6 +328,23 @@ PublicAccountUser::~PublicAccountUser() {}
 
 User::UserType PublicAccountUser::GetType() const {
   return USER_TYPE_PUBLIC_ACCOUNT;
+}
+
+bool User::has_gaia_account() const {
+  COMPILE_ASSERT(NUM_USER_TYPES == 6, num_user_types_unexpected);
+  switch (GetType()) {
+    case USER_TYPE_REGULAR:
+      return true;
+    case USER_TYPE_GUEST:
+    case USER_TYPE_RETAIL_MODE:
+    case USER_TYPE_PUBLIC_ACCOUNT:
+    case USER_TYPE_LOCALLY_MANAGED:
+    case USER_TYPE_KIOSK_APP:
+      return false;
+    default:
+      NOTREACHED();
+  }
+  return false;
 }
 
 }  // namespace chromeos

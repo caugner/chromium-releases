@@ -8,6 +8,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
+#include "chrome/browser/extensions/extension_web_contents_observer.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/external_protocol/external_protocol_observer.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
@@ -17,13 +18,13 @@
 #include "chrome/browser/net/load_time_stats.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
 #include "chrome/browser/net/predictor_tab_helper.h"
-#if !defined(OS_ANDROID)
 #include "chrome/browser/network_time/navigation_time_helper.h"
-#endif
 #include "chrome/browser/password_manager/password_generation_manager.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate_impl.h"
 #include "chrome/browser/plugins/plugin_observer.h"
+#include "chrome/browser/predictors/resource_prefetch_predictor_factory.h"
+#include "chrome/browser/predictors/resource_prefetch_predictor_tab_helper.h"
 #include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_tab_observer.h"
@@ -104,6 +105,10 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
 
   // Create all the tab helpers.
 
+  // ** Warning: This file is not used on Android. On Android, tab helpers are
+  // ** instantiated in chrome/browser/android/tab_android.cc. Please make sure
+  // ** to add the tab helper there too if appropriate.
+
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
 
@@ -125,6 +130,7 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   chrome_browser_net::PredictorTabHelper::CreateForWebContents(web_contents);
   WebContentsModalDialogManager::CreateForWebContents(web_contents);
   CoreTabHelper::CreateForWebContents(web_contents);
+  extensions::ExtensionWebContentsObserver::CreateForWebContents(web_contents);
   extensions::TabHelper::CreateForWebContents(web_contents);
   extensions::WebNavigationTabObserver::CreateForWebContents(web_contents);
   ExternalProtocolObserver::CreateForWebContents(web_contents);
@@ -134,6 +140,7 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   HungPluginTabHelper::CreateForWebContents(web_contents);
   InfoBarService::CreateForWebContents(web_contents);
   NavigationMetricsRecorder::CreateForWebContents(web_contents);
+  NavigationTimeHelper::CreateForWebContents(web_contents);
   PasswordGenerationManager::CreateForWebContents(web_contents);
   PasswordManagerDelegateImpl::CreateForWebContents(web_contents);
   PasswordManager::CreateForWebContentsAndDelegate(
@@ -154,9 +161,6 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   ThumbnailTabHelper::CreateForWebContents(web_contents);
   TranslateTabHelper::CreateForWebContents(web_contents);
   ZoomController::CreateForWebContents(web_contents);
-#if !defined(OS_ANDROID)
-  NavigationTimeHelper::CreateForWebContents(web_contents);
-#endif
 
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
   captive_portal::CaptivePortalTabHelper::CreateForWebContents(web_contents);
@@ -164,6 +168,11 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
 
   if (profile->IsManaged()) {
     ManagedModeNavigationObserver::CreateForWebContents(web_contents);
+  }
+
+  if (predictors::ResourcePrefetchPredictorFactory::GetForProfile(profile)) {
+    predictors::ResourcePrefetchPredictorTabHelper::CreateForWebContents(
+        web_contents);
   }
 
 #if defined(ENABLE_PRINTING)

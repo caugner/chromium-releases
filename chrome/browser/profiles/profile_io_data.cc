@@ -71,6 +71,8 @@
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
+#include "net/ssl/client_cert_store.h"
+#include "net/ssl/client_cert_store_impl.h"
 #include "net/ssl/server_bound_cert_service.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/file_protocol_handler.h"
@@ -90,9 +92,9 @@
 #include "chrome/browser/chromeos/drive/drive_protocol_handler.h"
 #include "chrome/browser/chromeos/policy/policy_cert_verifier.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
+#include "chromeos/settings/cros_settings_names.h"
 #endif  // defined(OS_CHROMEOS)
 
 using content::BrowserContext;
@@ -710,6 +712,18 @@ net::URLRequestContext* ProfileIOData::ResourceContext::GetRequestContext()  {
   return request_context_;
 }
 
+scoped_ptr<net::ClientCertStore>
+ProfileIOData::ResourceContext::CreateClientCertStore() {
+#if !defined(USE_OPENSSL)
+  return scoped_ptr<net::ClientCertStore>(new net::ClientCertStoreImpl());
+#else
+  // OpenSSL does not use the ClientCertStore infrastructure. On Android client
+  // cert matching is done by the OS as part of the call to show the cert
+  // selection dialog.
+  return scoped_ptr<net::ClientCertStore>();
+#endif
+}
+
 bool ProfileIOData::ResourceContext::AllowMicAccess(const GURL& origin) {
   return AllowContentAccess(origin, CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
 }
@@ -772,10 +786,13 @@ void ProfileIOData::Init(content::ProtocolHandlerMap* protocol_handlers) const {
       new ChromeNetworkDelegate(
           io_thread_globals->extension_event_router_forwarder.get(),
           &enable_referrers_);
+  if (command_line.HasSwitch(switches::kEnableClientHints))
+    network_delegate->SetEnableClientHints();
   network_delegate->set_extension_info_map(
       profile_params_->extension_info_map.get());
   network_delegate->set_url_blacklist_manager(url_blacklist_manager_.get());
   network_delegate->set_profile(profile_params_->profile);
+  network_delegate->set_profile_path(profile_params_->path);
   network_delegate->set_cookie_settings(profile_params_->cookie_settings.get());
   network_delegate->set_enable_do_not_track(&enable_do_not_track_);
   network_delegate->set_force_google_safe_search(&force_safesearch_);

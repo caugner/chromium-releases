@@ -11,12 +11,12 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
-#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/update_engine_client.h"
+#include "chromeos/settings/cros_settings_names.h"
 #include "policy/policy_constants.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -376,6 +376,13 @@ void DecodeReportingPolicies(const em::ChromeDeviceSettingsProto& policy,
                         container.report_network_interfaces()),
                     NULL);
     }
+    if (container.has_report_users()) {
+      policies->Set(key::kReportDeviceUsers,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(container.report_users()),
+                    NULL);
+    }
   }
 }
 
@@ -672,6 +679,18 @@ void DecodeGenericPolicies(const em::ChromeDeviceSettingsProto& policy,
                     POLICY_SCOPE_MACHINE,
                     Value::CreateStringValue(
                         container.login_screen_power_management()),
+                    NULL);
+    }
+  }
+  if (policy.has_auto_clean_up_settings()) {
+    const em::AutoCleanupSettigsProto& container(
+        policy.auto_clean_up_settings());
+    if (container.has_clean_up_strategy()) {
+      policies->Set(key::kAutoCleanUpStrategy,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateStringValue(
+                        container.clean_up_strategy()),
                     NULL);
     }
   }

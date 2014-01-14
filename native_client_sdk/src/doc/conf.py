@@ -61,7 +61,7 @@ release = '31'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ['_build']
+exclude_patterns = ['_build', '**/.#*']
 
 # The reST default role (used for this markup: `text`) to use for all documents.
 #default_role = None
@@ -165,4 +165,19 @@ html_use_smartypants = True
 # Output file base name for HTML help builder.
 htmlhelp_basename = 'NativeClientdoc'
 
+linkcheck_ignore = [
+    # General links not worth checking
+    r'http://localhost.*',
+    r'about:.*',
+    r'chrome:.*',
+    r'.*local_extensions\.css',
+
+    #
+    # Specific known bad cases go here.
+    #
+
+    # linkcheck's anchor checker can't check these because they are
+    # server-generated and don't actually appear in the HTML of the page.
+    r'https://code.google.com.*browse#svn.*',
+    ]
 

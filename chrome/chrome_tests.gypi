@@ -3,6 +3,48 @@
 # found in the LICENSE file.
 {
   'variables' : {
+    'chromedriver_unittest_sources': [
+      'test/chromedriver/capabilities_unittest.cc',
+      'test/chromedriver/chrome/chrome_finder_unittest.cc',
+      'test/chromedriver/chrome/console_logger_unittest.cc',
+      'test/chromedriver/chrome/device_manager_unittest.cc',
+      'test/chromedriver/chrome/devtools_client_impl_unittest.cc',
+      'test/chromedriver/chrome/devtools_http_client_unittest.cc',
+      'test/chromedriver/chrome/dom_tracker_unittest.cc',
+      'test/chromedriver/chrome/frame_tracker_unittest.cc',
+      'test/chromedriver/chrome/geolocation_override_manager_unittest.cc',
+      'test/chromedriver/chrome/heap_snapshot_taker_unittest.cc',
+      'test/chromedriver/chrome/javascript_dialog_manager_unittest.cc',
+      'test/chromedriver/chrome/navigation_tracker_unittest.cc',
+      'test/chromedriver/chrome/performance_logger_unittest.cc',
+      'test/chromedriver/chrome/status_unittest.cc',
+      'test/chromedriver/chrome/stub_chrome.cc',
+      'test/chromedriver/chrome/stub_chrome.h',
+      'test/chromedriver/chrome/stub_devtools_client.cc',
+      'test/chromedriver/chrome/stub_devtools_client.h',
+      'test/chromedriver/chrome/stub_web_view.cc',
+      'test/chromedriver/chrome/stub_web_view.h',
+      'test/chromedriver/chrome/web_view_impl_unittest.cc',
+      'test/chromedriver/chrome_launcher_unittest.cc',
+      'test/chromedriver/commands_unittest.cc',
+      'test/chromedriver/logging_unittest.cc',
+      'test/chromedriver/server/http_handler_unittest.cc',
+      'test/chromedriver/session_commands_unittest.cc',
+      'test/chromedriver/session_unittest.cc',
+      'test/chromedriver/util_unittest.cc',
+    ],
+    'chromedriver_test_sources': [
+      'test/chromedriver/key_converter_unittest.cc',
+      'test/chromedriver/keycode_text_conversion_unittest.cc',
+      'test/chromedriver/net/net_util_unittest.cc',
+      'test/chromedriver/net/port_server_unittest.cc',
+      'test/chromedriver/net/sync_websocket_impl_unittest.cc',
+      'test/chromedriver/net/test_http_server.cc',
+      'test/chromedriver/net/test_http_server.h',
+      'test/chromedriver/net/websocket_unittest.cc',
+      'test/chromedriver/test_util.cc',
+      'test/chromedriver/test_util.h',
+    ],
     'pyautolib_sources': [
       'app/chrome_command_ids.h',
       'app/chrome_dll_resource.h',
@@ -31,6 +73,24 @@
     'js_unittest_vars.gypi',
   ],
   'targets': [
+    {
+      'target_name': 'test_support_chrome',
+      'type': 'static_library',
+      'dependencies': [
+        'test_support_common',
+        '../testing/gtest.gyp:gtest',
+      ],
+      'export_dependent_settings': [
+        'test_support_common',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'test/base/chrome_test_launcher.cc',
+        'test/base/chrome_test_launcher.h',
+      ],
+    },
     {
       'target_name': 'test_support_ui_runner',
       'type': 'static_library',
@@ -109,6 +169,7 @@
         'common/extensions/api/api.gyp:api',
         'debugger',
         'renderer',
+        'test_support_chrome',
         'test_support_common',
         # NOTE: don't add test_support_ui, no more UITests. See
         # http://crbug.com/137365
@@ -136,8 +197,10 @@
       ],
       'defines': [
         'HAS_OUT_OF_PROC_TEST_RUNNER',
-        'INTERACTIVE_TESTS',
       ],
+      'variables': {
+        'win_use_external_manifest': 1,
+      },
       'sources': [
         '../apps/app_shim/app_shim_quit_interactive_uitest_mac.mm',
         '../ui/views/corewm/desktop_capture_controller_unittest.cc',
@@ -147,13 +210,16 @@
         'browser/apps/web_view_interactive_browsertest.cc',
         'browser/autofill/autofill_interactive_uitest.cc',
         'browser/browser_keyevents_browsertest.cc',
+        'browser/extensions/api/extension_action/browser_action_interactive_test.cc',
         'browser/extensions/api/omnibox/omnibox_api_interactive_test.cc',
         'browser/extensions/api/tabs/tabs_interactive_test.cc',
         'browser/extensions/browsertest_util.cc',
         'browser/extensions/extension_apitest.cc',
         'browser/extensions/extension_browsertest.cc',
+        'browser/extensions/extension_test_notification_observer.cc',
         'browser/extensions/extension_crash_recovery_browsertest.cc',
         'browser/extensions/extension_function_test_utils.cc',
+        'browser/extensions/extension_commands_global_registry_apitest.cc',
         'browser/extensions/extension_keybinding_apitest.cc',
         'browser/extensions/extension_test_message_listener.cc',
         'browser/extensions/extension_test_message_listener.h',
@@ -165,7 +231,6 @@
         'browser/notifications/desktop_notifications_unittest.cc',
         'browser/notifications/desktop_notifications_unittest.h',
         'browser/notifications/notification_browsertest.cc',
-        'browser/printing/print_dialog_cloud_interative_uitest.cc',
         'browser/task_manager/task_manager_browsertest_util.cc',
         'browser/ui/autofill/autofill_popup_controller_interactive_uitest.cc',
         'browser/ui/browser_focus_uitest.cc',
@@ -219,7 +284,6 @@
         'browser/ui/views/tabs/tab_drag_controller_interactive_uitest.cc',
         'browser/ui/views/tabs/tab_drag_controller_interactive_uitest.h',
         'browser/ui/views/tabs/tab_drag_controller_interactive_uitest_win.cc',
-        'test/base/chrome_test_launcher.cc',
         'test/base/interactive_test_utils.cc',
         'test/base/interactive_test_utils.h',
         'test/base/interactive_test_utils_aura.cc',
@@ -228,6 +292,7 @@
         'test/base/interactive_test_utils_mac.mm',
         'test/base/interactive_test_utils_views.cc',
         'test/base/interactive_test_utils_win.cc',
+        'test/base/interactive_ui_tests_main.cc',
         'test/base/view_event_test_base.cc',
         'test/base/view_event_test_base.h',
         'test/ppapi/ppapi_interactive_browsertest.cc',
@@ -264,6 +329,43 @@
             'browser/ui/views/menu_model_adapter_test.cc',
             'test/base/view_event_test_base.cc',
             'test/base/view_event_test_base.h',
+          ],
+        }],
+        ['OS=="linux" and use_aura==1 and chromeos==0', {
+          'sources!': [
+            # TODO(port): Disable all the interactive panel tests. All of this
+            # is currently very flaky.
+            'browser/ui/panels/base_panel_browser_test.cc',
+            'browser/ui/panels/base_panel_browser_test.h',
+            'browser/ui/panels/detached_panel_browsertest.cc',
+            'browser/ui/panels/docked_panel_browsertest.cc',
+            'browser/ui/panels/panel_browsertest.cc',
+            'browser/ui/panels/panel_drag_browsertest.cc',
+            'browser/ui/panels/panel_resize_browsertest.cc',
+            'browser/ui/panels/stacked_panel_browsertest.cc',
+            'browser/ui/views/panels/panel_view_browsertest.cc',
+            # TODO(port): These tests fail because they don't have a Screen,
+            # but expect one.
+            'browser/notifications/desktop_notifications_unittest.cc',
+            'browser/notifications/desktop_notifications_unittest.h',
+            'browser/notifications/notification_browsertest.cc',
+            # TODO(port): I have no idea about the crashes in here; there's
+            # nothing obviously wrong. It doesn't run on gtk today, either.
+            'browser/ui/views/button_dropdown_test.cc',
+            'browser/ui/views/tabs/tab_drag_controller_interactive_uitest.cc',
+            # TODO(port): Everything here times out. Attempts have been made to
+            # fix the individual failures, but each time I disable a test from
+            # these suites, it seems like one or another starts timing out too.
+            'browser/apps/web_view_interactive_browsertest.cc',
+            'browser/autofill/autofill_interactive_uitest.cc',
+            'browser/extensions/api/extension_action/browser_action_interactive_test.cc',
+            'browser/extensions/api/omnibox/omnibox_api_interactive_test.cc',
+            'browser/ui/omnibox/omnibox_view_browsertest.cc',
+            'browser/extensions/api/tabs/tabs_interactive_test.cc',
+            'browser/ui/search/instant_extended_interactive_uitest.cc',
+            'browser/ui/startup/startup_browser_creator_interactive_uitest.cc',
+            'browser/ui/views/keyboard_access_browsertest.cc',
+            'browser/ui/views/omnibox/omnibox_view_views_browsertest.cc',
           ],
         }],
         ['use_ash==1', {
@@ -335,6 +437,7 @@
             '../chromeos/chromeos.gyp:chromeos',
           ],
           'sources': [
+            'browser/chromeos/accessibility/sticky_keys_browsertest.cc',
             'browser/chromeos/input_method/textinput_browsertest.cc',
             'browser/chromeos/input_method/textinput_surroundingtext_browsertest.cc',
             'browser/chromeos/input_method/textinput_test_helper.cc',
@@ -412,9 +515,9 @@
               ],
             }],
             ['use_aura==1', {
-              'sources/': [
-                ['exclude', '^browser/ui/views/accessibility/browser_views_accessibility_browsertest.cc'],
-                ['exclude', '^browser/ui/views/native_widget_win_interactive_uitest.cc'],
+              'sources!': [
+                'browser/ui/views/accessibility/browser_views_accessibility_browsertest.cc',
+                'browser/ui/views/native_widget_win_interactive_uitest.cc',
               ],
             }],
           ],
@@ -431,14 +534,13 @@
           'msvs_disabled_warnings': [ 4267, ],
         }, { # else: OS != "win"
           'sources!': [
-            'browser/ui/views/ssl_client_certificate_selector_browsertest.cc',
             'browser/ui/views/native_widget_win_interactive_uitest.cc',
           ],
         }],  # OS != "win"
       ],  # conditions
     },
     {
-      'target_name': 'chrome_devtools_lib',
+      'target_name': 'automation_client_lib',
       'type': 'static_library',
       'hard_dependency': 1,
       'dependencies': [
@@ -447,6 +549,8 @@
         '../net/net.gyp:net',
         '../third_party/zlib/zlib.gyp:minizip',
         '../third_party/zlib/zlib.gyp:zlib',
+        '../ui/events/events.gyp:events',
+        '../ui/gfx/gfx.gyp:gfx',
         '../ui/ui.gyp:ui',
         '../url/url.gyp:url_lib',
       ],
@@ -485,6 +589,8 @@
         'test/chromedriver/chrome/chrome_impl.h',
         'test/chromedriver/chrome/console_logger.cc',
         'test/chromedriver/chrome/console_logger.h',
+        'test/chromedriver/chrome/debugger_tracker.cc',
+        'test/chromedriver/chrome/debugger_tracker.h',
         'test/chromedriver/chrome/device_manager.cc',
         'test/chromedriver/chrome/device_manager.h',
         'test/chromedriver/chrome/devtools_client.h',
@@ -532,6 +638,8 @@
         'test/chromedriver/net/adb_client_socket.h',
         'test/chromedriver/net/net_util.cc',
         'test/chromedriver/net/net_util.h',
+        'test/chromedriver/net/port_server.cc',
+        'test/chromedriver/net/port_server.h',
         'test/chromedriver/net/sync_websocket.h',
         'test/chromedriver/net/sync_websocket_factory.cc',
         'test/chromedriver/net/sync_websocket_factory.h',
@@ -620,18 +728,19 @@
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
     },
-    # This is the new ChromeDriver based on DevTools.
     {
-      'target_name': 'chromedriver2_lib',
+      'target_name': 'chromedriver_lib',
       'type': 'static_library',
       'hard_dependency': 1,
       'dependencies': [
-        'chrome_devtools_lib',
+        'automation_client_lib',
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../crypto/crypto.gyp:crypto',
         '../net/net.gyp:http_server',
         '../net/net.gyp:net',
+        '../ui/events/events.gyp:events',
+        '../ui/gfx/gfx.gyp:gfx',
         '../ui/ui.gyp:ui',
       ],
       'include_dirs': [
@@ -707,27 +816,11 @@
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
     },
-    # TODO(kkania): Remove this in favor of 'chromedriver' target right below.
-    {
-      'target_name': 'chromedriver2_server',
-      'type': 'executable',
-      'dependencies': [
-        'chromedriver2_lib',
-      ],
-      'include_dirs': [
-        '..',
-      ],
-      'sources': [
-        'test/chromedriver/server/chromedriver_server.cc',
-      ],
-      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-      'msvs_disabled_warnings': [ 4267, ],
-    },
     {
       'target_name': 'chromedriver',
       'type': 'executable',
       'dependencies': [
-        'chromedriver2_lib',
+        'chromedriver_lib',
       ],
       'include_dirs': [
         '..',
@@ -739,62 +832,59 @@
       'msvs_disabled_warnings': [ 4267, ],
     },
     {
-      'target_name': 'chromedriver2_unittests',
+      'target_name': 'chromedriver_unittests',
       'type': 'executable',
       'dependencies': [
-        'chromedriver2_lib',
+        'chromedriver_lib',
         '../base/base.gyp:base',
         '../base/base.gyp:run_all_unittests',
         '../net/net.gyp:http_server',
         '../net/net.gyp:net',
         '../testing/gtest.gyp:gtest',
+        '../ui/events/events.gyp:events',
+        '../ui/gfx/gfx.gyp:gfx',
         '../ui/ui.gyp:ui',
       ],
+      'include_dirs': [
+        '..,'
+      ],
       'sources': [
-        'test/chromedriver/capabilities_unittest.cc',
-        'test/chromedriver/chrome/chrome_finder_unittest.cc',
-        'test/chromedriver/chrome/console_logger_unittest.cc',
-        'test/chromedriver/chrome/device_manager_unittest.cc',
-        'test/chromedriver/chrome/devtools_client_impl_unittest.cc',
-        'test/chromedriver/chrome/devtools_http_client_unittest.cc',
-        'test/chromedriver/chrome/dom_tracker_unittest.cc',
-        'test/chromedriver/chrome/frame_tracker_unittest.cc',
-        'test/chromedriver/chrome/geolocation_override_manager_unittest.cc',
-        'test/chromedriver/chrome/heap_snapshot_taker_unittest.cc',
-        'test/chromedriver/chrome/javascript_dialog_manager_unittest.cc',
-        'test/chromedriver/chrome/navigation_tracker_unittest.cc',
-        'test/chromedriver/chrome/performance_logger_unittest.cc',
-        'test/chromedriver/chrome/status_unittest.cc',
-        'test/chromedriver/chrome/stub_chrome.cc',
-        'test/chromedriver/chrome/stub_chrome.h',
-        'test/chromedriver/chrome/stub_devtools_client.cc',
-        'test/chromedriver/chrome/stub_devtools_client.h',
-        'test/chromedriver/chrome/stub_web_view.cc',
-        'test/chromedriver/chrome/stub_web_view.h',
-        'test/chromedriver/chrome/web_view_impl_unittest.cc',
-        'test/chromedriver/chrome_launcher_unittest.cc',
-        'test/chromedriver/commands_unittest.cc',
-        'test/chromedriver/logging_unittest.cc',
-        'test/chromedriver/server/http_handler_unittest.cc',
-        'test/chromedriver/session_commands_unittest.cc',
-        'test/chromedriver/session_unittest.cc',
-        'test/chromedriver/util_unittest.cc',
+        '<@(chromedriver_unittest_sources)',
       ],
-      'conditions': [
-        # See http://crbug.com/162998#c4 for why this is needed.
-        ['OS=="linux" and linux_use_tcmalloc==1', {
-          'dependencies': [
-            '../base/allocator/allocator.gyp:allocator',
-          ],
-        }],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
+    },
+    # TODO(kkania): Remove when infra no longer references this.
+    {
+      'target_name': 'chromedriver2_unittests',
+      'type': 'executable',
+      'dependencies': [
+        'chromedriver_lib',
+        '../base/base.gyp:base',
+        '../base/base.gyp:run_all_unittests',
+        '../net/net.gyp:http_server',
+        '../net/net.gyp:net',
+        '../testing/gtest.gyp:gtest',
+        '../ui/events/events.gyp:events',
+        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/ui.gyp:ui',
       ],
+      'include_dirs': [
+        '..,'
+      ],
+      'sources': [
+        '<@(chromedriver_unittest_sources)',
+      ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
     # ChromeDriver2 tests that aren't run on the main buildbot. Available
     # as an optional test type on trybots.
     {
-      'target_name': 'chromedriver2_tests',
+      'target_name': 'chromedriver_tests',
       'type': 'executable',
       'dependencies': [
+        'chromedriver_lib',
         '../base/base.gyp:base',
         '../base/base.gyp:run_all_unittests',
         '../net/net.gyp:http_server',
@@ -802,21 +892,35 @@
         '../net/net.gyp:net_test_support',
         '../testing/gtest.gyp:gtest',
         '../url/url.gyp:url_lib',
-        'chromedriver2_lib',
       ],
       'include_dirs': [
         '..,'
       ],
       'sources': [
-        'test/chromedriver/key_converter_unittest.cc',
-        'test/chromedriver/keycode_text_conversion_unittest.cc',
-        'test/chromedriver/net/net_util_unittest.cc',
-        'test/chromedriver/net/sync_websocket_impl_unittest.cc',
-        'test/chromedriver/net/test_http_server.cc',
-        'test/chromedriver/net/test_http_server.h',
-        'test/chromedriver/net/websocket_unittest.cc',
-        'test/chromedriver/test_util.cc',
-        'test/chromedriver/test_util.h',
+        '<@(chromedriver_test_sources)',
+      ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
+    },
+    # TODO(kkania): Remove when infra no longer references this.
+    {
+      'target_name': 'chromedriver2_tests',
+      'type': 'executable',
+      'dependencies': [
+        'chromedriver_lib',
+        '../base/base.gyp:base',
+        '../base/base.gyp:run_all_unittests',
+        '../net/net.gyp:http_server',
+        '../net/net.gyp:net',
+        '../net/net.gyp:net_test_support',
+        '../testing/gtest.gyp:gtest',
+        '../url/url.gyp:url_lib',
+      ],
+      'include_dirs': [
+        '..,'
+      ],
+      'sources': [
+        '<@(chromedriver_test_sources)',
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
@@ -836,6 +940,7 @@
         'common/extensions/api/api.gyp:api',
         'renderer',
         'test/perf/perf_test.gyp:*',
+        'test_support_chrome',
         'test_support_common',
         'test_support_unit',
         '../base/base.gyp:base',
@@ -874,23 +979,15 @@
       ],
       'sources': [
         '../apps/app_restore_service_browsertest.cc',
+        '../apps/app_shim/app_shim_host_manager_browsertest_mac.mm',
+        '../apps/app_shim/test/app_shim_host_manager_test_api_mac.cc',
+        '../apps/app_shim/test/app_shim_host_manager_test_api_mac.h',
         '../apps/load_and_launch_browsertest.cc',
         # TODO(blundell): Bring up a components_browsertests target and move
         # this test to be in that target. crbug.com/283846
         '../components/autofill/content/renderer/password_form_conversion_utils_browsertest.cc',
         '../components/autofill/content/renderer/test_password_autofill_agent.h',
         '../components/autofill/content/renderer/test_password_autofill_agent.cc',
-        '../remoting/test/auth_browsertest.cc',
-        '../remoting/test/launch_browsertest.cc',
-        '../remoting/test/key_code_conv.cc',
-        '../remoting/test/key_code_conv.h',
-        '../remoting/test/key_code_map.h',
-        '../remoting/test/me2me_browsertest.cc',
-        '../remoting/test/remote_desktop_browsertest.cc',
-        '../remoting/test/remote_desktop_browsertest.h',
-        '../remoting/test/waiter.cc',
-        '../remoting/test/waiter.h',
-        'app/breakpad_mac_stubs.mm',
         'app/chrome_command_ids.h',
         'app/chrome_dll.rc',
         'app/chrome_dll_resource.h',
@@ -902,7 +999,10 @@
         'browser/apps/app_browsertest.cc',
         'browser/apps/app_browsertest_util.cc',
         'browser/apps/app_browsertest_util.h',
+        'browser/apps/app_crash_browsertest.cc',
         'browser/apps/app_url_redirector_browsertest.cc',
+        'browser/apps/event_page_browsertest.cc',
+        'browser/apps/speech_recognition_browsertest.cc',
         'browser/apps/web_view_browsertest.cc',
         'browser/apps/window_controls_browsertest.cc',
         'browser/autocomplete/autocomplete_browsertest.cc',
@@ -926,6 +1026,7 @@
         'browser/chromeos/accessibility/magnification_manager_browsertest.cc',
         'browser/chromeos/app_mode/kiosk_app_manager_browsertest.cc',
         'browser/chromeos/app_mode/kiosk_app_update_service_browsertest.cc',
+        'browser/chromeos/attestation/attestation_policy_browsertest.cc',
         'browser/chromeos/drive/drive_integration_service_browsertest.cc',
         'browser/chromeos/drive/test_util.cc',
         'browser/chromeos/drive/test_util.h',
@@ -934,6 +1035,7 @@
         'browser/chromeos/extensions/file_manager/file_browser_private_apitest.cc',
         'browser/chromeos/extensions/info_private_apitest.cc',
         'browser/chromeos/extensions/input_method_apitest_chromeos.cc',
+        'browser/chromeos/extensions/virtual_keyboard_browsertest.cc',
         'browser/chromeos/extensions/wallpaper_private_apitest.cc',
         'browser/chromeos/file_manager/desktop_notifications_browsertest.cc',
         'browser/chromeos/file_manager/drive_test_util.cc',
@@ -990,17 +1092,18 @@
         'browser/chromeos/policy/variations_service_policy_browsertest.cc',
         'browser/chromeos/power/peripheral_battery_observer_browsertest.cc',
         'browser/chromeos/profiles/profile_helper_browsertest.cc',
-        'browser/chromeos/screensaver/screensaver_controller_browsertest.cc',
         'browser/chromeos/system/tray_accessibility_browsertest.cc',
         'browser/chromeos/ui/idle_logout_dialog_view_browsertest.cc',
         'browser/collected_cookies_browsertest.cc',
         'browser/content_settings/content_settings_browsertest.cc',
         'browser/crash_recovery_browsertest.cc',
         'browser/custom_handlers/protocol_handler_registry_browsertest.cc',
+        'browser/devtools/devtools_adb_bridge_browsertest.cc',
         'browser/devtools/devtools_sanity_browsertest.cc',
         'browser/do_not_track_browsertest.cc',
         'browser/download/download_browsertest.cc',
         'browser/download/download_danger_prompt_browsertest.cc',
+        'browser/download/download_started_animation_browsertest.cc',
         'browser/download/save_page_browsertest.cc',
         'browser/drive/fake_drive_service.cc',
         'browser/drive/fake_drive_service.h',
@@ -1019,6 +1122,7 @@
         'browser/extensions/api/braille_display_private/braille_display_private_apitest.cc',
         'browser/extensions/api/bookmarks/bookmark_apitest.cc',
         'browser/extensions/api/browsing_data/browsing_data_test.cc',
+        'browser/extensions/api/cast_channel/cast_channel_apitest.cc',
         'browser/extensions/api/cloud_print_private/cloud_print_private_apitest.cc',
         'browser/extensions/api/command_line_private/command_line_private_apitest.cc',
         'browser/extensions/api/commands/command_service_browsertest.cc',
@@ -1040,6 +1144,8 @@
         'browser/extensions/api/extension_action/page_action_apitest.cc',
         'browser/extensions/api/extension_action/page_as_browser_action_apitest.cc',
         'browser/extensions/api/extension_action/script_badge_apitest.cc',
+        'browser/extensions/api/feedback_private/feedback_private_apitest.cc',
+        'browser/extensions/api/feedback_private/feedback_browsertest.cc',
         'browser/extensions/api/file_system/file_system_apitest.cc',
         'browser/extensions/api/font_settings/font_settings_apitest.cc',
         'browser/extensions/api/history/history_apitest.cc',
@@ -1071,11 +1177,13 @@
         'browser/extensions/api/push_messaging/push_messaging_apitest.cc',
         'browser/extensions/api/push_messaging/push_messaging_canary_test.cc',
         'browser/extensions/api/push_messaging/sync_setup_helper.cc',
-        'browser/extensions/api/rtc_private/rtc_private_apitest.cc',
         'browser/extensions/api/runtime/runtime_apitest.cc',
         'browser/extensions/api/serial/serial_apitest.cc',
         'browser/extensions/api/sessions/sessions_apitest.cc',
+        'browser/extensions/api/settings_overrides/settings_overrides_browsertest.cc',
         'browser/extensions/api/socket/socket_apitest.cc',
+        'browser/extensions/api/sockets_tcp/sockets_tcp_apitest.cc',
+        'browser/extensions/api/sockets_tcp_server/sockets_tcp_server_apitest.cc',
         'browser/extensions/api/sockets_udp/sockets_udp_apitest.cc',
         'browser/extensions/api/storage/settings_apitest.cc',
         'browser/extensions/api/streams_private/streams_private_apitest.cc',
@@ -1098,6 +1206,8 @@
         'browser/extensions/api/usb/usb_manual_apitest.cc',
         'browser/extensions/api/web_navigation/web_navigation_apitest.cc',
         'browser/extensions/api/web_request/web_request_apitest.cc',
+        'browser/extensions/api/webrtc_audio_private/webrtc_audio_private_browsertest.cc',
+        'browser/extensions/api/webrtc_logging_private/webrtc_logging_private_apitest.cc',
         'browser/extensions/api/webstore_private/webstore_private_apitest.cc',
         'browser/extensions/app_background_page_apitest.cc',
         'browser/extensions/app_process_apitest.cc',
@@ -1123,6 +1233,8 @@
         'browser/extensions/extension_bindings_apitest.cc',
         'browser/extensions/extension_browsertest.cc',
         'browser/extensions/extension_browsertest.h',
+        'browser/extensions/extension_test_notification_observer.cc',
+        'browser/extensions/extension_test_notification_observer.h',
         'browser/extensions/extension_context_menu_browsertest.cc',
         'browser/extensions/extension_disabled_ui_browsertest.cc',
         'browser/extensions/extension_dom_clipboard_apitest.cc',
@@ -1166,6 +1278,10 @@
         'browser/extensions/test_extension_dir.cc',
         'browser/extensions/test_extension_dir.h',
         'browser/extensions/web_contents_browsertest.cc',
+        'browser/extensions/webrtc_cast_apitest.cc',
+        'browser/extensions/webstore_inline_installer_browsertest.cc',
+        'browser/extensions/webstore_installer_test.cc',
+        'browser/extensions/webstore_installer_test.h',
         'browser/extensions/webstore_startup_installer_browsertest.cc',
         'browser/extensions/window_open_apitest.cc',
         'browser/external_extension_browsertest.cc',
@@ -1195,14 +1311,16 @@
         'browser/media/media_browsertest.cc',
         'browser/media/media_browsertest.h',
         'browser/media/chrome_media_stream_infobar_browsertest.cc',
+        'browser/media/chrome_webrtc_apprtc_browsertest.cc',
         'browser/media/chrome_webrtc_browsertest.cc',
         'browser/media/chrome_webrtc_audio_quality_browsertest.cc',
+        'browser/media/chrome_webrtc_typing_detection_browsertest.cc',
         'browser/media/chrome_webrtc_video_quality_browsertest.cc',
         'browser/media/encrypted_media_istypesupported_browsertest.cc',
         'browser/media/webrtc_browsertest_base.cc',
         'browser/media/webrtc_browsertest_base.h',
         'browser/media/webrtc_browsertest_common.cc',
-        'browser/media_galleries/fileapi/itunes_finder_win_browsertest.cc',
+        'browser/media_galleries/fileapi/iapps_finder_impl_win_browsertest.cc',
         'browser/media_galleries/fileapi/media_file_validator_browsertest.cc',
         'browser/media_galleries/media_galleries_dialog_controller_mock.cc',
         'browser/media_galleries/media_galleries_dialog_controller_mock.h',
@@ -1291,15 +1409,19 @@
         'browser/ui/app_list/test/app_list_service_test_api.h',
         'browser/ui/app_list/test/app_list_service_test_api_ash.cc',
         'browser/ui/app_list/test/app_list_service_test_api_ash.h',
+        'browser/ui/app_list/test/app_list_service_test_api_linux.cc',
         'browser/ui/app_list/test/app_list_service_test_api_mac.mm',
-        'browser/ui/app_list/test/app_list_service_test_api_win.cc',
+        'browser/ui/ash/accelerator_commands_browsertest.cc',
         'browser/ui/ash/caps_lock_delegate_chromeos_browsertest.cc',
-        'browser/ui/ash/chrome_shell_delegate_browsertest.cc',
         'browser/ui/ash/launcher/chrome_launcher_controller_browsertest.cc',
         'browser/ui/ash/launcher/launcher_favicon_loader_browsertest.cc',
         'browser/ui/ash/shelf_browsertest.cc',
         'browser/ui/ash/volume_controller_browsertest_chromeos.cc',
         'browser/ui/autofill/autofill_dialog_controller_browsertest.cc',
+        'browser/ui/autofill/test_generated_credit_card_bubble_view.cc',
+        'browser/ui/autofill/test_generated_credit_card_bubble_view.h',
+        'browser/ui/autofill/test_generated_credit_card_bubble_controller.cc',
+        'browser/ui/autofill/test_generated_credit_card_bubble_controller.h',
         'browser/ui/blocked_content/popup_blocker_browsertest.cc',
         'browser/ui/bookmarks/bookmark_browsertest.cc',
         'browser/ui/browser_browsertest.cc',
@@ -1351,16 +1473,20 @@
         'browser/ui/tab_modal_confirm_dialog_browsertest.h',
         'browser/ui/toolbar/test_toolbar_model.cc',
         'browser/ui/toolbar/test_toolbar_model.h',
+        'browser/ui/views/app_list/win/test/app_list_service_test_api_win.cc',
         'browser/ui/views/avatar_menu_button_browsertest.cc',
         'browser/ui/views/browser_actions_container_browsertest.cc',
         'browser/ui/views/frame/app_non_client_frame_view_ash_browsertest.cc',
         'browser/ui/views/frame/browser_non_client_frame_view_ash_browsertest.cc',
         'browser/ui/views/frame/browser_view_browsertest.cc',
+        'browser/ui/views/frame/browser_window_property_manager_browsertest_win.cc',
         'browser/ui/views/frame/immersive_mode_controller_ash_browsertest.cc',
         'browser/ui/views/location_bar/zoom_bubble_view_browsertest.cc',
+        'browser/ui/views/new_avatar_menu_button_browsertest.cc',
         'browser/ui/views/select_file_dialog_extension_browsertest.cc',
         'browser/ui/views/toolbar_view_browsertest.cc',
         'browser/ui/views/web_dialog_view_browsertest.cc',
+        'browser/ui/webui/app_list/start_page_browsertest.js',
         'browser/ui/webui/bidi_checker_web_ui_test.cc',
         'browser/ui/webui/bidi_checker_web_ui_test.h',
         'browser/ui/webui/bookmarks_ui_browsertest.cc',
@@ -1371,6 +1497,8 @@
         'browser/ui/webui/downloads_ui_browsertest.h',
         'browser/ui/webui/downloads_ui_browsertest.js',
         'browser/ui/webui/extensions/chromeos/kiosk_apps_browsertest.js',
+        'browser/ui/webui/extensions/extension_settings_browsertest.cc',
+        'browser/ui/webui/extensions/extension_settings_browsertest.h',
         'browser/ui/webui/extensions/extension_settings_browsertest.js',
         'browser/ui/webui/help/help_browsertest.js',
         'browser/ui/webui/identity_internals_ui_browsertest.cc',
@@ -1408,6 +1536,7 @@
         'browser/ui/webui/options/search_engine_manager_browsertest.js',
         'browser/ui/webui/options/settings_app_browsertest.js',
         'browser/ui/webui/options/settings_format_browsertest.js',
+        'browser/ui/webui/options/startup_page_list_browsertest.js',
         'browser/ui/webui/policy_ui_browsertest.cc',
         'browser/ui/webui/print_preview/print_preview_ui_browsertest.cc',
         'browser/ui/webui/signin/user_manager_ui_browsertest.cc',
@@ -1419,13 +1548,15 @@
         'common/mac/mock_launchd.cc',
         'common/mac/mock_launchd.h',
         'common/time_format_browsertest.cc',
+        'renderer/chrome_content_renderer_client_browsertest.cc',
         'renderer/autofill/autofill_renderer_browsertest.cc',
         'renderer/autofill/form_autocomplete_browsertest.cc',
         'renderer/autofill/form_autofill_browsertest.cc',
         'renderer/autofill/page_click_tracker_browsertest.cc',
         'renderer/autofill/password_autofill_agent_browsertest.cc',
-        'renderer/autofill/password_generation_manager_browsertest.cc',
+        'renderer/autofill/password_generation_agent_browsertest.cc',
         'renderer/content_settings_observer_browsertest.cc',
+        'renderer/media/cast_session_browsertest.cc',
         'renderer/printing/print_web_view_helper_browsertest.cc',
         'renderer/safe_browsing/malware_dom_details_browsertest.cc',
         'renderer/safe_browsing/phishing_classifier_browsertest.cc',
@@ -1433,17 +1564,17 @@
         'renderer/safe_browsing/phishing_dom_feature_extractor_browsertest.cc',
         'renderer/translate/translate_helper_browsertest.cc',
         'renderer/translate/translate_script_browsertest.cc',
+        'test/base/browser_tests_main.cc',
         'test/base/chrome_render_view_test.cc',
         'test/base/chrome_render_view_test.h',
-        'test/base/chrome_test_launcher.cc',
         'test/base/web_ui_browsertest.cc',
         'test/base/web_ui_browsertest.h',
-        'test/data/chromeos/oobe_webui_browsertest.js',
         'test/base/in_process_browser_test_browsertest.cc',
         'test/base/tracing_browsertest.cc',
         'test/base/test_chrome_web_ui_controller_factory.cc',
         'test/base/test_chrome_web_ui_controller_factory.h',
         'test/base/test_chrome_web_ui_controller_factory_browsertest.cc',
+        'test/data/chromeos/oobe_webui_browsertest.js',
         'test/data/webui/accessibility_audit_browsertest.js',
         'test/data/webui/assertions.js',
         'test/data/webui/async_gen.cc',
@@ -1482,6 +1613,18 @@
         'test/gpu/gpu_feature_browsertest.cc',
         'test/gpu/webgl_infobar_browsertest.cc',
         'test/ppapi/ppapi_browsertest.cc',
+        'test/remoting/auth_browsertest.cc',
+        'test/remoting/launch_browsertest.cc',
+        'test/remoting/key_code_conv.cc',
+        'test/remoting/key_code_conv.h',
+        'test/remoting/key_code_map.h',
+        'test/remoting/me2me_browsertest.cc',
+        'test/remoting/page_load_notification_observer.cc',
+        'test/remoting/page_load_notification_observer.h',
+        'test/remoting/remote_desktop_browsertest.cc',
+        'test/remoting/remote_desktop_browsertest.h',
+        'test/remoting/waiter.cc',
+        'test/remoting/waiter.h',
         'test/security_tests/sandbox_browsertest_linux.cc',
         'test/security_tests/sandbox_browsertest_win.cc',
         # TODO(craig): Rename this and run from base_unittests when the test
@@ -1544,12 +1687,14 @@
                 'test/nacl/nacl_browsertest_uma.cc',
                 'test/nacl/nacl_browsertest_util.cc',
                 'test/nacl/nacl_browsertest_util.h',
+                'test/nacl/pnacl_header_test.cc',
+                'test/nacl/pnacl_header_test.h',
               ],
               'dependencies': [
-                'test/data/extensions/api_test/api_test_data.gyp:socket_ppapi',
                 'test/data/nacl/nacl_test_data.gyp:*',
                 '../ppapi/native_client/native_client.gyp:nacl_irt',
                 '../ppapi/ppapi_untrusted.gyp:ppapi_nacl_tests',
+                '../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_socket'
               ],
             }],
             ['OS=="win" or OS=="linux"', {
@@ -1595,11 +1740,13 @@
             ['exclude', '^browser/ui/webui/options/chromeos/'],
           ],
           'sources!': [
-            'browser/extensions/api/rtc_private/rtc_private_apitest.cc',
             'browser/extensions/api/terminal/terminal_private_apitest.cc',
             'browser/ui/ash/caps_lock_delegate_chromeos_browsertest.cc',
             'test/data/webui/certificate_viewer_dialog_test.js',
             'test/data/webui/certificate_viewer_ui_test-inl.h',
+          ],
+          'dependencies': [
+            'chrome',  # for service_process_control_browsertest.cc
           ],
         }, { # chromeos==1
           'sources!': [
@@ -1608,6 +1755,7 @@
             'browser/printing/cloud_print/test/cloud_print_proxy_process_browsertest.cc',
             'browser/service/service_process_control_browsertest.cc',
             'browser/signin/signin_browsertest.cc',
+            'browser/ui/app_list/test/app_list_service_test_api_linux.cc',
             # chromeos does not use cross-platform panels
             'browser/ui/panels/panel_extension_browsertest.cc',
             # chromeos does not use the desktop user manager
@@ -1628,8 +1776,9 @@
             ['exclude', '^browser/policy/'],
           ],
           'sources!': [
-            'browser/ui/webui/policy_ui_browsertest.cc',
+            'browser/ui/webui/options/certificate_manager_browsertest.cc',
             'browser/ui/webui/options/preferences_browsertest.cc',
+            'browser/ui/webui/policy_ui_browsertest.cc',
           ],
         }],
         ['input_speech==0', {
@@ -1676,6 +1825,7 @@
         }],
         ['enable_webrtc==0', {
           'sources!': [
+            'browser/extensions/api/webrtc_logging_private/webrtc_logging_private_apitest.cc',
             'browser/media/chrome_webrtc_browsertest.cc',
           ],
         }],
@@ -1711,8 +1861,8 @@
             # for win aura builds.
             # TODO: enable these for win_ash browser tests.
             'browser/chromeos/system/tray_accessibility_browsertest.cc',
+            'browser/ui/ash/accelerator_commands_browsertest.cc',
             'browser/ui/ash/caps_lock_delegate_chromeos_browsertest.cc',
-            'browser/ui/ash/chrome_shell_delegate_browsertest.cc',
             'browser/ui/ash/launcher/chrome_launcher_controller_browsertest.cc',
             'browser/ui/ash/launcher/launcher_favicon_loader_browsertest.cc',
             'browser/ui/ash/shelf_browsertest.cc',
@@ -1786,6 +1936,11 @@
             'browser/media_galleries/fileapi/picasa_data_provider_browsertest.cc',
           ],
         }],
+        ['OS=="mac"', {
+          'sources': [
+            'browser/media_galleries/fileapi/iphoto_data_provider_browsertest.cc',
+          ],
+        }],
         ['os_posix == 0 or chromeos == 1', {
           'sources!': [
             'common/time_format_browsertest.cc',
@@ -1818,13 +1973,14 @@
           # npapi test plugin doesn't build on android or ios
           'dependencies': [
             # build time dependency.
-            '../content/content.gyp:copy_npapi_test_plugin',
+            '../content/content_shell_and_tests.gyp:copy_npapi_test_plugin',
             '../v8/tools/gyp/v8.gyp:v8_shell#host',
           ],
         }],
         ['enable_app_list==0', {
           'sources/': [
             ['exclude', '^browser/ui/app_list/'],
+            ['exclude', '^browser/ui/webui/app_list/'],
           ],
         }],
         ['enable_plugins==1', {
@@ -1838,7 +1994,6 @@
           'sources/': [
             ['exclude', '^browser/extensions/api/cloud_print_private/cloud_print_private_apitest.cc'],
             ['exclude', '^browser/printing/cloud_print/test/.*'],
-            ['exclude', '^browser/printing/print_dialog_cloud_interative_uitest.cc'],
             ['exclude', '^browser/printing/printing_layout_browsertest.cc'],
             ['exclude', '^browser/printing/print_preview_dialog_controller_browsertest.cc'],
             ['exclude', '^browser/ui/webui/print_preview/print_preview_ui_browsertest.cc'],
@@ -1850,6 +2005,8 @@
         }],
         ['enable_mdns==1', {
           'sources' : [
+            'browser/local_discovery/test_service_discovery_client.cc',
+            'browser/local_discovery/test_service_discovery_client.h',
             'browser/ui/webui/local_discovery/local_discovery_ui_browsertest.cc',
           ]
         }],
@@ -1857,6 +2014,12 @@
           'sources!': [
             'browser/extensions/api/braille_display_private/braille_display_private_apitest.cc'
             ]
+        }],
+        ['buildtype=="Official"', {
+          'sources!': [
+            # crbug.com/230471
+            'test/data/webui/accessibility_audit_browsertest.js'
+          ]
         }],
       ],  # conditions
     },  # target browser_tests
@@ -1874,6 +2037,7 @@
         'chrome_resources.gyp:packed_resources',
         'renderer',
         'test/perf/perf_test.gyp:*',
+        'test_support_chrome',
         'test_support_common',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
@@ -1901,7 +2065,6 @@
       'sources': [
         '../components/autofill/content/renderer/test_password_autofill_agent.cc',
         '../components/autofill/content/renderer/test_password_autofill_agent.h',
-        'app/breakpad_mac_stubs.mm',
         'app/chrome_command_ids.h',
         'app/chrome_dll.rc',
         'app/chrome_dll_resource.h',
@@ -1910,9 +2073,10 @@
         'browser/extensions/browsertest_util.cc',
         'browser/extensions/extension_apitest.cc',
         'browser/extensions/extension_browsertest.cc',
+        'browser/extensions/extension_test_notification_observer.cc',
+        'test/base/browser_perf_tests_main.cc',
         'test/base/chrome_render_view_test.cc',
         'test/base/chrome_render_view_test.h',
-        'test/base/chrome_test_launcher.cc',
         'test/perf/browser_perf_test.cc',
         'test/perf/browser_perf_test.h',
         'test/perf/rendering/throughput_tests.cc',
@@ -2141,6 +2305,7 @@
         'common',
         'common/extensions/api/api.gyp:api',
         'renderer',
+        'test_support_chrome',
         'test_support_common',
         '../net/net.gyp:net',
         '../printing/printing.gyp:printing',
@@ -2169,7 +2334,7 @@
         'app/chrome_dll.rc',
         'app/chrome_dll_resource.h',
         'app/chrome_version.rc.version',
-        'test/base/chrome_test_launcher.cc',
+        'test/base/browser_tests_main.cc',
         'test/data/resource.rc',
         'browser/sync/test/integration/apps_helper.cc',
         'browser/sync/test/integration/apps_helper.h',
@@ -2321,6 +2486,7 @@
         'chrome',
         'common/extensions/api/api.gyp:api',
         'test/perf/perf_test.gyp:*',
+        'test_support_chrome',
         'test_support_common',
         '../skia/skia.gyp:skia',
         '../sync/sync.gyp:sync',
@@ -2372,7 +2538,7 @@
         'browser/sync/test/integration/sync_test.h',
         'browser/sync/test/integration/typed_urls_helper.cc',
         'browser/sync/test/integration/typed_urls_helper.h',
-        'test/base/chrome_test_launcher.cc',
+        'test/base/browser_perf_tests_main.cc',
         'test/data/resource.rc',
       ],
       'conditions': [
@@ -2444,20 +2610,165 @@
       ],
     },
     {
-      # Executable that contains all the tests to be run on the GPU bots.
-      'target_name': 'gpu_tests',
-      'type': 'executable',
+      # Documentation: http://dev.chromium.org/developers/testing/pyauto
+      'target_name': 'pyautolib',
+      'conditions': [
+        ['enable_automation==1 and (OS=="mac" or ((OS=="win" or os_posix==1) and target_arch==python_arch))', {
+          'type': 'loadable_module',
+          'product_prefix': '_',
+          'dependencies': [
+            'chrome',
+            'chrome_resources.gyp:chrome_resources',
+            'chrome_resources.gyp:chrome_strings',
+            'chrome_resources.gyp:theme_resources',
+            'debugger',
+            'test_support_common',
+            '../skia/skia.gyp:skia',
+            '../sync/sync.gyp:sync',
+            '../testing/gtest.gyp:gtest',
+          ],
+          'export_dependent_settings': [
+            'test_support_common',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+          'cflags': [
+             '-Wno-uninitialized',
+             '-Wno-self-assign',  # to keep clang happy for generated code.
+          ],
+          'sources': [
+            'test/automation/proxy_launcher.cc',
+            'test/automation/proxy_launcher.h',
+            'test/pyautolib/pyautolib.cc',
+            'test/pyautolib/pyautolib.h',
+            'test/ui/ui_test.cc',
+            'test/ui/ui_test.h',
+            'test/ui/ui_test_suite.cc',
+            'test/ui/ui_test_suite.h',
+            '<(INTERMEDIATE_DIR)/pyautolib_wrap.cc',
+            '<@(pyautolib_sources)',
+          ],
+          'xcode_settings': {
+            # Link with python2.6. Using -L/usr/lib and -lpython2.6 does not
+            # work with the -isysroot argument passed in. Even if it did,
+            # the linker shouldn't use any other lib not in the 10.5 sdk.
+            'OTHER_LDFLAGS': [
+              '/usr/lib/libpython2.6.dylib'
+            ],
+            'WARNING_CFLAGS': [
+              # swig creates code with self assignments.
+              '-Wno-self-assign',
+            ],
+          },
+          'msvs_disabled_warnings': [4211],
+          'conditions': [
+            # Disable the type profiler. _POSIX_C_SOURCE and _XOPEN_SOURCE
+            # conflict between <Python.h> and <typeinfo>.
+            ['OS=="linux" and clang_type_profiler==1', {
+              'cflags_cc!': [
+                '-fintercept-allocation-functions',
+              ],
+            }],
+            ['os_posix == 1 and OS!="mac"', {
+              'include_dirs': [
+                '..',
+                '<(sysroot)/usr/include/python<(python_ver)',
+              ],
+              'link_settings': {
+                'libraries': [
+                  '-lpython<(python_ver)',
+                ],
+              },
+            }],
+            ['toolkit_uses_gtk == 1', {
+              'dependencies': [
+                '../build/linux/system.gyp:gtk',
+              ],
+            }],
+            ['OS=="mac"', {
+              'include_dirs': [
+                '..',
+                '/usr/include/python2.6',
+              ],
+            }],
+            ['OS=="win"', {
+              'product_extension': 'pyd',
+              'include_dirs': [
+                '..',
+                '../third_party/python_26/include',
+              ],
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'AdditionalLibraryDirectories': [
+                    '<(DEPTH)/third_party/python_26/libs',
+                  ],
+                  'AdditionalDependencies': [
+                    'python26.lib',
+                  ],
+                },
+              }
+            }],
+            ['asan==1', {
+              'cflags!': [ '-fsanitize=address' ],
+              'xcode_settings': { 'OTHER_CFLAGS!': [ '-fsanitize=address' ] },
+            }],
+          ],
+          'actions': [
+            {
+              'variables' : {
+                'swig_args': [ '-I..',
+                               '-python',
+                               '-c++',
+                               '-threads',
+                               '-outdir',
+                               '<(PRODUCT_DIR)',
+                               '-o',
+                               '<(INTERMEDIATE_DIR)/pyautolib_wrap.cc',
+                ],
+                'conditions': [
+                  ['chromeos==1', {
+                    'swig_args': [
+                      '-DOS_CHROMEOS',
+                    ]
+                  }],
+                ],
+              },
+              'action_name': 'pyautolib_swig',
+              'inputs': [
+                'test/pyautolib/argc_argv.i',
+                'test/pyautolib/pyautolib.i',
+                '<@(pyautolib_sources)',
+              ],
+              'outputs': [
+                '<(INTERMEDIATE_DIR)/pyautolib_wrap.cc',
+                '<(PRODUCT_DIR)/pyautolib.py',
+              ],
+              'action': [ 'python',
+                          '../tools/swig/swig.py',
+                          '<@(swig_args)',
+                          'test/pyautolib/pyautolib.i',
+              ],
+              'message': 'Generating swig wrappers for pyautolib',
+              'msvs_cygwin_shell': 1,
+            },
+          ],  # actions
+        }, {
+          'type': 'none',
+        }],
+      ], # conditions
+    },  # target 'pyautolib'
+    {
+      # Required for WebRTC PyAuto tests.
+      'target_name': 'webrtc_test_tools',
+      'type': 'none',
       'dependencies': [
-        # Runtime dependencies
-        '../third_party/mesa/mesa.gyp:osmesa',
+        'pyautolib',
+        '../third_party/libjingle/libjingle.gyp:peerconnection_server',
+        '../third_party/webrtc/tools/tools.gyp:frame_analyzer',
+        '../third_party/webrtc/tools/tools.gyp:rgba_to_i420_converter',
       ],
-      'includes': [
-        'test/gpu/test_support_gpu.gypi'
-      ],
-      'sources': [
-        'test/gpu/gpu_feature_browsertest.cc',
-      ],
-    },
+    },  # target 'webrtc_test_tools'
   ],
   'conditions': [
     ['OS=="mac"', {
@@ -2527,13 +2838,13 @@
             'common',
             'renderer',
             '../content/content.gyp:content_gpu',
-            '../content/content.gyp:test_support_content',
+            '../content/content_shell_and_tests.gyp:test_support_content',
             '../base/base.gyp:base',
             '../base/base.gyp:test_support_base',
             '../base/base.gyp:test_support_perf',
             '../skia/skia.gyp:skia',
             '../testing/gtest.gyp:gtest',
-            '../webkit/support/webkit_support.gyp:glue',
+            '../webkit/glue/webkit_glue.gyp:glue',
           ],
           'sources': [
             'test/perf/perftests.cc',
@@ -2615,171 +2926,6 @@
     ],  # OS=="win"
     # If you change this condition, make sure you also change it in all.gyp
     # for the chromium_builder_qa target.
-    ['enable_automation==1 and (OS=="mac" or ((OS=="win" or os_posix==1) and target_arch==python_arch))', {
-      'targets': [
-        {
-          # Documentation: http://dev.chromium.org/developers/testing/pyauto
-          'target_name': 'pyautolib',
-          'type': 'loadable_module',
-          'product_prefix': '_',
-          'dependencies': [
-            'chrome',
-            'chrome_resources.gyp:chrome_resources',
-            'chrome_resources.gyp:chrome_strings',
-            'chrome_resources.gyp:theme_resources',
-            'debugger',
-            'test_support_common',
-            '../skia/skia.gyp:skia',
-            '../sync/sync.gyp:sync',
-            '../testing/gtest.gyp:gtest',
-          ],
-          'export_dependent_settings': [
-            'test_support_common',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'cflags': [
-             '-Wno-uninitialized',
-             '-Wno-self-assign',  # to keep clang happy for generated code.
-          ],
-          'sources': [
-            'test/automation/proxy_launcher.cc',
-            'test/automation/proxy_launcher.h',
-            'test/pyautolib/pyautolib.cc',
-            'test/pyautolib/pyautolib.h',
-            'test/ui/ui_test.cc',
-            'test/ui/ui_test.h',
-            'test/ui/ui_test_suite.cc',
-            'test/ui/ui_test_suite.h',
-            '<(INTERMEDIATE_DIR)/pyautolib_wrap.cc',
-            '<@(pyautolib_sources)',
-          ],
-          'xcode_settings': {
-            # Link with python2.6. Using -L/usr/lib and -lpython2.6 does not
-            # work with the -isysroot argument passed in. Even if it did,
-            # the linker shouldn't use any other lib not in the 10.5 sdk.
-            'OTHER_LDFLAGS': [
-              '/usr/lib/libpython2.6.dylib'
-            ],
-          },
-          'msvs_disabled_warnings': [4211],
-          'conditions': [
-            # Disable the type profiler. _POSIX_C_SOURCE and _XOPEN_SOURCE
-            # conflict between <Python.h> and <typeinfo>.
-            ['OS=="linux" and clang_type_profiler==1', {
-              'cflags_cc!': [
-                '-fintercept-allocation-functions',
-              ],
-            }],
-            ['os_posix == 1 and OS!="mac"', {
-              'include_dirs': [
-                '..',
-                '<(sysroot)/usr/include/python<(python_ver)',
-              ],
-              'link_settings': {
-                'libraries': [
-                  '-lpython<(python_ver)',
-                ],
-              },
-            }],
-            ['toolkit_uses_gtk == 1', {
-              'dependencies': [
-                '../build/linux/system.gyp:gtk',
-              ],
-            }],
-            ['OS=="mac"', {
-              'include_dirs': [
-                '..',
-                '/usr/include/python2.6',
-              ],
-            }],
-            ['OS=="win"', {
-              'product_extension': 'pyd',
-              'include_dirs': [
-                '..',
-                '../third_party/python_26/include',
-              ],
-              'msvs_settings': {
-                'VCLinkerTool': {
-                  'AdditionalLibraryDirectories': [
-                    '<(DEPTH)/third_party/python_26/libs',
-                  ],
-                  'AdditionalDependencies': [
-                    'python26.lib',
-                  ],
-                },
-              }
-            }],
-            ['clang == 1', {
-              'xcode_settings': {
-                'WARNING_CFLAGS': [
-                  # swig creates code with self assignments.
-                  '-Wno-self-assign',
-                ],
-              },
-              'cflags': [
-                '-Wno-self-assign',
-              ],
-            }],
-            ['asan==1', {
-              'cflags!': [ '-fsanitize=address' ],
-              'xcode_settings': { 'OTHER_CFLAGS!': [ '-fsanitize=address' ] },
-            }],
-          ],
-          'actions': [
-            {
-              'variables' : {
-                'swig_args': [ '-I..',
-                               '-python',
-                               '-c++',
-                               '-threads',
-                               '-outdir',
-                               '<(PRODUCT_DIR)',
-                               '-o',
-                               '<(INTERMEDIATE_DIR)/pyautolib_wrap.cc',
-                ],
-                'conditions': [
-                  ['chromeos==1', {
-                    'swig_args': [
-                      '-DOS_CHROMEOS',
-                    ]
-                  }],
-                ],
-              },
-              'action_name': 'pyautolib_swig',
-              'inputs': [
-                'test/pyautolib/argc_argv.i',
-                'test/pyautolib/pyautolib.i',
-                '<@(pyautolib_sources)',
-              ],
-              'outputs': [
-                '<(INTERMEDIATE_DIR)/pyautolib_wrap.cc',
-                '<(PRODUCT_DIR)/pyautolib.py',
-              ],
-              'action': [ 'python',
-                          '../tools/swig/swig.py',
-                          '<@(swig_args)',
-                          'test/pyautolib/pyautolib.i',
-              ],
-              'message': 'Generating swig wrappers for pyautolib.',
-              'msvs_cygwin_shell': 1,
-            },
-          ],  # actions
-        },  # target 'pyautolib'
-        {
-          # Required for WebRTC PyAuto tests.
-          'target_name': 'webrtc_test_tools',
-          'type': 'none',
-          'dependencies': [
-            'pyautolib',
-            '../third_party/libjingle/libjingle.gyp:peerconnection_server',
-            '../third_party/webrtc/tools/tools.gyp:frame_analyzer',
-            '../third_party/webrtc/tools/tools.gyp:rgba_to_i420_converter',
-          ],
-        },  # target 'webrtc_test_tools'
-      ]  # targets
-    }],
     # To enable the coverage targets, do
     #    GYP_DEFINES='coverage=1' gclient sync
     # To match the coverage buildbot more closely, do this:
@@ -2801,7 +2947,7 @@
           'type': 'none',
           'actions': [
             {
-              'message': 'Coverage is now complete.',
+              'message': 'Coverage is now complete',
               # MSVS must have an input file and an output file.
               'inputs': [ '<(PRODUCT_DIR)/coverage.info' ],
               'outputs': [ '<(PRODUCT_DIR)/coverage-build-and-run.stamp' ],
@@ -2843,7 +2989,7 @@
             '../printing/printing.gyp:printing_unittests',
             '../remoting/remoting.gyp:remoting_unittests',
             '../sql/sql.gyp:sql_unittests',
-            '../content/content.gyp:content_unittests',
+            '../content/content_shell_and_tests.gyp:content_unittests',
             'unit_tests',
             '../sync/sync.gyp:sync_unit_tests',
           ],  # 'dependencies'
@@ -2866,7 +3012,7 @@
                 'interactive_ui_tests',
                 # Disabled from running in coverage_posix.py.
                 # We need to build this during compile step, so enabling here.
-                '../content/content.gyp:content_browsertests',
+                '../content/content_shell_and_tests.gyp:content_browsertests',
                 '../courgette/courgette.gyp:courgette_unittests',
                 '../crypto/crypto.gyp:crypto_unittests',
                 '../jingle/jingle.gyp:jingle_unittests',
@@ -2875,11 +3021,11 @@
                 '../url/url.gyp:url_unittests',
                 'browser_tests',
                 'chromedriver_unittests',
-                'gpu_tests',
                 'performance_ui_tests',
                 'pyautolib',
                 'sync_integration_tests',
-              ]}],
+              ],
+            }],
             ['OS=="mac"', {
               'dependencies': [
               # Placeholder; empty for now.
@@ -2890,7 +3036,7 @@
               # 'message' for Linux/scons in particular.  Scons
               # requires the 'coverage' target be run from within
               # src/chrome.
-              'message': 'Compiling coverage bundles.',
+              'message': 'Compiling coverage bundles',
               # MSVS must have an input file and an output file.
               #
               # TODO(jrg):
@@ -2944,7 +3090,7 @@
               # 'message' for Linux/scons in particular.  Scons
               # requires the 'coverage' target be run from within
               # src/chrome.
-              'message': 'Running the coverage script.  NOT building anything.',
+              'message': 'Running the coverage script, NOT building anything',
               # MSVS must have an input file and an output file.
               'inputs': [ '<(PRODUCT_DIR)/coverage_bundles.py' ],
               'outputs': [ '<(PRODUCT_DIR)/coverage.info' ],
@@ -2976,7 +3122,7 @@
             'chrome_java_test_support',
             '../base/base.gyp:base',
             '../base/base.gyp:base_java_test_support',
-            '../content/content.gyp:content_java_test_support',
+            '../content/content_shell_and_tests.gyp:content_java_test_support',
             '../sync/sync.gyp:sync_javatests',
           ],
           'variables': {
@@ -3017,7 +3163,7 @@
           },
           'dependencies': [
             'chrome_java',
-            '../content/content.gyp:content_java_test_support',
+            '../content/content_shell_and_tests.gyp:content_java_test_support',
             '../sync/sync.gyp:sync_java',
             '../sync/sync.gyp:sync_java_test_support',
           ],

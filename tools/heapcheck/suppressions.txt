@@ -818,22 +818,6 @@
    fun:SavedFilesServiceUnitTest::SavedFilesServiceUnitTest
 }
 {
-   bug_280931
-   Heapcheck:Leak
-   ...
-   fun:net::QuicFramer::BuildDataPacket
-   fun:net::QuicPacketCreator::SerializePacket
-   fun:net::QuicPacketGenerator::SerializeAndSendPacket
-   fun:net::QuicPacketGenerator::SendQueuedFrames
-   fun:net::QuicPacketGenerator::AddControlFrame
-   fun:net::QuicConnection::SendRstStream
-   fun:net::QuicSession::SendRstStream
-   fun:net::QuicClientSession::SendRstStream
-   fun:net::ReliableQuicStream::Close
-   fun:net::QuicHttpStream::Close
-   fun:net::test::QuicStreamFactoryTest_MaxOpenStream_Test::TestBody
-}
-{
    bug_282646
    Heapcheck:Leak
    ...
@@ -857,38 +841,62 @@
    fun:NetworkingPrivateCryptoTest_VerifyCredentials_Test::TestBody
 }
 {
-   bug_291236_a
+   bug_298887
    Heapcheck:Leak
-   fun:v8::internal::Malloced::New
-   fun:v8::internal::Zone::NewSegment
-   fun:v8::internal::Zone::NewExpand
-   fun:v8::internal::Zone::New
-   fun:v8::internal::ZoneAllocationPolicy::New
-   fun:v8::internal::List::NewData
-   fun:v8::internal::List::Resize
+   ...
+   fun:ui::KeyboardCodeFromXKeyEvent
+   fun:ui::KeyboardCodeFromNative
+   fun:UpdateStateFromEvent
+   fun:ui::EventFlagsFromNative
+   fun:KeyEvent
+   fun:chromeos::KeyboardDrivenEventRewriterTest::GetRewrittenEventAsString
+   fun:chromeos::KeyboardDrivenEventRewriterTest_PassThrough_Test::TestBody
 }
 {
-   bug_291236_b
+   bug_308770_a
    Heapcheck:Leak
-   fun:v8::internal::Malloced::New
-   fun:v8::internal::Zone::NewSegment
-   fun:v8::internal::Zone::NewExpand
-   fun:v8::internal::Zone::New
-   fun:v8::internal::ZoneObject::operator new
-   fun:v8::internal::HOptimizedGraphBuilder::VisitCompareOperation
-   fun:v8::internal::CompareOperation::Accept
-   fun:v8::internal::HOptimizedGraphBuilder::Visit
-   fun:v8::internal::HOptimizedGraphBuilder::VisitForControl
+   fun:sqlite3MemMalloc
+   fun:mozilla_security_manager::SetCertTrust
+   fun:mozilla_security_manager::ImportCACerts
+   fun:net::NSSCertDatabase::ImportCACerts
+   fun:chromeos::onc::CertificateImporterImpl::ParseServerOrCaCertificate
 }
 {
-   bug_291236_c
+   bug_308770_b
    Heapcheck:Leak
-   fun:v8::internal::Malloced::New
-   fun:v8::internal::Zone::NewSegment
-   fun:v8::internal::Zone::NewExpand
-   fun:v8::internal::Zone::New
-   fun:v8::internal::ZoneObject::operator new
-   fun:v8::internal::LChunkBuilder::Build
-   fun:v8::internal::LChunk::NewChunk
-   fun:v8::internal::OptimizingCompiler::OptimizeGraph
+   fun:sqlite3MemMalloc
+   fun:mozilla_security_manager::ImportCACerts
+   fun:net::NSSCertDatabase::ImportCACerts
+   fun:chromeos::ClientCertResolverTest::SetupTestCerts
+}
+{
+   bug_309468
+   Heapcheck:Leak
+   ...
+   fun:TranslateBubbleView::CreateViewBeforeTranslate
+   fun:TranslateBubbleView::Init
+   fun:views::BubbleDelegateView::CreateBubble
+   fun:TranslateBubbleViewTest::SetUp
+}
+{
+   bug_313238
+   Heapcheck:Leak
+   fun:??
+   fun:GtkThemeService::GtkThemeService
+   fun:ThemeServiceFactory::BuildServiceInstanceFor
+   fun:BrowserContextKeyedServiceFactory::GetServiceForBrowserContext
+   fun:_init
+   fun:BrowserContextDependencyManager::DoCreateBrowserContextServices
+   fun:BrowserContextDependencyManager::CreateBrowserContextServicesForTest
+   fun:TestingProfile::Init
+   fun:TestingProfile::TestingProfile
+   fun:AppKeepAliveServiceUnitTest::AppKeepAliveServiceUnitTest
+   fun:AppKeepAliveServiceUnitTest_Basic_Test::AppKeepAliveServiceUnitTest_Basic_Test
+   fun:testing::internal::TestFactoryImpl::CreateTest
+}
+{
+   bug_313521
+   Heapcheck:Leak
+   ...
+   fun:app_list::AppListModelTest_FolderItem_Test::TestBody
 }

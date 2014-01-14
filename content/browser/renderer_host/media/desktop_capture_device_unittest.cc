@@ -35,13 +35,13 @@ const int kTestFrameWidth1 = 100;
 const int kTestFrameHeight1 = 100;
 const int kTestFrameWidth2 = 200;
 const int kTestFrameHeight2 = 150;
-const int kBufferSize = kTestFrameWidth2 * kTestFrameHeight2 * 4;
 
 const int kFrameRate = 30;
 
-class MockFrameObserver : public media::VideoCaptureDevice::EventHandler {
+class MockDeviceClient : public media::VideoCaptureDevice::Client {
  public:
-  MOCK_METHOD0(ReserveOutputBuffer, scoped_refptr<media::VideoFrame>());
+  MOCK_METHOD1(ReserveOutputBuffer,
+               scoped_refptr<media::VideoFrame>(const gfx::Size& size));
   MOCK_METHOD0(OnError, void());
   MOCK_METHOD1(OnFrameInfo, void(const media::VideoCaptureCapability& info));
   MOCK_METHOD1(OnFrameInfoChanged,
@@ -121,32 +121,29 @@ TEST_F(DesktopCaptureDeviceTest, MAYBE_Capture) {
   base::WaitableEvent done_event(false, false);
   int frame_size;
 
-  MockFrameObserver frame_observer;
-  EXPECT_CALL(frame_observer, OnFrameInfo(_))
-      .WillOnce(SaveArg<0>(&caps));
-  EXPECT_CALL(frame_observer, OnError())
-      .Times(0);
-  EXPECT_CALL(frame_observer, OnIncomingCapturedFrame(_, _, _, _, _, _))
-      .WillRepeatedly(DoAll(
-          SaveArg<1>(&frame_size),
-          InvokeWithoutArgs(&done_event, &base::WaitableEvent::Signal)));
+  scoped_ptr<MockDeviceClient> client(new MockDeviceClient());
+  EXPECT_CALL(*client, OnFrameInfo(_)).WillOnce(SaveArg<0>(&caps));
+  EXPECT_CALL(*client, OnError()).Times(0);
+  EXPECT_CALL(*client, OnIncomingCapturedFrame(_, _, _, _, _, _))
+      .WillRepeatedly(
+           DoAll(SaveArg<1>(&frame_size),
+                 InvokeWithoutArgs(&done_event, &base::WaitableEvent::Signal)));
 
   media::VideoCaptureCapability capture_format(
-      640, 480, kFrameRate, media::PIXEL_FORMAT_I420, 0, false,
+      640, 480, kFrameRate, media::PIXEL_FORMAT_I420,
       media::ConstantResolutionVideoCaptureDevice);
-  capture_device.Allocate(capture_format, &frame_observer);
-  capture_device.Start();
+  capture_device.AllocateAndStart(
+      capture_format, client.PassAs<media::VideoCaptureDevice::Client>());
   EXPECT_TRUE(done_event.TimedWait(TestTimeouts::action_max_timeout()));
-  capture_device.Stop();
-  capture_device.DeAllocate();
+  capture_device.StopAndDeAllocate();
 
   EXPECT_GT(caps.width, 0);
   EXPECT_GT(caps.height, 0);
   EXPECT_EQ(kFrameRate, caps.frame_rate);
   EXPECT_EQ(media::PIXEL_FORMAT_ARGB, caps.color);
-  EXPECT_FALSE(caps.interlaced);
 
   EXPECT_EQ(caps.width * caps.height * 4, frame_size);
+  worker_pool_->FlushForTesting();
 }
 
 // Test that screen capturer behaves correctly if the source frame size changes
@@ -162,30 +159,26 @@ TEST_F(DesktopCaptureDeviceTest, ScreenResolutionChangeConstantResolution) {
   base::WaitableEvent done_event(false, false);
   int frame_size;
 
-  MockFrameObserver frame_observer;
-  Expectation frame_info_called = EXPECT_CALL(frame_observer, OnFrameInfo(_))
-      .WillOnce(SaveArg<0>(&caps));
-  EXPECT_CALL(frame_observer, OnFrameInfoChanged(_))
-      .Times(0);
-  EXPECT_CALL(frame_observer, OnError())
-      .Times(0);
-  EXPECT_CALL(frame_observer, OnIncomingCapturedFrame(_, _, _, _, _, _))
+  scoped_ptr<MockDeviceClient> client(new MockDeviceClient());
+  Expectation frame_info_called =
+      EXPECT_CALL(*client, OnFrameInfo(_)).WillOnce(SaveArg<0>(&caps));
+  EXPECT_CALL(*client, OnFrameInfoChanged(_)).Times(0);
+  EXPECT_CALL(*client, OnError()).Times(0);
+  EXPECT_CALL(*client, OnIncomingCapturedFrame(_, _, _, _, _, _))
       .After(frame_info_called)
-      .WillRepeatedly(DoAll(
-          SaveArg<1>(&frame_size),
-          InvokeWithoutArgs(&done_event, &base::WaitableEvent::Signal)));
+      .WillRepeatedly(
+           DoAll(SaveArg<1>(&frame_size),
+                 InvokeWithoutArgs(&done_event, &base::WaitableEvent::Signal)));
 
   media::VideoCaptureCapability capture_format(
       kTestFrameWidth1,
       kTestFrameHeight1,
       kFrameRate,
       media::PIXEL_FORMAT_I420,
-      0,
-      false,
       media::ConstantResolutionVideoCaptureDevice);
 
-  capture_device.Allocate(capture_format, &frame_observer);
-  capture_device.Start();
+  capture_device.AllocateAndStart(
+      capture_format, client.PassAs<media::VideoCaptureDevice::Client>());
 
   // Capture at least two frames, to ensure that the source frame size has
   // changed while capturing.
@@ -193,16 +186,15 @@ TEST_F(DesktopCaptureDeviceTest, ScreenResolutionChangeConstantResolution) {
   done_event.Reset();
   EXPECT_TRUE(done_event.TimedWait(TestTimeouts::action_max_timeout()));
 
-  capture_device.Stop();
-  capture_device.DeAllocate();
+  capture_device.StopAndDeAllocate();
 
   EXPECT_EQ(kTestFrameWidth1, caps.width);
   EXPECT_EQ(kTestFrameHeight1, caps.height);
   EXPECT_EQ(kFrameRate, caps.frame_rate);
   EXPECT_EQ(media::PIXEL_FORMAT_ARGB, caps.color);
-  EXPECT_FALSE(caps.interlaced);
 
   EXPECT_EQ(caps.width * caps.height * 4, frame_size);
+  worker_pool_->FlushForTesting();
 }
 
 // Test that screen capturer behaves correctly if the source frame size changes
@@ -217,38 +209,34 @@ TEST_F(DesktopCaptureDeviceTest, ScreenResolutionChangeVariableResolution) {
   media::VideoCaptureCapability caps;
   base::WaitableEvent done_event(false, false);
 
-  MockFrameObserver frame_observer;
-  Expectation frame_info_called = EXPECT_CALL(frame_observer, OnFrameInfo(_))
-      .WillOnce(SaveArg<0>(&caps));
-  Expectation first_info_changed = EXPECT_CALL(frame_observer,
-      OnFrameInfoChanged(EqualsCaptureCapability(kTestFrameWidth2,
-                                                 kTestFrameHeight2)))
-      .After(frame_info_called);
-  Expectation second_info_changed = EXPECT_CALL(frame_observer,
-      OnFrameInfoChanged(EqualsCaptureCapability(kTestFrameWidth1,
-                                                 kTestFrameHeight1)))
-      .After(first_info_changed);
-  EXPECT_CALL(frame_observer, OnFrameInfoChanged(_))
-      .Times(AnyNumber())
-      .After(second_info_changed);
-  EXPECT_CALL(frame_observer, OnError())
-      .Times(0);
-  EXPECT_CALL(frame_observer, OnIncomingCapturedFrame(_, _, _, _, _, _))
+  scoped_ptr<MockDeviceClient> client(new MockDeviceClient());
+  Expectation frame_info_called =
+      EXPECT_CALL(*client, OnFrameInfo(_)).WillOnce(SaveArg<0>(&caps));
+  Expectation first_info_changed = EXPECT_CALL(
+      *client,
+      OnFrameInfoChanged(EqualsCaptureCapability(
+          kTestFrameWidth2, kTestFrameHeight2))).After(frame_info_called);
+  Expectation second_info_changed = EXPECT_CALL(
+      *client,
+      OnFrameInfoChanged(EqualsCaptureCapability(
+          kTestFrameWidth1, kTestFrameHeight1))).After(first_info_changed);
+  EXPECT_CALL(*client, OnFrameInfoChanged(_)).Times(AnyNumber()).After(
+      second_info_changed);
+  EXPECT_CALL(*client, OnError()).Times(0);
+  EXPECT_CALL(*client, OnIncomingCapturedFrame(_, _, _, _, _, _))
       .After(frame_info_called)
       .WillRepeatedly(
-          InvokeWithoutArgs(&done_event, &base::WaitableEvent::Signal));
+           InvokeWithoutArgs(&done_event, &base::WaitableEvent::Signal));
 
   media::VideoCaptureCapability capture_format(
       kTestFrameWidth2,
       kTestFrameHeight2,
       kFrameRate,
       media::PIXEL_FORMAT_I420,
-      0,
-      false,
       media::VariableResolutionVideoCaptureDevice);
 
-  capture_device.Allocate(capture_format, &frame_observer);
-  capture_device.Start();
+  capture_device.AllocateAndStart(
+      capture_format, client.PassAs<media::VideoCaptureDevice::Client>());
 
   // Capture at least three frames, to ensure that the source frame size has
   // changed at least twice while capturing.
@@ -258,14 +246,13 @@ TEST_F(DesktopCaptureDeviceTest, ScreenResolutionChangeVariableResolution) {
   done_event.Reset();
   EXPECT_TRUE(done_event.TimedWait(TestTimeouts::action_max_timeout()));
 
-  capture_device.Stop();
-  capture_device.DeAllocate();
+  capture_device.StopAndDeAllocate();
 
   EXPECT_EQ(kTestFrameWidth1, caps.width);
   EXPECT_EQ(kTestFrameHeight1, caps.height);
   EXPECT_EQ(kFrameRate, caps.frame_rate);
   EXPECT_EQ(media::PIXEL_FORMAT_ARGB, caps.color);
-  EXPECT_FALSE(caps.interlaced);
+  worker_pool_->FlushForTesting();
 }
 
 }  // namespace content

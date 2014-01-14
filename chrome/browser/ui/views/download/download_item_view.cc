@@ -51,9 +51,7 @@
 //              different screen resolutions.
 static const int kTextWidth = 140;            // Pixels
 static const int kDangerousTextWidth = 200;   // Pixels
-static const int kHorizontalTextPadding = 2;  // Pixels
 static const int kVerticalPadding = 3;        // Pixels
-static const int kVerticalTextSpacer = 2;     // Pixels
 static const int kVerticalTextPadding = 2;    // Pixels
 static const int kTooltipMaxWidth = 800;      // Pixels
 
@@ -106,6 +104,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download_item,
     dangerous_download_label_sized_(false),
     disabled_while_opening_(false),
     creation_time_(base::Time::Now()),
+    time_download_warning_shown_(base::Time()),
     weak_ptr_factory_(this) {
   DCHECK(download());
   download()->AddObserver(this);
@@ -526,23 +525,32 @@ void DownloadItemView::ShowContextMenuForView(View* source,
   ShowContextMenuImpl(local_point, source_type);
 }
 
-void DownloadItemView::ButtonPressed(
-    views::Button* sender, const ui::Event& event) {
-  if (sender == discard_button_) {
-    if (model_.ShouldAllowDownloadFeedback() && BeginDownloadFeedback())
-      return;
-    UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download",
-                             base::Time::Now() - creation_time_);
-    download()->Remove();
-    // WARNING: we are deleted at this point.  Don't access 'this'.
-  } else if (save_button_ && sender == save_button_) {
+void DownloadItemView::ButtonPressed(views::Button* sender,
+                                     const ui::Event& event) {
+  base::TimeDelta warning_duration;
+  if (!time_download_warning_shown_.is_null())
+    warning_duration = base::Time::Now() - time_download_warning_shown_;
+
+  if (save_button_ && sender == save_button_) {
     // The user has confirmed a dangerous download.  We'd record how quickly the
     // user did this to detect whether we're being clickjacked.
-    UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download",
-                             base::Time::Now() - creation_time_);
+    UMA_HISTOGRAM_LONG_TIMES("clickjacking.save_download", warning_duration);
     // This will change the state and notify us.
     download()->ValidateDangerousDownload();
+    return;
   }
+
+  // WARNING: all end states after this point delete |this|.
+  DCHECK_EQ(discard_button_, sender);
+  if (model_.IsMalicious()) {
+    UMA_HISTOGRAM_LONG_TIMES("clickjacking.dismiss_download", warning_duration);
+    shelf_->RemoveDownloadView(this);
+    return;
+  }
+  if (model_.ShouldAllowDownloadFeedback() && BeginDownloadFeedback())
+    return;
+  UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download", warning_duration);
+  download()->Remove();
 }
 
 void DownloadItemView::AnimationProgressed(const gfx::Animation* animation) {
@@ -868,8 +876,11 @@ bool DownloadItemView::BeginDownloadFeedback() {
       sb_service->download_protection_service();
   if (!download_protection_service)
     return false;
+  base::TimeDelta warning_duration = base::TimeDelta();
+  if (!time_download_warning_shown_.is_null())
+    warning_duration = base::Time::Now() - time_download_warning_shown_;
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.report_and_discard_download",
-                           base::Time::Now() - creation_time_);
+                           warning_duration);
   download_protection_service->feedback_service()->BeginFeedbackForDownload(
       download());
   // WARNING: we are deleted at this point.  Don't access 'this'.
@@ -1074,7 +1085,12 @@ void DownloadItemView::ClearWarningDialog() {
 
 void DownloadItemView::ShowWarningDialog() {
   DCHECK(mode_ != DANGEROUS_MODE && mode_ != MALICIOUS_MODE);
-  mode_ = ((model_.IsMalicious()) ? MALICIOUS_MODE : DANGEROUS_MODE);
+  time_download_warning_shown_ = base::Time::Now();
+  if (model_.ShouldAllowDownloadFeedback()) {
+    safe_browsing::DownloadFeedbackService::RecordEligibleDownloadShown(
+        download()->GetDangerType());
+  }
+  mode_ = model_.MightBeMalicious() ? MALICIOUS_MODE : DANGEROUS_MODE;
 
   body_state_ = NORMAL;
   drop_down_state_ = NORMAL;
@@ -1084,15 +1100,12 @@ void DownloadItemView::ShowWarningDialog() {
     save_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
     AddChildView(save_button_);
   }
-  if (model_.ShouldAllowDownloadFeedback()) {
-    safe_browsing::DownloadFeedbackService::RecordFeedbackButtonShown(
-        download()->GetDangerType());
-    discard_button_ = new views::LabelButton(
-        this, l10n_util::GetStringUTF16(IDS_REPORT_AND_DISCARD_DOWNLOAD));
-  } else {
-    discard_button_ = new views::LabelButton(
-        this, l10n_util::GetStringUTF16(IDS_DISCARD_DOWNLOAD));
-  }
+  int discard_button_message = model_.IsMalicious() ?
+      IDS_DISMISS_DOWNLOAD : IDS_DISCARD_DOWNLOAD;
+  if (!model_.IsMalicious() && model_.ShouldAllowDownloadFeedback())
+    discard_button_message = IDS_REPORT_AND_DISCARD_DOWNLOAD;
+  discard_button_ = new views::LabelButton(
+      this, l10n_util::GetStringUTF16(discard_button_message));
   discard_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
   AddChildView(discard_button_);
 
@@ -1102,6 +1115,7 @@ void DownloadItemView::ShowWarningDialog() {
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
     case content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
+    case content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
       warning_icon_ = rb.GetImageSkiaNamed(IDR_SAFEBROWSING_WARNING);
       break;
 
@@ -1113,7 +1127,6 @@ void DownloadItemView::ShowWarningDialog() {
       // fallthrough
 
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE:
-    case content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
       warning_icon_ = rb.GetImageSkiaNamed(IDR_WARNING);
   }
   string16 dangerous_label = model_.GetWarningText(font_list_, kTextWidth);

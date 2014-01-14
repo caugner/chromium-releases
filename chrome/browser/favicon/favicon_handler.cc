@@ -32,7 +32,7 @@ namespace {
 
 // Size (along each axis) of a touch icon. This currently corresponds to
 // the apple touch icon for iPad.
-const int kTouchIconSize = 72;
+const int kTouchIconSize = 144;
 
 // Returns chrome::IconType the given icon_type corresponds to.
 chrome::IconType ToHistoryIconType(FaviconURL::IconType icon_type) {
@@ -47,27 +47,27 @@ chrome::IconType ToHistoryIconType(FaviconURL::IconType icon_type) {
       return chrome::INVALID_ICON;
   }
   NOTREACHED();
-  // Shouldn't reach here, just make compiler happy.
   return chrome::INVALID_ICON;
 }
 
 // Get the maximal icon size in pixels for a icon of type |icon_type| for the
 // current platform.
 int GetMaximalIconSize(chrome::IconType icon_type) {
-  int base_size = 0;
   switch (icon_type) {
     case chrome::FAVICON:
-      base_size = gfx::kFaviconSize;
-      break;
+#if defined(OS_ANDROID)
+      return 192;
+#else
+      return gfx::ImageSkia::GetMaxSupportedScale() * gfx::kFaviconSize;
+#endif
     case chrome::TOUCH_ICON:
     case chrome::TOUCH_PRECOMPOSED_ICON:
-      base_size = kTouchIconSize;
-      break;
+      return kTouchIconSize;
     case chrome::INVALID_ICON:
-      base_size = 0;
-      break;
+      return 0;
   }
-  return ui::GetScaleFactorScale(ui::GetMaxScaleFactor()) * base_size;
+  NOTREACHED();
+  return 0;
 }
 
 bool DoUrlAndIconMatch(const FaviconURL& favicon_url,
@@ -148,7 +148,7 @@ bool HasExpiredOrIncompleteResult(
       FaviconUtil::GetFaviconScaleFactors();
   for (size_t i = 0; i < scale_factors.size(); ++i) {
     int edge_size_in_pixel = floor(
-        desired_size_in_dip * ui::GetScaleFactorScale(scale_factors[i]));
+        desired_size_in_dip * ui::GetImageScale(scale_factors[i]));
     std::vector<gfx::Size>::iterator it = std::find(favicon_sizes.begin(),
         favicon_sizes.end(), gfx::Size(edge_size_in_pixel, edge_size_in_pixel));
     if (it == favicon_sizes.end())

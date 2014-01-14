@@ -47,9 +47,6 @@ gfx::FontList GetDefaultFontList() {
 
 namespace views {
 
-/////////////////////////////////////////////////////////////////////////////
-// Textfield
-
 // static
 const char Textfield::kViewClassName[] = "Textfield";
 
@@ -69,6 +66,17 @@ bool Textfield::IsViewsTextfieldEnabled() {
   return true;
 }
 
+// static
+size_t Textfield::GetCaretBlinkMs() {
+  static const size_t default_value = 500;
+#if defined(OS_WIN)
+  static const size_t system_value = ::GetCaretBlinkTime();
+  if (system_value != 0)
+    return (system_value == INFINITE) ? 0 : system_value;
+#endif
+  return default_value;
+}
+
 Textfield::Textfield()
     : native_wrapper_(NULL),
       controller_(NULL),
@@ -83,7 +91,6 @@ Textfield::Textfield()
       use_default_background_color_(true),
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false),
-      vertical_alignment_(gfx::ALIGN_VCENTER),
       placeholder_text_color_(kDefaultPlaceholderTextColor),
       text_input_type_(ui::TEXT_INPUT_TYPE_TEXT),
       weak_ptr_factory_(this) {
@@ -109,7 +116,6 @@ Textfield::Textfield(StyleFlags style)
       use_default_background_color_(true),
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false),
-      vertical_alignment_(gfx::ALIGN_VCENTER),
       placeholder_text_color_(kDefaultPlaceholderTextColor),
       text_input_type_(ui::TEXT_INPUT_TYPE_TEXT),
       weak_ptr_factory_(this) {
@@ -299,12 +305,6 @@ void Textfield::SetVerticalMargins(int top, int bottom) {
   PreferredSizeChanged();
 }
 
-void Textfield::SetVerticalAlignment(gfx::VerticalAlignment alignment) {
-  vertical_alignment_ = alignment;
-  if (native_wrapper_)
-    native_wrapper_->UpdateVerticalAlignment();
-}
-
 void Textfield::RemoveBorder() {
   if (!draw_border_)
     return;
@@ -312,6 +312,10 @@ void Textfield::RemoveBorder() {
   draw_border_ = false;
   if (native_wrapper_)
     native_wrapper_->UpdateBorder();
+}
+
+base::string16 Textfield::GetPlaceholderText() const {
+  return placeholder_text_;
 }
 
 bool Textfield::GetHorizontalMargins(int* left, int* right) {
@@ -344,7 +348,6 @@ void Textfield::UpdateAllProperties() {
     native_wrapper_->UpdateIsObscured();
     native_wrapper_->UpdateHorizontalMargins();
     native_wrapper_->UpdateVerticalMargins();
-    native_wrapper_->UpdateVerticalAlignment();
   }
 }
 

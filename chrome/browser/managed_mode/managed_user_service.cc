@@ -8,6 +8,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/managed_mode/managed_user_settings_service_factory.h"
 #include "chrome/browser/managed_mode/managed_user_sync_service.h"
 #include "chrome/browser/managed_mode/managed_user_sync_service_factory.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_base.h"
@@ -51,6 +51,7 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/supervised_user_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #endif
 
@@ -259,8 +260,8 @@ void ManagedUserService::GetCategoryNames(CategoryList* list) {
 
 std::string ManagedUserService::GetCustodianEmailAddress() const {
 #if defined(OS_CHROMEOS)
-  return chromeos::UserManager::Get()->
-      GetManagerDisplayEmailForManagedUser(
+  return chromeos::UserManager::Get()->GetSupervisedUserManager()->
+      GetManagerDisplayEmail(
           chromeos::UserManager::Get()->GetActiveUser()->email());
 #else
   return profile_->GetPrefs()->GetString(prefs::kManagedUserCustodianEmail);
@@ -269,8 +270,8 @@ std::string ManagedUserService::GetCustodianEmailAddress() const {
 
 std::string ManagedUserService::GetCustodianName() const {
 #if defined(OS_CHROMEOS)
-  return UTF16ToUTF8(chromeos::UserManager::Get()->
-      GetManagerDisplayNameForManagedUser(
+  return UTF16ToUTF8(chromeos::UserManager::Get()->GetSupervisedUserManager()->
+      GetManagerDisplayName(
           chromeos::UserManager::Get()->GetActiveUser()->email()));
 #else
   std::string name = profile_->GetPrefs()->GetString(
@@ -291,11 +292,6 @@ void ManagedUserService::DidBlockNavigation(
        it != navigation_blocked_callbacks_.end(); ++it) {
     it->Run(web_contents);
   }
-}
-
-void ManagedUserService::AddInitCallback(
-    const base::Closure& callback) {
-  init_callbacks_.push_back(callback);
 }
 
 std::string ManagedUserService::GetDebugPolicyProviderName() const {
@@ -528,12 +524,6 @@ void ManagedUserService::GetManualExceptionsForHost(const std::string& host,
   }
 }
 
-void ManagedUserService::InitForTesting() {
-  DCHECK(!profile_->IsManaged());
-  profile_->GetPrefs()->SetString(prefs::kManagedUserId, "Test ID");
-  Init();
-}
-
 void ManagedUserService::InitSync(const std::string& refresh_token) {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
@@ -611,14 +601,6 @@ void ManagedUserService::Init() {
   UpdateSiteLists();
   UpdateManualHosts();
   UpdateManualURLs();
-
-  // Call the callbacks to notify that the ManagedUserService has been
-  // initialized.
-  for (std::vector<base::Closure>::iterator it = init_callbacks_.begin();
-       it != init_callbacks_.end();
-       ++it) {
-    it->Run();
-  }
 }
 
 void ManagedUserService::RegisterAndInitSync(
@@ -641,7 +623,7 @@ void ManagedUserService::RegisterAndInitSync(
                  weak_ptr_factory_.GetWeakPtr(), callback, custodian_profile));
 
   // Fetch the custodian's profile information, to store the name.
-  // TODO(pamg): If --gaia-profile-info (keyword: switches::kGaiaProfileInfo)
+  // TODO(pamg): If --google-profile-info (flag: switches::kGoogleProfileInfo)
   // is ever enabled, take the name from the ProfileInfoCache instead.
   CustodianProfileDownloaderService* profile_downloader_service =
       CustodianProfileDownloaderServiceFactory::GetForProfile(

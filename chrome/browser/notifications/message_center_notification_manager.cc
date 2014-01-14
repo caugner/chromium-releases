@@ -35,11 +35,11 @@
 #include "chrome/browser/notifications/login_state_notification_blocker_chromeos.h"
 #endif
 
-namespace {
+#if defined(OS_WIN)
 // The first-run balloon will be shown |kFirstRunIdleDelaySeconds| after all
 // popups go away and the user has notifications in the message center.
 const int kFirstRunIdleDelaySeconds = 1;
-}  // namespace
+#endif
 
 MessageCenterNotificationManager::MessageCenterNotificationManager(
     message_center::MessageCenter* message_center,
@@ -91,6 +91,9 @@ void MessageCenterNotificationManager::Add(const Notification& notification,
                                            Profile* profile) {
   if (Update(notification, profile))
     return;
+
+  DesktopNotificationServiceFactory::GetForProfile(profile)->
+      ShowWelcomeNotificationIfNecessary(notification);
 
   AddProfileNotification(
       new ProfileNotification(profile, notification, message_center_));
@@ -156,6 +159,7 @@ bool MessageCenterNotificationManager::CancelById(const std::string& id) {
   if (iter == profile_notifications_.end())
     return false;
 
+  RemoveProfileNotification(iter->second);
   message_center_->RemoveNotification(id, /* by_user */ false);
   return true;
 }
@@ -186,7 +190,9 @@ bool MessageCenterNotificationManager::CancelAllBySourceOrigin(
        loopiter != profile_notifications_.end(); ) {
     NotificationMap::iterator curiter = loopiter++;
     if ((*curiter).second->notification().origin_url() == source) {
-      message_center_->RemoveNotification(curiter->first, /* by_user */ false);
+      const std::string id = curiter->first;
+      RemoveProfileNotification(curiter->second);
+      message_center_->RemoveNotification(id, /* by_user */ false);
       removed = true;
     }
   }
@@ -201,7 +207,9 @@ bool MessageCenterNotificationManager::CancelAllByProfile(Profile* profile) {
        loopiter != profile_notifications_.end(); ) {
     NotificationMap::iterator curiter = loopiter++;
     if (profile == (*curiter).second->profile()) {
-      message_center_->RemoveNotification(curiter->first, /* by_user */ false);
+      const std::string id = curiter->first;
+      RemoveProfileNotification(curiter->second);
+      message_center_->RemoveNotification(id, /* by_user */ false);
       removed = true;
     }
   }
@@ -217,9 +225,6 @@ void MessageCenterNotificationManager::CancelAll() {
 void MessageCenterNotificationManager::OnNotificationRemoved(
     const std::string& notification_id,
     bool by_user) {
-  // Do not call FindProfileNotification(). Some tests create notifications
-  // directly to MessageCenter, but this method will be called for the removals
-  // of such notifications.
   NotificationMap::const_iterator iter =
       profile_notifications_.find(notification_id);
   if (iter != profile_notifications_.end())

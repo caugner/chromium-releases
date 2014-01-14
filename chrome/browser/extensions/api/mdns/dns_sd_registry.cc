@@ -47,16 +47,17 @@ int DnsSdRegistry::ServiceTypeData::GetListenerCount() {
 
 bool DnsSdRegistry::ServiceTypeData::UpdateService(
       bool added, const DnsSdService& service) {
-  if (added) {
-    service_list_.push_back(service);
-  } else {
-    DnsSdRegistry::DnsSdServiceList::iterator it =
-        std::find_if(service_list_.begin(),
-                     service_list_.end(),
-                     IsSameServiceName(service));
-    if (it == service_list_.end())
-      return false;
+  DnsSdRegistry::DnsSdServiceList::iterator it =
+      std::find_if(service_list_.begin(),
+                   service_list_.end(),
+                   IsSameServiceName(service));
+  if (it != service_list_.end()) {
+    // If added == true, but we still found the service in our cache, then just
+    // update the existing entry, but this should not happen!
+    DCHECK(!added);
     *it = service;
+  } else if (added) {
+    service_list_.push_back(service);
   }
   return true;
 };
@@ -72,6 +73,14 @@ bool DnsSdRegistry::ServiceTypeData::RemoveService(
   }
   return false;
 };
+
+bool DnsSdRegistry::ServiceTypeData::ClearServices() {
+  if (service_list_.empty())
+    return false;
+
+  service_list_.clear();
+  return true;
+}
 
 const DnsSdRegistry::DnsSdServiceList&
 DnsSdRegistry::ServiceTypeData::GetServiceList() {
@@ -102,14 +111,14 @@ DnsSdDeviceLister* DnsSdRegistry::CreateDnsSdDeviceLister(
     DnsSdDelegate* delegate,
     const std::string& service_type,
     local_discovery::ServiceDiscoverySharedClient* discovery_client) {
-  return new DnsSdDeviceLister(delegate, service_type, discovery_client);
+  return new DnsSdDeviceLister(discovery_client, delegate, service_type);
 }
 
 void DnsSdRegistry::RegisterDnsSdListener(std::string service_type) {
   if (service_type.empty())
     return;
 
-  if (service_data_map_.find(service_type) != service_data_map_.end()) {
+  if (IsRegistered(service_type)) {
     service_data_map_[service_type]->ListenerAdded();
     DispatchApiEvent(service_type);
     return;
@@ -137,32 +146,48 @@ void DnsSdRegistry::UnregisterDnsSdListener(std::string service_type) {
 void DnsSdRegistry::ServiceChanged(const std::string& service_type,
                                    bool added,
                                    const DnsSdService& service) {
-  if (service_data_map_.find(service_type) == service_data_map_.end())
+  if (!IsRegistered(service_type))
     return;
 
+  VLOG(1) << "Service changed: " << service.service_name;
   if (service_data_map_[service_type]->UpdateService(added, service)) {
     DispatchApiEvent(service_type);
   } else {
-    DVLOG(1) << "Failed to find existing service to update: "
-             << service.service_name;
+    VLOG(1) << "Failed to find existing service to update: "
+            << service.service_name;
   }
 }
 
 void DnsSdRegistry::ServiceRemoved(const std::string& service_type,
                                    const std::string& service_name) {
-  if (service_data_map_.find(service_type) == service_data_map_.end())
+  if (!IsRegistered(service_type))
     return;
 
+  VLOG(1) << "Removing service: " << service_name;
   if (service_data_map_[service_type]->RemoveService(service_name)) {
     DispatchApiEvent(service_type);
   } else {
-    DVLOG(1) << "Failed to remove service: " << service_name;
+    VLOG(1) << "Failed to remove service: " << service_name;
   }
 }
 
+void DnsSdRegistry::ServicesFlushed(const std::string& service_type) {
+  if (!IsRegistered(service_type))
+    return;
+
+  if (service_data_map_[service_type]->ClearServices())
+    DispatchApiEvent(service_type);
+}
+
 void DnsSdRegistry::DispatchApiEvent(const std::string& service_type) {
+  // TODO(justinlin): Make this MaybeDispatchApiEvent instead and dispatch if a
+  // dirty bit is set.
   FOR_EACH_OBSERVER(DnsSdObserver, observers_, OnDnsSdEvent(
       service_type, service_data_map_[service_type]->GetServiceList()));
+}
+
+bool DnsSdRegistry::IsRegistered(const std::string& service_type) {
+  return service_data_map_.find(service_type) != service_data_map_.end();
 }
 
 }  // namespace extensions

@@ -73,6 +73,8 @@
 #define IDC_MINIMIZE_WINDOW             34046
 #define IDC_MAXIMIZE_WINDOW             34047
 #define IDC_ALL_WINDOWS_FRONT           34048
+#define IDC_VISIT_DESKTOP_OF_LRU_USER_2 34049
+#define IDC_VISIT_DESKTOP_OF_LRU_USER_3 34050
 
 // Page-related commands
 #define IDC_BOOKMARK_PAGE               35000
@@ -85,6 +87,7 @@
 #define IDC_ADVANCED_PRINT              35007
 #define IDC_PRINT_TO_DESTINATION        35008
 #define IDC_BOOKMARK_PAGE_FROM_STAR     35009
+#define IDC_TRANSLATE_PAGE              35010
 
 // When adding a new encoding to this list, be sure to append it to the
 // EncodingMenuController::kValidEncodingIds array in
@@ -164,6 +167,7 @@
 #define IDC_DEV_TOOLS                   40003
 #define IDC_DEV_TOOLS_CONSOLE           40004
 #define IDC_TASK_MANAGER                40005
+#define IDC_DEV_TOOLS_DEVICES           40006
 #if defined(GOOGLE_CHROME_BUILD)
 #define IDC_FEEDBACK                    40008
 #endif
@@ -203,6 +207,7 @@
 #define IDC_EXTERNAL_EXTENSION_ALERT    40238
 #define IDC_RECENT_TABS_MENU            40239
 #define IDC_RECENT_TABS_NO_DEVICE_TABS  40240
+#define IDC_SHOW_SETTINGS_RESET_BUBBLE  40241
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.

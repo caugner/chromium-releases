@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
@@ -28,6 +29,8 @@ class Profile;
 
 namespace chromeos {
 
+class TokenEncryptor;
+
 // DeviceOAuth2TokenService retrieves OAuth2 access tokens for a given
 // set of scopes using the device-level OAuth2 any-api refresh token
 // obtained during enterprise device enrollment.
@@ -40,17 +43,10 @@ namespace chromeos {
 // Note that requests must be made from the UI thread.
 class DeviceOAuth2TokenService : public OAuth2TokenService {
  public:
-  // Specialization of StartRequest that in parallel validates that the refresh
-  // token stored on the device is owned by the device service account.
-  // TODO(fgorski): Remove override of StartRequest to make the method
-  // non-virtual. See crbug.com/282454 for details.
-  virtual scoped_ptr<Request> StartRequest(const std::string& account_id,
-                                           const ScopeSet& scopes,
-                                           Consumer* consumer) OVERRIDE;
-
   // Persist the given refresh token on the device.  Overwrites any previous
-  // value.  Should only be called during initial device setup.
-  void SetAndSaveRefreshToken(const std::string& refresh_token);
+  // value.  Should only be called during initial device setup.  Returns false
+  // if there was an error encrypting and persisting the value, else true.
+  bool SetAndSaveRefreshToken(const std::string& refresh_token);
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
@@ -64,6 +60,8 @@ class DeviceOAuth2TokenService : public OAuth2TokenService {
  protected:
   // Implementation of OAuth2TokenService.
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
+  virtual scoped_ptr<OAuth2TokenService::RequestImpl> CreateRequest(
+      OAuth2TokenService::Consumer* consumer) OVERRIDE;
 
  private:
   class ValidatingConsumer;
@@ -73,8 +71,10 @@ class DeviceOAuth2TokenService : public OAuth2TokenService {
   friend class TestDeviceOAuth2TokenService;
 
   // Use DeviceOAuth2TokenServiceFactory to get an instance of this class.
+  // Ownership of |token_encryptor| will be taken.
   explicit DeviceOAuth2TokenService(net::URLRequestContextGetter* getter,
-                                    PrefService* local_state);
+                                    PrefService* local_state,
+                                    TokenEncryptor* token_encryptor);
   virtual ~DeviceOAuth2TokenService();
 
   void OnValidationComplete(bool token_is_valid);
@@ -87,6 +87,12 @@ class DeviceOAuth2TokenService : public OAuth2TokenService {
   // Cache the decrypted refresh token, so we only decrypt once.
   std::string refresh_token_;
   PrefService* local_state_;
+
+  // Used to encrypt/decrypt the refresh token.
+  scoped_ptr<TokenEncryptor> token_encryptor_;
+
+  base::WeakPtrFactory<DeviceOAuth2TokenService> weak_ptr_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(DeviceOAuth2TokenService);
 };
 

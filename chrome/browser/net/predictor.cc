@@ -16,6 +16,7 @@
 #include "base/containers/mru_cache.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -26,7 +27,6 @@
 #include "base/values.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/preconnect.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -488,11 +488,8 @@ void Predictor::set_max_parallel_resolves(size_t max_parallel_resolves) {
   g_max_parallel_resolves = max_parallel_resolves;
 }
 
-void Predictor::ShutdownOnUIThread(PrefService* user_prefs) {
+void Predictor::ShutdownOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  SaveStateForNextStartupAndTrim(user_prefs);
-
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
@@ -1378,7 +1375,7 @@ void SimplePredictor::InitNetworkPredictor(
   // Empty function for unittests.
 }
 
-void SimplePredictor::ShutdownOnUIThread(PrefService* user_prefs) {
+void SimplePredictor::ShutdownOnUIThread() {
   SetShutdown(true);
 }
 

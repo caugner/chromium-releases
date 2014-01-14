@@ -4,11 +4,14 @@
 
 #include "ash/shell/shell_delegate_impl.h"
 
-#include <limits>
-
+#include "ash/accessibility_delegate.h"
 #include "ash/caps_lock_delegate_stub.h"
+#include "ash/default_accessibility_delegate.h"
+#include "ash/default_user_wallpaper_delegate.h"
 #include "ash/host/root_window_host_factory.h"
 #include "ash/keyboard_controller_proxy_stub.h"
+#include "ash/media_delegate.h"
+#include "ash/new_window_delegate.h"
 #include "ash/session_state_delegate.h"
 #include "ash/session_state_delegate_stub.h"
 #include "ash/shell/context_menu.h"
@@ -24,15 +27,49 @@
 
 namespace ash {
 namespace shell {
+namespace {
+
+class NewWindowDelegateImpl : public NewWindowDelegate {
+ public:
+  NewWindowDelegateImpl() {}
+  virtual ~NewWindowDelegateImpl() {}
+
+  virtual void NewTab() OVERRIDE {}
+  virtual void NewWindow(bool incognito) OVERRIDE {
+    ash::shell::ToplevelWindow::CreateParams create_params;
+    create_params.can_resize = true;
+    create_params.can_maximize = true;
+    ash::shell::ToplevelWindow::CreateToplevelWindow(create_params);
+  }
+  virtual void OpenFileManager() OVERRIDE {}
+  virtual void OpenCrosh() OVERRIDE {}
+  virtual void RestoreTab() OVERRIDE {}
+  virtual void ShowKeyboardOverlay() OVERRIDE {}
+  virtual void ShowTaskManager() OVERRIDE {}
+  virtual void OpenFeedbackPage() OVERRIDE {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NewWindowDelegateImpl);
+};
+
+class MediaDelegateImpl : public MediaDelegate {
+ public:
+  MediaDelegateImpl() {}
+  virtual ~MediaDelegateImpl() {}
+
+  virtual void HandleMediaNextTrack() OVERRIDE {}
+  virtual void HandleMediaPlayPause() OVERRIDE {}
+  virtual void HandleMediaPrevTrack() OVERRIDE {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MediaDelegateImpl);
+};
+
+}  // namespace
 
 ShellDelegateImpl::ShellDelegateImpl()
     : watcher_(NULL),
-      launcher_delegate_(NULL),
-      spoken_feedback_enabled_(false),
-      high_contrast_enabled_(false),
-      screen_magnifier_enabled_(false),
-      screen_magnifier_type_(kDefaultMagnifierType),
-      large_cursor_enabled_(false) {
+      launcher_delegate_(NULL) {
 }
 
 ShellDelegateImpl::~ShellDelegateImpl() {
@@ -46,6 +83,10 @@ void ShellDelegateImpl::SetWatcher(WindowWatcher* watcher) {
 
 bool ShellDelegateImpl::IsFirstRunAfterBoot() const {
   return false;
+}
+
+bool ShellDelegateImpl::IsIncognitoAllowed() const {
+  return true;
 }
 
 bool ShellDelegateImpl::IsMultiProfilesEnabled() const {
@@ -66,96 +107,13 @@ void ShellDelegateImpl::Exit() {
   base::MessageLoopForUI::current()->Quit();
 }
 
-void ShellDelegateImpl::NewTab() {
-}
-
-void ShellDelegateImpl::NewWindow(bool incognito) {
-  ash::shell::ToplevelWindow::CreateParams create_params;
-  create_params.can_resize = true;
-  create_params.can_maximize = true;
-  ash::shell::ToplevelWindow::CreateToplevelWindow(create_params);
-}
-
-void ShellDelegateImpl::ToggleFullscreen() {
-  ToggleMaximized();
-}
-
-void ShellDelegateImpl::ToggleMaximized() {
-  wm::WindowState* window_state = wm::GetActiveWindowState();
-  if (window_state)
-    window_state->ToggleMaximized();
-}
-
-void ShellDelegateImpl::OpenFileManager(bool as_dialog) {
-}
-
-void ShellDelegateImpl::OpenCrosh() {
-}
-
-void ShellDelegateImpl::RestoreTab() {
-}
-
-void ShellDelegateImpl::ShowKeyboardOverlay() {
-}
-
 keyboard::KeyboardControllerProxy*
     ShellDelegateImpl::CreateKeyboardControllerProxy() {
   return new KeyboardControllerProxyStub();
 }
 
-void ShellDelegateImpl::ShowTaskManager() {
-}
-
 content::BrowserContext* ShellDelegateImpl::GetCurrentBrowserContext() {
   return Shell::GetInstance()->browser_context();
-}
-
-void ShellDelegateImpl::ToggleSpokenFeedback(
-    AccessibilityNotificationVisibility notify) {
-  spoken_feedback_enabled_ = !spoken_feedback_enabled_;
-}
-
-bool ShellDelegateImpl::IsSpokenFeedbackEnabled() const {
-  return spoken_feedback_enabled_;
-}
-
-void ShellDelegateImpl::ToggleHighContrast() {
-  high_contrast_enabled_ = !high_contrast_enabled_;
-}
-
-bool ShellDelegateImpl::IsHighContrastEnabled() const {
-  return high_contrast_enabled_;
-}
-
-void ShellDelegateImpl::SetMagnifierEnabled(bool enabled) {
-  screen_magnifier_enabled_ = enabled;
-}
-
-void ShellDelegateImpl::SetMagnifierType(MagnifierType type) {
-  screen_magnifier_type_ = type;
-}
-
-bool ShellDelegateImpl::IsMagnifierEnabled() const {
-  return screen_magnifier_enabled_;
-}
-
-MagnifierType ShellDelegateImpl::GetMagnifierType() const {
-  return screen_magnifier_type_;
-}
-
-void ShellDelegateImpl::SetLargeCursorEnabled(bool enabled) {
-  large_cursor_enabled_ = enabled;
-}
-
-bool ShellDelegateImpl::IsLargeCursorEnabled() const {
-  return large_cursor_enabled_;
-}
-
-bool ShellDelegateImpl::ShouldAlwaysShowAccessibilityMenu() const {
-  return false;
-}
-
-void ShellDelegateImpl::SilenceSpokenFeedback() const {
 }
 
 app_list::AppListViewDelegate* ShellDelegateImpl::CreateAppListViewDelegate() {
@@ -173,7 +131,7 @@ ash::SystemTrayDelegate* ShellDelegateImpl::CreateSystemTrayDelegate() {
 }
 
 ash::UserWallpaperDelegate* ShellDelegateImpl::CreateUserWallpaperDelegate() {
-  return NULL;
+  return new DefaultUserWallpaperDelegate();
 }
 
 ash::CapsLockDelegate* ShellDelegateImpl::CreateCapsLockDelegate() {
@@ -184,33 +142,26 @@ ash::SessionStateDelegate* ShellDelegateImpl::CreateSessionStateDelegate() {
   return new SessionStateDelegateStub;
 }
 
-aura::client::UserActionClient* ShellDelegateImpl::CreateUserActionClient() {
-  return NULL;
+ash::AccessibilityDelegate* ShellDelegateImpl::CreateAccessibilityDelegate() {
+  return new internal::DefaultAccessibilityDelegate;
 }
 
-void ShellDelegateImpl::OpenFeedbackPage() {
+ash::NewWindowDelegate* ShellDelegateImpl::CreateNewWindowDelegate() {
+  return new NewWindowDelegateImpl;
+}
+
+ash::MediaDelegate* ShellDelegateImpl::CreateMediaDelegate() {
+  return new MediaDelegateImpl;
+}
+
+aura::client::UserActionClient* ShellDelegateImpl::CreateUserActionClient() {
+  return NULL;
 }
 
 void ShellDelegateImpl::RecordUserMetricsAction(UserMetricsAction action) {
 }
 
-void ShellDelegateImpl::HandleMediaNextTrack() {
-}
-
-void ShellDelegateImpl::HandleMediaPlayPause() {
-}
-
-void ShellDelegateImpl::HandleMediaPrevTrack() {
-}
-
-void ShellDelegateImpl::SaveScreenMagnifierScale(double scale) {
-}
-
-double ShellDelegateImpl::GetSavedScreenMagnifierScale() {
-  return std::numeric_limits<double>::min();
-}
-
-ui::MenuModel* ShellDelegateImpl::CreateContextMenu(aura::RootWindow* root) {
+ui::MenuModel* ShellDelegateImpl::CreateContextMenu(aura::Window* root) {
   return new ContextMenu(root);
 }
 

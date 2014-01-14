@@ -4,16 +4,34 @@
 
 #include "chrome/browser/ui/search/search_tab_helper.h"
 
+#include <set>
+
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "chrome/browser/history/most_visited_tiles_experiment.h"
+#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/ui/app_list/app_list_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
+#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
+#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search/search_ipc_router_policy_impl.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
+#include "chrome/browser/ui/webui/ntp/ntp_user_data_logger.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
@@ -22,10 +40,15 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/referrer.h"
 #include "grit/generated_resources.h"
+#include "net/base/net_errors.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(SearchTabHelper);
 
@@ -69,13 +92,19 @@ bool IsSearchResults(const content::WebContents* contents) {
 }
 
 bool IsLocal(const content::WebContents* contents) {
-  return contents &&
-      contents->GetURL() == GURL(chrome::kChromeSearchLocalNtpUrl);
+  if (!contents)
+    return false;
+  const content::NavigationEntry* entry =
+      contents->GetController().GetVisibleEntry();
+  return entry && entry->GetURL() == GURL(chrome::kChromeSearchLocalNtpUrl);
 }
 
 // Returns true if |contents| are rendered inside an Instant process.
 bool InInstantProcess(Profile* profile,
                       const content::WebContents* contents) {
+  if (!profile || !contents)
+    return false;
+
   InstantService* instant_service =
       InstantServiceFactory::GetForProfile(profile);
   return instant_service &&
@@ -85,7 +114,7 @@ bool InInstantProcess(Profile* profile,
 
 // Updates the location bar to reflect |contents| Instant support state.
 void UpdateLocationBar(content::WebContents* contents) {
-// iOS and Android doesn't use the Instant framework.
+// iOS and Android don't use the Instant framework.
 #if !defined(OS_IOS) && !defined(OS_ANDROID)
   if (!contents)
     return;
@@ -106,7 +135,8 @@ SearchTabHelper::SearchTabHelper(content::WebContents* web_contents)
       web_contents_(web_contents),
       ipc_router_(web_contents, this,
                   make_scoped_ptr(new SearchIPCRouterPolicyImpl(web_contents))
-                      .PassAs<SearchIPCRouter::Policy>()) {
+                      .PassAs<SearchIPCRouter::Policy>()),
+      instant_service_(NULL) {
   if (!is_search_enabled_)
     return;
 
@@ -118,9 +148,17 @@ SearchTabHelper::SearchTabHelper(content::WebContents* web_contents)
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::Source<content::NavigationController>(
           &web_contents->GetController()));
+
+  instant_service_ =
+      InstantServiceFactory::GetForProfile(
+          Profile::FromBrowserContext(web_contents_->GetBrowserContext()));
+  if (instant_service_)
+    instant_service_->AddObserver(this);
 }
 
 SearchTabHelper::~SearchTabHelper() {
+  if (instant_service_)
+    instant_service_->RemoveObserver(this);
 }
 
 void SearchTabHelper::InitForPreloadedNTP() {
@@ -168,6 +206,24 @@ bool SearchTabHelper::SupportsInstant() const {
   return model_.instant_support() == INSTANT_SUPPORT_YES;
 }
 
+void SearchTabHelper::SetSuggestionToPrefetch(
+    const InstantSuggestion& suggestion) {
+  ipc_router_.SetSuggestionToPrefetch(suggestion);
+}
+
+void SearchTabHelper::Submit(const string16& text) {
+  DCHECK(!chrome::IsInstantNTP(web_contents_));
+  ipc_router_.Submit(text);
+}
+
+void SearchTabHelper::OnTabActivated() {
+  ipc_router_.OnTabActivated();
+}
+
+void SearchTabHelper::OnTabDeactivated() {
+  ipc_router_.OnTabDeactivated();
+}
+
 void SearchTabHelper::Observe(
     int type,
     const content::NotificationSource& source,
@@ -180,10 +236,8 @@ void SearchTabHelper::Observe(
 
   // TODO(kmadhusu): Set the page initial states (such as omnibox margin, etc)
   // from here. Please refer to crbug.com/247517 for more details.
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
   if (chrome::ShouldAssignURLToInstantRenderer(web_contents_->GetURL(),
-                                               profile)) {
+                                               profile())) {
     ipc_router_.SetDisplayInstantResults();
   }
 
@@ -223,6 +277,11 @@ void SearchTabHelper::Observe(
                                                   entry);
 }
 
+void SearchTabHelper::RenderViewCreated(
+    content::RenderViewHost* render_view_host) {
+  ipc_router_.SetPromoInformation(IsAppLauncherEnabled());
+}
+
 void SearchTabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
@@ -256,12 +315,19 @@ void SearchTabHelper::DidNavigateMainFrame(
 
 void SearchTabHelper::DidFailProvisionalLoad(
     int64 /* frame_id */,
+    const string16& frame_unique_name,
     bool is_main_frame,
-    const GURL& /* validated_url */,
-    int /* error_code */,
+    const GURL& validated_url,
+    int error_code,
     const string16& /* error_description */,
     content::RenderViewHost* /* render_view_host */) {
-  if (is_main_frame && IsCacheableNTP(web_contents_)) {
+  // If error_code is ERR_ABORTED means that the user has canceled this
+  // navigation so it shouldn't be redirected.
+  if (is_main_frame &&
+      error_code != net::ERR_ABORTED &&
+      chrome::ShouldUseCacheableNTP() &&
+      validated_url != GURL(chrome::kChromeSearchLocalNtpUrl) &&
+      chrome::IsNTPURL(validated_url, profile())) {
     RedirectToLocalNTP();
     RecordCacheableNTPLoadHistogram(false);
   }
@@ -284,6 +350,182 @@ void SearchTabHelper::OnSetVoiceSearchSupport(bool supports_voice_search) {
   model_.SetVoiceSearchSupported(supports_voice_search);
 }
 
+void SearchTabHelper::ThemeInfoChanged(const ThemeBackgroundInfo& theme_info) {
+  ipc_router_.SendThemeBackgroundInfo(theme_info);
+}
+
+void SearchTabHelper::MostVisitedItemsChanged(
+    const std::vector<InstantMostVisitedItem>& items) {
+  std::vector<InstantMostVisitedItem> items_copy(items);
+  MaybeRemoveMostVisitedItems(&items_copy);
+  ipc_router_.SendMostVisitedItems(items_copy);
+}
+
+void SearchTabHelper::MaybeRemoveMostVisitedItems(
+    std::vector<InstantMostVisitedItem>* items) {
+// The code below uses APIs not available on Android and the experiment should
+// not run there.
+#if !defined(OS_ANDROID)
+  if (!history::MostVisitedTilesExperiment::IsDontShowOpenURLsEnabled())
+    return;
+
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+  if (!profile)
+    return;
+
+  Browser* browser = chrome::FindBrowserWithProfile(profile,
+                                                    chrome::GetActiveDesktop());
+  if (!browser)
+    return;
+
+  TabStripModel* tab_strip_model = browser->tab_strip_model();
+  history::TopSites* top_sites = profile->GetTopSites();
+  if (!tab_strip_model || !top_sites) {
+    NOTREACHED();
+    return;
+  }
+
+  std::set<std::string> open_urls;
+  chrome::GetOpenUrls(*tab_strip_model, *top_sites, &open_urls);
+  history::MostVisitedTilesExperiment::RemoveItemsMatchingOpenTabs(
+      open_urls, items);
+#endif
+}
+
+void SearchTabHelper::FocusOmnibox(OmniboxFocusState state) {
+// iOS and Android don't use the Instant framework.
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
+  if (!browser)
+    return;
+
+  OmniboxView* omnibox_view = browser->window()->GetLocationBar()->
+      GetLocationEntry();
+  // Do not add a default case in the switch block for the following reasons:
+  // (1) Explicitly handle the new states. If new states are added in the
+  // OmniboxFocusState, the compiler will warn the developer to handle the new
+  // states.
+  // (2) An attacker may control the renderer and sends the browser process a
+  // malformed IPC. This function responds to the invalid |state| values by
+  // doing nothing instead of crashing the browser process (intentional no-op).
+  switch (state) {
+    case OMNIBOX_FOCUS_VISIBLE:
+      omnibox_view->SetFocus();
+      omnibox_view->model()->SetCaretVisibility(true);
+      break;
+    case OMNIBOX_FOCUS_INVISIBLE:
+      omnibox_view->SetFocus();
+      omnibox_view->model()->SetCaretVisibility(false);
+      // If the user clicked on the fakebox, any text already in the omnibox
+      // should get cleared when they start typing. Selecting all the existing
+      // text is a convenient way to accomplish this. It also gives a slight
+      // visual cue to users who really understand selection state about what
+      // will happen if they start typing.
+      omnibox_view->SelectAll(false);
+      break;
+    case OMNIBOX_FOCUS_NONE:
+      // Remove focus only if the popup is closed. This will prevent someone
+      // from changing the omnibox value and closing the popup without user
+      // interaction.
+      if (!omnibox_view->model()->popup_model()->IsOpen())
+        web_contents()->GetView()->Focus();
+      break;
+  }
+#endif
+}
+
+void SearchTabHelper::NavigateToURL(const GURL& url,
+                                    WindowOpenDisposition disposition,
+                                    bool is_most_visited_item_url) {
+// iOS and Android don't use the Instant framework.
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+  // TODO(kmadhusu): Remove chrome::FindBrowser...() function call from here.
+  // Create a SearchTabHelperDelegate interface and have the Browser object
+  // implement that interface to provide the necessary functionality.
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+  if (!browser || !profile)
+    return;
+
+  if (is_most_visited_item_url) {
+    content::RecordAction(
+        content::UserMetricsAction("InstantExtended.MostVisitedClicked"));
+  }
+
+  chrome::NavigateParams params(browser, url,
+                                content::PAGE_TRANSITION_AUTO_BOOKMARK);
+  params.referrer = content::Referrer();
+  params.source_contents = web_contents_;
+  params.disposition = disposition;
+  params.is_renderer_initiated = false;
+  params.initiating_profile = profile;
+  chrome::Navigate(&params);
+#endif
+}
+
+void SearchTabHelper::OnDeleteMostVisitedItem(const GURL& url) {
+  DCHECK(!url.is_empty());
+  if (instant_service_)
+    instant_service_->DeleteMostVisitedItem(url);
+}
+
+void SearchTabHelper::OnUndoMostVisitedDeletion(const GURL& url) {
+  DCHECK(!url.is_empty());
+  if (instant_service_)
+    instant_service_->UndoMostVisitedDeletion(url);
+}
+
+void SearchTabHelper::OnUndoAllMostVisitedDeletions() {
+  if (instant_service_)
+    instant_service_->UndoAllMostVisitedDeletions();
+}
+
+void SearchTabHelper::OnLogEvent(NTPLoggingEventType event) {
+  NTPUserDataLogger* data = NTPUserDataLogger::FromWebContents(web_contents());
+  if (data)
+    data->LogEvent(event);
+}
+
+void SearchTabHelper::PasteIntoOmnibox(const string16& text) {
+// iOS and Android don't use the Instant framework.
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
+  if (!browser)
+    return;
+
+  OmniboxView* omnibox_view = browser->window()->GetLocationBar()->
+      GetLocationEntry();
+  // The first case is for right click to paste, where the text is retrieved
+  // from the clipboard already sanitized. The second case is needed to handle
+  // drag-and-drop value and it has to be sanitazed before setting it into the
+  // omnibox.
+  string16 text_to_paste = text.empty() ? omnibox_view->GetClipboardText() :
+      omnibox_view->SanitizeTextForPaste(text);
+
+  if (text_to_paste.empty())
+    return;
+
+  if (!omnibox_view->model()->has_focus())
+    omnibox_view->SetFocus();
+
+  omnibox_view->OnBeforePossibleChange();
+  omnibox_view->model()->on_paste();
+  omnibox_view->SetUserText(text_to_paste);
+  omnibox_view->OnAfterPossibleChange();
+#endif
+}
+
+void SearchTabHelper::OnChromeIdentityCheck(const string16& identity) {
+  SigninManagerBase* manager = SigninManagerFactory::GetForProfile(profile());
+  if (manager) {
+    const string16 username = UTF8ToUTF16(manager->GetAuthenticatedUsername());
+    ipc_router_.SendChromeIdentityCheckResult(identity,
+                                              identity == username);
+  }
+}
+
 void SearchTabHelper::UpdateMode(bool update_origin, bool is_preloaded_ntp) {
   SearchMode::Type type = SearchMode::MODE_DEFAULT;
   SearchMode::Origin origin = SearchMode::ORIGIN_DEFAULT;
@@ -302,9 +544,7 @@ void SearchTabHelper::UpdateMode(bool update_origin, bool is_preloaded_ntp) {
 }
 
 void SearchTabHelper::DetermineIfPageSupportsInstant() {
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
-  if (!InInstantProcess(profile, web_contents_)) {
+  if (!InInstantProcess(profile(), web_contents_)) {
     // The page is not in the Instant process. This page does not support
     // instant. If we send an IPC message to a page that is not in the Instant
     // process, it will never receive it and will never respond. Therefore,
@@ -316,6 +556,10 @@ void SearchTabHelper::DetermineIfPageSupportsInstant() {
   } else {
     ipc_router_.DetermineIfPageSupportsInstant();
   }
+}
+
+Profile* SearchTabHelper::profile() const {
+  return Profile::FromBrowserContext(web_contents_->GetBrowserContext());
 }
 
 void SearchTabHelper::RedirectToLocalNTP() {

@@ -16,7 +16,7 @@ AppListModel::User::User() : active(false) {}
 AppListModel::User::~User() {}
 
 AppListModel::AppListModel()
-    : apps_(new Apps),
+    : item_list_(new AppListItemList),
       search_box_(new SearchBoxModel),
       results_(new SearchResults),
       signed_in_(false),

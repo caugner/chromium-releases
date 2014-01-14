@@ -62,10 +62,12 @@ FakeTileManager::FakeTileManager(TileManagerClient* client,
 
 FakeTileManager::~FakeTileManager() {}
 
-void FakeTileManager::AssignMemoryToTiles() {
+void FakeTileManager::AssignMemoryToTiles(
+    const GlobalStateThatImpactsTilePriority& state) {
   tiles_for_raster.clear();
   all_tiles.Clear();
 
+  ManageTiles(state);
   GetTilesWithAssignedBins(&all_tiles);
   AssignGpuMemoryToTiles(&all_tiles, &tiles_for_raster);
 }
@@ -78,6 +80,11 @@ bool FakeTileManager::HasBeenAssignedMemory(Tile* tile) {
 
 void FakeTileManager::CheckForCompletedTasks() {
   RasterWorkerPoolForTesting()->CheckForCompletedTasks();
+}
+
+void FakeTileManager::Release(Tile* tile) {
+  TileManager::Release(tile);
+  CleanUpReleasedTiles();
 }
 
 }  // namespace cc

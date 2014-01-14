@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/memory/scoped_ptr.h"
 
 class PrefValueMap;
 
@@ -18,17 +19,16 @@ class PolicyErrorMap;
 class PolicyMap;
 struct PolicyToPreferenceMapEntry;
 
-// Declares the array of policy key to preference name mappings. Contains
-// exactly DEFAULT_SEARCH_KEY entries, which are sorted according to the order
-// of entries in the DefaultSearchKey enum.
-extern const PolicyToPreferenceMapEntry kDefaultSearchPolicyMap[];
-
-// Converts policies to their corresponding preferences. Also does error
-// checking and cleans up policy values for displaying.
+// Converts policies to their corresponding preferences by applying a list of
+// ConfigurationPolicyHandler objects. This includes error checking and
+// cleaning up policy values for displaying.
 class ConfigurationPolicyHandlerList {
  public:
   ConfigurationPolicyHandlerList();
   ~ConfigurationPolicyHandlerList();
+
+  // Adds a policy handler to the list.
+  void AddHandler(scoped_ptr<ConfigurationPolicyHandler> handler);
 
   // Translates |policies| to their corresponding preferences in |prefs|.
   // Any errors found while processing the policies are stored in |errors|.
@@ -45,6 +45,9 @@ class ConfigurationPolicyHandlerList {
 
   DISALLOW_COPY_AND_ASSIGN(ConfigurationPolicyHandlerList);
 };
+
+// Builds a platform-specific handler list.
+scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList();
 
 }  // namespace policy
 

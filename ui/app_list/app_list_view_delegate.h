@@ -13,6 +13,10 @@ namespace base {
 class FilePath;
 }
 
+namespace content {
+class WebContents;
+}
+
 namespace gfx {
 class ImageSkia;
 }
@@ -28,6 +32,10 @@ class APP_LIST_EXPORT AppListViewDelegate {
  public:
   // AppListView owns the delegate.
   virtual ~AppListViewDelegate() {}
+
+  // Whether to force the use of a native desktop widget when the app list
+  // window is first created.
+  virtual bool ForceNativeDesktop() const = 0;
 
   // Sets the delegate to use the profile at |profile_path|. This is currently
   // only used by non-Ash Windows.
@@ -47,10 +55,6 @@ class APP_LIST_EXPORT AppListViewDelegate {
   virtual void GetShortcutPathForApp(
       const std::string& app_id,
       const base::Callback<void(const base::FilePath&)>& callback) = 0;
-
-  // Invoked when an AppListeItemModelView is activated by click or enter key.
-  virtual void ActivateAppListItem(AppListItemModel* item,
-                                   int event_flags) = 0;
 
   // Invoked to start a new search. Delegate collects query input from
   // SearchBoxModel and populates SearchResults. Both models are sub models
@@ -90,6 +94,9 @@ class APP_LIST_EXPORT AppListViewDelegate {
 
   // Shows the app list for the profile specified by |profile_path|.
   virtual void ShowForProfileByPath(const base::FilePath& profile_path) = 0;
+
+  // Get the start page web contents. Owned by the AppListViewDelegate.
+  virtual content::WebContents* GetStartPageContents() = 0;
 };
 
 }  // namespace app_list

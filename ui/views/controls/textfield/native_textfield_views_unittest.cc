@@ -252,14 +252,14 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
   string16 GetClipboardText() const {
     string16 text;
     ui::Clipboard::GetForCurrentThread()->
-        ReadText(ui::Clipboard::BUFFER_STANDARD, &text);
+        ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &text);
     return text;
   }
 
   void SetClipboardText(const std::string& text) {
     ui::ScopedClipboardWriter clipboard_writer(
         ui::Clipboard::GetForCurrentThread(),
-        ui::Clipboard::BUFFER_STANDARD);
+        ui::CLIPBOARD_TYPE_COPY_PASTE);
     clipboard_writer.WriteText(ASCIIToUTF16(text));
   }
 
@@ -793,7 +793,7 @@ TEST_F(NativeTextfieldViewsTest, ContextMenuDisplayTest) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   EXPECT_TRUE(textfield_->context_menu_controller());
   textfield_->SetText(ASCIIToUTF16("hello world"));
-  ui::Clipboard::GetForCurrentThread()->Clear(ui::Clipboard::BUFFER_STANDARD);
+  ui::Clipboard::GetForCurrentThread()->Clear(ui::CLIPBOARD_TYPE_COPY_PASTE);
   textfield_view_->ClearEditHistory();
   EXPECT_TRUE(GetContextMenuModel());
   VerifyTextfieldContextMenuContents(false, false, GetContextMenuModel());
@@ -1903,24 +1903,17 @@ TEST_F(NativeTextfieldViewsTest, TestLongPressInitiatesDragDrop) {
 }
 
 TEST_F(NativeTextfieldViewsTest, GetTextfieldBaseline_FontFallbackTest) {
-#if defined(OS_WIN)
-  // This test fails on some versions of Windows because two different strings
-  // have the same baseline.
-  if (base::win::GetVersion() <= base::win::VERSION_XP ||
-      base::win::VERSION_WIN8 <= base::win::GetVersion())
-    return;
-#endif
-
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(UTF8ToUTF16("abc"));
   const int old_baseline = textfield_->GetBaseline();
 
   // Set text which may fall back to a font which has taller baseline than
-  // the default font.  |new_baseline| will be greater than |old_baseline|.
+  // the default font.
   textfield_->SetText(UTF8ToUTF16("\xE0\xB9\x91"));
   const int new_baseline = textfield_->GetBaseline();
 
-  EXPECT_GT(new_baseline, old_baseline);
+  // Regardless of the text, the baseline must be the same.
+  EXPECT_EQ(new_baseline, old_baseline);
 }
 
 }  // namespace views

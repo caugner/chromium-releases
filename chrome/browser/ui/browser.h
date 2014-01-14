@@ -46,6 +46,7 @@
 
 class BrowserContentSettingBubbleModelDelegate;
 class BrowserInstantController;
+class BrowserLanguageStateObserver;
 class BrowserSyncedWindowDelegate;
 class BrowserToolbarModelDelegate;
 class BrowserTabRestoreServiceDelegate;
@@ -710,9 +711,6 @@ class Browser : public TabStripModelObserver,
   // well.
   void UpdateToolbar(bool should_restore_state);
 
-  // Updates the browser's search model with the tab's search model.
-  void UpdateSearchState(content::WebContents* contents);
-
   // Does one or both of the following for each bit in |changed_flags|:
   // . If the update should be processed immediately, it is.
   // . If the update should processed asynchronously (to avoid lots of ui
@@ -860,9 +858,6 @@ class Browser : public TabStripModelObserver,
   // See ScheduleUIUpdate and ProcessPendingUIUpdates.
   UpdateMap scheduled_updates_;
 
-  // The following factory is used for chrome update coalescing.
-  base::WeakPtrFactory<Browser> chrome_updater_factory_;
-
   // In-progress download termination handling /////////////////////////////////
 
   enum CancelDownloadConfirmationState {
@@ -894,9 +889,6 @@ class Browser : public TabStripModelObserver,
 
   scoped_ptr<chrome::UnloadController> unload_controller_;
   scoped_ptr<chrome::FastUnloadController> fast_unload_controller_;
-
-  // The following factory is used to close the frame at a later time.
-  base::WeakPtrFactory<Browser> weak_factory_;
 
   // The Find Bar. This may be NULL if there is no Find Bar, and if it is
   // non-NULL, it may or may not be visible.
@@ -937,6 +929,14 @@ class Browser : public TabStripModelObserver,
 
   // True if the browser window has been shown at least once.
   bool window_has_shown_;
+
+  // The following factory is used for chrome update coalescing.
+  base::WeakPtrFactory<Browser> chrome_updater_factory_;
+
+  // The following factory is used to close the frame at a later time.
+  base::WeakPtrFactory<Browser> weak_factory_;
+
+  scoped_ptr<BrowserLanguageStateObserver> language_state_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(Browser);
 };

@@ -37,7 +37,8 @@ class ScrollActionTest(tab_test_case.TabTestCase):
                               (2 * window.innerHeight + 1) + 'px';""")
 
     self.assertEquals(
-        self._tab.EvaluateJavaScript('document.body.scrollTop'), 0)
+        self._tab.EvaluateJavaScript("""document.documentElement.scrollTop
+                                   || document.body.scrollTop"""), 0)
 
     i = scroll.ScrollAction()
     i.WillRunAction(page, self._tab)
@@ -56,10 +57,13 @@ class ScrollActionTest(tab_test_case.TabTestCase):
 
     # Allow for roundoff error in scaled viewport.
     scroll_position = self._tab.EvaluateJavaScript(
-        'document.body.scrollTop + window.innerHeight')
+        """(document.documentElement.scrollTop || document.body.scrollTop)
+        + window.innerHeight""")
     scroll_height = self._tab.EvaluateJavaScript('document.body.scrollHeight')
     difference = scroll_position - scroll_height
-    self.assertTrue(abs(difference) <= 1)
+    self.assertTrue(abs(difference) <= 1,
+                    msg='scroll_position=%d; scroll_height=%d' %
+                            (scroll_position, scroll_height))
 
   def testBoundingClientRect(self):
     self.CreateAndNavigateToPageFromUnittestDataDir('blank.html', {})

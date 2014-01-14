@@ -22,6 +22,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/extension_web_contents_observer.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
@@ -155,6 +156,7 @@ ExtensionHost::ExtensionHost(const Extension* extension,
   host_contents_->SetDelegate(this);
   SetViewType(host_contents_.get(), host_type);
 
+  ExtensionWebContentsObserver::CreateForWebContents(host_contents());
   PrefsTabHelper::CreateForWebContents(host_contents());
 
   render_view_host_ = host_contents_->GetRenderViewHost();
@@ -256,6 +258,10 @@ WindowController* ExtensionHost::GetExtensionWindowController() const {
       view()->browser()->extension_window_controller() : NULL;
 }
 
+content::BrowserContext* ExtensionHost::browser_context() {
+  return profile_;
+}
+
 const GURL& ExtensionHost::GetURL() const {
   return host_contents()->GetURL();
 }
@@ -318,11 +324,11 @@ gfx::Size ExtensionHost::GetMaximumDialogSize() {
 }
 
 void ExtensionHost::AddObserver(
-    web_modal::WebContentsModalDialogHostObserver* observer) {
+    web_modal::ModalDialogHostObserver* observer) {
 }
 
 void ExtensionHost::RemoveObserver(
-    web_modal::WebContentsModalDialogHostObserver* observer) {
+    web_modal::ModalDialogHostObserver* observer) {
 }
 #endif
 
@@ -600,7 +606,9 @@ void ExtensionHost::OnDetailedConsoleMessageAdded(
             message,
             stack_trace,
             context_url,
-            static_cast<logging::LogSeverity>(severity_level))));
+            static_cast<logging::LogSeverity>(severity_level),
+            render_view_host_->GetRoutingID(),
+            render_view_host_->GetProcess()->GetID())));
   }
 }
 

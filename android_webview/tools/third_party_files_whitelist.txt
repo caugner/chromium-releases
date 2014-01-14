@@ -35,17 +35,17 @@ chrome/browser/importer/firefox_profile_lock_win.cc
 # Credits notice for ChromeOS.
 chrome/browser/resources/chromeos/about_os_credits.html
 # String 'copyright' used in code.
-chrome/browser/resources/file_manager/js/action_choice_scripts.js
+chrome/browser/resources/file_manager/foreground/js/action_choice/action_choice_scripts.js
 # String 'copyright' used in code.
-chrome/browser/resources/file_manager/js/photo/gallery_scripts.js
+chrome/browser/resources/file_manager/foreground/js/photo/gallery_scripts.js
 # String 'copyright' used in code.
-chrome/browser/resources/file_manager/js/main_scripts.js
+chrome/browser/resources/file_manager/foreground/js/main_scripts.js
 # String 'copyright' used in code.
-chrome/browser/resources/file_manager/js/media/mediaplayer_scripts.js
+chrome/browser/resources/file_manager/foreground/js/media/mediaplayer_scripts.js
 # String 'copyright' used in code.
-chrome/browser/resources/file_manager/js/media/video_player_scripts.js
+chrome/browser/resources/file_manager/foreground/js/media/video_player_scripts.js
 # String 'copyright' used in code.
-chrome/browser/resources/file_manager/js/photo/photo_import_scripts.js
+chrome/browser/resources/file_manager/foreground/js/photo/photo_import_scripts.js
 # String 'copyright' used in code.
 chrome/common/importer/firefox_importer_utils.cc
 # Copyright Netscape Communications Corporation; MPL, GPL v2 or LGPL v2
@@ -73,10 +73,6 @@ chrome_frame/CFInstance.js
 chrome/tools/test/generate_mime_tests.pl
 # Copyright Alf Watt; BSD license. Not used on Android.
 content/browser/geolocation/osx_wifi.h
-# Copyright The Chromium Authors and Apple Inc. Taken from Blink.
-content/browser/indexed_db/leveldb/avltree.h
-# Copyright The Chromium Authors and Apple Inc. Taken from Blink.
-content/browser/indexed_db/leveldb/fixed_array.h
 # Copyright The Chromium Authors, Apple Inc and Graham Dennis; BSD license. Not
 # used on Android.
 content/browser/renderer_host/render_widget_host_view_mac.mm

@@ -8,6 +8,7 @@
 
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/net/url_fixer_upper.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -217,11 +219,11 @@ bool HistoryURLProviderTest::SetUpImpl(bool no_db) {
     profile_->BlockUntilHistoryProcessesPendingRequests();
     profile_->BlockUntilHistoryIndexIsRefreshed();
   }
-  history_service_ =
-      HistoryServiceFactory::GetForProfile(profile_.get(),
-                                           Profile::EXPLICIT_ACCESS);
+  profile_->GetPrefs()->SetString(prefs::kAcceptLanguages, "en-US,en,ko");
+  history_service_ = HistoryServiceFactory::GetForProfile(
+      profile_.get(), Profile::EXPLICIT_ACCESS);
 
-  autocomplete_ = new HistoryURLProvider(this, profile_.get(), "en-US,en,ko");
+  autocomplete_ = new HistoryURLProvider(this, profile_.get());
   TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
       profile_.get(), &HistoryURLProviderTest::CreateTemplateURLService);
   FillData();
@@ -878,8 +880,8 @@ TEST_F(HistoryURLProviderTest, SuggestExactInput) {
                             string16(), GURL("about:blank"),
                             AutocompleteInput::INVALID_SPEC, false, false, true,
                             AutocompleteInput::ALL_MATCHES);
-    AutocompleteMatch match = HistoryURLProvider::SuggestExactInput(
-        autocomplete_.get(), input, test_cases[i].trim_http);
+    AutocompleteMatch match(autocomplete_->SuggestExactInput(
+        input.text(), input.canonicalized_url(), test_cases[i].trim_http));
     EXPECT_EQ(ASCIIToUTF16(test_cases[i].contents), match.contents);
     for (size_t match_index = 0; match_index < match.contents_class.size();
          ++match_index) {

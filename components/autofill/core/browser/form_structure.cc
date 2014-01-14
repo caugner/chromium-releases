@@ -45,7 +45,6 @@ const char kAttributeFieldType[] = "fieldtype";
 const char kAttributeFormSignature[] = "formsignature";
 const char kAttributeName[] = "name";
 const char kAttributeSignature[] = "signature";
-const char kAttributeUrlprefixSignature[] = "urlprefixsignature";
 const char kAcceptedFeaturesExperiment[] = "e"; // e=experiments
 const char kClientVersion[] = "6.1.1715.1442/en (GGLL)";
 const char kXMLDeclaration[] = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
@@ -335,8 +334,7 @@ FormStructure::FormStructure(const FormData& form)
   std::map<base::string16, size_t> unique_names;
   for (std::vector<FormFieldData>::const_iterator field =
            form.fields.begin();
-       field != form.fields.end(); field++) {
-
+       field != form.fields.end(); ++field) {
     if (!ShouldSkipField(*field)) {
       // Add all supported form fields (including with empty names) to the
       // signature.  This is a requirement for Autofill servers.

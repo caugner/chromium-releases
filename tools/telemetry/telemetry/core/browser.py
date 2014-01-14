@@ -39,6 +39,7 @@ class Browser(object):
     self.credentials = browser_credentials.BrowserCredentials()
     self._platform.SetFullPerformanceModeEnabled(True)
     self._active_profilers = []
+    self._profilers_states = {}
 
   def __enter__(self):
     return self
@@ -234,9 +235,12 @@ class Browser(object):
       raise Exception('The %s profiler is not '
                       'supported on this platform.' % profiler_name)
 
+    if not profiler_class in self._profilers_states:
+      self._profilers_states[profiler_class] = {}
+
     self._active_profilers.append(
         profiler_class(self._browser_backend, self._platform_backend,
-            base_output_file))
+            base_output_file, self._profilers_states[profiler_class]))
 
   def StopProfiling(self):
     """Stops all active profilers and saves their results.
@@ -272,7 +276,12 @@ class Browser(object):
 
   def Close(self):
     """Closes this browser."""
+    for profiler_class in self._profilers_states:
+      profiler_class.WillCloseBrowser(self._browser_backend,
+                                      self._platform_backend)
+
     self._platform.SetFullPerformanceModeEnabled(False)
+
     if self._wpr_server:
       self._wpr_server.Close()
       self._wpr_server = None
@@ -290,14 +299,24 @@ class Browser(object):
 
   def SetHTTPServerDirectories(self, paths):
     """Returns True if the HTTP server was started, False otherwise."""
-    if not isinstance(paths, list):
-      paths = [paths]
-    paths = [os.path.abspath(p) for p in paths]
+    if isinstance(paths, basestring):
+      paths = set([paths])
+    paths = set(os.path.realpath(p) for p in paths)
 
-    if paths and self._http_server and self._http_server.paths == paths:
-      return False
+    # If any path is in a subdirectory of another, remove the subdirectory.
+    duplicates = set()
+    for parent_path in paths:
+      for sub_path in paths:
+        if parent_path == sub_path:
+          continue
+        if os.path.commonprefix((parent_path, sub_path)) == parent_path:
+          duplicates.add(sub_path)
+    paths -= duplicates
 
     if self._http_server:
+      if paths and self._http_server.paths == paths:
+        return False
+
       self._http_server.Close()
       self._http_server = None
 

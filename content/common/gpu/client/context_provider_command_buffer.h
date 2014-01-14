@@ -5,10 +5,12 @@
 #ifndef CONTENT_COMMON_GPU_CLIENT_CONTEXT_PROVIDER_COMMAND_BUFFER
 #define CONTENT_COMMON_GPU_CLIENT_CONTEXT_PROVIDER_COMMAND_BUFFER
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "cc/output/context_provider.h"
+#include "content/common/content_export.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 
 namespace webkit {
@@ -21,7 +23,8 @@ namespace content {
 
 // Implementation of cc::ContextProvider that provides a
 // WebGraphicsContext3DCommandBufferImpl context and a GrContext.
-class ContextProviderCommandBuffer : public cc::ContextProvider {
+class CONTENT_EXPORT ContextProviderCommandBuffer
+    : NON_EXPORTED_BASE(public cc::ContextProvider) {
  public:
   static scoped_refptr<ContextProviderCommandBuffer> Create(
       scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context3d,
@@ -29,6 +32,7 @@ class ContextProviderCommandBuffer : public cc::ContextProvider {
 
   virtual bool BindToCurrentThread() OVERRIDE;
   virtual WebGraphicsContext3DCommandBufferImpl* Context3d() OVERRIDE;
+  virtual gpu::ContextSupport* ContextSupport() OVERRIDE;
   virtual class GrContext* GrContext() OVERRIDE;
   virtual Capabilities ContextCapabilities() OVERRIDE;
   virtual void VerifyContexts() OVERRIDE;
@@ -55,11 +59,10 @@ class ContextProviderCommandBuffer : public cc::ContextProvider {
 
   void OnLostContext();
   void OnSwapBuffersComplete();
-  void OnMemoryAllocationChanged(
-      const WebKit::WebGraphicsMemoryAllocation& allocation);
+  void OnMemoryAllocationChanged(const gpu::MemoryAllocation& allocation);
 
  private:
-  void InitializeCapabilities();
+  bool InitializeCapabilities();
 
   base::ThreadChecker main_thread_checker_;
   base::ThreadChecker context_thread_checker_;
@@ -84,9 +87,6 @@ class ContextProviderCommandBuffer : public cc::ContextProvider {
   class SwapBuffersCompleteCallbackProxy;
   scoped_ptr<SwapBuffersCompleteCallbackProxy>
       swap_buffers_complete_callback_proxy_;
-
-  class MemoryAllocationCallbackProxy;
-  scoped_ptr<MemoryAllocationCallbackProxy> memory_allocation_callback_proxy_;
 };
 
 }  // namespace content

@@ -47,6 +47,7 @@
         null,
         [{name: 'message', type: 'any', optional: true}, portSchema],
         options);
+    this.onDestroy_ = null;
   }
 
   // Sends a message asynchronously to the context on the other end of this
@@ -79,6 +80,8 @@
   Port.prototype.destroy_ = function() {
     var portId = this.portId_;
 
+    if (this.onDestroy_)
+      this.onDestroy_();
     this.onDisconnect.destroy_();
     this.onMessage.destroy_();
 
@@ -158,7 +161,8 @@
     if (!requestEvent.hasListeners())
       return false;
     var port = createPort(portId, channelName);
-    port.onMessage.addListener(function(request) {
+
+    function messageListener(request) {
       var responseCallbackPreserved = false;
       var responseCallback = function(response) {
         if (port) {
@@ -187,7 +191,7 @@
       } else {
         var rv = requestEvent.dispatch(request, sender, responseCallback);
         responseCallbackPreserved =
-            rv && rv.results && rv.results.indexOf(true) > -1;
+            rv && rv.results && $Array.indexOf(rv.results, true) > -1;
         if (!responseCallbackPreserved && port) {
           // If they didn't access the response callback, they're not
           // going to send a response, so clean up the port immediately.
@@ -195,7 +199,13 @@
           port = null;
         }
       }
-    });
+    }
+
+    port.onDestroy_ = function() {
+      port.onMessage.removeListener(messageListener);
+    };
+    port.onMessage.addListener(messageListener);
+
     var eventName = (isSendMessage ?
           (isExternal ?
               "runtime.onMessageExternal" : "runtime.onMessage") :
@@ -213,7 +223,8 @@
                              sourceTab,
                              sourceExtensionId,
                              targetExtensionId,
-                             sourceUrl) {
+                             sourceUrl,
+                             tlsChannelId) {
     // Only create a new Port if someone is actually listening for a connection.
     // In addition to being an optimization, this also fixes a bug where if 2
     // channels were opened to and from the same process, closing one would
@@ -236,6 +247,8 @@
       sender.url = sourceUrl;
     if (sourceTab)
       sender.tab = sourceTab;
+    if (tlsChannelId !== undefined)
+      sender.tlsChannelId = tlsChannelId;
 
     // Special case for sendRequest/onRequest and sendMessage/onMessage.
     if (channelName == kRequestChannel || channelName == kMessageChannel) {
@@ -313,28 +326,39 @@
     if (!responseCallback)
       responseCallback = function() {};
 
-    port.onDisconnect.addListener(function() {
+    // Note: make sure to manually remove the onMessage/onDisconnect listeners
+    // that we added before destroying the Port, a workaround to a bug in Port
+    // where any onMessage/onDisconnect listeners added but not removed will
+    // be leaked when the Port is destroyed.
+    // http://crbug.com/320723 tracks a sustainable fix.
+
+    function disconnectListener() {
       // For onDisconnects, we only notify the callback if there was an error.
-      try {
-        if (chrome.runtime && chrome.runtime.lastError)
-          responseCallback();
-      } finally {
-        port = null;
-      }
-    });
-    port.onMessage.addListener(function(response) {
+      if (chrome.runtime && chrome.runtime.lastError)
+        responseCallback();
+    }
+
+    function messageListener(response) {
       try {
         responseCallback(response);
       } finally {
         port.disconnect();
-        port = null;
       }
-    });
+    }
+
+    port.onDestroy_ = function() {
+      port.onDisconnect.removeListener(disconnectListener);
+      port.onMessage.removeListener(messageListener);
+    };
+    port.onDisconnect.addListener(disconnectListener);
+    port.onMessage.addListener(messageListener);
   };
 
-  function sendMessageUpdateArguments(functionName) {
-    var args = $Array.slice(arguments, 1);  // skip functionName
-    var alignedArgs = messagingUtils.alignSendMessageArguments(args);
+  function sendMessageUpdateArguments(functionName, hasOptionsArgument) {
+    // skip functionName and hasOptionsArgument
+    var args = $Array.slice(arguments, 2);
+    var alignedArgs = messagingUtils.alignSendMessageArguments(args,
+        hasOptionsArgument);
     if (!alignedArgs)
       throw new Error('Invalid arguments to ' + functionName + '.');
     return alignedArgs;

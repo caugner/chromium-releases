@@ -173,6 +173,8 @@
             'browser/devtools/adb_client_socket.h',
             'browser/devtools/adb_web_socket.cc',
             'browser/devtools/adb_web_socket.h',
+            'browser/devtools/android_device.cc',
+            'browser/devtools/android_device.h',
             'browser/devtools/browser_list_tabcontents_provider.cc',
             'browser/devtools/browser_list_tabcontents_provider.h',
             'browser/devtools/devtools_adb_bridge.cc',
@@ -185,11 +187,16 @@
             'browser/devtools/devtools_file_system_indexer.h',
             'browser/devtools/devtools_protocol.cc',
             'browser/devtools/devtools_protocol.h',
+            'browser/devtools/devtools_target_impl.cc',
+            'browser/devtools/devtools_target_impl.h',
+            'browser/devtools/devtools_toggle_action.cc',
             'browser/devtools/devtools_toggle_action.h',
             'browser/devtools/devtools_window.cc',
             'browser/devtools/devtools_window.h',
             'browser/devtools/port_forwarding_controller.cc',
             'browser/devtools/port_forwarding_controller.h',
+            'browser/devtools/refcounted_adb_thread.cc',
+            'browser/devtools/refcounted_adb_thread.h',
             'browser/devtools/remote_debugging_server.cc',
             'browser/devtools/remote_debugging_server.h',
           ],
@@ -207,6 +214,7 @@
                 'browser/devtools/adb/android_rsa.cc',
                 'browser/devtools/browser_list_tabcontents_provider.cc',
                 'browser/devtools/devtools_file_system_indexer.cc',
+                'browser/devtools/devtools_target_impl.cc',
                 'browser/devtools/devtools_window.cc',
                 'browser/devtools/remote_debugging_server.cc',
               ],
@@ -304,6 +312,8 @@
             }],
             ['OS=="win" or OS=="mac"', {
               'sources': [
+                'utility/media_galleries/iapps_xml_utils.cc',
+                'utility/media_galleries/iapps_xml_utils.h',
                 'utility/media_galleries/itunes_library_parser.cc',
                 'utility/media_galleries/itunes_library_parser.h',
                 'utility/media_galleries/picasa_album_table_reader.cc',
@@ -312,6 +322,12 @@
                 'utility/media_galleries/picasa_albums_indexer.h',
                 'utility/media_galleries/pmp_column_reader.cc',
                 'utility/media_galleries/pmp_column_reader.h',
+              ],
+            }],
+            ['OS=="mac"', {
+              'sources': [
+                'utility/media_galleries/iphoto_library_parser.cc',
+                'utility/media_galleries/iphoto_library_parser.h',
               ],
             }],
             ['use_openssl==1', {
@@ -345,22 +361,6 @@
           ],
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [ 4267, ],
-        },
-        {
-          'target_name': 'ipclist',
-          'type': 'executable',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'dependencies': [
-            'test_support_common',
-            '../skia/skia.gyp:skia',
-            '../sync/sync.gyp:sync',
-          ],
-          'include_dirs': [
-             '..',
-          ],
-          'sources': [
-            'tools/ipclist/ipclist.cc',
-          ],
         },
       ],
     }],  # OS!="ios"
@@ -636,8 +636,8 @@
           'conditions': [
             ['component=="shared_library"', {
               'dependencies': [
-                '../webkit/support/webkit_support.gyp:glue',
                 '../content/content.gyp:content_plugin',
+                '../webkit/glue/webkit_glue.gyp:glue',
               ],
               'xcode_settings': {
                 'LD_RUNPATH_SEARCH_PATHS': [
@@ -687,6 +687,8 @@
           'dependencies': [
             'chrome_resources.gyp:chrome_strings',
             '../base/base.gyp:base',
+            '../ui/events/events.gyp:events',
+            '../ui/gfx/gfx.gyp:gfx',
             '../ui/ui.gyp:ui',
           ],
           'include_dirs': [
@@ -700,40 +702,6 @@
     }],  # OS=="mac"
     ['OS!="mac" and OS!="ios"', {
       'targets': [
-        {
-          'target_name': 'convert_dict',
-          'type': 'executable',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../base/base.gyp:base_i18n',
-            'convert_dict_lib',
-            '../third_party/hunspell/hunspell.gyp:hunspell',
-          ],
-          'sources': [
-            'tools/convert_dict/convert_dict.cc',
-          ],
-        },
-        {
-          'target_name': 'convert_dict_lib',
-          'product_name': 'convert_dict',
-          'type': 'static_library',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'include_dirs': [
-            '..',
-          ],
-          'dependencies': [
-            '../base/base.gyp:base',
-          ],
-          'sources': [
-            'tools/convert_dict/aff_reader.cc',
-            'tools/convert_dict/aff_reader.h',
-            'tools/convert_dict/dic_reader.cc',
-            'tools/convert_dict/dic_reader.h',
-            'tools/convert_dict/hunspell_reader.cc',
-            'tools/convert_dict/hunspell_reader.h',
-          ],
-        },
         {
           'target_name': 'flush_cache',
           'type': 'executable',
@@ -798,20 +766,6 @@
             }],
           ],
         },
-        {
-          'target_name': 'ipcfuzz',
-          'type': 'loadable_module',
-          'include_dirs': [
-            '..',
-          ],
-          'dependencies': [
-            'test_support_common',
-            '../skia/skia.gyp:skia',
-          ],
-          'sources': [
-            'tools/ipclist/ipcfuzz.cc',
-          ],
-        },
       ],
     }],  # OS=="linux"
     ['OS=="win"',
@@ -827,11 +781,11 @@
             '../base/base.gyp:base_unittests',
             '../chrome_frame/chrome_frame.gyp:chrome_frame_tests',
             '../chrome_frame/chrome_frame.gyp:chrome_frame_net_tests',
-            '../content/content.gyp:content_browsertests',
-            '../content/content.gyp:content_shell',
-            '../content/content.gyp:content_unittests',
+            '../content/content_shell_and_tests.gyp:content_browsertests',
+            '../content/content_shell_and_tests.gyp:content_shell',
+            '../content/content_shell_and_tests.gyp:content_unittests',
             '../net/net.gyp:net_unittests',
-            '../ui/ui.gyp:ui_unittests',
+            '../ui/ui_unittests.gyp:ui_unittests',
           ],
           'conditions': [
             ['use_aura==1 or target_arch=="x64"', {
@@ -932,17 +886,12 @@
           'sources': [
              'test/automation/automation_handle_tracker.cc',
              'test/automation/automation_handle_tracker.h',
-             'test/automation/automation_json_requests.cc',
-             'test/automation/automation_json_requests.h',
              'test/automation/automation_proxy.cc',
              'test/automation/automation_proxy.h',
              'test/automation/browser_proxy.cc',
              'test/automation/browser_proxy.h',
              'test/automation/tab_proxy.cc',
              'test/automation/tab_proxy.h',
-             'test/automation/value_conversion_traits.cc',
-             'test/automation/value_conversion_traits.h',
-             'test/automation/value_conversion_util.h',
              'test/automation/window_proxy.cc',
              'test/automation/window_proxy.h',
           ],
@@ -953,16 +902,13 @@
           'dependencies': [
             'installer_util',
             '../base/base.gyp:base',
-            '../breakpad/breakpad.gyp:breakpad_handler',
-            '../breakpad/breakpad.gyp:breakpad_sender',
             '../chrome/common_constants.gyp:common_constants',
+            '../components/components.gyp:breakpad_crash_service',
           ],
           'include_dirs': [
             '..',
           ],
           'sources': [
-            'tools/crash_service/crash_service.cc',
-            'tools/crash_service/crash_service.h',
             'tools/crash_service/main.cc',
           ],
           'msvs_settings': {
@@ -1020,16 +966,13 @@
           'dependencies': [
             'installer_util_nacl_win64',
             '../base/base.gyp:base_static_win64',
-            '../breakpad/breakpad.gyp:breakpad_handler_win64',
-            '../breakpad/breakpad.gyp:breakpad_sender_win64',
             '../chrome/common_constants.gyp:common_constants_win64',
+            '../components/components.gyp:breakpad_crash_service_win64',
           ],
           'include_dirs': [
             '..',
           ],
           'sources': [
-            'tools/crash_service/crash_service.cc',
-            'tools/crash_service/crash_service.h',
             'tools/crash_service/main.cc',
             '../content/public/common/content_switches.cc',
           ],

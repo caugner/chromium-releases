@@ -14,11 +14,11 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_profile_client.h"
 #include "chromeos/network/network_ui_data.h"
-#include "chromeos/network/onc/onc_constants.h"
 #include "chromeos/network/onc/onc_signature.h"
 #include "chromeos/network/onc/onc_translator.h"
 #include "chromeos/network/policy_util.h"
 #include "chromeos/network/shill_property_util.h"
+#include "components/onc/onc_constants.h"
 #include "dbus/object_path.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -43,11 +43,14 @@ const base::DictionaryValue* GetByGUID(
 
 }  // namespace
 
-PolicyApplicator::PolicyApplicator(base::WeakPtr<ConfigurationHandler> handler,
-                                   const NetworkProfile& profile,
-                                   const GuidToPolicyMap& all_policies,
-                                   std::set<std::string>* modified_policies)
+PolicyApplicator::PolicyApplicator(
+    base::WeakPtr<ConfigurationHandler> handler,
+    const NetworkProfile& profile,
+    const GuidToPolicyMap& all_policies,
+    const base::DictionaryValue& global_network_config,
+    std::set<std::string>* modified_policies)
     : handler_(handler), profile_(profile) {
+  global_network_config_.MergeDictionary(&global_network_config);
   remaining_policies_.swap(*modified_policies);
   for (GuidToPolicyMap::const_iterator it = all_policies.begin();
        it != all_policies.end(); ++it) {
@@ -73,10 +76,10 @@ void PolicyApplicator::GetProfilePropertiesCallback(
   VLOG(2) << "Received properties for profile " << profile_.ToDebugString();
   const base::ListValue* entries = NULL;
   if (!profile_properties.GetListWithoutPathExpansion(
-           flimflam::kEntriesProperty, &entries)) {
+           shill::kEntriesProperty, &entries)) {
     LOG(ERROR) << "Profile " << profile_.ToDebugString()
                << " doesn't contain the property "
-               << flimflam::kEntriesProperty;
+               << shill::kEntriesProperty;
     return;
   }
 
@@ -110,7 +113,7 @@ void PolicyApplicator::GetEntryCallback(
                                           &onc::kNetworkWithStateSignature));
 
   std::string old_guid;
-  if (!onc_part->GetStringWithoutPathExpansion(onc::network_config::kGUID,
+  if (!onc_part->GetStringWithoutPathExpansion(::onc::network_config::kGUID,
                                                &old_guid)) {
     VLOG(1) << "Entry " << entry << " of profile " << profile_.ToDebugString()
             << " doesn't contain a GUID.";
@@ -130,8 +133,9 @@ void PolicyApplicator::GetEntryCallback(
   }
 
   bool was_managed = !old_guid.empty() && ui_data &&
-                     (ui_data->onc_source() == onc::ONC_SOURCE_DEVICE_POLICY ||
-                      ui_data->onc_source() == onc::ONC_SOURCE_USER_POLICY);
+                     (ui_data->onc_source() ==
+                          ::onc::ONC_SOURCE_DEVICE_POLICY ||
+                      ui_data->onc_source() == ::onc::ONC_SOURCE_USER_POLICY);
 
   const base::DictionaryValue* new_policy = NULL;
   if (was_managed) {
@@ -148,7 +152,7 @@ void PolicyApplicator::GetEntryCallback(
 
   if (new_policy) {
     std::string new_guid;
-    new_policy->GetStringWithoutPathExpansion(onc::network_config::kGUID,
+    new_policy->GetStringWithoutPathExpansion(::onc::network_config::kGUID,
                                               &new_guid);
 
     VLOG_IF(1, was_managed && old_guid != new_guid)
@@ -190,10 +194,20 @@ void PolicyApplicator::GetEntryCallback(
     // unclear which values originating the policy should be removed.
     DeleteEntry(entry);
   } else {
-    VLOG(2) << "Ignore unmanaged entry.";
+    // The entry wasn't managed and doesn't match any current policy. Global
+    // network settings have to be applied.
 
-    // The entry wasn't managed and doesn't match any current policy. Thus
-    // leave it as it is.
+    base::DictionaryValue shill_properties_to_update;
+    GetPropertiesForUnmanagedEntry(entry_properties,
+                                   &shill_properties_to_update);
+    if (shill_properties_to_update.empty()) {
+      VLOG(2) << "Ignore unmanaged entry.";
+      // Calling a SetProperties of Shill with an empty dictionary is a no op.
+    } else {
+      VLOG(2) << "Apply global network config to unmanaged entry.";
+      handler_->UpdateExistingConfigurationWithPropertiesFromPolicy(
+          entry_properties, shill_properties_to_update);
+    }
   }
 }
 
@@ -209,10 +223,57 @@ void PolicyApplicator::CreateAndWriteNewShillConfiguration(
     const std::string& guid,
     const base::DictionaryValue& policy,
     const base::DictionaryValue* user_settings) {
+  // Ethernet (non EAP) settings, like GUID or UIData, cannot be stored per
+  // user. Abort in that case.
+  std::string type;
+  policy.GetStringWithoutPathExpansion(::onc::network_config::kType, &type);
+  if (type == ::onc::network_type::kEthernet &&
+      profile_.type() == NetworkProfile::TYPE_USER) {
+    const base::DictionaryValue* ethernet = NULL;
+    policy.GetDictionaryWithoutPathExpansion(::onc::network_config::kEthernet,
+                                             &ethernet);
+    std::string auth;
+    ethernet->GetStringWithoutPathExpansion(::onc::ethernet::kAuthentication,
+                                            &auth);
+    if (auth == ::onc::ethernet::kNone)
+      return;
+  }
+
   scoped_ptr<base::DictionaryValue> shill_dictionary =
       policy_util::CreateShillConfiguration(
           profile_, guid, &policy, user_settings);
   handler_->CreateConfigurationFromPolicy(*shill_dictionary);
+}
+
+void PolicyApplicator::GetPropertiesForUnmanagedEntry(
+    const base::DictionaryValue& entry_properties,
+    base::DictionaryValue* properties_to_update) const {
+  // kAllowOnlyPolicyNetworksToAutoconnect is currently the only global config.
+
+  std::string type;
+  entry_properties.GetStringWithoutPathExpansion(shill::kTypeProperty, &type);
+  if (NetworkTypePattern::Ethernet().MatchesType(type))
+    return;  // Autoconnect for Ethernet cannot be configured.
+
+  // By default all networks are allowed to autoconnect.
+  bool only_policy_autoconnect = false;
+  global_network_config_.GetBooleanWithoutPathExpansion(
+      ::onc::global_network_config::kAllowOnlyPolicyNetworksToAutoconnect,
+      &only_policy_autoconnect);
+  if (!only_policy_autoconnect)
+    return;
+
+  bool old_autoconnect = false;
+  if (entry_properties.GetBooleanWithoutPathExpansion(
+          shill::kAutoConnectProperty, &old_autoconnect) &&
+      !old_autoconnect) {
+    // Autoconnect is already explictly disabled. No need to set it again.
+    return;
+  }
+  // If autconnect is not explicitly set yet, it might automatically be enabled
+  // by Shill. To prevent that, disable it explicitly.
+  properties_to_update->SetBooleanWithoutPathExpansion(
+      shill::kAutoConnectProperty, false);
 }
 
 PolicyApplicator::~PolicyApplicator() {

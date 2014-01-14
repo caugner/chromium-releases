@@ -31,6 +31,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "crypto/sha2.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/manifest.h"
 
 using base::RandDouble;
@@ -51,7 +52,9 @@ namespace {
 const int kStartupWaitSeconds = 60 * 5;
 
 // For sanity checking on update frequency - enforced in release mode only.
+#ifdef NDEBUG
 const int kMinUpdateFrequencySeconds = 30;
+#endif
 const int kMaxUpdateFrequencySeconds = 60 * 60 * 24 * 7;  // 7 days
 
 // Require at least 5 seconds between consecutive non-succesful extension update
@@ -249,7 +252,7 @@ void ExtensionUpdater::TimerFired() {
 
   // If the user has overridden the update frequency, don't bother reporting
   // this.
-  if (frequency_seconds_ == ExtensionService::kDefaultUpdateFrequencySeconds) {
+  if (frequency_seconds_ == extensions::kDefaultUpdateFrequencySeconds) {
     Time last = Time::FromInternalValue(prefs_->GetInt64(
         kLastExtensionsUpdateCheck));
     if (last.ToInternalValue() != 0) {

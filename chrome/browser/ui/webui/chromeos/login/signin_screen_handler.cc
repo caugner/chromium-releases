@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 
 #include "base/callback.h"
-#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
@@ -13,6 +12,7 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -36,7 +36,6 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/native_window_delegate.h"
@@ -241,7 +240,7 @@ std::string GetNetworkName(const std::string& service_path) {
 // Returns captive portal state for a network by its service path.
 NetworkPortalDetector::CaptivePortalState GetCaptivePortalState(
     const std::string& service_path) {
-  NetworkPortalDetector* detector = NetworkPortalDetector::GetInstance();
+  NetworkPortalDetector* detector = NetworkPortalDetector::Get();
   const NetworkState* network = NetworkHandler::Get()->network_state_handler()->
       GetNetworkState(service_path);
   if (!detector || !network)
@@ -252,12 +251,12 @@ NetworkPortalDetector::CaptivePortalState GetCaptivePortalState(
 void RecordDiscrepancyWithShill(
     const NetworkState* network,
     const NetworkPortalDetector::CaptivePortalStatus status) {
-  if (network->connection_state() == flimflam::kStateOnline) {
+  if (network->connection_state() == shill::kStateOnline) {
     UMA_HISTOGRAM_ENUMERATION(
         "CaptivePortal.OOBE.DiscrepancyWithShill_Online",
         status,
         NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_COUNT);
-  } else if (network->connection_state() == flimflam::kStatePortal) {
+  } else if (network->connection_state() == shill::kStatePortal) {
     UMA_HISTOGRAM_ENUMERATION(
         "CaptivePortal.OOBE.DiscrepancyWithShill_RestrictedPool",
         status,
@@ -292,20 +291,20 @@ void RecordNetworkPortalDetectorStats(const std::string& service_path) {
       NOTREACHED();
       break;
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_OFFLINE:
-      if (network->connection_state() == flimflam::kStateOnline ||
-          network->connection_state() == flimflam::kStatePortal)
+      if (network->connection_state() == shill::kStateOnline ||
+          network->connection_state() == shill::kStatePortal)
         RecordDiscrepancyWithShill(network, state.status);
       break;
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE:
-      if (network->connection_state() != flimflam::kStateOnline)
+      if (network->connection_state() != shill::kStateOnline)
         RecordDiscrepancyWithShill(network, state.status);
       break;
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL:
-      if (network->connection_state() != flimflam::kStatePortal)
+      if (network->connection_state() != shill::kStatePortal)
         RecordDiscrepancyWithShill(network, state.status);
       break;
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED:
-      if (network->connection_state() != flimflam::kStateOnline)
+      if (network->connection_state() != shill::kStateOnline)
         RecordDiscrepancyWithShill(network, state.status);
       break;
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_COUNT:
@@ -398,7 +397,8 @@ SigninScreenHandler::SigninScreenHandler(
       is_first_update_state_call_(true),
       offline_login_active_(false),
       last_network_state_(NetworkStateInformer::UNKNOWN),
-      has_pending_auth_ui_(false) {
+      has_pending_auth_ui_(false),
+      wait_for_auto_enrollment_check_(false) {
   DCHECK(network_state_informer_.get());
   DCHECK(error_screen_actor_);
   DCHECK(core_oobe_actor_);
@@ -1322,8 +1322,13 @@ void SigninScreenHandler::HandleToggleEnrollmentScreen() {
 
 void SigninScreenHandler::HandleToggleKioskEnableScreen() {
   if (delegate_ &&
+      !wait_for_auto_enrollment_check_ &&
       !g_browser_process->browser_policy_connector()->IsEnterpriseManaged()) {
-    delegate_->ShowKioskEnableScreen();
+    wait_for_auto_enrollment_check_ = true;
+
+    LoginDisplayHostImpl::default_host()->GetAutoEnrollmentCheckResult(
+        base::Bind(&SigninScreenHandler::ContinueKioskEnableFlow,
+                   weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -1583,6 +1588,10 @@ void SigninScreenHandler::HandleLoginUIStateChanged(const std::string& source,
   if (!KioskAppManager::Get()->GetAutoLaunchApp().empty() &&
       KioskAppManager::Get()->IsAutoLaunchRequested()) {
     LOG(INFO) << "Showing auto-launch warning";
+    // On slow devices, the wallpaper animation is not shown initially, so we
+    // must explicitly load the wallpaper. This is also the case for the
+    // account-picker and gaia-signin UI states.
+    delegate_->LoadSigninWallpaper();
     HandleToggleKioskAutolaunchScreen();
     return;
   }
@@ -1776,6 +1785,24 @@ void SigninScreenHandler::SubmitLoginFormForTest() {
   // Test properties are cleared in HandleCompleteLogin because the form
   // submission might fail and login will not be attempted after reloading
   // if they are cleared here.
+}
+
+void SigninScreenHandler::ContinueKioskEnableFlow(bool should_auto_enroll) {
+  wait_for_auto_enrollment_check_ = false;
+
+  // Do not proceed with kiosk enable when auto enroll will be enforced.
+  // TODO(xiyuan): Add an error UI feedkback so user knows what happens.
+  if (should_auto_enroll) {
+    LOG(WARNING) << "Kiosk enable flow aborted because auto enrollment is "
+                    "going to be enforced.";
+
+    if (!kiosk_enable_flow_aborted_callback_for_test_.is_null())
+      kiosk_enable_flow_aborted_callback_for_test_.Run();
+    return;
+  }
+
+  if (delegate_)
+    delegate_->ShowKioskEnableScreen();
 }
 
 }  // namespace chromeos

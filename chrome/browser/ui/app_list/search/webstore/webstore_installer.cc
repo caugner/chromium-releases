@@ -5,7 +5,8 @@
 #include "chrome/browser/ui/app_list/search/webstore/webstore_installer.h"
 
 #include "chrome/browser/extensions/extension_install_prompt.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 
 namespace app_list {
 
@@ -15,7 +16,10 @@ WebstoreInstaller::WebstoreInstaller(const std::string& webstore_item_id,
                                      const Callback& callback)
     : WebstoreStartupInstaller(webstore_item_id, profile, true, callback),
       profile_(profile),
-      parent_window_(parent_window) {}
+      parent_window_(parent_window) {
+  set_install_source(
+      extensions::WebstoreInstaller::INSTALL_SOURCE_APP_LAUNCHER);
+}
 
 WebstoreInstaller::~WebstoreInstaller() {}
 
@@ -26,9 +30,9 @@ scoped_ptr<ExtensionInstallPrompt> WebstoreInstaller::CreateInstallUI() {
 
 content::WebContents* WebstoreInstaller::OpenURL(
     const content::OpenURLParams& params) {
-  Browser* browser = chrome::FindOrCreateTabbedBrowser(
+  chrome::ScopedTabbedBrowserDisplayer displayer(
       profile_, chrome::GetActiveDesktop());
-  return browser->OpenURL(params);
+  return displayer.browser()->OpenURL(params);
 }
 
 }  // namespace app_list

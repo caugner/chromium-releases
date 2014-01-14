@@ -6,9 +6,11 @@
 #define ASH_WM_WINDOW_STATE_H_
 
 #include "ash/ash_export.h"
+#include "ash/wm/wm_types.h"
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "ui/aura/window_observer.h"
 #include "ui/base/ui_base_types.h"
 
 namespace aura {
@@ -20,7 +22,11 @@ class Rect;
 }
 
 namespace ash {
+class WindowResizer;
+
 namespace wm {
+class WindowStateDelegate;
+class WindowStateObserver;
 
 // WindowState manages and defines ash specific window state and
 // behavior. Ash specific per-window state (such as ones that controls
@@ -33,25 +39,25 @@ namespace wm {
 // Prefer using this class instead of passing aura::Window* around in
 // ash code as this is often what you need to interact with, and
 // accessing the window using |window()| is cheap.
-class ASH_EXPORT WindowState {
+class ASH_EXPORT WindowState : public aura::WindowObserver {
  public:
-  class ASH_EXPORT Observer {
-   public:
-    // Called when the tracked_by_workspace has changed.
-    virtual void OnTrackedByWorkspaceChanged(aura::Window* window,
-                                             bool old_value) {}
-  };
-
   static bool IsMaximizedOrFullscreenState(ui::WindowShowState state);
 
   explicit WindowState(aura::Window* window);
-  ~WindowState();
+  virtual ~WindowState();
 
   aura::Window* window() { return window_; }
   const aura::Window* window() const { return window_; }
 
-  // Returns the window's current shows tate.
+  void SetDelegate(scoped_ptr<WindowStateDelegate> delegate);
+
+  // Returns the window's current show state.
   ui::WindowShowState GetShowState() const;
+
+  // Returns the window's current ash show type.
+  // Refer to WindowShowType definition in wm_types.h as for why Ash
+  // has its own show type.
+  WindowShowType window_show_type() const { return window_show_type_; }
 
   // Predicates to check window state.
   bool IsMinimized() const;
@@ -62,6 +68,7 @@ class ASH_EXPORT WindowState {
   // SHOW_STATE_DEFAULT.
   bool IsNormalShowState() const;
   bool IsActive() const;
+  bool IsDocked() const;
 
   // Checks if the window can change its state accordingly.
   bool CanMaximize() const;
@@ -80,6 +87,9 @@ class ASH_EXPORT WindowState {
   void Deactivate();
   void Restore();
   void ToggleMaximized();
+  void ToggleFullscreen();
+  void SnapLeft(const gfx::Rect& bounds);
+  void SnapRight(const gfx::Rect& bounds);
 
   // Sets the window's bounds in screen coordinates.
   void SetBoundsInScreen(const gfx::Rect& bounds_in_screen);
@@ -119,6 +129,37 @@ class ASH_EXPORT WindowState {
     always_restores_to_restore_bounds_ = value;
   }
 
+  // Gets/sets whether the shelf should be hidden when this window is
+  // fullscreen.
+  bool hide_shelf_when_fullscreen() const {
+    return hide_shelf_when_fullscreen_;
+  }
+
+  void set_hide_shelf_when_fullscreen(bool value) {
+    hide_shelf_when_fullscreen_ = value;
+  }
+
+  // Sets/gets the flag to suppress the cross-fade animation for
+  // the transition to the fullscreen state.
+  bool animate_to_fullscreen() const {
+    return animate_to_fullscreen_;
+  }
+  void set_animate_to_fullscreen(bool value) {
+    animate_to_fullscreen_ = value;
+  }
+
+  // If the minimum visibilty is true, ash will try to keep a
+  // minimum amount of the window is always visible on the work area
+  // when shown.
+  // TODO(oshima): Consolidate this and window_position_managed
+  // into single parameter to control the window placement.
+  bool minimum_visibility() const {
+    return minimum_visibility_;
+  }
+  void set_minimum_visibility(bool minimum_visibility) {
+    minimum_visibility_ = minimum_visibility;
+  }
+
   // Gets/Sets the bounds of the window before it was moved by the auto window
   // management. As long as it was not auto-managed, it will return NULL.
   const gfx::Rect* pre_auto_manage_window_bounds() const {
@@ -128,8 +169,8 @@ class ASH_EXPORT WindowState {
 
   // Layout related properties
 
-  void AddObserver(Observer* observer);
-  void RemoveObserver(Observer* observer);
+  void AddObserver(WindowStateObserver* observer);
+  void RemoveObserver(WindowStateObserver* observer);
 
   // Whether the window is tracked by workspace code. Default is
   // true. If set to false the workspace does not switch the current
@@ -175,9 +216,50 @@ class ASH_EXPORT WindowState {
     ignored_by_shelf_ = ignored_by_shelf;
   }
 
+  // True if the window should be offered a chance to consume special system
+  // keys such as brightness, volume, etc. that are usually handled by the
+  // shell.
+  bool can_consume_system_keys() const { return can_consume_system_keys_; }
+  void set_can_consume_system_keys(bool can_consume_system_keys) {
+    can_consume_system_keys_ = can_consume_system_keys;
+  }
+
+  // True if this window has requested that the top-row keys (back, forward,
+  // brightness, volume) should be treated as function keys.
+  bool top_row_keys_are_function_keys() const {
+    return top_row_keys_are_function_keys_;
+  }
+  void set_top_row_keys_are_function_keys(bool value) {
+    top_row_keys_are_function_keys_ = value;
+  }
+
+  // Returns or sets a pointer to WindowResizer when resizing is active.
+  // The pointer to a WindowResizer that is returned is set when a resizer gets
+  // created and cleared when it gets destroyed. WindowState does not own the
+  // |window_resizer_| instance and the resizer's lifetime is controlled
+  // externally. It can be used to avoid creating multiple instances of a
+  // WindowResizer for the same window.
+  WindowResizer* window_resizer() const {
+    return window_resizer_;
+  }
+  void set_window_resizer_(WindowResizer* window_resizer) {
+    window_resizer_ = window_resizer;
+  }
+
+  // aura::WindowObserver overrides:
+  virtual void OnWindowPropertyChanged(aura::Window* window,
+                                       const void* key,
+                                       intptr_t old) OVERRIDE;
+  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
+
  private:
+  // Snaps the window to left or right of the desktop with given bounds.
+  void SnapWindow(WindowShowType left_or_right,
+                  const gfx::Rect& bounds);
+
   // The owner of this window settings.
   aura::Window* window_;
+  scoped_ptr<WindowStateDelegate> delegate_;
 
   bool tracked_by_workspace_;
   bool window_position_managed_;
@@ -185,15 +267,23 @@ class ASH_EXPORT WindowState {
   bool panel_attached_;
   bool continue_drag_after_reparent_;
   bool ignored_by_shelf_;
+  bool can_consume_system_keys_;
+  bool top_row_keys_are_function_keys_;
+  WindowResizer* window_resizer_;
 
   bool always_restores_to_restore_bounds_;
+  bool hide_shelf_when_fullscreen_;
+  bool animate_to_fullscreen_;
+  bool minimum_visibility_;
 
   // A property to remember the window position which was set before the
   // auto window position manager changed the window bounds, so that it can get
   // restored when only this one window gets shown.
   scoped_ptr<gfx::Rect> pre_auto_manage_window_bounds_;
 
-  ObserverList<Observer> observer_list_;
+  ObserverList<WindowStateObserver> observer_list_;
+
+  WindowShowType window_show_type_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowState);
 };

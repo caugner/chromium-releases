@@ -10,13 +10,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/printing/print_job_manager.h"
+#include "chrome/browser/printing/printing_ui_web_contents_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/common/print_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 
 #if defined(ENABLE_FULL_PRINTING)
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
@@ -30,6 +30,7 @@
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "chrome/browser/printing/print_dialog_cloud.h"
+#include "content/public/browser/web_contents_view.h"
 #endif
 
 #if defined(OS_ANDROID)
@@ -70,20 +71,19 @@ void RenderParamsFromPrintSettings(const printing::PrintSettings& settings,
   params->margin_left = settings.page_setup_device_units().content_area().x();
   params->dpi = settings.dpi();
   // Currently hardcoded at 1.25. See PrintSettings' constructor.
-  params->min_shrink = settings.min_shrink;
+  params->min_shrink = settings.min_shrink();
   // Currently hardcoded at 2.0. See PrintSettings' constructor.
-  params->max_shrink = settings.max_shrink;
+  params->max_shrink = settings.max_shrink();
   // Currently hardcoded at 72dpi. See PrintSettings' constructor.
-  params->desired_dpi = settings.desired_dpi;
+  params->desired_dpi = settings.desired_dpi();
   // Always use an invalid cookie.
   params->document_cookie = 0;
-  params->selection_only = settings.selection_only;
+  params->selection_only = settings.selection_only();
   params->supports_alpha_blend = settings.supports_alpha_blend();
-  params->should_print_backgrounds = settings.should_print_backgrounds;
-  params->display_header_footer = settings.display_header_footer;
-  params->date = settings.date;
-  params->title = settings.title;
-  params->url = settings.url;
+  params->should_print_backgrounds = settings.should_print_backgrounds();
+  params->display_header_footer = settings.display_header_footer();
+  params->title = settings.title();
+  params->url = settings.url();
 }
 
 }  // namespace
@@ -185,6 +185,8 @@ void PrintingMessageFilter::OnAllocateTempFileForPrinting(
 #elif defined(OS_ANDROID)
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   content::WebContents* wc = GetWebContentsForRenderView(render_view_id);
+  if (!wc)
+    return;
   printing::PrintViewManagerBasic* print_view_manager =
       printing::PrintViewManagerBasic::FromWebContents(wc);
   // The file descriptor is originally created in & passed from the Android
@@ -217,6 +219,8 @@ void PrintingMessageFilter::OnTempFileForPrintingWritten(int render_view_id,
 #elif defined(OS_ANDROID)
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   content::WebContents* wc = GetWebContentsForRenderView(render_view_id);
+  if (!wc)
+    return;
   printing::PrintViewManagerBasic* print_view_manager =
       printing::PrintViewManagerBasic::FromWebContents(wc);
   const base::FileDescriptor& file_descriptor =
@@ -233,6 +237,8 @@ void PrintingMessageFilter::CreatePrintDialogForFile(
     int render_view_id,
     const base::FilePath& path) {
   content::WebContents* wc = GetWebContentsForRenderView(render_view_id);
+  if (!wc)
+    return;
   print_dialog_cloud::CreatePrintDialogForFile(
       wc->GetBrowserContext(),
       wc->GetView()->GetTopLevelNativeWindow(),
@@ -249,7 +255,7 @@ content::WebContents* PrintingMessageFilter::GetWebContentsForRenderView(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   content::RenderViewHost* view = content::RenderViewHost::FromID(
       render_process_id_, render_view_id);
-  return content::WebContents::FromRenderViewHost(view);
+  return view ? content::WebContents::FromRenderViewHost(view) : NULL;
 }
 
 struct PrintingMessageFilter::GetPrintSettingsForRenderViewParams {
@@ -266,13 +272,30 @@ void PrintingMessageFilter::GetPrintSettingsForRenderView(
     scoped_refptr<printing::PrinterQuery> printer_query) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   content::WebContents* wc = GetWebContentsForRenderView(render_view_id);
+  if (wc) {
+    scoped_ptr<PrintingUIWebContentsObserver> wc_observer(
+        new PrintingUIWebContentsObserver(wc));
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&printing::PrinterQuery::GetSettings, printer_query,
+                   params.ask_user_for_settings, base::Passed(&wc_observer),
+                   params.expected_page_count, params.has_selection,
+                   params.margin_type, callback));
+  } else {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&PrintingMessageFilter::OnGetPrintSettingsFailed, this,
+                   callback, printer_query));
+  }
+}
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&printing::PrinterQuery::GetSettings, printer_query,
-                 params.ask_user_for_settings, wc->GetView()->GetNativeView(),
-                 params.expected_page_count, params.has_selection,
-                 params.margin_type, callback));
+void PrintingMessageFilter::OnGetPrintSettingsFailed(
+    const base::Closure& callback,
+    scoped_refptr<printing::PrinterQuery> printer_query) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  printer_query->GetSettingsDone(printing::PrintSettings(),
+                                 printing::PrintingContext::FAILED);
+  callback.Run();
 }
 
 void PrintingMessageFilter::OnIsPrintingEnabled(bool* is_enabled) {
@@ -370,7 +393,7 @@ void PrintingMessageFilter::OnScriptedPrintReply(
     RenderParamsFromPrintSettings(printer_query->settings(), &params.params);
     params.params.document_cookie = printer_query->cookie();
     params.pages =
-        printing::PageRange::GetPages(printer_query->settings().ranges);
+        printing::PageRange::GetPages(printer_query->settings().ranges());
   }
   PrintHostMsg_ScriptedPrint::WriteReplyParams(reply_msg, params);
   Send(reply_msg);
@@ -395,6 +418,8 @@ void PrintingMessageFilter::OnScriptedPrintReply(
 void PrintingMessageFilter::UpdateFileDescriptor(int render_view_id, int fd) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   content::WebContents* wc = GetWebContentsForRenderView(render_view_id);
+  if (!wc)
+    return;
   printing::PrintViewManagerBasic* print_view_manager =
       printing::PrintViewManagerBasic::FromWebContents(wc);
   print_view_manager->set_file_descriptor(base::FileDescriptor(fd, false));
@@ -430,7 +455,7 @@ void PrintingMessageFilter::OnUpdatePrintSettingsReply(
     RenderParamsFromPrintSettings(printer_query->settings(), &params.params);
     params.params.document_cookie = printer_query->cookie();
     params.pages =
-        printing::PageRange::GetPages(printer_query->settings().ranges);
+        printing::PageRange::GetPages(printer_query->settings().ranges());
   }
   PrintHostMsg_UpdatePrintSettings::WriteReplyParams(reply_msg, params);
   Send(reply_msg);

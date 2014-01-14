@@ -10,21 +10,15 @@
 #include "base/path_service.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_system.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
-#include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_install_prompt.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -42,7 +36,6 @@ namespace file_manager {
 namespace util {
 namespace {
 
-const base::FilePath::CharType kCRXExtension[] = FILE_PATH_LITERAL(".crx");
 const base::FilePath::CharType kPdfExtension[] = FILE_PATH_LITERAL(".pdf");
 const base::FilePath::CharType kSwfExtension[] = FILE_PATH_LITERAL(".swf");
 
@@ -118,42 +111,10 @@ void OpenNewTab(Profile* profile, const GURL& url) {
   if (!g_browser_process->profile_manager()->IsValidProfile(profile))
     return;
 
-  Browser* browser = chrome::FindOrCreateTabbedBrowser(
+  chrome::ScopedTabbedBrowserDisplayer displayer(
       profile, chrome::HOST_DESKTOP_TYPE_ASH);
-  chrome::AddSelectedTabWithURL(browser, url, content::PAGE_TRANSITION_LINK);
-  // If the current browser is not tabbed then the new tab will be created
-  // in a different browser. Make sure it is visible.
-  browser->window()->Show();
-}
-
-void InstallCRX(Profile* profile, const base::FilePath& file_path) {
-  DCHECK(profile);
-
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  CHECK(service);
-
-  scoped_refptr<extensions::CrxInstaller> installer(
-      extensions::CrxInstaller::Create(
-          service,
-          scoped_ptr<ExtensionInstallPrompt>(new ExtensionInstallPrompt(
-              profile, NULL, NULL))));
-  installer->set_error_on_unsupported_requirements(true);
-  installer->set_is_gallery_install(false);
-  installer->set_allow_silent_install(false);
-  installer->InstallCrx(file_path);
-}
-
-// Called when a crx file on Drive was downloaded.
-void OnCRXDownloadCallback(Profile* profile,
-                           drive::FileError error,
-                           const base::FilePath& file,
-                           scoped_ptr<drive::ResourceEntry> entry) {
-  DCHECK(profile);
-
-  if (error != drive::FILE_ERROR_OK)
-    return;
-  InstallCRX(profile, file);
+  chrome::AddSelectedTabWithURL(displayer.browser(), url,
+      content::PAGE_TRANSITION_LINK);
 }
 
 // Reads the alternate URL from a GDoc file. When it fails, returns a file URL
@@ -200,21 +161,6 @@ bool OpenFileWithBrowser(Profile* profile, const base::FilePath& file_path) {
           FROM_HERE,
           base::Bind(&ReadUrlFromGDocOnBlockingPool, file_path),
           base::Bind(&OpenNewTab, profile));
-    }
-    return true;
-  }
-
-  if (file_path.MatchesExtension(kCRXExtension)) {
-    if (drive::util::IsUnderDriveMountPoint(file_path)) {
-      drive::FileSystemInterface* file_system =
-          drive::util::GetFileSystemByProfile(profile);
-      if (!file_system)
-        return false;
-      file_system->GetFileByPath(
-          drive::util::ExtractDrivePath(file_path),
-          base::Bind(&OnCRXDownloadCallback, profile));
-    } else {
-      InstallCRX(profile, file_path);
     }
     return true;
   }

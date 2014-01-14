@@ -847,6 +847,8 @@ bool PrerenderLocalPredictor::ApplyParsedPrerenderServiceResponse(
                                               in_index == 1,
                                               (1 - in_index_timed_out) == 1);
       }
+      if (list->GetSize() > 0)
+        RecordEvent(EVENT_PRERENDER_SERIVCE_RETURNED_HINTING_CANDIDATES);
     }
   }
 
@@ -971,6 +973,11 @@ HistoryService* PrerenderLocalPredictor::GetHistoryIfExists() const {
 void PrerenderLocalPredictor::Init() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   RecordEvent(EVENT_INIT_STARTED);
+  Profile* profile = prerender_manager_->profile();
+  if (!profile || DisableLocalPredictorBasedOnSyncAndConfiguration(profile)) {
+    RecordEvent(EVENT_INIT_FAILED_UNENCRYPTED_SYNC_NOT_ENABLED);
+    return;
+  }
   HistoryService* history = GetHistoryIfExists();
   if (history) {
     CHECK(!is_visit_database_observer_);
@@ -1100,6 +1107,8 @@ void PrerenderLocalPredictor::ContinuePrerenderCheck(
       }
       RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_EXAMINE_NEXT_URL_SERVICE);
     }
+
+    RecordEvent(EVENT_CONTINUE_PRERENDER_CHECK_EXAMINE_NEXT_URL_NOT_SKIPPED);
 
     // We need to check whether we can issue a prerender for this URL.
     // We test a set of conditions. Each condition can either rule out

@@ -19,6 +19,7 @@
 #include "net/quic/quic_client_session.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_connection_helper.h"
+#include "net/quic/quic_default_packet_writer.h"
 #include "net/quic/quic_http_utils.h"
 #include "net/quic/quic_reliable_client_stream.h"
 #include "net/quic/spdy_utils.h"
@@ -51,8 +52,10 @@ class TestQuicConnection : public QuicConnection {
  public:
   TestQuicConnection(QuicGuid guid,
                      IPEndPoint address,
-                     QuicConnectionHelper* helper)
-      : QuicConnection(guid, address, helper, false, QuicVersionMax()) {
+                     QuicConnectionHelper* helper,
+                     QuicPacketWriter* writer)
+      : QuicConnection(guid, address, helper, writer, false,
+                       QuicSupportedVersions()) {
   }
 
   void SetSendAlgorithm(SendAlgorithmInterface* send_algorithm) {
@@ -132,22 +135,19 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
         use_closing_stream_(false),
         read_buffer_(new IOBufferWithSize(4096)),
         guid_(2),
-        framer_(QuicVersionMax(), QuicTime::Zero(), false),
+        framer_(QuicSupportedVersions(), QuicTime::Zero(), false),
         creator_(guid_, &framer_, &random_, false) {
     IPAddressNumber ip;
     CHECK(ParseIPLiteralToNumber("192.0.2.33", &ip));
     peer_addr_ = IPEndPoint(ip, 443);
     self_addr_ = IPEndPoint(ip, 8435);
-    // TODO(rch): remove this.
-    QuicConnection::g_acks_do_not_instigate_acks = true;
   }
 
   ~QuicHttpStreamTest() {
+    session_->CloseSessionOnError(ERR_ABORTED);
     for (size_t i = 0; i < writes_.size(); i++) {
       delete writes_[i].packet;
     }
-    // TODO(rch): remove this.
-    QuicConnection::g_acks_do_not_instigate_acks = false;
   }
 
   // Adds a packet to the list of expected writes.
@@ -188,7 +188,8 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
     receive_algorithm_ = new TestReceiveAlgorithm(NULL);
     EXPECT_CALL(*receive_algorithm_, RecordIncomingPacket(_, _, _, _)).
         Times(AnyNumber());
-    EXPECT_CALL(*send_algorithm_, SentPacket(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*send_algorithm_,
+                OnPacketSent(_, _, _, _, _)).Times(AnyNumber());
     EXPECT_CALL(*send_algorithm_, RetransmissionDelay()).WillRepeatedly(
         Return(QuicTime::Delta::Zero()));
     EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _, _)).
@@ -197,16 +198,20 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
         Return(QuicTime::Delta::Zero()));
     EXPECT_CALL(*send_algorithm_, BandwidthEstimate()).WillRepeatedly(
         Return(QuicBandwidth::Zero()));
-    helper_ = new QuicConnectionHelper(runner_.get(), &clock_,
-                                       &random_generator_, socket);
-    connection_ = new TestQuicConnection(guid_, peer_addr_, helper_);
+    EXPECT_CALL(*send_algorithm_, SetFromConfig(_, _)).Times(AnyNumber());
+    helper_.reset(new QuicConnectionHelper(runner_.get(), &clock_,
+                                           &random_generator_));
+    writer_.reset(new QuicDefaultPacketWriter(socket));
+    connection_ = new TestQuicConnection(guid_, peer_addr_, helper_.get(),
+                                         writer_.get());
     connection_->set_visitor(&visitor_);
     connection_->SetSendAlgorithm(send_algorithm_);
     connection_->SetReceiveAlgorithm(receive_algorithm_);
     crypto_config_.SetDefaults();
     session_.reset(
         new QuicClientSession(connection_,
-                              scoped_ptr<DatagramClientSocket>(socket), NULL,
+                              scoped_ptr<DatagramClientSocket>(socket),
+                              writer_.Pass(), NULL,
                               &crypto_client_stream_factory_,
                               "www.google.com", DefaultQuicConfig(),
                               &crypto_config_, NULL));
@@ -242,7 +247,7 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
                                    bool write_priority,
                                    RequestPriority priority) {
     QuicSpdyCompressor compressor;
-    if (framer_.version() >= QUIC_VERSION_9 && write_priority) {
+    if (write_priority) {
       return compressor.CompressHeadersWithPriority(
           ConvertRequestPriorityToQuicPriority(priority), headers);
     }
@@ -265,7 +270,7 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
   QuicEncryptedPacket* ConstructRstStreamPacket(
       QuicPacketSequenceNumber sequence_number) {
     InitializeHeader(sequence_number, false);
-    QuicRstStreamFrame frame(3, QUIC_ERROR_PROCESSING_STREAM);
+    QuicRstStreamFrame frame(3, QUIC_STREAM_CANCELLED);
     return ConstructPacket(header_, QuicFrame(&frame));
   }
 
@@ -302,9 +307,10 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
   MockClock clock_;
   MockRandom random_generator_;
   TestQuicConnection* connection_;
-  QuicConnectionHelper* helper_;
+  scoped_ptr<QuicConnectionHelper> helper_;
   testing::StrictMock<MockConnectionVisitor> visitor_;
   scoped_ptr<QuicHttpStream> stream_;
+  scoped_ptr<QuicDefaultPacketWriter> writer_;
   scoped_ptr<QuicClientSession> session_;
   QuicCryptoClientConfig crypto_config_;
   TestCompletionCallback callback_;
@@ -510,7 +516,7 @@ TEST_F(QuicHttpStreamTest, SendPostRequest) {
   ScopedVector<UploadElementReader> element_readers;
   element_readers.push_back(
       new UploadBytesElementReader(kUploadData, strlen(kUploadData)));
-  UploadDataStream upload_data_stream(&element_readers, 0);
+  UploadDataStream upload_data_stream(element_readers.Pass(), 0);
   request_.method = "POST";
   request_.url = GURL("http://www.google.com/");
   request_.upload_data_stream = &upload_data_stream;

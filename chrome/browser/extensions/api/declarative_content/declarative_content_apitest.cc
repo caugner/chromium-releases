@@ -8,6 +8,8 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/test_extension_dir.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "content/public/test/browser_test_utils.h"
@@ -26,11 +28,30 @@ const char kDeclarativeContentManifest[] =
     "  \"background\": {\n"
     "    \"scripts\": [\"background.js\"]\n"
     "  },\n"
+    "  \"page_action\": {},\n"
     "  \"permissions\": [\n"
     "    \"declarativeContent\"\n"
-    "  ],\n"
-    "  \"page_action\": {}\n"
+    "  ]\n"
     "}\n";
+
+const char kBackgroundHelpers[] =
+    "var PageStateMatcher = chrome.declarativeContent.PageStateMatcher;\n"
+    "var ShowPageAction = chrome.declarativeContent.ShowPageAction;\n"
+    "var onPageChanged = chrome.declarativeContent.onPageChanged;\n"
+    "var Reply = window.domAutomationController.send.bind(\n"
+    "    window.domAutomationController);\n"
+    "\n"
+    "function setRules(rules, responseString) {\n"
+    "  onPageChanged.removeRules(undefined, function() {\n"
+    "    onPageChanged.addRules(rules, function() {\n"
+    "      if (chrome.runtime.lastError) {\n"
+    "        Reply(chrome.runtime.lastError.message);\n"
+    "        return;\n"
+    "      }\n"
+    "      Reply(responseString);\n"
+    "    });\n"
+    "  });\n"
+    "};\n";
 
 class DeclarativeContentApiTest : public ExtensionApiTest {
  public:
@@ -55,10 +76,10 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest, Overview) {
       "var ShowPageAction = chrome.declarativeContent.ShowPageAction;\n"
       "\n"
       "var rule0 = {\n"
-      "  conditions: [new PageStateMatcher({pageUrl: {hostPrefix: "
-      "\"test1\"}}),\n"
-      "               new PageStateMatcher({css: "
-      "[\"input[type='password']\"]})],\n"
+      "  conditions: [new PageStateMatcher({\n"
+      "                   pageUrl: {hostPrefix: \"test1\"}}),\n"
+      "               new PageStateMatcher({\n"
+      "                   css: [\"input[type='password']\"]})],\n"
       "  actions: [new ShowPageAction()]\n"
       "}\n"
       "\n"
@@ -96,18 +117,156 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest, Overview) {
   // Insert a password field to make sure that's noticed.
   ASSERT_TRUE(content::ExecuteScript(
       tab, "document.body.innerHTML = '<input type=\"password\">';"));
-  // Give the mutation observer a chance to run and send back the
-  // matching-selector update.
+  // Give the style match a chance to run and send back the matching-selector
+  // update.  This takes one time through the Blink message loop to apply the
+  // style to the new element, and a second to dedupe updates.
   ASSERT_TRUE(content::ExecuteScript(tab, std::string()));
-  EXPECT_TRUE(page_action->GetIsVisible(tab_id));
+  ASSERT_TRUE(content::ExecuteScript(tab, std::string()));
+  EXPECT_TRUE(page_action->GetIsVisible(tab_id))
+      << "Adding a matching element should show the page action.";
 
   // Remove it again to make sure that reverts the action.
   ASSERT_TRUE(content::ExecuteScript(
       tab, "document.body.innerHTML = 'Hello world';"));
-  // Give the mutation observer a chance to run and send back the
-  // matching-selector update.
+  // Give the style match a chance to run and send back the
+  // matching-selector update.  This also takes 2 iterations.
   ASSERT_TRUE(content::ExecuteScript(tab, std::string()));
+  ASSERT_TRUE(content::ExecuteScript(tab, std::string()));
+  EXPECT_FALSE(page_action->GetIsVisible(tab_id))
+      << "Removing the matching element should hide the page action again.";
+}
+
+// http://crbug.com/304373
+IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
+                       UninstallWhileActivePageAction) {
+  ext_dir_.WriteManifest(kDeclarativeContentManifest);
+  ext_dir_.WriteFile(FILE_PATH_LITERAL("background.js"), kBackgroundHelpers);
+  const Extension* extension = LoadExtension(ext_dir_.unpacked_path());
+  ASSERT_TRUE(extension);
+  const std::string extension_id = extension->id();
+  const ExtensionAction* page_action = ExtensionActionManager::Get(
+      browser()->profile())->GetPageAction(*extension);
+  ASSERT_TRUE(page_action);
+
+  const std::string kTestRule =
+      "setRules([{\n"
+      "  conditions: [new PageStateMatcher({\n"
+      "                   pageUrl: {hostPrefix: \"test\"}})],\n"
+      "  actions: [new ShowPageAction()]\n"
+      "}], 'test_rule');\n";
+  EXPECT_EQ("test_rule",
+            ExecuteScriptInBackgroundPage(extension_id, kTestRule));
+
+  content::WebContents* const tab =
+      browser()->tab_strip_model()->GetWebContentsAt(0);
+  const int tab_id = ExtensionTabUtil::GetTabId(tab);
+
+  NavigateInRenderer(tab, GURL("http://test/"));
+
+  EXPECT_TRUE(page_action->GetIsVisible(tab_id));
+  EXPECT_TRUE(WaitForPageActionVisibilityChangeTo(1));
+  LocationBarTesting* location_bar =
+      browser()->window()->GetLocationBar()->GetLocationBarForTesting();
+  EXPECT_EQ(1, location_bar->PageActionCount());
+  EXPECT_EQ(1, location_bar->PageActionVisibleCount());
+
+  ReloadExtension(extension_id);  // Invalidates page_action and extension.
+  EXPECT_EQ("test_rule",
+            ExecuteScriptInBackgroundPage(extension_id, kTestRule));
+  // TODO(jyasskin): Apply new rules to existing tabs, without waiting for a
+  // navigation.
+  NavigateInRenderer(tab, GURL("http://test/"));
+  EXPECT_TRUE(WaitForPageActionVisibilityChangeTo(1));
+  EXPECT_EQ(1, location_bar->PageActionCount());
+  EXPECT_EQ(1, location_bar->PageActionVisibleCount());
+
+  UnloadExtension(extension_id);
+  NavigateInRenderer(tab, GURL("http://test/"));
+  EXPECT_TRUE(WaitForPageActionVisibilityChangeTo(0));
+  EXPECT_EQ(0, location_bar->PageActionCount());
+  EXPECT_EQ(0, location_bar->PageActionVisibleCount());
+}
+
+// This tests against a renderer crash that was present during development.
+IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
+                       AddExtensionMatchingExistingTabWithDeadFrames) {
+  ext_dir_.WriteManifest(kDeclarativeContentManifest);
+  ext_dir_.WriteFile(FILE_PATH_LITERAL("background.js"), kBackgroundHelpers);
+  content::WebContents* const tab =
+      browser()->tab_strip_model()->GetWebContentsAt(0);
+  const int tab_id = ExtensionTabUtil::GetTabId(tab);
+
+  ASSERT_TRUE(content::ExecuteScript(
+      tab, "document.body.innerHTML = '<iframe src=\"http://test2\">';"));
+  // Replace the iframe to destroy its WebFrame.
+  ASSERT_TRUE(content::ExecuteScript(
+      tab, "document.body.innerHTML = '<span class=\"foo\">';"));
+
+  const Extension* extension = LoadExtension(ext_dir_.unpacked_path());
+  ASSERT_TRUE(extension);
+  const ExtensionAction* page_action = ExtensionActionManager::Get(
+      browser()->profile())->GetPageAction(*extension);
+  ASSERT_TRUE(page_action);
   EXPECT_FALSE(page_action->GetIsVisible(tab_id));
+
+  EXPECT_EQ("rule0",
+            ExecuteScriptInBackgroundPage(
+                extension->id(),
+                "setRules([{\n"
+                "  conditions: [new PageStateMatcher({\n"
+                "                   css: [\"span[class=foo]\"]})],\n"
+                "  actions: [new ShowPageAction()]\n"
+                "}], 'rule0');\n"));
+  // Give the renderer a chance to apply the rules change and notify the
+  // browser.  This takes one time through the Blink message loop to receive
+  // the rule change and apply the new stylesheet, and a second to dedupe the
+  // update.
+  ASSERT_TRUE(content::ExecuteScript(tab, std::string()));
+  ASSERT_TRUE(content::ExecuteScript(tab, std::string()));
+
+  EXPECT_FALSE(tab->IsCrashed());
+  EXPECT_TRUE(page_action->GetIsVisible(tab_id))
+      << "Loading an extension when an open page matches its rules "
+      << "should show the page action.";
+
+  EXPECT_EQ("removed",
+            ExecuteScriptInBackgroundPage(
+                extension->id(),
+                "onPageChanged.removeRules(undefined, function() {\n"
+                "  window.domAutomationController.send('removed');\n"
+                "});\n"));
+  EXPECT_FALSE(page_action->GetIsVisible(tab_id));
+}
+
+IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
+                       ShowPageActionWithoutPageAction) {
+  std::string manifest_without_page_action = kDeclarativeContentManifest;
+  ReplaceSubstringsAfterOffset(
+      &manifest_without_page_action, 0, "\"page_action\": {},", "");
+  ext_dir_.WriteManifest(manifest_without_page_action);
+  ext_dir_.WriteFile(FILE_PATH_LITERAL("background.js"), kBackgroundHelpers);
+  const Extension* extension = LoadExtension(ext_dir_.unpacked_path());
+  ASSERT_TRUE(extension);
+
+  EXPECT_THAT(ExecuteScriptInBackgroundPage(
+                  extension->id(),
+                  "setRules([{\n"
+                  "  conditions: [new PageStateMatcher({\n"
+                  "                   pageUrl: {hostPrefix: \"test\"}})],\n"
+                  "  actions: [new ShowPageAction()]\n"
+                  "}], 'test_rule');\n"),
+              testing::HasSubstr("without a page action"));
+
+  content::WebContents* const tab =
+      browser()->tab_strip_model()->GetWebContentsAt(0);
+  NavigateInRenderer(tab, GURL("http://test/"));
+
+  EXPECT_EQ(NULL,
+            ExtensionActionManager::Get(browser()->profile())->
+                GetPageAction(*extension));
+  EXPECT_EQ(0,
+            browser()->window()->GetLocationBar()->GetLocationBarForTesting()->
+            PageActionCount());
 }
 
 IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,

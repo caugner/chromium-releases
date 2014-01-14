@@ -165,9 +165,6 @@ bool ExecProcess(const CommandLine& cmdline,
       return false;
     case 0:  // child
       {
-#if defined(OS_MACOSX)
-        base::RestoreDefaultExceptionHandler();
-#endif
         // DANGER: no calls to malloc are allowed from now on:
         // http://crbug.com/36678
 
@@ -304,7 +301,7 @@ Value RunExecScript(Scope* scope,
   }
 
   ScopedTrace trace(TraceItem::TRACE_SCRIPT_EXECUTE, script_source.value());
-  trace.SetToolchain(settings->toolchain()->label());
+  trace.SetToolchain(settings->toolchain_label());
 
   // Add all dependencies of this script, including the script itself, to the
   // build deps.
@@ -351,6 +348,14 @@ Value RunExecScript(Scope* scope,
 
   base::FilePath startup_dir =
       build_settings->GetFullPath(build_settings->build_dir());
+  // The first time a build is run, no targets will have been written so the
+  // build output directory won't exist. We need to make sure it does before
+  // running any scripts with this as its startup directory, although it will
+  // be relatively rare that the directory won't exist by the time we get here.
+  //
+  // If this shows up on benchmarks, we can cache whether we've done this
+  // or not and skip creating the directory.
+  file_util::CreateDirectory(startup_dir);
 
   // Execute the process.
   // TODO(brettw) set the environment block.

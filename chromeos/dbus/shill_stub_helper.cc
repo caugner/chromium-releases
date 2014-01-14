@@ -11,7 +11,6 @@
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/dbus/shill_profile_client.h"
-#include "chromeos/dbus/shill_profile_client_stub.h"
 #include "chromeos/dbus/shill_service_client.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -19,6 +18,11 @@ namespace chromeos {
 namespace shill_stub_helper {
 
 namespace {
+
+const char kDevicePathEthernet[] = "/device/eth1";
+const char kDevicePathWifi[] = "/device/wifi1";
+const char kDevicePathCellular[] = "/device/cellular1";
+const char kDevicePathWimax[] = "/device/wimax1";
 
 const char kStubPortalledWifiName[] = "Portalled Wifi";
 const char kStubPortalledWifiPath[] = "portalled_wifi";
@@ -28,8 +32,8 @@ void UpdatePortalledWifiState() {
       DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
 
   services->SetServiceProperty(kStubPortalledWifiPath,
-                               flimflam::kStateProperty,
-                               base::StringValue(flimflam::kStatePortal));
+                               shill::kStateProperty,
+                               base::StringValue(shill::kStatePortal));
 }
 
 }  // namespace
@@ -59,27 +63,25 @@ void SetupDefaultEnvironment() {
   // Stub Technologies.
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
            chromeos::switches::kDisableStubEthernet)) {
-    manager->AddTechnology(flimflam::kTypeEthernet, true);
+    manager->AddTechnology(shill::kTypeEthernet, true);
   }
-  manager->AddTechnology(flimflam::kTypeWifi, true);
-  manager->AddTechnology(flimflam::kTypeCellular, true);
-  manager->AddTechnology(flimflam::kTypeWimax, true);
+  manager->AddTechnology(shill::kTypeWifi, true);
+  manager->AddTechnology(shill::kTypeCellular, true);
+  manager->AddTechnology(shill::kTypeWimax, true);
 
   profiles->AddProfile(kSharedProfilePath, std::string());
 
-  // Add a wifi device.
-  devices->AddDevice("stub_wifi_device1", flimflam::kTypeWifi, "/device/wifi1");
-
-  // Add a cellular device. Used in SMS stub.
   devices->AddDevice(
-      "stub_cellular_device1", flimflam::kTypeCellular, "/device/cellular1");
-  devices->SetDeviceProperty("stub_cellular_device1",
-                             flimflam::kCarrierProperty,
+      kDevicePathEthernet, shill::kTypeEthernet, "stub_eth_device1");
+  devices->AddDevice(kDevicePathWifi, shill::kTypeWifi, "stub_wifi_device1");
+
+  devices->AddDevice(
+      kDevicePathCellular, shill::kTypeCellular, "stub_cellular_device1");
+  devices->SetDeviceProperty(kDevicePathCellular,
+                             shill::kCarrierProperty,
                              base::StringValue(shill::kCarrierSprint));
 
-  // Add a wimax device.
-  devices->AddDevice(
-      "stub_wimax_device1", flimflam::kTypeWimax, "/device/wimax1");
+  devices->AddDevice(kDevicePathWimax, shill::kTypeWimax, "stub_wimax_device1");
 
   const bool add_to_visible = true;
   const bool add_to_watchlist = true;
@@ -87,9 +89,9 @@ void SetupDefaultEnvironment() {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
            chromeos::switches::kDisableStubEthernet)) {
     services->AddService("eth1", "eth1",
-               flimflam::kTypeEthernet,
-               flimflam::kStateOnline,
-               add_to_visible, add_to_watchlist);
+                         shill::kTypeEthernet,
+                         shill::kStateOnline,
+                         add_to_visible, add_to_watchlist);
     profiles->AddService(kSharedProfilePath, "eth1");
   }
 
@@ -97,41 +99,41 @@ void SetupDefaultEnvironment() {
 
   services->AddService("wifi1",
                        "wifi1",
-                       flimflam::kTypeWifi,
-                       flimflam::kStateOnline,
+                       shill::kTypeWifi,
+                       shill::kStateOnline,
                        add_to_visible, add_to_watchlist);
   services->SetServiceProperty("wifi1",
-                               flimflam::kSecurityProperty,
-                               base::StringValue(flimflam::kSecurityWep));
+                               shill::kSecurityProperty,
+                               base::StringValue(shill::kSecurityWep));
   profiles->AddService(kSharedProfilePath, "wifi1");
 
   services->AddService("wifi2",
                        "wifi2_PSK",
-                       flimflam::kTypeWifi,
-                       flimflam::kStateIdle,
+                       shill::kTypeWifi,
+                       shill::kStateIdle,
                        add_to_visible, add_to_watchlist);
   services->SetServiceProperty("wifi2",
-                               flimflam::kSecurityProperty,
-                               base::StringValue(flimflam::kSecurityPsk));
+                               shill::kSecurityProperty,
+                               base::StringValue(shill::kSecurityPsk));
   base::FundamentalValue strength_value(80);
   services->SetServiceProperty(
-      "wifi2", flimflam::kSignalStrengthProperty, strength_value);
+      "wifi2", shill::kSignalStrengthProperty, strength_value);
   profiles->AddService(kSharedProfilePath, "wifi2");
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kEnableStubPortalledWifi)) {
     services->AddService(kStubPortalledWifiPath,
                          kStubPortalledWifiName,
-                         flimflam::kTypeWifi,
-                         flimflam::kStatePortal,
+                         shill::kTypeWifi,
+                         shill::kStatePortal,
                          add_to_visible, add_to_watchlist);
     services->SetServiceProperty(kStubPortalledWifiPath,
-                                 flimflam::kSecurityProperty,
-                                 base::StringValue(flimflam::kSecurityNone));
+                                 shill::kSecurityProperty,
+                                 base::StringValue(shill::kSecurityNone));
     services->SetConnectBehavior(kStubPortalledWifiPath,
                                  base::Bind(&UpdatePortalledWifiState));
     services->SetServiceProperty(kStubPortalledWifiPath,
-                                 flimflam::kConnectableProperty,
+                                 shill::kConnectableProperty,
                                  base::FundamentalValue(true));
   }
 
@@ -139,29 +141,29 @@ void SetupDefaultEnvironment() {
 
   services->AddService("wimax1",
                        "wimax1",
-                       flimflam::kTypeWimax,
-                       flimflam::kStateIdle,
+                       shill::kTypeWimax,
+                       shill::kStateIdle,
                        add_to_visible, add_to_watchlist);
   services->SetServiceProperty(
-      "wimax1", flimflam::kConnectableProperty, base::FundamentalValue(true));
+      "wimax1", shill::kConnectableProperty, base::FundamentalValue(true));
 
   // Cellular
 
   services->AddService("cellular1",
                        "cellular1",
-                       flimflam::kTypeCellular,
-                       flimflam::kStateIdle,
+                       shill::kTypeCellular,
+                       shill::kStateIdle,
                        add_to_visible, add_to_watchlist);
-  base::StringValue technology_value(flimflam::kNetworkTechnologyGsm);
+  base::StringValue technology_value(shill::kNetworkTechnologyGsm);
   services->SetServiceProperty(
-      "cellular1", flimflam::kNetworkTechnologyProperty, technology_value);
+      "cellular1", shill::kNetworkTechnologyProperty, technology_value);
   services->SetServiceProperty(
       "cellular1",
-      flimflam::kActivationStateProperty,
-      base::StringValue(flimflam::kActivationStateNotActivated));
+      shill::kActivationStateProperty,
+      base::StringValue(shill::kActivationStateNotActivated));
   services->SetServiceProperty("cellular1",
-                               flimflam::kRoamingStateProperty,
-                               base::StringValue(flimflam::kRoamingStateHome));
+                               shill::kRoamingStateProperty,
+                               base::StringValue(shill::kRoamingStateHome));
 
   // VPN
 
@@ -170,28 +172,39 @@ void SetupDefaultEnvironment() {
   // "Provider" . "Type", etc keys are used. Here we are setting the values
   // that will be read (by the UI, tests, etc).
   base::DictionaryValue provider_properties;
-  provider_properties.SetString(flimflam::kTypeProperty,
-                                flimflam::kProviderOpenVpn);
-  provider_properties.SetString(flimflam::kHostProperty, "vpn_host");
+  provider_properties.SetString(shill::kTypeProperty, shill::kProviderOpenVpn);
+  provider_properties.SetString(shill::kHostProperty, "vpn_host");
 
   services->AddService("vpn1",
                        "vpn1",
-                       flimflam::kTypeVPN,
-                       flimflam::kStateOnline,
+                       shill::kTypeVPN,
+                       shill::kStateOnline,
                        add_to_visible, add_to_watchlist);
   services->SetServiceProperty(
-      "vpn1", flimflam::kProviderProperty, provider_properties);
+      "vpn1", shill::kProviderProperty, provider_properties);
   profiles->AddService(kSharedProfilePath, "vpn1");
 
   services->AddService("vpn2",
                        "vpn2",
-                       flimflam::kTypeVPN,
-                       flimflam::kStateOffline,
+                       shill::kTypeVPN,
+                       shill::kStateOffline,
                        add_to_visible, add_to_watchlist);
   services->SetServiceProperty(
-      "vpn2", flimflam::kProviderProperty, provider_properties);
+      "vpn2", shill::kProviderProperty, provider_properties);
 
   manager->SortManagerServices();
+}
+
+std::string DevicePathForType(const std::string& type) {
+  if (type == shill::kTypeEthernet)
+    return kDevicePathEthernet;
+  if (type == shill::kTypeWifi)
+    return kDevicePathWifi;
+  if (type == shill::kTypeCellular)
+    return kDevicePathCellular;
+  if (type == shill::kTypeWimax)
+    return kDevicePathWimax;
+  return "";
 }
 
 }  // namespace shill_stub_helper

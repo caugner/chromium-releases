@@ -18,7 +18,6 @@
 #include "webkit/browser/fileapi/file_stream_writer.h"
 #include "webkit/browser/fileapi/file_system_context.h"
 #include "webkit/browser/fileapi/file_system_operation.h"
-#include "webkit/browser/fileapi/sandbox_quota_observer.h"
 #include "webkit/common/fileapi/file_system_util.h"
 
 using content::BrowserThread;
@@ -73,8 +72,6 @@ SyncFileSystemBackend::SyncFileSystemBackend(Profile* profile)
 }
 
 SyncFileSystemBackend::~SyncFileSystemBackend() {
-  RevokeSyncableFileSystem();
-
   if (change_tracker_) {
     GetDelegate()->file_task_runner()->DeleteSoon(
         FROM_HERE, change_tracker_.release());
@@ -106,14 +103,9 @@ void SyncFileSystemBackend::Initialize(fileapi::FileSystemContext* context) {
   context_ = context;
 
   fileapi::SandboxFileSystemBackendDelegate* delegate = GetDelegate();
-  delegate->AddFileUpdateObserver(
-      fileapi::kFileSystemTypeSyncable,
-      delegate->quota_observer(),
-      delegate->file_task_runner());
-  delegate->AddFileUpdateObserver(
-      fileapi::kFileSystemTypeSyncableForInternalSync,
-      delegate->quota_observer(),
-      delegate->file_task_runner());
+  delegate->RegisterQuotaUpdateObserver(fileapi::kFileSystemTypeSyncable);
+  delegate->RegisterQuotaUpdateObserver(
+      fileapi::kFileSystemTypeSyncableForInternalSync);
 }
 
 void SyncFileSystemBackend::OpenFileSystem(

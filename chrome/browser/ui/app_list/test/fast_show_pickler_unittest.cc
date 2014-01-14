@@ -17,17 +17,17 @@ using app_list::AppListModel;
 class AppListModelPicklerUnitTest : public testing::Test {
  protected:
   void CheckIsSame(AppListModel* m1, AppListModel* m2) {
-    ASSERT_EQ(m1->apps()->item_count(), m2->apps()->item_count());
+    ASSERT_EQ(m1->item_list()->item_count(), m2->item_list()->item_count());
     ASSERT_EQ(m1->signed_in(), m2->signed_in());
-    for (size_t i = 0; i < m1->apps()->item_count(); i++) {
-      ASSERT_EQ(m1->apps()->GetItemAt(i)->app_id(),
-                m2->apps()->GetItemAt(i)->app_id());
-      ASSERT_EQ(m1->apps()->GetItemAt(i)->title(),
-                m2->apps()->GetItemAt(i)->title());
-      ASSERT_EQ(m1->apps()->GetItemAt(i)->full_name(),
-                m2->apps()->GetItemAt(i)->full_name());
-      CompareImages(m1->apps()->GetItemAt(i)->icon(),
-                    m2->apps()->GetItemAt(i)->icon());
+    for (size_t i = 0; i < m1->item_list()->item_count(); i++) {
+      ASSERT_EQ(m1->item_list()->item_at(i)->id(),
+                m2->item_list()->item_at(i)->id());
+      ASSERT_EQ(m1->item_list()->item_at(i)->title(),
+                m2->item_list()->item_at(i)->title());
+      ASSERT_EQ(m1->item_list()->item_at(i)->full_name(),
+                m2->item_list()->item_at(i)->full_name());
+      CompareImages(m1->item_list()->item_at(i)->icon(),
+                    m2->item_list()->item_at(i)->icon());
     }
   }
 
@@ -39,7 +39,7 @@ class AppListModelPicklerUnitTest : public testing::Test {
     for (size_t i = 0; i < reps1.size(); ++i) {
       ASSERT_TRUE(
           gfx::BitmapsAreEqual(reps1[i].sk_bitmap(), reps2[i].sk_bitmap()));
-      ASSERT_EQ(reps1[i].scale_factor(), reps2[i].scale_factor());
+      ASSERT_EQ(reps1[i].scale(), reps2[i].scale());
     }
   }
 
@@ -77,52 +77,46 @@ TEST_F(AppListModelPicklerUnitTest, EmptyModel) {
 
 TEST_F(AppListModelPicklerUnitTest, OneItem) {
   AppListModel model;
-  AppListItemModel* app1 = new AppListItemModel;
-  app1->set_app_id("abc");
+  AppListItemModel* app1 = new AppListItemModel("abc");
   app1->SetTitleAndFullName("ht", "hello, there");
-  model.apps()->Add(app1);
+  model.item_list()->AddItem(app1);
 
   DoConsistencyChecks(&model);
 }
 
 TEST_F(AppListModelPicklerUnitTest, TwoItems) {
   AppListModel model;
-  AppListItemModel* app1 = new AppListItemModel;
-  app1->set_app_id("abc");
+  AppListItemModel* app1 = new AppListItemModel("abc");
   app1->SetTitleAndFullName("ht", "hello, there");
-  model.apps()->Add(app1);
+  model.item_list()->AddItem(app1);
 
-  AppListItemModel* app2 = new AppListItemModel;
-  app2->set_app_id("abc2");
+  AppListItemModel* app2 = new AppListItemModel("abc2");
   app2->SetTitleAndFullName("ht2", "hello, there 2");
-  model.apps()->Add(app2);
+  model.item_list()->AddItem(app2);
 
   DoConsistencyChecks(&model);
 }
 
 TEST_F(AppListModelPicklerUnitTest, Images) {
   AppListModel model;
-  AppListItemModel* app1 = new AppListItemModel;
-  app1->set_app_id("abc");
+  AppListItemModel* app1 = new AppListItemModel("abc");
   app1->SetTitleAndFullName("ht", "hello, there");
   app1->SetIcon(MakeImage(), true);
-  model.apps()->Add(app1);
+  model.item_list()->AddItem(app1);
 
-  AppListItemModel* app2 = new AppListItemModel;
-  app2->set_app_id("abc2");
+  AppListItemModel* app2 = new AppListItemModel("abc2");
   app2->SetTitleAndFullName("ht2", "hello, there 2");
-  model.apps()->Add(app2);
+  model.item_list()->AddItem(app2);
 
   DoConsistencyChecks(&model);
 }
 
 TEST_F(AppListModelPicklerUnitTest, EmptyImage) {
   AppListModel model;
-  AppListItemModel* app1 = new AppListItemModel;
-  app1->set_app_id("abc");
+  AppListItemModel* app1 = new AppListItemModel("abc");
   app1->SetTitleAndFullName("ht", "hello, there");
   app1->SetIcon(gfx::ImageSkia(), true);
-  model.apps()->Add(app1);
+  model.item_list()->AddItem(app1);
 
   DoConsistencyChecks(&model);
 }

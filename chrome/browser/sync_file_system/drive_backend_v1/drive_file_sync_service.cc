@@ -64,7 +64,7 @@ void DownloadVersionCallbackAdapter(
     const DriveFileSyncService::DownloadVersionCallback& download_callback,
     const SyncStatusCallback& completion_callback,
     SyncStatusCode status,
-    scoped_ptr<webkit_blob::ScopedFile> downloaded) {
+    webkit_blob::ScopedFile downloaded) {
   completion_callback.Run(status);
   download_callback.Run(status, downloaded.Pass());
 }
@@ -498,7 +498,6 @@ void DriveFileSyncService::DoRegisterOrigin(
   OriginOperation op = pending_origin_operations_.Pop();
   DCHECK_EQ(origin, op.origin);
   DCHECK_EQ(OriginOperation::REGISTERING, op.type);
-  DCHECK(!op.aborted);
 
   DCHECK(!metadata_store_->IsOriginDisabled(origin));
   if (!metadata_store_->GetResourceIdForOrigin(origin).empty()) {
@@ -517,12 +516,6 @@ void DriveFileSyncService::DoEnableOrigin(
   OriginOperation op = pending_origin_operations_.Pop();
   DCHECK_EQ(origin, op.origin);
   DCHECK_EQ(OriginOperation::ENABLING, op.type);
-
-  // If it's aborted just return ok.
-  if (op.aborted) {
-    callback.Run(SYNC_STATUS_OK);
-    return;
-  }
 
   // If origin cannot be found in disabled list, then it's not a SyncFS app
   // and should be ignored.
@@ -543,12 +536,6 @@ void DriveFileSyncService::DoDisableOrigin(
   DCHECK_EQ(origin, op.origin);
   DCHECK_EQ(OriginOperation::DISABLING, op.type);
 
-  // If it's aborted just return ok.
-  if (op.aborted) {
-    callback.Run(SYNC_STATUS_OK);
-    return;
-  }
-
   pending_batch_sync_origins_.erase(origin);
   if (!metadata_store_->IsIncrementalSyncOrigin(origin)) {
     callback.Run(SYNC_STATUS_OK);
@@ -566,7 +553,6 @@ void DriveFileSyncService::DoUninstallOrigin(
   OriginOperation op = pending_origin_operations_.Pop();
   DCHECK_EQ(origin, op.origin);
   DCHECK_EQ(OriginOperation::UNINSTALLING, op.type);
-  DCHECK(!op.aborted);
 
   // Because origin management is now split between DriveFileSyncService and
   // DriveMetadataStore, resource_id must be checked for in two places.
@@ -721,8 +707,7 @@ void DriveFileSyncService::DoDownloadRemoteVersion(
   DriveMetadata metadata;
   if (metadata_store_->ReadEntry(url, &metadata) != SYNC_STATUS_OK) {
     // The conflict may have been already resolved.
-    callback.Run(SYNC_FILE_ERROR_NOT_FOUND,
-                 scoped_ptr<webkit_blob::ScopedFile>());
+    callback.Run(SYNC_FILE_ERROR_NOT_FOUND, webkit_blob::ScopedFile());
     return;
   }
 
@@ -738,7 +723,7 @@ void DriveFileSyncService::DidDownloadVersion(
     const std::string& file_md5,
     int64 file_size,
     const base::Time& last_updated,
-    scoped_ptr<webkit_blob::ScopedFile> downloaded) {
+    webkit_blob::ScopedFile downloaded) {
   SyncStatusCode status = GDataErrorCodeToSyncStatusCodeWrapper(error);
   download_callback.Run(status, downloaded.Pass());
 }

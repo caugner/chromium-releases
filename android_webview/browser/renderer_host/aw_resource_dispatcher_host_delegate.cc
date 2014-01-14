@@ -145,7 +145,8 @@ bool IoThreadClientThrottle::MaybeBlockRequest() {
 bool IoThreadClientThrottle::ShouldBlockRequest() {
   scoped_ptr<AwContentsIoThreadClient> io_client =
       AwContentsIoThreadClient::FromID(child_id_, route_id_);
-  DCHECK(io_client.get());
+  if (!io_client)
+    return false;
 
   // Part of implementation of WebSettings.allowContentAccess.
   if (request_->url().SchemeIs(android_webview::kContentScheme) &&
@@ -209,7 +210,6 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
     ResourceType::Type resource_type,
     int child_id,
     int route_id,
-    bool is_continuation_of_transferred_request,
     ScopedVector<content::ResourceThrottle>* throttles) {
   // If io_client is NULL, then the browser side objects have already been
   // destroyed, so do not do anything to the request. Conversely if the
@@ -290,6 +290,19 @@ bool AwResourceDispatcherHostDelegate::AcceptAuthRequest(
   return true;
 }
 
+bool AwResourceDispatcherHostDelegate::AcceptSSLClientCertificateRequest(
+    net::URLRequest* request,
+    net::SSLCertRequestInfo* cert_info) {
+  // WebView does not support client certificate selection, however it does
+  // send a no-certificate response to the server to allow it decide how to
+  // proceed. The base class returns false here, which causes the entire
+  // resource request to be abort. We don't want that, so we must return true
+  // here (and subsequently complete the request in
+  // AwContentBrowserClient::SelectClientCertificate) to get the intended
+  // behavior.
+  return true;
+}
+
 content::ResourceDispatcherHostLoginDelegate*
     AwResourceDispatcherHostDelegate::CreateLoginDelegate(
         net::AuthChallengeInfo* auth_info,
@@ -327,8 +340,10 @@ void AwResourceDispatcherHostDelegate::OnResponseStarted(
       scoped_ptr<AwContentsIoThreadClient> io_client =
           AwContentsIoThreadClient::FromID(request_info->GetChildID(),
                                            request_info->GetRouteID());
-      io_client->NewLoginRequest(
-          header_data.realm, header_data.account, header_data.args);
+      if (io_client) {
+        io_client->NewLoginRequest(
+            header_data.realm, header_data.account, header_data.args);
+      }
     }
   }
 }

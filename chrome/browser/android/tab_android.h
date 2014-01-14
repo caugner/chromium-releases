@@ -56,13 +56,25 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   // Return specific id information regarding this TabAndroid.
   const SessionID& session_id() const { return session_tab_id_; }
-  int android_id() const { return android_tab_id_; }
+  int GetAndroidId() const;
+  int GetSyncId() const;
+
+  // Return the tab title.
+  string16 GetTitle() const;
+
+  // Return the tab url.
+  GURL GetURL() const;
+
+  // Restore the tab if it was unloaded from memory.
+  bool RestoreIfNeeded();
 
   // Helper methods to make it easier to access objects from the associated
   // WebContents.  Can return NULL.
   content::ContentViewCore* GetContentViewCore() const;
   Profile* GetProfile() const;
   browser_sync::SyncedTabDelegate* GetSyncedTabDelegate() const;
+
+  void SetSyncId(int sync_id);
 
   virtual void HandlePopupNavigation(chrome::NavigateParams* params) = 0;
 
@@ -85,13 +97,10 @@ class TabAndroid : public CoreTabHelperDelegate,
       int r_value, int g_value, int b_value) = 0;
 
   // Called when a bookmark node should be edited.
-  virtual void EditBookmark(int64 node_id, bool is_folder) = 0;
-
-  // Called to show the sync settings menu.
-  virtual void ShowSyncSettings() = 0;
-
-  // Called to show a dialog with the terms of service.
-  virtual void ShowTermsOfService() = 0;
+  virtual void EditBookmark(int64 node_id,
+                            const base::string16& node_title,
+                            bool is_folder,
+                            bool is_partner_bookmark) = 0;
 
   // Called to determine if chrome://welcome should contain links to the terms
   // of service and the privacy notice.
@@ -99,10 +108,6 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   // Called to notify that the new tab page has completely rendered.
   virtual void OnNewTabPageReady() = 0;
-
-  // Used by sync to get/set the sync id of tab.
-  virtual int GetSyncId() const = 0;
-  virtual void SetSyncId(int sync_id) = 0;
 
   static void InitTabHelpers(content::WebContents* web_contents);
 
@@ -123,10 +128,10 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   virtual void InitWebContents(JNIEnv* env,
                                jobject obj,
-                               jint tab_id,
                                jboolean incognito,
                                jobject jcontent_view_core,
                                jobject jweb_contents_delegate);
+
   virtual void DestroyWebContents(JNIEnv* env,
                                   jobject obj,
                                   jboolean delete_native);
@@ -134,6 +139,10 @@ class TabAndroid : public CoreTabHelperDelegate,
                                                                jobject obj);
   void LaunchBlockedPopups(JNIEnv* env, jobject obj);
   ToolbarModel::SecurityLevel GetSecurityLevel(JNIEnv* env, jobject obj);
+  void SetActiveNavigationEntryTitleForUrl(JNIEnv* env,
+                                           jobject obj,
+                                           jstring jurl,
+                                           jstring jtitle);
 
  protected:
   virtual ~TabAndroid();
@@ -142,7 +151,6 @@ class TabAndroid : public CoreTabHelperDelegate,
   JavaObjectWeakGlobalRef weak_java_tab_;
 
   SessionID session_tab_id_;
-  int android_tab_id_;
 
   content::NotificationRegistrar notification_registrar_;
 

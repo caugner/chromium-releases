@@ -4,6 +4,10 @@
 
 #include <errno.h>
 #include <fcntl.h>
+
+#include <set>
+#include <string>
+
 #include <gmock/gmock.h>
 #include <ppapi/c/ppb_file_io.h>
 #include <ppapi/c/pp_directory_entry.h>
@@ -13,6 +17,7 @@
 #include <windows.h>  // For Sleep()
 #endif
 
+#include "nacl_io/kernel_handle.h"
 #include "nacl_io/mount_html5fs.h"
 #include "nacl_io/osdirent.h"
 #include "nacl_io/osunistd.h"
@@ -195,12 +200,13 @@ TEST_F(MountHtml5FsTest, OpenForCreate) {
   EXPECT_EQ(ENOENT, mnt->Access(path, F_OK));
 
   ScopedMountNode node;
-  EXPECT_EQ(0, mnt->Open(path, O_CREAT | O_RDWR, &node));
+  ASSERT_EQ(0, mnt->Open(path, O_CREAT | O_RDWR, &node));
 
   // Write some data.
   char contents[] = "contents";
   int bytes_written = 0;
-  EXPECT_EQ(0, node->Write(0, &contents[0], strlen(contents), &bytes_written));
+  EXPECT_EQ(0, node->Write(HandleAttr(), &contents[0], strlen(contents),
+                           &bytes_written));
   EXPECT_EQ(strlen(contents), bytes_written);
 
   // Create again.
@@ -227,41 +233,45 @@ TEST_F(MountHtml5FsTest, OpenForCreate) {
 
 TEST_F(MountHtml5FsTest, Read) {
   const char contents[] = "contents";
-  EXPECT_TRUE(
+  ASSERT_TRUE(
       ppapi_html5_.filesystem_template()->AddFile("/file", contents, NULL));
-  EXPECT_TRUE(ppapi_html5_.filesystem_template()->AddDirectory("/dir", NULL));
-
+  ASSERT_TRUE(ppapi_html5_.filesystem_template()->AddDirectory("/dir", NULL));
   StringMap_t map;
   ScopedRef<MountHtml5FsForTesting> mnt(
       new MountHtml5FsForTesting(map, &ppapi_));
 
   ScopedMountNode node;
-  EXPECT_EQ(0, mnt->Open(Path("/file"), O_RDONLY, &node));
+  ASSERT_EQ(0, mnt->Open(Path("/file"), O_RDONLY, &node));
 
   char buffer[10] = {0};
   int bytes_read = 0;
-  EXPECT_EQ(0, node->Read(0, &buffer[0], sizeof(buffer), &bytes_read));
-  EXPECT_EQ(strlen(contents), bytes_read);
-  EXPECT_STREQ(contents, buffer);
+  HandleAttr attr;
+  ASSERT_EQ(0, node->Read(attr, &buffer[0], sizeof(buffer), &bytes_read));
+  ASSERT_EQ(strlen(contents), bytes_read);
+  ASSERT_STREQ(contents, buffer);
 
   // Read nothing past the end of the file.
-  EXPECT_EQ(0, node->Read(100, &buffer[0], sizeof(buffer), &bytes_read));
-  EXPECT_EQ(0, bytes_read);
+  attr.offs = 100;
+  ASSERT_EQ(0, node->Read(attr, &buffer[0], sizeof(buffer), &bytes_read));
+  ASSERT_EQ(0, bytes_read);
 
   // Read part of the data.
-  EXPECT_EQ(0, node->Read(4, &buffer[0], sizeof(buffer), &bytes_read));
+  attr.offs = 4;
+  ASSERT_EQ(0, node->Read(attr, &buffer[0], sizeof(buffer), &bytes_read));
   ASSERT_EQ(strlen(contents) - 4, bytes_read);
   buffer[bytes_read] = 0;
-  EXPECT_STREQ("ents", buffer);
+  ASSERT_STREQ("ents", buffer);
 
   // Writing should fail.
   int bytes_written = 1;  // Set to a non-zero value.
-  EXPECT_EQ(EACCES, node->Write(0, &buffer[0], sizeof(buffer), &bytes_written));
-  EXPECT_EQ(0, bytes_written);
+  attr.offs = 0;
+  ASSERT_EQ(EACCES, node->Write(attr, &buffer[0], sizeof(buffer),
+                                &bytes_written));
+  ASSERT_EQ(0, bytes_written);
 
   // Reading from a directory should fail.
-  EXPECT_EQ(0, mnt->Open(Path("/dir"), O_RDONLY, &node));
-  EXPECT_EQ(EISDIR, node->Read(0, &buffer[0], sizeof(buffer), &bytes_read));
+  ASSERT_EQ(0, mnt->Open(Path("/dir"), O_RDONLY, &node));
+  ASSERT_EQ(EISDIR, node->Read(attr, &buffer[0], sizeof(buffer), &bytes_read));
 }
 
 TEST_F(MountHtml5FsTest, Write) {
@@ -280,24 +290,27 @@ TEST_F(MountHtml5FsTest, Write) {
   // Reading should fail.
   char buffer[10];
   int bytes_read = 1;  // Set to a non-zero value.
-  EXPECT_EQ(EACCES, node->Read(0, &buffer[0], sizeof(buffer), &bytes_read));
+  HandleAttr attr;
+  EXPECT_EQ(EACCES, node->Read(attr, &buffer[0], sizeof(buffer), &bytes_read));
   EXPECT_EQ(0, bytes_read);
 
   // Reopen as read-write.
   ASSERT_EQ(0, mnt->Open(Path("/file"), O_RDWR, &node));
 
   int bytes_written = 1;  // Set to a non-zero value.
-  EXPECT_EQ(0, node->Write(3, "struct", 6, &bytes_written));
+  attr.offs = 3;
+  EXPECT_EQ(0, node->Write(attr, "struct", 6, &bytes_written));
   EXPECT_EQ(6, bytes_written);
 
-  EXPECT_EQ(0, node->Read(0, &buffer[0], sizeof(buffer), &bytes_read));
+  attr.offs = 0;
+  EXPECT_EQ(0, node->Read(attr, &buffer[0], sizeof(buffer), &bytes_read));
   EXPECT_EQ(9, bytes_read);
   buffer[bytes_read] = 0;
   EXPECT_STREQ("construct", buffer);
 
   // Writing to a directory should fail.
   EXPECT_EQ(0, mnt->Open(Path("/dir"), O_RDWR, &node));
-  EXPECT_EQ(EISDIR, node->Write(0, &buffer[0], sizeof(buffer), &bytes_read));
+  EXPECT_EQ(EISDIR, node->Write(attr, &buffer[0], sizeof(buffer), &bytes_read));
 }
 
 TEST_F(MountHtml5FsTest, GetStat) {
@@ -330,7 +343,9 @@ TEST_F(MountHtml5FsTest, GetStat) {
 
   struct stat statbuf;
   EXPECT_EQ(0, node->GetStat(&statbuf));
-  EXPECT_EQ(S_IFREG | S_IWRITE | S_IREAD, statbuf.st_mode);
+  EXPECT_EQ(S_IFREG, statbuf.st_mode & S_IFMT);
+  EXPECT_EQ(S_IRUSR | S_IRGRP | S_IROTH |
+            S_IWUSR | S_IWGRP | S_IWOTH, statbuf.st_mode & ~S_IFMT);
   EXPECT_EQ(strlen(contents), statbuf.st_size);
   EXPECT_EQ(access_time, statbuf.st_atime);
   EXPECT_EQ(creation_time, statbuf.st_ctime);
@@ -347,7 +362,9 @@ TEST_F(MountHtml5FsTest, GetStat) {
   // GetStat on a directory...
   EXPECT_EQ(0, mnt->Open(Path("/dir"), O_RDONLY, &node));
   EXPECT_EQ(0, node->GetStat(&statbuf));
-  EXPECT_EQ(S_IFDIR | S_IWRITE | S_IREAD, statbuf.st_mode);
+  EXPECT_EQ(S_IFDIR, statbuf.st_mode & S_IFMT);
+  EXPECT_EQ(S_IRUSR | S_IRGRP | S_IROTH |
+            S_IWUSR | S_IWGRP | S_IWOTH, statbuf.st_mode & ~S_IFMT);
   EXPECT_EQ(0, statbuf.st_size);
   EXPECT_EQ(access_time, statbuf.st_atime);
   EXPECT_EQ(creation_time, statbuf.st_ctime);
@@ -374,19 +391,20 @@ TEST_F(MountHtml5FsTest, FTruncate) {
   ScopedMountNode node;
   ASSERT_EQ(0, mnt->Open(Path("/file"), O_RDWR, &node));
 
+  HandleAttr attr;
   char buffer[10] = {0};
   int bytes_read = 0;
 
   // First make the file shorter...
   EXPECT_EQ(0, node->FTruncate(4));
-  EXPECT_EQ(0, node->Read(0, &buffer[0], sizeof(buffer), &bytes_read));
+  EXPECT_EQ(0, node->Read(attr, &buffer[0], sizeof(buffer), &bytes_read));
   EXPECT_EQ(4, bytes_read);
   buffer[bytes_read] = 0;
   EXPECT_STREQ("cont", buffer);
 
   // Now make the file longer...
   EXPECT_EQ(0, node->FTruncate(8));
-  EXPECT_EQ(0, node->Read(0, &buffer[0], sizeof(buffer), &bytes_read));
+  EXPECT_EQ(0, node->Read(attr, &buffer[0], sizeof(buffer), &bytes_read));
   EXPECT_EQ(8, bytes_read);
   buffer[bytes_read] = 0;
   EXPECT_STREQ("cont\0\0\0\0", buffer);
@@ -412,7 +430,8 @@ TEST_F(MountHtml5FsTest, GetDents) {
   ASSERT_EQ(0, mnt->Open(Path("/file"), O_RDWR, &node));
 
   // Should fail for regular files.
-  struct dirent dirents[3];
+  const size_t kMaxDirents = 5;
+  dirent dirents[kMaxDirents];
   int bytes_read = 1;  // Set to a non-zero value.
 
   memset(&dirents[0], 0, sizeof(dirents));
@@ -424,11 +443,25 @@ TEST_F(MountHtml5FsTest, GetDents) {
   // +2 to test a size that is not a multiple of sizeof(dirent).
   // Expect it to round down.
   memset(&dirents[0], 0, sizeof(dirents));
-  EXPECT_EQ(0, root->GetDents(0, &dirents[0], sizeof(dirent) + 2, &bytes_read));
-  EXPECT_EQ(sizeof(dirent), bytes_read);
-  EXPECT_EQ(sizeof(dirent), dirents[0].d_off);
-  EXPECT_EQ(sizeof(dirent), dirents[0].d_reclen);
-  EXPECT_STREQ("file", dirents[0].d_name);
+  EXPECT_EQ(
+      0, root->GetDents(0, &dirents[0], sizeof(dirent) * 3 + 2, &bytes_read));
+
+  {
+    size_t num_dirents = bytes_read / sizeof(dirent);
+    EXPECT_EQ(3, num_dirents);
+    EXPECT_EQ(sizeof(dirent) * num_dirents, bytes_read);
+
+    std::multiset<std::string> dirnames;
+    for (int i = 0; i < num_dirents; ++i) {
+      EXPECT_EQ(sizeof(dirent), dirents[i].d_off);
+      EXPECT_EQ(sizeof(dirent), dirents[i].d_reclen);
+      dirnames.insert(dirents[i].d_name);
+    }
+
+    EXPECT_EQ(1, dirnames.count("file"));
+    EXPECT_EQ(1, dirnames.count("."));
+    EXPECT_EQ(1, dirnames.count(".."));
+  }
 
   // Add another file...
   ASSERT_EQ(0, mnt->Open(Path("/file2"), O_CREAT, &node));
@@ -436,13 +469,22 @@ TEST_F(MountHtml5FsTest, GetDents) {
   // Read the root directory again.
   memset(&dirents[0], 0, sizeof(dirents));
   EXPECT_EQ(0, root->GetDents(0, &dirents[0], sizeof(dirents), &bytes_read));
-  EXPECT_EQ(sizeof(dirent) * 2, bytes_read);
 
-  for (int i = 0; i < 2; ++i) {
-    EXPECT_LT(0, dirents[i].d_ino);  // 0 is an invalid ino.
-    EXPECT_EQ(sizeof(dirent), dirents[i].d_off);
-    EXPECT_EQ(sizeof(dirent), dirents[i].d_reclen);
-    // Could be "file" or "file2".
-    EXPECT_TRUE(strncmp("file", dirents[i].d_name, 4) == 0);
+  {
+    size_t num_dirents = bytes_read / sizeof(dirent);
+    EXPECT_EQ(4, num_dirents);
+    EXPECT_EQ(sizeof(dirent) * num_dirents, bytes_read);
+
+    std::multiset<std::string> dirnames;
+    for (int i = 0; i < num_dirents; ++i) {
+      EXPECT_EQ(sizeof(dirent), dirents[i].d_off);
+      EXPECT_EQ(sizeof(dirent), dirents[i].d_reclen);
+      dirnames.insert(dirents[i].d_name);
+    }
+
+    EXPECT_EQ(1, dirnames.count("file"));
+    EXPECT_EQ(1, dirnames.count("file2"));
+    EXPECT_EQ(1, dirnames.count("."));
+    EXPECT_EQ(1, dirnames.count(".."));
   }
 }

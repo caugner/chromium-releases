@@ -31,9 +31,13 @@ base::string16 GetTooltipText(const base::string16& headline,
                               const std::string& data2) {
   std::vector<base::string16> lines;
   lines.push_back(headline);
-  lines.push_back(l10n_util::GetStringFUTF16(
-      IDS_ASH_STATUS_TRAY_DISPLAY_SINGLE_DISPLAY,
-      name1, UTF8ToUTF16(data1)));
+  if (data1.empty()) {
+    lines.push_back(name1);
+  } else {
+    lines.push_back(l10n_util::GetStringFUTF16(
+        IDS_ASH_STATUS_TRAY_DISPLAY_SINGLE_DISPLAY,
+        name1, UTF8ToUTF16(data1)));
+  }
   if (!name2.empty()) {
     lines.push_back(l10n_util::GetStringFUTF16(
         IDS_ASH_STATUS_TRAY_DISPLAY_SINGLE_DISPLAY,
@@ -63,7 +67,7 @@ base::string16 GetSecondDisplayName() {
 base::string16 GetMirroredDisplayName() {
   DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   return UTF8ToUTF16(display_manager->GetDisplayNameForId(
-      display_manager->mirrored_display().id()));
+      display_manager->mirrored_display_id()));
 }
 
 class TrayDisplayTest : public ash::test::AshTestBase {
@@ -148,7 +152,7 @@ base::string16 TrayDisplayTest::GetDisplayNotificationAdditionalText() const {
 const message_center::Notification* TrayDisplayTest::GetDisplayNotification()
     const {
   const message_center::NotificationList::Notifications notifications =
-      message_center::MessageCenter::Get()->GetNotifications();
+      message_center::MessageCenter::Get()->GetVisibleNotifications();
   for (message_center::NotificationList::Notifications::const_iterator iter =
            notifications.begin(); iter != notifications.end(); ++iter) {
     if ((*iter)->id() == TrayDisplay::kNotificationId)
@@ -300,13 +304,10 @@ TEST_F(TrayDisplayTest, ExternalDisplayResized) {
   // Mirroring
   display_manager->SetSoftwareMirroring(true);
   UpdateDisplay("400x400,200x200@1.5");
-  base::string16 mirror_name = l10n_util::GetStringFUTF16(
-      IDS_ASH_STATUS_TRAY_DISPLAY_ANNOTATED_NAME,
-      GetMirroredDisplayName(), UTF8ToUTF16("300x300"));
   tray()->ShowDefaultView(BUBBLE_USE_EXISTING);
   EXPECT_TRUE(IsDisplayVisibleInTray());
   expected = l10n_util::GetStringFUTF16(
-      IDS_ASH_STATUS_TRAY_DISPLAY_MIRRORING, mirror_name);
+      IDS_ASH_STATUS_TRAY_DISPLAY_MIRRORING, GetMirroredDisplayName());
   EXPECT_EQ(expected, GetTrayDisplayText());
   EXPECT_EQ(GetMirroredTooltipText(expected, GetFirstDisplayName(), "400x400"),
             GetTrayDisplayTooltipText());

@@ -1403,6 +1403,8 @@ ErrorCode RestrictSocketcallCommand(Sandbox* sandbox) {
 }
 #endif
 
+const int kFSDeniedErrno = EPERM;
+
 ErrorCode BaselinePolicy(Sandbox* sandbox, int sysno) {
   if (IsBaselinePolicyAllowed(sysno)) {
     return ErrorCode(ErrorCode::ERR_ALLOWED);
@@ -1448,7 +1450,7 @@ ErrorCode BaselinePolicy(Sandbox* sandbox, int sysno) {
 #endif
 
   if (IsFileSystem(sysno) || IsCurrentDirectory(sysno)) {
-    return ErrorCode(EPERM);
+    return ErrorCode(kFSDeniedErrno);
   }
 
   if (IsAnySystemV(sysno)) {
@@ -1759,7 +1761,7 @@ void RunSandboxSanityChecks(const std::string& process_type) {
     // open() must be restricted.
     syscall_ret = open("/etc/passwd", O_RDONLY);
     CHECK_EQ(-1, syscall_ret);
-    CHECK_EQ(EPERM, errno);
+    CHECK_EQ(kFSDeniedErrno, errno);
 
     // We should never allow the creation of netlink sockets.
     syscall_ret = socket(AF_NETLINK, SOCK_DGRAM, 0);
@@ -1883,7 +1885,8 @@ void InitGpuBrokerProcess(Sandbox::EvaluateSyscall gpu_policy,
     NOTREACHED();
   }
 
-  *broker_process = new BrokerProcess(read_whitelist, write_whitelist);
+  *broker_process = new BrokerProcess(kFSDeniedErrno,
+                                      read_whitelist, write_whitelist);
   // Initialize the broker process and give it a sandbox callback.
   CHECK((*broker_process)->Init(sandbox_callback));
 }
@@ -1915,11 +1918,6 @@ void WarmupPolicy(Sandbox::EvaluateSyscall policy,
              policy == ArmGpuProcessPolicyWithShmat) {
     // Create a new broker process.
     InitGpuBrokerProcess(policy, broker_process);
-
-    // Preload the GL libraries. These are in the read whitelist but we have to
-    // preload them anyways to work around ld.so bugs. See crbug.com/268439.
-    dlopen(kLibGlesPath, RTLD_NOW|RTLD_GLOBAL|RTLD_NODELETE);
-    dlopen(kLibEglPath, RTLD_NOW|RTLD_GLOBAL|RTLD_NODELETE);
 
     // Preload the Tegra libraries.
     dlopen("/usr/lib/libnvrm.so", RTLD_NOW|RTLD_GLOBAL|RTLD_NODELETE);
@@ -1960,6 +1958,8 @@ Sandbox::EvaluateSyscall GetProcessSyscallPolicy(
   }
 
   if (process_type == switches::kUtilityProcess) {
+    // TODO(jorgelo): review sandbox initialization in utility_main.cc if we
+    // change this policy.
     return BlacklistDebugAndNumaPolicy;
   }
 

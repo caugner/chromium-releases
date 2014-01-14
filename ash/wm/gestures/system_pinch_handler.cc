@@ -13,9 +13,9 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "ui/aura/window.h"
-#include "ui/base/gestures/gesture_types.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/events/event_constants.h"
+#include "ui/events/gestures/gesture_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -86,7 +86,7 @@ SystemGestureStatus SystemPinchHandler::ProcessGestureEvent(
         // Snap for left/right swipes.
         ui::ScopedLayerAnimationSettings settings(
             target_->layer()->GetAnimator());
-        internal::SnapSizer::SnapWindow(target_,
+        internal::SnapSizer::SnapWindow(window_state,
             event.details().swipe_left() ? internal::SnapSizer::LEFT_EDGE :
                                            internal::SnapSizer::RIGHT_EDGE);
       } else if (event.details().swipe_up()) {

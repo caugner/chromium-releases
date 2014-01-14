@@ -141,9 +141,9 @@
 #endif
 
 #if !defined(OS_MACOSX)
-#include "apps/native_app_window.h"
 #include "apps/shell_window.h"
 #include "apps/shell_window_registry.h"
+#include "apps/ui/native_app_window.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
@@ -160,6 +160,11 @@ using testing::_;
 namespace policy {
 
 namespace {
+
+#if defined(OS_CHROMEOS)
+const int kOneHourInMs = 60 * 60 * 1000;
+const int kThreeHoursInMs = 180 * 60 * 1000;
+#endif
 
 const char kURL[] = "http://example.com";
 const char kCookieValue[] = "converted=true";
@@ -178,8 +183,6 @@ const char kGoodCrxId[] = "ldnnhddmnhbkjipkidpdiheffobcpfmf";
 const char kAdBlockCrxId[] = "dojnnbeimaimaojcialkkgajdnefpgcn";
 const char kHostedAppCrxId[] = "kbmnembihfiondgfjekmnmcbddelicoi";
 
-const base::FilePath::CharType kGoodCrxManifestName[] =
-    FILE_PATH_LITERAL("good_update_manifest.xml");
 const base::FilePath::CharType kGood2CrxManifestName[] =
     FILE_PATH_LITERAL("good2_update_manifest.xml");
 const base::FilePath::CharType kGoodV1CrxManifestName[] =
@@ -188,8 +191,11 @@ const base::FilePath::CharType kGoodUnpackedExt[] =
     FILE_PATH_LITERAL("good_unpacked");
 const base::FilePath::CharType kAppUnpackedExt[] =
     FILE_PATH_LITERAL("app");
+
+#if !defined(OS_MACOSX)
 const base::FilePath::CharType kUnpackedFullscreenAppName[] =
     FILE_PATH_LITERAL("fullscreen_app");
+#endif  // !defined(OS_MACOSX)
 
 // Filters requests to the hosts in |urls| and redirects them to the test data
 // dir through URLRequestMockHTTPJobs.
@@ -468,62 +474,49 @@ class TestAudioObserver : public chromeos::CrasAudioHandler::AudioObserver {
 };
 #endif
 
-// This is a customized version of content::WindowedNotificationObserver that
-// waits until either of the two provided notification types is observed.
-// See content::WindowedNotificationObserver for further documentation.
-class OneOfTwoNotificationsObserver : public content::NotificationObserver {
+// This class waits until either a load stops or the WebContents is destroyed.
+class WebContentsLoadedOrDestroyedWatcher
+    : public content::WebContentsObserver {
  public:
-  // Set up to wait for one of two notifications.
-  OneOfTwoNotificationsObserver(int notification_type1, int notification_type2);
-  virtual ~OneOfTwoNotificationsObserver();
+  explicit WebContentsLoadedOrDestroyedWatcher(
+      content::WebContents* web_contents);
+  virtual ~WebContentsLoadedOrDestroyedWatcher();
 
-  // Wait until one of the specified notifications is observed. If either
-  // notification has already been received, Wait() returns immediately.
+  // Waits until the WebContents's load is done or until it is destroyed.
   void Wait();
 
-  // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // Overridden WebContentsObserver methods.
+  virtual void WebContentsDestroyed(
+      content::WebContents* web_contents) OVERRIDE;
+  virtual void DidStopLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
 
  private:
-  bool seen_;
-  bool running_;
-  content::NotificationRegistrar registrar_;
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 
-  DISALLOW_COPY_AND_ASSIGN(OneOfTwoNotificationsObserver);
+  DISALLOW_COPY_AND_ASSIGN(WebContentsLoadedOrDestroyedWatcher);
 };
 
-OneOfTwoNotificationsObserver::OneOfTwoNotificationsObserver(
-    int notification_type1, int notification_type2)
-    : seen_(false), running_(false) {
-  registrar_.Add(this, notification_type1,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, notification_type2,
-                 content::NotificationService::AllSources());
+WebContentsLoadedOrDestroyedWatcher::WebContentsLoadedOrDestroyedWatcher(
+    content::WebContents* web_contents)
+    : content::WebContentsObserver(web_contents),
+      message_loop_runner_(new content::MessageLoopRunner) {
 }
 
-OneOfTwoNotificationsObserver::~OneOfTwoNotificationsObserver() {}
+WebContentsLoadedOrDestroyedWatcher::~WebContentsLoadedOrDestroyedWatcher() {}
 
-void OneOfTwoNotificationsObserver::Wait() {
-  if (seen_)
-    return;
-  running_ = true;
-  message_loop_runner_ = new content::MessageLoopRunner;
+void WebContentsLoadedOrDestroyedWatcher::Wait() {
   message_loop_runner_->Run();
-  EXPECT_TRUE(seen_);
 }
 
-// NotificationObserver:
-void OneOfTwoNotificationsObserver::Observe(int type,
-                     const content::NotificationSource& source,
-                     const content::NotificationDetails& details) {
-  seen_ = true;
-  if (!running_)
-    return;
+void WebContentsLoadedOrDestroyedWatcher::WebContentsDestroyed(
+    content::WebContents* web_contents) {
   message_loop_runner_->Quit();
-  running_ = false;
+}
+
+void WebContentsLoadedOrDestroyedWatcher::DidStopLoading(
+    content::RenderViewHost* render_view_host) {
+  message_loop_runner_->Quit();
 }
 
 #if !defined(OS_MACOSX)
@@ -1314,13 +1307,20 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DeveloperToolsDisabled) {
   EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_DEV_TOOLS));
   content::WebContents* contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_TRUE(DevToolsWindow::GetDockedInstanceForInspectedTab(contents));
+  DevToolsWindow *devtools_window =
+      DevToolsWindow::GetDockedInstanceForInspectedTab(contents);
+  EXPECT_TRUE(devtools_window);
 
   // Disable devtools via policy.
   PolicyMap policies;
   policies.Set(key::kDeveloperToolsDisabled, POLICY_LEVEL_MANDATORY,
                POLICY_SCOPE_USER, base::Value::CreateBooleanValue(true), NULL);
+  content::WindowedNotificationObserver close_observer(
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+      content::Source<content::WebContents>(devtools_window->web_contents()));
   UpdateProviderPolicy(policies);
+  // wait for devtools close
+  close_observer.Wait();
   // The existing devtools window should have closed.
   EXPECT_FALSE(DevToolsWindow::GetDockedInstanceForInspectedTab(contents));
   // And it's not possible to open it again.
@@ -1422,7 +1422,13 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallBlacklistSelective) {
             service->GetExtensionById(kAdBlockCrxId, true));
 }
 
-IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallBlacklistWildcard) {
+// Flaky on windows; http://crbug.com/307994.
+#if defined(OS_WIN)
+#define MAYBE_ExtensionInstallBlacklistWildcard DISABLED_ExtensionInstallBlacklistWildcard
+#else
+#define MAYBE_ExtensionInstallBlacklistWildcard ExtensionInstallBlacklistWildcard
+#endif
+IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_ExtensionInstallBlacklistWildcard) {
   // Verify that a wildcard blacklist takes effect.
   EXPECT_TRUE(InstallExtension(kAdBlockCrxName));
   ExtensionService* service = extension_service();
@@ -1519,7 +1525,9 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
   base::FilePath test_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_path));
 
-  TestRequestInterceptor interceptor("update.extension");
+  TestRequestInterceptor interceptor(
+      "update.extension",
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
   interceptor.PushJobCallback(
       TestRequestInterceptor::FileJob(
           test_path.Append(kTestExtensionsDir).Append(kGood2CrxManifestName)));
@@ -1555,9 +1563,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
     if (!(*iter)->IsLoading()) {
       ++iter;
     } else {
-      OneOfTwoNotificationsObserver(
-          content::NOTIFICATION_LOAD_STOP,
-          content::NOTIFICATION_WEB_CONTENTS_DESTROYED).Wait();
+      content::WebContents* web_contents =
+          content::WebContents::FromRenderViewHost(*iter);
+      ASSERT_TRUE(web_contents);
+      WebContentsLoadedOrDestroyedWatcher(web_contents).Wait();
 
       // Test activity may have modified the set of extension processes during
       // message processing, so re-start the iteration to catch added/removed
@@ -1739,6 +1748,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, Javascript) {
   EXPECT_TRUE(IsJavascriptEnabled(contents));
   EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_DEV_TOOLS));
   EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_DEV_TOOLS_CONSOLE));
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_DEV_TOOLS_DEVICES));
 
   // Disable Javascript via policy.
   PolicyMap policies;
@@ -1751,6 +1761,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, Javascript) {
   // Developer tools still work when javascript is disabled.
   EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_DEV_TOOLS));
   EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_DEV_TOOLS_CONSOLE));
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_DEV_TOOLS_DEVICES));
   // Javascript is always enabled for the internal pages.
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIAboutURL));
   EXPECT_TRUE(IsJavascriptEnabled(contents));
@@ -2011,10 +2022,10 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, FullscreenAllowedApp) {
   // Launch an app that tries to open a fullscreen window.
   TestAddShellWindowObserver add_window_observer(
       apps::ShellWindowRegistry::Get(browser()->profile()));
-  chrome::OpenApplication(chrome::AppLaunchParams(browser()->profile(),
-                                                  extension,
-                                                  extension_misc::LAUNCH_NONE,
-                                                  NEW_WINDOW));
+  OpenApplication(AppLaunchParams(browser()->profile(),
+                                  extension,
+                                  extension_misc::LAUNCH_NONE,
+                                  NEW_WINDOW));
   apps::ShellWindow* window = add_window_observer.WaitForShellWindow();
   ASSERT_TRUE(window);
 
@@ -2086,7 +2097,8 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, DisableAudioOutput) {
 }
 
 IN_PROC_BROWSER_TEST_F(PolicyTest, PRE_SessionLengthLimit) {
-  // Set the session start time to 2 hours ago.
+  // Indicate that the session started 2 hours ago and no user activity has
+  // occurred yet.
   g_browser_process->local_state()->SetInt64(
       prefs::kSessionStartTime,
       (base::TimeTicks::Now() - base::TimeDelta::FromHours(2))
@@ -2107,7 +2119,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SessionLengthLimit) {
   PolicyMap policies;
   policies.Set(key::kSessionLengthLimit, POLICY_LEVEL_MANDATORY,
                POLICY_SCOPE_USER,
-               base::Value::CreateIntegerValue(180 * 60 * 1000),  // 3 hours.
+               base::Value::CreateIntegerValue(kThreeHoursInMs),
                NULL);
   UpdateProviderPolicy(policies);
   base::RunLoop().RunUntilIdle();
@@ -2118,7 +2130,92 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, SessionLengthLimit) {
   EXPECT_CALL(observer, Observe(chrome::NOTIFICATION_APP_TERMINATING, _, _));
   policies.Set(key::kSessionLengthLimit, POLICY_LEVEL_MANDATORY,
                POLICY_SCOPE_USER,
-               base::Value::CreateIntegerValue(60 * 60 * 1000),  // 1 hour.
+               base::Value::CreateIntegerValue(kOneHourInMs),
+               NULL);
+  UpdateProviderPolicy(policies);
+  base::RunLoop().RunUntilIdle();
+  Mock::VerifyAndClearExpectations(&observer);
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, PRE_WaitForInitialUserActivityUsatisfied) {
+  // Indicate that the session started 2 hours ago and no user activity has
+  // occurred yet.
+  g_browser_process->local_state()->SetInt64(
+      prefs::kSessionStartTime,
+      (base::TimeTicks::Now() - base::TimeDelta::FromHours(2))
+          .ToInternalValue());
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, WaitForInitialUserActivityUsatisfied) {
+  content::MockNotificationObserver observer;
+  content::NotificationRegistrar registrar;
+  registrar.Add(&observer,
+                chrome::NOTIFICATION_APP_TERMINATING,
+                content::NotificationService::AllSources());
+
+  // Require initial user activity.
+  PolicyMap policies;
+  policies.Set(key::kWaitForInitialUserActivity, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER,
+               new base::FundamentalValue(true),
+               NULL);
+  UpdateProviderPolicy(policies);
+  base::RunLoop().RunUntilIdle();
+
+  // Set the session length limit to 1 hour. Verify that the session is not
+  // terminated.
+  EXPECT_CALL(observer, Observe(chrome::NOTIFICATION_APP_TERMINATING, _, _))
+      .Times(0);
+  policies.Set(key::kSessionLengthLimit, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER,
+               base::Value::CreateIntegerValue(kOneHourInMs),
+               NULL);
+  UpdateProviderPolicy(policies);
+  base::RunLoop().RunUntilIdle();
+  Mock::VerifyAndClearExpectations(&observer);
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, PRE_WaitForInitialUserActivitySatisfied) {
+  // Indicate that initial user activity in this session occurred 2 hours ago.
+  g_browser_process->local_state()->SetInt64(
+      prefs::kSessionStartTime,
+      (base::TimeTicks::Now() - base::TimeDelta::FromHours(2))
+          .ToInternalValue());
+  g_browser_process->local_state()->SetBoolean(
+      prefs::kSessionUserActivitySeen,
+      true);
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, WaitForInitialUserActivitySatisfied) {
+  content::MockNotificationObserver observer;
+  content::NotificationRegistrar registrar;
+  registrar.Add(&observer,
+                chrome::NOTIFICATION_APP_TERMINATING,
+                content::NotificationService::AllSources());
+
+  // Require initial user activity and set the session length limit to 3 hours.
+  // Verify that the session is not terminated.
+  EXPECT_CALL(observer, Observe(chrome::NOTIFICATION_APP_TERMINATING, _, _))
+      .Times(0);
+  PolicyMap policies;
+  policies.Set(key::kWaitForInitialUserActivity, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER,
+               new base::FundamentalValue(true),
+               NULL);
+  policies.Set(key::kSessionLengthLimit, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER,
+               base::Value::CreateIntegerValue(kThreeHoursInMs),
+               NULL);
+  UpdateProviderPolicy(policies);
+  base::RunLoop().RunUntilIdle();
+  Mock::VerifyAndClearExpectations(&observer);
+
+  // Decrease the session length limit to 1 hour. Verify that the session is
+  // terminated immediately.
+  EXPECT_CALL(observer, Observe(chrome::NOTIFICATION_APP_TERMINATING, _, _));
+  policies.Set(key::kSessionLengthLimit, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER,
+               base::Value::CreateIntegerValue(kOneHourInMs),
                NULL);
   UpdateProviderPolicy(policies);
   base::RunLoop().RunUntilIdle();

@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -16,7 +17,6 @@
 #include "chrome/browser/media/desktop_streams_registry.h"
 #include "chrome/browser/media/media_stream_capture_indicator.h"
 #include "chrome/browser/media/media_stream_infobar_delegate.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/screen_capture_notification_ui.h"
 #include "chrome/browser/ui/simple_message_box.h"
@@ -55,12 +55,14 @@ const content::MediaStreamDevice* FindDeviceWithId(
   return NULL;
 };
 
-// This is a short-term solution to grant microphone access to virtual keyboard
-// extension for voice input. Once http://crbug.com/292856 is fixed, remove this
-// whitelist.
+// This is a short-term solution to grant microphone access to the
+// virtual keyboard extension and the Google Voice Search Hotword
+// extension for voice input. Once http://crbug.com/292856 is fixed,
+// remove this whitelist.
 bool IsMediaRequestWhitelistedForExtension(
     const extensions::Extension* extension) {
-  return extension->id() == "mppnpdlheglhdfmldimlhpnegondlapf";
+  return extension->id() == "mppnpdlheglhdfmldimlhpnegondlapf" ||
+      extension->id() == "bepbmhgboaologfdajaanbcjmnhjmhfn";
 }
 
 // This is a short-term solution to allow testing of the the Screen Capture API
@@ -200,7 +202,7 @@ void MediaCaptureDevicesDispatcher::ProcessMediaAccessRequest(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (request.video_type == content::MEDIA_DESKTOP_VIDEO_CAPTURE ||
-      request.audio_type == content::MEDIA_SYSTEM_AUDIO_CAPTURE) {
+      request.audio_type == content::MEDIA_LOOPBACK_AUDIO_CAPTURE) {
     ProcessDesktopCaptureAccessRequest(
         web_contents, request, callback, extension);
   } else if (request.video_type == content::MEDIA_TAB_VIDEO_CAPTURE ||
@@ -234,7 +236,8 @@ void MediaCaptureDevicesDispatcher::ProcessDesktopCaptureAccessRequest(
   // chrome.desktopCapture.chooseDesktopMedia()) was used to generate device Id.
   content::DesktopMediaID media_id =
       GetDesktopStreamsRegistry()->RequestMediaForStreamId(
-          request.requested_video_device_id, request.security_origin);
+          request.requested_video_device_id, request.render_process_id,
+          request.render_view_id, request.security_origin);
 
   // If the id wasn't generated using Desktop Capture API then process it as a
   // screen capture request.
@@ -249,12 +252,19 @@ void MediaCaptureDevicesDispatcher::ProcessDesktopCaptureAccessRequest(
       content::MEDIA_DESKTOP_VIDEO_CAPTURE, media_id.ToString(),
       std::string()));
 
+  bool loopback_audio_supported = false;
+#if defined(USE_CRAS) || defined(OS_WIN)
+  // Currently loopback audio capture is supported only on Windows and ChromeOS.
+  loopback_audio_supported = true;
+#endif
+
   // Audio is only supported for screen capture streams.
   if (media_id.type == content::DesktopMediaID::TYPE_SCREEN &&
-      request.audio_type == content::MEDIA_SYSTEM_AUDIO_CAPTURE) {
+      request.audio_type == content::MEDIA_LOOPBACK_AUDIO_CAPTURE &&
+      loopback_audio_supported) {
     devices.push_back(content::MediaStreamDevice(
-        content::MEDIA_SYSTEM_AUDIO_CAPTURE, media_id.ToString(),
-        "System Audio"));
+        content::MEDIA_LOOPBACK_AUDIO_CAPTURE,
+        media::AudioManagerBase::kLoopbackInputDeviceId, "System Audio"));
   }
 
   ui = ScreenCaptureNotificationUI::Create(l10n_util::GetStringFUTF16(
@@ -291,21 +301,11 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
     return;
   }
 
-  const bool system_audio_capture_requested =
-      request.audio_type == content::MEDIA_SYSTEM_AUDIO_CAPTURE;
-
+  bool loopback_audio_supported = false;
 #if defined(USE_CRAS) || defined(OS_WIN)
-  const bool system_audio_capture_supported = true;
-#else
-  const bool system_audio_capture_supported = false;
+  // Currently loopback audio capture is supported only on Windows and ChromeOS.
+  loopback_audio_supported = true;
 #endif
-
-  // Reject request when audio capture was requested but is not supported on
-  // this system.
-  if (system_audio_capture_requested && !system_audio_capture_supported) {
-    callback.Run(devices, ui.Pass());
-    return;
-  }
 
   const bool component_extension =
       extension && extension->location() == extensions::Manifest::COMPONENT;
@@ -348,14 +348,12 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
     if (user_approved || component_extension) {
       devices.push_back(content::MediaStreamDevice(
           content::MEDIA_DESKTOP_VIDEO_CAPTURE, media_id.ToString(), "Screen"));
-      if (system_audio_capture_requested) {
-#if defined(USE_CRAS) || defined(OS_WIN)
+      if (request.audio_type == content::MEDIA_LOOPBACK_AUDIO_CAPTURE &&
+          loopback_audio_supported) {
         // Use the special loopback device ID for system audio capture.
         devices.push_back(content::MediaStreamDevice(
-            content::MEDIA_SYSTEM_AUDIO_CAPTURE,
-            media::AudioManagerBase::kLoopbackInputDeviceId,
-            "System Audio"));
-#endif
+            content::MEDIA_LOOPBACK_AUDIO_CAPTURE,
+            media::AudioManagerBase::kLoopbackInputDeviceId, "System Audio"));
       }
     }
   }
@@ -387,6 +385,11 @@ void MediaCaptureDevicesDispatcher::ProcessTabCaptureAccessRequest(
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   extensions::TabCaptureRegistry* tab_capture_registry =
       extensions::TabCaptureRegistry::Get(profile);
+  if (!tab_capture_registry) {
+    NOTREACHED();
+    callback.Run(devices, ui.Pass());
+    return;
+  }
   bool tab_capture_allowed =
       tab_capture_registry->VerifyRequest(request.render_process_id,
                                           request.render_view_id);

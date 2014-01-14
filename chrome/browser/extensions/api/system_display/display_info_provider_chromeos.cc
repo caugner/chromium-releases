@@ -167,9 +167,8 @@ void UpdateDisplayLayout(const gfx::Rect& primary_display_bounds,
                          int target_display_id) {
   ash::DisplayLayout layout = GetLayoutForRectangles(primary_display_bounds,
                                                      target_display_bounds);
-  ash::DisplayController* display_controller =
-      ash::Shell::GetInstance()->display_controller();
-  display_controller->SetLayoutForCurrentDisplays(layout);
+  ash::Shell::GetInstance()->display_manager()->
+      SetLayoutForCurrentDisplays(layout);
 }
 
 // Validates that parameters passed to the SetInfo function are valid for the
@@ -355,14 +354,10 @@ bool SetInfoImpl(const std::string& display_id_str,
 
 }  // namespace
 
-void DisplayInfoProvider::SetInfo(const std::string& display_id,
+bool DisplayInfoProvider::SetInfo(const std::string& display_id,
                                   const DisplayProperties& info,
-                                  const SetInfoCallback& callback) {
-  std::string error;
-  bool success = SetInfoImpl(display_id, info, &error);
-  base::MessageLoopProxy::current()->PostTask(
-      FROM_HERE,
-      base::Bind(callback, success, error));
+                                  std::string* error) {
+  return SetInfoImpl(display_id, info, error);
 }
 
 void DisplayInfoProvider::UpdateDisplayUnitInfoForPlatform(
@@ -374,7 +369,7 @@ void DisplayInfoProvider::UpdateDisplayUnitInfoForPlatform(
   unit->name = display_manager->GetDisplayNameForId(display.id());
   if (display_manager->IsMirrored()) {
     unit->mirroring_source_id =
-        base::Int64ToString(display_manager->mirrored_display().id());
+        base::Int64ToString(display_manager->mirrored_display_id());
   }
 
   const float dpi = display.device_scale_factor() * kDpi96;

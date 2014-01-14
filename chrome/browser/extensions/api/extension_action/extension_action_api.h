@@ -5,10 +5,12 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_ACTION_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_ACTION_API_H_
 
+#include <string>
+
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/extension_action.h"
-#include "chrome/browser/extensions/extension_function.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -64,7 +66,7 @@ class ExtensionActionAPI : public ProfileKeyedAPI {
   // The DispatchEvent methods forward events to the |profile|'s event router.
   static void DispatchEventToExtension(Profile* profile,
                                        const std::string& extension_id,
-                                       const char* event_name,
+                                       const std::string& event_name,
                                        scoped_ptr<base::ListValue> event_args);
 
   // Called to dispatch a deprecated style page action click event that was
@@ -118,7 +120,7 @@ class ExtensionActionStorageManager
 // have required tabIds while browserAction's are optional, they have different
 // internal browser notification requirements, and not all functions are defined
 // for all APIs).
-class ExtensionActionFunction : public SyncExtensionFunction {
+class ExtensionActionFunction : public ChromeSyncExtensionFunction {
  public:
   static bool ParseCSSColorString(const std::string& color_string,
                                   SkColor* result);
@@ -341,6 +343,30 @@ class BrowserActionDisableFunction : public ExtensionActionHideFunction {
   virtual ~BrowserActionDisableFunction() {}
 };
 
+class BrowserActionOpenPopupFunction : public ChromeAsyncExtensionFunction,
+                                       public content::NotificationObserver {
+ public:
+  DECLARE_EXTENSION_FUNCTION("browserAction.openPopup",
+                             BROWSERACTION_OPEN_POPUP)
+  BrowserActionOpenPopupFunction();
+
+ private:
+  virtual ~BrowserActionOpenPopupFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+  void OpenPopupTimedOut();
+
+  content::NotificationRegistrar registrar_;
+  bool response_sent_;
+
+  DISALLOW_COPY_AND_ASSIGN(BrowserActionOpenPopupFunction);
+};
+
 //
 // scriptBadge.* aliases for supported scriptBadge APIs.
 //
@@ -441,7 +467,7 @@ class PageActionGetPopupFunction
 };
 
 // Base class for deprecated page actions APIs
-class PageActionsFunction : public SyncExtensionFunction {
+class PageActionsFunction : public ChromeSyncExtensionFunction {
  protected:
   PageActionsFunction();
   virtual ~PageActionsFunction();

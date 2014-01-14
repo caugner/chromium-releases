@@ -27,13 +27,13 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/file_system.h"
-#include "chrome/common/extensions/permissions/api_permission.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "extensions/common/permissions/api_permission.h"
 #include "grit/generated_resources.h"
 #include "net/base/mime_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -279,18 +279,16 @@ namespace extensions {
 
 namespace file_system_api {
 
-bool GetLastChooseEntryDirectory(const ExtensionPrefs* prefs,
-                                 const std::string& extension_id,
-                                 base::FilePath* path) {
+base::FilePath GetLastChooseEntryDirectory(const ExtensionPrefs* prefs,
+                                           const std::string& extension_id) {
+  base::FilePath path;
   std::string string_path;
-  if (!prefs->ReadPrefAsString(extension_id,
-                               kLastChooseEntryDirectory,
-                               &string_path)) {
-    return false;
+  if (prefs->ReadPrefAsString(extension_id,
+                              kLastChooseEntryDirectory,
+                              &string_path)) {
+    path = base::FilePath::FromUTF8Unsafe(string_path);
   }
-
-  *path = base::FilePath::FromUTF8Unsafe(string_path);
-  return true;
+  return path;
 }
 
 void SetLastChooseEntryDirectory(ExtensionPrefs* prefs,
@@ -329,7 +327,7 @@ void FileSystemEntryFunction::CheckWritableFiles(
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   app_file_handler_util::CheckWritableFiles(
       paths,
-      profile_,
+      GetProfile(),
       is_directory_,
       base::Bind(&FileSystemEntryFunction::RegisterFileSystemsAndSendResponse,
                  this,
@@ -366,7 +364,7 @@ void FileSystemEntryFunction::AddEntryToResponse(
   DCHECK(response_);
   extensions::app_file_handler_util::GrantedFileEntry file_entry =
       extensions::app_file_handler_util::CreateFileEntry(
-          profile(),
+          GetProfile(),
           GetExtension(),
           render_view_host_->GetProcess()->GetID(),
           path,
@@ -587,7 +585,7 @@ void FileSystemChooseEntryFunction::ShowPicker(
   content::WebContents* web_contents = NULL;
   if (extension_->is_platform_app()) {
     apps::ShellWindowRegistry* registry =
-        apps::ShellWindowRegistry::Get(profile());
+        apps::ShellWindowRegistry::Get(GetProfile());
     DCHECK(registry);
     ShellWindow* shell_window = registry->GetShellWindowForRenderViewHost(
         render_view_host());
@@ -697,14 +695,15 @@ void FileSystemChooseEntryFunction::FilesSelected(
   } else {
     last_choose_directory = paths[0].DirName();
   }
-  file_system_api::SetLastChooseEntryDirectory(ExtensionPrefs::Get(profile()),
-                                               GetExtension()->id(),
-                                               last_choose_directory);
+  file_system_api::SetLastChooseEntryDirectory(
+      ExtensionPrefs::Get(GetProfile()),
+      GetExtension()->id(),
+      last_choose_directory);
   if (is_directory_) {
     // Get the WebContents for the app window to be the parent window of the
     // confirmation dialog if necessary.
     apps::ShellWindowRegistry* registry =
-        apps::ShellWindowRegistry::Get(profile());
+        apps::ShellWindowRegistry::Get(GetProfile());
     DCHECK(registry);
     ShellWindow* shell_window = registry->GetShellWindowForRenderViewHost(
         render_view_host());
@@ -913,28 +912,27 @@ bool FileSystemChooseEntryFunction::RunImpl() {
 
   file_type_info.support_drive = true;
 
-  base::FilePath previous_path;
-  file_system_api::GetLastChooseEntryDirectory(
-      ExtensionPrefs::Get(profile()),
-      GetExtension()->id(),
-      &previous_path);
+  base::FilePath previous_path = file_system_api::GetLastChooseEntryDirectory(
+      ExtensionPrefs::Get(GetProfile()), GetExtension()->id());
 
   content::BrowserThread::PostTaskAndReply(
       content::BrowserThread::FILE,
       FROM_HERE,
-      base::Bind(
-          &FileSystemChooseEntryFunction::SetInitialPathOnFileThread, this,
-          suggested_name, previous_path),
-      base::Bind(
-          &FileSystemChooseEntryFunction::ShowPicker, this, file_type_info,
-          picker_type));
+      base::Bind(&FileSystemChooseEntryFunction::SetInitialPathOnFileThread,
+                 this,
+                 suggested_name,
+                 previous_path),
+      base::Bind(&FileSystemChooseEntryFunction::ShowPicker,
+                 this,
+                 file_type_info,
+                 picker_type));
   return true;
 }
 
 bool FileSystemRetainEntryFunction::RunImpl() {
   std::string entry_id;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &entry_id));
-  SavedFilesService* saved_files_service = SavedFilesService::Get(profile());
+  SavedFilesService* saved_files_service = SavedFilesService::Get(GetProfile());
   // Add the file to the retain list if it is not already on there.
   if (!saved_files_service->IsRegistered(extension_->id(), entry_id)) {
     std::string filesystem_name;
@@ -954,8 +952,9 @@ bool FileSystemRetainEntryFunction::RunImpl() {
         FROM_HERE,
         base::Bind(&FileSystemRetainEntryFunction::SetIsDirectoryOnFileThread,
                    this),
-        base::Bind(
-            &FileSystemRetainEntryFunction::RetainFileEntry, this, entry_id));
+        base::Bind(&FileSystemRetainEntryFunction::RetainFileEntry,
+                   this,
+                   entry_id));
     return true;
   }
 
@@ -966,7 +965,7 @@ bool FileSystemRetainEntryFunction::RunImpl() {
 
 void FileSystemRetainEntryFunction::RetainFileEntry(
     const std::string& entry_id) {
-  SavedFilesService* saved_files_service = SavedFilesService::Get(profile());
+  SavedFilesService* saved_files_service = SavedFilesService::Get(GetProfile());
   saved_files_service->RegisterFileEntry(
       extension_->id(), entry_id, path_, is_directory_);
   saved_files_service->EnqueueFileEntry(extension_->id(), entry_id);
@@ -974,16 +973,14 @@ void FileSystemRetainEntryFunction::RetainFileEntry(
 }
 
 void FileSystemRetainEntryFunction::SetIsDirectoryOnFileThread() {
-  if (base::DirectoryExists(path_)) {
-    is_directory_ = true;
-  }
+  is_directory_ = base::DirectoryExists(path_);
 }
 
 bool FileSystemIsRestorableFunction::RunImpl() {
   std::string entry_id;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &entry_id));
   SetResult(new base::FundamentalValue(SavedFilesService::Get(
-      profile())->IsRegistered(extension_->id(), entry_id)));
+      GetProfile())->IsRegistered(extension_->id(), entry_id)));
   return true;
 }
 
@@ -993,14 +990,14 @@ bool FileSystemRestoreEntryFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &entry_id));
   EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(1, &needs_new_entry));
   const SavedFileEntry* file_entry = SavedFilesService::Get(
-      profile())->GetFileEntry(extension_->id(), entry_id);
+      GetProfile())->GetFileEntry(extension_->id(), entry_id);
   if (!file_entry) {
     error_ = kUnknownIdError;
     return false;
   }
 
-  SavedFilesService::Get(profile())->EnqueueFileEntry(
-      extension_->id(), entry_id);
+  SavedFilesService::Get(GetProfile())
+      ->EnqueueFileEntry(extension_->id(), entry_id);
 
   // Only create a new file entry if the renderer requests one.
   // |needs_new_entry| will be false if the renderer already has an Entry for

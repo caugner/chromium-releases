@@ -18,22 +18,37 @@ from telemetry.core.backends.chrome import android_browser_backend
 from telemetry.core.platform import android_platform_backend
 
 CHROME_PACKAGE_NAMES = {
-  'android-chrome': 'com.google.android.apps.chrome',
-  'android-chrome-beta': 'com.chrome.beta',
-  'android-chrome-dev': 'com.google.android.apps.chrome_dev',
-  'android-jb-system-chrome': 'com.android.chrome'
+  'android-content-shell':
+      ['org.chromium.content_shell_apk',
+       android_browser_backend.ContentShellBackendSettings,
+       'ContentShell.apk'],
+  'android-chromium-testshell':
+      ['org.chromium.chrome.testshell',
+       android_browser_backend.ChromiumTestShellBackendSettings,
+       'ChromiumTestShell.apk'],
+  'android-webview':
+      ['com.android.webview.chromium.shell',
+       android_browser_backend.WebviewBackendSettings,
+       None],
+  'android-chrome':
+      ['com.google.android.apps.chrome',
+       android_browser_backend.ChromeBackendSettings,
+       'Chrome.apk'],
+  'android-chrome-beta':
+      ['com.chrome.beta',
+       android_browser_backend.ChromeBackendSettings,
+       None],
+  'android-chrome-dev':
+      ['com.google.android.apps.chrome_dev',
+       android_browser_backend.ChromeBackendSettings,
+       None],
+  'android-jb-system-chrome':
+      ['com.android.chrome',
+       android_browser_backend.ChromeBackendSettings,
+       None]
 }
 
-ALL_BROWSER_TYPES = ','.join([
-                                'android-chromium-testshell',
-                                'android-content-shell',
-                                'android-webview',
-                             ] + CHROME_PACKAGE_NAMES.keys())
-
-CONTENT_SHELL_PACKAGE = 'org.chromium.content_shell_apk'
-CHROMIUM_TESTSHELL_PACKAGE = 'org.chromium.chrome.testshell'
-WEBVIEW_PACKAGE = 'com.android.webview.chromium.shell'
-
+ALL_BROWSER_TYPES = ','.join(CHROME_PACKAGE_NAMES.keys())
 
 # adb shell pm list packages
 # adb
@@ -43,9 +58,26 @@ WEBVIEW_PACKAGE = 'com.android.webview.chromium.shell'
 
 class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
   """A launchable android browser instance."""
-  def __init__(self, browser_type, finder_options, backend_settings):
+  def __init__(self, browser_type, finder_options, backend_settings, apk_name):
     super(PossibleAndroidBrowser, self).__init__(browser_type, finder_options)
     self._backend_settings = backend_settings
+    self._local_apk = None
+
+    chrome_root = util.GetChromiumSrcDir()
+    if apk_name:
+      candidate_apks = []
+      for build_dir, build_type in util.GetBuildDirectories():
+        apk_full_name = os.path.join(chrome_root, build_dir, build_type, 'apks',
+                                     apk_name)
+        if os.path.exists(apk_full_name):
+          last_changed = os.path.getmtime(apk_full_name)
+          candidate_apks.append((last_changed, apk_full_name))
+
+      if candidate_apks:
+        # Find the canadidate .apk with the latest modification time.
+        newest_apk_path = sorted(candidate_apks)[-1][1]
+        self._local_apk = newest_apk_path
+
 
   def __repr__(self):
     return 'PossibleAndroidBrowser(browser_type=%s)' % self.browser_type
@@ -67,7 +99,27 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
       return False
     return True
 
-def SelectDefaultBrowser(_):
+  def HaveLocalAPK(self):
+    return self._local_apk and os.path.exists(self._local_apk)
+
+  def UpdateExecutableIfNeeded(self):
+    if self.HaveLocalAPK():
+      real_logging.warn(
+          'Refreshing %s on device if needed.' % self._local_apk)
+      self._backend_settings.adb.Install(self._local_apk)
+
+  def last_modification_time(self):
+    if self.HaveLocalAPK():
+      return os.path.getmtime(self._local_apk)
+    return -1
+
+def SelectDefaultBrowser(possible_browsers):
+  local_builds_by_date = sorted(possible_browsers,
+                                key=lambda b: b.last_modification_time())
+
+  if local_builds_by_date:
+    newest_browser = local_builds_by_date[-1]
+    return newest_browser
   return None
 
 adb_works = None
@@ -102,20 +154,6 @@ def CanFindAvailableBrowsers(logging=real_logging):
         adb_works = True
       else:
         adb_works = False
-  if adb_works and sys.platform.startswith('linux'):
-    # Workaround for crbug.com/268450
-    import psutil  # pylint: disable=F0401
-    adb_commands.GetAttachedDevices()
-    pids  = [p.pid for p in psutil.process_iter() if 'adb' in p.name]
-    with open(os.devnull, 'w') as devnull:
-      for pid in pids:
-        ret = subprocess.call(['taskset', '-p', '0x1', str(pid)],
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              stdin=devnull)
-        if ret:
-          logging.warn('Failed to taskset %d (%s)', pid, ret)
-
   return adb_works
 
 def FindAllAvailableBrowsers(finder_options, logging=real_logging):
@@ -144,36 +182,45 @@ def FindAllAvailableBrowsers(finder_options, logging=real_logging):
 
   adb = adb_commands.AdbCommands(device=device)
 
+  if sys.platform.startswith('linux'):
+    # Host side workaround for crbug.com/268450 (adb instability)
+    # The adb server has a race which is mitigated by binding to a single core.
+    import psutil  # pylint: disable=F0401
+    pids  = [p.pid for p in psutil.process_iter() if 'adb' in p.name]
+    with open(os.devnull, 'w') as devnull:
+      for pid in pids:
+        ret = subprocess.call(['taskset', '-p', '-c', '0', str(pid)],
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              stdin=devnull)
+        if ret:
+          logging.warn('Failed to taskset %d (%s)', pid, ret)
+
+    # Experimental device side workaround for crbug.com/268450 (adb instability)
+    # The /sbin/adbd process on the device appears to hang which causes adb to
+    # report that the device is offline. Our working theory is that killing
+    # the process and allowing it to be automatically relaunched will allow us
+    # to run for longer before it hangs.
+    if not finder_options.keep_test_server_ports:
+      # This would break forwarder connections, so we cannot do this if
+      # instructed to keep server ports open.
+      logging.info('Killing adbd on device')
+      adb.KillAll('adbd')
+      logging.info('Waiting for adbd to restart')
+      adb.Adb().Adb().SendCommand('wait-for-device')
+
   packages = adb.RunShellCommand('pm list packages')
   possible_browsers = []
-  if 'package:' + CONTENT_SHELL_PACKAGE in packages:
-    b = PossibleAndroidBrowser(
-        'android-content-shell',
-        finder_options, android_browser_backend.ContentShellBackendSettings(
-            adb, CONTENT_SHELL_PACKAGE))
-    possible_browsers.append(b)
 
-  if 'package:' + CHROMIUM_TESTSHELL_PACKAGE in packages:
+  for name, package_info in CHROME_PACKAGE_NAMES.iteritems():
+    [package, backend_settings, local_apk] = package_info
     b = PossibleAndroidBrowser(
-        'android-chromium-testshell',
+        name,
         finder_options,
-        android_browser_backend.ChromiumTestShellBackendSettings(
-            adb, CHROMIUM_TESTSHELL_PACKAGE))
-    possible_browsers.append(b)
+        backend_settings(adb, package),
+        local_apk)
 
-  if 'package:' + WEBVIEW_PACKAGE in packages:
-    b = PossibleAndroidBrowser(
-        'android-webview',
-        finder_options,
-        android_browser_backend.WebviewBackendSettings(adb, WEBVIEW_PACKAGE))
-    possible_browsers.append(b)
-
-  for name, package in CHROME_PACKAGE_NAMES.iteritems():
-    if 'package:' + package in packages:
-      b = PossibleAndroidBrowser(
-          name,
-          finder_options,
-          android_browser_backend.ChromeBackendSettings(adb, package))
+    if 'package:' + package in packages or b.HaveLocalAPK():
       possible_browsers.append(b)
 
   # See if the "forwarder" is installed -- we need this to host content locally
@@ -182,9 +229,10 @@ def FindAllAvailableBrowsers(finder_options, logging=real_logging):
       not adb_commands.HasForwarder()):
     logging.warn('telemetry detected an android device. However,')
     logging.warn('Chrome\'s port-forwarder app is not available.')
-    logging.warn('To build:')
+    logging.warn('Falling back to prebuilt binaries, but to build locally: ')
     logging.warn('  ninja -C out/Release forwarder2 md5sum')
     logging.warn('')
     logging.warn('')
-    return []
+    if not adb_commands.SetupPrebuiltTools(device):
+      return []
   return possible_browsers

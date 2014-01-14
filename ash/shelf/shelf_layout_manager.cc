@@ -26,7 +26,6 @@
 #include "ash/wm/lock_state_controller.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/window_animations.h"
-#include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace_controller.h"
@@ -290,12 +289,12 @@ void ShelfLayoutManager::LayoutShelf() {
 
   if (shelf_->launcher()) {
     // This is not part of UpdateBoundsAndOpacity() because
-    // SetLauncherViewBounds() sets the bounds immediately and does not animate.
-    // The height of the LauncherView for a horizontal shelf and the width of
-    // the LauncherView for a vertical shelf are set when |shelf_|'s bounds
+    // SetShelfViewBounds() sets the bounds immediately and does not animate.
+    // The height of the ShelfView for a horizontal shelf and the width of
+    // the ShelfView for a vertical shelf are set when |shelf_|'s bounds
     // are changed via UpdateBoundsAndOpacity(). This sets the origin and the
     // dimension in the other direction.
-    shelf_->launcher()->SetLauncherViewBounds(
+    shelf_->launcher()->SetShelfViewBounds(
         target_bounds.launcher_bounds_in_shelf);
   }
 }
@@ -321,10 +320,12 @@ void ShelfLayoutManager::UpdateVisibilityState() {
     WorkspaceWindowState window_state(workspace_controller_->GetWindowState());
     switch (window_state) {
       case WORKSPACE_WINDOW_STATE_FULL_SCREEN:
-        if (FullscreenWithMinimalChrome()) {
-          SetState(SHELF_AUTO_HIDE);
-        } else {
+        if (FullscreenWithHiddenShelf()) {
           SetState(SHELF_HIDDEN);
+        } else {
+          // The shelf is sometimes not hidden when in immersive fullscreen.
+          // Force the shelf to be auto hidden in this case.
+          SetState(SHELF_AUTO_HIDE);
         }
         break;
       case WORKSPACE_WINDOW_STATE_MAXIMIZED:
@@ -469,10 +470,10 @@ void ShelfLayoutManager::CompleteGestureDrag(const ui::GestureEvent& gesture) {
       gesture_drag_auto_hide_state_ == SHELF_AUTO_HIDE_SHOWN ?
       SHELF_AUTO_HIDE_BEHAVIOR_NEVER : SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS;
 
-  // In fullscreen with minimal chrome, the auto hide behavior affects neither
-  // the visibility state nor the auto hide state. Set |gesture_drag_status_|
-  // to GESTURE_DRAG_COMPLETE_IN_PROGRESS to set the auto hide state to
-  // |gesture_drag_auto_hide_state_|.
+  // When in fullscreen and the shelf is forced to be auto hidden, the auto hide
+  // behavior affects neither the visibility state nor the auto hide state. Set
+  // |gesture_drag_status_| to GESTURE_DRAG_COMPLETE_IN_PROGRESS to set the auto
+  // hide state to |gesture_drag_auto_hide_state_|.
   gesture_drag_status_ = GESTURE_DRAG_COMPLETE_IN_PROGRESS;
   if (auto_hide_behavior_ != new_auto_hide_behavior)
     SetAutoHideBehavior(new_auto_hide_behavior);
@@ -537,16 +538,14 @@ bool ShelfLayoutManager::IsHorizontalAlignment() const {
          GetAlignment() == SHELF_ALIGNMENT_TOP;
 }
 
-bool ShelfLayoutManager::FullscreenWithMinimalChrome() const {
+bool ShelfLayoutManager::FullscreenWithHiddenShelf() const {
   RootWindowController* controller = GetRootWindowController(root_window_);
   if (!controller)
     return false;
   const aura::Window* window = controller->GetTopmostFullscreenWindow();
   if (!window)
     return false;
-  if (!window->GetProperty(kFullscreenUsesMinimalChromeKey))
-    return false;
-  return true;
+  return wm::GetWindowState(window)->hide_shelf_when_fullscreen();
 }
 
 // static
@@ -830,16 +829,16 @@ void ShelfLayoutManager::CalculateTargetBounds(
   // This needs to happen after calling UpdateTargetBoundsForGesture(), because
   // that can change the size of the shelf.
   target_bounds->launcher_bounds_in_shelf = SelectValueForShelfAlignment(
-      gfx::Rect(base::i18n::IsRTL() ? status_size.width() : 0, 0,
-                    shelf_width - status_size.width(),
-                    target_bounds->shelf_bounds_in_root.height()),
+      gfx::Rect(0, 0,
+                shelf_width - status_size.width(),
+                target_bounds->shelf_bounds_in_root.height()),
       gfx::Rect(0, 0, target_bounds->shelf_bounds_in_root.width(),
                 shelf_height - status_size.height()),
       gfx::Rect(0, 0, target_bounds->shelf_bounds_in_root.width(),
                 shelf_height - status_size.height()),
-      gfx::Rect(base::i18n::IsRTL() ? status_size.width() : 0, 0,
-                    shelf_width - status_size.width(),
-                    target_bounds->shelf_bounds_in_root.height()));
+      gfx::Rect(0, 0,
+                shelf_width - status_size.width(),
+                target_bounds->shelf_bounds_in_root.height()));
 }
 
 void ShelfLayoutManager::UpdateTargetBoundsForGesture(
@@ -1127,7 +1126,11 @@ void ShelfLayoutManager::OnKeyboardBoundsChanging(
 }
 
 void ShelfLayoutManager::OnDockBoundsChanging(
-    const gfx::Rect& dock_bounds) {
+    const gfx::Rect& dock_bounds,
+    DockedWindowLayoutManagerObserver::Reason reason) {
+  // Skip shelf layout in case docked notification originates from this class.
+  if (reason == DISPLAY_INSETS_CHANGED)
+    return;
   if (dock_bounds_ != dock_bounds) {
     dock_bounds_ = dock_bounds;
     OnWindowResized();

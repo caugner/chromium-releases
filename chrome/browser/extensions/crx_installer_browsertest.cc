@@ -4,6 +4,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/download/download_crx_util.h"
+#include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
@@ -17,13 +18,19 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/feature_switch.h"
-#include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/test/download_test_observer.h"
+#include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/switches.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/fake_user_manager.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
+#endif
 
 class SkBitmap;
 
@@ -203,29 +210,6 @@ class ExtensionCrxInstallerTest : public ExtensionBrowserTest {
             mock_prompt->extension_id());
     ASSERT_TRUE(permissions.get());
   }
-
-  // Creates and returns a popup ExtensionHost for an extension and waits
-  // for a url to load in the host's web contents.
-  // The caller is responsible for cleaning up the returned ExtensionHost.
-  ExtensionHost* OpenUrlInExtensionPopupHost(const Extension* extension,
-                                             const GURL& url) {
-    ExtensionSystem* extension_system = extensions::ExtensionSystem::Get(
-        browser()->profile());
-    ExtensionProcessManager* epm = extension_system->process_manager();
-    ExtensionHost* extension_host =
-        epm->CreatePopupHost(extension, url, browser());
-
-    extension_host->CreateRenderViewSoon();
-    if (!extension_host->IsRenderViewLive()) {
-      content::WindowedNotificationObserver observer(
-          content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-          content::Source<content::WebContents>(
-              extension_host->host_contents()));
-      observer.Wait();
-    }
-
-    return extension_host;
-  }
 };
 
 #if defined(OS_CHROMEOS)
@@ -360,7 +344,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, DISABLED_AllowOffStore) {
     }
 
     crx_installer->InstallCrx(test_data_dir_.AppendASCII("good.crx"));
-    EXPECT_EQ(kTestData[i], WaitForExtensionInstall()) << kTestData[i];
+    EXPECT_EQ(kTestData[i],
+              WaitForExtensionInstall()) << kTestData[i];
     EXPECT_EQ(kTestData[i], mock_prompt->did_succeed());
     EXPECT_EQ(kTestData[i], mock_prompt->confirmation_requested()) <<
         kTestData[i];
@@ -413,10 +398,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest,
 
   // Make test extension non-idle by opening the extension's browser action
   // popup. This should cause the installation to be delayed.
-  std::string popup_url = std::string("chrome-extension://")
-      + extension_id + std::string("/popup.html");
-  scoped_ptr<ExtensionHost> extension_host = scoped_ptr<ExtensionHost>(
-      OpenUrlInExtensionPopupHost(extension, GURL(popup_url)));
+  content::WindowedNotificationObserver loading_observer(
+      chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
+      content::Source<Profile>(profile()));
+  BrowserActionTestUtil util(browser());
+  // There is only one extension, so just click the first browser action.
+  ASSERT_EQ(1, util.NumberOfBrowserActions());
+  util.Press(0);
+  loading_observer.Wait();
+  ExtensionHost* extension_host =
+      content::Details<ExtensionHost>(loading_observer.details()).ptr();
 
   // Install version 2 of the extension and check that it is indeed delayed.
   ASSERT_TRUE(UpdateExtensionWaitForIdle(
@@ -426,10 +417,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest,
   extension = service->GetExtensionById(extension_id, false);
   ASSERT_EQ("1.0", extension->version()->GetString());
 
-  // Make the extension idle again by navigating away from the extension's
-  // browser action page. This should not trigger the delayed install.
-  extension_system->process_manager()->UnregisterRenderViewHost(
-      extension_host->render_view_host());
+  // Make the extension idle again by closing the popup. This should not trigger
+  //the delayed install.
+  content::WindowedNotificationObserver terminated_observer(
+      content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+      content::Source<content::RenderProcessHost>(
+          extension_host->render_process_host()));
+  extension_host->render_view_host()->ClosePage();
+  terminated_observer.Wait();
   ASSERT_EQ(1u, service->delayed_installs()->size());
 
   // Install version 3 of the extension. Because the extension is idle,
@@ -475,6 +470,22 @@ IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, NonStrictManifestCheck) {
                   test_data_dir_.AppendASCII("crx_installer/v1.crx"));
 
   EXPECT_TRUE(mock_prompt->did_succeed());
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionCrxInstallerTest, KioskOnlyTest) {
+  base::FilePath crx_path =
+      test_data_dir_.AppendASCII("kiosk/kiosk_only.crx");
+  EXPECT_FALSE(InstallExtension(crx_path, 0));
+#if defined(OS_CHROMEOS)
+  // Simulate ChromeOS kiosk mode. |scoped_user_manager| will take over
+  // lifetime of |user_manager|.
+  chromeos::FakeUserManager* fake_user_manager =
+      new chromeos::FakeUserManager();
+  fake_user_manager->AddKioskAppUser("example@example.com");
+  fake_user_manager->LoginUser("example@example.com");
+  chromeos::ScopedUserManagerEnabler scoped_user_manager(fake_user_manager);
+  EXPECT_TRUE(InstallExtension(crx_path, 1));
+#endif
 }
 
 }  // namespace extensions

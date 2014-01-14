@@ -9,7 +9,6 @@
 #include <set>
 #include <vector>
 
-#include "apps/app_launcher.h"
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
@@ -18,7 +17,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -112,10 +110,6 @@ static gfx::ImageSkia* kDefaultFavicon = NULL;
 // Icon used for folders.
 static gfx::ImageSkia* kFolderIcon = NULL;
 
-// Offset for where the menu is shown relative to the bottom of the
-// BookmarkBarView.
-static const int kMenuOffset = 3;
-
 // Color of the drop indicator.
 static const SkColor kDropIndicatorColor = SK_ColorBLACK;
 
@@ -201,7 +195,7 @@ class BookmarkButton : public BookmarkButtonBase {
     gfx::Point location(p);
     ConvertPointToScreen(this, &location);
     *tooltip = BookmarkBarView::CreateToolTipForURLAndTitle(
-        location, url_, text(), profile_, GetWidget()->GetNativeView());
+        GetWidget(), location, url_, text(), profile_);
     return !tooltip->empty();
   }
 
@@ -601,15 +595,16 @@ void BookmarkBarView::StopThrobbing(bool immediate) {
 
 // static
 string16 BookmarkBarView::CreateToolTipForURLAndTitle(
+    const views::Widget* widget,
     const gfx::Point& screen_loc,
     const GURL& url,
     const string16& title,
-    Profile* profile,
-    gfx::NativeView context) {
-  int max_width = views::TooltipManager::GetMaxWidth(screen_loc.x(),
-                                                     screen_loc.y(),
-                                                     context);
-  const gfx::FontList& tt_fonts = views::TooltipManager::GetDefaultFontList();
+    Profile* profile) {
+  int max_width = views::TooltipManager::GetMaxWidth(
+      screen_loc.x(),
+      screen_loc.y(),
+      widget->GetNativeView());
+  const gfx::FontList tt_fonts = widget->GetTooltipManager()->GetFontList();
   string16 result;
 
   // First the title.
@@ -1169,7 +1164,7 @@ void BookmarkBarView::OnMenuButtonClicked(views::View* view,
     node = model_->bookmark_bar_node()->GetChild(button_index);
   }
 
-  bookmark_utils::RecordBookmarkFolderOpen(GetBookmarkLaunchLocation());
+  RecordBookmarkFolderOpen(GetBookmarkLaunchLocation());
   bookmark_menu_ = new BookmarkMenuController(
       browser_, page_navigator_, GetWidget(), node, start_index);
   bookmark_menu_->set_observer(this);
@@ -1188,7 +1183,7 @@ void BookmarkBarView::ButtonPressed(views::Button* sender,
                          content::PAGE_TRANSITION_AUTO_BOOKMARK,
                          false);
     page_navigator_->OpenURL(params);
-    bookmark_utils::RecordAppsPageOpen(GetBookmarkLaunchLocation());
+    RecordBookmarkAppsPageOpen(GetBookmarkLaunchLocation());
     return;
   }
 
@@ -1213,7 +1208,7 @@ void BookmarkBarView::ButtonPressed(views::Button* sender,
                     disposition_from_event_flags, browser_->profile());
   }
 
-  bookmark_utils::RecordBookmarkLaunch(GetBookmarkLaunchLocation());
+  RecordBookmarkLaunch(node, GetBookmarkLaunchLocation());
 }
 
 void BookmarkBarView::ShowContextMenuForView(views::View* source,
@@ -1281,7 +1276,8 @@ void BookmarkBarView::Init() {
       base::Bind(&BookmarkBarView::OnAppsPageShortcutVisibilityPrefChanged,
                  base::Unretained(this)));
   apps_page_shortcut_->SetVisible(
-      chrome::ShouldShowAppsShortcutInBookmarkBar(browser_->profile()));
+      chrome::ShouldShowAppsShortcutInBookmarkBar(
+          browser_->profile(), browser_->host_desktop_type()));
 
   bookmarks_separator_view_ = new ButtonSeparatorView();
   AddChildView(bookmarks_separator_view_);
@@ -1315,10 +1311,9 @@ views::TextButton* BookmarkBarView::GetBookmarkButton(int index) {
   return static_cast<views::TextButton*>(child_at(index));
 }
 
-bookmark_utils::BookmarkLaunchLocation
-    BookmarkBarView::GetBookmarkLaunchLocation() const {
-  return IsDetached() ? bookmark_utils::LAUNCH_DETACHED_BAR :
-                        bookmark_utils::LAUNCH_ATTACHED_BAR;
+BookmarkLaunchLocation BookmarkBarView::GetBookmarkLaunchLocation() const {
+  return IsDetached() ? BOOKMARK_LAUNCH_LOCATION_DETACHED_BAR :
+                        BOOKMARK_LAUNCH_LOCATION_ATTACHED_BAR;
 }
 
 int BookmarkBarView::GetFirstHiddenNodeIndex() {
@@ -1858,7 +1853,7 @@ void BookmarkBarView::OnAppsPageShortcutVisibilityPrefChanged() {
   DCHECK(apps_page_shortcut_);
   // Only perform layout if required.
   bool visible = chrome::ShouldShowAppsShortcutInBookmarkBar(
-      browser_->profile());
+      browser_->profile(), browser_->host_desktop_type());
   if (apps_page_shortcut_->visible() == visible)
     return;
   apps_page_shortcut_->SetVisible(visible);

@@ -55,7 +55,7 @@ class KernelProxy : protected KernelObject {
   virtual int open_resource(const char* file);
 
   // KernelHandle and FD allocation and manipulation functions.
-  virtual int open(const char* path, int oflag);
+  virtual int open(const char* path, int open_flags);
   virtual int close(int fd);
   virtual int dup(int fd);
   virtual int dup2(int fd, int newfd);
@@ -95,13 +95,15 @@ class KernelProxy : protected KernelObject {
   virtual ssize_t write(int fd, const void *buf, size_t nbyte);
 
   virtual int fchmod(int fd, int prot);
-  virtual int fcntl(int fd, int request, char *argp);
+  virtual int fcntl(int fd, int request, va_list args);
   virtual int fstat(int fd, struct stat *buf);
   virtual int getdents(int fd, void *buf, unsigned int count);
+  virtual int fchdir(int fd);
   virtual int ftruncate(int fd, off_t length);
   virtual int fsync(int fd);
+  virtual int fdatasync(int fd);
   virtual int isatty(int fd);
-  virtual int ioctl(int fd, int request, char *argp);
+  virtual int ioctl(int fd, int request, va_list args);
 
   // lseek() relies on the mount's Stat() to determine whether or not the
   // file handle corresponding to fd is a directory
@@ -113,8 +115,13 @@ class KernelProxy : protected KernelObject {
   virtual int remove(const char* path);
   // unlink() is a simple wrapper around the mount's Unlink function.
   virtual int unlink(const char* path);
+  virtual int truncate(const char* path, off_t len);
+  virtual int lstat(const char* path, struct stat* buf);
+  virtual int rename(const char* path, const char* newpath);
   // access() uses the Mount's Stat().
   virtual int access(const char* path, int amode);
+  virtual int readlink(const char *path, char *buf, size_t count);
+  virtual int utimes(const char *filename, const struct timeval times[2]);
 
   virtual int link(const char* oldpath, const char* newpath);
   virtual int symlink(const char* oldpath, const char* newpath);

@@ -103,8 +103,8 @@
 #endif
 
 #if defined(OS_WIN)
-#include "apps/app_launch_for_metro_restart_win.h"
 #include "base/win/windows_version.h"
+#include "chrome/browser/apps/app_launch_for_metro_restart_win.h"
 #endif
 
 using content::ChildProcessSecurityPolicy;
@@ -298,6 +298,14 @@ class WebContentsCloseObserver : public content::NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(WebContentsCloseObserver);
 };
 
+const Extension* GetDisabledPlatformApp(Profile* profile,
+                                        const std::string& extension_id) {
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
+  const Extension* extension = service->GetExtensionById(extension_id, true);
+  return extension && extension->is_platform_app() ? extension : NULL;
+}
+
 }  // namespace
 
 namespace internals {
@@ -350,9 +358,25 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   }
 
   AppListService::InitAll(profile);
-  if (command_line_.HasSwitch(switches::kShowAppList)) {
+  if (command_line_.HasSwitch(switches::kAppId)) {
+    std::string app_id = command_line_.GetSwitchValueASCII(switches::kAppId);
+    const Extension* extension = GetDisabledPlatformApp(profile, app_id);
+    // If |app_id| is a disabled platform app we handle it specially here,
+    // otherwise it will be handled below.
+    if (extension) {
+      RecordCmdLineAppHistogram(extensions::Manifest::TYPE_PLATFORM_APP);
+      AppLaunchParams params(profile, extension,
+                             extension_misc::LAUNCH_NONE, NEW_WINDOW);
+      params.command_line = &command_line_;
+      params.current_directory = cur_dir_;
+      OpenApplicationWithReenablePrompt(params);
+      return true;
+    }
+  } else if (command_line_.HasSwitch(switches::kShowAppList)) {
+    // This switch is used for shortcuts on the native desktop.
     AppListService::RecordShowTimings(command_line_);
-    AppListService::Get()->ShowForProfile(profile);
+    AppListService::Get(chrome::HOST_DESKTOP_TYPE_NATIVE)->
+        ShowForProfile(profile);
     return true;
   }
 
@@ -458,7 +482,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationTab(Profile* profile) {
 
   RecordCmdLineAppHistogram(extension->GetType());
 
-  WebContents* app_tab = chrome::OpenApplication(chrome::AppLaunchParams(
+  WebContents* app_tab = OpenApplication(AppLaunchParams(
       profile, extension, extension_misc::LAUNCH_TAB, NEW_FOREGROUND_TAB));
   return (app_tab != NULL);
 }
@@ -493,11 +517,10 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
 
     RecordCmdLineAppHistogram(extension->GetType());
 
-    chrome::AppLaunchParams params(profile, extension,
-                                   launch_container, NEW_WINDOW);
+    AppLaunchParams params(profile, extension, launch_container, NEW_WINDOW);
     params.command_line = &command_line_;
     params.current_directory = cur_dir_;
-    WebContents* tab_in_app_window = chrome::OpenApplication(params);
+    WebContents* tab_in_app_window = OpenApplication(params);
 
     if (out_app_contents)
       *out_app_contents = tab_in_app_window;
@@ -533,9 +556,9 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
       gfx::Rect override_bounds;
       ExtractOptionalAppWindowSize(&override_bounds);
 
-      WebContents* app_tab = chrome::OpenAppShortcutWindow(profile,
-                                                           url,
-                                                           override_bounds);
+      WebContents* app_tab = OpenAppShortcutWindow(profile,
+                                                   url,
+                                                   override_bounds);
 
       if (out_app_contents)
         *out_app_contents = app_tab;
@@ -564,7 +587,7 @@ void StartupBrowserCreatorImpl::ProcessLaunchURLs(
   if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
     // See if there are apps for this profile that should be launched on startup
     // due to a switch from Metro mode.
-    apps::HandleAppLaunchForMetroRestart(profile_);
+    app_metro_launch::HandleAppLaunchForMetroRestart(profile_);
   }
 #endif
 
@@ -582,7 +605,8 @@ void StartupBrowserCreatorImpl::ProcessLaunchURLs(
     // Chrome may have been running in the background due to an app with a
     // background page being installed, or running with only an app window
     // displayed.
-    SessionService* service = SessionServiceFactory::GetForProfile(profile_);
+    SessionService* service =
+        SessionServiceFactory::GetForProfileForSessionRestore(profile_);
     if (service && service->ShouldNewWindowStartSession()) {
       // Restore the last session if any.
       if (!HasPendingUncleanExit(profile_) &&

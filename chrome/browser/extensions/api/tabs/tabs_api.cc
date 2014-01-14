@@ -148,8 +148,9 @@ Browser* GetBrowserInProfileWithId(Profile* profile,
   return NULL;
 }
 
-bool GetBrowserFromWindowID(
-    UIThreadExtensionFunction* function, int window_id, Browser** browser) {
+bool GetBrowserFromWindowID(ChromeAsyncExtensionFunction* function,
+                            int window_id,
+                            Browser** browser) {
   if (window_id == extension_misc::kCurrentWindowId) {
     *browser = function->GetCurrentBrowser();
     if (!(*browser) || !(*browser)->window()) {
@@ -158,8 +159,10 @@ bool GetBrowserFromWindowID(
     }
   } else {
     std::string error;
-    *browser = GetBrowserInProfileWithId(
-        function->profile(), window_id, function->include_incognito(), &error);
+    *browser = GetBrowserInProfileWithId(function->GetProfile(),
+                                         window_id,
+                                         function->include_incognito(),
+                                         &error);
     if (!*browser) {
       function->SetError(error);
       return false;
@@ -280,7 +283,7 @@ bool WindowsGetLastFocusedFunction::RunImpl() {
   // include other window types (e.g. panels), we will need to add logic to
   // WindowControllerList that mirrors the active behavior of BrowserList.
   Browser* browser = chrome::FindAnyBrowser(
-      profile(), include_incognito(), chrome::GetActiveDesktop());
+      GetProfile(), include_incognito(), chrome::GetActiveDesktop());
   if (!browser || !browser->window()) {
     error_ = keys::kNoLastFocusedWindowError;
     return false;
@@ -325,7 +328,7 @@ bool WindowsCreateFunction::ShouldOpenIncognitoWindow(
     std::vector<GURL>* urls, bool* is_error) {
   *is_error = false;
   const IncognitoModePrefs::Availability incognito_availability =
-      IncognitoModePrefs::GetAvailability(profile_->GetPrefs());
+      IncognitoModePrefs::GetAvailability(GetProfile()->GetPrefs());
   bool incognito = false;
   if (create_data && create_data->incognito) {
     incognito = *create_data->incognito;
@@ -347,10 +350,10 @@ bool WindowsCreateFunction::ShouldOpenIncognitoWindow(
 
   // Remove all URLs that are not allowed in an incognito session. Note that a
   // ChromeOS guest session is not considered incognito in this case.
-  if (incognito && !profile_->IsGuestSession()) {
+  if (incognito && !GetProfile()->IsGuestSession()) {
     std::string first_url_erased;
     for (size_t i = 0; i < urls->size();) {
-      if (chrome::IsURLAllowedInIncognito((*urls)[i], profile())) {
+      if (chrome::IsURLAllowedInIncognito((*urls)[i], GetProfile())) {
         i++;
       } else {
         if (first_url_erased.empty())
@@ -409,12 +412,18 @@ bool WindowsCreateFunction::RunImpl() {
   if (create_data && create_data->tab_id) {
     // Find the tab. |source_tab_strip| and |tab_index| will later be used to
     // move the tab into the created window.
-    if (!GetTabById(*create_data->tab_id, profile(), include_incognito(), NULL,
-                    &source_tab_strip, NULL, &tab_index, &error_))
+    if (!GetTabById(*create_data->tab_id,
+                    GetProfile(),
+                    include_incognito(),
+                    NULL,
+                    &source_tab_strip,
+                    NULL,
+                    &tab_index,
+                    &error_))
       return false;
   }
 
-  Profile* window_profile = profile();
+  Profile* window_profile = GetProfile();
   Browser::Type window_type = Browser::TYPE_TABBED;
   bool create_panel = false;
 
@@ -455,13 +464,12 @@ bool WindowsCreateFunction::RunImpl() {
 #endif
         if (use_panels) {
           create_panel = true;
-#if !defined(OS_CHROMEOS)
-          // Non-ChromeOS has both docked and detached panel types.
-          if (create_data->type ==
+          // Non-ash supports both docked and detached panel types.
+          if (chrome::GetActiveDesktop() != chrome::HOST_DESKTOP_TYPE_ASH &&
+              create_data->type ==
               windows::Create::Params::CreateData::TYPE_DETACHED_PANEL) {
             panel_create_mode = PanelManager::CREATE_AS_DETACHED;
           }
-#endif
         } else {
           window_type = Browser::TYPE_POPUP;
         }
@@ -522,8 +530,8 @@ bool WindowsCreateFunction::RunImpl() {
     if (urls.empty())
       urls.push_back(GURL(chrome::kChromeUINewTabURL));
 
-#if defined(OS_CHROMEOS)
-    if (PanelManager::ShouldUsePanels(extension_id)) {
+#if defined(USE_ASH)
+    if (chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH) {
       ShellWindow::CreateParams create_params;
       create_params.window_type = ShellWindow::WINDOW_TYPE_V1_PANEL;
       create_params.bounds = window_bounds;
@@ -537,7 +545,7 @@ bool WindowsCreateFunction::RunImpl() {
                 CreateWindowValueWithTabs(GetExtension()));
       return true;
     }
-#else
+#endif
     std::string title =
         web_app::GenerateApplicationNameFromExtensionId(extension_id);
     // Note: Panels ignore all but the first url provided.
@@ -554,7 +562,6 @@ bool WindowsCreateFunction::RunImpl() {
         panel->extension_window_controller()->CreateWindowValueWithTabs(
             GetExtension()));
     return true;
-#endif
   }
 
   // Create a new BrowserWindow.
@@ -616,8 +623,10 @@ bool WindowsCreateFunction::RunImpl() {
   else
     new_window->window()->ShowInactive();
 
-  if (new_window->profile()->IsOffTheRecord() && !include_incognito()) {
-    // Don't expose incognito windows if the extension isn't allowed.
+  if (new_window->profile()->IsOffTheRecord() &&
+      !GetProfile()->IsOffTheRecord() && !include_incognito()) {
+    // Don't expose incognito windows if extension itself works in non-incognito
+    // profile and CanCrossIncognito isn't allowed.
     SetResult(Value::CreateNullValue());
   } else {
     SetResult(
@@ -866,32 +875,35 @@ bool TabsQueryFunction::RunImpl() {
   }
 
   base::ListValue* result = new base::ListValue();
+  Browser* last_active_browser = chrome::FindAnyBrowser(
+      GetProfile(), include_incognito(), chrome::GetActiveDesktop());
+  Browser* current_browser = GetCurrentBrowser();
   for (chrome::BrowserIterator it; !it.done(); it.Next()) {
     Browser* browser = *it;
-    if (!profile()->IsSameProfile(browser->profile()))
+    if (!GetProfile()->IsSameProfile(browser->profile()))
       continue;
 
     if (!browser->window())
       continue;
 
-    if (!include_incognito() && profile() != browser->profile())
+    if (!include_incognito() && GetProfile() != browser->profile())
       continue;
 
     if (window_id >= 0 && window_id != ExtensionTabUtil::GetWindowId(browser))
       continue;
 
     if (window_id == extension_misc::kCurrentWindowId &&
-        browser != GetCurrentBrowser()) {
+        browser != current_browser) {
       continue;
     }
 
     if (!MatchesBool(params->query_info.current_window.get(),
-                     browser == GetCurrentBrowser())) {
+                     browser == current_browser)) {
       continue;
     }
 
     if (!MatchesBool(params->query_info.last_focused_window.get(),
-                     browser->window()->IsActive())) {
+                     browser == last_active_browser)) {
       continue;
     }
 
@@ -957,8 +969,8 @@ bool TabsCreateFunction::RunImpl() {
 
   // Ensure the selected browser is tabbed.
   if (!browser->is_type_tabbed() && browser->IsAttemptingToCloseBrowser())
-    browser = chrome::FindTabbedBrowser(profile(), include_incognito(),
-                                        browser->host_desktop_type());
+    browser = chrome::FindTabbedBrowser(
+        GetProfile(), include_incognito(), browser->host_desktop_type());
 
   if (!browser || !browser->window())
     return false;
@@ -969,9 +981,13 @@ bool TabsCreateFunction::RunImpl() {
   if (params->create_properties.opener_tab_id.get()) {
     int opener_id = *params->create_properties.opener_tab_id;
 
-    if (!ExtensionTabUtil::GetTabById(
-            opener_id, profile(), include_incognito(),
-            NULL, NULL, &opener, NULL)) {
+    if (!ExtensionTabUtil::GetTabById(opener_id,
+                                      GetProfile(),
+                                      include_incognito(),
+                                      NULL,
+                                      NULL,
+                                      &opener,
+                                      NULL)) {
       return false;
     }
   }
@@ -1085,8 +1101,14 @@ bool TabsDuplicateFunction::RunImpl() {
   Browser* browser = NULL;
   TabStripModel* tab_strip = NULL;
   int tab_index = -1;
-  if (!GetTabById(tab_id, profile(), include_incognito(),
-                  &browser, &tab_strip, NULL, &tab_index, &error_)) {
+  if (!GetTabById(tab_id,
+                  GetProfile(),
+                  include_incognito(),
+                  &browser,
+                  &tab_strip,
+                  NULL,
+                  &tab_index,
+                  &error_)) {
     return false;
   }
 
@@ -1121,8 +1143,14 @@ bool TabsGetFunction::RunImpl() {
   TabStripModel* tab_strip = NULL;
   WebContents* contents = NULL;
   int tab_index = -1;
-  if (!GetTabById(tab_id, profile(), include_incognito(),
-                  NULL, &tab_strip, &contents, &tab_index, &error_))
+  if (!GetTabById(tab_id,
+                  GetProfile(),
+                  include_incognito(),
+                  NULL,
+                  &tab_strip,
+                  &contents,
+                  &tab_index,
+                  &error_))
     return false;
 
   SetResult(ExtensionTabUtil::CreateTabValue(contents,
@@ -1237,8 +1265,14 @@ bool TabsUpdateFunction::RunImpl() {
 
   int tab_index = -1;
   TabStripModel* tab_strip = NULL;
-  if (!GetTabById(tab_id, profile(), include_incognito(),
-                  NULL, &tab_strip, &contents, &tab_index, &error_)) {
+  if (!GetTabById(tab_id,
+                  GetProfile(),
+                  include_incognito(),
+                  NULL,
+                  &tab_strip,
+                  &contents,
+                  &tab_index,
+                  &error_)) {
     return false;
   }
 
@@ -1290,9 +1324,13 @@ bool TabsUpdateFunction::RunImpl() {
     int opener_id = *params->update_properties.opener_tab_id;
 
     WebContents* opener_contents = NULL;
-    if (!ExtensionTabUtil::GetTabById(
-            opener_id, profile(), include_incognito(),
-            NULL, NULL, &opener_contents, NULL))
+    if (!ExtensionTabUtil::GetTabById(opener_id,
+                                      GetProfile(),
+                                      include_incognito(),
+                                      NULL,
+                                      NULL,
+                                      &opener_contents,
+                                      NULL))
       return false;
 
     tab_strip->SetOpenerOfWebContentsAt(tab_index, opener_contents);
@@ -1342,11 +1380,12 @@ bool TabsUpdateFunction::UpdateURL(const std::string &url_string,
         script_executor()->ExecuteScript(
             extension_id(),
             ScriptExecutor::JAVASCRIPT,
-            url.path(),
+            url.GetContent(),
             ScriptExecutor::TOP_FRAME,
             UserScript::DOCUMENT_IDLE,
             ScriptExecutor::MAIN_WORLD,
             ScriptExecutor::DEFAULT_PROCESS,
+            GURL(),
             ScriptExecutor::NO_RESULT,
             base::Bind(&TabsUpdateFunction::OnExecuteCodeFinished, this));
 
@@ -1435,9 +1474,14 @@ bool TabsMoveFunction::MoveTab(int tab_id,
   TabStripModel* source_tab_strip = NULL;
   WebContents* contents = NULL;
   int tab_index = -1;
-  if (!GetTabById(tab_id, profile(), include_incognito(),
-                  &source_browser, &source_tab_strip, &contents,
-                  &tab_index, &error_)) {
+  if (!GetTabById(tab_id,
+                  GetProfile(),
+                  include_incognito(),
+                  &source_browser,
+                  &source_tab_strip,
+                  &contents,
+                  &tab_index,
+                  &error_)) {
     return false;
   }
 
@@ -1550,8 +1594,14 @@ bool TabsReloadFunction::RunImpl() {
     int tab_id = *params->tab_id;
 
     Browser* browser = NULL;
-    if (!GetTabById(tab_id, profile(), include_incognito(),
-                    &browser, NULL, &web_contents, NULL, &error_))
+    if (!GetTabById(tab_id,
+                    GetProfile(),
+                    include_incognito(),
+                    &browser,
+                    NULL,
+                    &web_contents,
+                    NULL,
+                    &error_))
     return false;
   }
 
@@ -1591,8 +1641,14 @@ bool TabsRemoveFunction::RunImpl() {
 bool TabsRemoveFunction::RemoveTab(int tab_id) {
   Browser* browser = NULL;
   WebContents* contents = NULL;
-  if (!GetTabById(tab_id, profile(), include_incognito(),
-                  &browser, NULL, &contents, NULL, &error_)) {
+  if (!GetTabById(tab_id,
+                  GetProfile(),
+                  include_incognito(),
+                  &browser,
+                  NULL,
+                  &contents,
+                  NULL,
+                  &error_)) {
     return false;
   }
 
@@ -1639,7 +1695,7 @@ bool TabsCaptureVisibleTabFunction::RunImpl() {
       tabs::CaptureVisibleTab::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  PrefService* service = profile()->GetPrefs();
+  PrefService* service = GetProfile()->GetPrefs();
   if (service->GetBoolean(prefs::kDisableScreenshots)) {
     error_ = keys::kScreenshotsDisabled;
     return false;
@@ -1812,8 +1868,14 @@ bool TabsDetectLanguageFunction::RunImpl() {
   // in the current window.
   if (params->tab_id.get()) {
     tab_id = *params->tab_id;
-    if (!GetTabById(tab_id, profile(), include_incognito(),
-                    &browser, NULL, &contents, NULL, &error_)) {
+    if (!GetTabById(tab_id,
+                    GetProfile(),
+                    include_incognito(),
+                    &browser,
+                    NULL,
+                    &contents,
+                    NULL,
+                    &error_)) {
       return false;
     }
     if (!browser || !contents)
@@ -1903,8 +1965,14 @@ bool ExecuteCodeInTabFunction::CanExecuteScriptOnPage() {
   // If |tab_id| is specified, look for the tab. Otherwise default to selected
   // tab in the current window.
   CHECK_GE(execute_tab_id_, 0);
-  if (!GetTabById(execute_tab_id_, profile(), include_incognito(),
-                  NULL, NULL, &contents, NULL, &error_)) {
+  if (!GetTabById(execute_tab_id_,
+                  GetProfile(),
+                  include_incognito(),
+                  NULL,
+                  NULL,
+                  &contents,
+                  NULL,
+                  &error_)) {
     return false;
   }
 
@@ -1931,9 +1999,15 @@ ScriptExecutor* ExecuteCodeInTabFunction::GetScriptExecutor() {
   Browser* browser = NULL;
   content::WebContents* contents = NULL;
 
-  bool success = GetTabById(
-      execute_tab_id_, profile(), include_incognito(), &browser, NULL,
-      &contents, NULL, &error_) && contents && browser;
+  bool success = GetTabById(execute_tab_id_,
+                            GetProfile(),
+                            include_incognito(),
+                            &browser,
+                            NULL,
+                            &contents,
+                            NULL,
+                            &error_) &&
+                 contents && browser;
 
   if (!success)
     return NULL;

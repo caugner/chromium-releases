@@ -4,8 +4,7 @@
 
 #include "chrome/browser/extensions/api/music_manager_private/device_id.h"
 
-#include "base/message_loop/message_loop.h"
-#include "chromeos/cryptohome/cryptohome_library.h"
+#include "chromeos/cryptohome/system_salt_getter.h"
 
 namespace extensions {
 namespace api {
@@ -13,18 +12,7 @@ namespace api {
 // ChromeOS: Use the System Salt.
 /* static */
 void DeviceId::GetMachineId(const IdCallback& callback) {
-  chromeos::CryptohomeLibrary* c_home = chromeos::CryptohomeLibrary::Get();
-  std::string result = c_home->GetSystemSalt();
-  if (result.empty()) {
-    // cryptohome must not be running; re-request after a delay.
-    const int64 kRequestSystemSaltDelayMs = 500;
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&DeviceId::GetMachineId, callback),
-        base::TimeDelta::FromMilliseconds(kRequestSystemSaltDelayMs));
-    return;
-  }
-  callback.Run(result);
+  chromeos::SystemSaltGetter::Get()->GetSystemSalt(callback);
 }
 
 }  // namespace api

@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/fullscreen/fullscreen_exit_bubble_type.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
+#include "chrome/browser/ui/translate/translate_bubble_model.h"
 #include "chrome/common/content_settings_types.h"
 #include "ui/base/base_window.h"
 #include "ui/base/window_open_disposition.h"
@@ -111,6 +112,14 @@ class BrowserWindow : public ui::BaseWindow {
   // Sets the starred state for the current tab.
   virtual void SetStarredState(bool is_starred) = 0;
 
+  // Called when the active tab changes.  Subclasses which implement
+  // TabStripModelObserver should implement this instead of ActiveTabChanged();
+  // the Browser will call this method while processing that one.
+  virtual void OnActiveTabChanged(content::WebContents* old_contents,
+                                  content::WebContents* new_contents,
+                                  int index,
+                                  int reason) = 0;
+
   // Called to force the zoom state to for the active tab to be recalculated.
   // |can_show_bubble| is true when a user presses the zoom up or down keyboard
   // shortcuts and will be false in other cases (e.g. switching tabs, "clicking"
@@ -200,9 +209,6 @@ class BrowserWindow : public ui::BaseWindow {
   virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
                                         Profile* profile) = 0;
 
-  // Shows or hides the bookmark bar depending on its current visibility.
-  virtual void ToggleBookmarkBar() = 0;
-
   // Shows the Update Recommended dialog box.
   virtual void ShowUpdateChromeDialog() = 0;
 
@@ -213,6 +219,11 @@ class BrowserWindow : public ui::BaseWindow {
   // Shows the bookmark prompt.
   // TODO(yosin): Make ShowBookmarkPrompt pure virtual.
   virtual void ShowBookmarkPrompt() {}
+
+  // Shows the translate bubble.
+  virtual void ShowTranslateBubble(
+      content::WebContents* contents,
+      TranslateBubbleModel::ViewState view_state) = 0;
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   enum OneClickSigninBubbleType {
@@ -234,7 +245,7 @@ class BrowserWindow : public ui::BaseWindow {
       const string16& email,
       const string16& error_message,
       const StartSyncCallback& start_sync_callback) = 0;
-  #endif
+#endif
 
   // Whether or not the shelf view is visible.
   virtual bool IsDownloadShelfVisible() const = 0;
@@ -290,10 +301,6 @@ class BrowserWindow : public ui::BaseWindow {
   // if the renderer did not process it.
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) = 0;
-
-  // Shows the create chrome app shortcut dialog box.
-  virtual void ShowCreateChromeAppShortcutsDialog(Profile* profile,
-      const extensions::Extension* app) = 0;
 
   // Clipboard commands applied to the whole browser window.
   virtual void Cut() = 0;

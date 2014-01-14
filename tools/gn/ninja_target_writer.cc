@@ -19,9 +19,12 @@
 #include "tools/gn/target.h"
 #include "tools/gn/trace.h"
 
-NinjaTargetWriter::NinjaTargetWriter(const Target* target, std::ostream& out)
+NinjaTargetWriter::NinjaTargetWriter(const Target* target,
+                                     const Toolchain* toolchain,
+                                     std::ostream& out)
     : settings_(target->settings()),
       target_(target),
+      toolchain_(toolchain),
       out_(out),
       path_output_(settings_->build_settings()->build_dir(),
                    ESCAPE_NINJA, true),
@@ -45,7 +48,7 @@ void NinjaTargetWriter::RunAndWriteFile(const Target* target) {
 
   ScopedTrace trace(TraceItem::TRACE_FILE_WRITE,
                     target->label().GetUserVisibleName(false));
-  trace.SetToolchain(settings->toolchain()->label());
+  trace.SetToolchain(settings->toolchain_label());
 
   base::FilePath ninja_file(settings->build_settings()->GetFullPath(
       helper.GetNinjaFileForTarget(target).GetSourceFile(
@@ -54,50 +57,39 @@ void NinjaTargetWriter::RunAndWriteFile(const Target* target) {
   if (g_scheduler->verbose_logging())
     g_scheduler->Log("Writing", FilePathToUTF8(ninja_file));
 
+  const Toolchain* tc = settings->build_settings()->toolchain_manager()
+      .GetToolchainDefinitionUnlocked(settings->toolchain_label());
+  CHECK(tc);
+
   file_util::CreateDirectory(ninja_file.DirName());
 
   // It's rediculously faster to write to a string and then write that to
   // disk in one operation than to use an fstream here.
   std::stringstream file;
-  if (file.fail()) {
-    g_scheduler->FailWithError(
-        Err(Location(), "Error writing ninja file.",
-            "Unable to open \"" + FilePathToUTF8(ninja_file) + "\"\n"
-            "for writing."));
-    return;
-  }
 
   // Call out to the correct sub-type of writer.
   if (target->output_type() == Target::COPY_FILES) {
-    NinjaCopyTargetWriter writer(target, file);
+    NinjaCopyTargetWriter writer(target, tc, file);
     writer.Run();
   } else if (target->output_type() == Target::CUSTOM) {
-    NinjaScriptTargetWriter writer(target, file);
+    NinjaScriptTargetWriter writer(target, tc, file);
     writer.Run();
   } else if (target->output_type() == Target::GROUP) {
-    NinjaGroupTargetWriter writer(target, file);
+    NinjaGroupTargetWriter writer(target, tc, file);
     writer.Run();
   } else if (target->output_type() == Target::EXECUTABLE ||
              target->output_type() == Target::STATIC_LIBRARY ||
-             target->output_type() == Target::SHARED_LIBRARY) {
-    NinjaBinaryTargetWriter writer(target, file);
+             target->output_type() == Target::SHARED_LIBRARY ||
+             target->output_type() == Target::SOURCE_SET) {
+    NinjaBinaryTargetWriter writer(target, tc, file);
     writer.Run();
   } else {
     CHECK(0);
   }
 
   std::string contents = file.str();
-  file_util::WriteFile(ninja_file, contents.c_str(), contents.size());
-}
-
-void NinjaTargetWriter::WriteEnvironment() {
-  // TODO(brettw) have a better way to do the environment setup on Windows.
-  if (target_->settings()->IsWin())
-    out_ << "arch = environment.x86\n";
-}
-
-const Toolchain* NinjaTargetWriter::GetToolchain() const {
-  return target_->settings()->toolchain();
+  file_util::WriteFile(ninja_file, contents.c_str(),
+                       static_cast<int>(contents.size()));
 }
 
 std::string NinjaTargetWriter::GetSourcesImplicitDeps() const {
@@ -113,12 +105,12 @@ std::string NinjaTargetWriter::GetSourcesImplicitDeps() const {
   }
 
   // Add on any direct deps marked as "hard".
-  const std::vector<const Target*>& deps = target_->deps();
+  const LabelTargetVector& deps = target_->deps();
   for (size_t i = 0; i < deps.size(); i++) {
-    if (deps[i]->hard_dep()) {
+    if (deps[i].ptr->hard_dep()) {
       has_files = true;
       ret << " ";
-      path_output_.WriteFile(ret, helper_.GetTargetOutputFile(deps[i]));
+      path_output_.WriteFile(ret, helper_.GetTargetOutputFile(deps[i].ptr));
     }
   }
 

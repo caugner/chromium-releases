@@ -47,7 +47,6 @@ class UI_EXPORT InputMethodIBus
   virtual void OnTextInputTypeChanged(const TextInputClient* client) OVERRIDE;
   virtual void OnCaretBoundsChanged(const TextInputClient* client) OVERRIDE;
   virtual void CancelComposition(const TextInputClient* client) OVERRIDE;
-  virtual void OnInputLocaleChanged() OVERRIDE;
   virtual std::string GetInputLocale() OVERRIDE;
   virtual base::i18n::TextDirection GetInputTextDirection() OVERRIDE;
   virtual bool IsActive() OVERRIDE;
@@ -124,7 +123,7 @@ class UI_EXPORT InputMethodIBus
                                 uint32 ibus_state);
 
   // chromeos::IBusInputContextHandlerInterface overrides:
-  virtual void CommitText(const chromeos::IBusText& text) OVERRIDE;
+  virtual void CommitText(const std::string& text) OVERRIDE;
   virtual void ForwardKeyEvent(uint32 keyval,
                                uint32 keycode,
                                uint32 state) OVERRIDE;
@@ -138,6 +137,9 @@ class UI_EXPORT InputMethodIBus
   void ProcessKeyEventDone(uint32 id, XEvent* xevent,
                            uint32 ibus_keyval, uint32 ibus_keycode,
                            uint32 ibus_state, bool is_handled);
+
+  // Processes a caret bounds changed event.
+  void OnCaretBoundsChangedInternal(const TextInputClient* client);
 
   // All pending key events. Note: we do not own these object, we just save
   // pointers to these object so that we can abandon them when necessary.
@@ -165,6 +167,10 @@ class UI_EXPORT InputMethodIBus
 
   // Indicates if the composition text is changed or deleted.
   bool composition_changed_;
+
+  // If it's true then all input method result received before the next key
+  // event will be discarded.
+  bool suppress_next_result_;
 
   // The latest id of key event.
   uint32 current_keyevent_id_;

@@ -17,8 +17,11 @@ if (is_linux && use_system_ssl) {
   pkg_script = "//build/config/linux/pkg-config.py"
   config("system_ssl_config") {
     defines = [ "USE_SYSTEM_SSL" ]
-    cflags = exec_script(pkg_script, [ "--cflags", "nss" ], "list lines")
-    ldflags = exec_script(pkg_script, [ "--libs", "nss" ], "list lines")
+    pkgresult = exec_script(pkg_script, [ "nss" ], "value")
+    include_dirs = pkgresult[0]
+    cflags = pkgresult[1]
+    libs = pkgresult[2]
+    lib_dirs = pkgresult[3]
   }
 }
 
@@ -34,7 +37,7 @@ group("metassl") {
     assert(is_linux)
     direct_dependent_configs = ":system_ssl_config"
   } else {
-    deps = [ "//net/third_party/nss/ssl" ]
+    deps = [ "//net/third_party/nss:ssl" ]
   }
 
   forward_dependent_configs_from = deps

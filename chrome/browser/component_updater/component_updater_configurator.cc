@@ -35,8 +35,6 @@ const char kSwitchFastUpdate[] = "fast-update";
 const char kSwitchOutOfProcess[] = "out-of-process";
 // Add "testrequest=1" parameter to the update check query.
 const char kSwitchRequestParam[] = "test-request";
-// Disables differential updates.
-const char kSwitchDisableDeltaUpdates[] = "disable-delta-updates";
 // Disables pings. Pings are the requests sent to the update server that report
 // the success or the failure of component install or update attempts.
 extern const char kSwitchDisablePings[] = "disable-pings";
@@ -51,6 +49,11 @@ const char kDefaultUrlSource[] =
 
 // The url to send the pings to.
 const char kPingUrl[] = "http://tools.google.com/service/update2";
+
+#if defined(OS_WIN)
+// Disables differential updates.
+const char kSwitchDisableDeltaUpdates[] = "disable-delta-updates";
+#endif  // defined(OS_WIN)
 
 // Returns true if and only if |test| is contained in |vec|.
 bool HasSwitchValue(const std::vector<std::string>& vec, const char* test) {
@@ -165,7 +168,7 @@ int ChromeConfigurator::StepDelayMedium() {
 }
 
 int ChromeConfigurator::StepDelay() {
-  return fast_update_ ? 1 : 4;
+  return fast_update_ ? 1 : 1;
 }
 
 int ChromeConfigurator::MinimumReCheckWait() {

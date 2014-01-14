@@ -219,7 +219,9 @@ class TokenWebDataServiceFake : public TokenWebData {
 class WebDataServiceFake : public AutofillWebDataService {
  public:
   WebDataServiceFake()
-      : AutofillWebDataService(),
+      : AutofillWebDataService(
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB)),
         web_database_(NULL),
         autocomplete_syncable_service_(NULL),
         autofill_profile_syncable_service_(NULL),
@@ -529,7 +531,7 @@ class ProfileSyncServiceAutofillTest
     EXPECT_CALL(*personal_data_manager_, LoadProfiles()).Times(1);
     EXPECT_CALL(*personal_data_manager_, LoadCreditCards()).Times(1);
 
-    personal_data_manager_->Init(profile_.get());
+    personal_data_manager_->Init(profile_.get(), profile_->GetPrefs());
 
     web_data_service_->StartSyncableService();
   }
@@ -590,7 +592,6 @@ class ProfileSyncServiceAutofillTest
     // We need tokens to get the tests going
     ProfileOAuth2TokenServiceFactory::GetForProfile(profile_.get())
         ->UpdateCredentials("test_user@gmail.com", "oauth2_login_token");
-    token_service_->IssueAuthTokenForTest(GaiaConstants::kSyncService, "token");
 
     sync_service_->RegisterDataTypeController(data_type_controller);
     sync_service_->Initialize();

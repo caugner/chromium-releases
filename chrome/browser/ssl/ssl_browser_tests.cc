@@ -75,6 +75,7 @@ class ProvisionalLoadWaiter : public content::WebContentsObserver {
 
   virtual void DidFailProvisionalLoad(
       int64 frame_id,
+      const string16& frame_unique_name,
       bool is_main_frame,
       const GURL& validated_url,
       int error_code,
@@ -1637,6 +1638,31 @@ IN_PROC_BROWSER_TEST_F(SSLUITestIgnoreCertErrors, TestWSS) {
   // as page title.
   const string16 result = watcher.WaitAndGetTitle();
   EXPECT_TRUE(LowerCaseEqualsASCII(result, "pass"));
+}
+
+// Verifies that if JavaScript is disabled interstitials aren't affected.
+// http://crbug.com/322948
+IN_PROC_BROWSER_TEST_F(SSLUITest, InterstitialNotAffectedByContentSettings) {
+  browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT, CONTENT_SETTING_BLOCK);
+
+  ASSERT_TRUE(https_server_expired_.Start());
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  ui_test_utils::NavigateToURL(browser(),
+      https_server_expired_.GetURL("files/ssl/google.html"));
+  CheckAuthenticationBrokenState(tab, net::CERT_STATUS_DATE_INVALID, false,
+                                 true);  // Interstitial showing
+
+  InterstitialPage* interstitial_page = tab->GetInterstitialPage();
+  content::RenderViewHost* interstitial_rvh =
+      interstitial_page->GetRenderViewHostForTesting();
+  bool result = false;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+              interstitial_rvh,
+              "window.domAutomationController.send(true);",
+              &result));
+  // The above will hang without the fix.
+  ASSERT_TRUE(result);
 }
 
 // TODO(jcampan): more tests to do below.

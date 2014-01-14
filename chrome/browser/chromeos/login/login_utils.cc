@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
@@ -24,6 +23,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "base/sys_info.h"
 #include "base/task_runner_util.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
@@ -35,16 +35,15 @@
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/chrome_restart_request.h"
-#include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/oauth2_login_manager.h"
 #include "chrome/browser/chromeos/login/oauth2_login_manager_factory.h"
 #include "chrome/browser/chromeos/login/parallel_authenticator.h"
 #include "chrome/browser/chromeos/login/profile_auth_data.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
+#include "chrome/browser/chromeos/login/supervised_user_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_util_chromeos.h"
@@ -59,16 +58,20 @@
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/app_list/start_page_service.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/cryptohome/cryptohome_library.h"
+#include "chromeos/cryptohome/cryptohome_util.h"
+#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/ime/input_method_manager.h"
+#include "chromeos/settings/cros_settings_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
@@ -102,8 +105,7 @@ class LoginUtilsImpl
       public base::SupportsWeakPtr<LoginUtilsImpl> {
  public:
   LoginUtilsImpl()
-      : using_oauth_(false),
-        has_web_auth_cookies_(false),
+      : has_web_auth_cookies_(false),
         delegate_(NULL),
         should_restore_auth_session_(false),
         exit_after_session_restore_(false),
@@ -122,7 +124,6 @@ class LoginUtilsImpl
   virtual void PrepareProfile(
       const UserContext& user_context,
       const std::string& display_email,
-      bool using_oauth,
       bool has_cookies,
       bool has_active_session,
       LoginUtils::Delegate* delegate) OVERRIDE;
@@ -148,9 +149,6 @@ class LoginUtilsImpl
  private:
   // Restarts OAuth session authentication check.
   void KickStartAuthentication(Profile* profile);
-
-  // Check user's profile for kApplicationLocale setting.
-  void RespectLocalePreference(Profile* pref);
 
   // Callback for Profile::CREATE_STATUS_CREATED profile state.
   // Initializes basic preferences for newly created profile. Any other
@@ -194,7 +192,6 @@ class LoginUtilsImpl
   void AttemptExit(Profile* profile);
 
   UserContext user_context_;
-  bool using_oauth_;
 
   // True if the authentication profile's cookie jar should contain
   // authentication cookies from the authentication extension log in flow.
@@ -253,6 +250,10 @@ void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
   if (browser_shutdown::IsTryingToQuit())
     return;
 
+  User* user = UserManager::Get()->GetUserByProfile(profile);
+  if (user != NULL)
+    UserManager::Get()->RespectLocalePreference(profile, user);
+
   if (!UserManager::Get()->GetCurrentUserFlow()->ShouldLaunchBrowser()) {
     UserManager::Get()->GetCurrentUserFlow()->LaunchExtraSteps(profile);
     return;
@@ -298,6 +299,9 @@ void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
                                 first_run,
                                 &return_code);
 
+  // Triggers app launcher start page service to load start page web contents.
+  app_list::StartPageService::Get(profile);
+
   // Mark login host for deletion after browser starts.  This
   // guarantees that the message loop will be referenced by the
   // browser before it is dereferenced by the login host.
@@ -309,7 +313,6 @@ void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
 void LoginUtilsImpl::PrepareProfile(
     const UserContext& user_context,
     const std::string& display_email,
-    bool using_oauth,
     bool has_cookies,
     bool has_active_session,
     LoginUtils::Delegate* delegate) {
@@ -332,7 +335,7 @@ void LoginUtilsImpl::PrepareProfile(
   btl->AddLoginTimeMarker("UserLoggedIn-End", false);
 
   // Switch log file as soon as possible.
-  if (base::chromeos::IsRunningOnChromeOS())
+  if (base::SysInfo::IsRunningOnChromeOS())
     logging::RedirectChromeLogging(*(CommandLine::ForCurrentProcess()));
 
   // Update user's displayed email.
@@ -341,7 +344,6 @@ void LoginUtilsImpl::PrepareProfile(
 
   user_context_ = user_context;
 
-  using_oauth_ = using_oauth;
   has_web_auth_cookies_ = has_cookies;
   delegate_ = delegate;
   InitSessionRestoreStrategy();
@@ -368,7 +370,8 @@ void LoginUtilsImpl::InitProfilePreferences(Profile* user_profile,
   if (UserManager::Get()->IsLoggedInAsLocallyManagedUser()) {
     User* active_user = UserManager::Get()->GetActiveUser();
     std::string managed_user_sync_id =
-        UserManager::Get()->GetManagedUserSyncId(active_user->email());
+        UserManager::Get()->GetSupervisedUserManager()->
+            GetUserSyncId(active_user->email());
 
     // TODO(ibraaaa): Remove that when 97% of our users are using M31.
     // http://crbug.com/276163
@@ -387,10 +390,6 @@ void LoginUtilsImpl::InitProfilePreferences(Profile* user_profile,
     const User* user = UserManager::Get()->FindUser(email);
     google_services_username.SetValue(user ? user->display_email() : email);
   }
-
-  // For multi-profile case don't apply profile local because it is not safe.
-  if (UserManager::Get()->GetLoggedInUsers().size() == 1)
-    RespectLocalePreference(user_profile);
 }
 
 void LoginUtilsImpl::InitSessionRestoreStrategy() {
@@ -440,11 +439,11 @@ void LoginUtilsImpl::OnProfileCreated(
   CHECK(user_profile);
 
   switch (status) {
-    case Profile::CREATE_STATUS_INITIALIZED:
-      UserProfileInitialized(user_profile);
-      break;
     case Profile::CREATE_STATUS_CREATED:
       InitProfilePreferences(user_profile, email);
+      break;
+    case Profile::CREATE_STATUS_INITIALIZED:
+      UserProfileInitialized(user_profile);
       break;
     case Profile::CREATE_STATUS_LOCAL_FAIL:
     case Profile::CREATE_STATUS_REMOTE_FAIL:
@@ -459,7 +458,7 @@ void LoginUtilsImpl::UserProfileInitialized(Profile* user_profile) {
   BootTimesLoader* btl = BootTimesLoader::Get();
   btl->AddLoginTimeMarker("UserProfileGotten", false);
 
-  if (using_oauth_) {
+  if (user_context_.using_oauth) {
     // Transfer proxy authentication cache, cookies (optionally) and server
     // bound certs from the profile that was used for authentication.  This
     // profile contains cookies that auth extension should have already put in
@@ -513,13 +512,13 @@ void LoginUtilsImpl::FinalizePrepareProfile(Profile* user_profile) {
   BootTimesLoader* btl = BootTimesLoader::Get();
   // Own TPM device if, for any reason, it has not been done in EULA
   // wizard screen.
-  CryptohomeLibrary* cryptohome = CryptohomeLibrary::Get();
+  CryptohomeClient* client = DBusThreadManager::Get()->GetCryptohomeClient();
   btl->AddLoginTimeMarker("TPMOwn-Start", false);
-  if (cryptohome->TpmIsEnabled() && !cryptohome->TpmIsBeingOwned()) {
-    if (cryptohome->TpmIsOwned()) {
-      cryptohome->TpmClearStoredPassword();
+  if (cryptohome_util::TpmIsEnabled() && !cryptohome_util::TpmIsBeingOwned()) {
+    if (cryptohome_util::TpmIsOwned()) {
+      client->CallTpmClearStoredPasswordAndBlock();
     } else {
-      cryptohome->TpmCanAttemptOwnership();
+      client->TpmCanAttemptOwnership(EmptyVoidDBusMethodCallback());
     }
   }
   btl->AddLoginTimeMarker("TPMOwn-End", false);
@@ -533,8 +532,11 @@ void LoginUtilsImpl::FinalizePrepareProfile(Profile* user_profile) {
       content::NotificationService::AllSources(),
       content::Details<Profile>(user_profile));
 
-  InitRlzDelayed(user_profile);
-
+  // Initialize RLZ only for primary user.
+  if (UserManager::Get()->GetPrimaryUser() ==
+      UserManager::Get()->GetUserByProfile(user_profile)) {
+    InitRlzDelayed(user_profile);
+  }
   // TODO(altimofeev): This pointer should probably never be NULL, but it looks
   // like LoginUtilsImpl::OnProfileCreated() may be getting called before
   // LoginUtilsImpl::PrepareProfile() has set |delegate_| when Chrome is killed
@@ -620,29 +622,6 @@ void LoginUtilsImpl::StartSignedInServices(Profile* user_profile) {
   }
   user_context_.password.clear();
   user_context_.auth_code.clear();
-}
-
-void LoginUtilsImpl::RespectLocalePreference(Profile* profile) {
-  DCHECK(profile != NULL);
-  PrefService* prefs = profile->GetPrefs();
-  DCHECK(prefs != NULL);
-  if (g_browser_process == NULL)
-    return;
-
-  std::string pref_locale = prefs->GetString(prefs::kApplicationLocale);
-  if (pref_locale.empty())
-    pref_locale = prefs->GetString(prefs::kApplicationLocaleBackup);
-  if (pref_locale.empty())
-    pref_locale = g_browser_process->GetApplicationLocale();
-  DCHECK(!pref_locale.empty());
-  profile->ChangeAppLocale(pref_locale, Profile::APP_LOCALE_CHANGED_VIA_LOGIN);
-  // Here we don't enable keyboard layouts. Input methods are set up when
-  // the user first logs in. Then the user may customize the input methods.
-  // Hence changing input methods here, just because the user's UI language
-  // is different from the login screen UI language, is not desirable. Note
-  // that input method preferences are synced, so users can use their
-  // farovite input methods as soon as the preferences are synced.
-  LanguageSwitchMenu::SwitchLanguage(pref_locale);
 }
 
 void LoginUtilsImpl::CompleteOffTheRecordLogin(const GURL& start_url) {
@@ -751,6 +730,8 @@ void LoginUtilsImpl::OnSessionRestoreStateChanged(
   User::OAuthTokenStatus user_status = User::OAUTH_TOKEN_STATUS_UNKNOWN;
   OAuth2LoginManager* login_manager =
       OAuth2LoginManagerFactory::GetInstance()->GetForProfile(user_profile);
+
+  bool connection_error = false;
   switch (state) {
     case OAuth2LoginManager::SESSION_RESTORE_DONE:
       user_status = User::OAUTH2_TOKEN_STATUS_VALID;
@@ -758,18 +739,23 @@ void LoginUtilsImpl::OnSessionRestoreStateChanged(
     case OAuth2LoginManager::SESSION_RESTORE_FAILED:
       user_status = User::OAUTH2_TOKEN_STATUS_INVALID;
       break;
+    case OAuth2LoginManager::SESSION_RESTORE_CONNECTION_FAILED:
+      connection_error = true;
+      break;
     case OAuth2LoginManager::SESSION_RESTORE_NOT_STARTED:
-      return;
     case OAuth2LoginManager::SESSION_RESTORE_PREPARING:
-      return;
     case OAuth2LoginManager::SESSION_RESTORE_IN_PROGRESS:
       return;
   }
 
-  // We are in one of "done" states here.
-  UserManager::Get()->SaveUserOAuthStatus(
-      UserManager::Get()->GetLoggedInUser()->email(),
-      user_status);
+  // We should not be clearing existing token state if that was a connection
+  // error. http://crbug.com/295245
+  if (!connection_error) {
+    // We are in one of "done" states here.
+    UserManager::Get()->SaveUserOAuthStatus(
+        UserManager::Get()->GetLoggedInUser()->email(),
+        user_status);
+  }
   login_manager->RemoveObserver(this);
 }
 

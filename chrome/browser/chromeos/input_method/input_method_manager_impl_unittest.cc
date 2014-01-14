@@ -15,8 +15,8 @@
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/chromeos/input_method/mock_candidate_window_controller.h"
 #include "chrome/browser/chromeos/input_method/mock_ibus_controller.h"
+#include "chromeos/dbus/fake_dbus_thread_manager.h"
 #include "chromeos/dbus/ibus/mock_ibus_client.h"
-#include "chromeos/dbus/mock_dbus_thread_manager_without_gmock.h"
 #include "chromeos/ime/extension_ime_util.h"
 #include "chromeos/ime/fake_input_method_delegate.h"
 #include "chromeos/ime/mock_component_extension_ime_manager_delegate.h"
@@ -61,10 +61,10 @@ class InputMethodManagerImplTest :  public testing::Test {
     mock_ibus_daemon_controller_ = new chromeos::MockIBusDaemonController();
     chromeos::IBusDaemonController::InitializeForTesting(
         mock_ibus_daemon_controller_);
-    mock_dbus_thread_manager_ =
-        new chromeos::MockDBusThreadManagerWithoutGMock();
+    fake_dbus_thread_manager_ =
+        new chromeos::FakeDBusThreadManager();
     chromeos::DBusThreadManager::InitializeForTesting(
-        mock_dbus_thread_manager_);
+        fake_dbus_thread_manager_);
     delegate_ = new FakeInputMethodDelegate();
     manager_.reset(new InputMethodManagerImpl(
         scoped_ptr<InputMethodDelegate>(delegate_)));
@@ -151,9 +151,9 @@ class InputMethodManagerImplTest :  public testing::Test {
   // Helper function to initialize IBus bus connection for testing. Do not use
   // ibus related mocks before calling this function.
   void InitIBusBus() {
-    mock_dbus_thread_manager_->InitIBusBus("dummy address",
+    fake_dbus_thread_manager_->InitIBusBus("dummy address",
                                            base::Bind(&base::DoNothing));
-    mock_ibus_client_ = mock_dbus_thread_manager_->mock_ibus_client();
+    mock_ibus_client_ = fake_dbus_thread_manager_->mock_ibus_client();
     mock_ibus_daemon_controller_->EmulateConnect();
   }
 
@@ -164,7 +164,7 @@ class InputMethodManagerImplTest :  public testing::Test {
   MockIBusDaemonController* mock_ibus_daemon_controller_;
   scoped_ptr<MockIMEEngineHandler> mock_engine_handler_;
   MockIBusClient* mock_ibus_client_;
-  MockDBusThreadManagerWithoutGMock* mock_dbus_thread_manager_;
+  FakeDBusThreadManager* fake_dbus_thread_manager_;
   MockXKeyboard* xkeyboard_;
   base::MessageLoop message_loop_;
   MockComponentExtIMEManagerDelegate* mock_delegate_;
@@ -1111,15 +1111,15 @@ TEST_F(InputMethodManagerImplTest, TestReset) {
   ids.push_back(nacl_mozc_us_id);
   EXPECT_TRUE(manager_->EnableInputMethods(ids));
   EXPECT_EQ(2U, manager_->GetNumActiveInputMethods());
-  EXPECT_EQ(1, mock_engine_handler_->reset_call_count());
+  EXPECT_EQ(0, mock_engine_handler_->reset_call_count());
   manager_->ChangeInputMethod(nacl_mozc_us_id);
   EXPECT_EQ(1, mock_ibus_client_->set_global_engine_call_count());
   EXPECT_EQ(nacl_mozc_us_id, mock_ibus_client_->latest_global_engine_name());
-  EXPECT_EQ(1, mock_engine_handler_->reset_call_count());
+  EXPECT_EQ(0, mock_engine_handler_->reset_call_count());
   manager_->ChangeInputMethod("xkb:us::eng");
-  EXPECT_EQ(2, mock_ibus_client_->set_global_engine_call_count());
+  EXPECT_EQ(1, mock_ibus_client_->set_global_engine_call_count());
   EXPECT_EQ(nacl_mozc_us_id, mock_ibus_client_->latest_global_engine_name());
-  EXPECT_EQ(1, mock_engine_handler_->reset_call_count());
+  EXPECT_EQ(0, mock_engine_handler_->reset_call_count());
 }
 
 TEST_F(InputMethodManagerImplTest,
@@ -1238,32 +1238,6 @@ TEST_F(InputMethodManagerImplTest,
   manager_->ChangeInputMethod(ext_id2);
   EXPECT_EQ(2, mock_ibus_client_->set_global_engine_call_count());
   EXPECT_EQ(ext_id2, mock_ibus_client_->latest_global_engine_name());
-}
-
-TEST_F(InputMethodManagerImplTest,
-       MigrateOldInputMethodTest) {
-  std::vector<std::string> input_method_ids;
-  input_method_ids.push_back("mozc");
-  input_method_ids.push_back("mozc-jp");
-  input_method_ids.push_back("xkb:us::eng");
-  input_method_ids.push_back(nacl_mozc_us_id);
-
-  manager_->MigrateOldInputMethods(&input_method_ids);
-
-  ASSERT_EQ(4U, input_method_ids.size());
-  EXPECT_EQ(input_method_ids.end(),
-            std::find(input_method_ids.begin(), input_method_ids.end(),
-                      "mozc"));
-  EXPECT_EQ(input_method_ids.end(),
-            std::find(input_method_ids.begin(), input_method_ids.end(),
-                      "mozc-jp"));
-  EXPECT_NE(input_method_ids.end(),
-            std::find(input_method_ids.begin(), input_method_ids.end(),
-                      "xkb:us::eng"));
-  EXPECT_NE(input_method_ids.end(),
-            std::find(input_method_ids.begin(), input_method_ids.end(),
-                      nacl_mozc_us_id));
-
 }
 
 TEST_F(InputMethodManagerImplTest,

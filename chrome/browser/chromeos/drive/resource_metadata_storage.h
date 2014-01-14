@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
+#include "chrome/browser/drive/drive_service_interface.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -36,7 +37,7 @@ class ResourceMetadataStorage {
  public:
   // This should be incremented when incompatibility change is made to DB
   // format.
-  static const int kDBVersion = 8;
+  static const int kDBVersion = 11;
 
   // Object to iterate over entries stored in this storage.
   class Iterator {
@@ -104,6 +105,21 @@ class ResourceMetadataStorage {
     DISALLOW_COPY_AND_ASSIGN(CacheEntryIterator);
   };
 
+  // Cache information recovered from trashed DB.
+  struct RecoveredCacheInfo {
+    RecoveredCacheInfo();
+    ~RecoveredCacheInfo();
+
+    bool is_dirty;
+    std::string md5;
+    std::string title;
+  };
+  typedef std::map<std::string, RecoveredCacheInfo> RecoveredCacheInfoMap;
+
+  // Returns true if the DB was successfully upgraded to the newest version.
+  static bool UpgradeOldDB(const base::FilePath& directory_path,
+                           const ResourceIdCanonicalizer& id_canonicalizer);
+
   ResourceMetadataStorage(const base::FilePath& directory_path,
                           base::SequencedTaskRunner* blocking_task_runner);
 
@@ -119,6 +135,9 @@ class ResourceMetadataStorage {
   // Initializes this object.
   bool Initialize();
 
+  // Collects cache info from trashed resource map DB.
+  void RecoverCacheInfoFromTrashedResourceMap(RecoveredCacheInfoMap* out_info);
+
   // Sets the largest changestamp.
   bool SetLargestChangestamp(int64 largest_changestamp);
 
@@ -126,7 +145,7 @@ class ResourceMetadataStorage {
   int64 GetLargestChangestamp();
 
   // Puts the entry to this storage.
-  bool PutEntry(const std::string& id, const ResourceEntry& entry);
+  bool PutEntry(const ResourceEntry& entry);
 
   // Gets an entry stored in this storage.
   bool GetEntry(const std::string& id, ResourceEntry* out_entry);
@@ -156,6 +175,9 @@ class ResourceMetadataStorage {
 
   // Returns an object to iterate over cache entries stored in this storage.
   scoped_ptr<CacheEntryIterator> GetCacheEntryIterator();
+
+  // Returns the local ID associated with the given resource ID.
+  bool GetIdByResourceId(const std::string& resource_id, std::string* out_id);
 
  private:
   friend class ResourceMetadataStorageTest;

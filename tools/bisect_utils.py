@@ -89,6 +89,24 @@ def OutputAnnotationStepClosed():
   sys.stdout.flush()
 
 
+def OutputAnnotationStepLink(label, url):
+  """Outputs appropriate annotation to print a link.
+
+  Args:
+    label: The name to print.
+    url: The url to print.
+  """
+  print
+  print '@@@STEP_LINK@%s@%s@@@' % (label, url)
+  print
+  sys.stdout.flush()
+
+
+def IsTelemetryCommand(command):
+  """Attempts to discern whether or not a given command is running telemetry."""
+  return ('tools/perf/run_' in command or 'tools\\perf\\run_' in command)
+
+
 def CreateAndChangeToSourceDirectory(working_directory):
   """Creates a directory 'bisect' as a subdirectory of 'working_directory'.  If
   the function is successful, the current working directory will change to that
@@ -270,6 +288,19 @@ def RemoveThirdPartyLibjingleDirectory():
   return True
 
 
+def _CleanupPreviousGitRuns():
+  """Performs necessary cleanup between runs."""
+  if os.name != 'nt':
+    return
+  # On windows, if a previous run of git crashed, bot was reset, etc... we
+  # might end up with leftover index.lock files.
+  for (path, dir, files) in os.walk(os.getcwd()):
+    for cur_file in files:
+      if cur_file.endswith('index.lock'):
+        path_to_file = os.path.join(path, cur_file)
+        os.remove(path_to_file)
+
+
 def RunGClientAndSync(cwd=None):
   """Runs gclient and does a normal sync.
 
@@ -316,6 +347,8 @@ def SetupGitDepot(opts, custom_deps):
       os.chdir(cwd)
 
     if passed_deps_check:
+      _CleanupPreviousGitRuns()
+
       RunGClient(['revert'])
       if not RunGClientAndSync():
         passed = True
@@ -375,12 +408,12 @@ def CopyAndSaveOriginalEnvironmentVars():
   ORIGINAL_ENV = os.environ.copy()
 
 
-def SetupAndroidBuildEnvironment(opts):
+def SetupAndroidBuildEnvironment(opts, path_to_src=None):
   """Sets up the android build environment.
 
   Args:
     opts: The options parsed from the command line through parse_args().
-    path_to_file: Path to the bisect script's directory.
+    path_to_src: Path to the src checkout.
 
   Returns:
     True if successful.
@@ -398,7 +431,7 @@ def SetupAndroidBuildEnvironment(opts):
   proc = subprocess.Popen(['bash', '-c', 'source %s && env' % path_to_file],
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE,
-                           cwd='src')
+                           cwd=path_to_src)
   (out, _) = proc.communicate()
 
   for line in out.splitlines():
@@ -412,7 +445,6 @@ def SetupPlatformBuildEnvironment(opts):
 
   Args:
     opts: The options parsed from the command line through parse_args().
-    path_to_file: Path to the bisect script's directory.
 
   Returns:
     True if successful.
@@ -446,18 +478,9 @@ def CreateBisectDirectoryAndSetupDepot(opts, custom_deps):
   Args:
     opts: The options parsed from the command line through parse_args().
     custom_deps: A dictionary of additional dependencies to add to .gclient.
-
-  Returns:
-    Returns 0 on success, otherwise 1.
   """
   if not CreateAndChangeToSourceDirectory(opts.working_directory):
-    print 'Error: Could not create bisect directory.'
-    print
-    return 1
+    raise RuntimeError('Could not create bisect directory.')
 
   if not SetupGitDepot(opts, custom_deps):
-    print 'Error: Failed to grab source.'
-    print
-    return 1
-
-  return 0
+    raise RuntimeError('Failed to grab source.')

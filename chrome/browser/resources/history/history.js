@@ -93,7 +93,6 @@ function Visit(result, continued, model) {
   this.url_ = result.url;
   this.domain_ = result.domain;
   this.starred_ = result.starred;
-  this.snippet_ = result.snippet || '';
 
   // These identify the name and type of the device on which this visit
   // occurred. They will be empty if the visit occurred on the current device.
@@ -213,6 +212,8 @@ Visit.prototype.getResultDOM = function(propertyBag) {
 
   if (isMobileVersion()) {
     var removeButton = createElementWithClassName('button', 'remove-entry');
+    removeButton.setAttribute('aria-label',
+                              loadTimeData.getString('removeFromHistory'));
     removeButton.classList.add('custom-appearance');
     removeButton.addEventListener('click', function(e) {
       self.removeFromHistory();
@@ -253,14 +254,7 @@ Visit.prototype.getResultDOM = function(propertyBag) {
   node.appendChild(entryBoxContainer);
   entryBoxContainer.appendChild(entryBox);
 
-  if (isSearchResult) {
-    time.appendChild(document.createTextNode(this.dateShort));
-    var snippet = createElementWithClassName('div', 'snippet');
-    this.addHighlightedText_(snippet,
-                             this.snippet_,
-                             this.model_.getSearchText());
-    node.appendChild(snippet);
-  } else if (useMonthDate) {
+  if (isSearchResult || useMonthDate) {
     // Show the day instead of the time.
     time.appendChild(document.createTextNode(this.dateShort));
   } else {
@@ -1544,21 +1538,19 @@ function load() {
   cr.ui.FocusManager.disableMouseFocusOnButtons();
 
   if (isMobileVersion()) {
-    if (searchField) {
-      // Move the search box out of the header.
-      var resultsDisplay = $('results-display');
-      resultsDisplay.parentNode.insertBefore($('search-field'), resultsDisplay);
+    // Move the search box out of the header.
+    var resultsDisplay = $('results-display');
+    resultsDisplay.parentNode.insertBefore($('search-field'), resultsDisplay);
 
-      window.addEventListener(
-          'resize', historyView.updateClearBrowsingDataButton_);
+    window.addEventListener(
+        'resize', historyView.updateClearBrowsingDataButton_);
 
-      // When the search field loses focus, add a delay before updating the
-      // visibility, otherwise the button will flash on the screen before the
-      // keyboard animates away.
-      searchField.addEventListener('blur', function() {
-        setTimeout(historyView.updateClearBrowsingDataButton_, 250);
-      });
-    }
+    // When the search field loses focus, add a delay before updating the
+    // visibility, otherwise the button will flash on the screen before the
+    // keyboard animates away.
+    searchField.addEventListener('blur', function() {
+      setTimeout(historyView.updateClearBrowsingDataButton_, 250);
+    });
 
     // Move the button to the bottom of the page.
     $('history-page').appendChild($('clear-browsing-data'));
@@ -1569,6 +1561,22 @@ function load() {
     });
     searchField.focus();
   }
+
+<if expr="is_ios">
+  function checkKeyboardVisibility() {
+    // Figure out the real height based on the orientation, becauase
+    // screen.width and screen.height don't update after rotation.
+    var screenHeight = window.orientation % 180 ? screen.width : screen.height;
+
+    // Assume that the keyboard is visible if more than 30% of the screen is
+    // taken up by window chrome.
+    var isKeyboardVisible = (window.innerHeight / screenHeight) < 0.7;
+
+    document.body.classList.toggle('ios-keyboard-visible', isKeyboardVisible);
+  }
+  window.addEventListener('orientationchange', checkKeyboardVisibility);
+  window.addEventListener('resize', checkKeyboardVisibility);
+</if> /* is_ios */
 }
 
 /**
@@ -1874,7 +1882,10 @@ function toggleHandler(e) {
     // the height to auto so that it is computed and then set it to the
     // computed value in pixels so the transition works properly.
     var height = innerResultList.clientHeight;
-    innerResultList.style.height = height + 'px';
+    innerResultList.style.height = 0;
+    setTimeout(function() {
+      innerResultList.style.height = height + 'px';
+    }, 0);
     innerArrow.classList.remove('collapse');
     innerArrow.classList.add('expand');
   } else {

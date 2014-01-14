@@ -18,6 +18,8 @@
 #include <X11/XF86keysym.h>
 #include <X11/Xlib.h>
 
+#include "ash/test/ash_test_base.h"
+#include "ash/wm/window_state.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
 #include "chrome/browser/chromeos/login/mock_user_manager.h"
@@ -25,7 +27,8 @@
 #include "chrome/browser/chromeos/preferences.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/mock_xkeyboard.h"
-#include "ui/base/x/x11_util.h"
+#include "ui/aura/window.h"
+#include "ui/events/x/events_x_utils.h"
 #include "ui/gfx/x/x11_types.h"
 
 namespace {
@@ -2325,4 +2328,64 @@ TEST_F(EventRewriterTest, TestRewriteKeyEventSentByXSendEvent) {
                                       KeyPress),
             rewritten_event);
 }
+
+// Tests of event rewriting that depend on the Ash window manager.
+class EventRewriterAshTest : public ash::test::AshTestBase {
+ public:
+  EventRewriterAshTest() {
+    chromeos::Preferences::RegisterProfilePrefs(prefs_.registry());
+    rewriter_.set_pref_service_for_testing(&prefs_);
+  }
+  virtual ~EventRewriterAshTest() {}
+
+  bool RewriteFunctionKeys(ui::KeyEvent* event) {
+    return rewriter_.RewriteFunctionKeys(event);
+  }
+
+ protected:
+  TestingPrefServiceSyncable prefs_;
+
+ private:
+  EventRewriter rewriter_;
+
+  DISALLOW_COPY_AND_ASSIGN(EventRewriterAshTest);
+};
+
+TEST_F(EventRewriterAshTest, TopRowKeysAreFunctionKeys) {
+  scoped_ptr<aura::Window> window(CreateTestWindowInShellWithId(1));
+  ash::wm::WindowState* window_state = ash::wm::GetWindowState(window.get());
+  window_state->Activate();
+
+  // Create a simulated keypress of F1 targetted at the window.
+  XEvent xev_f1;
+  KeyCode keycode_f1 = XKeysymToKeycode(gfx::GetXDisplay(), XK_F1);
+  InitXKeyEvent(ui::VKEY_F1, 0, ui::ET_KEY_PRESSED, keycode_f1, 0u, &xev_f1);
+  ui::KeyEvent press_f1(&xev_f1, false);
+  ui::Event::DispatcherApi dispatch_helper(&press_f1);
+  dispatch_helper.set_target(window.get());
+
+  // Simulate an apps v2 window that has requested top row keys as function
+  // keys. The event should not be rewritten.
+  window_state->set_top_row_keys_are_function_keys(true);
+  ASSERT_FALSE(RewriteFunctionKeys(&press_f1));
+  ASSERT_EQ(ui::VKEY_F1, press_f1.key_code());
+
+  // The event should also not be rewritten if the send-function-keys pref is
+  // additionally set, for both apps v2 and regular windows.
+  BooleanPrefMember send_function_keys_pref;
+  send_function_keys_pref.Init(prefs::kLanguageSendFunctionKeys, &prefs_);
+  send_function_keys_pref.SetValue(true);
+  ASSERT_FALSE(RewriteFunctionKeys(&press_f1));
+  ASSERT_EQ(ui::VKEY_F1, press_f1.key_code());
+  window_state->set_top_row_keys_are_function_keys(false);
+  ASSERT_FALSE(RewriteFunctionKeys(&press_f1));
+  ASSERT_EQ(ui::VKEY_F1, press_f1.key_code());
+
+  // If the pref isn't set when an event is sent to a regular window, F1 is
+  // rewritten to the back key.
+  send_function_keys_pref.SetValue(false);
+  ASSERT_TRUE(RewriteFunctionKeys(&press_f1));
+  ASSERT_EQ(ui::VKEY_BROWSER_BACK, press_f1.key_code());
+}
+
 #endif  // OS_CHROMEOS

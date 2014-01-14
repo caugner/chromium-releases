@@ -21,7 +21,6 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -91,8 +90,7 @@ class ExtensionSettingsHandler
 
  private:
   friend class ExtensionUITest;
-
-  void RenderViewHostCreated(content::RenderViewHost* render_view_host);
+  friend class BrokerDelegate;
 
   // content::WebContentsObserver implementation.
   virtual void RenderViewDeleted(
@@ -244,6 +242,9 @@ class ExtensionSettingsHandler
   // it is removed from the process). Keep a pointer to it so we can exclude
   // it from the active views.
   content::RenderViewHost* deleting_rvh_;
+  // Do the same for a deleting RenderWidgetHost ID and RenderProcessHost ID.
+  int deleting_rwh_id_;
+  int deleting_rph_id_;
 
   // We want to register for notifications only after we've responded at least
   // once to the page, otherwise we'd be calling JavaScript functions on objects
@@ -254,8 +255,6 @@ class ExtensionSettingsHandler
   content::NotificationRegistrar registrar_;
 
   PrefChangeRegistrar pref_registrar_;
-
-  content::RenderViewHost::CreatedCallback rvh_created_callback_;
 
   // This will not be empty when a requirements check is in progress. Doing
   // another Check() before the previous one is complete will cause the first

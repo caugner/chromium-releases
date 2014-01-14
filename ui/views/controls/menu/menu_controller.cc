@@ -37,6 +37,7 @@
 #include "ui/views/view_constants.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/root_view.h"
+#include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
@@ -45,6 +46,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include "ui/views/win/hwnd_message_handler.h"
 #include "ui/views/win/hwnd_util.h"
 #endif
 
@@ -384,6 +386,27 @@ MenuItemView* MenuController::Run(Widget* parent,
   // Close any open menus.
   SetSelection(NULL, SELECTION_UPDATE_IMMEDIATELY | SELECTION_EXIT);
 
+#if defined(OS_WIN) && defined(USE_AURA)
+  // On Windows, if we select the menu item by touch and if the window at the
+  // location is another window on the same thread, that window gets a
+  // WM_MOUSEACTIVATE message and ends up activating itself, which is not
+  // correct. We workaround this by setting a property on the window at the
+  // current cursor location. We check for this property in our
+  // WM_MOUSEACTIVATE handler and don't activate the window if the property is
+  // set.
+  if (item_selected_by_touch_) {
+    item_selected_by_touch_ = false;
+    POINT cursor_pos;
+    ::GetCursorPos(&cursor_pos);
+     HWND window = ::WindowFromPoint(cursor_pos);
+     if (::GetWindowThreadProcessId(window, NULL) ==
+                                    ::GetCurrentThreadId()) {
+       ::SetProp(window, views::kIgnoreTouchMouseActivateForWindow,
+                 reinterpret_cast<HANDLE>(true));
+     }
+  }
+#endif
+
   if (nested_menu) {
     DCHECK(!menu_stack_.empty());
     // We're running from within a menu, restore the previous state.
@@ -425,7 +448,6 @@ MenuItemView* MenuController::Run(Widget* parent,
     menu_button_->SetState(CustomButton::STATE_NORMAL);
     menu_button_->SchedulePaint();
   }
-
   return result;
 }
 
@@ -575,7 +597,7 @@ void MenuController::OnMouseEntered(SubmenuView* source,
   // do anything here.
 }
 
-#if defined(OS_LINUX)
+#if defined(USE_AURA)
 bool MenuController::OnMouseWheel(SubmenuView* source,
                                   const ui::MouseWheelEvent& event) {
   MenuPart part = GetMenuPart(source, event.location());
@@ -600,6 +622,7 @@ void MenuController::OnGestureEvent(SubmenuView* source,
       if (part.menu->GetDelegate()->IsTriggerableEvent(
           part.menu, *event)) {
         Accept(part.menu, event->flags());
+        item_selected_by_touch_ = true;
       }
       event->StopPropagation();
     } else if (part.type == MenuPart::MENU_ITEM) {
@@ -1104,6 +1127,10 @@ bool MenuController::OnKeyDown(ui::KeyboardCode key_code) {
         return false;
       break;
 
+    case ui::VKEY_F4:
+      if (!accept_on_f4_)
+        break;
+      // Fallthrough to accept on F4, so combobox menus match Windows behavior.
     case ui::VKEY_RETURN:
       if (pending_state_.item) {
         if (pending_state_.item->HasSubmenu()) {
@@ -1167,7 +1194,9 @@ MenuController::MenuController(ui::NativeTheme* theme,
       message_loop_depth_(0),
       menu_config_(theme),
       closing_event_time_(base::TimeDelta()),
-      menu_start_time_(base::TimeTicks()) {
+      menu_start_time_(base::TimeTicks()),
+      accept_on_f4_(false),
+      item_selected_by_touch_(false) {
   active_instance_ = this;
 }
 
@@ -1573,10 +1602,17 @@ void MenuController::OpenMenuImpl(MenuItemView* item, bool show) {
   state_.open_leading.push_back(resulting_direction);
   bool do_capture = (!did_capture_ && blocking_run_);
   showing_submenu_ = true;
-  if (show)
+  if (show) {
+    // Menus are the only place using kGroupingPropertyKey, so any value (other
+    // than 0) is fine.
+    const int kGroupingId = 1001;
     item->GetSubmenu()->ShowAt(owner_, bounds, do_capture);
-  else
+    item->GetSubmenu()->GetWidget()->SetNativeWindowProperty(
+        TooltipManager::kGroupingPropertyKey,
+        reinterpret_cast<void*>(kGroupingId));
+  } else {
     item->GetSubmenu()->Reposition(bounds);
+  }
   showing_submenu_ = false;
 }
 
@@ -2134,8 +2170,9 @@ void MenuController::RepostEvent(SubmenuView* source,
   if (event.IsMouseEvent()) {
     clone.reset(new ui::MouseEvent(static_cast<const ui::MouseEvent&>(event)));
   } else if (event.IsGestureEvent()) {
-    const ui::GestureEvent& ge = static_cast<const ui::GestureEvent&>(event);
-    clone.reset(new ui::GestureEvent(ge));
+    // TODO(rbyers): Gesture event repost is tricky to get right
+    // crbug.com/170987.
+    return;
   } else {
     NOTREACHED();
     return;

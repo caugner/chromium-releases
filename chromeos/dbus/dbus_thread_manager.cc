@@ -6,9 +6,9 @@
 
 #include <map>
 
-#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/observer_list.h"
+#include "base/sys_info.h"
 #include "base/threading/thread.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/bluetooth_adapter_client.h"
@@ -26,10 +26,13 @@
 #include "chromeos/dbus/ibus/ibus_client.h"
 #include "chromeos/dbus/ibus/ibus_engine_factory_service.h"
 #include "chromeos/dbus/ibus/ibus_engine_service.h"
-#include "chromeos/dbus/ibus/ibus_input_context_client.h"
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/introspectable_client.h"
 #include "chromeos/dbus/modem_messaging_client.h"
+#include "chromeos/dbus/nfc_adapter_client.h"
+#include "chromeos/dbus/nfc_device_client.h"
+#include "chromeos/dbus/nfc_manager_client.h"
+#include "chromeos/dbus/nfc_tag_client.h"
 #include "chromeos/dbus/permission_broker_client.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/power_policy_controller.h"
@@ -102,6 +105,11 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     InitClient(image_burner_client_.get());
     InitClient(introspectable_client_.get());
     InitClient(modem_messaging_client_.get());
+    // Initialize the NFC clients in the correct order.
+    InitClient(nfc_manager_client_.get());
+    InitClient(nfc_adapter_client_.get());
+    InitClient(nfc_device_client_.get());
+    InitClient(nfc_tag_client_.get());
     InitClient(permission_broker_client_.get());
     InitClient(power_manager_client_.get());
     InitClient(session_manager_client_.get());
@@ -173,8 +181,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
 
     ibus_client_.reset(
         IBusClient::Create(client_type, ibus_bus_.get()));
-    ibus_input_context_client_.reset(
-        IBusInputContextClient::Create(client_type));
     ibus_engine_factory_service_.reset(
         IBusEngineFactoryService::Create(ibus_bus_.get(), client_type));
 
@@ -264,6 +270,22 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     return modem_messaging_client_.get();
   }
 
+  virtual NfcAdapterClient* GetNfcAdapterClient() OVERRIDE {
+    return nfc_adapter_client_.get();
+  }
+
+  virtual NfcDeviceClient* GetNfcDeviceClient() OVERRIDE {
+    return nfc_device_client_.get();
+  }
+
+  virtual NfcManagerClient* GetNfcManagerClient() OVERRIDE {
+    return nfc_manager_client_.get();
+  }
+
+  virtual NfcTagClient* GetNfcTagClient() OVERRIDE {
+    return nfc_tag_client_.get();
+  }
+
   virtual PermissionBrokerClient* GetPermissionBrokerClient() OVERRIDE {
     return permission_broker_client_.get();
   }
@@ -294,10 +316,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
 
   virtual IBusClient* GetIBusClient() OVERRIDE {
     return ibus_client_.get();
-  }
-
-  virtual IBusInputContextClient* GetIBusInputContextClient() OVERRIDE {
-    return ibus_input_context_client_.get();
   }
 
   virtual IBusEngineFactoryService* GetIBusEngineFactoryService() OVERRIDE {
@@ -361,6 +379,14 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     image_burner_client_.reset(ImageBurnerClient::Create(client_type));
     introspectable_client_.reset(IntrospectableClient::Create(client_type));
     modem_messaging_client_.reset(ModemMessagingClient::Create(client_type));
+    // Create the NFC clients in the correct order based on their dependencies.
+    nfc_manager_client_.reset(NfcManagerClient::Create(client_type));
+    nfc_adapter_client_.reset(
+        NfcAdapterClient::Create(client_type, nfc_manager_client_.get()));
+    nfc_device_client_.reset(
+        NfcDeviceClient::Create(client_type, nfc_adapter_client_.get()));
+    nfc_tag_client_.reset(
+        NfcTagClient::Create(client_type, nfc_adapter_client_.get()));
     permission_broker_client_.reset(
         PermissionBrokerClient::Create(client_type));
     power_manager_client_.reset(
@@ -396,6 +422,12 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   scoped_ptr<ImageBurnerClient> image_burner_client_;
   scoped_ptr<IntrospectableClient> introspectable_client_;
   scoped_ptr<ModemMessagingClient> modem_messaging_client_;
+  // The declaration order for NFC client objects is important. See
+  // DBusThreadManager::CreateDefaultClients for the dependencies.
+  scoped_ptr<NfcManagerClient> nfc_manager_client_;
+  scoped_ptr<NfcAdapterClient> nfc_adapter_client_;
+  scoped_ptr<NfcDeviceClient> nfc_device_client_;
+  scoped_ptr<NfcTagClient> nfc_tag_client_;
   scoped_ptr<PermissionBrokerClient> permission_broker_client_;
   scoped_ptr<SystemClockClient> system_clock_client_;
   scoped_ptr<PowerManagerClient> power_manager_client_;
@@ -403,7 +435,6 @@ class DBusThreadManagerImpl : public DBusThreadManager {
   scoped_ptr<SMSClient> sms_client_;
   scoped_ptr<UpdateEngineClient> update_engine_client_;
   scoped_ptr<IBusClient> ibus_client_;
-  scoped_ptr<IBusInputContextClient> ibus_input_context_client_;
   scoped_ptr<IBusEngineFactoryService> ibus_engine_factory_service_;
   std::map<dbus::ObjectPath, IBusEngineService*> ibus_engine_services_;
   scoped_ptr<PowerPolicyController> power_policy_controller_;
@@ -421,7 +452,7 @@ void DBusThreadManager::Initialize() {
   CHECK(g_dbus_thread_manager == NULL);
   // Determine whether we use stub or real client implementations.
   DBusThreadManagerImpl* dbus_thread_manager_impl;
-  if (base::chromeos::IsRunningOnChromeOS()) {
+  if (base::SysInfo::IsRunningOnChromeOS()) {
     dbus_thread_manager_impl =
         new DBusThreadManagerImpl(REAL_DBUS_CLIENT_IMPLEMENTATION);
     VLOG(1) << "DBusThreadManager initialized for ChromeOS";

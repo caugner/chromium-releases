@@ -4,8 +4,10 @@
 
 #include "cc/test/pixel_test.h"
 
+#include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "cc/base/switches.h"
 #include "cc/output/compositor_frame_metadata.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/copy_output_result.h"
@@ -49,7 +51,7 @@ class PixelTest::PixelTestRendererClient
   }
   virtual void ReleaseGL() OVERRIDE {}
   virtual void SetNeedsRedrawRect(gfx::Rect damage_rect) OVERRIDE {}
-  virtual void BeginFrame(const BeginFrameArgs& args) OVERRIDE {}
+  virtual void BeginImplFrame(const BeginFrameArgs& args) OVERRIDE {}
   virtual void OnSwapBuffersComplete() OVERRIDE {}
   virtual void ReclaimResources(const CompositorFrameAck* ack) OVERRIDE {}
   virtual void DidLoseOutputSurface() OVERRIDE {}
@@ -62,7 +64,6 @@ class PixelTest::PixelTestRendererClient
     device_clip_ = clip;
   }
   virtual void SetMemoryPolicy(const ManagedMemoryPolicy& policy) OVERRIDE {}
-  virtual void SetDiscardBackBufferWhenNotVisible(bool discard) OVERRIDE {}
   virtual void SetTreeActivationCallback(const base::Closure&) OVERRIDE {}
 
  private:
@@ -72,6 +73,7 @@ class PixelTest::PixelTestRendererClient
 
 PixelTest::PixelTest()
     : device_viewport_size_(gfx::Size(200, 200)),
+      disable_picture_quad_image_filtering_(false),
       fake_client_(
           new PixelTestRendererClient(gfx::Rect(device_viewport_size_))) {}
 
@@ -119,7 +121,8 @@ bool PixelTest::RunPixelTestWithReadbackTarget(
   renderer_->DrawFrame(pass_list,
                        offscreen_contexts.get(),
                        device_scale_factor,
-                       allow_partial_swap);
+                       allow_partial_swap,
+                       disable_picture_quad_image_filtering_);
 
   // Wait for the readback to complete.
   resource_provider_->Finish();
@@ -145,8 +148,9 @@ bool PixelTest::PixelsMatchReference(const base::FilePath& ref_file,
   if (!result_bitmap_)
     return false;
 
-  // To rebaseline:
-  // return WritePNGFile(*result_bitmap_, test_data_dir.Append(ref_file), true);
+  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  if (cmd->HasSwitch(switches::kCCRebaselinePixeltests))
+    return WritePNGFile(*result_bitmap_, test_data_dir.Append(ref_file), true);
 
   return MatchesPNGFile(*result_bitmap_,
                         test_data_dir.Append(ref_file),
@@ -163,7 +167,7 @@ void PixelTest::SetUpGLRenderer(bool use_skia_gpu_backend) {
   output_surface_->BindToClient(fake_client_.get());
 
   resource_provider_ =
-      ResourceProvider::Create(output_surface_.get(), 0, false);
+      ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1);
 
   texture_mailbox_deleter_ = make_scoped_ptr(new TextureMailboxDeleter);
 
@@ -206,12 +210,12 @@ void PixelTest::SetUpSoftwareRenderer() {
   output_surface_.reset(new PixelTestOutputSurface(device.Pass()));
   output_surface_->BindToClient(fake_client_.get());
   resource_provider_ =
-      ResourceProvider::Create(output_surface_.get(), 0, false);
+      ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1);
   renderer_ = SoftwareRenderer::Create(fake_client_.get(),
                                        &settings_,
                                        output_surface_.get(),
                                        resource_provider_.get())
-                  .PassAs<DirectRenderer>();
+      .PassAs<DirectRenderer>();
 }
 
 }  // namespace cc

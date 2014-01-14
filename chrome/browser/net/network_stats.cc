@@ -785,9 +785,9 @@ void CollectNetworkStats(const std::string& network_stats_server,
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  // Check that there is a network connection. We get called only if UMA upload
-  // to the server has succeeded.
-  DCHECK(!net::NetworkChangeNotifier::IsOffline());
+  if (net::NetworkChangeNotifier::IsOffline()) {
+    return;
+  }
 
   CR_DEFINE_STATIC_LOCAL(scoped_refptr<base::FieldTrial>, trial, ());
   static bool collect_stats = false;
@@ -810,6 +810,10 @@ void CollectNetworkStats(const std::string& network_stats_server,
       // Enable the connectivity testing for 1% of the users in beta channel.
       probability_per_group = kDivisor / 100;
     }
+
+    // TODO(rtenneti): Enable the experiment after fixing
+    // issue http://crbug.com/273917.
+    probability_per_group = 0;
 
     // After July 31, 2014 builds, it will always be in default group
     // (disable_network_stats).

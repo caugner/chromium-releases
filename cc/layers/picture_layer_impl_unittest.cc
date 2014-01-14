@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "cc/debug/test_web_graphics_context_3d.h"
 #include "cc/layers/append_quads_data.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/test/fake_content_layer_client.h"
@@ -18,6 +17,7 @@
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/impl_side_painting_settings.h"
 #include "cc/test/mock_quad_culler.h"
+#include "cc/test/test_web_graphics_context_3d.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmapDevice.h"
@@ -742,12 +742,12 @@ TEST_F(PictureLayerImplTest, DontAddLowResDuringAnimation) {
   EXPECT_BOTH_EQ(num_tilings(), 2u);
 
   // Page scale animation, new high res, but not new low res because animating.
-  contents_scale = 4.f;
-  page_scale = 4.f;
+  contents_scale = 2.f;
+  page_scale = 2.f;
   animating_transform = true;
   SetContentsScaleOnBothLayers(
       contents_scale, device_scale, page_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale(), 4.f);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale(), 2.f);
   EXPECT_BOTH_EQ(LowResTiling()->contents_scale(), low_res_factor);
   EXPECT_BOTH_EQ(num_tilings(), 3u);
 
@@ -755,8 +755,8 @@ TEST_F(PictureLayerImplTest, DontAddLowResDuringAnimation) {
   animating_transform = false;
   SetContentsScaleOnBothLayers(
       contents_scale, device_scale, page_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale(), 4.f);
-  EXPECT_BOTH_EQ(LowResTiling()->contents_scale(), 4.f * low_res_factor);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale(), 2.f);
+  EXPECT_BOTH_EQ(LowResTiling()->contents_scale(), 2.f * low_res_factor);
   EXPECT_BOTH_EQ(num_tilings(), 4u);
 }
 
@@ -1106,19 +1106,45 @@ TEST_F(PictureLayerImplTest, ActivateUninitializedLayer) {
   EXPECT_FALSE(active_layer_->needs_post_commit_initialization());
 }
 
-// Solid color scrollbar setting is required for deferred initialization.
-class ImplSidePaintingSolidColorScrollbarSettings
-    : public ImplSidePaintingSettings {
- public:
-  ImplSidePaintingSolidColorScrollbarSettings() {
-    solid_color_scrollbars = true;
-  }
-};
+TEST_F(PictureLayerImplTest, SyncTilingAfterReleaseResource) {
+  SetupDefaultTrees(gfx::Size(10, 10));
+  host_impl_.active_tree()->UpdateDrawProperties();
+  EXPECT_FALSE(host_impl_.active_tree()->needs_update_draw_properties());
+
+  // Contrived unit test of a real crash. A layer is transparent during a
+  // context loss, and later becomes opaque, causing active layer SyncTiling to
+  // be called.
+  const float tile_scale = 2.f;
+  active_layer_->DidLoseOutputSurface();
+  EXPECT_FALSE(active_layer_->tilings()->TilingAtScale(tile_scale));
+  pending_layer_->AddTiling(2.f);
+  EXPECT_TRUE(active_layer_->tilings()->TilingAtScale(tile_scale));
+}
+
+TEST_F(PictureLayerImplTest, NoTilingIfDoesNotDrawContent) {
+  // Set up layers with tilings.
+  SetupDefaultTrees(gfx::Size(10, 10));
+  SetContentsScaleOnBothLayers(1.f, 1.f, 1.f, false);
+  pending_layer_->PushPropertiesTo(active_layer_);
+  EXPECT_TRUE(pending_layer_->DrawsContent());
+  EXPECT_TRUE(pending_layer_->CanHaveTilings());
+  EXPECT_GE(pending_layer_->num_tilings(), 0u);
+  EXPECT_GE(active_layer_->num_tilings(), 0u);
+
+  // Set content to false, which should make CanHaveTilings return false.
+  pending_layer_->SetDrawsContent(false);
+  EXPECT_FALSE(pending_layer_->DrawsContent());
+  EXPECT_FALSE(pending_layer_->CanHaveTilings());
+
+  // No tilings should be pushed to active layer.
+  pending_layer_->PushPropertiesTo(active_layer_);
+  EXPECT_EQ(0u, active_layer_->num_tilings());
+}
 
 class DeferredInitPictureLayerImplTest : public PictureLayerImplTest {
  public:
   DeferredInitPictureLayerImplTest()
-      : PictureLayerImplTest(ImplSidePaintingSolidColorScrollbarSettings()) {}
+      : PictureLayerImplTest(ImplSidePaintingSettings()) {}
 
   virtual void InitializeRenderer() OVERRIDE {
     host_impl_.InitializeRenderer(FakeOutputSurface::CreateDeferredGL(

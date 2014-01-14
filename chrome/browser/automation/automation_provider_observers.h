@@ -47,7 +47,6 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_view_host_observer.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 
@@ -580,7 +579,6 @@ class DomOperationObserver : public content::NotificationObserver {
                        const content::NotificationDetails& details) OVERRIDE;
 
   virtual void OnDomOperationCompleted(const std::string& json) = 0;
-  virtual void OnModalDialogShown() = 0;
   virtual void OnJavascriptBlocked() = 0;
 
  private:
@@ -600,7 +598,6 @@ class DomOperationMessageSender : public DomOperationObserver {
   virtual ~DomOperationMessageSender();
 
   virtual void OnDomOperationCompleted(const std::string& json) OVERRIDE;
-  virtual void OnModalDialogShown() OVERRIDE;
   virtual void OnJavascriptBlocked() OVERRIDE;
 
  private:
@@ -673,10 +670,7 @@ class LoginObserver : public chromeos::LoginStatusConsumer {
 
   virtual void OnLoginFailure(const chromeos::LoginFailure& error);
 
-  virtual void OnLoginSuccess(
-      const chromeos::UserContext& user_context,
-      bool pending_requests,
-      bool using_oauth);
+  virtual void OnLoginSuccess(const chromeos::UserContext& user_context);
 
  private:
   chromeos::ExistingUserController* controller_;
@@ -762,10 +756,7 @@ class ScreenUnlockObserver : public ScreenLockUnlockObserver,
 
   virtual void OnLoginFailure(const chromeos::LoginFailure& error);
 
-  virtual void OnLoginSuccess(
-      const chromeos::UserContext& user_context,
-      bool pending_requests,
-      bool using_oauth) {}
+  virtual void OnLoginSuccess(const chromeos::UserContext& user_context) {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ScreenUnlockObserver);

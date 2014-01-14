@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/stl_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task_runner.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
@@ -24,7 +25,7 @@
 #include "chromeos/network/managed_network_configuration_handler.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_ui_data.h"
-#include "chromeos/network/onc/onc_constants.h"
+#include "components/onc/onc_constants.h"
 #include "dbus/object_path.h"
 #include "net/cert/x509_certificate.h"
 
@@ -80,7 +81,7 @@ struct CertAndIssuer {
 
 bool CompareCertExpiration(const CertAndIssuer& a,
                            const CertAndIssuer& b) {
-  return (a.cert->valid_expiry() < b.cert->valid_expiry());
+  return (a.cert->valid_expiry() > b.cert->valid_expiry());
 }
 
 // Describes a network that is configured with the certificate pattern
@@ -100,7 +101,7 @@ struct NetworkAndCertPattern {
 // A unary predicate that returns true if the given CertAndIssuer matches the
 // certificate pattern of the NetworkAndCertPattern.
 struct MatchCertWithPattern {
-  MatchCertWithPattern(const NetworkAndCertPattern& pattern)
+  explicit MatchCertWithPattern(const NetworkAndCertPattern& pattern)
       : net_and_pattern(pattern) {}
 
   bool operator()(const CertAndIssuer& cert_and_issuer) {
@@ -192,7 +193,7 @@ void FindCertificateMatches(const net::CertificateList& certs,
 // pattern within an EAP, IPsec or OpenVPN configuration.
 client_cert::ConfigType OncToClientCertConfigurationType(
     const base::DictionaryValue& network_config) {
-  using namespace ::chromeos::onc;
+  using namespace ::onc;
 
   const base::DictionaryValue* wifi = NULL;
   network_config.GetDictionaryWithoutPathExpansion(network_config::kWiFi,
@@ -247,7 +248,7 @@ void LogError(const std::string& service_path,
 }
 
 bool ClientCertificatesLoaded() {
-  if(!CertLoader::Get()->certificates_loaded()) {
+  if (!CertLoader::Get()->certificates_loaded()) {
     VLOG(1) << "Certificates not loaded yet.";
     return false;
   }
@@ -431,11 +432,12 @@ void ClientCertResolver::ConfigureCertificates(NetworkCertMatches* matches) {
     VLOG(1) << "Configuring certificate of network " << it->service_path;
     CertLoader* cert_loader = CertLoader::Get();
     base::DictionaryValue shill_properties;
-    client_cert::SetShillProperties(it->cert_config_type,
-                                    cert_loader->tpm_token_slot(),
-                                    cert_loader->tpm_user_pin(),
-                                    &it->pkcs11_id,
-                                    &shill_properties);
+    client_cert::SetShillProperties(
+        it->cert_config_type,
+        base::IntToString(cert_loader->tpm_token_slot_id()),
+        cert_loader->tpm_user_pin(),
+        &it->pkcs11_id,
+        &shill_properties);
     DBusThreadManager::Get()->GetShillServiceClient()->
         SetProperties(dbus::ObjectPath(it->service_path),
                         shill_properties,

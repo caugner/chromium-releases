@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/extensions/extension_install_ui_default.h"
 
-#include "apps/app_launcher.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
+#include "chrome/browser/ui/app_list/app_list_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -50,7 +51,6 @@ using extensions::Extension;
 
 namespace {
 
-
 // Helpers --------------------------------------------------------------------
 
 Browser* FindOrCreateVisibleBrowser(Profile* profile) {
@@ -58,11 +58,11 @@ Browser* FindOrCreateVisibleBrowser(Profile* profile) {
   // after fixing http://crbug.com/38676.
   if (!IncognitoModePrefs::CanOpenBrowser(profile))
     return NULL;
-  Browser* browser =
-      chrome::FindOrCreateTabbedBrowser(profile, chrome::GetActiveDesktop());
+  chrome::ScopedTabbedBrowserDisplayer displayer(
+      profile, chrome::GetActiveDesktop());
+  Browser* browser = displayer.browser();
   if (browser->tab_strip_model()->count() == 0)
     chrome::AddBlankTabAt(browser, -1, true);
-  browser->window()->Show();
   return browser;
 }
 
@@ -153,7 +153,8 @@ ExtensionInstallUI* ExtensionInstallUI::Create(Profile* profile) {
 void ExtensionInstallUI::OpenAppInstalledUI(Profile* profile,
                                             const std::string& app_id) {
 #if defined(OS_CHROMEOS)
-  AppListService::Get()->ShowForProfile(profile);
+  AppListService::Get(chrome::HOST_DESKTOP_TYPE_ASH)->
+      ShowForProfile(profile);
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_APP_INSTALLED_TO_APPLIST,
@@ -244,8 +245,11 @@ void ExtensionInstallUIDefault::OnInstallSuccess(const Extension* extension,
                   cmdline->HasSwitch(switches::kAppsNewInstallBubble));
 #endif
 
-    if (apps::IsAppLauncherEnabled()) {
-      AppListService::Get()->ShowForProfile(current_profile);
+    if (IsAppLauncherEnabled()) {
+      // TODO(tapted): ExtensionInstallUI should retain the desktop type from
+      // the browser used to initiate the flow. http://crbug.com/308360.
+      AppListService::Get(chrome::GetActiveDesktop())->
+          ShowForProfile(current_profile);
 
       content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_APP_INSTALLED_TO_APPLIST,

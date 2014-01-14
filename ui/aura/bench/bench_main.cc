@@ -15,8 +15,8 @@
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/test/test_focus_client.h"
 #include "ui/aura/test/test_screen.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
@@ -26,6 +26,7 @@
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/debug_utils.h"
 #include "ui/compositor/layer.h"
+#include "ui/compositor/test/context_factories_for_test.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skia_util.h"
@@ -182,7 +183,6 @@ class WebGLBench : public BenchCompositorObserver {
         parent_(parent),
         webgl_(ui::LAYER_TEXTURED),
         compositor_(compositor),
-        context_provider_(),
         texture_(),
         fbo_(0),
         do_draw_(true) {
@@ -208,8 +208,8 @@ class WebGLBench : public BenchCompositorObserver {
     webgl_.SetBounds(bounds);
     parent_->Add(&webgl_);
 
-    context_provider_ = ui::ContextFactory::GetInstance()
-        ->OffscreenContextProviderForMainThread();
+    context_provider_ =
+        ui::ContextFactory::GetInstance()->SharedMainThreadContextProvider();
     WebKit::WebGraphicsContext3D* context = context_provider_->Context3d();
     context->makeContextCurrent();
     texture_ = new WebGLTexture(context, bounds.size());
@@ -228,7 +228,7 @@ class WebGLBench : public BenchCompositorObserver {
   virtual ~WebGLBench() {
     context_provider_->Context3d()->makeContextCurrent();
     context_provider_->Context3d()->deleteFramebuffer(fbo_);
-    webgl_.SetExternalTexture(NULL);
+    webgl_.SetShowPaintedContent();
     texture_ = NULL;
     compositor_->RemoveObserver(this);
   }
@@ -302,14 +302,14 @@ int main(int argc, char** argv) {
 
   // The ContextFactory must exist before any Compositors are created.
   bool allow_test_contexts = false;
-  ui::Compositor::InitializeContextFactoryForTests(allow_test_contexts);
+  ui::InitializeContextFactoryForTests(allow_test_contexts);
 
   ui::RegisterPathProvider();
   base::i18n::InitializeICU();
   ResourceBundle::InitSharedInstanceWithLocale("en-US", NULL);
 
   base::MessageLoop message_loop(base::MessageLoop::TYPE_UI);
-  aura::Env::GetInstance();
+  aura::Env::CreateInstance();
   scoped_ptr<aura::TestScreen> test_screen(
       aura::TestScreen::CreateFullscreen());
   gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, test_screen.get());
@@ -319,7 +319,8 @@ int main(int argc, char** argv) {
       root_window.get(),
       new aura::client::DefaultCaptureClient(root_window.get()));
 
-  scoped_ptr<aura::client::FocusClient> focus_client(new aura::FocusManager);
+  scoped_ptr<aura::client::FocusClient> focus_client(
+      new aura::test::TestFocusClient);
   aura::client::SetFocusClient(root_window.get(), focus_client.get());
 
   // add layers

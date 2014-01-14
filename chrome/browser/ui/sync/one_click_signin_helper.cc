@@ -14,9 +14,11 @@
 #include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -29,7 +31,6 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -178,13 +179,18 @@ class ConfirmEmailDialogDelegate : public TabModalConfirmDialogDelegate {
   virtual string16 GetMessage() OVERRIDE;
   virtual string16 GetAcceptButtonTitle() OVERRIDE;
   virtual string16 GetCancelButtonTitle() OVERRIDE;
+  virtual string16 GetLinkText() const OVERRIDE;
   virtual void OnAccepted() OVERRIDE;
   virtual void OnCanceled() OVERRIDE;
   virtual void OnClosed() OVERRIDE;
+  virtual void OnLinkClicked(WindowOpenDisposition disposition) OVERRIDE;
 
   std::string last_email_;
   std::string email_;
   Callback callback_;
+
+  // Web contents from which the "Learn more" link should be opened.
+  content::WebContents* web_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(ConfirmEmailDialogDelegate);
 };
@@ -208,7 +214,8 @@ ConfirmEmailDialogDelegate::ConfirmEmailDialogDelegate(
   : TabModalConfirmDialogDelegate(contents),
     last_email_(last_email),
     email_(email),
-    callback_(callback) {
+    callback_(callback),
+    web_contents_(contents) {
 }
 
 ConfirmEmailDialogDelegate::~ConfirmEmailDialogDelegate() {
@@ -235,6 +242,10 @@ string16 ConfirmEmailDialogDelegate::GetCancelButtonTitle() {
       IDS_ONE_CLICK_SIGNIN_CONFIRM_EMAIL_DIALOG_CANCEL_BUTTON);
 }
 
+string16 ConfirmEmailDialogDelegate::GetLinkText() const {
+  return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
+}
+
 void ConfirmEmailDialogDelegate::OnAccepted() {
   base::ResetAndReturn(&callback_).Run(CREATE_NEW_USER);
 }
@@ -245,6 +256,20 @@ void ConfirmEmailDialogDelegate::OnCanceled() {
 
 void ConfirmEmailDialogDelegate::OnClosed() {
   base::ResetAndReturn(&callback_).Run(CLOSE);
+}
+
+void ConfirmEmailDialogDelegate::OnLinkClicked(
+    WindowOpenDisposition disposition) {
+  content::OpenURLParams params(
+      GURL(chrome::kChromeSyncMergeTroubleshootingURL),
+      content::Referrer(),
+      NEW_POPUP,
+      content::PAGE_TRANSITION_AUTO_TOPLEVEL,
+      false);
+  // It is guaranteed that |web_contents_| is valid here because when it's
+  // deleted, the dialog is immediately closed and no further action can be
+  // performed.
+  web_contents_->OpenURL(params);
 }
 
 
@@ -299,7 +324,7 @@ void LogHistogramValue(signin::Source source, int action) {
       break;
     default:
       // This switch statement needs to be updated when the enum Source changes.
-      COMPILE_ASSERT(signin::SOURCE_UNKNOWN == 9,
+      COMPILE_ASSERT(signin::SOURCE_UNKNOWN == 11,
                      kSourceEnumHasChangedButNotThisSwitchStatement);
       NOTREACHED();
       return;
@@ -329,6 +354,17 @@ void RedirectToNtpOrAppsPage(content::WebContents* contents,
   contents->OpenURL(params);
 }
 
+void RedirectToNtpOrAppsPageWithIds(int child_id,
+                                    int route_id,
+                                    signin::Source source) {
+  content::WebContents* web_contents = tab_util::GetWebContentsByID(child_id,
+                                                                    route_id);
+  if (!web_contents)
+    return;
+
+  RedirectToNtpOrAppsPage(web_contents, source);
+}
+
 // If the |source| is not settings page/webstore, redirects to
 // the NTP/Apps page.
 void RedirectToNtpOrAppsPageIfNecessary(content::WebContents* contents,
@@ -349,10 +385,10 @@ void StartSync(const StartSyncArgs& args,
 
   // The starter deletes itself once its done.
   new OneClickSigninSyncStarter(args.profile, args.browser, args.session_index,
-                                args.email, args.password, start_mode,
+                                args.email, args.password,
+                                "" /* oauth_code */, start_mode,
                                 args.web_contents,
                                 args.confirmation_required,
-                                args.source,
                                 args.callback);
 
   int action = one_click_signin::HISTOGRAM_MAX;
@@ -390,17 +426,21 @@ void StartExplicitSync(const StartSyncArgs& args,
     // the action is CREATE_NEW_USER because the "Create new user" page might
     // be opened in a different tab that is already showing settings.
     //
-    // Don't redirect when this callback is called while there is a navigation
-    // in progress. Otherwise, there would be 2 nested navigations and a crash
-    // would occur (crbug.com/293261).
-    //
-    // Also, don't redirect when the visible URL is not a blank page: if the
+    // Don't redirect when the visible URL is not a blank page: if the
     // source is SOURCE_WEBSTORE_INSTALL, |contents| might be showing an app
     // page that shouldn't be hidden.
-    if (!contents->IsLoading() &&
-        signin::IsContinueUrlForWebBasedSigninFlow(
+    //
+    // If redirecting, don't do so immediately, otherwise there may be 2 nested
+    // navigations and a crash would occur (crbug.com/293261).  Post the task
+    // to the current thread instead.
+    if (signin::IsContinueUrlForWebBasedSigninFlow(
             contents->GetVisibleURL())) {
-      RedirectToNtpOrAppsPage(contents, args.source);
+      base::MessageLoopProxy::current()->PostNonNestableTask(
+          FROM_HERE,
+          base::Bind(RedirectToNtpOrAppsPageWithIds,
+                     contents->GetRenderProcessHost()->GetID(),
+                     contents->GetRoutingID(),
+                     args.source));
     }
     if (action == ConfirmEmailDialogDelegate::CREATE_NEW_USER) {
       chrome::ShowSettingsSubPage(args.browser,
@@ -512,6 +552,7 @@ class CurrentHistoryCleaner : public content::WebContentsObserver {
   virtual void WebContentsDestroyed(content::WebContents* contents) OVERRIDE;
   virtual void DidCommitProvisionalLoadForFrame(
       int64 frame_id,
+      const string16& frame_unique_name,
       bool is_main_frame,
       const GURL& url,
       content::PageTransition transition_type,
@@ -535,6 +576,7 @@ CurrentHistoryCleaner::~CurrentHistoryCleaner() {
 
 void CurrentHistoryCleaner::DidCommitProvisionalLoadForFrame(
     int64 frame_id,
+    const string16& frame_unique_name,
     bool is_main_frame,
     const GURL& url,
     content::PageTransition transition_type,
@@ -813,7 +855,7 @@ void OneClickSigninHelper::ShowInfoBarIfPossible(net::URLRequest* request,
             << " g-c-s='" << google_chrome_signin_value << "'";
   }
 
-  if (!gaia::IsGaiaSignonRealm(request->original_url().GetOrigin()))
+  if (!gaia::IsGaiaSignonRealm(request->url().GetOrigin()))
     return;
 
   // Parse Google-Accounts-SignIn.
@@ -1161,17 +1203,19 @@ void OneClickSigninHelper::DidStopLoading(
   // sync.
   if (email_.empty()) {
     VLOG(1) << "OneClickSigninHelper::DidStopLoading: nothing to do";
-    if (continue_url_match && auto_accept_ == AUTO_ACCEPT_EXPLICIT)
-      RedirectToSignin();
-    std::string unused_value;
-    if (net::GetValueForKeyInQuery(url, "ntp", &unused_value)) {
-      signin::SetUserSkippedPromo(profile);
-      RedirectToNtpOrAppsPage(web_contents(), source_);
-    }
-
-    if (!continue_url_match && !IsValidGaiaSigninRedirectOrResponseURL(url) &&
-        ++untrusted_navigations_since_signin_visit_ > kMaxNavigationsSince) {
-      CleanTransientState();
+    if (continue_url_match) {
+      if (auto_accept_ == AUTO_ACCEPT_EXPLICIT)
+        RedirectToSignin();
+      std::string unused_value;
+      if (net::GetValueForKeyInQuery(url, "ntp", &unused_value)) {
+        signin::SetUserSkippedPromo(profile);
+        RedirectToNtpOrAppsPage(web_contents(), source_);
+      }
+    } else {
+      if (!IsValidGaiaSigninRedirectOrResponseURL(url) &&
+          ++untrusted_navigations_since_signin_visit_ > kMaxNavigationsSince) {
+        CleanTransientState();
+      }
     }
 
     return;
@@ -1391,7 +1435,9 @@ void OneClickSigninHelper::OnStateChanged() {
     if (sync_service->FirstSetupInProgress())
       return;
 
-    if (sync_service->sync_initialized()) {
+    if (sync_service->sync_initialized() &&
+        signin::GetSourceForPromoURL(original_continue_url_)
+            != signin::SOURCE_SETTINGS) {
       contents->GetController().LoadURL(original_continue_url_,
                                         content::Referrer(),
                                         content::PAGE_TRANSITION_AUTO_TOPLEVEL,

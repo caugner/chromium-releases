@@ -13,61 +13,74 @@ config("executable_ldconfig") {
   ]
 }
 
+# This script returns a list consisting of two nested lists: the first is the
+# list of cflags, the second are the linker flags.
 pkg_script = "pkg-config.py"
 
 config("fontconfig") {
-  ldflags = [ "-lfontconfig" ]
+  libs = [ "fontconfig" ]
 }
 
 config("freetype2") {
-  cflags = exec_script(pkg_script, [ "--cflags", "freetype2" ], "list lines")
-  ldflags = exec_script(pkg_script, [ "--libs", "freetype2" ], "list lines")
+  pkgresult = exec_script(pkg_script, [ "freetype2" ], "value")
+  include_dirs = pkgresult[0]
+  cflags = pkgresult[1]
+  libs = pkgresult[2]
+  lib_dirs = pkgresult[3]
 }
 
 config("glib") {
-  glib_packages = "glib-2.0 gmodule-2.0 gobject-2.0 gthread-2.0"
-
-  cflags = exec_script(pkg_script, [ "--cflags", glib_packages ], "list lines")
-  ldflags = exec_script(pkg_script, [ "--libs", glib_packages ], "list lines")
+  pkgresult = exec_script(pkg_script,
+    [ "glib-2.0", "gmodule-2.0", "gobject-2.0", "gthread-2.0" ], "value" )
+  include_dirs = pkgresult[0]
+  cflags = pkgresult[1]
+  libs = pkgresult[2]
+  lib_dirs = pkgresult[3]
 }
 
 config("gtk") {
   # Gtk requires gmodule, but it does not list it as a dependency in some
   # misconfigured systems.
-  gtk_packages = "gmodule-2.0 gtk+-2.0 gthread-2.0"
+  pkgresult = exec_script(pkg_script,
+    [ "gmodule-2.0", "gtk+-2.0", "gthread-2.0" ], "value" )
+  include_dirs = pkgresult[0]
+  cflags = pkgresult[1]
+  libs = pkgresult[2]
+  lib_dirs = pkgresult[3]
 
   defines = [ "TOOLKIT_GTK" ]
-
-  cflags = exec_script(pkg_script, [ "--cflags", gtk_packages ], "list lines")
-  ldflags = exec_script(pkg_script, [ "--libs", gtk_packages ], "list lines")
 }
 
 config("pangocairo") {
-  cflags = exec_script(pkg_script, [ "--cflags", "pangocairo" ], "list lines")
-  ldflags = exec_script(pkg_script, [ "--libs", "pangocairo" ], "list lines")
+  pkgresult = exec_script(pkg_script, [ "pangocairo" ], "value" )
+  include_dirs = pkgresult[0]
+  cflags = pkgresult[1]
+  libs = pkgresult[2]
+  lib_dirs = pkgresult[3]
 }
 
 config("udev") {
-  udev_packages = "libudev"
-
-  cflags = exec_script(pkg_script, [ "--cflags", udev_packages ], "list lines")
-  ldflags = exec_script(pkg_script, [ "--libs", udev_packages ], "list lines")
+  pkgresult = exec_script(pkg_script, [ "libudev" ], "value" )
+  include_dirs = pkgresult[0]
+  cflags = pkgresult[1]
+  libs = pkgresult[2]
+  lib_dirs = pkgresult[3]
 }
 
 config("x11") {
   # Don't bother running pkg-config for these X related libraries since it just
   # returns the same libs, and forking pkg-config is slow.
   defines = [ "USE_X11" ]
-  ldflags = [
-    "-lX11",
-    "-lXcomposite",
-    "-lXcursor",
-    "-lXdamage",
-    "-lXext",
-    "-lXfixes",
-    "-lXi",
-    "-lXrender",
-    "-lXss",
-    "-lXtst",
+  libs = [
+    "X11",
+    "Xcomposite",
+    "Xcursor",
+    "Xdamage",
+    "Xext",
+    "Xfixes",
+    "Xi",
+    "Xrender",
+    "Xss",
+    "Xtst",
   ]
 }

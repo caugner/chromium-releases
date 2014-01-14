@@ -8,10 +8,10 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "cc/base/switches.h"
-#include "cc/debug/test_context_provider.h"
 #include "cc/input/input_handler.h"
 #include "cc/layers/layer.h"
 #include "cc/output/output_surface.h"
+#include "cc/test/test_context_provider.h"
 #include "cc/trees/layer_tree_host.h"
 #include "content/test/test_webkit_platform_support.h"
 #include "third_party/WebKit/public/platform/Platform.h"
@@ -20,6 +20,7 @@
 #include "third_party/WebKit/public/platform/WebLayerTreeView.h"
 #include "third_party/WebKit/public/platform/WebRenderingStats.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
+#include "ui/gfx/frame_time.h"
 #include "webkit/common/gpu/test_context_provider_factory.h"
 #include "webkit/renderer/compositor_bindings/web_layer_impl.h"
 
@@ -44,7 +45,7 @@ bool WebLayerTreeViewImplForTesting::Initialize() {
 
   // Accelerated animations are enabled for unit tests.
   settings.accelerated_animation_enabled = true;
-  layer_tree_host_ = cc::LayerTreeHost::Create(this, settings, NULL);
+  layer_tree_host_ = cc::LayerTreeHost::Create(this, NULL, settings, NULL);
   if (!layer_tree_host_)
     return false;
   return true;
@@ -127,7 +128,7 @@ bool WebLayerTreeViewImplForTesting::commitRequested() const {
 }
 
 void WebLayerTreeViewImplForTesting::composite() {
-  layer_tree_host_->Composite(base::TimeTicks::Now());
+  layer_tree_host_->Composite(gfx::FrameTime::Now());
 }
 
 void WebLayerTreeViewImplForTesting::didStopFlinging() {}
@@ -165,15 +166,10 @@ void WebLayerTreeViewImplForTesting::ScheduleComposite() {
 }
 
 scoped_refptr<cc::ContextProvider>
-WebLayerTreeViewImplForTesting::OffscreenContextProviderForMainThread() {
+WebLayerTreeViewImplForTesting::OffscreenContextProvider() {
+  // Unit tests only run in single threaded mode.
   return webkit::gpu::TestContextProviderFactory::GetInstance()->
       OffscreenContextProviderForMainThread();
-}
-
-scoped_refptr<cc::ContextProvider>
-WebLayerTreeViewImplForTesting::OffscreenContextProviderForCompositorThread() {
-  NOTREACHED();
-  return NULL;
 }
 
 }  // namespace webkit

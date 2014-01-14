@@ -15,7 +15,7 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_instructions_delegate.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view_observer.h"
@@ -150,11 +150,11 @@ class BookmarkBarView : public DetachableToolbarView,
   //
   // Note that we adjust the direction of both the URL and the title based on
   // the locale so that pure LTR strings are displayed properly in RTL locales.
-  static string16 CreateToolTipForURLAndTitle(const gfx::Point& screen_loc,
+  static string16 CreateToolTipForURLAndTitle(const views::Widget* widget,
+                                              const gfx::Point& screen_loc,
                                               const GURL& url,
                                               const string16& title,
-                                              Profile* profile,
-                                              gfx::NativeView context);
+                                              Profile* profile);
 
   // DetachableToolbarView methods:
   virtual bool IsDetached() const OVERRIDE;
@@ -283,8 +283,9 @@ class BookmarkBarView : public DetachableToolbarView,
   // Returns the button at the specified index.
   views::TextButton* GetBookmarkButton(int index);
 
-  // Returns LAUNCH_DETACHED_BAR or LAUNCH_ATTACHED_BAR based on detached state.
-  bookmark_utils::BookmarkLaunchLocation GetBookmarkLaunchLocation() const;
+  // Returns BOOKMARK_LAUNCH_LOCATION_DETACHED_BAR or
+  // BOOKMARK_LAUNCH_LOCATION_ATTACHED_BAR based on detached state.
+  BookmarkLaunchLocation GetBookmarkLaunchLocation() const;
 
   // Returns the index of the first hidden bookmark button. If all buttons are
   // visible, this returns GetBookmarkButtonCount().

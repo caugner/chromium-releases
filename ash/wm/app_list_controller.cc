@@ -163,7 +163,7 @@ void AppListController::SetVisible(bool visible, aura::Window* window) {
     // will be released with AppListView on close.
     app_list::AppListView* view = new app_list::AppListView(
         Shell::GetInstance()->delegate()->CreateAppListViewDelegate());
-    aura::RootWindow* root_window = window->GetRootWindow();
+    aura::Window* root_window = window->GetRootWindow();
     aura::Window* container = GetRootWindowController(root_window)->
         GetContainer(kShellWindowId_AppListContainer);
     if (ash::switches::UseAlternateShelfLayout()) {
@@ -328,12 +328,14 @@ void AppListController::OnGestureEvent(ui::GestureEvent* event) {
 
 void AppListController::OnWindowFocused(aura::Window* gained_focus,
                                         aura::Window* lost_focus) {
-  if (gained_focus && view_ && is_visible_) {
-    aura::Window* applist_container =
-        GetRootWindowController(gained_focus->GetRootWindow())->GetContainer(
-            kShellWindowId_AppListContainer);
-    if (gained_focus->parent() != applist_container)
-      SetVisible(false, gained_focus);
+  if (view_ && is_visible_) {
+    aura::Window* applist_window = view_->GetWidget()->GetNativeView();
+    aura::Window* applist_container = applist_window->parent();
+
+    if (applist_container->Contains(lost_focus) &&
+        (!gained_focus || !applist_container->Contains(gained_focus))) {
+      SetVisible(false, applist_window);
+    }
   }
 }
 
@@ -367,15 +369,15 @@ void AppListController::OnWidgetDestroying(views::Widget* widget) {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AppListController, ShellObserver implementation:
-void AppListController::OnShelfAlignmentChanged(aura::RootWindow* root_window) {
+void AppListController::OnShelfAlignmentChanged(aura::Window* root_window) {
   if (view_)
     view_->SetBubbleArrow(GetBubbleArrow(view_->GetWidget()->GetNativeView()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// AppListController, LauncherIconObserver implementation:
+// AppListController, ShelfIconObserver implementation:
 
-void AppListController::OnLauncherIconPositionsChanged() {
+void AppListController::OnShelfIconPositionsChanged() {
   UpdateBounds();
 }
 

@@ -28,8 +28,9 @@
       });
 
   for (QTCaptureDevice* device in captureDevices) {
-    [deviceNames setObject:[device localizedDisplayName]
-                    forKey:[device uniqueID]];
+    if (![[device attributeForKey:QTCaptureDeviceSuspendedAttribute] boolValue])
+      [deviceNames setObject:[device localizedDisplayName]
+                      forKey:[device uniqueID]];
   }
 }
 
@@ -86,6 +87,11 @@
       return NO;
     }
     QTCaptureDevice *device = [captureDevices objectAtIndex:index];
+    if ([[device attributeForKey:QTCaptureDeviceSuspendedAttribute]
+            boolValue]) {
+      DLOG(ERROR) << "Cannot open suspended video capture device.";
+      return NO;
+    }
     NSError *error;
     if (![device open:&error]) {
       DLOG(ERROR) << "Could not open video capture device."
@@ -280,8 +286,6 @@
     captureCapability.height = frameHeight;
     captureCapability.frame_rate = frameRate_;
     captureCapability.color = media::PIXEL_FORMAT_UYVY;
-    captureCapability.expected_capture_delay = 0;
-    captureCapability.interlaced = false;
 
     // The aspect ratio dictionary is often missing, in which case we report
     // a pixel aspect ratio of 0:0.

@@ -138,7 +138,7 @@ var testing = {};
      * on-demand.
      * @return {axs.AuditConfiguration}
      */
-    accessibilityAuditConfig: function() {
+    get accessibilityAuditConfig() {
       if (!this.accessibilityAuditConfig_) {
         this.accessibilityAuditConfig_ = new axs.AuditConfiguration();
 
@@ -152,7 +152,11 @@ var testing = {};
             // Most WebUI pages are inside an IFrame, so the "web page should
             // have a title that describes topic or purpose" test (AX_TITLE_01)
             // generally does not apply.
-            "pageWithoutTitle"
+            "pageWithoutTitle",
+
+            // TODO(aboxhall): re-enable when crbug.com/267035 is fixed.
+            // Until then it's just noise.
+            "lowContrastElements",
         ];
       }
       return this.accessibilityAuditConfig_;
@@ -291,8 +295,8 @@ var testing = {};
       if (!this.runAccessibilityChecks || typeof document === 'undefined')
         return;
 
-      if (!runAccessibilityAudit(this.a11yResults_,
-                                 this.accessibilityAuditConfig())) {
+      var auditConfig = this.accessibilityAuditConfig;
+      if (!runAccessibilityAudit(this.a11yResults_, auditConfig)) {
         var report = accessibilityAuditReport(this.a11yResults_);
         if (this.accessibilityIssuesAreErrors)
           throw new Error(report);
@@ -732,7 +736,7 @@ var testing = {};
 
       // Allow pattern to match multiple lines for text wrapping.
       var callerRegExp =
-          new RegExp(stackInfo.callerName + '\\((.|\\n)*?\\);', 'g');
+          new RegExp(stackInfo.callerName + '\\((.|\\n|\\r)*?\\);', 'g');
 
       // Find all matches allowing wrap around such as when a helper function
       // calls assert/expect calls and that helper function is called multiple
@@ -1003,7 +1007,6 @@ var testing = {};
         a11yResults.push(auditResult);
       }
     }
-
     // TODO(aboxhall): have strict (no errors or warnings) vs non-strict
     // (warnings ok)
     // TODO(aboxhall): some kind of info logging for warnings only??
@@ -1020,6 +1023,7 @@ var testing = {};
    */
   function accessibilityAuditReport(a11yResults, message) {
     message = message ? message + '\n\n' : '\n';
+    message += 'Accessibility issues found on ' + window.location.href + '\n';
     message += axs.Audit.createReport(a11yResults);
     return message;
   }
@@ -1031,7 +1035,7 @@ var testing = {};
   function assertAccessibilityOk(opt_results) {
     helper.registerCall();
     var a11yResults = opt_results || [];
-    var auditConfig = currentTestCase.fixture.accessibilityAuditConfig();
+    var auditConfig = currentTestCase.fixture.accessibilityAuditConfig;
     if (!runAccessibilityAudit(a11yResults, auditConfig))
       throw new Error(accessibilityAuditReport(a11yResults));
   }

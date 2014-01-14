@@ -219,8 +219,6 @@ CollectedCookiesViews::CollectedCookiesViews(content::WebContents* web_contents)
       web_contents->GetView()->GetNativeView(),
       modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
   web_contents_modal_dialog_manager->ShowDialog(window_->GetNativeView());
-  web_contents_modal_dialog_manager->SetCloseOnInterstitialWebUI(
-      window_->GetNativeView(), true);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -301,6 +299,11 @@ void CollectedCookiesViews::OnTreeViewSelectionChanged(
 
 ///////////////////////////////////////////////////////////////////////////////
 // CollectedCookiesViews, views::View overrides:
+
+gfx::Size CollectedCookiesViews::GetMinimumSize() {
+  // Allow UpdateWebContentsModalDialogPosition to clamp the dialog width.
+  return gfx::Size(0, View::GetMinimumSize().height());
+}
 
 void CollectedCookiesViews::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {

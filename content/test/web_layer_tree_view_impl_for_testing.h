@@ -57,8 +57,8 @@ class WebLayerTreeViewImplForTesting : public WebKit::WebLayerTreeView,
       WebKit::WebRenderingStats& stats) const;  // NOLINT(runtime/references)
 
   // cc::LayerTreeHostClient implementation.
-  virtual void WillBeginFrame() OVERRIDE {}
-  virtual void DidBeginFrame() OVERRIDE {}
+  virtual void WillBeginMainFrame() OVERRIDE {}
+  virtual void DidBeginMainFrame() OVERRIDE {}
   virtual void Animate(double frame_begin_time) OVERRIDE {}
   virtual void Layout() OVERRIDE;
   virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta, float page_scale)
@@ -72,9 +72,7 @@ class WebLayerTreeViewImplForTesting : public WebKit::WebLayerTreeView,
   virtual void DidCompleteSwapBuffers() OVERRIDE {}
   virtual void ScheduleComposite() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForMainThread() OVERRIDE;
-  virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForCompositorThread() OVERRIDE;
+      OffscreenContextProvider() OVERRIDE;
 
  private:
   scoped_ptr<cc::LayerTreeHost> layer_tree_host_;

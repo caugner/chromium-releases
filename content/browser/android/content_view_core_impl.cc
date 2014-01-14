@@ -18,6 +18,9 @@
 #include "content/browser/android/interstitial_page_delegate_android.h"
 #include "content/browser/android/load_url_params.h"
 #include "content/browser/android/touch_point.h"
+#include "content/browser/frame_host/interstitial_page_impl.h"
+#include "content/browser/frame_host/navigation_controller_impl.h"
+#include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/media/android/browser_media_player_manager.h"
 #include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/browser/renderer_host/input/web_input_event_builders_android.h"
@@ -27,9 +30,6 @@
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/ssl/ssl_host_state.h"
-#include "content/browser/web_contents/interstitial_page_impl.h"
-#include "content/browser/web_contents/navigation_controller_impl.h"
-#include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/web_contents_view_android.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
@@ -48,8 +48,8 @@
 #include "jni/ContentViewCore_jni.h"
 #include "third_party/WebKit/public/web/WebBindings.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "ui/android/view_android.h"
-#include "ui/android/window_android.h"
+#include "ui/base/android/view_android.h"
+#include "ui/base/android/window_android.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size_conversions.h"
@@ -159,7 +159,8 @@ ContentViewCoreImpl::ContentViewCoreImpl(JNIEnv* env, jobject obj,
                                          WebContents* web_contents,
                                          ui::ViewAndroid* view_android,
                                          ui::WindowAndroid* window_android)
-    : java_ref_(env, obj),
+    : WebContentsObserver(web_contents),
+      java_ref_(env, obj),
       web_contents_(static_cast<WebContentsImpl*>(web_contents)),
       root_layer_(cc::Layer::Create()),
       tab_crashed_(false),
@@ -168,7 +169,8 @@ ContentViewCoreImpl::ContentViewCoreImpl(JNIEnv* env, jobject obj,
       expected_browser_composite_time_(base::TimeDelta::FromMicroseconds(
           kDefaultVSyncIntervalMicros * kDefaultBrowserCompositeVSyncFraction)),
       view_android_(view_android),
-      window_android_(window_android) {
+      window_android_(window_android),
+      device_orientation_(0) {
   CHECK(web_contents) <<
       "A ContentViewCoreImpl should be created with a valid WebContents.";
 
@@ -219,15 +221,12 @@ void ContentViewCoreImpl::InitWebContents() {
   DCHECK(web_contents_);
   notification_registrar_.Add(
       this, NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
-      Source<NavigationController>(&web_contents_->GetController()));
+      Source<WebContents>(web_contents_));
   notification_registrar_.Add(
       this, NOTIFICATION_RENDERER_PROCESS_CREATED,
       content::NotificationService::AllBrowserContextsAndSources());
   notification_registrar_.Add(
       this, NOTIFICATION_WEB_CONTENTS_CONNECTED,
-      Source<WebContents>(web_contents_));
-  notification_registrar_.Add(
-      this, NOTIFICATION_WEB_CONTENTS_SWAPPED,
       Source<WebContents>(web_contents_));
 
   static_cast<WebContentsViewAndroid*>(web_contents_->GetView())->
@@ -289,14 +288,12 @@ void ContentViewCoreImpl::Observe(int type,
       }
       break;
     }
-    case NOTIFICATION_WEB_CONTENTS_SWAPPED: {
-      JNIEnv* env = AttachCurrentThread();
-      ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-      if (!obj.is_null()) {
-        Java_ContentViewCore_onWebContentsSwapped(env, obj.obj());
-      }
-    }
   }
+}
+
+void ContentViewCoreImpl::RenderViewReady() {
+  if (device_orientation_ != 0)
+    SendOrientationChangeEventInternal();
 }
 
 RenderWidgetHostViewAndroid*
@@ -383,14 +380,18 @@ void ContentViewCoreImpl::UpdateFrameInfo(
     const gfx::Vector2dF& controls_offset,
     const gfx::Vector2dF& content_offset,
     float overdraw_bottom_height) {
-  if (window_android_)
-      window_android_->set_content_offset(
-          gfx::ScaleVector2d(content_offset, dpi_scale_));
-
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
+
+  if (window_android_) {
+    gfx::Vector2dF window_offset(
+        Java_ContentViewCore_getLocationInWindowX(env, obj.obj()),
+        Java_ContentViewCore_getLocationInWindowY(env, obj.obj()));
+    window_android_->set_content_offset(
+        gfx::ScaleVector2d(content_offset, dpi_scale_) + window_offset);
+  }
 
   Java_ContentViewCore_updateFrameInfo(
       env, obj.obj(),
@@ -489,6 +490,14 @@ void ContentViewCoreImpl::UnhandledFlingStartEvent() {
   if (j_obj.is_null())
     return;
   Java_ContentViewCore_unhandledFlingStartEvent(env, j_obj.obj());
+}
+
+void ContentViewCoreImpl::OnScrollUpdateGestureConsumed() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
+  if (j_obj.is_null())
+    return;
+  Java_ContentViewCore_onScrollUpdateGestureConsumed(env, j_obj.obj());
 }
 
 void ContentViewCoreImpl::HasTouchEventHandlers(bool need_touch_events) {
@@ -715,13 +724,20 @@ void ContentViewCoreImpl::LoadUrl(
   UpdateTabCrashedFlag();
 }
 
-void ContentViewCoreImpl::SetNeedsBeginFrame(bool enabled) {
+void ContentViewCoreImpl::AddBeginFrameSubscriber() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_ContentViewCore_setVSyncNotificationEnabled(
-      env, obj.obj(), static_cast<jboolean>(enabled));
+  Java_ContentViewCore_addVSyncSubscriber(env, obj.obj());
+}
+
+void ContentViewCoreImpl::RemoveBeginFrameSubscriber() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  Java_ContentViewCore_removeVSyncSubscriber(env, obj.obj());
 }
 
 void ContentViewCoreImpl::SetNeedsAnimate() {
@@ -825,12 +841,7 @@ jint ContentViewCoreImpl::GetCurrentRenderProcessId(JNIEnv* env, jobject obj) {
 
 ScopedJavaLocalRef<jstring> ContentViewCoreImpl::GetURL(
     JNIEnv* env, jobject) const {
-  // The current users of the Java API expect to use the active entry
-  // rather than the visible entry, which is exposed by WebContents::GetURL.
-  content::NavigationEntry* entry =
-      web_contents_->GetController().GetActiveEntry();
-  GURL url = entry ? entry->GetVirtualURL() : GURL::EmptyGURL();
-  return ConvertUTF8ToJavaString(env, url.spec());
+  return ConvertUTF8ToJavaString(env, GetWebContents()->GetURL().spec());
 }
 
 ScopedJavaLocalRef<jstring> ContentViewCoreImpl::GetTitle(
@@ -863,13 +874,10 @@ void ContentViewCoreImpl::SetFocusInternal(bool focused) {
 void ContentViewCoreImpl::SendOrientationChangeEvent(JNIEnv* env,
                                                      jobject obj,
                                                      jint orientation) {
-  RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
-  if (rwhv)
-    rwhv->UpdateScreenInfo(rwhv->GetNativeView());
-
-  RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
-      web_contents_->GetRenderViewHost());
-  rvhi->SendOrientationChangeEvent(orientation);
+  if (device_orientation_ != orientation) {
+    device_orientation_ = orientation;
+    SendOrientationChangeEventInternal();
+  }
 }
 
 jboolean ContentViewCoreImpl::SendTouchEvent(JNIEnv* env,
@@ -1044,7 +1052,7 @@ void ContentViewCoreImpl::ShowPressState(JNIEnv* env, jobject obj,
                                          jlong time_ms,
                                          jfloat x, jfloat y) {
   WebGestureEvent event = MakeGestureEvent(
-      WebInputEvent::GestureTapDown, time_ms, x, y);
+      WebInputEvent::GestureShowPress, time_ms, x, y);
   SendGestureEvent(event);
 }
 
@@ -1055,6 +1063,14 @@ void ContentViewCoreImpl::ShowPressCancel(JNIEnv* env,
                                           jfloat y) {
   WebGestureEvent event = MakeGestureEvent(
       WebInputEvent::GestureTapCancel, time_ms, x, y);
+  SendGestureEvent(event);
+}
+
+void ContentViewCoreImpl::TapDown(JNIEnv* env, jobject obj,
+                                  jlong time_ms,
+                                  jfloat x, jfloat y) {
+  WebGestureEvent event = MakeGestureEvent(
+      WebInputEvent::GestureTapDown, time_ms, x, y);
   SendGestureEvent(event);
 }
 
@@ -1169,6 +1185,15 @@ void ContentViewCoreImpl::GoToNavigationIndex(JNIEnv* env,
                                               jint index) {
   web_contents_->GetController().GoToIndex(index);
   UpdateTabCrashedFlag();
+}
+
+void ContentViewCoreImpl::LoadIfNecessary(JNIEnv* env, jobject obj) {
+  web_contents_->GetController().LoadIfNecessary();
+  UpdateTabCrashedFlag();
+}
+
+void ContentViewCoreImpl::RequestRestoreLoad(JNIEnv* env, jobject obj) {
+  web_contents_->GetController().SetNeedsReload();
 }
 
 void ContentViewCoreImpl::StopLoading(JNIEnv* env, jobject obj) {
@@ -1344,6 +1369,8 @@ jboolean ContentViewCoreImpl::IsRenderWidgetHostViewReady(JNIEnv* env,
 
 void ContentViewCoreImpl::ExitFullscreen(JNIEnv* env, jobject obj) {
   RenderViewHost* host = web_contents_->GetRenderViewHost();
+  if (!host)
+    return;
   host->ExitFullscreen();
 }
 
@@ -1353,6 +1380,8 @@ void ContentViewCoreImpl::UpdateTopControlsState(JNIEnv* env,
                                                  bool enable_showing,
                                                  bool animate) {
   RenderViewHost* host = web_contents_->GetRenderViewHost();
+  if (!host)
+    return;
   host->Send(new ViewMsg_UpdateTopControlsState(host->GetRoutingID(),
                                                 enable_hiding,
                                                 enable_showing,
@@ -1438,7 +1467,7 @@ void ContentViewCoreImpl::GetDirectedNavigationHistory(JNIEnv* env,
 ScopedJavaLocalRef<jstring>
 ContentViewCoreImpl::GetOriginalUrlForActiveNavigationEntry(JNIEnv* env,
                                                             jobject obj) {
-  NavigationEntry* entry = web_contents_->GetController().GetActiveEntry();
+  NavigationEntry* entry = web_contents_->GetController().GetVisibleEntry();
   if (entry == NULL)
     return ScopedJavaLocalRef<jstring>(env, NULL);
   return ConvertUTF8ToJavaString(env, entry->GetOriginalRequestURL().spec());
@@ -1449,10 +1478,6 @@ int ContentViewCoreImpl::GetNativeImeAdapter(JNIEnv* env, jobject obj) {
   if (!rwhva)
     return 0;
   return rwhva->GetNativeImeAdapter();
-}
-
-jboolean ContentViewCoreImpl::NeedsReload(JNIEnv* env, jobject obj) {
-  return web_contents_->GetController().NeedsReload();
 }
 
 void ContentViewCoreImpl::UndoScrollFocusedEditableNodeIntoView(
@@ -1513,7 +1538,7 @@ void ContentViewCoreImpl::EvaluateJavaScript(JNIEnv* env,
 
 bool ContentViewCoreImpl::GetUseDesktopUserAgent(
     JNIEnv* env, jobject obj) {
-  NavigationEntry* entry = web_contents_->GetController().GetActiveEntry();
+  NavigationEntry* entry = web_contents_->GetController().GetVisibleEntry();
   return entry && entry->GetIsOverridingUserAgent();
 }
 
@@ -1524,7 +1549,8 @@ void ContentViewCoreImpl::UpdateImeAdapter(int native_ime_adapter,
                                            int selection_end,
                                            int composition_start,
                                            int composition_end,
-                                           bool show_ime_if_needed) {
+                                           bool show_ime_if_needed,
+                                           bool require_ack) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
@@ -1536,15 +1562,7 @@ void ContentViewCoreImpl::UpdateImeAdapter(int native_ime_adapter,
                                         jstring_text.obj(),
                                         selection_start, selection_end,
                                         composition_start, composition_end,
-                                        show_ime_if_needed);
-}
-
-void ContentViewCoreImpl::ProcessImeBatchStateAck(bool is_begin) {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (obj.is_null())
-    return;
-  Java_ContentViewCore_processImeBatchStateAck(env, obj.obj(), is_begin);
+                                        show_ime_if_needed, require_ack);
 }
 
 void ContentViewCoreImpl::ClearSslPreferences(JNIEnv* env, jobject obj) {
@@ -1562,7 +1580,7 @@ void ContentViewCoreImpl::SetUseDesktopUserAgent(
     return;
 
   // Make sure the navigation entry actually exists.
-  NavigationEntry* entry = web_contents_->GetController().GetActiveEntry();
+  NavigationEntry* entry = web_contents_->GetController().GetVisibleEntry();
   if (!entry)
     return;
 
@@ -1586,15 +1604,30 @@ void ContentViewCoreImpl::SetAccessibilityEnabled(JNIEnv* env, jobject obj,
     return;
   RenderWidgetHostImpl* host_impl = RenderWidgetHostImpl::From(
       host_view->GetRenderWidgetHost());
+  BrowserAccessibilityState* accessibility_state =
+      BrowserAccessibilityState::GetInstance();
   if (enabled) {
-    BrowserAccessibilityState::GetInstance()->EnableAccessibility();
-    if (host_impl)
+    // This enables accessibility globally unless it was explicitly disallowed
+    // by a command-line flag.
+    accessibility_state->OnScreenReaderDetected();
+    // If it was actually enabled globally, enable it for this RenderWidget now.
+    if (accessibility_state->IsAccessibleBrowser() && host_impl)
       host_impl->SetAccessibilityMode(AccessibilityModeComplete);
   } else {
-    BrowserAccessibilityState::GetInstance()->DisableAccessibility();
+    accessibility_state->DisableAccessibility();
     if (host_impl)
       host_impl->SetAccessibilityMode(AccessibilityModeOff);
   }
+}
+
+void ContentViewCoreImpl::SendOrientationChangeEventInternal() {
+  RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
+  if (rwhv)
+    rwhv->UpdateScreenInfo(rwhv->GetNativeView());
+
+  RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
+      web_contents_->GetRenderViewHost());
+  rvhi->SendOrientationChangeEvent(device_orientation_);
 }
 
 // This is called for each ContentView.

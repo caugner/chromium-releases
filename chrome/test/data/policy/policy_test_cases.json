@@ -690,7 +690,7 @@
     "can_be_recommended": true,
     "test_policy": { "RestoreOnStartupURLs": ["chromium.org"] },
     "pref_mappings": [
-      { "pref": "session.urls_to_restore_on_startup",
+      { "pref": "session.startup_urls",
         "indicator_tests": [
           { "policy": { "RestoreOnStartupURLs": ["chromium.org"] } }
         ]
@@ -1545,6 +1545,9 @@
     ]
   },
 
+  "ForceEphemeralProfiles": {
+  },
+
   "----- Chrome OS policies ------------------------------------------------": {},
 
   "ChromeOsLockOnIdleSuspend": {
@@ -1819,6 +1822,16 @@
     ]
   },
 
+  "WaitForInitialUserActivity": {
+    "os": ["chromeos"],
+    "test_policy": { "WaitForInitialUserActivity": true },
+    "pref_mappings": [
+      { "pref": "session.wait_for_initial_user_activity",
+        "local_state": true },
+      { "pref": "power.wait_for_initial_user_activity" }
+    ]
+  },
+
   "TermsOfServiceURL": {
     "os": ["chromeos"],
     "test_policy": { "TermsOfServiceURL": "http://www.example.com/terms_of_service.txt" },
@@ -1965,6 +1978,9 @@
   "ReportDeviceNetworkInterfaces": {
   },
 
+  "ReportDeviceUsers": {
+  },
+
   "DeviceAllowNewUsers": {
   },
 
@@ -2096,6 +2112,9 @@
   },
 
   "SupervisedUserCreationEnabled": {
+  },
+
+  "AutoCleanUpStrategy": {
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

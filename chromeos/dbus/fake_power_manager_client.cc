@@ -36,9 +36,6 @@ void FakePowerManagerClient::SetPolicy(
 void FakePowerManagerClient::RequestShutdown() {
 }
 
-void FakePowerManagerClient::RequestIdleNotification(int64 threshold_secs) {
-}
-
 void FakePowerManagerClient::DecreaseScreenBrightness(bool allow_off) {
 }
 
@@ -52,6 +49,10 @@ void FakePowerManagerClient::GetScreenBrightnessPercent(
 
 base::Closure FakePowerManagerClient::GetSuspendReadinessCallback() {
   return base::Closure();
+}
+
+int FakePowerManagerClient::GetNumPendingSuspendReadinessCallbacks() {
+  return 0;
 }
 
 bool FakePowerManagerClient::HasObserver(Observer* observer) {

@@ -44,8 +44,8 @@ bool NetworkingPrivateGetPropertiesFunction::RunImpl() {
 
   // If there are properties set by SetProperties function, use those.
   NetworkingPrivatePropertiesData* stored_properties =
-    static_cast<NetworkingPrivatePropertiesData*> (
-        profile()->GetUserData(kNetworkingPrivateProperties));
+      static_cast<NetworkingPrivatePropertiesData*>(
+          GetProfile()->GetUserData(kNetworkingPrivateProperties));
   if (stored_properties != NULL) {
     SetResult(stored_properties->properties_.release());
     SendResponse(true);
@@ -60,7 +60,7 @@ bool NetworkingPrivateGetPropertiesFunction::RunImpl() {
      "\"WiFi\":{"
        "\"Frequency\":5000,"
        "\"FrequencyList\":[2400,5000],"
-       "\"SSID\":\"stub_wifi2\","
+       "\"SSID\":\"wifi2_PSK\","
        "\"Security\":\"WPA-PSK\","
        "\"SignalStrength\":80}}";
 
@@ -121,9 +121,9 @@ bool NetworkingPrivateGetManagedPropertiesFunction::RunImpl() {
       "      \"UserSetting\": \"FAKE_CREDENTIAL_VPaJDV9x\""
       "    },"
       "    \"SSID\": {"
-      "      \"Active\": \"stub_wifi2\","
+      "      \"Active\": \"wifi2_PSK\","
       "      \"Effective\": \"UserPolicy\","
-      "      \"UserPolicy\": \"stub_wifi2\""
+      "      \"UserPolicy\": \"wifi2_PSK\""
       "    },"
       "    \"Security\": {"
       "      \"Active\": \"WPA-PSK\","
@@ -185,8 +185,9 @@ bool NetworkingPrivateSetPropertiesFunction::RunImpl() {
       params->properties.ToValue());
 
   // Store properties_dict in profile to return from GetProperties.
-  profile()->SetUserData(kNetworkingPrivateProperties,
-    new NetworkingPrivatePropertiesData(properties_dict.get()));
+  GetProfile()->SetUserData(
+      kNetworkingPrivateProperties,
+      new NetworkingPrivatePropertiesData(properties_dict.get()));
   SendResponse(true);
   return true;
 }
@@ -207,7 +208,7 @@ bool NetworkingPrivateCreateNetworkFunction::RunImpl() {
   scoped_ptr<base::DictionaryValue> properties_dict(
       params->properties.ToValue());
   properties_dict->SetString("GUID", "fake_guid");
-  profile()->SetUserData(
+  GetProfile()->SetUserData(
       kNetworkingPrivateProperties,
       new NetworkingPrivatePropertiesData(properties_dict.get()));
 
@@ -290,6 +291,52 @@ bool NetworkingPrivateGetVisibleNetworksFunction::RunImpl() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// NetworkingPrivateGetEnabledNetworkTypesFunction
+
+NetworkingPrivateGetEnabledNetworkTypesFunction::
+~NetworkingPrivateGetEnabledNetworkTypesFunction() {
+}
+
+bool NetworkingPrivateGetEnabledNetworkTypesFunction::RunImpl() {
+  base::ListValue* network_list = new base::ListValue;
+
+  network_list->Append(new base::StringValue("Ethernet"));
+  network_list->Append(new base::StringValue("WiFi"));
+  network_list->Append(new base::StringValue("Cellular"));
+
+  SetResult(network_list);
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NetworkingPrivateEnableNetworkTypeFunction
+
+NetworkingPrivateEnableNetworkTypeFunction::
+~NetworkingPrivateEnableNetworkTypeFunction() {
+}
+
+bool NetworkingPrivateEnableNetworkTypeFunction::RunImpl() {
+  scoped_ptr<api::EnableNetworkType::Params> params =
+      api::EnableNetworkType::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params);
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NetworkingPrivateDisableNetworkTypeFunction
+
+NetworkingPrivateDisableNetworkTypeFunction::
+~NetworkingPrivateDisableNetworkTypeFunction() {
+}
+
+bool NetworkingPrivateDisableNetworkTypeFunction::RunImpl() {
+  scoped_ptr<api::DisableNetworkType::Params> params =
+      api::DisableNetworkType::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params);
+  return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // NetworkingPrivateRequestNetworkScanFunction
 
 NetworkingPrivateRequestNetworkScanFunction::
@@ -305,7 +352,8 @@ bool NetworkingPrivateRequestNetworkScanFunction::RunImpl() {
   changes.push_back("stub_wifi2");
   changes.push_back("stub_cellular1");
 
-  EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
+  EventRouter* event_router =
+      ExtensionSystem::Get(GetProfile())->event_router();
   scoped_ptr<base::ListValue> args(api::OnNetworkListChanged::Create(changes));
   scoped_ptr<extensions::Event> extension_event(new extensions::Event(
       api::OnNetworkListChanged::kEventName, args.Pass()));
@@ -342,13 +390,16 @@ bool NetworkingPrivateStartConnectFunction::RunImpl() {
          "\"SignalStrength\":80}}";
 
     // Store network_properties in profile to return from GetProperties.
-    profile()->SetUserData(kNetworkingPrivateProperties,
-      new NetworkingPrivatePropertiesData(
-        static_cast<DictionaryValue*>(
-          base::JSONReader::Read(network_properties))));
+    scoped_ptr<Value> network_properties_value(
+        base::JSONReader::Read(network_properties));
+    GetProfile()->SetUserData(
+        kNetworkingPrivateProperties,
+        new NetworkingPrivatePropertiesData(
+            static_cast<DictionaryValue*>(network_properties_value.get())));
 
     // Broadcast NetworksChanged Event that network is connected
-    EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
+    EventRouter* event_router =
+        ExtensionSystem::Get(GetProfile())->event_router();
     scoped_ptr<base::ListValue> args(api::OnNetworksChanged::Create(
         std::vector<std::string>(1, params->network_guid)));
     scoped_ptr<extensions::Event> netchanged_event(
@@ -389,7 +440,8 @@ bool NetworkingPrivateStartDisconnectFunction::RunImpl() {
     SendResponse(true);
 
     // Send Event that network is disconnected. Listener will use GetProperties.
-    EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
+    EventRouter* event_router =
+        ExtensionSystem::Get(GetProfile())->event_router();
     scoped_ptr<base::ListValue> args(api::OnNetworksChanged::Create(
         std::vector<std::string>(1, params->network_guid)));
     scoped_ptr<extensions::Event> extension_event(

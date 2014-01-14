@@ -30,6 +30,7 @@ class ManageProfileHandler : public OptionsPageUIHandler,
       base::DictionaryValue* localized_strings) OVERRIDE;
   virtual void InitializeHandler() OVERRIDE;
   virtual void InitializePage() OVERRIDE;
+  virtual void Uninitialize() OVERRIDE;
 
   // WebUIMessageHandler:
   virtual void RegisterMessages() OVERRIDE;
@@ -120,12 +121,12 @@ class ManageProfileHandler : public OptionsPageUIHandler,
   // URL for the current profile's GAIA picture.
   std::string gaia_picture_url_;
 
-  // For generating weak pointers to itself for callbacks.
-  base::WeakPtrFactory<ManageProfileHandler> weak_factory_;
-
   // Used to observe the preference that allows creating managed users, which
   // can be changed by policy.
   PrefChangeRegistrar pref_change_registrar_;
+
+  // For generating weak pointers to itself for callbacks.
+  base::WeakPtrFactory<ManageProfileHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ManageProfileHandler);
 };

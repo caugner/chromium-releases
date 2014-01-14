@@ -5,8 +5,8 @@
 #include "chrome/browser/apps/app_browsertest_util.h"
 
 #include "apps/app_window_contents.h"
-#include "apps/native_app_window.h"
 #include "apps/shell_window_registry.h"
+#include "apps/ui/native_app_window.h"
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
@@ -16,6 +16,7 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/switches.h"
 
@@ -40,6 +41,21 @@ void PlatformAppBrowserTest::SetUpCommandLine(CommandLine* command_line) {
   command_line->AppendSwitchASCII(::switches::kEventPageSuspendingTime, "1");
 }
 
+// static
+ShellWindow* PlatformAppBrowserTest::GetFirstShellWindowForBrowser(
+    Browser* browser) {
+  ShellWindowRegistry* app_registry =
+      ShellWindowRegistry::Get(browser->profile());
+  const ShellWindowRegistry::ShellWindowList& shell_windows =
+      app_registry->shell_windows();
+
+  ShellWindowRegistry::const_iterator iter = shell_windows.begin();
+  if (iter != shell_windows.end())
+    return *iter;
+
+  return NULL;
+}
+
 const Extension* PlatformAppBrowserTest::LoadAndLaunchPlatformApp(
     const char* name) {
   content::WindowedNotificationObserver app_loaded_observer(
@@ -50,10 +66,10 @@ const Extension* PlatformAppBrowserTest::LoadAndLaunchPlatformApp(
       test_data_dir_.AppendASCII("platform_apps").AppendASCII(name));
   EXPECT_TRUE(extension);
 
-  chrome::OpenApplication(chrome::AppLaunchParams(browser()->profile(),
-                                                  extension,
-                                                  extension_misc::LAUNCH_NONE,
-                                                  NEW_WINDOW));
+  OpenApplication(AppLaunchParams(browser()->profile(),
+                                  extension,
+                                  extension_misc::LAUNCH_NONE,
+                                  NEW_WINDOW));
 
   app_loaded_observer.Wait();
 
@@ -77,10 +93,10 @@ const Extension* PlatformAppBrowserTest::InstallAndLaunchPlatformApp(
 
   const Extension* extension = InstallPlatformApp(name);
 
-  chrome::OpenApplication(chrome::AppLaunchParams(browser()->profile(),
-                                                  extension,
-                                                  extension_misc::LAUNCH_NONE,
-                                                  NEW_WINDOW));
+  OpenApplication(AppLaunchParams(browser()->profile(),
+                                  extension,
+                                  extension_misc::LAUNCH_NONE,
+                                  NEW_WINDOW));
 
   app_loaded_observer.Wait();
 
@@ -96,16 +112,7 @@ WebContents* PlatformAppBrowserTest::GetFirstShellWindowWebContents() {
 }
 
 ShellWindow* PlatformAppBrowserTest::GetFirstShellWindow() {
-  ShellWindowRegistry* app_registry =
-      ShellWindowRegistry::Get(browser()->profile());
-  const ShellWindowRegistry::ShellWindowList& shell_windows =
-      app_registry->shell_windows();
-
-  ShellWindowRegistry::const_iterator iter = shell_windows.begin();
-  if (iter != shell_windows.end())
-    return *iter;
-
-  return NULL;
+  return GetFirstShellWindowForBrowser(browser());
 }
 
 size_t PlatformAppBrowserTest::RunGetWindowsFunctionForExtension(
@@ -171,11 +178,10 @@ ShellWindow* PlatformAppBrowserTest::CreateShellWindowFromParams(
 }
 
 void PlatformAppBrowserTest::CloseShellWindow(ShellWindow* window) {
-  content::WindowedNotificationObserver destroyed_observer(
-      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-      content::NotificationService::AllSources());
+  content::WebContentsDestroyedWatcher destroyed_watcher(
+      window->web_contents());
   window->GetBaseWindow()->Close();
-  destroyed_observer.Wait();
+  destroyed_watcher.Wait();
 }
 
 void PlatformAppBrowserTest::CallAdjustBoundsToBeVisibleOnScreenForShellWindow(

@@ -10,7 +10,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #if defined(OS_CHROMEOS)
-#include "chromeos/cryptohome/cryptohome_library.h"
+#include "chromeos/cryptohome/system_salt_getter.h"
 #endif
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_context.h"
@@ -20,6 +20,7 @@
 #include "crypto/encryptor.h"
 #include "crypto/random.h"
 #include "crypto/sha2.h"
+#include "ppapi/c/pp_errors.h"
 #if defined(ENABLE_RLZ)
 #include "rlz/lib/machine_id.h"
 #endif
@@ -36,26 +37,19 @@ const char kDRMIdentifierFile[] = "Pepper DRM ID.0";
 
 const uint32_t kSaltLength = 32;
 
-void GetMachineIDAsync(const DeviceIDFetcher::IDCallback& callback) {
-  std::string result;
+void GetMachineIDAsync(
+    const base::Callback<void(const std::string&)>& callback) {
 #if defined(OS_WIN) && defined(ENABLE_RLZ)
+  std::string result;
   rlz_lib::GetMachineId(&result);
+  callback.Run(result);
 #elif defined(OS_CHROMEOS)
-  result = chromeos::CryptohomeLibrary::Get()->GetSystemSalt();
-  if (result.empty()) {
-    // cryptohome must not be running; re-request after a delay.
-    const int64 kRequestSystemSaltDelayMs = 500;
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&GetMachineIDAsync, callback),
-        base::TimeDelta::FromMilliseconds(kRequestSystemSaltDelayMs));
-    return;
-  }
+  chromeos::SystemSaltGetter::Get()->GetSystemSalt(callback);
 #else
   // Not implemented for other platforms.
   NOTREACHED();
+  callback.Run(std::string());
 #endif
-  callback.Run(result);
 }
 
 }  // namespace
@@ -116,7 +110,7 @@ void DeviceIDFetcher::CheckPrefsOnUIThread() {
   if (!profile ||
       profile->IsOffTheRecord() ||
       !profile->GetPrefs()->GetBoolean(prefs::kEnableDRM)) {
-    RunCallbackOnIOThread(std::string());
+    RunCallbackOnIOThread(std::string(), PP_ERROR_NOACCESS);
     return;
   }
 
@@ -151,7 +145,7 @@ void DeviceIDFetcher::ComputeOnUIThread(const std::string& salt,
 
   if (machine_id.empty()) {
     LOG(ERROR) << "Empty machine id";
-    RunCallbackOnIOThread(std::string());
+    RunCallbackOnIOThread(std::string(), PP_ERROR_FAILED);
     return;
   }
 
@@ -162,7 +156,7 @@ void DeviceIDFetcher::ComputeOnUIThread(const std::string& salt,
     salt_bytes.clear();
   if (salt_bytes.size() != kSaltLength) {
     LOG(ERROR) << "Unexpected salt bytes length: " << salt_bytes.size();
-    RunCallbackOnIOThread(std::string());
+    RunCallbackOnIOThread(std::string(), PP_ERROR_FAILED);
     return;
   }
 
@@ -181,7 +175,7 @@ void DeviceIDFetcher::ComputeOnUIThread(const std::string& salt,
         reinterpret_cast<const void*>(id_buf),
         sizeof(id_buf)));
 
-  RunCallbackOnIOThread(id);
+  RunCallbackOnIOThread(id, PP_OK);
 }
 
 // TODO(raymes): This is temporary code to migrate ChromeOS devices to the new
@@ -196,7 +190,7 @@ void DeviceIDFetcher::LegacyComputeOnBlockingPool(
   base::FilePath id_path = GetLegacyDeviceIDPath(profile_path);
   if (base::PathExists(id_path)) {
     if (base::ReadFileToString(id_path, &id) && !id.empty()) {
-      RunCallbackOnIOThread(id);
+      RunCallbackOnIOThread(id, PP_OK);
       return;
     }
   }
@@ -209,15 +203,16 @@ void DeviceIDFetcher::LegacyComputeOnBlockingPool(
                             this, salt)));
 }
 
-void DeviceIDFetcher::RunCallbackOnIOThread(const std::string& id) {
+void DeviceIDFetcher::RunCallbackOnIOThread(const std::string& id,
+                                            int32_t result) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&DeviceIDFetcher::RunCallbackOnIOThread, this, id));
+        base::Bind(&DeviceIDFetcher::RunCallbackOnIOThread, this, id, result));
     return;
   }
   in_progress_ = false;
-  callback_.Run(id);
+  callback_.Run(id, result);
 }
 
 }  // namespace chrome

@@ -11,13 +11,11 @@
 
 namespace extensions {
 
-void DisplayInfoProvider::SetInfo(
-    const std::string& display_id,
+bool DisplayInfoProvider::SetInfo(const std::string& display_id,
     const api::system_display::DisplayProperties& info,
-    const SetInfoCallback& callback) {
-  base::MessageLoopProxy::current()->PostTask(
-      FROM_HERE,
-      base::Bind(callback, false, "Not implemented"));
+    std::string* error) {
+  *error = "Not Implemented";
+  return false;
 }
 
 void DisplayInfoProvider::UpdateDisplayUnitInfoForPlatform(
@@ -29,7 +27,8 @@ void DisplayInfoProvider::UpdateDisplayUnitInfoForPlatform(
   gint monitor_num = static_cast<gint>(display.id());
   char* monitor_name = reinterpret_cast<char*>(gdk_screen_get_monitor_plug_name(
        screen, monitor_num));
-  unit->name = std::string(monitor_name);
+  if (monitor_name)
+    unit->name = std::string(monitor_name);
 }
 
 }  // namespace extensions

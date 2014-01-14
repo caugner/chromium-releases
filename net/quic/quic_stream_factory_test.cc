@@ -11,6 +11,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
+#include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/crypto/quic_decrypter.h"
 #include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/quic_http_stream.h"
@@ -23,6 +24,38 @@
 
 namespace net {
 namespace test {
+
+class QuicStreamFactoryPeer {
+ public:
+  static QuicCryptoClientConfig* GetOrCreateCryptoConfig(
+      QuicStreamFactory* factory,
+      const HostPortProxyPair& host_port_proxy_pair) {
+    return factory->GetOrCreateCryptoConfig(host_port_proxy_pair);
+  }
+
+  static bool HasActiveSession(QuicStreamFactory* factory,
+                               const HostPortProxyPair& host_port_proxy_pair) {
+    return factory->HasActiveSession(host_port_proxy_pair);
+  }
+
+  static QuicClientSession* GetActiveSession(
+      QuicStreamFactory* factory,
+      const HostPortProxyPair& host_port_proxy_pair) {
+    DCHECK(factory->HasActiveSession(host_port_proxy_pair));
+    return factory->active_sessions_[host_port_proxy_pair];
+  }
+
+  static bool IsLiveSession(QuicStreamFactory* factory,
+                            QuicClientSession* session) {
+    for (QuicStreamFactory::SessionSet::iterator it =
+             factory->all_sessions_.begin();
+         it != factory->all_sessions_.end(); ++it) {
+      if (*it == session)
+        return true;
+    }
+    return false;
+  }
+};
 
 class QuicStreamFactoryTest : public ::testing::Test {
  protected:
@@ -52,7 +85,7 @@ class QuicStreamFactoryTest : public ::testing::Test {
     header.fec_flag = false;
     header.fec_group = 0;
 
-    QuicRstStreamFrame rst(stream_id, QUIC_ERROR_PROCESSING_STREAM);
+    QuicRstStreamFrame rst(stream_id, QUIC_STREAM_CANCELLED);
     return scoped_ptr<QuicEncryptedPacket>(
         ConstructPacket(header, QuicFrame(&rst)));
   }
@@ -75,7 +108,7 @@ class QuicStreamFactoryTest : public ::testing::Test {
     feedback.tcp.accumulated_number_of_lost_packets = 0;
     feedback.tcp.receive_window = 16000;
 
-    QuicFramer framer(QuicVersionMax(), QuicTime::Zero(), false);
+    QuicFramer framer(QuicSupportedVersions(), QuicTime::Zero(), false);
     QuicFrames frames;
     frames.push_back(QuicFrame(&ack));
     frames.push_back(QuicFrame(&feedback));
@@ -109,7 +142,7 @@ class QuicStreamFactoryTest : public ::testing::Test {
   scoped_ptr<QuicEncryptedPacket> ConstructPacket(
       const QuicPacketHeader& header,
       const QuicFrame& frame) {
-    QuicFramer framer(QuicVersionMax(), QuicTime::Zero(), false);
+    QuicFramer framer(QuicSupportedVersions(), QuicTime::Zero(), false);
     QuicFrames frames;
     frames.push_back(frame);
     scoped_ptr<QuicPacket> packet(
@@ -165,6 +198,61 @@ TEST_F(QuicStreamFactoryTest, Create) {
                                  callback_.callback()));
   stream = request2.ReleaseStream();  // Will reset stream 5.
   stream.reset();  // Will reset stream 7.
+
+  EXPECT_TRUE(socket_data.at_read_eof());
+  EXPECT_TRUE(socket_data.at_write_eof());
+}
+
+TEST_F(QuicStreamFactoryTest, Goaway) {
+  MockRead reads[] = {
+    MockRead(ASYNC, OK, 0)  // EOF
+  };
+  DeterministicSocketData socket_data(reads, arraysize(reads), NULL, 0);
+  socket_data.StopAfter(1);
+  socket_factory_.AddSocketDataProvider(&socket_data);
+  DeterministicSocketData socket_data2(reads, arraysize(reads), NULL, 0);
+  socket_data2.StopAfter(1);
+  socket_factory_.AddSocketDataProvider(&socket_data2);
+
+  QuicStreamRequest request(&factory_);
+  EXPECT_EQ(ERR_IO_PENDING, request.Request(host_port_proxy_pair_, is_https_,
+                                            cert_verifier_.get(), net_log_,
+                                            callback_.callback()));
+
+  EXPECT_EQ(OK, callback_.WaitForResult());
+  scoped_ptr<QuicHttpStream> stream = request.ReleaseStream();
+  EXPECT_TRUE(stream.get());
+
+  // Mark the session as going away.  Ensure that while it is still alive
+  // that it is no longer active.
+  QuicClientSession* session = QuicStreamFactoryPeer::GetActiveSession(
+      &factory_, host_port_proxy_pair_);
+  factory_.OnSessionGoingAway(session);
+  EXPECT_EQ(true, QuicStreamFactoryPeer::IsLiveSession(&factory_, session));
+  EXPECT_FALSE(QuicStreamFactoryPeer::HasActiveSession(&factory_,
+                                                       host_port_proxy_pair_));
+  EXPECT_EQ(NULL, factory_.CreateIfSessionExists(host_port_proxy_pair_,
+                                                 net_log_).get());
+
+  // Create a new request for the same destination and verify that a
+  // new session is created.
+  QuicStreamRequest request2(&factory_);
+  EXPECT_EQ(ERR_IO_PENDING, request2.Request(host_port_proxy_pair_, is_https_,
+                                             cert_verifier_.get(), net_log_,
+                                             callback_.callback()));
+  EXPECT_EQ(OK, callback_.WaitForResult());
+  scoped_ptr<QuicHttpStream> stream2 = request2.ReleaseStream();
+  EXPECT_TRUE(stream2.get());
+
+  EXPECT_TRUE(QuicStreamFactoryPeer::HasActiveSession(&factory_,
+                                                      host_port_proxy_pair_));
+  EXPECT_NE(session,
+            QuicStreamFactoryPeer::GetActiveSession(
+                &factory_, host_port_proxy_pair_));
+  EXPECT_EQ(true, QuicStreamFactoryPeer::IsLiveSession(&factory_, session));
+
+  stream2.reset();
+  stream.reset();
 
   EXPECT_TRUE(socket_data.at_read_eof());
   EXPECT_TRUE(socket_data.at_write_eof());
@@ -368,6 +456,67 @@ TEST_F(QuicStreamFactoryTest, OnIPAddressChanged) {
   EXPECT_TRUE(socket_data.at_write_eof());
   EXPECT_TRUE(socket_data2.at_read_eof());
   EXPECT_TRUE(socket_data2.at_write_eof());
+}
+
+TEST_F(QuicStreamFactoryTest, SharedCryptoConfig) {
+  HostPortProxyPair host_port_proxy_pair1(HostPortPair("r1.c.youtube.com", 80),
+                                          ProxyServer::Direct());
+
+  QuicCryptoClientConfig* crypto_config1 =
+      QuicStreamFactoryPeer::GetOrCreateCryptoConfig(&factory_,
+                                                     host_port_proxy_pair1);
+  DCHECK(crypto_config1);
+  QuicCryptoClientConfig::CachedState* cached1 =
+      crypto_config1->LookupOrCreate(host_port_proxy_pair1.first.host());
+  EXPECT_FALSE(cached1->proof_valid());
+  EXPECT_TRUE(cached1->source_address_token().empty());
+
+  // Mutate the cached1 to have different data.
+  // TODO(rtenneti): mutate other members of CachedState.
+  cached1->set_source_address_token("c.youtube.com");
+  cached1->SetProofValid();
+
+  HostPortProxyPair host_port_proxy_pair2(HostPortPair("r2.c.youtube.com", 80),
+                                          ProxyServer::Direct());
+  QuicCryptoClientConfig* crypto_config2 =
+      QuicStreamFactoryPeer::GetOrCreateCryptoConfig(&factory_,
+                                                     host_port_proxy_pair2);
+  DCHECK(crypto_config2);
+  QuicCryptoClientConfig::CachedState* cached2 =
+      crypto_config2->LookupOrCreate(host_port_proxy_pair2.first.host());
+  EXPECT_EQ(cached1->source_address_token(), cached2->source_address_token());
+  EXPECT_TRUE(cached2->proof_valid());
+}
+
+TEST_F(QuicStreamFactoryTest, CryptoConfigWhenProofIsInvalid) {
+  HostPortProxyPair host_port_proxy_pair1(HostPortPair("r1.c.youtube.com", 80),
+                                          ProxyServer::Direct());
+
+  QuicCryptoClientConfig* crypto_config1 =
+      QuicStreamFactoryPeer::GetOrCreateCryptoConfig(&factory_,
+                                                     host_port_proxy_pair1);
+  DCHECK(crypto_config1);
+  QuicCryptoClientConfig::CachedState* cached1 =
+      crypto_config1->LookupOrCreate(host_port_proxy_pair1.first.host());
+  EXPECT_FALSE(cached1->proof_valid());
+  EXPECT_TRUE(cached1->source_address_token().empty());
+
+  // Mutate the cached1 to have different data.
+  // TODO(rtenneti): mutate other members of CachedState.
+  cached1->set_source_address_token("c.youtube.com");
+  cached1->SetProofInvalid();
+
+  HostPortProxyPair host_port_proxy_pair2(HostPortPair("r2.c.youtube.com", 80),
+                                          ProxyServer::Direct());
+  QuicCryptoClientConfig* crypto_config2 =
+      QuicStreamFactoryPeer::GetOrCreateCryptoConfig(&factory_,
+                                                     host_port_proxy_pair2);
+  DCHECK(crypto_config2);
+  QuicCryptoClientConfig::CachedState* cached2 =
+      crypto_config2->LookupOrCreate(host_port_proxy_pair2.first.host());
+  EXPECT_NE(cached1->source_address_token(), cached2->source_address_token());
+  EXPECT_TRUE(cached2->source_address_token().empty());
+  EXPECT_FALSE(cached2->proof_valid());
 }
 
 }  // namespace test

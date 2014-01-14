@@ -84,33 +84,31 @@ NetworkConfigView::NetworkConfigView()
   SetActiveDialog(this);
 }
 
-void NetworkConfigView::InitWithNetworkState(const NetworkState* network) {
+bool NetworkConfigView::InitWithNetworkState(const NetworkState* network) {
   DCHECK(network);
   std::string service_path = network->path();
-  if (network->type() == flimflam::kTypeWifi)
+  if (network->type() == shill::kTypeWifi)
     child_config_view_ = new WifiConfigView(this, service_path, false);
-  else if (network->type() == flimflam::kTypeWimax)
+  else if (network->type() == shill::kTypeWimax)
     child_config_view_ = new WimaxConfigView(this, service_path);
-  else if (network->type() == flimflam::kTypeVPN)
+  else if (network->type() == shill::kTypeVPN)
     child_config_view_ = new VPNConfigView(this, service_path);
-  else
-    NOTREACHED();
+  return child_config_view_ != NULL;
 }
 
-void NetworkConfigView::InitWithType(const std::string& type) {
-  if (type == flimflam::kTypeWifi) {
+bool NetworkConfigView::InitWithType(const std::string& type) {
+  if (type == shill::kTypeWifi) {
     child_config_view_ = new WifiConfigView(this,
                                             "" /* service_path */,
                                             false /* show_8021x */);
     advanced_button_ = new views::LabelButton(this, l10n_util::GetStringUTF16(
         IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADVANCED_BUTTON));
     advanced_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
-  } else if (type == flimflam::kTypeVPN) {
+  } else if (type == shill::kTypeVPN) {
     child_config_view_ = new VPNConfigView(this,
                                            "" /* service_path */);
-  } else {
-    NOTREACHED();
   }
+  return child_config_view_ != NULL;
 }
 
 NetworkConfigView::~NetworkConfigView() {
@@ -130,7 +128,12 @@ void NetworkConfigView::Show(const std::string& service_path,
     LOG(ERROR) << "NetworkConfigView::Show called with invalid service_path";
     return;
   }
-  view->InitWithNetworkState(network);
+  if (!view->InitWithNetworkState(network)) {
+    LOG(ERROR) << "NetworkConfigView::Show called with invalid network type: "
+               << network->type();
+    delete view;
+    return;
+  }
   view->ShowDialog(parent);
 }
 
@@ -140,7 +143,12 @@ void NetworkConfigView::ShowForType(const std::string& type,
   if (GetActiveDialog() != NULL)
     return;
   NetworkConfigView* view = new NetworkConfigView();
-  view->InitWithType(type);
+  if (!view->InitWithType(type)) {
+    LOG(ERROR) << "NetworkConfigView::ShowForType called with invalid type: "
+               << type;
+    delete view;
+    return;
+  }
   view->ShowDialog(parent);
 }
 

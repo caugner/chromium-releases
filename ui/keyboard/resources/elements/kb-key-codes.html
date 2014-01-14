@@ -7,6 +7,17 @@
 <polymer-element name="kb-key-codes">
 <script>
   (function() {
+
+    // Flag values for ctrl, alt and shift as defined by EventFlags
+    // in "event_constants.h".
+    // @enum {number}
+    var Modifier = {
+      NONE: 0,
+      ALT: 8,
+      CONTROL: 4,
+      SHIFT: 2
+    }
+
     // Each virtual key event is assigned a unique ID.
     var nextRequestID = 0;
 
@@ -18,12 +29,21 @@
     // keyCode attribute for kb-key or kb-keysequence elements to refer to
     // indices in this table in order to emulate a physical keyboard with an
     // alternate layout.  Not all keys on a virtual keyboard are required to
-    // have keyCodes.
+    // have keyCodes. The shiftModifier specifies whether to always include or
+    // exclude the shift modifer when sending key events for this key. If it's
+    // undefined, it will defer to state of the keyboard.
+    // TODO(rsadam): Correctly propagate shutdown keycode. This is currently
+    // ignored due to chromoting (crbug/146609)
     var keyCodes = {
       '\b': {keyCode: 0x08, shiftModifier: false},
       '\t': {keyCode: 0x09, shiftModifier: false},
       '\n': {keyCode: 0x0D, shiftModifier: false},
+      'Esc': {keyCode: 0x1B, shiftModifier: false},
       ' ': {keyCode: 0x20, shiftModifier: false},
+      'Arrow-Left': {keyCode: 0x25, shiftModifier: undefined},
+      'Arrow-Up': {keyCode: 0x26, shiftModifier: undefined},
+      'Arrow-Right': {keyCode: 0x27, shiftModifier: undefined},
+      'Arrow-Down': {keyCode: 0x28, shiftModifier: undefined},
       '0': {keyCode: 0x30, shiftModifier: false},
       ')': {keyCode: 0x30, shiftModifier: true},
       '1': {keyCode: 0x31, shiftModifier: false},
@@ -96,6 +116,15 @@
       'Y': {keyCode: 0x59, shiftModifier: true},
       'z': {keyCode: 0x5A, shiftModifier: false},
       'Z': {keyCode: 0x5A, shiftModifier: true},
+      'Fullscreen': {keyCode: 0x7A, shiftModifier: false},
+      'Shutdown': {keyCode: 0x98, shiftModifier: false},
+      'Back': {keyCode: 0xA6, shiftModifier: false},
+      'Forward': {keyCode: 0xA7, shiftModifier: false},
+      'Reload': {keyCode: 0xA8, shiftModifier: false},
+      'Mute': {keyCode: 0xAD, shiftModifier: false},
+      'Volume-Down': {keyCode: 0xAE, shiftModifier: false},
+      'Volume-Up': {keyCode: 0xAF, shiftModifier: false},
+      'Change-Window': {keyCode: 0xB6, shiftModifier: false},
       ';': {keyCode: 0xBA, shiftModifier: false},
       ':': {keyCode: 0xBA, shiftModifier: true},
       '=': {keyCode: 0xBB, shiftModifier: false},
@@ -104,16 +133,18 @@
       '<': {keyCode: 0xBC, shiftModifier: true},
       '-': {keyCode: 0xBD, shiftModifier: false},
       '_': {keyCode: 0xBD, shiftModifier: true},
-      '.': {keyCode: 0xBE, shiftModifier: false}, 
-      '>': {keyCode: 0xBE, shiftModifier: true}, 
+      '.': {keyCode: 0xBE, shiftModifier: false},
+      '>': {keyCode: 0xBE, shiftModifier: true},
       '/': {keyCode: 0xBF, shiftModifier: false},
-      '?': {keyCode: 0xBF, shiftModifier: true}, 
+      '?': {keyCode: 0xBF, shiftModifier: true},
       '`': {keyCode: 0xC0, shiftModifier: false},
       '~': {keyCode: 0xC0, shiftModifier: true},
+      'Brightness-Down': {keyCode: 0xD8, shiftModifier: false},
+      'Brightness-Up': {keyCode: 0xD9, shiftModifier: false},
       '[': {keyCode: 0xDB, shiftModifier: false},
       '{': {keyCode: 0xDB, shiftModifier: true},
       '\\': {keyCode: 0xDC, shiftModifier: false},
-      '|': {keyCode: 0xDC, shiftModifier: true}, 
+      '|': {keyCode: 0xDC, shiftModifier: true},
       ']': {keyCode: 0xDD, shiftModifier: false},
       '}': {keyCode: 0xDD, shiftModifier: true},
       '\'': {keyCode: 0xDE, shiftModifier: false},
@@ -134,6 +165,9 @@
             shiftModifier: entry.shiftModifier
           };
         }
+        if (id.length != 1)
+          return;
+        // Special case of accented characters.
         return {
           keyCode: 0,
           shiftModifier: false
@@ -151,27 +185,34 @@
       */
      createVirtualKeyEvent: function(detail, type) {
        var char = detail.char;
-       if (!char || char.length != 1) {
-         console.error('Invalid key. Expected single character.');
-         return;
-       }
        var keyCode = detail.keyCode;
+       // The shift modifier is handled specially. Some charactares like '+'
+       // {keyCode: 0xBB, shiftModifier: true}, are available on non-upper
+       // keysets, and so we rely on caching the correct shiftModifier. If
+       // the cached value of the shiftModifier is undefined, we defer to
+       // the shiftModifier in the detail.
        var shiftModifier = detail.shiftModifier;
        if (keyCode == undefined) {
          var state = this.GetKeyCodeAndModifiers(char);
          if (state) {
            keyCode = state.keyCode;
-           shiftModifier = state.shiftModifier;
+           shiftModifier = (state.shiftModifier == undefined) ?
+               shiftModifier : state.shiftModifier;
          } else {
-           keyCode = 0;
-           shiftModifier = false;
+           // Keycode not defined.
+           return;
          }
        }
+       var modifiers = Modifier.NONE;
+       modifiers = shiftModifier ? modifiers | Modifier.SHIFT : modifiers;
+       modifiers = detail.controlModifier ?
+           modifiers | Modifier.CONTROL : modifiers;
+       modifiers = detail.altModifier ? modifiers | Modifier.ALT : modifiers;
        return {
          type: type,
          charValue: char.charCodeAt(0),
          keyCode: keyCode,
-         shiftKey: shiftModifier
+         modifiers: modifiers
        };
      },
     });

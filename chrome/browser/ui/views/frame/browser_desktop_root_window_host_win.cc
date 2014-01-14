@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_frame_common_win.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/browser_window_property_manager_win.h"
 #include "chrome/browser/ui/views/frame/system_menu_insertion_delegate_win.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/theme_image_mapper.h"
@@ -76,12 +77,10 @@ class DesktopThemeProvider : public ui::ThemeProvider {
 BrowserDesktopRootWindowHostWin::BrowserDesktopRootWindowHostWin(
     views::internal::NativeWidgetDelegate* native_widget_delegate,
     views::DesktopNativeWidgetAura* desktop_native_widget_aura,
-    const gfx::Rect& initial_bounds,
     BrowserView* browser_view,
     BrowserFrame* browser_frame)
     : DesktopRootWindowHostWin(native_widget_delegate,
-                               desktop_native_widget_aura,
-                               initial_bounds),
+                               desktop_native_widget_aura),
       browser_view_(browser_view),
       browser_frame_(browser_frame),
       did_gdi_clear_(false) {
@@ -150,6 +149,15 @@ bool BrowserDesktopRootWindowHostWin::GetClientAreaInsets(
     border_thickness -= kClientEdgeThickness;
   insets->Set(0, border_thickness, border_thickness, border_thickness);
   return true;
+}
+
+void BrowserDesktopRootWindowHostWin::HandleCreate() {
+  DesktopRootWindowHostWin::HandleCreate();
+  browser_window_property_manager_ =
+      BrowserWindowPropertyManager::CreateBrowserWindowPropertyManager(
+          browser_view_);
+  if (browser_window_property_manager_)
+    browser_window_property_manager_->UpdateWindowProperties(GetHWND());
 }
 
 void BrowserDesktopRootWindowHostWin::HandleFrameChanged() {
@@ -317,12 +325,10 @@ BrowserDesktopRootWindowHost*
     BrowserDesktopRootWindowHost::CreateBrowserDesktopRootWindowHost(
         views::internal::NativeWidgetDelegate* native_widget_delegate,
         views::DesktopNativeWidgetAura* desktop_native_widget_aura,
-        const gfx::Rect& initial_bounds,
         BrowserView* browser_view,
         BrowserFrame* browser_frame) {
   return new BrowserDesktopRootWindowHostWin(native_widget_delegate,
                                              desktop_native_widget_aura,
-                                             initial_bounds,
                                              browser_view,
                                              browser_frame);
 }

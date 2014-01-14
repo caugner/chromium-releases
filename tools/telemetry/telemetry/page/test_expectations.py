@@ -7,13 +7,15 @@ import fnmatch
 OS_MODIFIERS = ['win', 'xp', 'vista', 'win7',
                 'mac', 'leopard', 'snowleopard', 'lion', 'mountainlion',
                 'linux', 'chromeos', 'android']
-GPU_MODIFIERS = ['nvidia', 'amd', 'intel']
+GPU_MODIFIERS = ['amd', 'arm', 'broadcom', 'hisilicon', 'intel', 'imagination',
+                 'nvidia', 'qualcomm', 'vivante']
 CONFIG_MODIFIERS = ['debug', 'release']
 
 class Expectation(object):
-  def __init__(self, expectation, url_pattern, conditions=None, bug=None):
+  def __init__(self, expectation, pattern, conditions=None, bug=None):
     self.expectation = expectation.lower()
-    self.url_pattern = url_pattern
+    self.name_pattern = pattern
+    self.url_pattern = pattern
     self.bug = bug
 
     self.os_conditions = []
@@ -31,6 +33,8 @@ class Expectation(object):
           c0 = c[0].lower()
           if c0 in GPU_MODIFIERS:
             self.device_id_conditions.append((c0, c[1]))
+          else:
+            raise ValueError('Unknown expectation condition: "%s"' % c0)
         else:
           condition = c.lower()
           if condition in OS_MODIFIERS:
@@ -68,7 +72,9 @@ class TestExpectations(object):
     gpu_info = None
 
     for e in self.expectations:
-      if fnmatch.fnmatch(page.url, e.url_pattern):
+      matches_url = fnmatch.fnmatch(page.url, e.url_pattern)
+      matches_name = page.name and fnmatch.fnmatch(page.name, e.name_pattern)
+      if matches_url or matches_name:
         if gpu_info == None and browser.supports_system_info:
           gpu_info = browser.GetSystemInfo().gpu
         if self._ModifiersApply(platform, gpu_info, e):
@@ -82,7 +88,7 @@ class TestExpectations(object):
         vendor_string = primary_gpu.vendor_string.lower()
         vendor_id = primary_gpu.vendor_id
         if vendor_string:
-          return vendor_string
+          return vendor_string.split(' ')[0]
         elif vendor_id == 0x10DE:
           return 'nvidia'
         elif vendor_id == 0x1002:
@@ -96,7 +102,7 @@ class TestExpectations(object):
     if gpu_info:
       primary_gpu = gpu_info.devices[0]
       if primary_gpu:
-        return primary_gpu.device_id
+        return primary_gpu.device_id or primary_gpu.device_string
 
     return 0
 

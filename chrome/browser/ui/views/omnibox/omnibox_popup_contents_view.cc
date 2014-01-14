@@ -23,19 +23,9 @@
 #include "ui/views/corewm/window_animations.h"
 #endif
 
-namespace {
-
-// This is the number of pixels in the border image used to draw the bottom
-// border + drop shadow interior to the "visual" border. We lay out assuming
-// that this many pixels inside the border is "in the popup."
-const SkAlpha kGlassPopupAlpha = 240;
-const SkAlpha kOpaquePopupAlpha = 255;
-
 // This is the number of pixels in the border image interior to the actual
 // border.
 const int kBorderInterior = 6;
-
-}  // namespace
 
 class OmniboxPopupContentsView::AutocompletePopupWidget
     : public views::Widget,
@@ -82,8 +72,7 @@ OmniboxPopupContentsView::OmniboxPopupContentsView(
       size_animation_(this),
       left_margin_(0),
       right_margin_(0),
-      outside_vertical_padding_(0),
-      in_popup_init_(false) {
+      outside_vertical_padding_(0) {
   // The contents is owned by the LocationBarView.
   set_owned_by_client();
 
@@ -106,7 +95,6 @@ OmniboxPopupContentsView::~OmniboxPopupContentsView() {
   // We don't need to do anything with |popup_| here.  The OS either has already
   // closed the window, in which case it's been deleted, or it will soon, in
   // which case there's nothing we need to do.
-  CHECK(!in_popup_init_);
 }
 
 gfx::Rect OmniboxPopupContentsView::GetPopupBounds() const {
@@ -167,8 +155,6 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
     // No matches or the IME is showing a popup window which may overlap
     // the omnibox popup window.  Close any existing popup.
     if (popup_ != NULL) {
-      CHECK(!in_popup_init_);
-
       size_animation_.Stop();
 
       // NOTE: Do NOT use CloseNow() here, as we may be deep in a callstack
@@ -219,16 +205,17 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
     params.parent = popup_parent;
     params.bounds = GetPopupBounds();
     params.context = popup_parent;
-    in_popup_init_ = true;
     popup_->Init(params);
-    in_popup_init_ = false;
+    // Third-party software such as DigitalPersona identity verification can
+    // hook the underlying window creation methods and use SendMessage to
+    // synchronously change focus/activation, resulting in the popup being
+    // destroyed by the time control returns here.  Bail out in this case to
+    // avoid a NULL dereference.
+    if (!popup_.get())
+      return;
 #if defined(USE_AURA)
-    views::corewm::SetWindowVisibilityAnimationType(
-        popup_->GetNativeView(),
-        views::corewm::WINDOW_VISIBILITY_ANIMATION_TYPE_VERTICAL);
-    // No animation for autocomplete popup appearance.
     views::corewm::SetWindowVisibilityAnimationTransition(
-        popup_->GetNativeView(), views::corewm::ANIMATE_HIDE);
+        popup_->GetNativeView(), views::corewm::ANIMATE_NONE);
 #endif
     popup_->SetContentsView(this);
     popup_->StackAbove(omnibox_view_->GetRelativeWindowForPopup());

@@ -16,12 +16,9 @@
       'dependencies': [
         '../base/base.gyp:base',
         'chrome_android_core',
-        'chrome_android_auxiliary',
         'chromium_testshell_jni_headers',
         'chrome.gyp:browser_ui',
         '../content/content.gyp:content_app_browser',
-        # TODO(miguelg): This should be indirect, see http://crbug.com/280695 .
-        '../skia/skia.gyp:skia',
       ],
       'sources': [
         # This file must always be included in the shared_library step to ensure
@@ -119,8 +116,6 @@
       'sources': [
         'app/android/chrome_android_initializer.cc',
         'app/android/chrome_android_initializer.h',
-        'app/android/chrome_data_reduction_proxy_android.cc',
-        'app/android/chrome_data_reduction_proxy_android.h',
         'app/android/chrome_main_delegate_android.cc',
         'app/android/chrome_main_delegate_android.h',
         'app/chrome_main_delegate.cc',
@@ -132,19 +127,6 @@
           '-ljnigraphics',
         ],
       },
-    },
-    {
-       'target_name': 'chrome_android_auxiliary',
-       'type': 'static_library',
-       'include_dirs': [
-         '<(SHARED_INTERMEDIATE_DIR)/chromium_testshell',
-       ],
-       'sources': [
-         'android/testshell/chrome_data_reduction_proxy_testshell_android.cc',
-       ],
-       'dependencies': [
-         '../base/base.gyp:base',
-       ],
     },
     {
       'target_name': 'chromium_testshell_paks',

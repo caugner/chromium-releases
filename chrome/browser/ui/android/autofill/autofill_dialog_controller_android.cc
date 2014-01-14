@@ -11,10 +11,10 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/android/autofill/autofill_dialog_result.h"
@@ -37,7 +37,7 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "jni/AutofillDialogControllerAndroid_jni.h"
-#include "ui/android/window_android.h"
+#include "ui/base/android/window_android.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/models/menu_model.h"
@@ -154,14 +154,7 @@ base::WeakPtr<AutofillDialogController> AutofillDialogControllerAndroid::Create(
   return autofill_dialog_controller->weak_ptr_factory_.GetWeakPtr();
 }
 
-// static
-void AutofillDialogControllerAndroid::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterDictionaryPref(
-      ::prefs::kAutofillDialogDefaults,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-}
-
+#if defined(ENABLE_AUTOFILL_DIALOG)
 // static
 base::WeakPtr<AutofillDialogController>
 AutofillDialogController::Create(
@@ -176,10 +169,16 @@ AutofillDialogController::Create(
 }
 
 // static
+void AutofillDialogController::RegisterPrefs(PrefRegistrySimple* registry) {}
+
+// static
 void AutofillDialogController::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  AutofillDialogControllerAndroid::RegisterProfilePrefs(registry);
+  registry->RegisterDictionaryPref(
+      ::prefs::kAutofillDialogDefaults,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 }
+#endif  // defined(ENABLE_AUTOFILL_DIALOG)
 
 AutofillDialogControllerAndroid::~AutofillDialogControllerAndroid() {
   if (java_object_.is_null())

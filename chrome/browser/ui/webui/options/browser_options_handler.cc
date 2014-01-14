@@ -17,6 +17,7 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -30,7 +31,6 @@
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/gpu/gpu_mode_manager.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
@@ -68,6 +68,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/autofill/core/common/password_generation_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/navigation_controller.h"
@@ -87,21 +88,22 @@
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/webui/web_ui_util.h"
+#include "ui/base/webui/web_ui_util.h"
 
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/options/advanced_options_utils.h"
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "ash/ash_switches.h"
 #include "ash/magnifier/magnifier_constants.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/extensions/wallpaper_manager_util.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/webui/options/chromeos/timezone_options_util.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "ui/gfx/image/image_skia.h"
@@ -110,6 +112,10 @@
 #if defined(OS_WIN)
 #include "chrome/installer/util/auto_launch_util.h"
 #endif  // defined(OS_WIN)
+
+#if defined(ENABLE_MDNS)
+#include "chrome/browser/local_discovery/privet_notifications.h"
+#endif
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -138,6 +144,7 @@ bool ShouldShowMultiProfilesUserList(chrome::HostDesktopType desktop_type) {
 BrowserOptionsHandler::BrowserOptionsHandler()
     : page_initialized_(false),
       template_url_service_(NULL),
+      cloud_print_mdns_ui_enabled_(false),
       weak_ptr_factory_(this) {
 #if !defined(OS_MACOSX)
   default_browser_worker_ = new ShellIntegration::DefaultBrowserWorker(this);
@@ -157,6 +164,11 @@ BrowserOptionsHandler::BrowserOptionsHandler()
   cloud_print_connector_ui_enabled_ = true;
 #endif
 #endif  // defined(ENABLE_FULL_PRINTING)
+
+#if defined(ENABLE_MDNS)
+  cloud_print_mdns_ui_enabled_ = !CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kDisableDeviceDiscovery);
+#endif  // defined(ENABLE_MDNS)
 }
 
 BrowserOptionsHandler::~BrowserOptionsHandler() {
@@ -260,6 +272,8 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
     { "profilesDeleteSingle", IDS_PROFILES_DELETE_SINGLE_BUTTON_LABEL },
     { "profilesListItemCurrent", IDS_PROFILES_LIST_ITEM_CURRENT },
     { "profilesManage", IDS_PROFILES_MANAGE_BUTTON_LABEL },
+    { "profilesSupervisedDashboardTip",
+      IDS_PROFILES_SUPERVISED_USER_DASHBOARD_TIP },
 #if defined(ENABLE_SETTINGS_APP)
     { "profilesAppListSwitch", IDS_SETTINGS_APP_PROFILES_SWITCH_BUTTON_LABEL },
 #endif
@@ -335,6 +349,22 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_VIRTUAL_KEYBOARD_DESCRIPTION },
     { "accessibilityAlwaysShowMenu",
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_SHOULD_ALWAYS_SHOW_MENU },
+    { "accessibilityAutoclick",
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DESCRIPTION },
+    { "accessibilityAutoclickDropdown",
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DROPDOWN_DESCRIPTION },
+    { "autoclickDelayExtremelyShort",
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DELAY_EXTREMELY_SHORT },
+    { "autoclickDelayVeryShort",
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DELAY_VERY_SHORT },
+    { "autoclickDelayShort",
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DELAY_SHORT },
+    { "autoclickDelayLong",
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DELAY_LONG },
+    { "autoclickDelayVeryLong",
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_AUTOCLICK_DELAY_VERY_LONG },
+    { "enableContentProtectionAttestation",
+      IDS_OPTIONS_ENABLE_CONTENT_PROTECTION_ATTESTATION },
     { "factoryResetHeading", IDS_OPTIONS_FACTORY_RESET_HEADING },
     { "factoryResetTitle", IDS_OPTIONS_FACTORY_RESET },
     { "factoryResetRestart", IDS_OPTIONS_FACTORY_RESET_BUTTON },
@@ -451,10 +481,13 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 #if defined(OS_CHROMEOS)
   // TODO(pastarmovj): replace this with a call to the CrosSettings list
   // handling functionality to come.
-  values->Set("timezoneList", GetTimezoneList().release());
+  values->Set("timezoneList", chromeos::system::GetTimezoneList().release());
 
   values->SetString("accessibilityLearnMoreURL",
                     chrome::kChromeAccessibilityHelpURL);
+
+  values->SetString("contentProtectionAttestationLearnMoreURL",
+                    chrome::kAttestationForContentProtectionLearnMoreURL);
 
   // Creates magnifierList.
   scoped_ptr<base::ListValue> magnifier_list(new base::ListValue);
@@ -498,15 +531,12 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 #endif
 
 #if defined(ENABLE_MDNS)
-bool cloud_print_mdns_options_shown =
-    !CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kDisableDeviceDiscovery);
-#else
-bool cloud_print_mdns_options_shown = false;
+values->SetBoolean("cloudPrintHideNotificationsCheckbox",
+                   !local_discovery::PrivetNotificationService::IsEnabled());
 #endif
 
 values->SetBoolean("cloudPrintShowMDnsOptions",
-                   cloud_print_mdns_options_shown);
+                   cloud_print_mdns_ui_enabled_);
 
 values->SetString("cloudPrintLearnMoreURL", chrome::kCloudPrintLearnMoreURL);
 
@@ -633,14 +663,17 @@ void BrowserOptionsHandler::RegisterMessages() {
 #endif  // defined(OS_CHROMEOS)
 
 #if defined(ENABLE_MDNS)
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableDeviceDiscovery)) {
+  if (cloud_print_mdns_ui_enabled_) {
     web_ui()->RegisterMessageCallback(
         "showCloudPrintDevicesPage",
         base::Bind(&BrowserOptionsHandler::ShowCloudPrintDevicesPage,
                    base::Unretained(this)));
   }
 #endif
+}
+
+void BrowserOptionsHandler::Uninitialize() {
+  registrar_.RemoveAll();
 }
 
 void BrowserOptionsHandler::OnStateChanged() {
@@ -723,6 +756,10 @@ void BrowserOptionsHandler::InitializeHandler() {
       base::Bind(&BrowserOptionsHandler::SetupFontSizeSelector,
                  base::Unretained(this)));
   profile_pref_registrar_.Add(
+      prefs::kManagedUsers,
+      base::Bind(&BrowserOptionsHandler::SetupManagingSupervisedUsers,
+                 base::Unretained(this)));
+  profile_pref_registrar_.Add(
       prefs::kSigninAllowed,
       base::Bind(&BrowserOptionsHandler::OnSigninAllowedPrefChange,
                  base::Unretained(this)));
@@ -750,13 +787,17 @@ void BrowserOptionsHandler::InitializePage() {
   SetupPageZoomSelector();
   SetupAutoOpenFileTypes();
   SetupProxySettingsSection();
+  SetupManageCertificatesSection();
+  SetupManagingSupervisedUsers();
 
 #if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
-  if (cloud_print_connector_ui_enabled_) {
-    SetupCloudPrintConnectorSection();
-    RefreshCloudPrintStatusFromService();
-  } else {
-    RemoveCloudPrintConnectorSection();
+  if (!cloud_print_mdns_ui_enabled_) {
+    if (cloud_print_connector_ui_enabled_) {
+      SetupCloudPrintConnectorSection();
+      RefreshCloudPrintStatusFromService();
+    } else {
+      RemoveCloudPrintConnectorSection();
+    }
   }
 #endif
 
@@ -814,13 +855,6 @@ void BrowserOptionsHandler::CheckAutoLaunchCallback(
 }
 
 void BrowserOptionsHandler::UpdateDefaultBrowserState() {
-  // Check for side-by-side first.
-  if (ShellIntegration::CanSetAsDefaultBrowser() ==
-          ShellIntegration::SET_DEFAULT_NOT_ALLOWED) {
-    SetDefaultBrowserUIString(IDS_OPTIONS_DEFAULTBROWSER_SXS);
-    return;
-  }
-
 #if defined(OS_MACOSX)
   ShellIntegration::DefaultWebClientState state =
       ShellIntegration::GetDefaultBrowser();
@@ -871,14 +905,21 @@ int BrowserOptionsHandler::StatusStringIdForState(
 void BrowserOptionsHandler::SetDefaultWebClientUIState(
     ShellIntegration::DefaultWebClientUIState state) {
   int status_string_id;
-  if (state == ShellIntegration::STATE_IS_DEFAULT)
+
+  if (state == ShellIntegration::STATE_IS_DEFAULT) {
     status_string_id = IDS_OPTIONS_DEFAULTBROWSER_DEFAULT;
-  else if (state == ShellIntegration::STATE_NOT_DEFAULT)
-    status_string_id = IDS_OPTIONS_DEFAULTBROWSER_NOTDEFAULT;
-  else if (state == ShellIntegration::STATE_UNKNOWN)
+  } else if (state == ShellIntegration::STATE_NOT_DEFAULT) {
+    if (ShellIntegration::CanSetAsDefaultBrowser() ==
+            ShellIntegration::SET_DEFAULT_NOT_ALLOWED) {
+      status_string_id = IDS_OPTIONS_DEFAULTBROWSER_SXS;
+    } else {
+      status_string_id = IDS_OPTIONS_DEFAULTBROWSER_NOTDEFAULT;
+    }
+  } else if (state == ShellIntegration::STATE_UNKNOWN) {
     status_string_id = IDS_OPTIONS_DEFAULTBROWSER_UNKNOWN;
-  else
+  } else {
     return;  // Still processing.
+  }
 
   SetDefaultBrowserUIString(status_string_id);
 }
@@ -982,13 +1023,7 @@ void BrowserOptionsHandler::Observe(
       break;
 #endif
     case chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED:
-      // If the browser shuts down during supervised-profile creation, deleting
-      // the unregistered supervised-user profile triggers this notification,
-      // but the RenderViewHost the profile info would be sent to has already
-      // been destroyed.
-      if (!web_ui()->GetWebContents()->GetRenderViewHost())
-        return;
-      SendProfilesInfo();
+    SendProfilesInfo();
       break;
     case chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL:
     case chrome::NOTIFICATION_GOOGLE_SIGNED_OUT:
@@ -1434,8 +1469,7 @@ void BrowserOptionsHandler::SetupMetricsReportingSettingVisibility() {
 
 void BrowserOptionsHandler::SetupPasswordGenerationSettingVisibility() {
   base::FundamentalValue visible(
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnablePasswordGeneration));
+      autofill::password_generation::IsPasswordGenerationEnabled());
   web_ui()->CallJavascriptFunction(
       "BrowserOptions.setPasswordGenerationSettingVisibility", visible);
 }
@@ -1521,21 +1555,50 @@ void BrowserOptionsHandler::SetupAutoOpenFileTypes() {
 
 void BrowserOptionsHandler::SetupProxySettingsSection() {
 #if !defined(OS_CHROMEOS)
-  // Disable the button if proxy settings are managed by a sysadmin or
-  // overridden by an extension.
+  // Disable the button if proxy settings are managed by a sysadmin, overridden
+  // by an extension, or the browser is running in Windows Ash (on Windows the
+  // proxy settings dialog will open on the Windows desktop and be invisible
+  // to a user in Ash).
+  bool is_win_ash = false;
+#if defined(OS_WIN)
+  chrome::HostDesktopType desktop_type = helper::GetDesktopType(web_ui());
+  is_win_ash = (desktop_type == chrome::HOST_DESKTOP_TYPE_ASH);
+#endif
   PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
   const PrefService::Preference* proxy_config =
       pref_service->FindPreference(prefs::kProxy);
   bool is_extension_controlled = (proxy_config &&
                                   proxy_config->IsExtensionControlled());
 
-  base::FundamentalValue disabled(proxy_config &&
-                                  !proxy_config->IsUserModifiable());
+  base::FundamentalValue disabled(is_win_ash || (proxy_config &&
+                                  !proxy_config->IsUserModifiable()));
   base::FundamentalValue extension_controlled(is_extension_controlled);
   web_ui()->CallJavascriptFunction("BrowserOptions.setupProxySettingsSection",
                                    disabled, extension_controlled);
 
 #endif  // !defined(OS_CHROMEOS)
+}
+
+void BrowserOptionsHandler::SetupManageCertificatesSection() {
+#if defined(OS_WIN)
+  // Disable the button if the settings page is displayed in Windows Ash,
+  // otherwise the proxy settings dialog will open on the Windows desktop and
+  // be invisible to a user in Ash.
+  if (helper::GetDesktopType(web_ui()) == chrome::HOST_DESKTOP_TYPE_ASH) {
+    base::FundamentalValue enabled(false);
+    web_ui()->CallJavascriptFunction("BrowserOptions.enableCertificateButton",
+                                     enabled);
+  }
+#endif  // defined(OS_WIN)
+}
+
+void BrowserOptionsHandler::SetupManagingSupervisedUsers() {
+  bool has_users = !Profile::FromWebUI(web_ui())->
+      GetPrefs()->GetDictionary(prefs::kManagedUsers)->empty();
+  base::FundamentalValue has_users_value(has_users);
+  web_ui()->CallJavascriptFunction(
+      "BrowserOptions.updateManagesSupervisedUsers",
+      has_users_value);
 }
 
 }  // namespace options

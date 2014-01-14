@@ -173,8 +173,8 @@ ImageLoader::~ImageLoader() {
 }
 
 // static
-ImageLoader* ImageLoader::Get(Profile* profile) {
-  return ImageLoaderFactory::GetForProfile(profile);
+ImageLoader* ImageLoader::Get(content::BrowserContext* context) {
+  return ImageLoaderFactory::GetForBrowserContext(context);
 }
 
 // A map from a resource path to the resource ID.  Used only by
@@ -334,7 +334,8 @@ void ImageLoader::ReplyBack(
     const ImageRepresentation& image_rep = it->image_representation;
 
     image_skia.AddRepresentation(gfx::ImageSkiaRep(
-        bitmap, image_rep.scale_factor));
+        bitmap,
+        ui::GetImageScale(image_rep.scale_factor)));
   }
 
   gfx::Image image;

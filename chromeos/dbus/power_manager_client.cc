@@ -147,18 +147,6 @@ class PowerManagerClientImpl : public PowerManagerClient {
     SimpleMethodCallToPowerManager(power_manager::kRequestShutdownMethod);
   }
 
-  virtual void RequestIdleNotification(int64 threshold) OVERRIDE {
-    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
-                                 power_manager::kRequestIdleNotification);
-    dbus::MessageWriter writer(&method_call);
-    writer.AppendInt64(threshold);
-
-    power_manager_proxy_->CallMethod(
-        &method_call,
-        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-        dbus::ObjectProxy::EmptyResponseCallback());
-  }
-
   virtual void NotifyUserActivity(
       power_manager::UserActivityType type) OVERRIDE {
     dbus::MethodCall method_call(
@@ -223,6 +211,10 @@ class PowerManagerClientImpl : public PowerManagerClient {
                       weak_ptr_factory_.GetWeakPtr(), pending_suspend_id_);
   }
 
+  virtual int GetNumPendingSuspendReadinessCallbacks() OVERRIDE {
+    return num_pending_suspend_readiness_callbacks_;
+  }
+
  protected:
   virtual void Init(dbus::Bus* bus) OVERRIDE {
     power_manager_proxy_ = bus->GetObjectProxy(
@@ -256,14 +248,6 @@ class PowerManagerClientImpl : public PowerManagerClient {
         power_manager::kPowerManagerInterface,
         power_manager::kPowerSupplyPollSignal,
         base::Bind(&PowerManagerClientImpl::PowerSupplyPollReceived,
-                   weak_ptr_factory_.GetWeakPtr()),
-        base::Bind(&PowerManagerClientImpl::SignalConnected,
-                   weak_ptr_factory_.GetWeakPtr()));
-
-    power_manager_proxy_->ConnectToSignal(
-        power_manager::kPowerManagerInterface,
-        power_manager::kIdleNotifySignal,
-        base::Bind(&PowerManagerClientImpl::IdleNotifySignalReceived,
                    weak_ptr_factory_.GetWeakPtr()),
         base::Bind(&PowerManagerClientImpl::SignalConnected,
                    weak_ptr_factory_.GetWeakPtr()));
@@ -338,7 +322,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
         dbus::ObjectProxy::EmptyResponseCallback());
   }
 
-  void NameOwnerChangedReceived(dbus::Signal* signal) {
+  void NameOwnerChangedReceived(const std::string& old_owner,
+                                const std::string& new_owner) {
     VLOG(1) << "Power manager restarted";
     RegisterSuspendDelay();
     SetIsProjecting(last_is_projecting_);
@@ -445,20 +430,6 @@ class PowerManagerClientImpl : public PowerManagerClient {
     suspend_delay_id_ = protobuf.delay_id();
     has_suspend_delay_id_ = true;
     VLOG(1) << "Registered suspend delay " << suspend_delay_id_;
-  }
-
-  void IdleNotifySignalReceived(dbus::Signal* signal) {
-    dbus::MessageReader reader(signal);
-    int64 threshold = 0;
-    if (!reader.PopInt64(&threshold)) {
-      LOG(ERROR) << "Idle Notify signal had incorrect parameters: "
-                 << signal->ToString();
-      return;
-    }
-    DCHECK_GT(threshold, 0);
-
-    VLOG(1) << "Idle Notify: " << threshold;
-    FOR_EACH_OBSERVER(Observer, observers_, IdleNotify(threshold));
   }
 
   void SuspendImminentReceived(dbus::Signal* signal) {
@@ -674,11 +645,16 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
         brightness_(50.0),
         pause_count_(2),
         cycle_count_(0),
+        num_pending_suspend_readiness_callbacks_(0),
         weak_ptr_factory_(this) {}
 
   virtual ~PowerManagerClientStubImpl() {}
 
-  // PowerManagerClient overrides
+  int num_pending_suspend_readiness_callbacks() const {
+    return num_pending_suspend_readiness_callbacks_;
+  }
+
+  // PowerManagerClient overrides:
   virtual void Init(dbus::Bus* bus) OVERRIDE {
     if (CommandLine::ForCurrentProcess()->HasSwitch(
         chromeos::switches::kEnableStubInteractive)) {
@@ -740,14 +716,6 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
   virtual void RequestRestart() OVERRIDE {}
   virtual void RequestShutdown() OVERRIDE {}
 
-  virtual void RequestIdleNotification(int64 threshold) OVERRIDE {
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&PowerManagerClientStubImpl::TriggerIdleNotify,
-                   weak_ptr_factory_.GetWeakPtr(), threshold),
-        base::TimeDelta::FromMilliseconds(threshold));
-  }
-
   virtual void NotifyUserActivity(
       power_manager::UserActivityType type) OVERRIDE {}
   virtual void NotifyVideoActivity(bool is_fullscreen) OVERRIDE {}
@@ -755,10 +723,19 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
       const power_manager::PowerManagementPolicy& policy) OVERRIDE {}
   virtual void SetIsProjecting(bool is_projecting) OVERRIDE {}
   virtual base::Closure GetSuspendReadinessCallback() OVERRIDE {
-    return base::Closure();
+    num_pending_suspend_readiness_callbacks_++;
+    return base::Bind(&PowerManagerClientStubImpl::HandleSuspendReadiness,
+                      weak_ptr_factory_.GetWeakPtr());
+  }
+  virtual int GetNumPendingSuspendReadinessCallbacks() OVERRIDE {
+    return num_pending_suspend_readiness_callbacks_;
   }
 
  private:
+  void HandleSuspendReadiness() {
+    num_pending_suspend_readiness_callbacks_--;
+  }
+
   void UpdateStatus() {
     if (pause_count_ > 0) {
       pause_count_--;
@@ -834,10 +811,6 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
                       BrightnessChanged(brightness_level, user_initiated));
   }
 
-  void TriggerIdleNotify(int64 threshold) {
-    FOR_EACH_OBSERVER(Observer, observers_, IdleNotify(threshold));
-  }
-
   bool discharging_;
   int battery_percentage_;
   double brightness_;
@@ -846,6 +819,10 @@ class PowerManagerClientStubImpl : public PowerManagerClient {
   ObserverList<Observer> observers_;
   base::RepeatingTimer<PowerManagerClientStubImpl> update_timer_;
   power_manager::PowerSupplyProperties props_;
+
+  // Number of callbacks returned by GetSuspendReadinessCallback() but not yet
+  // invoked.
+  int num_pending_suspend_readiness_callbacks_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

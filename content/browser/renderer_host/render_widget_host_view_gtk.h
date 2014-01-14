@@ -127,6 +127,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
   virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
+  virtual void ResizeCompositingSurface(const gfx::Size&) OVERRIDE;
   virtual bool LockMouse() OVERRIDE;
   virtual void UnlockMouse() OVERRIDE;
   virtual void OnAccessibilityEvents(
@@ -231,9 +232,6 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
 
   // This is the rectangle which we'll paint.
   gfx::Rect invalid_rect_;
-
-  // Whether or not this widget is hidden.
-  bool is_hidden_;
 
   // Whether we are currently loading.
   bool is_loading_;

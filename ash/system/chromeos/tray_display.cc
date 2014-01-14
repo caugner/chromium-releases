@@ -46,10 +46,13 @@ base::string16 GetDisplaySize(int64 display_id) {
   DisplayManager* display_manager = GetDisplayManager();
 
   const gfx::Display* display = &display_manager->GetDisplayForId(display_id);
-  if (display_manager->IsMirrored() &&
-      display_manager->mirrored_display().id() == display_id) {
-    display = &display_manager->mirrored_display();
-  }
+
+  // We don't show display size for mirrored display. Fallback
+  // to empty string if this happens on release build.
+  bool mirrored_display = display_manager->mirrored_display_id() == display_id;
+  DCHECK(!mirrored_display);
+  if (mirrored_display)
+    return base::string16();
 
   DCHECK(display->is_valid());
   return UTF8ToUTF16(display->size().ToString());
@@ -60,6 +63,8 @@ base::string16 GetDisplaySize(int64 display_id) {
 base::string16 GetDisplayInfoLine(int64 display_id) {
   const DisplayInfo& display_info =
       GetDisplayManager()->GetDisplayInfo(display_id);
+  if (GetDisplayManager()->mirrored_display_id() == display_id)
+    return GetDisplayName(display_id);
 
   base::string16 size_text = GetDisplaySize(display_id);
   base::string16 display_data;
@@ -102,18 +107,18 @@ base::string16 GetAllDisplayInfo() {
 }
 
 // Returns the name of the currently connected external display.
+// This should not be used when the external display is used for
+// mirroring.
 base::string16 GetExternalDisplayName() {
   DisplayManager* display_manager = GetDisplayManager();
-  int64 external_id = display_manager->mirrored_display().id();
+  DCHECK(!display_manager->IsMirrored());
 
-  if (external_id == gfx::Display::kInvalidDisplayID) {
-    int64 internal_display_id = gfx::Display::InternalDisplayId();
-    for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
-      int64 id = display_manager->GetDisplayAt(i).id();
-      if (id != internal_display_id) {
-        external_id = id;
-        break;
-      }
+  int64 external_id = gfx::Display::kInvalidDisplayID;
+  for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
+    int64 id = display_manager->GetDisplayAt(i).id();
+    if (id != gfx::Display::InternalDisplayId()) {
+      external_id = id;
+      break;
     }
   }
 
@@ -156,15 +161,16 @@ base::string16 GetTrayDisplayMessage(base::string16* additional_message_out) {
   if (display_manager->IsMirrored()) {
     if (GetDisplayManager()->HasInternalDisplay()) {
       return l10n_util::GetStringFUTF16(
-          IDS_ASH_STATUS_TRAY_DISPLAY_MIRRORING, GetExternalDisplayName());
+          IDS_ASH_STATUS_TRAY_DISPLAY_MIRRORING,
+          GetDisplayName(display_manager->mirrored_display_id()));
     }
     return l10n_util::GetStringUTF16(
         IDS_ASH_STATUS_TRAY_DISPLAY_MIRRORING_NO_INTERNAL);
   }
 
-  int64 first_id = display_manager->first_display_id();
+  int64 primary_id = Shell::GetScreen()->GetPrimaryDisplay().id();
   if (display_manager->HasInternalDisplay() &&
-      !display_manager->IsInternalDisplayId(first_id)) {
+      !display_manager->IsInternalDisplayId(primary_id)) {
     if (additional_message_out) {
       *additional_message_out = l10n_util::GetStringUTF16(
           IDS_ASH_STATUS_TRAY_DISPLAY_DOCKED_DESCRIPTION);
@@ -178,10 +184,10 @@ base::string16 GetTrayDisplayMessage(base::string16* additional_message_out) {
 void OpenSettings() {
   user::LoginStatus login_status =
       Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus();
-  if (login_status == ash::user::LOGGED_IN_USER ||
-      login_status == ash::user::LOGGED_IN_OWNER ||
-      login_status == ash::user::LOGGED_IN_GUEST) {
-    ash::Shell::GetInstance()->system_tray_delegate()->ShowDisplaySettings();
+  if (login_status == user::LOGGED_IN_USER ||
+      login_status == user::LOGGED_IN_OWNER ||
+      login_status == user::LOGGED_IN_GUEST) {
+    Shell::GetInstance()->system_tray_delegate()->ShowDisplaySettings();
   }
 }
 
@@ -189,17 +195,16 @@ void OpenSettings() {
 
 const char TrayDisplay::kNotificationId[] = "chrome://settings/display";
 
-class DisplayView : public ash::internal::ActionableView {
+class DisplayView : public internal::ActionableView {
  public:
   explicit DisplayView() {
     SetLayoutManager(new views::BoxLayout(
         views::BoxLayout::kHorizontal,
-        ash::kTrayPopupPaddingHorizontal, 0,
-        ash::kTrayPopupPaddingBetweenItems));
+        kTrayPopupPaddingHorizontal, 0,
+        kTrayPopupPaddingBetweenItems));
 
     ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-    image_ =
-        new ash::internal::FixedSizedImageView(0, ash::kTrayPopupItemHeight);
+    image_ = new internal::FixedSizedImageView(0, kTrayPopupItemHeight);
     image_->SetImage(
         bundle.GetImageNamed(IDR_AURA_UBER_TRAY_DISPLAY).ToImageSkia());
     AddChildView(image_);

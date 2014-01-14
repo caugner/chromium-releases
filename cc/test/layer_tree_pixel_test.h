@@ -30,10 +30,7 @@ class LayerTreePixelTest : public LayerTreeTest {
   virtual ~LayerTreePixelTest();
 
   virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback) OVERRIDE;
-  virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForMainThread() OVERRIDE;
-  virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForCompositorThread() OVERRIDE;
+  virtual scoped_refptr<ContextProvider> OffscreenContextProvider() OVERRIDE;
 
   virtual scoped_ptr<CopyOutputRequest> CreateCopyOutputRequest();
 
@@ -102,6 +99,7 @@ class LayerTreePixelTest : public LayerTreeTest {
   scoped_ptr<SkBitmap> result_bitmap_;
   std::vector<scoped_refptr<TextureLayer> > texture_layers_;
   int pending_texture_mailbox_callbacks_;
+  bool impl_side_painting_;
 };
 
 }  // namespace cc

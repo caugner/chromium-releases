@@ -7,8 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "apps/app_launcher.h"
-#include "apps/pref_names.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/prefs/pref_service.h"
@@ -29,6 +27,7 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/app_list/app_list_util.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
@@ -52,11 +51,11 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
+#include "ui/base/webui/jstemplate_builder.h"
+#include "ui/base/webui/web_ui_util.h"
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/sys_color_change_listener.h"
-#include "ui/webui/jstemplate_builder.h"
-#include "ui/webui/web_ui_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_switches.h"
@@ -81,14 +80,6 @@ const char kLearnMoreIncognitoUrl[] =
 // The URL for the Learn More page shown on guest session new tab.
 const char kLearnMoreGuestSessionUrl[] =
     "https://www.google.com/support/chromeos/bin/answer.py?answer=1057090";
-
-// The URL for bookmark sync service help.
-const char kSyncServiceHelpUrl[] =
-    "https://www.google.com/support/chrome/bin/answer.py?answer=165139";
-
-// The URL to be loaded to display Help.
-const char kHelpContentUrl[] =
-    "https://www.google.com/support/chrome/";
 
 string16 GetUrlWithLang(const GURL& url) {
   return ASCIIToUTF16(google_util::AppendGoogleLocaleParam(url).spec());
@@ -193,13 +184,15 @@ NTPResourceCache::NTPResourceCache(Profile* profile)
   profile_pref_change_registrar_.Add(prefs::kHideWebStoreIcon, callback);
 
   // Some tests don't have a local state.
+#if defined(ENABLE_APP_LIST)
   if (g_browser_process->local_state()) {
     local_state_pref_change_registrar_.Init(g_browser_process->local_state());
-    local_state_pref_change_registrar_.Add(apps::prefs::kShowAppLauncherPromo,
+    local_state_pref_change_registrar_.Add(prefs::kShowAppLauncherPromo,
                                            callback);
     local_state_pref_change_registrar_.Add(
-        apps::prefs::kAppLauncherHasBeenEnabled, callback);
+        prefs::kAppLauncherHasBeenEnabled, callback);
   }
+#endif
 }
 
 NTPResourceCache::~NTPResourceCache() {}
@@ -388,7 +381,7 @@ void NTPResourceCache::CreateNewTabHTML() {
           IDR_THEME_NTP_ATTRIBUTION));
   load_time_data.SetBoolean("showMostvisited", should_show_most_visited_page_);
   load_time_data.SetBoolean("showAppLauncherPromo",
-      apps::ShouldShowAppLauncherPromo());
+      ShouldShowAppLauncherPromo());
   load_time_data.SetBoolean("showRecentlyClosed",
       should_show_recently_closed_menu_);
   load_time_data.SetString("title",
@@ -484,6 +477,17 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("showApps", should_show_apps_page_);
   load_time_data.SetBoolean("showWebStoreIcon",
                             !prefs->GetBoolean(prefs::kHideWebStoreIcon));
+
+  bool streamlined_hosted_apps = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableStreamlinedHostedApps);
+  load_time_data.SetBoolean("enableStreamlinedHostedApps",
+                            streamlined_hosted_apps);
+  // Use a different string for launching as a regular tab for streamlined
+  // hosted apps.
+  if (streamlined_hosted_apps) {
+    load_time_data.SetString("applaunchtypetab",
+        l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_OPEN_TAB));
+  }
 
 #if defined(OS_MACOSX)
   load_time_data.SetBoolean(

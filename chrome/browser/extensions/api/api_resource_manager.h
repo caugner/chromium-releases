@@ -10,6 +10,7 @@
 #include "base/containers/hash_tables.h"
 #include "base/lazy_instance.h"
 #include "base/memory/linked_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
@@ -20,6 +21,14 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+
+namespace extensions {
+namespace api {
+class TCPServerSocketEventDispatcher;
+class TCPSocketEventDispatcher;
+class UDPSocketEventDispatcher;
+}
+}
 
 namespace extensions {
 
@@ -83,7 +92,7 @@ class ApiResourceManager : public ProfileKeyedAPI,
       content::BrowserThread::ID thread_id) {
     ApiResourceManager* manager = new ApiResourceManager<T>(profile);
     manager->thread_id_ = thread_id;
-    manager->data_.reset(new ApiResourceData(thread_id));
+    manager->data_ = new ApiResourceData(thread_id);
     return manager;
   }
 
@@ -94,7 +103,7 @@ class ApiResourceManager : public ProfileKeyedAPI,
         "the thread message loop needed for that kind of resource. "
         "Please ensure that the appropriate message loop is operational.";
 
-    content::BrowserThread::DeleteSoon(thread_id_, FROM_HERE, data_.release());
+    data_->InititateCleanup();
   }
 
   // ProfileKeyedAPI implementation.
@@ -145,6 +154,9 @@ class ApiResourceManager : public ProfileKeyedAPI,
   }
 
  private:
+  friend class api::TCPServerSocketEventDispatcher;
+  friend class api::TCPSocketEventDispatcher;
+  friend class api::UDPSocketEventDispatcher;
   friend class ProfileKeyedAPIFactory<ApiResourceManager<T> >;
   // ProfileKeyedAPI implementation.
   static const char* service_name() {
@@ -155,7 +167,7 @@ class ApiResourceManager : public ProfileKeyedAPI,
 
   // ApiResourceData class handles resource bookkeeping on a thread
   // where resource lifetime is handled.
-  class ApiResourceData {
+  class ApiResourceData : public base::RefCountedThreadSafe<ApiResourceData> {
    public:
     typedef std::map<int, linked_ptr<T> > ApiResourceMap;
     // Lookup map from extension id's to allocated resource id's.
@@ -208,16 +220,25 @@ class ApiResourceManager : public ProfileKeyedAPI,
     void InitiateExtensionUnloadedCleanup(const std::string& extension_id) {
       content::BrowserThread::PostTask(thread_id_, FROM_HERE,
           base::Bind(&ApiResourceData::CleanupResourcesFromUnloadedExtension,
-                     base::Unretained(this), extension_id));
+                     this, extension_id));
     }
 
     void InitiateExtensionSuspendedCleanup(const std::string& extension_id) {
       content::BrowserThread::PostTask(thread_id_, FROM_HERE,
           base::Bind(&ApiResourceData::CleanupResourcesFromSuspendedExtension,
-                     base::Unretained(this), extension_id));
+                     this, extension_id));
+    }
+
+    void InititateCleanup() {
+      content::BrowserThread::PostTask(thread_id_, FROM_HERE,
+          base::Bind(&ApiResourceData::Cleanup, this));
     }
 
    private:
+    friend class base::RefCountedThreadSafe<ApiResourceData>;
+
+    virtual ~ApiResourceData() {}
+
     T* GetOwnedResource(const std::string& extension_id,
                         int api_resource_id) {
       linked_ptr<T> ptr = api_resource_map_[api_resource_id];
@@ -267,7 +288,7 @@ class ApiResourceManager : public ProfileKeyedAPI,
         } else {
           linked_ptr<T> ptr = api_resource_map_[*it];
           T* resource = ptr.get();
-          erase = (resource && !resource->persistent());
+          erase = (resource && !resource->IsPersistent());
         }
 
         if (erase) {
@@ -284,6 +305,13 @@ class ApiResourceManager : public ProfileKeyedAPI,
       }
     }
 
+    void Cleanup() {
+      DCHECK(content::BrowserThread::CurrentlyOn(thread_id_));
+
+      api_resource_map_.clear();
+      extension_resource_map_.clear();
+    }
+
     int GenerateId() {
       return next_id_++;
     }
@@ -296,7 +324,7 @@ class ApiResourceManager : public ProfileKeyedAPI,
 
   content::BrowserThread::ID thread_id_;
   content::NotificationRegistrar registrar_;
-  scoped_ptr<ApiResourceData> data_;
+  scoped_refptr<ApiResourceData> data_;
 };
 
 }  // namespace extensions

@@ -17,6 +17,7 @@
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/render_messages.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/frame_navigate_params.h"
@@ -24,11 +25,14 @@
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/color_analysis.h"
+#include "ui/gfx/favicon_size.h"
 #include "url/gurl.h"
 
 ShortcutBuilder::ShortcutBuilder(content::WebContents* web_contents,
-                                 const string16& title)
-    : is_webapp_capable_(false) {
+                                 const string16& title,
+                                 int launcher_large_icon_size)
+    : launcher_large_icon_size_(launcher_large_icon_size),
+      shortcut_type_(BOOKMARK) {
   Observe(web_contents);
   url_ = web_contents->GetURL();
   if (title.length() > 0)
@@ -40,9 +44,11 @@ ShortcutBuilder::ShortcutBuilder(content::WebContents* web_contents,
   Send(new ChromeViewMsg_RetrieveWebappInformation(routing_id(), url_));
 }
 
-void ShortcutBuilder::OnDidRetrieveWebappInformation(bool success,
-                                                     bool is_webapp_capable,
-                                                     const GURL& expected_url) {
+void ShortcutBuilder::OnDidRetrieveWebappInformation(
+    bool success,
+    bool is_mobile_webapp_capable,
+    bool is_apple_mobile_webapp_capable,
+    const GURL& expected_url) {
   Profile* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   Observe(NULL);
@@ -56,23 +62,29 @@ void ShortcutBuilder::OnDidRetrieveWebappInformation(bool success,
     Destroy();
     return;
   }
-  is_webapp_capable_ = is_webapp_capable;
+
+  if (is_apple_mobile_webapp_capable && !is_mobile_webapp_capable) {
+    shortcut_type_ = APP_SHORTCUT_APPLE;
+  } else if (is_apple_mobile_webapp_capable || is_mobile_webapp_capable) {
+    shortcut_type_ = APP_SHORTCUT;
+  } else {
+    shortcut_type_ = BOOKMARK;
+  }
 
   // Grab the best, largest icon we can find to represent this bookmark.
   // TODO(dfalcantara): Try combining with the new BookmarksHandler once its
   //                    rewrite is further along.
-  FaviconService::FaviconForURLParams favicon_params(
-      profile,
-      url_,
-      chrome::TOUCH_PRECOMPOSED_ICON | chrome::TOUCH_ICON | chrome::FAVICON,
-      0);
-
+  std::vector<int> icon_types;
+  icon_types.push_back(chrome::FAVICON);
+  icon_types.push_back(chrome::TOUCH_PRECOMPOSED_ICON | chrome::TOUCH_ICON);
   FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
       profile, Profile::EXPLICIT_ACCESS);
 
-  favicon_service->GetRawFaviconForURL(
-      favicon_params,
-      ui::SCALE_FACTOR_100P,
+  // Using favicon if its size is not smaller than platform required size,
+  // otherwise using the largest icon among all avaliable icons.
+  int threshold_to_get_any_largest_icon = launcher_large_icon_size_ - 1;
+  favicon_service->GetLargestRawFaviconForURL(profile, url_, icon_types,
+      threshold_to_get_any_largest_icon,
       base::Bind(&ShortcutBuilder::FinishAddingShortcut,
                  base::Unretained(this)),
       &cancelable_task_tracker_);
@@ -85,7 +97,7 @@ void ShortcutBuilder::FinishAddingShortcut(
       base::Bind(&ShortcutHelper::AddShortcutInBackground,
                  url_,
                  title_,
-                 is_webapp_capable_,
+                 shortcut_type_,
                  bitmap_result),
       true);
   Destroy();
@@ -113,9 +125,10 @@ void ShortcutBuilder::Destroy() {
 }
 
 void ShortcutHelper::AddShortcut(content::WebContents* web_contents,
-                                 const string16& title) {
+                                 const string16& title,
+                                 int launcher_large_icon_size) {
   // The ShortcutBuilder deletes itself when it's done.
-  new ShortcutBuilder(web_contents, title);
+  new ShortcutBuilder(web_contents, title, launcher_large_icon_size);
 }
 
 bool ShortcutHelper::RegisterShortcutHelper(JNIEnv* env) {
@@ -125,7 +138,7 @@ bool ShortcutHelper::RegisterShortcutHelper(JNIEnv* env) {
 void ShortcutHelper::AddShortcutInBackground(
     const GURL& url,
     const string16& title,
-    bool is_webapp_capable,
+    ShortcutBuilder::ShortcutType shortcut_type,
     const chrome::FaviconBitmapResult& bitmap_result) {
   DCHECK(base::WorkerPool::RunsTasksOnCurrentThread());
 
@@ -165,7 +178,25 @@ void ShortcutHelper::AddShortcutInBackground(
                                   r_value,
                                   g_value,
                                   b_value,
-                                  is_webapp_capable);
+                                  shortcut_type != ShortcutBuilder::BOOKMARK);
+
+  // Record what type of shortcut was added by the user.
+  switch (shortcut_type) {
+    case ShortcutBuilder::APP_SHORTCUT:
+      content::RecordAction(
+          content::UserMetricsAction("webapps.AddShortcut.AppShortcut"));
+      break;
+    case ShortcutBuilder::APP_SHORTCUT_APPLE:
+      content::RecordAction(
+          content::UserMetricsAction("webapps.AddShortcut.AppShortcutApple"));
+      break;
+    case ShortcutBuilder::BOOKMARK:
+      content::RecordAction(
+          content::UserMetricsAction("webapps.AddShortcut.Bookmark"));
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 // Adds a shortcut to the current URL to the Android home screen, firing
@@ -175,9 +206,11 @@ void ShortcutHelper::AddShortcutInBackground(
 static void AddShortcut(JNIEnv* env,
                         jclass clazz,
                         jint tab_android_ptr,
-                        jstring title) {
+                        jstring title,
+                        jint launcher_large_icon_size) {
   TabAndroid* tab = reinterpret_cast<TabAndroid*>(tab_android_ptr);
   ShortcutHelper::AddShortcut(
       tab->web_contents(),
-      base::android::ConvertJavaStringToUTF16(env, title));
+      base::android::ConvertJavaStringToUTF16(env, title),
+      launcher_large_icon_size);
 }

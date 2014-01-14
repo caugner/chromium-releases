@@ -29,6 +29,7 @@
 #include "chrome/browser/prefs/pref_service_syncable_observer.h"
 #include "chrome/browser/ui/ash/app_sync_ui_state_observer.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item.h"
+#include "chrome/browser/ui/ash/launcher/chrome_launcher_types.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "ui/aura/window_observer.h"
@@ -45,6 +46,7 @@ class ShellWindowLauncherController;
 class TabContents;
 
 namespace ash {
+class LauncherItemDelegateManager;
 class LauncherModel;
 }
 
@@ -84,10 +86,7 @@ class ChromeLauncherControllerUserSwitchObserver {
 // * App shell windows have ShellWindowLauncherItemController, owned by
 //   ShellWindowLauncherController.
 // * Shortcuts have no LauncherItemController.
-// TODO(simon.hong81): Move LauncherItemDelegate out from
-// ChromeLauncherController and makes separate subclass with it.
 class ChromeLauncherController : public ash::LauncherDelegate,
-                                 public ash::LauncherItemDelegate,
                                  public ash::LauncherModelObserver,
                                  public ash::ShellObserver,
                                  public ash::DisplayController::Observer,
@@ -118,12 +117,17 @@ class ChromeLauncherController : public ash::LauncherDelegate,
     virtual ~AppTabHelper() {}
 
     // Returns the app id of the specified tab, or an empty string if there is
-    // no app.
+    // no app. All known profiles will be queried for this.
     virtual std::string GetAppID(content::WebContents* tab) = 0;
 
-    // Returns true if |id| is valid. Used during restore to ignore no longer
-    // valid extensions.
-    virtual bool IsValidID(const std::string& id) = 0;
+    // Returns true if |id| is valid for the currently active profile.
+    // Used during restore to ignore no longer valid extensions.
+    // Note that already running applications are ignored by the restore
+    // process.
+    virtual bool IsValidIDForCurrentUser(const std::string& id) = 0;
+
+    // Sets the currently active profile for the usage of |GetAppID|.
+    virtual void SetCurrentUser(Profile* profile) = 0;
   };
 
   ChromeLauncherController(Profile* profile, ash::LauncherModel* model);
@@ -197,18 +201,19 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   // Opens a new instance of the application identified by |app_id|.
   // Used by the app-list, and by pinned-app launcher items.
-  void LaunchApp(const std::string& app_id, int event_flags);
+  void LaunchApp(const std::string& app_id,
+                 ash::LaunchSource source,
+                 int event_flags);
 
   // If |app_id| is running, reactivates the app's most recently active window,
   // otherwise launches and activates the app.
   // Used by the app-list, and by pinned-app launcher items.
-  void ActivateApp(const std::string& app_id, int event_flags);
+  void ActivateApp(const std::string& app_id,
+                   ash::LaunchSource source,
+                   int event_flags);
 
   // Returns the launch type of app for the specified id.
   extensions::ExtensionPrefs::LaunchType GetLaunchType(ash::LauncherID id);
-
-  // Returns the id of the app for the specified tab.
-  std::string GetAppID(content::WebContents* tab);
 
   // Set the image for a specific launcher item (e.g. when set by the app).
   void SetLauncherItemImage(ash::LauncherID launcher_id,
@@ -247,15 +252,15 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   // Gets the shelf auto-hide behavior on |root_window|.
   ash::ShelfAutoHideBehavior GetShelfAutoHideBehavior(
-      aura::RootWindow* root_window) const;
+      aura::Window* root_window) const;
 
   // Returns |true| if the user is allowed to modify the shelf auto-hide
   // behavior on |root_window|.
-  bool CanUserModifyShelfAutoHideBehavior(aura::RootWindow* root_window) const;
+  bool CanUserModifyShelfAutoHideBehavior(aura::Window* root_window) const;
 
   // Toggles the shelf auto-hide behavior on |root_window|. Does nothing if the
   // user is not allowed to modify the auto-hide behavior.
-  void ToggleShelfAutoHideBehavior(aura::RootWindow* root_window);
+  void ToggleShelfAutoHideBehavior(aura::Window* root_window);
 
   // The tab no longer represents its previously identified application.
   void RemoveTabFromRunningApp(content::WebContents* tab,
@@ -289,18 +294,6 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   virtual bool CanPin() const OVERRIDE;
   virtual void UnpinAppWithID(const std::string& app_id) OVERRIDE;
 
-  // ash::LauncherItemDelegate overrides:
-  virtual void ItemSelected(const ash::LauncherItem& item,
-                           const ui::Event& event) OVERRIDE;
-  virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE;
-  virtual ui::MenuModel* CreateContextMenu(
-      const ash::LauncherItem& item, aura::RootWindow* root) OVERRIDE;
-  virtual ash::LauncherMenuModel* CreateApplicationMenu(
-      const ash::LauncherItem& item,
-      int event_flags) OVERRIDE;
-  virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE;
-  virtual bool ShouldShowTooltip(const ash::LauncherItem& item) OVERRIDE;
-
   // ash::LauncherModelObserver overrides:
   virtual void LauncherItemAdded(int index) OVERRIDE;
   virtual void LauncherItemRemoved(int index, ash::LauncherID id) OVERRIDE;
@@ -315,7 +308,7 @@ class ChromeLauncherController : public ash::LauncherDelegate,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // ash::ShellObserver overrides:
-  virtual void OnShelfAlignmentChanged(aura::RootWindow* root_window) OVERRIDE;
+  virtual void OnShelfAlignmentChanged(aura::Window* root_window) OVERRIDE;
 
   // ash::DisplayController::Observer overrides:
   virtual void OnDisplayConfigurationChanging() OVERRIDE;
@@ -337,11 +330,14 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   // ash::ShelfLayoutManagerObserver overrides:
   virtual void OnAutoHideBehaviorChanged(
-      aura::RootWindow* root_window,
+      aura::Window* root_window,
       ash::ShelfAutoHideBehavior new_behavior) OVERRIDE;
 
   // Called when the active user has changed.
   void ActiveUserChanged(const std::string& user_email);
+
+  // Called when a user got added to the session.
+  void AdditionalUserAddedToSession(Profile* profile);
 
   // Get the list of all running incarnations of this item.
   // |event_flags| specifies the flags which were set by the event which
@@ -378,6 +374,16 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   BrowserShortcutLauncherItemController*
       GetBrowserShortcutLauncherItemController();
 
+  LauncherItemController* GetLauncherItemController(const ash::LauncherID id);
+
+  // Returns true if |browser| is owned by the active user.
+  bool IsBrowserFromActiveUser(Browser* browser);
+
+  // Access to the BrowserStatusMonitor for tests.
+  BrowserStatusMonitor* browser_status_monitor_for_test() {
+    return browser_status_monitor_.get();
+  }
+
  protected:
   // Creates a new app shortcut item and controller on the launcher at |index|.
   // Use kInsertItemAtEnd to add a shortcut as the last item.
@@ -389,6 +395,11 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   void SetAppTabHelperForTest(AppTabHelper* helper);
   void SetAppIconLoaderForTest(extensions::AppIconLoader* loader);
   const std::string& GetAppIdFromLauncherIdForTest(ash::LauncherID id);
+
+  // Sets the ash::LauncherItemDelegateManager only for unittests and doesn't
+  // take an ownership of it.
+  void SetLauncherItemDelegateManagerForTest(
+      ash::LauncherItemDelegateManager* manager);
 
  private:
   friend class ChromeLauncherControllerTest;
@@ -433,7 +444,7 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   // Persists the shelf auto-hide behavior to prefs.
   void SetShelfAutoHideBehaviorPrefs(ash::ShelfAutoHideBehavior behavior,
-                                     aura::RootWindow* root_window);
+                                     aura::Window* root_window);
 
   // Sets the shelf auto-hide behavior from prefs.
   void SetShelfAutoHideBehaviorFromPrefs();
@@ -501,8 +512,10 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   // deleted.
   void CloseWindowedAppsFromRemovedExtension(const std::string& app_id);
 
-  // Register LauncherItemDelegate.
-  void RegisterLauncherItemDelegate();
+  // Set LauncherItemDelegate |item_delegate| for |id| and take an ownership.
+  // TODO(simon.hong81): Make this take a scoped_ptr of |item_delegate|.
+  void SetLauncherItemDelegate(ash::LauncherID id,
+                               ash::LauncherItemDelegate* item_delegate);
 
   // Attach to a specific profile.
   void AttachProfile(Profile* proifile);
@@ -510,9 +523,14 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   // Forget the current profile to allow attaching to a new one.
   void ReleaseProfile();
 
+  // Update the state of all V1 shortcut launcher items after a user switch.
+  void UpdateV1AppStatesAfterUserSwitch();
+
   static ChromeLauncherController* instance_;
 
   ash::LauncherModel* model_;
+
+  ash::LauncherItemDelegateManager* item_delegate_manager_;
 
   // Profile used for prefs and loading extensions. This is NOT necessarily the
   // profile new windows are created with.
@@ -546,9 +564,6 @@ class ChromeLauncherController : public ash::LauncherDelegate,
   // Launchers that are currently being observed.
   std::set<ash::Launcher*> launchers_;
 
-  // The owned browser shortcut item.
-  scoped_ptr<BrowserShortcutLauncherItemController> browser_item_controller_;
-
   // The owned browser status monitor.
   scoped_ptr<BrowserStatusMonitor> browser_status_monitor_;
 
@@ -557,6 +572,9 @@ class ChromeLauncherController : public ash::LauncherDelegate,
 
   // If true, incoming pinned state changes should be ignored.
   bool ignore_persist_pinned_state_change_;
+
+  // True if each user has an own desktop.
+  bool multi_profile_desktop_separation_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeLauncherController);
 };

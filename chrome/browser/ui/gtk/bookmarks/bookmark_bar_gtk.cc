@@ -15,7 +15,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -155,9 +155,9 @@ BookmarkBarGtk::BookmarkBarGtk(BrowserWindowGtk* window,
       slide_animation_(this),
       last_allocation_width_(-1),
       throbbing_widget_(NULL),
-      weak_factory_(this),
       bookmark_bar_state_(BookmarkBar::DETACHED),
-      max_height_(0) {
+      max_height_(0),
+      weak_factory_(this) {
   Init();
   // Force an update by simulating being in the wrong state.
   // BrowserWindowGtk sets our true state after we're created.
@@ -587,11 +587,10 @@ int BookmarkBarGtk::GetBookmarkButtonCount() {
   return count;
 }
 
-bookmark_utils::BookmarkLaunchLocation
-    BookmarkBarGtk::GetBookmarkLaunchLocation() const {
+BookmarkLaunchLocation BookmarkBarGtk::GetBookmarkLaunchLocation() const {
   return bookmark_bar_state_ == BookmarkBar::DETACHED ?
-      bookmark_utils::LAUNCH_DETACHED_BAR :
-      bookmark_utils::LAUNCH_ATTACHED_BAR;
+      BOOKMARK_LAUNCH_LOCATION_DETACHED_BAR :
+      BOOKMARK_LAUNCH_LOCATION_ATTACHED_BAR;
 }
 
 void BookmarkBarGtk::SetOverflowButtonAppearance() {
@@ -1187,7 +1186,7 @@ void BookmarkBarGtk::OnClicked(GtkWidget* sender) {
                   event_utils::DispositionForCurrentButtonPressEvent(),
                   browser_->profile());
 
-  bookmark_utils::RecordBookmarkLaunch(GetBookmarkLaunchLocation());
+  RecordBookmarkLaunch(node, GetBookmarkLaunchLocation());
 }
 
 void BookmarkBarGtk::OnButtonDragBegin(GtkWidget* button,
@@ -1264,7 +1263,7 @@ void BookmarkBarGtk::OnAppsButtonClicked(GtkWidget* sender) {
       content::PAGE_TRANSITION_AUTO_BOOKMARK,
       false);
   browser_->OpenURL(params);
-  bookmark_utils::RecordAppsPageOpen(GetBookmarkLaunchLocation());
+  RecordBookmarkAppsPageOpen(GetBookmarkLaunchLocation());
 }
 
 void BookmarkBarGtk::OnFolderClicked(GtkWidget* sender) {
@@ -1277,7 +1276,7 @@ void BookmarkBarGtk::OnFolderClicked(GtkWidget* sender) {
   GdkEvent* event = gtk_get_current_event();
   if (event->button.button == 1 ||
       (event->button.button == 2 && sender == overflow_button_)) {
-    bookmark_utils::RecordBookmarkFolderOpen(GetBookmarkLaunchLocation());
+    RecordBookmarkFolderOpen(GetBookmarkLaunchLocation());
     PopupForButton(sender);
   } else if (event->button.button == 2) {
     const BookmarkNode* node = GetNodeForToolButton(sender);
@@ -1501,7 +1500,8 @@ void BookmarkBarGtk::ShowImportDialog() {
 
 void BookmarkBarGtk::OnAppsPageShortcutVisibilityChanged() {
   const bool visible =
-      chrome::ShouldShowAppsShortcutInBookmarkBar(browser_->profile());
+      chrome::ShouldShowAppsShortcutInBookmarkBar(
+          browser_->profile(), browser_->host_desktop_type());
   gtk_widget_set_visible(apps_shortcut_button_, visible);
   gtk_widget_set_no_show_all(apps_shortcut_button_, !visible);
 }

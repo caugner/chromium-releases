@@ -47,6 +47,10 @@ namespace {
 using extensions::Action;
 using constants::kArgUrlPlaceholder;
 
+// If DOM API methods start with this string, we flag them as being of type
+// DomActionType::XHR.
+const char kDomXhrPrefix[] = "XMLHttpRequest.";
+
 // Specifies a possible action to take to get an extracted URL in the ApiInfo
 // structure below.
 enum Transformation {
@@ -189,6 +193,17 @@ bool GetUrlForTabId(int tab_id,
   }
 }
 
+// Resolves an argument URL relative to a base page URL.  If the page URL is
+// not valid, then only absolute argument URLs are supported.
+bool ResolveUrl(const GURL& base, const std::string& arg, GURL* arg_out) {
+  if (base.is_valid())
+    *arg_out = base.Resolve(arg);
+  else
+    *arg_out = GURL(arg);
+
+  return arg_out->is_valid();
+}
+
 // Performs processing of the Action object to extract URLs from the argument
 // list and translate tab IDs to URLs, according to the API call metadata in
 // kApiInfoTable.  Mutates the Action object in place.  There is a small chance
@@ -223,29 +238,29 @@ void ExtractUrls(scoped_refptr<Action> action, Profile* profile) {
   switch (api_info->arg_url_transform) {
     case NONE: {
       // No translation needed; just extract the URL directly from a raw string
-      // or from a dictionary.
+      // or from a dictionary.  Succeeds if we can find a string in the
+      // argument list and that the string resolves to a valid URL.
       std::string url_string;
-      if (action->args()->GetString(url_index, &url_string)) {
-        arg_url = GURL(url_string);
-        if (arg_url.is_valid()) {
-          action->mutable_args()
-              ->Set(url_index, new StringValue(kArgUrlPlaceholder));
-        }
+      if (action->args()->GetString(url_index, &url_string) &&
+          ResolveUrl(action->page_url(), url_string, &arg_url)) {
+        action->mutable_args()->Set(url_index,
+                                    new StringValue(kArgUrlPlaceholder));
       }
       break;
     }
 
     case DICT_LOOKUP: {
-      // Look up the URL from a dictionary at the specified location.
+      CHECK(api_info->arg_url_dict_path);
+      // Look up the URL from a dictionary at the specified location.  Succeeds
+      // if we can find a dictionary in the argument list, the dictionary
+      // contains the specified key, and the corresponding value resolves to a
+      // valid URL.
       DictionaryValue* dict = NULL;
       std::string url_string;
-      CHECK(api_info->arg_url_dict_path);
-
       if (action->mutable_args()->GetDictionary(url_index, &dict) &&
-          dict->GetString(api_info->arg_url_dict_path, &url_string)) {
-        arg_url = GURL(url_string);
-        if (arg_url.is_valid())
-          dict->SetString(api_info->arg_url_dict_path, kArgUrlPlaceholder);
+          dict->GetString(api_info->arg_url_dict_path, &url_string) &&
+          ResolveUrl(action->page_url(), url_string, &arg_url)) {
+        dict->SetString(api_info->arg_url_dict_path, kArgUrlPlaceholder);
       }
       break;
     }
@@ -408,6 +423,7 @@ void ActivityLog::SetDatabasePolicy(
     default:
       NOTREACHED();
   }
+  database_policy_->Init();
   database_policy_type_ = policy_type;
 }
 
@@ -519,6 +535,18 @@ void ActivityLog::LogAction(scoped_refptr<Action> action) {
   // Perform some preprocessing of the Action data: convert tab IDs to URLs and
   // mask out incognito URLs if appropriate.
   ExtractUrls(action, profile_);
+
+  // Mark DOM XHR requests as such, for easier processing later.
+  if (action->action_type() == Action::ACTION_DOM_ACCESS &&
+      StartsWithASCII(action->api_name(), kDomXhrPrefix, true) &&
+      action->other()) {
+    DictionaryValue* other = action->mutable_other();
+    int dom_verb = -1;
+    if (other->GetInteger(constants::kActionDomVerb, &dom_verb) &&
+        dom_verb == DomActionType::METHOD) {
+      other->SetInteger(constants::kActionDomVerb, DomActionType::XHR);
+    }
+  }
 
   if (uma_policy_)
     uma_policy_->ProcessAction(action);

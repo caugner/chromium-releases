@@ -14,6 +14,7 @@
 
 class BrowserFrame;
 class BrowserView;
+class BrowserWindowPropertyManager;
 
 namespace views {
 class DesktopNativeWidgetAura;
@@ -26,7 +27,6 @@ class BrowserDesktopRootWindowHostWin : public BrowserDesktopRootWindowHost,
   BrowserDesktopRootWindowHostWin(
       views::internal::NativeWidgetDelegate* native_widget_delegate,
       views::DesktopNativeWidgetAura* desktop_native_widget_aura,
-      const gfx::Rect& initial_bounds,
       BrowserView* browser_view,
       BrowserFrame* browser_frame);
   virtual ~BrowserDesktopRootWindowHostWin();
@@ -42,6 +42,7 @@ class BrowserDesktopRootWindowHostWin : public BrowserDesktopRootWindowHost,
   // Overridden from DesktopRootWindowHostWin:
   virtual int GetInitialShowState() const OVERRIDE;
   virtual bool GetClientAreaInsets(gfx::Insets* insets) const OVERRIDE;
+  virtual void HandleCreate() OVERRIDE;
   virtual void HandleFrameChanged() OVERRIDE;
   virtual bool PreHandleMSG(UINT message,
                             WPARAM w_param,
@@ -62,6 +63,8 @@ class BrowserDesktopRootWindowHostWin : public BrowserDesktopRootWindowHost,
   BrowserFrame* browser_frame_;
 
   MinimizeButtonMetrics minimize_button_metrics_;
+
+  scoped_ptr<BrowserWindowPropertyManager> browser_window_property_manager_;
 
   // The wrapped system menu itself.
   scoped_ptr<views::NativeMenuWin> system_menu_;

@@ -43,10 +43,12 @@
 
       /**
        * Returns a subset of the key attributes.
+       * @param {string} caller The id of the function that called
+       *     populateDetails.
        * @return {Object} Mapping of attributes for the key element.
        */
-      populateDetails: function() {
-        var details = this.super();
+      populateDetails: function(caller) {
+        var details = this.super([caller]);
         details.keyCode = this.keyCode;
         details.shiftModifier = this.shiftModifier;
         return details;
@@ -56,27 +58,58 @@
 </polymer-element>
 
 <!-- Special keys -->
-
-<!--
-  -- TODO(kevers): Rip this out if and when we are done implementing the proper
-  -- layout switcher.
-  -->
-<polymer-element name="kb-layout-selector" class="layout-selector dark" char="Invalid"
+<polymer-element name="kb-abc-key" class="symbol dark" char="Invalid"
     extends="kb-key">
   <script>
-    Polymer('kb-layout-selector', {
-      toLayout: 'qwerty'
+    Polymer('kb-abc-key', {
+      populateDetails: function(caller) {
+        var detail = this.super([caller]);
+        switch (caller) {
+          case ('down'):
+            detail.relegateToShift = true;
+            break;
+          default:
+            break;
+        }
+        return detail;
+      }
     });
   </script>
 </polymer-element>
 
-<polymer-element name="kb-hide-keyboard-key" class="hide-keyboard dark" char="Invalid"
-    extends="kb-key">
+<polymer-element name="kb-hide-keyboard-key" class="hide-keyboard dark"
+    char="Invalid" extends="kb-key">
   <script>
     Polymer('kb-hide-keyboard-key', {
-      down: function(event) {},
+      /**
+       * Timer for a long press event which triggers the display of a keyboard
+       * options menu.
+       * @type {?Function}
+       */
+      longPressTimer: undefined,
+
+      down: function(event) {
+         var self = this;
+         this.longPressTimer = this.asyncMethod(function() {
+           if (self.longPressTimer) {
+             clearTimeout(self.longPressTimer);
+             self.longPressTimer = undefined;
+             var details = {
+               left: this.offsetLeft,
+               top: this.offsetTop,
+               width: this.clientWidth,
+             };
+             this.fire('show-options', details);
+           }
+         }, null, LONGPRESS_DELAY_MSEC);
+      },
+
       up: function(event) {
-        hideKeyboard();
+        if (this.longPressTimer) {
+          clearTimeout(this.longPressTimer);
+          hideKeyboard();
+          this.longPressTimer = undefined;
+        }
       }
     });
   </script>

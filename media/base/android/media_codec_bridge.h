@@ -48,13 +48,12 @@ class MEDIA_EXPORT MediaCodecBridge {
   // decode |codec| type.
   static bool CanDecode(const std::string& codec, bool is_secure);
 
-  // Represents supported codecs on android. |secure_decoder_supported| is true
-  // if secure decoder is available for the codec type.
+  // Represents supported codecs on android.
   // TODO(qinmin): Curretly the codecs string only contains one codec, do we
   // need more specific codecs separated by comma. (e.g. "vp8" -> "vp8, vp8.0")
   struct CodecsInfo {
     std::string codecs;
-    bool secure_decoder_supported;
+    std::string name;
   };
 
   // Get a list of supported codecs.
@@ -130,23 +129,32 @@ class MEDIA_EXPORT MediaCodecBridge {
   void ReleaseOutputBuffer(int index, bool render);
 
   // Gets output buffers from media codec and keeps them inside the java class.
-  // To access them, use DequeueOutputBuffer().
-  void GetOutputBuffers();
+  // To access them, use DequeueOutputBuffer(). Returns whether output buffers
+  // were successfully obtained.
+  bool GetOutputBuffers() WARN_UNUSED_RESULT;
 
   static bool RegisterMediaCodecBridge(JNIEnv* env);
 
  protected:
+  // Returns true if |mime_type| is known to be unaccelerated (i.e. backed by a
+  // software codec instead of a hardware one).
+  static bool IsKnownUnaccelerated(const std::string& mime_type);
+
   MediaCodecBridge(const std::string& mime, bool is_secure);
 
   // Calls start() against the media codec instance. Used in StartXXX() after
-  // configuring media codec.
-  void StartInternal();
+  // configuring media codec. Returns whether media codec was successfully
+  // started.
+  bool StartInternal() WARN_UNUSED_RESULT;
 
   jobject media_codec() { return j_media_codec_.obj(); }
 
  private:
-  // Fills a particular input buffer and returns the size of copied data.
-  size_t FillInputBuffer(int index, const uint8* data, int data_size);
+  // Fills a particular input buffer; returns false if |data_size| exceeds the
+  // input buffer's capacity (and doesn't touch the input buffer in that case).
+  bool FillInputBuffer(int index,
+                       const uint8* data,
+                       int data_size) WARN_UNUSED_RESULT;
 
   // Java MediaCodec instance.
   base::android::ScopedJavaGlobalRef<jobject> j_media_codec_;
@@ -158,12 +166,15 @@ class AudioCodecBridge : public MediaCodecBridge {
  public:
   // Returns an AudioCodecBridge instance if |codec| is supported, or a NULL
   // pointer otherwise.
-  static AudioCodecBridge* Create(const AudioCodec codec);
+  static AudioCodecBridge* Create(const AudioCodec& codec);
+
+  // See MediaCodecBridge::IsKnownUnaccelerated().
+  static bool IsKnownUnaccelerated(const AudioCodec& codec);
 
   // Start the audio codec bridge.
-  bool Start(const AudioCodec codec, int sample_rate, int channel_count,
+  bool Start(const AudioCodec& codec, int sample_rate, int channel_count,
              const uint8* extra_data, size_t extra_data_size,
-             bool play_audio, jobject media_crypto);
+             bool play_audio, jobject media_crypto) WARN_UNUSED_RESULT;
 
   // Play the output buffer. This call must be called after
   // DequeueOutputBuffer() and before ReleaseOutputBuffer.
@@ -176,7 +187,7 @@ class AudioCodecBridge : public MediaCodecBridge {
   explicit AudioCodecBridge(const std::string& mime);
 
   // Configure the java MediaFormat object with the extra codec data passed in.
-  bool ConfigureMediaFormat(jobject j_format, const AudioCodec codec,
+  bool ConfigureMediaFormat(jobject j_format, const AudioCodec& codec,
                             const uint8* extra_data, size_t extra_data_size);
 };
 
@@ -184,11 +195,14 @@ class MEDIA_EXPORT VideoCodecBridge : public MediaCodecBridge {
  public:
   // Returns an VideoCodecBridge instance if |codec| is supported, or a NULL
   // pointer otherwise.
-  static VideoCodecBridge* Create(const VideoCodec codec, bool is_secure);
+  static VideoCodecBridge* Create(const VideoCodec& codec, bool is_secure);
+
+  // See MediaCodecBridge::IsKnownUnaccelerated().
+  static bool IsKnownUnaccelerated(const VideoCodec& codec);
 
   // Start the video codec bridge.
   // TODO(qinmin): Pass codec specific data if available.
-  bool Start(const VideoCodec codec, const gfx::Size& size, jobject surface,
+  bool Start(const VideoCodec& codec, const gfx::Size& size, jobject surface,
              jobject media_crypto);
 
  private:
@@ -198,4 +212,3 @@ class MEDIA_EXPORT VideoCodecBridge : public MediaCodecBridge {
 }  // namespace media
 
 #endif  // MEDIA_BASE_ANDROID_MEDIA_CODEC_BRIDGE_H_
-

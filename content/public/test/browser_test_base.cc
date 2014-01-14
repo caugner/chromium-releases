@@ -8,11 +8,14 @@
 #include "base/command_line.h"
 #include "base/debug/stack_trace.h"
 #include "base/message_loop/message_loop.h"
+#include "base/sys_info.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/test/test_utils.h"
+#include "net/base/net_errors.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/gl/gl_implementation.h"
@@ -33,8 +36,9 @@
 #include "content/public/browser/browser_thread.h"
 #endif
 
-#if defined(OS_CHROMEOS)
-#include "base/chromeos/chromeos_version.h"
+#if defined(USE_AURA)
+#include "content/browser/aura/image_transport_factory.h"
+#include "ui/compositor/test/test_context_factory.h"
 #endif
 
 namespace content {
@@ -65,13 +69,57 @@ void RunTaskOnRendererThread(const base::Closure& task,
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, quit_task);
 }
 
+// In many cases it may be not obvious that a test makes a real DNS lookup.
+// We generally don't want to rely on external DNS servers for our tests,
+// so this host resolver procedure catches external queries and returns a failed
+// lookup result.
+class LocalHostResolverProc : public net::HostResolverProc {
+ public:
+  LocalHostResolverProc() : HostResolverProc(NULL) {}
+
+  virtual int Resolve(const std::string& host,
+                      net::AddressFamily address_family,
+                      net::HostResolverFlags host_resolver_flags,
+                      net::AddressList* addrlist,
+                      int* os_error) OVERRIDE {
+    const char* kLocalHostNames[] = {"localhost", "127.0.0.1", "::1"};
+    bool local = false;
+
+    if (host == net::GetHostName()) {
+      local = true;
+    } else {
+      for (size_t i = 0; i < arraysize(kLocalHostNames); i++)
+        if (host == kLocalHostNames[i]) {
+          local = true;
+          break;
+        }
+    }
+
+    // To avoid depending on external resources and to reduce (if not preclude)
+    // network interactions from tests, we simulate failure for non-local DNS
+    // queries, rather than perform them.
+    // If you really need to make an external DNS query, use
+    // net::RuleBasedHostResolverProc and its AllowDirectLookup method.
+    if (!local) {
+      DVLOG(1) << "To avoid external dependencies, simulating failure for "
+          "external DNS lookup of " << host;
+      return net::ERR_NOT_IMPLEMENTED;
+    }
+
+    return ResolveUsingPrevious(host, address_family, host_resolver_flags,
+                                addrlist, os_error);
+  }
+
+ private:
+  virtual ~LocalHostResolverProc() {}
+};
+
 }  // namespace
 
 extern int BrowserMain(const MainFunctionParams&);
 
 BrowserTestBase::BrowserTestBase()
-    : embedded_test_server_io_thread_("EmbeddedTestServer io thread"),
-      allow_test_contexts_(true),
+    : allow_test_contexts_(true),
       allow_osmesa_(true) {
 #if defined(OS_MACOSX)
   base::mac::SetOverrideAmIBundled(true);
@@ -82,15 +130,7 @@ BrowserTestBase::BrowserTestBase()
   handle_sigterm_ = true;
 #endif
 
-  // Create a separate thread for the test server to run on. It's tempting to
-  // use actual browser threads, but that doesn't work for cases where the test
-  // server needs to be started before the browser, for example when the server
-  // URL should be passed in command-line parameters.
-  base::Thread::Options thread_options;
-  thread_options.message_loop_type = base::MessageLoop::TYPE_IO;
-  CHECK(embedded_test_server_io_thread_.StartWithOptions(thread_options));
-  embedded_test_server_.reset(new net::test_server::EmbeddedTestServer(
-      embedded_test_server_io_thread_.message_loop_proxy()));
+  embedded_test_server_.reset(new net::test_server::EmbeddedTestServer);
 }
 
 BrowserTestBase::~BrowserTestBase() {
@@ -109,13 +149,27 @@ void BrowserTestBase::SetUp() {
 
   command_line->AppendSwitch(switches::kDomAutomationController);
 
-  command_line->AppendSwitch(switches::kSkipGpuDataLoading);
+  // It is sometimes useful when looking at browser test failures to know which
+  // GPU blacklisting decisions were made.
+  command_line->AppendSwitch(switches::kLogGpuControlListDecisions);
+
+#if defined(OS_CHROMEOS)
+  // If the test is running on the chromeos envrionment (such as
+  // device or vm bots), always use real contexts.
+  if (base::SysInfo::IsRunningOnChromeOS())
+    allow_test_contexts_ = false;
+#endif
 
 #if defined(USE_AURA)
+  if (command_line->HasSwitch(switches::kDisableTestCompositor))
+    allow_test_contexts_  = false;
+
   // Use test contexts for browser tests unless they override and force us to
   // use a real context.
-  if (allow_test_contexts_)
-    command_line->AppendSwitch(switches::kTestCompositor);
+  if (allow_test_contexts_) {
+    content::ImageTransportFactory::InitializeForUnitTests(
+        scoped_ptr<ui::ContextFactory>(new ui::TestContextFactory));
+  }
 #endif
 
   // When using real GL contexts, we usually use OSMesa as this works on all
@@ -141,7 +195,7 @@ void BrowserTestBase::SetUp() {
   // If the test is running on the chromeos envrionment (such as
   // device or vm bots), the compositor will use real GL contexts, and
   // we should use real GL bindings with it.
-  if (base::chromeos::IsRunningOnChromeOS())
+  if (base::SysInfo::IsRunningOnChromeOS())
     allow_osmesa_ = false;
 #endif
 
@@ -154,6 +208,14 @@ void BrowserTestBase::SetUp() {
     command_line->AppendSwitchASCII(
         switches::kUseGL, gfx::kGLImplementationOSMesaName);
   }
+
+  scoped_refptr<net::HostResolverProc> local_resolver =
+      new LocalHostResolverProc();
+  rule_based_resolver_ =
+      new net::RuleBasedHostResolverProc(local_resolver.get());
+  rule_based_resolver_->AddSimulatedFailure("wpad");
+  net::ScopedDefaultHostResolverProc scoped_local_host_resolver_proc(
+      rule_based_resolver_.get());
 
   SetUpInProcessBrowserTestFixture();
 

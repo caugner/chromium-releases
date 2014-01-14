@@ -27,6 +27,7 @@
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
@@ -62,7 +63,7 @@
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/webui/web_ui_util.h"
+#include "ui/base/webui/web_ui_util.h"
 #include "webkit/browser/fileapi/file_system_context.h"
 #include "webkit/browser/fileapi/file_system_operation.h"
 #include "webkit/browser/fileapi/file_system_operation_runner.h"
@@ -287,7 +288,7 @@ void DeveloperPrivateAPI::OnListenerRemoved(
 namespace api {
 
 bool DeveloperPrivateAutoUpdateFunction::RunImpl() {
-  ExtensionUpdater* updater = GetExtensionUpdater(profile());
+  ExtensionUpdater* updater = GetExtensionUpdater(GetProfile());
   if (updater)
     updater->CheckNow(ExtensionUpdater::CheckParams());
   SetResult(new base::FundamentalValue(true));
@@ -302,8 +303,8 @@ scoped_ptr<developer::ItemInfo>
       bool item_is_enabled) {
   scoped_ptr<developer::ItemInfo> info(new developer::ItemInfo());
 
-  ExtensionSystem* system = ExtensionSystem::Get(profile());
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionSystem* system = ExtensionSystem::Get(GetProfile());
+  ExtensionService* service = GetProfile()->GetExtensionService();
 
   info->id = item.id();
   info->name = item.name();
@@ -341,9 +342,10 @@ scoped_ptr<developer::ItemInfo>
     }
   }
 
-  info->incognito_enabled = service->IsIncognitoEnabled(item.id());
+  info->incognito_enabled =
+      extension_util::IsIncognitoEnabled(item.id(),service);
   info->wants_file_access = item.wants_file_access();
-  info->allow_file_access = service->AllowFileAccess(&item);
+  info->allow_file_access = extension_util::AllowFileAccess(&item, service);
   info->allow_reload = Manifest::IsUnpackedLocation(item.location());
   info->is_unpacked = Manifest::IsUnpackedLocation(item.location());
   info->terminated = service->terminated_extensions()->Contains(item.id());
@@ -428,7 +430,7 @@ void DeveloperPrivateGetItemsInfoFunction::
     GetShellWindowPagesForExtensionProfile(
         const Extension* extension,
         ItemInspectViewList* result) {
-  ShellWindowRegistry* registry = ShellWindowRegistry::Get(profile());
+  ShellWindowRegistry* registry = ShellWindowRegistry::Get(GetProfile());
   if (!registry) return;
 
   const ShellWindowRegistry::ShellWindowList windows =
@@ -484,7 +486,7 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
   ItemInspectViewList result;
   // Get the extension process's active views.
   ExtensionProcessManager* process_manager =
-      ExtensionSystem::Get(profile())->process_manager();
+      ExtensionSystem::Get(GetProfile())->process_manager();
   GetInspectablePagesForExtensionProcess(
       extension,
       process_manager->GetRenderViewHostsForExtension(extension->id()),
@@ -505,7 +507,7 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
         BackgroundInfo::HasGeneratedBackgroundPage(extension)));
   }
 
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
   // Repeat for the incognito process, if applicable. Don't try to get
   // shell windows for incognito process.
   if (service->profile()->HasOffTheRecordProfile() &&
@@ -542,7 +544,7 @@ bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
 
   ExtensionSet items;
 
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
 
   items.InsertAll(*service->extensions());
 
@@ -594,9 +596,9 @@ bool DeveloperPrivateAllowFileAccessFunction::RunImpl() {
 
   EXTENSION_FUNCTION_VALIDATE(user_gesture_);
 
-  ExtensionSystem* system = ExtensionSystem::Get(profile());
+  ExtensionSystem* system = ExtensionSystem::Get(GetProfile());
   ManagementPolicy* management_policy = system->management_policy();
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
   const Extension* extension = service->GetInstalledExtension(params->item_id);
   bool result = true;
 
@@ -608,7 +610,7 @@ bool DeveloperPrivateAllowFileAccessFunction::RunImpl() {
                << extension->id();
     result = false;
   } else {
-    service->SetAllowFileAccess(extension, params->allow);
+    extension_util::SetAllowFileAccess(extension, service, params->allow);
     result = true;
   }
 
@@ -623,14 +625,15 @@ bool DeveloperPrivateAllowIncognitoFunction::RunImpl() {
       AllowIncognito::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
   const Extension* extension = service->GetInstalledExtension(params->item_id);
   bool result = true;
 
   if (!extension)
     result = false;
   else
-    service->SetIsIncognitoEnabled(extension->id(), params->allow);
+    extension_util::SetIsIncognitoEnabled(
+        extension->id(),service, params->allow);
 
   return result;
 }
@@ -643,7 +646,7 @@ bool DeveloperPrivateReloadFunction::RunImpl() {
   scoped_ptr<Reload::Params> params(Reload::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
   CHECK(!params->item_id.empty());
   service->ReloadExtension(params->item_id);
   return true;
@@ -651,9 +654,9 @@ bool DeveloperPrivateReloadFunction::RunImpl() {
 
 bool DeveloperPrivateShowPermissionsDialogFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &extension_id_));
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
   CHECK(!extension_id_.empty());
-  ShellWindowRegistry* registry = ShellWindowRegistry::Get(profile());
+  ShellWindowRegistry* registry = ShellWindowRegistry::Get(GetProfile());
   DCHECK(registry);
   ShellWindow* shell_window = registry->GetShellWindowForRenderViewHost(
       render_view_host());
@@ -668,8 +671,8 @@ bool DeveloperPrivateShowPermissionsDialogFunction::RunImpl() {
   std::vector<base::FilePath> retained_file_paths;
   if (extension->HasAPIPermission(extensions::APIPermission::kFileSystem)) {
     std::vector<apps::SavedFileEntry> retained_file_entries =
-        apps::SavedFilesService::Get(profile())->GetAllFileEntries(
-            extension_id_);
+        apps::SavedFilesService::Get(GetProfile())
+            ->GetAllFileEntries(extension_id_);
     for (size_t i = 0; i < retained_file_entries.size(); i++) {
       retained_file_paths.push_back(retained_file_entries[i].path);
     }
@@ -682,10 +685,12 @@ DeveloperPrivateReloadFunction::~DeveloperPrivateReloadFunction() {}
 
 // This is called when the user clicks "Revoke File Access."
 void DeveloperPrivateShowPermissionsDialogFunction::InstallUIProceed() {
-  apps::SavedFilesService::Get(profile())->ClearQueue(
-      profile()->GetExtensionService()->GetExtensionById(extension_id_, true));
-  if (apps::AppRestoreService::Get(profile())->IsAppRestorable(extension_id_))
-    apps::AppLoadService::Get(profile())->RestartApplication(extension_id_);
+  apps::SavedFilesService::Get(GetProfile())
+      ->ClearQueue(GetProfile()->GetExtensionService()->GetExtensionById(
+            extension_id_, true));
+  if (apps::AppRestoreService::Get(GetProfile())
+          ->IsAppRestorable(extension_id_))
+    apps::AppLoadService::Get(GetProfile())->RestartApplication(extension_id_);
   SendResponse(true);
   Release();
 }
@@ -710,22 +715,28 @@ bool DeveloperPrivateEnableFunction::RunImpl() {
 
   std::string extension_id = params->item_id;
 
-  ExtensionSystem* system = ExtensionSystem::Get(profile());
-  ManagementPolicy* management_policy = system->management_policy();
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionSystem* system = ExtensionSystem::Get(GetProfile());
+  ManagementPolicy* policy = system->management_policy();
+  ExtensionService* service = GetProfile()->GetExtensionService();
 
   const Extension* extension = service->GetInstalledExtension(extension_id);
-  if (!extension ||
-      !management_policy->UserMayModifySettings(extension, NULL)) {
-    LOG(ERROR) << "Attempt to enable an extension that is non-usermanagable "
-               "was made. Extension id: " << extension_id.c_str();
+  if (!extension) {
+    LOG(ERROR) << "Did not find extension with id " << extension_id;
+    return false;
+  }
+  bool enable = params->enable;
+  if (!policy->UserMayModifySettings(extension, NULL) ||
+      (!enable && policy->MustRemainEnabled(extension, NULL)) ||
+      (enable && policy->MustRemainDisabled(extension, NULL, NULL))) {
+    LOG(ERROR) << "Attempt to change enable state denied by management policy. "
+               << "Extension id: " << extension_id.c_str();
     return false;
   }
 
-  if (params->enable) {
+  if (enable) {
     ExtensionPrefs* prefs = service->extension_prefs();
     if (prefs->DidExtensionEscalatePermissions(extension_id)) {
-      ShellWindowRegistry* registry = ShellWindowRegistry::Get(profile());
+      ShellWindowRegistry* registry = ShellWindowRegistry::Get(GetProfile());
       CHECK(registry);
       ShellWindow* shell_window = registry->GetShellWindowForRenderViewHost(
           render_view_host());
@@ -766,7 +777,7 @@ void DeveloperPrivateEnableFunction::OnRequirementsChecked(
     std::string extension_id,
     std::vector<std::string> requirements_errors) {
   if (requirements_errors.empty()) {
-    ExtensionService* service = profile()->GetExtensionService();
+    ExtensionService* service = GetProfile()->GetExtensionService();
     service->EnableExtension(extension_id);
   } else {
     ExtensionErrorReporter::GetInstance()->ReportError(
@@ -790,7 +801,7 @@ bool DeveloperPrivateInspectFunction::RunImpl() {
   if (render_process_id == -1) {
     // This is a lazy background page. Identify if it is a normal
     // or incognito background page.
-    ExtensionService* service = profile()->GetExtensionService();
+    ExtensionService* service = GetProfile()->GetExtensionService();
     if (options.incognito)
       service = ExtensionSystem::Get(
           service->profile()->GetOffTheRecordProfile())->extension_service();
@@ -798,7 +809,7 @@ bool DeveloperPrivateInspectFunction::RunImpl() {
         options.extension_id);
     DCHECK(extension);
     // Wakes up the background page and  opens the inspect window.
-    devtools_util::InspectBackgroundPage(extension, profile());
+    devtools_util::InspectBackgroundPage(extension, GetProfile());
     return false;
   }
 
@@ -826,7 +837,7 @@ bool DeveloperPrivateLoadUnpackedFunction::RunImpl() {
   AddRef();
   bool result = ShowPicker(
       ui::SelectFileDialog::SELECT_FOLDER,
-      DeveloperPrivateAPI::Get(profile())->GetLastUnpackedDirectory(),
+      DeveloperPrivateAPI::Get(GetProfile())->GetLastUnpackedDirectory(),
       select_title,
       ui::SelectFileDialog::FileTypeInfo(),
       0);
@@ -835,9 +846,9 @@ bool DeveloperPrivateLoadUnpackedFunction::RunImpl() {
 
 void DeveloperPrivateLoadUnpackedFunction::FileSelected(
     const base::FilePath& path) {
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
   UnpackedInstaller::Create(service)->Load(path);
-  DeveloperPrivateAPI::Get(profile())->SetLastUnpackedDirectory(path);
+  DeveloperPrivateAPI::Get(GetProfile())->SetLastUnpackedDirectory(path);
   SendResponse(true);
   Release();
 }
@@ -853,7 +864,7 @@ bool DeveloperPrivateChooseEntryFunction::ShowPicker(
     const string16& select_title,
     const ui::SelectFileDialog::FileTypeInfo& info,
     int file_type_index) {
-  ShellWindowRegistry* registry = ShellWindowRegistry::Get(profile());
+  ShellWindowRegistry* registry = ShellWindowRegistry::Get(GetProfile());
   DCHECK(registry);
   ShellWindow* shell_window = registry->GetShellWindowForRenderViewHost(
       render_view_host());
@@ -967,10 +978,11 @@ bool DeveloperPrivateExportSyncfsFolderToLocalfsFunction::RunImpl() {
     return false;
   }
 
-  context_ = content::BrowserContext::GetStoragePartition(profile(),
-      render_view_host()->GetSiteInstance())->GetFileSystemContext();
+  context_ = content::BrowserContext::GetStoragePartition(
+      GetProfile(), render_view_host()->GetSiteInstance())
+                 ->GetFileSystemContext();
 
-  base::FilePath project_path(profile()->GetPath());
+  base::FilePath project_path(GetProfile()->GetPath());
   project_path = project_path.Append(kUnpackedAppsFolder);
   project_path = project_path.Append(project_name);
 
@@ -1129,11 +1141,11 @@ bool DeveloperPrivateLoadProjectFunction::RunImpl() {
     return false;
   }
 
-  base::FilePath path(profile()->GetPath());
+  base::FilePath path(GetProfile()->GetPath());
   path = path.Append(kUnpackedAppsFolder);
   // TODO(grv) : Sanitize / check project_name.
   path = path.Append(project_name);
-  ExtensionService* service = profile()->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
   UnpackedInstaller::Create(service)->Load(path);
 
   const ExtensionSet* extensions = service->extensions();
@@ -1201,7 +1213,7 @@ bool DeveloperPrivateChoosePathFunction::RunImpl() {
   AddRef();
   bool result = ShowPicker(
       type,
-      DeveloperPrivateAPI::Get(profile())->GetLastUnpackedDirectory(),
+      DeveloperPrivateAPI::Get(GetProfile())->GetLastUnpackedDirectory(),
       select_title,
       info,
       file_type_index);
@@ -1337,7 +1349,7 @@ bool DeveloperPrivateGetStringsFunction::RunImpl() {
 DeveloperPrivateGetStringsFunction::~DeveloperPrivateGetStringsFunction() {}
 
 bool DeveloperPrivateIsProfileManagedFunction::RunImpl() {
-  SetResult(new base::FundamentalValue(profile_->IsManaged()));
+  SetResult(new base::FundamentalValue(GetProfile()->IsManaged()));
   return true;
 }
 

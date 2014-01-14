@@ -9,11 +9,14 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/ui/app_list/search/common/webservice_cache.h"
 #include "chrome/browser/ui/app_list/search/search_provider.h"
 
 class Profile;
 
 namespace app_list {
+
+class WebserviceCache;
 
 // Helper class for webservice based searches.
 class WebserviceSearchProvider : public SearchProvider {
@@ -31,6 +34,7 @@ class WebserviceSearchProvider : public SearchProvider {
 
  protected:
   Profile* profile_;
+  WebserviceCache* cache_;  // BrowserContextKeyedService, not owned.
 
  private:
   bool IsSensitiveInput(const string16& query);

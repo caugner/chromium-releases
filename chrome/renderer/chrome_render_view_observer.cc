@@ -22,7 +22,6 @@
 #include "chrome/renderer/content_settings_observer.h"
 #include "chrome/renderer/extensions/dispatcher.h"
 #include "chrome/renderer/external_host_bindings.h"
-#include "chrome/renderer/frame_sniffer.h"
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #include "chrome/renderer/translate/translate_helper.h"
@@ -312,9 +311,6 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
                         OnSetVisuallyDeemphasized)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_RequestThumbnailForContextNode,
                         OnRequestThumbnailForContextNode)
-#if defined(OS_CHROMEOS)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_StartFrameSniffer, OnStartFrameSniffer)
-#endif
     IPC_MESSAGE_HANDLER(ChromeViewMsg_GetFPS, OnGetFPS)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_AddStrictSecurityHost,
                         OnAddStrictSecurityHost)
@@ -441,8 +437,9 @@ void ChromeRenderViewObserver::OnRetrieveWebappInformation(
     success = false;
   }
 
-  if (main_frame && is_apple_mobile_webapp_capable &&
-      !is_mobile_webapp_capable) {
+  bool is_only_apple_mobile_webapp_capable =
+      is_apple_mobile_webapp_capable && !is_mobile_webapp_capable;
+  if (main_frame && is_only_apple_mobile_webapp_capable) {
     WebKit::WebConsoleMessage message(
         WebKit::WebConsoleMessage::LevelWarning,
         "<meta name=\"apple-mobile-web-app-capable\" content=\"yes\"> is "
@@ -452,12 +449,12 @@ void ChromeRenderViewObserver::OnRetrieveWebappInformation(
     main_frame->addMessageToConsole(message);
   }
 
-  bool webapp_capable =
-      is_mobile_webapp_capable || is_apple_mobile_webapp_capable;
-  Send(new ChromeViewHostMsg_DidRetrieveWebappInformation(routing_id(),
-                                                          success,
-                                                          webapp_capable,
-                                                          expected_url));
+  Send(new ChromeViewHostMsg_DidRetrieveWebappInformation(
+      routing_id(),
+      success,
+      is_mobile_webapp_capable,
+      is_apple_mobile_webapp_capable,
+      expected_url));
 }
 #endif
 
@@ -503,8 +500,7 @@ void ChromeRenderViewObserver::OnRequestThumbnailForContextNode(
   WebNode context_node = render_view()->GetContextMenuNode();
   SkBitmap thumbnail;
   gfx::Size original_size;
-  CHECK(!context_node.isNull());
-  if (context_node.isElementNode()) {
+  if (!context_node.isNull() && context_node.isElementNode()) {
     WebKit::WebImage image = context_node.to<WebElement>().imageContents();
     original_size = image.size();
     thumbnail = Downscale(image,
@@ -513,10 +509,6 @@ void ChromeRenderViewObserver::OnRequestThumbnailForContextNode(
   }
   Send(new ChromeViewHostMsg_RequestThumbnailForContextNode_ACK(
       routing_id(), thumbnail, original_size));
-}
-
-void ChromeRenderViewObserver::OnStartFrameSniffer(const string16& frame_name) {
-  new FrameSniffer(render_view(), frame_name);
 }
 
 void ChromeRenderViewObserver::OnGetFPS() {
@@ -762,6 +754,15 @@ bool ChromeRenderViewObserver::allowRunningInsecureContent(
   return true;
 }
 
+bool ChromeRenderViewObserver::allowWebGLDebugRendererInfo(WebFrame* frame) {
+  bool allowed = false;
+  Send(new ChromeViewHostMsg_IsWebGLDebugRendererInfoAllowed(
+      routing_id(),
+      GURL(frame->top()->document().securityOrigin().toString().utf8()),
+      &allowed));
+  return allowed;
+}
+
 void ChromeRenderViewObserver::didNotAllowPlugins(WebFrame* frame) {
   content_settings_->DidNotAllowPlugins();
 }
@@ -828,19 +829,6 @@ void ChromeRenderViewObserver::DidClearWindowObject(WebFrame* frame) {
           content::BINDINGS_POLICY_EXTERNAL_HOST) {
     GetExternalHostBindings()->BindToJavascript(frame, "externalHost");
   }
-}
-
-void ChromeRenderViewObserver::DidHandleGestureEvent(
-    const WebGestureEvent& event) {
-  if (event.type != WebKit::WebGestureEvent::GestureTap)
-    return;
-
-  WebKit::WebTextInputType text_input_type =
-      render_view()->GetWebView()->textInputInfo().type;
-
-  render_view()->Send(new ChromeViewHostMsg_FocusedNodeTouched(
-      routing_id(),
-      text_input_type != WebKit::WebTextInputTypeNone));
 }
 
 void ChromeRenderViewObserver::DetailedConsoleMessageAdded(

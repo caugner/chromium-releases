@@ -24,6 +24,7 @@ enum ViewID {
   VIEW_ID_WINDOW_TITLE,
   VIEW_ID_AVATAR_LABEL,
   VIEW_ID_AVATAR_BUTTON,
+  VIEW_ID_NEW_AVATAR_BUTTON,
 
   // Tabs within a window/tab strip, counting from the left.
   VIEW_ID_TAB_0,
@@ -55,6 +56,7 @@ enum ViewID {
   VIEW_ID_FEEDBACK_BUTTON,
   VIEW_ID_OMNIBOX,
   VIEW_ID_SCRIPT_BUBBLE,
+  VIEW_ID_TRANSLATE_BUTTON,
 
   // The Bookmark Bar.
   VIEW_ID_BOOKMARK_BAR,
@@ -99,4 +101,3 @@ enum ViewID {
 };
 
 #endif  // CHROME_BROWSER_UI_VIEW_IDS_H_
-

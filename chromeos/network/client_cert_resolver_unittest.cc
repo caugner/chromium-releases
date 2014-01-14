@@ -11,6 +11,7 @@
 #include "base/json/json_reader.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/values.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_profile_client.h"
 #include "chromeos/dbus/shill_service_client.h"
@@ -145,12 +146,12 @@ class ClientCertResolverTest : public testing::Test {
     const bool add_to_watchlist = true;
     service_test_->AddService(kWifiStub,
                               kWifiSSID,
-                              flimflam::kTypeWifi,
-                              flimflam::kStateOnline,
+                              shill::kTypeWifi,
+                              shill::kStateOnline,
                               add_to_visible,
                               add_to_watchlist);
     service_test_->SetServiceProperty(
-        kWifiStub, flimflam::kGuidProperty, base::StringValue(kWifiStub));
+        kWifiStub, shill::kGuidProperty, base::StringValue(kWifiStub));
 
     profile_test_->AddService(kUserProfilePath, kWifiStub);
   }
@@ -187,7 +188,10 @@ class ClientCertResolverTest : public testing::Test {
     ASSERT_TRUE(policy_value->GetAsList(&policy));
 
     managed_config_handler_->SetPolicy(
-        onc::ONC_SOURCE_USER_POLICY, kUserHash, *policy);
+        onc::ONC_SOURCE_USER_POLICY,
+        kUserHash,
+        *policy,
+        base::DictionaryValue() /* no global network config */);
   }
 
   void GetClientCertProperties(std::string* pkcs11_id) {
@@ -196,7 +200,7 @@ class ClientCertResolverTest : public testing::Test {
         service_test_->GetServiceProperties(kWifiStub);
     if (!properties)
       return;
-    properties->GetStringWithoutPathExpansion(flimflam::kEapCertIdProperty,
+    properties->GetStringWithoutPathExpansion(shill::kEapCertIdProperty,
                                               pkcs11_id);
   }
 

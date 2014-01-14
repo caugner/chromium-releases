@@ -11,6 +11,7 @@
 #include <sys/types.h>
 
 #include "mock_util.h"
+#include "nacl_io/kernel_handle.h"
 #include "nacl_io/kernel_intercept.h"
 #include "nacl_io/mount_http.h"
 #include "nacl_io/mount_node_dir.h"
@@ -26,7 +27,6 @@ using ::testing::Mock;
 using ::testing::Return;
 using ::testing::SetArgPointee;
 using ::testing::StrEq;
-
 
 class MountHttpMock : public MountHttp {
  public:
@@ -163,10 +163,10 @@ TEST_F(MountHttpTest, ParseManifest) {
   EXPECT_FALSE(bar->GetStat(&sbar));
 
   EXPECT_EQ(123, sfoo.st_size);
-  EXPECT_EQ(S_IFREG | S_IREAD, sfoo.st_mode);
+  EXPECT_EQ(S_IFREG | S_IRALL, sfoo.st_mode);
 
   EXPECT_EQ(234, sbar.st_size);
-  EXPECT_EQ(S_IFREG | S_IREAD | S_IWRITE, sbar.st_mode);
+  EXPECT_EQ(S_IFREG | S_IRALL | S_IWALL, sbar.st_mode);
 }
 
 
@@ -444,14 +444,16 @@ TEST_F(MountHttpNodeTest, DISABLED_ReadCached) {
   ExpectHeaders("");
   SetResponse(200, "Content-Length: 42\n");
   SetResponseBody("Here is some response text. And some more.");
-  EXPECT_EQ(0, node_->Read(0, buf, sizeof(buf) - 1, &result_bytes));
+  HandleAttr attr;
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_STREQ("Here is s", &buf[0]);
   ResetMocks();
 
   // Further reads should be cached.
-  EXPECT_EQ(0, node_->Read(0, buf, sizeof(buf) - 1, &result_bytes));
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_STREQ("Here is s", &buf[0]);
-  EXPECT_EQ(0, node_->Read(10, buf, sizeof(buf) - 1, &result_bytes));
+  attr.offs = 10;
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_STREQ("me respon", &buf[0]);
 
   EXPECT_EQ(0, node_->GetSize(&result_size));
@@ -482,14 +484,16 @@ TEST_F(MountHttpNodeTest, DISABLED_ReadCachedNoContentLength) {
   char buf[10];
   memset(&buf[0], 0, sizeof(buf));
 
-  EXPECT_EQ(0, node_->Read(0, buf, sizeof(buf) - 1, &result_bytes));
+  HandleAttr attr;
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_STREQ("Here is s", &buf[0]);
   ResetMocks();
 
   // Further reads should be cached.
-  EXPECT_EQ(0, node_->Read(0, buf, sizeof(buf) - 1, &result_bytes));
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_STREQ("Here is s", &buf[0]);
-  EXPECT_EQ(0, node_->Read(10, buf, sizeof(buf) - 1, &result_bytes));
+  attr.offs = 10;
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_STREQ("me respon", &buf[0]);
 
   EXPECT_EQ(0, node_->GetSize(&result_size));
@@ -517,7 +521,8 @@ TEST_F(MountHttpNodeTest, DISABLED_ReadCachedUnderrun) {
   ExpectHeaders("");
   SetResponse(200, "Content-Length: 100\n");
   SetResponseBody("abcdefghijklmnopqrstuvwxyz");
-  EXPECT_EQ(0, node_->Read(0, buf, sizeof(buf) - 1, &result_bytes));
+  HandleAttr attr;
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_EQ(sizeof(buf) - 1, result_bytes);
   EXPECT_STREQ("abcdefghi", &buf[0]);
   ResetMocks();
@@ -547,7 +552,9 @@ TEST_F(MountHttpNodeTest, DISABLED_ReadCachedOverrun) {
   ExpectHeaders("");
   SetResponse(200, "Content-Length: 15\n");
   SetResponseBody("01234567890123456789");
-  EXPECT_EQ(0, node_->Read(10, buf, sizeof(buf) - 1, &result_bytes));
+  HandleAttr attr;
+  attr.offs = 10;
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_EQ(5, result_bytes);
   EXPECT_STREQ("01234", &buf[0]);
   ResetMocks();
@@ -575,7 +582,8 @@ TEST_F(MountHttpNodeTest, DISABLED_ReadPartial) {
   ExpectHeaders("Range: bytes=0-8\n");
   SetResponse(206, "Content-Length: 9\nContent-Range: bytes=0-8\n");
   SetResponseBody("012345678");
-  EXPECT_EQ(0, node_->Read(0, buf, sizeof(buf) - 1, &result_bytes));
+  HandleAttr attr;
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_EQ(sizeof(buf) - 1, result_bytes);
   EXPECT_STREQ("012345678", &buf[0]);
   ResetMocks();
@@ -585,7 +593,8 @@ TEST_F(MountHttpNodeTest, DISABLED_ReadPartial) {
   ExpectHeaders("Range: bytes=10-18\n");
   SetResponse(206, "Content-Length: 9\nContent-Range: bytes=10-18\n");
   SetResponseBody("abcdefghi");
-  EXPECT_EQ(0, node_->Read(10, buf, sizeof(buf) - 1, &result_bytes));
+  attr.offs = 10;
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_EQ(sizeof(buf) - 1, result_bytes);
   EXPECT_STREQ("abcdefghi", &buf[0]);
 }
@@ -609,7 +618,9 @@ TEST_F(MountHttpNodeTest, DISABLED_ReadPartialNoServerSupport) {
   ExpectHeaders("Range: bytes=10-18\n");
   SetResponse(200, "Content-Length: 20\n");
   SetResponseBody("0123456789abcdefghij");
-  EXPECT_EQ(0, node_->Read(10, buf, sizeof(buf) - 1, &result_bytes));
+  HandleAttr attr;
+  attr.offs = 10;
+  EXPECT_EQ(0, node_->Read(attr, buf, sizeof(buf) - 1, &result_bytes));
   EXPECT_EQ(sizeof(buf) - 1, result_bytes);
   EXPECT_STREQ("abcdefghi", &buf[0]);
 }

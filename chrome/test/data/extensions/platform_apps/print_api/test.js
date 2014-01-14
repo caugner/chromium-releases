@@ -4,18 +4,12 @@
 
 chrome.app.runtime.onLaunched.addListener(function() {
   chrome.test.getConfig(function(config) {
-    chrome.test.runTests([
-      function testWindowDotPrintApi() {
-        chrome.app.window.create('test.html', {}, chrome.test.callbackPass(
-            function(appWindow) {
-              appWindow.contentWindow.onload = chrome.test.callbackPass(
-                  function() {
-                    appWindow.contentWindow.print();
-                    if (config.customArg === 'close')
-                      appWindow.contentWindow.close();
-                  });
-            }));
-      }
-    ]);
+    var options = {bounds: {width: 200, height: 100}};
+    chrome.app.window.create('test.html', options, function(appWindow) {
+      appWindow.contentWindow.onload = function() {
+        appWindow.contentWindow.print();
+        chrome.test.notifyPass();
+      };
+    });
   });
 });

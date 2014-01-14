@@ -21,6 +21,7 @@
 #include "chrome/test/chromedriver/chrome/adb_impl.h"
 #include "chrome/test/chromedriver/chrome/device_manager.h"
 #include "chrome/test/chromedriver/chrome/status.h"
+#include "chrome/test/chromedriver/net/port_server.h"
 #include "chrome/test/chromedriver/net/url_request_context_getter.h"
 #include "chrome/test/chromedriver/session.h"
 #include "chrome/test/chromedriver/session_thread_map.h"
@@ -65,7 +66,8 @@ HttpHandler::HttpHandler(
     const base::Closure& quit_func,
     const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     const std::string& url_base,
-    int adb_port)
+    int adb_port,
+    scoped_ptr<PortServer> port_server)
     : quit_func_(quit_func),
       url_base_(url_base),
       received_shutdown_(false),
@@ -77,6 +79,8 @@ HttpHandler::HttpHandler(
   socket_factory_ = CreateSyncWebSocketFactory(context_getter_.get());
   adb_.reset(new AdbImpl(io_task_runner, adb_port));
   device_manager_.reset(new DeviceManager(adb_.get()));
+  port_server_ = port_server.Pass();
+  port_manager_.reset(new PortManager(12000, 13000));
 
   CommandMapping commands[] = {
       CommandMapping(
@@ -84,12 +88,14 @@ HttpHandler::HttpHandler(
           internal::kNewSessionPathPattern,
           base::Bind(&ExecuteCreateSession,
                      &session_thread_map_,
-                     WrapToCommand("InitSession",
-                                   base::Bind(&ExecuteInitSession,
-                                              InitSessionParams(
-                                                  context_getter_,
-                                                  socket_factory_,
-                                                  device_manager_.get()))))),
+                     WrapToCommand(
+                         "InitSession",
+                         base::Bind(&ExecuteInitSession,
+                                    InitSessionParams(context_getter_,
+                                                      socket_factory_,
+                                                      device_manager_.get(),
+                                                      port_server_.get(),
+                                                      port_manager_.get()))))),
       CommandMapping(kGet,
                      "session/:sessionId",
                      WrapToCommand("GetSessionCapabilities",
@@ -173,6 +179,10 @@ HttpHandler::HttpHandler(
           kGet,
           "session/:sessionId/screenshot",
           WrapToCommand("Screenshot", base::Bind(&ExecuteScreenshot))),
+      CommandMapping(
+          kGet,
+          "session/:sessionId/chromium/heap_snapshot",
+          WrapToCommand("HeapSnapshot", base::Bind(&ExecuteTakeHeapSnapshot))),
       CommandMapping(kPost,
                      "session/:sessionId/visible",
                      base::Bind(&UnimplementedCommand)),

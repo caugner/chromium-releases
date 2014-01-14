@@ -6,6 +6,7 @@
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/stl_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -16,7 +17,6 @@
 #include "chrome/browser/extensions/external_policy_loader.h"
 #include "chrome/browser/extensions/updater/extension_downloader.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
@@ -428,7 +428,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, MAYBE_ExternalUrlUpdate) {
 
   EXPECT_TRUE(pending_extension_manager->AddFromExternalUpdateUrl(
       kExtensionId, GURL("http://localhost/autoupdate/manifest"),
-      Manifest::EXTERNAL_PREF_DOWNLOAD));
+      Manifest::EXTERNAL_PREF_DOWNLOAD, Extension::NO_FLAGS, false));
 
   // Run autoupdate and make sure version 2 of the extension was installed.
   service->updater()->CheckNow(params);
@@ -451,7 +451,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, MAYBE_ExternalUrlUpdate) {
   // because of the killbit.
   EXPECT_FALSE(pending_extension_manager->AddFromExternalUpdateUrl(
       kExtensionId, GURL("http://localhost/autoupdate/manifest"),
-      Manifest::EXTERNAL_PREF_DOWNLOAD));
+      Manifest::EXTERNAL_PREF_DOWNLOAD, Extension::NO_FLAGS, false));
   EXPECT_FALSE(pending_extension_manager->IsIdPending(kExtensionId))
       << "External reinstall of a killed extension shouldn't work.";
   EXPECT_TRUE(extension_prefs->IsExternalExtensionUninstalled(kExtensionId))

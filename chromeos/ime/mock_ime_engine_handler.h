@@ -14,13 +14,11 @@ class MockIMEEngineHandler : public IBusEngineHandlerInterface {
   MockIMEEngineHandler();
   virtual ~MockIMEEngineHandler();
 
-  virtual void FocusIn() OVERRIDE;
+  virtual void FocusIn(ibus::TextInputType text_input_type) OVERRIDE;
   virtual void FocusOut() OVERRIDE;
   virtual void Enable() OVERRIDE;
   virtual void Disable() OVERRIDE;
-  virtual void PropertyActivate(
-      const std::string& property_name,
-      ibus::IBusPropertyState property_state) OVERRIDE;
+  virtual void PropertyActivate(const std::string& property_name) OVERRIDE;
   virtual void PropertyShow(const std::string& property_name) OVERRIDE;
   virtual void PropertyHide(const std::string& property_name) OVERRIDE;
   virtual void SetCapability(IBusCapability capability) OVERRIDE;
@@ -40,6 +38,10 @@ class MockIMEEngineHandler : public IBusEngineHandlerInterface {
   }
   int process_key_event_call_count() const {
     return process_key_event_call_count_;
+  }
+
+  ibus::TextInputType last_text_input_type() const {
+    return last_text_input_type_;
   }
 
   std::string last_set_surrounding_text() const {
@@ -76,6 +78,7 @@ class MockIMEEngineHandler : public IBusEngineHandlerInterface {
   int set_surrounding_text_call_count_;
   int process_key_event_call_count_;
   int reset_call_count_;
+  ibus::TextInputType last_text_input_type_;
   std::string last_set_surrounding_text_;
   uint32 last_set_surrounding_cursor_pos_;
   uint32 last_set_surrounding_anchor_pos_;

@@ -703,6 +703,7 @@ class DownloadTest : public InProcessBrowserTest {
     GURL slow_download_url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
     DownloadManager* manager = DownloadManagerForBrowser(browser());
 
+    EXPECT_EQ(0, manager->NonMaliciousInProgressCount());
     EXPECT_EQ(0, manager->InProgressCount());
     if (manager->InProgressCount() != 0)
       return NULL;
@@ -1293,10 +1294,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadResourceThrottleCancels) {
       "window.domAutomationController.send(startDownload());",
       &download_assempted));
   ASSERT_TRUE(download_assempted);
-  observer.WaitForObservation(
-      base::Bind(&content::RunMessageLoop),
-      base::Bind(&base::MessageLoop::Quit,
-                 base::Unretained(base::MessageLoopForUI::current())));
+  observer.Wait();
 
   // Check that we did not download the file.
   base::FilePath file(FILE_PATH_LITERAL("download-test1.lib"));

@@ -40,7 +40,7 @@
 #endif
 #if defined(USE_AURA)
 #include "ui/aura/root_window.h"
-#include "ui/base/gestures/gesture_recognizer.h"
+#include "ui/events/gestures/gesture_recognizer.h"
 #endif
 
 using ::testing::_;
@@ -936,7 +936,8 @@ class HitTestView : public View {
   virtual bool HasHitTestMask() const OVERRIDE {
     return has_hittest_mask_;
   }
-  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE {
+  virtual void GetHitTestMask(HitTestSource source,
+                              gfx::Path* mask) const OVERRIDE {
     DCHECK(has_hittest_mask_);
     DCHECK(mask);
 
@@ -1247,21 +1248,21 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   normal->SelectAll(false);
   normal->ExecuteCommand(IDS_APP_CUT);
   string16 result;
-  clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
+  clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   EXPECT_EQ(kNormalText, result);
   normal->SetText(kNormalText);  // Let's revert to the original content.
 
   read_only->SelectAll(false);
   read_only->ExecuteCommand(IDS_APP_CUT);
   result.clear();
-  clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
+  clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   // Cut should have failed, so the clipboard content should not have changed.
   EXPECT_EQ(kNormalText, result);
 
   password->SelectAll(false);
   password->ExecuteCommand(IDS_APP_CUT);
   result.clear();
-  clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
+  clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   // Cut should have failed, so the clipboard content should not have changed.
   EXPECT_EQ(kNormalText, result);
 
@@ -1273,19 +1274,19 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   read_only->SelectAll(false);
   read_only->ExecuteCommand(IDS_APP_COPY);
   result.clear();
-  clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
+  clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   EXPECT_EQ(kReadOnlyText, result);
 
   normal->SelectAll(false);
   normal->ExecuteCommand(IDS_APP_COPY);
   result.clear();
-  clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
+  clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   EXPECT_EQ(kNormalText, result);
 
   password->SelectAll(false);
   password->ExecuteCommand(IDS_APP_COPY);
   result.clear();
-  clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
+  clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   // Text cannot be copied from an obscured field; the clipboard won't change.
   EXPECT_EQ(kNormalText, result);
 
@@ -1721,7 +1722,7 @@ TEST_F(ViewTest, TransformEvent) {
   // Now rotate |v2| inside |v1| clockwise.
   transform = v2->GetTransform();
   RotateClockwise(&transform);
-  transform.matrix().setDouble(0, 3, 100.0);
+  transform.matrix().set(0, 3, 100.f);
   v2->SetTransform(transform);
 
   // Now, |v2| occupies (100, 100) to (200, 300) in |v1|, and (100, 300) to
@@ -1751,13 +1752,13 @@ TEST_F(ViewTest, TransformEvent) {
   // Rotate |v3| clockwise with respect to |v2|.
   transform = v1->GetTransform();
   RotateClockwise(&transform);
-  transform.matrix().setDouble(0, 3, 30.0);
+  transform.matrix().set(0, 3, 30.f);
   v3->SetTransform(transform);
 
   // Scale |v2| with respect to |v1| along both axis.
   transform = v2->GetTransform();
-  transform.matrix().setDouble(0, 0, 0.8);
-  transform.matrix().setDouble(1, 1, 0.5);
+  transform.matrix().set(0, 0, 0.8f);
+  transform.matrix().set(1, 1, 0.5f);
   v2->SetTransform(transform);
 
   // |v3| occupies (108, 105) to (132, 115) in |root|.
@@ -1788,19 +1789,19 @@ TEST_F(ViewTest, TransformEvent) {
   // Rotate |v3| clockwise with respect to |v2|, and scale it along both axis.
   transform = v3->GetTransform();
   RotateClockwise(&transform);
-  transform.matrix().setDouble(0, 3, 30.0);
+  transform.matrix().set(0, 3, 30.f);
   // Rotation sets some scaling transformation. Using SetScale would overwrite
   // that and pollute the rotation. So combine the scaling with the existing
   // transforamtion.
   gfx::Transform scale;
-  scale.Scale(0.8, 0.5);
+  scale.Scale(0.8f, 0.5f);
   transform.ConcatTransform(scale);
   v3->SetTransform(transform);
 
   // Translate |v2| with respect to |v1|.
   transform = v2->GetTransform();
-  transform.matrix().setDouble(0, 3, 10.0);
-  transform.matrix().setDouble(1, 3, 10.0);
+  transform.matrix().set(0, 3, 10.f);
+  transform.matrix().set(1, 3, 10.f);
   v2->SetTransform(transform);
 
   // |v3| now occupies (120, 120) to (144, 130) in |root|.
@@ -1844,7 +1845,7 @@ TEST_F(ViewTest, TransformVisibleBound) {
   // Rotate |child| counter-clockwise
   gfx::Transform transform;
   RotateCounterclockwise(&transform);
-  transform.matrix().setDouble(1, 3, 50.0);
+  transform.matrix().set(1, 3, 50.f);
   child->SetTransform(transform);
   EXPECT_EQ(gfx::Rect(40, 0, 10, 50), child->GetVisibleBounds());
 
@@ -1946,10 +1947,15 @@ TEST_F(ViewTest, SetBoundsPaint) {
 }
 
 // Tests conversion methods with a transform.
-TEST_F(ViewTest, ConvertPointToViewWithTransform) {
+TEST_F(ViewTest, ConversionsWithTransform) {
   TestView top_view;
+
+  // View hierarchy used to test scale transforms.
   TestView* child = new TestView;
   TestView* child_child = new TestView;
+
+  // View used to test a rotation transform.
+  TestView* child_2 = new TestView;
 
   top_view.AddChildView(child);
   child->AddChildView(child_child);
@@ -1965,6 +1971,12 @@ TEST_F(ViewTest, ConvertPointToViewWithTransform) {
   transform.MakeIdentity();
   transform.Scale(5.0, 7.0);
   child_child->SetTransform(transform);
+
+  top_view.AddChildView(child_2);
+  child_2->SetBoundsRect(gfx::Rect(700, 725, 100, 100));
+  transform.MakeIdentity();
+  RotateClockwise(&transform);
+  child_2->SetTransform(transform);
 
   // Sanity check to make sure basic transforms act as expected.
   {
@@ -2012,10 +2024,24 @@ TEST_F(ViewTest, ConvertPointToViewWithTransform) {
     EXPECT_EQ(22, point.x());
     EXPECT_EQ(39, point.y());
 
+    gfx::RectF rect(5.0f, 5.0f, 10.0f, 20.0f);
+    View::ConvertRectToTarget(child, &top_view, &rect);
+    EXPECT_FLOAT_EQ(22.0f, rect.x());
+    EXPECT_FLOAT_EQ(39.0f, rect.y());
+    EXPECT_FLOAT_EQ(30.0f, rect.width());
+    EXPECT_FLOAT_EQ(80.0f, rect.height());
+
     point.SetPoint(22, 39);
     View::ConvertPointToTarget(&top_view, child, &point);
     EXPECT_EQ(5, point.x());
     EXPECT_EQ(5, point.y());
+
+    rect.SetRect(22.0f, 39.0f, 30.0f, 80.0f);
+    View::ConvertRectToTarget(&top_view, child, &rect);
+    EXPECT_FLOAT_EQ(5.0f, rect.x());
+    EXPECT_FLOAT_EQ(5.0f, rect.y());
+    EXPECT_FLOAT_EQ(10.0f, rect.width());
+    EXPECT_FLOAT_EQ(20.0f, rect.height());
   }
 
   // Conversions from child_child->top and top->child_child.
@@ -2025,10 +2051,24 @@ TEST_F(ViewTest, ConvertPointToViewWithTransform) {
     EXPECT_EQ(133, point.x());
     EXPECT_EQ(211, point.y());
 
+    gfx::RectF rect(5.0f, 5.0f, 10.0f, 20.0f);
+    View::ConvertRectToTarget(child_child, &top_view, &rect);
+    EXPECT_FLOAT_EQ(133.0f, rect.x());
+    EXPECT_FLOAT_EQ(211.0f, rect.y());
+    EXPECT_FLOAT_EQ(150.0f, rect.width());
+    EXPECT_FLOAT_EQ(560.0f, rect.height());
+
     point.SetPoint(133, 211);
     View::ConvertPointToTarget(&top_view, child_child, &point);
     EXPECT_EQ(5, point.x());
     EXPECT_EQ(5, point.y());
+
+    rect.SetRect(133.0f, 211.0f, 150.0f, 560.0f);
+    View::ConvertRectToTarget(&top_view, child_child, &rect);
+    EXPECT_FLOAT_EQ(5.0f, rect.x());
+    EXPECT_FLOAT_EQ(5.0f, rect.y());
+    EXPECT_FLOAT_EQ(10.0f, rect.width());
+    EXPECT_FLOAT_EQ(20.0f, rect.height());
   }
 
   // Conversions from child_child->child and child->child_child
@@ -2038,10 +2078,24 @@ TEST_F(ViewTest, ConvertPointToViewWithTransform) {
     EXPECT_EQ(42, point.x());
     EXPECT_EQ(48, point.y());
 
+    gfx::RectF rect(5.0f, 5.0f, 10.0f, 20.0f);
+    View::ConvertRectToTarget(child_child, child, &rect);
+    EXPECT_FLOAT_EQ(42.0f, rect.x());
+    EXPECT_FLOAT_EQ(48.0f, rect.y());
+    EXPECT_FLOAT_EQ(50.0f, rect.width());
+    EXPECT_FLOAT_EQ(140.0f, rect.height());
+
     point.SetPoint(42, 48);
     View::ConvertPointToTarget(child, child_child, &point);
     EXPECT_EQ(5, point.x());
     EXPECT_EQ(5, point.y());
+
+    rect.SetRect(42.0f, 48.0f, 50.0f, 140.0f);
+    View::ConvertRectToTarget(child, child_child, &rect);
+    EXPECT_FLOAT_EQ(5.0f, rect.x());
+    EXPECT_FLOAT_EQ(5.0f, rect.y());
+    EXPECT_FLOAT_EQ(10.0f, rect.width());
+    EXPECT_FLOAT_EQ(20.0f, rect.height());
   }
 
   // Conversions from top_view to child with a value that should be negative.
@@ -2051,6 +2105,31 @@ TEST_F(ViewTest, ConvertPointToViewWithTransform) {
     View::ConvertPointToTarget(&top_view, child, &point);
     EXPECT_EQ(-1, point.x());
     EXPECT_EQ(-1, point.y());
+
+    float error = 0.01f;
+    gfx::RectF rect(6.0f, 18.0f, 10.0f, 39.0f);
+    View::ConvertRectToTarget(&top_view, child, &rect);
+    EXPECT_NEAR(-0.33f, rect.x(), error);
+    EXPECT_NEAR(-0.25f, rect.y(), error);
+    EXPECT_NEAR(3.33f, rect.width(), error);
+    EXPECT_NEAR(9.75f, rect.height(), error);
+  }
+
+  // Rect conversions from top_view->child_2 and child_2->top_view.
+  {
+    gfx::RectF rect(50.0f, 55.0f, 20.0f, 30.0f);
+    View::ConvertRectToTarget(child_2, &top_view, &rect);
+    EXPECT_FLOAT_EQ(615.0f, rect.x());
+    EXPECT_FLOAT_EQ(775.0f, rect.y());
+    EXPECT_FLOAT_EQ(30.0f, rect.width());
+    EXPECT_FLOAT_EQ(20.0f, rect.height());
+
+    rect.SetRect(615.0f, 775.0f, 30.0f, 20.0f);
+    View::ConvertRectToTarget(&top_view, child_2, &rect);
+    EXPECT_FLOAT_EQ(50.0f, rect.x());
+    EXPECT_FLOAT_EQ(55.0f, rect.y());
+    EXPECT_FLOAT_EQ(20.0f, rect.width());
+    EXPECT_FLOAT_EQ(30.0f, rect.height());
   }
 }
 
@@ -2079,7 +2158,7 @@ TEST_F(ViewTest, ConvertRectWithTransform) {
   // Rotate |v2|
   gfx::Transform t2;
   RotateCounterclockwise(&t2);
-  t2.matrix().setDouble(1, 3, 100.0);
+  t2.matrix().set(1, 3, 100.f);
   v2->SetTransform(t2);
 
   // |v2| now occupies (30, 30) to (230, 130) in |widget|

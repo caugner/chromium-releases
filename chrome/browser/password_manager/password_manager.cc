@@ -72,6 +72,8 @@ void PasswordManager::RegisterProfilePrefs(
       prefs::kPasswordManagerAllowShowPasswords,
       true,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kPasswordManagerGroupsForDomains,
+                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 // static
@@ -226,7 +228,8 @@ void PasswordManager::RecordFailure(ProvisionalSaveFailure failure,
                             failure, MAX_FAILURE_VALUE);
 
   std::string group_name = password_manager_metrics_util::GroupIdToString(
-      password_manager_metrics_util::MonitoredDomainGroupId(form_origin));
+      password_manager_metrics_util::MonitoredDomainGroupId(
+          form_origin, delegate_->GetProfile()->GetPrefs()));
   if (!group_name.empty()) {
     password_manager_metrics_util::LogUMAHistogramEnumeration(
         "PasswordManager.ProvisionalSaveFailure_" + group_name, failure,
@@ -253,7 +256,8 @@ void PasswordManager::DidNavigateMainFrame(
   // Clear data after main frame navigation. We don't want to clear data after
   // subframe navigation as there might be password forms on other frames that
   // could be submitted.
-  pending_login_managers_.clear();
+  if (!details.is_in_page)
+    pending_login_managers_.clear();
 }
 
 bool PasswordManager::OnMessageReceived(const IPC::Message& message) {

@@ -22,6 +22,7 @@ import urlparse
 import app_notification_specifics_pb2
 import app_setting_specifics_pb2
 import app_specifics_pb2
+import article_specifics_pb2
 import autofill_specifics_pb2
 import bookmark_specifics_pb2
 import dictionary_specifics_pb2
@@ -54,6 +55,7 @@ ALL_TYPES = (
     APPS,
     APP_NOTIFICATION,
     APP_SETTINGS,
+    ARTICLE,
     AUTOFILL,
     AUTOFILL_PROFILE,
     BOOKMARK,
@@ -75,7 +77,7 @@ ALL_TYPES = (
     TYPED_URL,
     EXTENSION_SETTINGS,
     FAVICON_IMAGES,
-    FAVICON_TRACKING) = range(26)
+    FAVICON_TRACKING) = range(27)
 
 # An enumeration on the frequency at which the server should send errors
 # to the client. This would be specified by the url that triggers the error.
@@ -95,6 +97,7 @@ SYNC_TYPE_TO_DESCRIPTOR = {
     APP_NOTIFICATION: SYNC_TYPE_FIELDS['app_notification'],
     APP_SETTINGS: SYNC_TYPE_FIELDS['app_setting'],
     APPS: SYNC_TYPE_FIELDS['app'],
+    ARTICLE: SYNC_TYPE_FIELDS['article'],
     AUTOFILL: SYNC_TYPE_FIELDS['autofill'],
     AUTOFILL_PROFILE: SYNC_TYPE_FIELDS['autofill_profile'],
     BOOKMARK: SYNC_TYPE_FIELDS['bookmark'],
@@ -448,8 +451,7 @@ class UpdateSieve(object):
         final_stamp = max(old_timestamp, new_timestamp)
         final_migration = self._migration_history.GetLatestVersion(data_type)
         new_marker.token = pickle.dumps((final_stamp, final_migration))
-        if new_marker not in self._original_request.from_progress_marker:
-          get_updates_response.new_progress_marker.add().MergeFrom(new_marker)
+        get_updates_response.new_progress_marker.add().MergeFrom(new_marker)
     elif self._original_request.HasField('from_timestamp'):
       if self._original_request.from_timestamp < new_timestamp:
         get_updates_response.new_timestamp = new_timestamp
@@ -530,6 +532,8 @@ class SyncDataModel(object):
                     parent_tag=ROOT_ID, sync_type=TYPED_URL),
       PermanentItem('google_chrome_dictionary', name='Dictionary',
                     parent_tag=ROOT_ID, sync_type=DICTIONARY),
+      PermanentItem('google_chrome_articles', name='Articles',
+                    parent_tag=ROOT_ID, sync_type=ARTICLE),
       ]
 
   def __init__(self):
@@ -925,7 +929,7 @@ class SyncDataModel(object):
     # tombstone.  A sync server must track deleted IDs forever, since it does
     # not keep track of client knowledge (there's no deletion ACK event).
     if entry.deleted:
-      def MakeTombstone(id_string):
+      def MakeTombstone(id_string, datatype):
         """Make a tombstone entry that will replace the entry being deleted.
 
         Args:
@@ -934,13 +938,11 @@ class SyncDataModel(object):
           A new SyncEntity reflecting the fact that the entry is deleted.
         """
         # Only the ID, version and deletion state are preserved on a tombstone.
-        # TODO(nick): Does the production server not preserve the type?  Not
-        # doing so means that tombstones cannot be filtered based on
-        # requested_types at GetUpdates time.
         tombstone = sync_pb2.SyncEntity()
         tombstone.id_string = id_string
         tombstone.deleted = True
         tombstone.name = ''
+        tombstone.specifics.CopyFrom(GetDefaultEntitySpecifics(datatype))
         return tombstone
 
       def IsChild(child_id):
@@ -963,10 +965,12 @@ class SyncDataModel(object):
 
       # Mark all children that were identified as deleted.
       for child_id in child_ids:
-        self._SaveEntry(MakeTombstone(child_id))
+        datatype = GetEntryType(self._entries[child_id])
+        self._SaveEntry(MakeTombstone(child_id, datatype))
 
       # Delete entry itself.
-      entry = MakeTombstone(entry.id_string)
+      datatype = GetEntryType(self._entries[entry.id_string])
+      entry = MakeTombstone(entry.id_string, datatype)
     else:
       # Comments in sync.proto detail how the representation of positional
       # ordering works.

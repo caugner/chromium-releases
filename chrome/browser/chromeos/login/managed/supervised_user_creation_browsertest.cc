@@ -15,7 +15,8 @@
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
-#include "chrome/browser/chromeos/net/network_portal_detector_stub.h"
+#include "chrome/browser/chromeos/net/network_portal_detector_test_impl.h"
+#include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
 #include "chrome/browser/managed_mode/managed_user_registration_utility.h"
 #include "chrome/browser/managed_mode/managed_user_registration_utility_stub.h"
 #include "chrome/common/chrome_switches.h"
@@ -41,12 +42,12 @@ const char kSupervisedUserPassword[] = "simplepassword";
 
 }  // namespace
 
-class SupervisedUserCreationTest : public chromeos::LoginManagerTest {
+class SupervisedUserTest : public chromeos::LoginManagerTest {
  protected:
-  SupervisedUserCreationTest() : LoginManagerTest(true),
-                                 mock_async_method_caller_(NULL),
-                                 network_portal_detector_stub_(NULL),
-                                 registration_utility_stub_(NULL) {
+  SupervisedUserTest() : LoginManagerTest(true),
+                         mock_async_method_caller_(NULL),
+                         network_portal_detector_(NULL),
+                         registration_utility_stub_(NULL) {
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
@@ -69,15 +70,14 @@ class SupervisedUserCreationTest : public chromeos::LoginManagerTest {
     // Setup network portal detector to return online state for both
     // ethernet and wifi networks. Ethernet is an active network by
     // default.
-    network_portal_detector_stub_ =
-        static_cast<NetworkPortalDetectorStub*>(
-            NetworkPortalDetector::GetInstance());
+    network_portal_detector_ = new NetworkPortalDetectorTestImpl();
+    NetworkPortalDetector::InitializeForTesting(network_portal_detector_);
     NetworkPortalDetector::CaptivePortalState online_state;
     online_state.status = NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE;
     online_state.response_code = 204;
-    network_portal_detector_stub_->SetDefaultNetworkPathForTesting(
+    network_portal_detector_->SetDefaultNetworkPathForTesting(
         kStubEthernetServicePath);
-    network_portal_detector_stub_->SetDetectionResultsForTesting(
+    network_portal_detector_->SetDetectionResultsForTesting(
         kStubEthernetServicePath, online_state);
   }
 
@@ -90,6 +90,10 @@ class SupervisedUserCreationTest : public chromeos::LoginManagerTest {
     cryptohome::AsyncMethodCaller::Shutdown();
     mock_async_method_caller_ = NULL;
     LoginManagerTest::TearDown();
+  }
+
+  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
+    NetworkPortalDetector::Shutdown();
   }
 
   void JSEval(const std::string& script) {
@@ -118,24 +122,29 @@ class SupervisedUserCreationTest : public chromeos::LoginManagerTest {
     JSEval(function);
   }
 
+  void PrepareUsers();
+  void CreateSupervisedUser();
+  void SigninAsSupervisedUser();
+  void RemoveSupervisedUser();
+  void LogInAsManagerAndFillUserData();
+
  protected:
    cryptohome::MockAsyncMethodCaller* mock_async_method_caller_;
-   NetworkPortalDetectorStub* network_portal_detector_stub_;
+   NetworkPortalDetectorTestImpl* network_portal_detector_;
    ManagedUserRegistrationUtilityStub* registration_utility_stub_;
    scoped_ptr<ScopedTestingManagedUserRegistrationUtility> scoped_utility_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SupervisedUserCreationTest);
+  DISALLOW_COPY_AND_ASSIGN(SupervisedUserTest);
 };
 
-IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
-    PRE_PRE_CreateSupervisedUser) {
+void SupervisedUserTest::PrepareUsers() {
   RegisterUser(kTestManager);
   RegisterUser(kTestOtherUser);
   chromeos::StartupUtils::MarkOobeCompleted();
 }
 
-IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest, PRE_CreateSupervisedUser) {
+void SupervisedUserTest::LogInAsManagerAndFillUserData() {
   // Create supervised user.
 
   // Navigate to supervised user creation screen.
@@ -207,6 +216,10 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest, PRE_CreateSupervisedUser) {
 
   JSEval("$('managed-user-creation').updateNextButtonForUser_()");
   JSExpect("!$('managed-user-creation-next-button').disabled");
+}
+
+void SupervisedUserTest::CreateSupervisedUser() {
+  LogInAsManagerAndFillUserData();
 
   EXPECT_CALL(*mock_async_method_caller_, AsyncMount(_, _, _, _))
       .Times(1);
@@ -234,13 +247,150 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest, PRE_CreateSupervisedUser) {
   JSEval("$('managed-user-creation-gotit-button').click()");
 }
 
-IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest, CreateSupervisedUser) {
+void SupervisedUserTest::SigninAsSupervisedUser() {
   // Log in as supervised user, make sure that everything works.
   ASSERT_EQ(3UL, UserManager::Get()->GetUsers().size());
   // Created supervised user have to be first in a list.
   const User* user = UserManager::Get()->GetUsers().at(0);
   ASSERT_EQ(UTF8ToUTF16(kSupervisedUserDisplayName), user->display_name());
   LoginUser(user->email());
+}
+
+void SupervisedUserTest::RemoveSupervisedUser() {
+  // Remove supervised user.
+
+  ASSERT_EQ(3UL, UserManager::Get()->GetUsers().size());
+  // Created supervised user have to be first in a list.
+  const User* user = UserManager::Get()->GetUsers().at(0);
+  ASSERT_EQ(UTF8ToUTF16(kSupervisedUserDisplayName), user->display_name());
+
+  // Open pod menu.
+  JSExpect("!$('pod-row').pods[0].isActionBoxMenuActive");
+  JSEval("$('pod-row').pods[0].querySelector('.action-box-button').click()");
+  JSExpect("$('pod-row').pods[0].isActionBoxMenuActive");
+
+  // Select "Remove user" element.
+  JSExpect("$('pod-row').pods[0].actionBoxRemoveUserWarningElement.hidden");
+  JSEval(std::string("$('pod-row').pods[0].")
+      .append("querySelector('.action-box-menu-remove').click()"));
+  JSExpect("!$('pod-row').pods[0].actionBoxRemoveUserWarningElement.hidden");
+
+  EXPECT_CALL(*mock_async_method_caller_, AsyncRemove(_, _)).Times(1);
+
+  // Confirm deletion.
+  JSEval(std::string("$('pod-row').pods[0].")
+      .append("querySelector('.remove-warning-button').click()"));
+
+  // Make sure there is no supervised user in list.
+  ASSERT_EQ(2UL, UserManager::Get()->GetUsers().size());
+}
+
+class SupervisedUserCreationTest : public SupervisedUserTest {
+ public:
+  SupervisedUserCreationTest() : SupervisedUserTest() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SupervisedUserCreationTest);
+};
+
+class SupervisedUserTransactionCleanupTest : public SupervisedUserTest {
+ public:
+  SupervisedUserTransactionCleanupTest() : SupervisedUserTest () {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SupervisedUserTransactionCleanupTest);
+};
+
+class SupervisedUserOwnerCreationTest : public SupervisedUserTest {
+ public:
+  SupervisedUserOwnerCreationTest() : SupervisedUserTest() {}
+
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+    SupervisedUserTest::SetUpInProcessBrowserTestFixture();
+    cros_settings_provider_.reset(new StubCrosSettingsProvider());
+    cros_settings_provider_->Set(kDeviceOwner, base::StringValue(kTestManager));
+  }
+
+ private:
+  scoped_ptr<StubCrosSettingsProvider> cros_settings_provider_;
+  DISALLOW_COPY_AND_ASSIGN(SupervisedUserOwnerCreationTest);
+};
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
+    PRE_PRE_PRE_CreateAndRemoveSupervisedUser) {
+  PrepareUsers();
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
+    PRE_PRE_CreateAndRemoveSupervisedUser) {
+  CreateSupervisedUser();
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
+    PRE_CreateAndRemoveSupervisedUser) {
+  SigninAsSupervisedUser();
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserCreationTest,
+    CreateAndRemoveSupervisedUser) {
+  RemoveSupervisedUser();
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserOwnerCreationTest,
+    PRE_PRE_PRE_CreateAndRemoveSupervisedUser) {
+  PrepareUsers();
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserOwnerCreationTest,
+    PRE_PRE_CreateAndRemoveSupervisedUser) {
+  CreateSupervisedUser();
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserOwnerCreationTest,
+    PRE_CreateAndRemoveSupervisedUser) {
+  SigninAsSupervisedUser();
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserOwnerCreationTest,
+    CreateAndRemoveSupervisedUser) {
+  RemoveSupervisedUser();
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserTransactionCleanupTest,
+    PRE_PRE_CreateAndCancelSupervisedUser) {
+  PrepareUsers();
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserTransactionCleanupTest,
+    PRE_CreateAndCancelSupervisedUser) {
+  LogInAsManagerAndFillUserData();
+
+  EXPECT_CALL(*mock_async_method_caller_, AsyncMount(_, _, _, _))
+      .Times(1);
+  EXPECT_CALL(*mock_async_method_caller_, AsyncGetSanitizedUsername(_, _))
+      .Times(1);
+  EXPECT_CALL(*mock_async_method_caller_, AsyncAddKey(_, _, _, _))
+      .Times(1);
+
+  JSEval("$('managed-user-creation-next-button').click()");
+
+  testing::Mock::VerifyAndClearExpectations(mock_async_method_caller_);
+
+  EXPECT_TRUE(registration_utility_stub_->register_was_called());
+  EXPECT_EQ(registration_utility_stub_->display_name(),
+            UTF8ToUTF16(kSupervisedUserDisplayName));
+
+  std::string user_id = registration_utility_stub_->managed_user_id();
+  // Make sure user is already in list.
+  ASSERT_EQ(3UL, UserManager::Get()->GetUsers().size());
+  // We wait for token now. Press cancel button at this point.
+  JSEval("$('cancel-add-user-button').click()");
+}
+
+IN_PROC_BROWSER_TEST_F(SupervisedUserTransactionCleanupTest,
+    CreateAndCancelSupervisedUser) {
+  // Make sure there is no supervised user in list.
+  ASSERT_EQ(2UL, UserManager::Get()->GetUsers().size());
 }
 
 }  // namespace chromeos

@@ -40,6 +40,7 @@ extern const char kPermission[];
 extern const char kPermissionTypeDialog[];
 extern const char kPermissionTypeDownload[];
 extern const char kPermissionTypeGeolocation[];
+extern const char kPermissionTypeLoadPlugin[];
 extern const char kPermissionTypeMedia[];
 extern const char kPermissionTypeNewWindow[];
 extern const char kPermissionTypePointerLock[];
@@ -54,6 +55,12 @@ extern const char kSourceId[];
 extern const char kInternalCurrentEntryIndex[];
 extern const char kInternalEntryCount[];
 extern const char kInternalProcessId[];
+
+// Initialization parameters.
+extern const char kParameterUserAgentOverride[];
+
+// Miscellaneous.
+extern const unsigned int kMaxOutstandingPermissionRequests;
 
 }  // namespace webview
 

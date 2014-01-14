@@ -77,6 +77,14 @@
             '../build/linux/system.gyp:x11',
           ],
         }],
+        ['use_aura==1 and use_x11==1', {
+          'dependencies': [
+            '../build/linux/system.gyp:xrandr',
+          ],
+          'export_dependent_settings': [
+            '../build/linux/system.gyp:xrandr',
+          ],
+        }],
         ['OS == "android" and _toolset == "host"', {
           # Always build base as a static_library for host toolset, even if
           # we're doing a component build. Specifically, we only care about the
@@ -384,6 +392,8 @@
         'prefs/pref_value_map.h',
         'prefs/pref_value_store.cc',
         'prefs/pref_value_store.h',
+        'prefs/scoped_user_pref_update.cc',
+        'prefs/scoped_user_pref_update.h',
         'prefs/value_map_pref_store.cc',
         'prefs/value_map_pref_store.h',
       ],
@@ -460,7 +470,8 @@
         'bits_unittest.cc',
         'build_time_unittest.cc',
         'callback_helpers_unittest.cc',
-        'callback_registry_unittest.cc',
+        'callback_list_unittest.cc',
+        'callback_list_unittest.nc',
         'callback_unittest.cc',
         'callback_unittest.nc',
         'cancelable_callback_unittest.cc',
@@ -521,6 +532,7 @@
         'md5_unittest.cc',
         'memory/aligned_memory_unittest.cc',
         'memory/discardable_memory_unittest.cc',
+        'memory/discardable_memory_provider_unittest.cc',
         'memory/linked_ptr_unittest.cc',
         'memory/ref_counted_memory_unittest.cc',
         'memory/ref_counted_unittest.cc',
@@ -542,6 +554,7 @@
         'metrics/bucket_ranges_unittest.cc',
         'metrics/field_trial_unittest.cc',
         'metrics/histogram_base_unittest.cc',
+        'metrics/histogram_delta_serialization_unittest.cc',
         'metrics/histogram_unittest.cc',
         'metrics/sparse_histogram_unittest.cc',
         'metrics/stats_table_unittest.cc',
@@ -564,6 +577,7 @@
         'prefs/pref_service_unittest.cc',
         'prefs/pref_value_map_unittest.cc',
         'prefs/pref_value_store_unittest.cc',
+        'prefs/scoped_user_pref_update_unittest.cc',
         'process/memory_unittest.cc',
         'process/memory_unittest_mac.h',
         'process/memory_unittest_mac.mm',
@@ -595,6 +609,7 @@
         'strings/sys_string_conversions_unittest.cc',
         'strings/utf_offset_string_conversions_unittest.cc',
         'strings/utf_string_conversions_unittest.cc',
+        'sync_socket_unittest.cc',
         'synchronization/cancellation_flag_unittest.cc',
         'synchronization/condition_variable_unittest.cc',
         'synchronization/lock_unittest.cc',
@@ -809,9 +824,19 @@
             'win/win_util_unittest.cc',
           ],
         }],
+        ['use_aura==1 and use_x11==1',  {
+          'sources': [
+            'x11/edid_parser_x11_unittest.cc',
+          ],
+        }],
         ['use_system_nspr==1', {
           'dependencies': [
             'third_party/nspr/nspr.gyp:nspr',
+          ],
+        }],
+        ['<(native_discardable_memory)==1', {
+          'sources!': [
+            'memory/discardable_memory_provider_unittest.cc',
           ],
         }],
       ],  # conditions
@@ -874,6 +899,15 @@
         'test/expectations/parser.h',
         'test/gtest_xml_util.cc',
         'test/gtest_xml_util.h',
+        'test/launcher/test_launcher.cc',
+        'test/launcher/test_launcher.h',
+        'test/launcher/test_result.cc',
+        'test/launcher/test_result.h',
+        'test/launcher/test_results_tracker.cc',
+        'test/launcher/test_results_tracker.h',
+        'test/launcher/unit_test_launcher.cc',
+        'test/launcher/unit_test_launcher.h',
+        'test/launcher/unit_test_launcher_ios.cc',
         'test/mock_chrome_application_mac.h',
         'test/mock_chrome_application_mac.mm',
         'test/mock_devices_changed_observer.cc',
@@ -885,16 +919,12 @@
         'test/multiprocess_test_android.cc',
         'test/null_task_runner.cc',
         'test/null_task_runner.h',
-        'test/parallel_test_launcher.cc',
-        'test/parallel_test_launcher.h',
         'test/perf_log.cc',
         'test/perf_log.h',
         'test/perf_test_suite.cc',
         'test/perf_test_suite.h',
         'test/perf_time_logger.cc',
         'test/perf_time_logger.h',
-        'test/perftimer.cc',
-        'test/perftimer.h',
         'test/power_monitor_test_base.cc',
         'test/power_monitor_test_base.h',
         'test/scoped_locale.cc',
@@ -917,8 +947,6 @@
         'test/test_file_util_mac.cc',
         'test/test_file_util_posix.cc',
         'test/test_file_util_win.cc',
-        'test/test_launcher.cc',
-        'test/test_launcher.h',
         'test/test_listener_ios.h',
         'test/test_listener_ios.mm',
         'test/test_pending_task.cc',
@@ -945,9 +973,6 @@
         'test/thread_test_helper.h',
         'test/trace_event_analyzer.cc',
         'test/trace_event_analyzer.h',
-        'test/unit_test_launcher.cc',
-        'test/unit_test_launcher.h',
-        'test/unit_test_launcher_ios.cc',
         'test/values_test_util.cc',
         'test/values_test_util.h',
       ],
@@ -960,7 +985,7 @@
           ],
           'sources!': [
             # iOS uses its own unit test launcher.
-            'test/unit_test_launcher.cc',
+            'test/launcher/unit_test_launcher.cc',
           ],
         }],
       ],  # target_conditions

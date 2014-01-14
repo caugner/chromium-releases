@@ -107,11 +107,18 @@ bool NavEntryIsInstantNTP(const content::WebContents* contents,
 // because it doesn't satisfy the requirements for extended mode or if Instant
 // is disabled through preferences). Callers must check that the returned URL is
 // valid before using it. The value of |start_margin| is used for the "es_sm"
-// parameter in the URL.
+// parameter in the URL. |force_instant_results| forces a search page to update
+// results incrementally even if that is otherwise disabled by google.com
+// preferences.
 // NOTE: This method expands the default search engine's instant_url template,
 // so it shouldn't be called from SearchTermsData or other such code that would
 // lead to an infinite recursion.
-GURL GetInstantURL(Profile* profile, int start_margin);
+GURL GetInstantURL(Profile* profile,
+                   int start_margin,
+                   bool force_instant_results);
+
+// Returns URLs associated with the default search engine for |profile|.
+std::vector<GURL> GetSearchURLs(Profile* profile);
 
 // Returns the Local Instant URL of the New Tab Page.
 // TODO(kmadhusu): Remove this function and update the call sites.
@@ -140,9 +147,6 @@ bool ShouldShowRecentTabsOnNTP();
 // Returns true if Instant Extended should be disabled on the search results
 // page.
 bool ShouldSuppressInstantExtendedOnSRP();
-
-// Returns true if |my_url| matches |other_url|.
-bool MatchesOriginAndPath(const GURL& my_url, const GURL& other_url);
 
 // Transforms the input |url| into its "effective URL". The returned URL
 // facilitates grouping process-per-site. The |url| is transformed, for
@@ -239,7 +243,6 @@ bool GetBoolValueForFlagWithDefault(const std::string& flag,
                                     const FieldTrialFlags& flags);
 
 // Returns the Cacheable New Tab Page URL for the given |profile|.
-// Exposed for testing only.
 GURL GetNewTabPageURL(Profile* profile);
 
 // Let tests reset the gate that prevents metrics from being sent more than

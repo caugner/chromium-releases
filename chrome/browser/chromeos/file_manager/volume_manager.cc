@@ -10,13 +10,13 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/mounted_disk_monitor.h"
+#include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager_factory.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager_observer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -24,6 +24,7 @@
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "webkit/browser/fileapi/external_mount_points.h"
 
 namespace file_manager {
 namespace {
@@ -36,14 +37,18 @@ void OnMarkCacheFileAsUnmounted(drive::FileError error) {
 VolumeType MountTypeToVolumeType(
     chromeos::MountType type) {
   switch (type) {
+    case chromeos::MOUNT_TYPE_INVALID:
+      // We don't expect this value, but list here, so that when any value
+      // is added to the enum definition but this is not edited, the compiler
+      // warns it.
+      break;
     case chromeos::MOUNT_TYPE_DEVICE:
       return VOLUME_TYPE_REMOVABLE_DISK_PARTITION;
     case chromeos::MOUNT_TYPE_ARCHIVE:
       return VOLUME_TYPE_MOUNTED_ARCHIVE_FILE;
-    default:
-      NOTREACHED();
   }
 
+  NOTREACHED();
   return VOLUME_TYPE_DOWNLOADS_DIRECTORY;
 }
 
@@ -53,10 +58,12 @@ VolumeInfo CreateDriveVolumeInfo() {
 
   VolumeInfo volume_info;
   volume_info.type = VOLUME_TYPE_GOOGLE_DRIVE;
+  volume_info.device_type = chromeos::DEVICE_TYPE_UNKNOWN;
   volume_info.source_path = drive_path;
   volume_info.mount_path = drive_path;
   volume_info.mount_condition = chromeos::disks::MOUNT_CONDITION_NONE;
   volume_info.is_parent = false;
+  volume_info.is_read_only = false;
   return volume_info;
 }
 
@@ -64,10 +71,12 @@ VolumeInfo CreateDownloadsVolumeInfo(
     const base::FilePath& downloads_path) {
   VolumeInfo volume_info;
   volume_info.type = VOLUME_TYPE_DOWNLOADS_DIRECTORY;
+  volume_info.device_type = chromeos::DEVICE_TYPE_UNKNOWN;
   // Keep source_path empty.
   volume_info.mount_path = downloads_path;
   volume_info.mount_condition = chromeos::disks::MOUNT_CONDITION_NONE;
   volume_info.is_parent = false;
+  volume_info.is_read_only = false;
   return volume_info;
 }
 
@@ -80,12 +89,16 @@ VolumeInfo CreateVolumeInfoFromMountPointInfo(
   volume_info.mount_path = base::FilePath(mount_point.mount_path);
   volume_info.mount_condition = mount_point.mount_condition;
   if (disk) {
+    volume_info.device_type = disk->device_type();
     volume_info.system_path_prefix =
         base::FilePath(disk->system_path_prefix());
     volume_info.drive_label = disk->drive_label();
     volume_info.is_parent = disk->is_parent();
+    volume_info.is_read_only = disk->is_read_only();
   } else {
+    volume_info.device_type = chromeos::DEVICE_TYPE_UNKNOWN;
     volume_info.is_parent = false;
+    volume_info.is_read_only = false;
   }
 
   return volume_info;
@@ -120,6 +133,40 @@ VolumeManager* VolumeManager::Get(content::BrowserContext* context) {
 }
 
 void VolumeManager::Initialize() {
+  // Path to mount user folders have changed several times. We need to migrate
+  // the old preferences on paths to the new format when needed. For the detail,
+  // see the comments in file_manager::util::MigratePathFromOldFormat,
+  // TODO(kinaba): Remove this are several rounds of releases.
+  const char* kPathPreference[] = {
+      prefs::kDownloadDefaultDirectory,
+      prefs::kSelectFileLastDirectory,
+      prefs::kSaveFileDefaultDirectory,
+  };
+  for (size_t i = 0; i < arraysize(kPathPreference); ++i) {
+    const base::FilePath old_path =
+        profile_->GetPrefs()->GetFilePath(kPathPreference[i]);
+    base::FilePath new_path;
+    if (!old_path.empty() &&
+        file_manager::util::MigratePathFromOldFormat(profile_,
+                                                     old_path, &new_path)) {
+      profile_->GetPrefs()->SetFilePath(kPathPreference[i], new_path);
+    }
+  }
+
+  // Register 'Downloads' folder for the profile to the file system.
+  fileapi::ExternalMountPoints* mount_points =
+      content::BrowserContext::GetMountPoints(profile_);
+  DCHECK(mount_points);
+
+  const base::FilePath downloads_folder =
+      file_manager::util::GetDownloadsFolderForProfile(profile_);
+  bool success = mount_points->RegisterFileSystem(
+      downloads_folder.BaseName().AsUTF8Unsafe(),
+      fileapi::kFileSystemTypeNativeLocal,
+      downloads_folder);
+  DCHECK(success);
+
+  // Subscribe to DriveIntegrationService.
   if (drive_integration_service_)
     drive_integration_service_->AddObserver(this);
 
@@ -165,11 +212,15 @@ std::vector<VolumeInfo> VolumeManager::GetVolumeInfoList() const {
     result.push_back(CreateDriveVolumeInfo());
 
   // Adds "Downloads".
-  base::FilePath home_path;
-  if (PathService::Get(base::DIR_HOME, &home_path)) {
-    result.push_back(
-        CreateDownloadsVolumeInfo(home_path.AppendASCII("Downloads")));
-  }
+  // Usually, the path of the directory is where we registered in Initialize(),
+  // but in tests, the mount point may be overridden. To take it into account,
+  // here we explicitly retrieves the path from the file API mount points.
+  fileapi::ExternalMountPoints* fileapi_mount_points =
+      content::BrowserContext::GetMountPoints(profile_);
+  DCHECK(fileapi_mount_points);
+  base::FilePath downloads;
+  if (fileapi_mount_points->GetRegisteredPath("Downloads", &downloads))
+    result.push_back(CreateDownloadsVolumeInfo(downloads));
 
   // Adds disks (both removable disks and zip archives).
   const chromeos::disks::DiskMountManager::MountPointMap& mount_points =
@@ -177,11 +228,9 @@ std::vector<VolumeInfo> VolumeManager::GetVolumeInfoList() const {
   for (chromeos::disks::DiskMountManager::MountPointMap::const_iterator it =
            mount_points.begin();
        it != mount_points.end(); ++it) {
-    if (it->second.mount_type == chromeos::MOUNT_TYPE_DEVICE ||
-        it->second.mount_type == chromeos::MOUNT_TYPE_ARCHIVE)
-      result.push_back(CreateVolumeInfoFromMountPointInfo(
-          it->second,
-          disk_mount_manager_->FindDiskBySourcePath(it->second.source_path)));
+    result.push_back(CreateVolumeInfoFromMountPointInfo(
+        it->second,
+        disk_mount_manager_->FindDiskBySourcePath(it->second.source_path)));
   }
 
   return result;
@@ -293,7 +342,7 @@ void VolumeManager::OnMountEvent(
     chromeos::MountError error_code,
     const chromeos::disks::DiskMountManager::MountPointInfo& mount_info) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  DCHECK(mount_info.mount_type != chromeos::MOUNT_TYPE_INVALID);
+  DCHECK_NE(chromeos::MOUNT_TYPE_INVALID, mount_info.mount_type);
 
   if (mount_info.mount_type == chromeos::MOUNT_TYPE_ARCHIVE) {
     // If the file is not mounted now, tell it to drive file system so that

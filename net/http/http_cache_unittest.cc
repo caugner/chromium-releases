@@ -2785,7 +2785,7 @@ TEST(HttpCache, SimplePOST_LoadOnlyFromCache_Hit) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, kUploadId);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), kUploadId);
   MockHttpRequest request(transaction);
   request.upload_data_stream = &upload_data_stream;
 
@@ -2816,7 +2816,7 @@ TEST(HttpCache, SimplePOST_WithRanges) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, kUploadId);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), kUploadId);
 
   MockHttpRequest request(transaction);
   request.upload_data_stream = &upload_data_stream;
@@ -2835,7 +2835,7 @@ TEST(HttpCache, SimplePOST_SeparateCache) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 1);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 1);
 
   MockTransaction transaction(kSimplePOST_Transaction);
   MockHttpRequest req1(transaction);
@@ -2874,7 +2874,7 @@ TEST(HttpCache, SimplePOST_Invalidate_205) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 1);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 1);
 
   transaction.method = "POST";
   transaction.status = "HTTP/1.1 205 No Content";
@@ -2913,7 +2913,7 @@ TEST(HttpCache, SimplePOST_NoUploadId_Invalidate_205) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 0);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 0);
 
   transaction.method = "POST";
   transaction.status = "HTTP/1.1 205 No Content";
@@ -2944,7 +2944,7 @@ TEST(HttpCache, SimplePOST_NoUploadId_NoBackend) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 0);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 0);
 
   MockTransaction transaction(kSimplePOST_Transaction);
   AddMockTransaction(&transaction);
@@ -2973,7 +2973,7 @@ TEST(HttpCache, SimplePOST_DontInvalidate_100) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 1);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 1);
 
   transaction.method = "POST";
   transaction.status = "HTTP/1.1 100 Continue";
@@ -3003,7 +3003,7 @@ TEST(HttpCache, SimplePUT_Miss) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 0);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 0);
 
   MockHttpRequest request(transaction);
   request.upload_data_stream = &upload_data_stream;
@@ -3032,7 +3032,7 @@ TEST(HttpCache, SimplePUT_Invalidate) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 0);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 0);
 
   transaction.method = "PUT";
   MockHttpRequest req2(transaction);
@@ -3068,7 +3068,7 @@ TEST(HttpCache, SimplePUT_Invalidate_305) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 0);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 0);
 
   transaction.method = "PUT";
   transaction.status = "HTTP/1.1 305 Use Proxy";
@@ -3106,7 +3106,7 @@ TEST(HttpCache, SimplePUT_DontInvalidate_404) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 0);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 0);
 
   transaction.method = "PUT";
   transaction.status = "HTTP/1.1 404 Not Found";
@@ -3136,7 +3136,7 @@ TEST(HttpCache, SimpleDELETE_Miss) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 0);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 0);
 
   MockHttpRequest request(transaction);
   request.upload_data_stream = &upload_data_stream;
@@ -3165,7 +3165,7 @@ TEST(HttpCache, SimpleDELETE_Invalidate) {
 
   ScopedVector<net::UploadElementReader> element_readers;
   element_readers.push_back(new net::UploadBytesElementReader("hello", 5));
-  net::UploadDataStream upload_data_stream(&element_readers, 0);
+  net::UploadDataStream upload_data_stream(element_readers.Pass(), 0);
 
   transaction.method = "DELETE";
   MockHttpRequest req2(transaction);
@@ -3395,6 +3395,37 @@ TEST(HttpCache, RangeGET_NoStrongValidators) {
   RemoveMockTransaction(&transaction);
 }
 
+// Tests that we cache partial responses that lack content-length.
+TEST(HttpCache, RangeGET_NoContentLength) {
+  MockHttpCache cache;
+  std::string headers;
+
+  // Attempt to write to the cache (40-49).
+  MockTransaction transaction(kRangeGET_TransactionOK);
+  AddMockTransaction(&transaction);
+  transaction.response_headers = "ETag: \"foo\"\n"
+                                 "Accept-Ranges: bytes\n"
+                                 "Content-Range: bytes 40-49/80\n";
+  transaction.handler = NULL;
+  RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Now verify that there's no cached data.
+  transaction.handler = &RangeTransactionServer::RangeHandler;
+  RunTransactionTestWithResponse(cache.http_cache(), kRangeGET_TransactionOK,
+                                 &headers);
+
+  Verify206Response(headers, 40, 49);
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  RemoveMockTransaction(&transaction);
+}
+
 // Tests that we can cache range requests and fetch random blocks from the
 // cache and the network.
 TEST(HttpCache, RangeGET_OK) {
@@ -3454,8 +3485,6 @@ TEST(HttpCache, RangeGET_OK) {
 
   RemoveMockTransaction(&kRangeGET_TransactionOK);
 }
-
-#if defined(OS_ANDROID)
 
 // Checks that with a cache backend having Sparse IO unimplementes the cache
 // entry would be doomed after a range request.
@@ -3528,8 +3557,6 @@ TEST(HttpCache, RangeGET_SparseNotImplementedOnEmptyCache) {
   ASSERT_EQ(net::ERR_CACHE_OPEN_FAILURE, cb.GetResult(rv));
   RemoveMockTransaction(&transaction);
 }
-
-#endif  // OS_ANDROID
 
 // Tests that we can cache range requests and fetch random blocks from the
 // cache and the network, with synchronous responses.

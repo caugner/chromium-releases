@@ -7,15 +7,14 @@
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/accelerators/accelerator_table.h"
 #include "ash/ash_switches.h"
-#include "ash/display/display_controller.h"
 #include "ash/display/display_manager.h"
 #include "ash/focus_cycler.h"
 #include "ash/launcher/launcher.h"
-#include "ash/launcher/launcher_view.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
 #include "ash/session_state_delegate.h"
 #include "ash/shelf/shelf_layout_manager_observer.h"
+#include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
@@ -24,7 +23,7 @@
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/launcher_test_api.h"
-#include "ash/wm/window_properties.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
@@ -348,7 +347,7 @@ class ShelfLayoutManagerTest : public ash::test::AshTestBase {
     window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
     window->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window->Init(ui::LAYER_TEXTURED);
-    SetDefaultParentByPrimaryRootWindow(window);
+    ParentWindowInPrimaryRootWindow(window);
     return window;
   }
 
@@ -580,9 +579,10 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
   EXPECT_EQ(shelf_hidden.ToString(),
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
 
-  // Enter into fullscreen with minimal chrome (immersive fullscreen).
+  // Put |widget| into fullscreen. Set the shelf to be auto hidden when |widget|
+  // is fullscreen. (eg browser immersive fullscreen).
   widget->SetFullscreen(true);
-  window->SetProperty(ash::internal::kFullscreenUsesMinimalChromeKey, true);
+  wm::GetWindowState(window)->set_hide_shelf_when_fullscreen(false);
   shelf->UpdateVisibilityState();
 
   gfx::Rect bounds_fullscreen = window->bounds();
@@ -614,9 +614,9 @@ void ShelfLayoutManagerTest::RunGestureDragTests(gfx::Vector2d delta) {
             GetShelfWidget()->GetWindowBoundsInScreen().ToString());
   EXPECT_EQ(bounds_fullscreen.ToString(), window->bounds().ToString());
 
-  // Put the window into fullscreen without any chrome at all (eg tab
-  // fullscreen).
-  window->SetProperty(ash::internal::kFullscreenUsesMinimalChromeKey, false);
+  // Set the shelf to be hidden when |widget| is fullscreen. (eg tab fullscreen
+  // with or without immersive browser fullscreen).
+  wm::GetWindowState(window)->set_hide_shelf_when_fullscreen(true);
   shelf->UpdateVisibilityState();
   EXPECT_EQ(SHELF_HIDDEN, shelf->visibility_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
@@ -785,7 +785,7 @@ TEST_F(ShelfLayoutManagerTest, LauncherUpdatedWhenStatusAreaChangesSize) {
   shelf_widget->status_area_widget()->SetBounds(
       gfx::Rect(0, 0, 200, 200));
   EXPECT_EQ(200, shelf_widget->GetContentsView()->width() -
-            test::LauncherTestAPI(launcher).launcher_view()->width());
+            test::LauncherTestAPI(launcher).shelf_view()->width());
 }
 
 
@@ -798,7 +798,7 @@ TEST_F(ShelfLayoutManagerTest, LauncherUpdatedWhenStatusAreaChangesSize) {
 
 // Various assertions around auto-hide.
 TEST_F(ShelfLayoutManagerTest, MAYBE_AutoHide) {
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   aura::test::EventGenerator generator(root, root);
   generator.MoveMouseTo(0, 0);
 
@@ -869,7 +869,7 @@ TEST_F(ShelfLayoutManagerTest, AutoHideShelfOnScreenBoundary) {
 
   UpdateDisplay("800x600,800x600");
   DisplayLayout display_layout(DisplayLayout::RIGHT, 0);
-  Shell::GetInstance()->display_controller()->SetLayoutForCurrentDisplays(
+  Shell::GetInstance()->display_manager()->SetLayoutForCurrentDisplays(
       display_layout);
   // Put the primary monitor's shelf on the display boundary.
   ShelfLayoutManager* shelf = GetShelfLayoutManager();
@@ -975,7 +975,7 @@ TEST_F(ShelfLayoutManagerTest, VisibleWhenLockScreenShowing) {
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
 
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   // LayoutShelf() forces the animation to completion, at which point the
   // launcher should go off the screen.
   shelf->LayoutShelf();
@@ -1650,22 +1650,6 @@ TEST_F(ShelfLayoutManagerTest, ShelfFlickerOnTrayActivation) {
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
   EXPECT_TRUE(GetSystemTray()->HasSystemBubble());
-
-  // Now activate the tray (using the keyboard, instead of using the mouse to
-  // make sure the mouse does not alter the auto-hide state in the shelf).
-  // This should not trigger any auto-hide state change in the shelf.
-  ShelfLayoutObserverTest observer;
-  shelf->AddObserver(&observer);
-
-  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
-  generator.PressKey(ui::VKEY_SPACE, 0);
-  generator.ReleaseKey(ui::VKEY_SPACE, 0);
-  EXPECT_TRUE(GetSystemTray()->HasSystemBubble());
-  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
-  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
-  EXPECT_FALSE(observer.changed_auto_hide_state());
-
-  shelf->RemoveObserver(&observer);
 }
 
 TEST_F(ShelfLayoutManagerTest, WorkAreaChangeWorkspace) {

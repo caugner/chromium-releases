@@ -31,6 +31,7 @@
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
+#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
@@ -69,6 +70,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_view.h"
+#include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
@@ -229,6 +231,9 @@ class TestInterstitialPage : public content::InterstitialPageDelegate {
   virtual ~TestInterstitialPage() { }
   void Proceed() {
     interstitial_page_->Proceed();
+  }
+  void DontProceed() {
+    interstitial_page_->DontProceed();
   }
 
   virtual std::string GetHTMLContents() OVERRIDE {
@@ -459,6 +464,35 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_ThirtyFourTabs) {
   }
 }
 
+// Test for crbug.com/297289.  Ensure that modal dialogs are closed when a
+// cross-process navigation is ready to commit.
+IN_PROC_BROWSER_TEST_F(BrowserTest, CrossProcessNavCancelsDialogs) {
+  ASSERT_TRUE(test_server()->Start());
+  host_resolver()->AddRule("www.example.com", "127.0.0.1");
+  GURL url(test_server()->GetURL("empty.html"));
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  // TODO(creis): Test this with a setInterval loop of alert dialogs to ensure
+  // that we can navigate away even if the renderer tries to synchronously
+  // create more.  See http://crbug.com/312490.
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  contents->GetRenderViewHost()->ExecuteJavascriptInWebFrame(
+      string16(),
+      ASCIIToUTF16("alert('Dialog showing!');"));
+  AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
+  EXPECT_TRUE(alert->IsValid());
+  AppModalDialogQueue* dialog_queue = AppModalDialogQueue::GetInstance();
+  EXPECT_TRUE(dialog_queue->HasActiveDialog());
+
+  // A cross-site navigation should force the dialog to close.
+  GURL url2("http://www.example.com/empty.html");
+  ui_test_utils::NavigateToURL(browser(), url2);
+  EXPECT_FALSE(dialog_queue->HasActiveDialog());
+
+  // Make sure input events still work in the renderer process.
+  EXPECT_FALSE(contents->GetRenderProcessHost()->IgnoreInputEvents());
+}
+
 // Test for crbug.com/22004.  Reloading a page with a before unload handler and
 // then canceling the dialog should not leave the throbber spinning.
 IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
@@ -478,6 +512,34 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
       ExecuteJavascriptInWebFrame(string16(),
                                   ASCIIToUTF16("onbeforeunload=null;"));
 }
+
+class RedirectObserver : public content::WebContentsObserver {
+ public:
+  explicit RedirectObserver(content::WebContents* web_contents)
+      : WebContentsObserver(web_contents) {
+  }
+
+  virtual void DidNavigateAnyFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) OVERRIDE {
+    params_ = params;
+  }
+
+  virtual void WebContentsDestroyed(WebContents* contents) OVERRIDE {
+    // Make sure we don't close the tab while the observer is in scope.
+    // See http://crbug.com/314036.
+    FAIL() << "WebContents closed during navigation (http://crbug.com/314036).";
+  }
+
+  const content::FrameNavigateParams& params() const {
+    return params_;
+  }
+
+ private:
+  content::FrameNavigateParams params_;
+
+  DISALLOW_COPY_AND_ASSIGN(RedirectObserver);
+};
 
 // Ensure that a transferred cross-process navigation does not generate
 // DidStopLoading events until the navigation commits.  If it did, then
@@ -501,16 +563,32 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, NoStopDuringTransferUntilCommit) {
   ui_test_utils::NavigateToURL(browser(), init_url);
 
   // Navigate to a same-site page that redirects, causing a transfer.
-  GURL dest_url(https_test_server.GetURL("files/title2.html"));
-  GURL redirect_url(test_server()->GetURL("server-redirect?" +
-      dest_url.spec()));
-  ui_test_utils::NavigateToURL(browser(), redirect_url);
-
-  // We should immediately see the new committed entry.
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_FALSE(contents->GetController().GetPendingEntry());
-  EXPECT_EQ(dest_url,
-            contents->GetController().GetLastCommittedEntry()->GetURL());
+
+  // Create a RedirectObserver that goes away before we close the tab.
+  {
+    RedirectObserver redirect_observer(contents);
+    GURL dest_url(https_test_server.GetURL("files/title2.html"));
+    GURL redirect_url(test_server()->GetURL("server-redirect?" +
+        dest_url.spec()));
+    ui_test_utils::NavigateToURL(browser(), redirect_url);
+
+    // We should immediately see the new committed entry.
+    EXPECT_FALSE(contents->GetController().GetPendingEntry());
+    EXPECT_EQ(dest_url,
+              contents->GetController().GetLastCommittedEntry()->GetURL());
+
+    // We should keep track of the original request URL, redirect chain, and
+    // page transition type during a transfer, since these are necessary for
+    // history autocomplete to work.
+    EXPECT_EQ(redirect_url, contents->GetController().GetLastCommittedEntry()->
+                  GetOriginalRequestURL());
+    EXPECT_EQ(2U, redirect_observer.params().redirects.size());
+    EXPECT_EQ(redirect_url, redirect_observer.params().redirects.at(0));
+    EXPECT_EQ(dest_url, redirect_observer.params().redirects.at(1));
+    EXPECT_TRUE(PageTransitionCoreTypeIs(redirect_observer.params().transition,
+                                         content::PAGE_TRANSITION_TYPED));
+  }
 
   // Restore previous browser client.
   SetBrowserClientForTesting(old_client);
@@ -1330,9 +1408,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
   const Extension* extension_app = GetExtension();
 
   // Launch it in a window, as AppLauncherHandler::HandleLaunchApp() would.
-  WebContents* app_window = chrome::OpenApplication(
-      chrome::AppLaunchParams(browser()->profile(), extension_app,
-                              extension_misc::LAUNCH_WINDOW, NEW_WINDOW));
+  WebContents* app_window = OpenApplication(
+      AppLaunchParams(browser()->profile(), extension_app,
+                      extension_misc::LAUNCH_WINDOW, NEW_WINDOW));
   ASSERT_TRUE(app_window);
 
   // Apps launched in a window from the NTP have an extensions tab helper but
@@ -1588,12 +1666,12 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageZoom) {
         new content::MessageLoopRunner);
     content::HostZoomMap::ZoomLevelChangedCallback callback(
         base::Bind(&OnZoomLevelChanged, loop_runner->QuitClosure()));
-    content::HostZoomMap::GetForBrowserContext(
-        browser()->profile())->AddZoomLevelChangedCallback(callback);
+    scoped_ptr<content::HostZoomMap::Subscription> sub =
+        content::HostZoomMap::GetForBrowserContext(
+            browser()->profile())->AddZoomLevelChangedCallback(callback);
     chrome::Zoom(browser(), content::PAGE_ZOOM_IN);
     loop_runner->Run();
-    content::HostZoomMap::GetForBrowserContext(
-        browser()->profile())->RemoveZoomLevelChangedCallback(callback);
+    sub.reset();
     EXPECT_EQ(contents->GetZoomPercent(&enable_plus, &enable_minus), 110);
     EXPECT_TRUE(enable_plus);
     EXPECT_TRUE(enable_minus);
@@ -1604,12 +1682,12 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageZoom) {
         new content::MessageLoopRunner);
     content::HostZoomMap::ZoomLevelChangedCallback callback(
         base::Bind(&OnZoomLevelChanged, loop_runner->QuitClosure()));
-    content::HostZoomMap::GetForBrowserContext(
-        browser()->profile())->AddZoomLevelChangedCallback(callback);
+    scoped_ptr<content::HostZoomMap::Subscription> sub =
+        content::HostZoomMap::GetForBrowserContext(
+            browser()->profile())->AddZoomLevelChangedCallback(callback);
     chrome::Zoom(browser(), content::PAGE_ZOOM_RESET);
     loop_runner->Run();
-    content::HostZoomMap::GetForBrowserContext(
-        browser()->profile())->RemoveZoomLevelChangedCallback(callback);
+    sub.reset();
     EXPECT_EQ(contents->GetZoomPercent(&enable_plus, &enable_minus), 100);
     EXPECT_TRUE(enable_plus);
     EXPECT_TRUE(enable_minus);
@@ -1620,12 +1698,12 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_PageZoom) {
         new content::MessageLoopRunner);
     content::HostZoomMap::ZoomLevelChangedCallback callback(
         base::Bind(&OnZoomLevelChanged, loop_runner->QuitClosure()));
-    content::HostZoomMap::GetForBrowserContext(
-        browser()->profile())->AddZoomLevelChangedCallback(callback);
+    scoped_ptr<content::HostZoomMap::Subscription> sub =
+        content::HostZoomMap::GetForBrowserContext(
+            browser()->profile())->AddZoomLevelChangedCallback(callback);
     chrome::Zoom(browser(), content::PAGE_ZOOM_OUT);
     loop_runner->Run();
-    content::HostZoomMap::GetForBrowserContext(
-        browser()->profile())->RemoveZoomLevelChangedCallback(callback);
+    sub.reset();
     EXPECT_EQ(contents->GetZoomPercent(&enable_plus, &enable_minus), 90);
     EXPECT_TRUE(enable_plus);
     EXPECT_TRUE(enable_minus);
@@ -1685,6 +1763,56 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_SAVE_PAGE));
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_ENCODING_MENU));
 }
+
+// Ensure that creating an interstitial page closes any JavaScript dialogs
+// that were present on the previous page.  See http://crbug.com/295695.
+IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialClosesDialogs) {
+  ASSERT_TRUE(test_server()->Start());
+  host_resolver()->AddRule("www.example.com", "127.0.0.1");
+  GURL url(test_server()->GetURL("empty.html"));
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  contents->GetRenderViewHost()->ExecuteJavascriptInWebFrame(
+      string16(),
+      ASCIIToUTF16("alert('Dialog showing!');"));
+  AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
+  EXPECT_TRUE(alert->IsValid());
+  AppModalDialogQueue* dialog_queue = AppModalDialogQueue::GetInstance();
+  EXPECT_TRUE(dialog_queue->HasActiveDialog());
+
+  TestInterstitialPage* interstitial = NULL;
+  {
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+
+    InterstitialObserver observer(contents,
+                                  loop_runner->QuitClosure(),
+                                  base::Closure());
+    interstitial = new TestInterstitialPage(contents, false, GURL());
+    loop_runner->Run();
+  }
+
+  // The interstitial should have closed the dialog.
+  EXPECT_TRUE(contents->ShowingInterstitialPage());
+  EXPECT_FALSE(dialog_queue->HasActiveDialog());
+
+  {
+    scoped_refptr<content::MessageLoopRunner> loop_runner(
+        new content::MessageLoopRunner);
+
+    InterstitialObserver observer(contents,
+                                  base::Closure(),
+                                  loop_runner->QuitClosure());
+    interstitial->DontProceed();
+    loop_runner->Run();
+    // interstitial is deleted now.
+  }
+
+  // Make sure input events still work in the renderer process.
+  EXPECT_FALSE(contents->GetRenderProcessHost()->IgnoreInputEvents());
+}
+
 
 IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCloseTab) {
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
@@ -2151,10 +2279,7 @@ class ClickModifierTest : public InProcessBrowserTest {
           browser->tab_strip_model()->GetActiveWebContents();
       content::TestNavigationObserver same_tab_observer(web_contents);
       SimulateMouseClick(web_contents, modifiers, button);
-      base::RunLoop run_loop;
-      same_tab_observer.WaitForObservation(
-          base::Bind(&content::RunThisRunLoop, base::Unretained(&run_loop)),
-          content::GetQuitTaskForRunLoop(&run_loop));
+      same_tab_observer.Wait();
       EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile(),
                                             browser->host_desktop_type()));
       EXPECT_EQ(1, browser->tab_strip_model()->count());

@@ -7,11 +7,12 @@
 #include <algorithm>
 
 #include "ash/launcher/launcher_types.h"
-#include "ash/launcher/launcher_view.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "ash/system/tray/system_tray.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/root_window.h"
@@ -30,22 +31,22 @@ namespace {
 // Max bubble size to screen size ratio.
 const float kMaxBubbleSizeToScreenRatio = 0.5f;
 
-// Inner padding in pixels for launcher view inside bubble.
+// Inner padding in pixels for shelf view inside bubble.
 const int kPadding = 2;
 
-// Padding space in pixels between LauncherView's left/top edge to its contents.
-const int kLauncherViewLeadingInset = 8;
+// Padding space in pixels between ShelfView's left/top edge to its contents.
+const int kShelfViewLeadingInset = 8;
 
 ////////////////////////////////////////////////////////////////////////////////
 // OverflowBubbleView
-// OverflowBubbleView hosts a LauncherView to display overflown items.
+// OverflowBubbleView hosts a ShelfView to display overflown items.
 
 class OverflowBubbleView : public views::BubbleDelegateView {
  public:
   OverflowBubbleView();
   virtual ~OverflowBubbleView();
 
-  void InitOverflowBubble(views::View* anchor, LauncherView* launcher_view);
+  void InitOverflowBubble(views::View* anchor, ShelfView* shelf_view);
 
  private:
   bool IsHorizontalAlignment() const {
@@ -53,7 +54,7 @@ class OverflowBubbleView : public views::BubbleDelegateView {
   }
 
   const gfx::Size GetContentsSize() const {
-    return static_cast<views::View*>(launcher_view_)->GetPreferredSize();
+    return static_cast<views::View*>(shelf_view_)->GetPreferredSize();
   }
 
   // Gets arrow location based on shelf alignment.
@@ -82,27 +83,27 @@ class OverflowBubbleView : public views::BubbleDelegateView {
 
   ShelfLayoutManager* GetShelfLayoutManagerForLauncher() const {
     return ShelfLayoutManager::ForLauncher(
-        anchor_view()->GetWidget()->GetNativeView());
+        GetAnchorView()->GetWidget()->GetNativeView());
   }
 
-  LauncherView* launcher_view_;  // Owned by views hierarchy.
+  ShelfView* shelf_view_;  // Owned by views hierarchy.
   gfx::Vector2d scroll_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(OverflowBubbleView);
 };
 
 OverflowBubbleView::OverflowBubbleView()
-    : launcher_view_(NULL) {
+    : shelf_view_(NULL) {
 }
 
 OverflowBubbleView::~OverflowBubbleView() {
 }
 
 void OverflowBubbleView::InitOverflowBubble(views::View* anchor,
-                                            LauncherView* launcher_view) {
+                                            ShelfView* shelf_view) {
   // set_anchor_view needs to be called before GetShelfLayoutManagerForLauncher
   // can be called.
-  set_anchor_view(anchor);
+  SetAnchorView(anchor);
   set_arrow(GetBubbleArrow());
   set_background(NULL);
   set_color(SkColorSetARGB(kLauncherBackgroundAlpha, 0, 0, 0));
@@ -117,9 +118,12 @@ void OverflowBubbleView::InitOverflowBubble(views::View* anchor,
   SetFillsBoundsOpaquely(false);
   layer()->SetMasksToBounds(true);
 
-  launcher_view_ = launcher_view;
-  AddChildView(launcher_view_);
+  shelf_view_ = shelf_view;
+  AddChildView(shelf_view_);
 
+  set_parent_window(Shell::GetContainer(
+        anchor->GetWidget()->GetNativeWindow()->GetRootWindow(),
+        internal::kShellWindowId_ShelfBubbleContainer));
   views::BubbleDelegateView::CreateBubble(this);
 }
 
@@ -164,7 +168,7 @@ gfx::Size OverflowBubbleView::GetPreferredSize() {
 }
 
 void OverflowBubbleView::Layout() {
-  launcher_view_->SetBoundsRect(gfx::Rect(
+  shelf_view_->SetBoundsRect(gfx::Rect(
       gfx::PointAtOffsetFromOrigin(-scroll_offset_), GetContentsSize()));
 }
 
@@ -205,7 +209,7 @@ gfx::Rect OverflowBubbleView::GetBubbleBounds() {
   const int border_size =
       views::BubbleBorder::is_arrow_on_horizontal(arrow()) ?
       bubble_insets.left() : bubble_insets.top();
-  const int arrow_offset = border_size + kPadding + kLauncherViewLeadingInset +
+  const int arrow_offset = border_size + kPadding + kShelfViewLeadingInset +
       ShelfLayoutManager::GetPreferredShelfSize() / 2;
 
   const gfx::Size content_size = GetPreferredSize();
@@ -248,19 +252,19 @@ gfx::Rect OverflowBubbleView::GetBubbleBounds() {
 OverflowBubble::OverflowBubble()
     : bubble_(NULL),
       anchor_(NULL),
-      launcher_view_(NULL) {
+      shelf_view_(NULL) {
 }
 
 OverflowBubble::~OverflowBubble() {
   Hide();
 }
 
-void OverflowBubble::Show(views::View* anchor, LauncherView* launcher_view) {
+void OverflowBubble::Show(views::View* anchor, ShelfView* shelf_view) {
   Hide();
 
   OverflowBubbleView* bubble_view = new OverflowBubbleView();
-  bubble_view->InitOverflowBubble(anchor, launcher_view);
-  launcher_view_ = launcher_view;
+  bubble_view->InitOverflowBubble(anchor, shelf_view);
+  shelf_view_ = shelf_view;
   anchor_ = anchor;
 
   Shell::GetInstance()->AddPreTargetHandler(this);
@@ -281,7 +285,18 @@ void OverflowBubble::Hide() {
   bubble_->GetWidget()->Close();
   bubble_ = NULL;
   anchor_ = NULL;
-  launcher_view_ = NULL;
+  shelf_view_ = NULL;
+}
+
+void OverflowBubble::HideBubbleAndRefreshButton() {
+  if (!IsShowing())
+    return;
+
+  views::View* anchor = anchor_;
+  Hide();
+  // Update overflow button (|anchor|) status when overflow bubble is hidden
+  // by outside event of overflow button.
+  anchor->SchedulePaint();
 }
 
 void OverflowBubble::ProcessPressedEvent(ui::LocatedEvent* event) {
@@ -289,13 +304,10 @@ void OverflowBubble::ProcessPressedEvent(ui::LocatedEvent* event) {
   gfx::Point event_location_in_screen = event->location();
   aura::client::GetScreenPositionClient(target->GetRootWindow())->
       ConvertPointToScreen(target, &event_location_in_screen);
-  if (!bubble_->GetBoundsInScreen().Contains(event_location_in_screen) &&
+  if (!shelf_view_->IsShowingMenu() &&
+      !bubble_->GetBoundsInScreen().Contains(event_location_in_screen) &&
       !anchor_->GetBoundsInScreen().Contains(event_location_in_screen)) {
-    views::View* anchor = anchor_;
-    Hide();
-    // Update overflow button (|anchor|) status when overflow bubble is hidden
-    // by outside event of overflow button.
-    anchor->SchedulePaint();
+    HideBubbleAndRefreshButton();
   }
 }
 
@@ -313,7 +325,7 @@ void OverflowBubble::OnWidgetDestroying(views::Widget* widget) {
   DCHECK(widget == bubble_->GetWidget());
   bubble_ = NULL;
   anchor_ = NULL;
-  launcher_view_ = NULL;
+  shelf_view_ = NULL;
   ShelfLayoutManager::ForLauncher(
       widget->GetNativeView())->shelf_widget()->launcher()->SchedulePaint();
 }

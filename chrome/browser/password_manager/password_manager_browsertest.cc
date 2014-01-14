@@ -165,6 +165,22 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
+                       PromptForSubmitWithInPageNavigation) {
+  NavigateToFile("/password/password_navigate_before_submit.html");
+
+  // Fill a form and submit through a <input type="submit"> button. Nothing
+  // special. The form does an in-page navigation before submitting.
+  NavigationObserver observer(WebContents());
+  std::string fill_and_submit =
+      "document.getElementById('username_field').value = 'temp';"
+      "document.getElementById('password_field').value = 'random';"
+      "document.getElementById('input_submit_button').click()";
+  ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), fill_and_submit));
+  observer.Wait();
+  EXPECT_TRUE(observer.infobar_shown());
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
                        PromptForSubmitUsingJavaScript) {
   NavigateToFile("/password/password_form.html");
 
@@ -181,8 +197,10 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
   EXPECT_TRUE(observer.infobar_shown());
 }
 
+// Flaky: crbug.com/301547, observed on win and mac. Probably happens on all
+// platforms.
 IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
-                       PromptForDynamicForm) {
+                       DISABLED_PromptForDynamicForm) {
   NavigateToFile("/password/dynamic_password_form.html");
 
   // Fill the dynamic password form and submit.

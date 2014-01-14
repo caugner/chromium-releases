@@ -4,39 +4,54 @@
 
 #include "chrome/browser/ui/views/profile_chooser_view.h"
 
+#include "base/command_line.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
+#include "chrome/browser/signin/profile_oauth2_token_service.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/views/user_manager_view.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/button/blue_button.h"
-#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/separator.h"
+#include "ui/views/controls/webview/webview.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 
-// Helpers --------------------------------------------------------------------
+#if defined(USE_AURA)
+#include "ui/native_theme/native_theme_aura.h"
+#endif
 
 namespace {
+
+// Helpers --------------------------------------------------------------------
 
 const int kLargeImageSide = 64;
 const int kSmallImageSide = 32;
 const int kMinMenuWidth = 250;
+const int kButtonHeight = 29;
+const int kArrowHeight = 10;
 
 // Current profile avatar image.
 views::View* CreateProfileImageView(const gfx::Image& icon) {
@@ -44,8 +59,8 @@ views::View* CreateProfileImageView(const gfx::Image& icon) {
 
   gfx::Image image = profiles::GetSizedAvatarIconWithBorder(
       icon, true,
-      kLargeImageSide + profiles::kAvatarIconBorder,
-      kLargeImageSide + profiles::kAvatarIconBorder);
+      kLargeImageSide + profiles::kAvatarIconPadding,
+      kLargeImageSide + profiles::kAvatarIconPadding);
   view->SetImage(image.ToImageSkia());
 
   return view;
@@ -71,13 +86,13 @@ views::GridLayout* CreateDoubleColumnLayout(views::View* view) {
   views::ColumnSet* columns = layout->AddColumnSet(0);
   columns->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 0,
                      views::GridLayout::USE_PREF, 0, 0);
-  columns->AddPaddingColumn(0, views::kUnrelatedControlHorizontalSpacing);
+  columns->AddPaddingColumn(0, views::kUnrelatedControlLargeHorizontalSpacing);
   columns->AddColumn(views::GridLayout::LEADING, views::GridLayout::TRAILING, 1,
                      views::GridLayout::USE_PREF, 0, 0);
   return layout;
 }
 
-views::Link* CreateLink(const string16 link_text,
+views::Link* CreateLink(const string16& link_text,
                         views::LinkListener* listener) {
   views::Link* link_button = new views::Link(link_text);
   link_button->SetHorizontalAlignment(gfx::ALIGN_LEFT);
@@ -85,6 +100,82 @@ views::Link* CreateLink(const string16 link_text,
   link_button->set_listener(listener);
   return link_button;
 }
+
+
+// HorizontalPaddingButtonBorder ----------------------------------------------
+
+// A button border that adds padding before the icon and after the text. This
+// is needed so that the button looks like it is spanning the entire parent
+// view (especially when hovered over), but has the icon indented and aligned
+// with the other items in the parent view.
+class HorizontalPaddingButtonBorder : public views::TextButtonBorder {
+ public:
+  HorizontalPaddingButtonBorder() : views::TextButtonBorder() {
+    SetInsets(gfx::Insets(0, views::kButtonHEdgeMarginNew,
+                          0, views::kButtonHEdgeMarginNew));
+  };
+
+  virtual ~HorizontalPaddingButtonBorder() {
+  };
+
+ private:
+  // This function is pure virtual in the parent, so we must provide an
+  // implementation.
+  virtual void Paint(const views::View& view, gfx::Canvas* canvas) OVERRIDE {
+  };
+
+  DISALLOW_COPY_AND_ASSIGN(HorizontalPaddingButtonBorder);
+};
+
+
+// BackgroundColorHoverButton -------------------------------------------------
+
+// A custom button that allows for setting a background color when hovered over.
+class BackgroundColorHoverButton : public views::TextButton {
+ public:
+  BackgroundColorHoverButton(views::ButtonListener* listener,
+                             const string16& text,
+                             const gfx::ImageSkia& normal_icon,
+                             const gfx::ImageSkia& hover_icon)
+      : views::TextButton(listener, text) {
+    set_border(new HorizontalPaddingButtonBorder);
+    set_min_height(kButtonHeight);
+    set_icon_text_spacing(views::kItemLabelSpacing);
+    SetIcon(normal_icon);
+    SetHoverIcon(hover_icon);
+    SetPushedIcon(hover_icon);
+    SetHoverColor(GetNativeTheme()->GetSystemColor(
+        ui::NativeTheme::kColorId_SelectedMenuItemForegroundColor));
+    OnHighlightStateChanged();
+  };
+
+  virtual ~BackgroundColorHoverButton(){
+  };
+
+ private:
+  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE {
+    views::TextButton::OnMouseEntered(event);
+    OnHighlightStateChanged();
+  };
+
+  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE {
+    views::TextButton::OnMouseExited(event);
+    OnHighlightStateChanged();
+  };
+
+  void OnHighlightStateChanged() {
+    bool is_highlighted = (state() == views::TextButton::STATE_PRESSED) ||
+        (state() == views::TextButton::STATE_HOVERED) || HasFocus();
+    ui::NativeTheme::ColorId color_id = is_highlighted ?
+        ui::NativeTheme::kColorId_FocusedMenuItemBackgroundColor :
+        ui::NativeTheme::kColorId_MenuBackgroundColor;
+    set_background(views::Background::CreateSolidBackground(
+        GetNativeTheme()->GetSystemColor(color_id)));
+    SchedulePaint();
+  };
+
+  DISALLOW_COPY_AND_ASSIGN(BackgroundColorHoverButton);
+};
 
 }  // namespace
 
@@ -112,6 +203,7 @@ void ProfileChooserView::ShowBubble(
   profile_bubble_->set_close_on_deactivate(close_on_deactivate_);
   profile_bubble_->SetAlignment(border_alignment);
   profile_bubble_->GetWidget()->Show();
+  profile_bubble_->SetArrowPaintType(views::BubbleBorder::PAINT_NONE);
 }
 
 // static
@@ -133,6 +225,8 @@ ProfileChooserView::ProfileChooserView(views::View* anchor_view,
       browser_(browser) {
   // Reset the default margins inherited from the BubbleDelegateView.
   set_margins(gfx::Insets());
+  // Compensate for built-in vertical padding in the anchor view's image.
+  set_anchor_view_insets(gfx::Insets(kArrowHeight, 0, kArrowHeight, 0));
 
   ResetLinksAndButtons();
 
@@ -154,6 +248,8 @@ void ProfileChooserView::ResetLinksAndButtons() {
   guest_button_ = NULL;
   end_guest_button_ = NULL;
   users_button_ = NULL;
+  add_user_button_ = NULL;
+  add_account_button_ = NULL;
   open_other_profile_indexes_map_.clear();
 }
 
@@ -184,6 +280,27 @@ void ProfileChooserView::ShowView(BubbleViewMode view_to_display,
 
   views::GridLayout* layout = CreateSingleColumnLayout(this);
   layout->set_minimum_size(gfx::Size(kMinMenuWidth, 0));
+
+  if (view_to_display == GAIA_SIGNIN_VIEW ||
+      view_to_display == GAIA_ADD_ACCOUNT_VIEW) {
+    // Minimum size for embedded sign in pages as defined in Gaia.
+    const int kMinGaiaViewWidth = 320;
+    const int kMinGaiaViewHeight = 500;
+    Profile* profile = browser_->profile();
+    views::WebView* web_view = new views::WebView(profile);
+    signin::Source source = (view_to_display == GAIA_SIGNIN_VIEW) ?
+        signin::SOURCE_AVATAR_BUBBLE_SIGN_IN :
+        signin::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT;
+    web_view->LoadInitialURL(GURL(signin::GetPromoURL(source, false)));
+    layout->StartRow(1, 0);
+    layout->AddView(web_view);
+    layout->set_minimum_size(
+        gfx::Size(kMinGaiaViewWidth, kMinGaiaViewHeight));
+    Layout();
+    if (GetBubbleFrameView())
+      SizeToContents();
+    return;
+  }
 
   // Separate items into active and alternatives.
   Indexes other_profiles;
@@ -231,6 +348,8 @@ void ProfileChooserView::ShowView(BubbleViewMode view_to_display,
   layout->AddView(option_buttons_view);
 
   Layout();
+  if (GetBubbleFrameView())
+    SizeToContents();
 }
 
 void ProfileChooserView::WindowClosing() {
@@ -247,11 +366,24 @@ void ProfileChooserView::ButtonPressed(views::Button* sender,
     sender->SetEnabled(false);
 
   if (sender == guest_button_) {
-    avatar_menu_->SwitchToGuestProfileWindow(browser_);
+    profiles::SwitchToGuestProfile(browser_->host_desktop_type(),
+                                   profiles::ProfileSwitchingDoneCallback());
   } else if (sender == end_guest_button_) {
     profiles::CloseGuestProfileWindows();
   } else if (sender == users_button_) {
-    UserManagerView::Show(browser_);
+    // Only non-guest users appear in the User Manager.
+    base::FilePath profile_path;
+    if (!end_guest_button_) {
+      size_t active_index = avatar_menu_->GetActiveProfileIndex();
+      profile_path = avatar_menu_->GetItemAt(active_index).profile_path;
+    }
+    chrome::ShowUserManager(profile_path);
+  } else if (sender == add_user_button_) {
+    profiles::CreateAndSwitchToNewProfile(
+        browser_->host_desktop_type(),
+        profiles::ProfileSwitchingDoneCallback());
+  } else if (sender == add_account_button_) {
+    ShowView(GAIA_ADD_ACCOUNT_VIEW, avatar_menu_.get());
   } else {
     // One of the "other profiles" buttons was pressed.
     ButtonIndexes::const_iterator match =
@@ -267,12 +399,16 @@ void ProfileChooserView::LinkClicked(views::Link* sender, int event_flags) {
   if (sender == manage_accounts_link_) {
     // ShowView() will DCHECK if this view is displayed for non signed-in users.
     ShowView(ACCOUNT_MANAGEMENT_VIEW, avatar_menu_.get());
-    SizeToContents();   // The account list changes the height of the bubble.
   } else if (sender == signout_current_profile_link_) {
     avatar_menu_->BeginSignOut();
   } else if (sender == signin_current_profile_link_) {
-    GURL page = signin::GetPromoURL(signin::SOURCE_MENU, false);
-    chrome::ShowSingletonTab(browser_, page);
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableInlineSignin)) {
+      ShowView(GAIA_SIGNIN_VIEW, avatar_menu_.get());
+    } else {
+      GURL page = signin::GetPromoURL(signin::SOURCE_MENU, false);
+      chrome::ShowSingletonTab(browser_, page);
+    }
   } else {
     DCHECK(sender == change_photo_link_);
     avatar_menu_->EditProfile(
@@ -285,10 +421,10 @@ views::View* ProfileChooserView::CreateCurrentProfileView(
     bool is_guest) {
   views::View* view = new views::View();
   views::GridLayout* layout = CreateDoubleColumnLayout(view);
-  layout->SetInsets(views::kButtonHEdgeMarginNew,
-                    views::kButtonVEdgeMarginNew,
+  layout->SetInsets(views::kButtonVEdgeMarginNew,
                     views::kButtonHEdgeMarginNew,
-                    views::kButtonVEdgeMarginNew);
+                    views::kButtonVEdgeMarginNew,
+                    views::kButtonHEdgeMarginNew);
 
   views::View* photo_image = CreateProfileImageView(avatar_item.icon);
   view->SetBoundsRect(photo_image->bounds());
@@ -317,10 +453,10 @@ views::View* ProfileChooserView::CreateCurrentProfileView(
         l10n_util::GetStringUTF16(IDS_PROFILES_PROFILE_SIGNOUT_BUTTON), this);
     layout->StartRow(1, 0);
     layout->SkipColumns(1);
-    layout->AddView(manage_accounts_link_);
+    layout->AddView(signout_current_profile_link_);
     layout->StartRow(1, 0);
     layout->SkipColumns(1);
-    layout->AddView(signout_current_profile_link_);
+    layout->AddView(manage_accounts_link_);
   } else {
     signin_current_profile_link_ = CreateLink(
         l10n_util::GetStringFUTF16(
@@ -342,10 +478,10 @@ views::View* ProfileChooserView::CreateCurrentProfileEditableView(
   DCHECK(avatar_item.signed_in);
   views::View* view = new views::View();
   views::GridLayout* layout = CreateDoubleColumnLayout(view);
-  layout->SetInsets(views::kButtonHEdgeMarginNew,
-                    views::kButtonVEdgeMarginNew,
+  layout->SetInsets(views::kButtonVEdgeMarginNew,
                     views::kButtonHEdgeMarginNew,
-                    views::kButtonVEdgeMarginNew);
+                    views::kButtonVEdgeMarginNew,
+                    views::kButtonHEdgeMarginNew);
 
   views::View* photo_image = CreateProfileImageView(avatar_item.icon);
   view->SetBoundsRect(photo_image->bounds());
@@ -391,32 +527,32 @@ views::View* ProfileChooserView::CreateOtherProfilesView(
     const Indexes& avatars_to_show) {
   views::View* view = new views::View();
   views::GridLayout* layout = CreateSingleColumnLayout(view);
-  layout->SetInsets(0 - views::kRelatedControlHorizontalSpacing,
-                    views::kButtonVEdgeMarginNew,
-                    views::kButtonHEdgeMarginNew,
-                    views::kButtonVEdgeMarginNew);
-
-  for (Indexes::const_iterator iter = avatars_to_show.begin();
-       iter != avatars_to_show.end();
-       ++iter) {
-    const size_t index = *iter;
+  layout->SetInsets(0, views::kButtonHEdgeMarginNew,
+                    views::kButtonVEdgeMarginNew, views::kButtonHEdgeMarginNew);
+  int num_avatars_to_show = avatars_to_show.size();
+  for (int i = 0; i < num_avatars_to_show; ++i) {
+    const size_t index = avatars_to_show[i];
     const AvatarMenu::Item& item = avatar_menu_->GetItemAt(index);
 
     gfx::Image image = profiles::GetSizedAvatarIconWithBorder(
         item.icon, true,
-        kSmallImageSide + profiles::kAvatarIconBorder,
-        kSmallImageSide + profiles::kAvatarIconBorder);
+        kSmallImageSide + profiles::kAvatarIconPadding,
+        kSmallImageSide + profiles::kAvatarIconPadding);
 
     views::TextButton* button = new views::TextButton(this, item.name);
     open_other_profile_indexes_map_[button] = index;
     button->SetIcon(*image.ToImageSkia());
+    button->set_icon_text_spacing(views::kItemLabelSpacing);
     button->SetFont(ui::ResourceBundle::GetSharedInstance().GetFont(
-        ui::ResourceBundle::BaseFont));
+        ui::ResourceBundle::MediumFont));
     button->set_border(NULL);
 
-    layout->AddPaddingRow(0, views::kRelatedControlHorizontalSpacing);
     layout->StartRow(1, 0);
     layout->AddView(button);
+
+    // The last avatar in the list does not need any bottom padding.
+    if (i < num_avatars_to_show - 1)
+      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   }
 
   return view;
@@ -425,35 +561,43 @@ views::View* ProfileChooserView::CreateOtherProfilesView(
 views::View* ProfileChooserView::CreateOptionsView(bool is_guest_view) {
   views::View* view = new views::View();
   views::GridLayout* layout = CreateSingleColumnLayout(view);
-  layout->SetInsets(views::kRelatedControlHorizontalSpacing,
-                    views::kButtonVEdgeMarginNew,
-                    views::kButtonHEdgeMarginNew,
-                    views::kButtonVEdgeMarginNew);
+  // The horizontal padding will be set by each button individually, so that
+  // in the hovered state the button spans the entire parent view.
+  layout->SetInsets(views::kRelatedControlVerticalSpacing, 0,
+                    views::kRelatedControlVerticalSpacing, 0);
 
   ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
 
   layout->StartRow(1, 0);
   if (is_guest_view) {
-    end_guest_button_ = new views::TextButton(this,
-        l10n_util::GetStringUTF16(IDS_PROFILES_PROFILE_EXIT_GUEST_BUTTON));
-    end_guest_button_->SetIcon(
-        *rb->GetImageSkiaNamed(IDR_ICON_GUEST_WHITE));
-    end_guest_button_->set_border(NULL);
+    end_guest_button_ = new BackgroundColorHoverButton(
+        this,
+        l10n_util::GetStringUTF16(IDS_PROFILES_EXIT_GUEST_BUTTON),
+        *rb->GetImageSkiaNamed(IDR_ICON_PROFILES_BROWSE_GUEST),
+        *rb->GetImageSkiaNamed(IDR_ICON_PROFILES_BROWSE_GUEST_WHITE));
     layout->AddView(end_guest_button_);
   } else {
-    guest_button_ = new views::TextButton(this,
-        l10n_util::GetStringUTF16(IDS_PROFILES_PROFILE_GUEST_BUTTON));
-    guest_button_->SetIcon(*rb->GetImageSkiaNamed(IDR_ICON_GUEST_WHITE));
-    guest_button_->set_border(NULL);
+    guest_button_ = new BackgroundColorHoverButton(
+        this,
+        l10n_util::GetStringUTF16(IDS_PROFILES_GUEST_BUTTON),
+        *rb->GetImageSkiaNamed(IDR_ICON_PROFILES_BROWSE_GUEST),
+        *rb->GetImageSkiaNamed(IDR_ICON_PROFILES_BROWSE_GUEST_WHITE));
     layout->AddView(guest_button_);
   }
 
-  users_button_ = new views::TextButton(this,
-      l10n_util::GetStringUTF16(IDS_PROFILES_PROFILE_USERS_BUTTON));
-  users_button_->SetIcon(*rb->GetImageSkiaNamed(IDR_ICON_ADD_USER_WHITE));
-  users_button_->set_border(NULL);
+  add_user_button_ = new BackgroundColorHoverButton(
+      this,
+      l10n_util::GetStringUTF16(IDS_PROFILES_ADD_PERSON_BUTTON),
+      *rb->GetImageSkiaNamed(IDR_ICON_PROFILES_ADD_USER),
+      *rb->GetImageSkiaNamed(IDR_ICON_PROFILES_ADD_USER_WHITE));
+  layout->StartRow(1, 0);
+  layout->AddView(add_user_button_);
 
-  layout->AddPaddingRow(0, views::kRelatedControlHorizontalSpacing);
+  users_button_ = new BackgroundColorHoverButton(
+      this,
+      l10n_util::GetStringUTF16(IDS_PROFILES_ALL_PEOPLE_BUTTON),
+      *rb->GetImageSkiaNamed(IDR_ICON_PROFILES_ADD_USER),
+      *rb->GetImageSkiaNamed(IDR_ICON_PROFILES_ADD_USER_WHITE));
   layout->StartRow(1, 0);
   layout->AddView(users_button_);
 
@@ -465,26 +609,35 @@ views::View* ProfileChooserView::CreateCurrentProfileAccountsView(
   DCHECK(avatar_item.signed_in);
   views::View* view = new views::View();
   views::GridLayout* layout = CreateSingleColumnLayout(view);
-  layout->SetInsets(views::kButtonHEdgeMarginNew,
-                    views::kButtonVEdgeMarginNew,
+  layout->SetInsets(views::kButtonVEdgeMarginNew,
                     views::kButtonHEdgeMarginNew,
-                    views::kButtonVEdgeMarginNew);
+                    views::kButtonVEdgeMarginNew,
+                    views::kButtonHEdgeMarginNew);
 
-  views::Label* email_label = new views::Label(avatar_item.sync_state);
-  email_label->SetElideBehavior(views::Label::ELIDE_AS_EMAIL);
-  email_label->SetFont(ui::ResourceBundle::GetSharedInstance().GetFont(
-      ui::ResourceBundle::SmallFont));
-  email_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  Profile* profile = browser_->profile();
+  std::vector<std::string> accounts(
+      ProfileOAuth2TokenServiceFactory::GetForProfile(profile)->GetAccounts());
+  for (size_t i = 0; i < accounts.size(); ++i) {
+    if (i != 0)
+      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
-  layout->StartRow(1, 0);
-  layout->AddView(email_label);
-  layout->AddPaddingRow(0, views::kUnrelatedControlHorizontalSpacing);
+    views::Label* email_label = new views::Label(UTF8ToUTF16(accounts[i]));
+    email_label->SetElideBehavior(views::Label::ELIDE_AS_EMAIL);
+    email_label->SetFont(ui::ResourceBundle::GetSharedInstance().GetFont(
+        ui::ResourceBundle::SmallFont));
+    email_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
-  views::BlueButton* add_account_button = new views::BlueButton(
-      NULL,
+    layout->StartRow(1, 0);
+    layout->AddView(email_label);
+  }
+
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+
+  add_account_button_ = new views::BlueButton(
+      this,
       l10n_util::GetStringFUTF16(IDS_PROFILES_PROFILE_ADD_ACCOUNT_BUTTON,
                                  avatar_item.name));
   layout->StartRow(1, 0);
-  layout->AddView(add_account_button);
+  layout->AddView(add_account_button_);
   return view;
 }

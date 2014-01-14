@@ -32,16 +32,13 @@
 
 using views::View;
 using web_modal::WebContentsModalDialogHost;
-using web_modal::WebContentsModalDialogHostObserver;
+using web_modal::ModalDialogHostObserver;
 
 namespace {
 
 // The visible height of the shadow above the tabs. Clicks in this area are
 // treated as clicks to the frame, rather than clicks to the tab.
 const int kTabShadowSize = 2;
-// The number of pixels the bookmark bar should overlap the spacer by if the
-// spacer is visible.
-const int kSpacerBookmarkBarOverlap = 1;
 // The number of pixels the metro switcher is offset from the right edge.
 const int kWindowSwitcherOffsetX = 7;
 // The number of pixels the constrained window should overlap the bottom
@@ -70,23 +67,15 @@ class BrowserViewLayout::WebContentsModalDialogHostViews
   }
 
   virtual ~WebContentsModalDialogHostViews() {
-    FOR_EACH_OBSERVER(web_modal::WebContentsModalDialogHostObserver,
+    FOR_EACH_OBSERVER(web_modal::ModalDialogHostObserver,
                       observer_list_,
                       OnHostDestroying());
   }
 
   void NotifyPositionRequiresUpdate() {
-    FOR_EACH_OBSERVER(WebContentsModalDialogHostObserver,
+    FOR_EACH_OBSERVER(ModalDialogHostObserver,
                       observer_list_,
                       OnPositionRequiresUpdate());
-  }
-
- private:
-  virtual gfx::NativeView GetHostView() const OVERRIDE {
-    gfx::NativeWindow native_window =
-        browser_view_layout_->browser()->window()->GetNativeWindow();
-    return views::Widget::GetWidgetForNativeWindow(native_window)->
-        GetNativeView();
   }
 
   // Center horizontally over the content area, with the top overlapping the
@@ -97,6 +86,14 @@ class BrowserViewLayout::WebContentsModalDialogHostViews
         browser_view_layout_->browser_view_->GetClientAreaBounds();
     int middle_x = content_area.x() + content_area.width() / 2;
     return gfx::Point(middle_x - size.width() / 2, top_y);
+  }
+
+ private:
+  virtual gfx::NativeView GetHostView() const OVERRIDE {
+    gfx::NativeWindow native_window =
+        browser_view_layout_->browser()->window()->GetNativeWindow();
+    return views::Widget::GetWidgetForNativeWindow(native_window)->
+        GetNativeView();
   }
 
   virtual gfx::Size GetMaximumDialogSize() OVERRIDE {
@@ -115,17 +112,17 @@ class BrowserViewLayout::WebContentsModalDialogHostViews
 
   // Add/remove observer.
   virtual void AddObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE {
+      ModalDialogHostObserver* observer) OVERRIDE {
     observer_list_.AddObserver(observer);
   }
   virtual void RemoveObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE {
+      ModalDialogHostObserver* observer) OVERRIDE {
     observer_list_.RemoveObserver(observer);
   }
 
   BrowserViewLayout* const browser_view_layout_;
 
-  ObserverList<WebContentsModalDialogHostObserver> observer_list_;
+  ObserverList<ModalDialogHostObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsModalDialogHostViews);
 };
@@ -383,8 +380,11 @@ void BrowserViewLayout::Layout(views::View* browser_view) {
   if (fullscreen_exit_bubble)
     fullscreen_exit_bubble->RepositionIfVisible();
 
-  // Adjust any web contents modal dialogs.
-  dialog_host_->NotifyPositionRequiresUpdate();
+  // Adjust any hosted dialogs if the browser's dialog positioning has changed.
+  if (dialog_host_->GetDialogPosition(gfx::Size()) != latest_dialog_position_) {
+    latest_dialog_position_ = dialog_host_->GetDialogPosition(gfx::Size());
+    dialog_host_->NotifyPositionRequiresUpdate();
+  }
 }
 
 // Return the preferred size which is the size required to give each

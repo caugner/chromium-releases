@@ -132,6 +132,7 @@ OutputFile NinjaHelper::GetTargetOutputFile(const Target* target) const {
 
   const char* extension;
   if (target->output_type() == Target::GROUP ||
+      target->output_type() == Target::SOURCE_SET ||
       target->output_type() == Target::COPY_FILES ||
       target->output_type() == Target::CUSTOM) {
     extension = "stamp";
@@ -188,23 +189,20 @@ OutputFile NinjaHelper::GetTargetOutputFile(const Target* target) const {
   return ret;
 }
 
-std::string NinjaHelper::GetRulePrefix(const Toolchain* toolchain) const {
-  // This code doesn't prefix the default toolchain commands. This is disabled
-  // so we can coexist with GYP's commands (which aren't prefixed). If we don't
-  // need to coexist with GYP anymore, we can uncomment this to make things a
-  // bit prettier.
-  //if (toolchain->is_default())
-  //  return std::string();  // Default toolchain has no prefix.
-  return toolchain->label().name() + "_";
+std::string NinjaHelper::GetRulePrefix(const Settings* settings) const {
+  // Don't prefix the default toolchain so it looks prettier, prefix everything
+  // else.
+  if (settings->is_default())
+    return std::string();  // Default toolchain has no prefix.
+  return settings->toolchain_label().name() + "_";
 }
 
 std::string NinjaHelper::GetRuleForSourceType(const Settings* settings,
-                                              const Toolchain* toolchain,
                                               SourceFileType type) const {
   // This function may be hot since it will be called for every source file
   // in the tree. We could cache the results to avoid making a string for
   // every invocation.
-  std::string prefix = GetRulePrefix(toolchain);
+  std::string prefix = GetRulePrefix(settings);
 
   if (type == SOURCE_C)
     return prefix + "cc";
@@ -229,21 +227,4 @@ std::string NinjaHelper::GetRuleForSourceType(const Settings* settings,
   }
 
   return std::string();
-}
-
-std::string NinjaHelper::GetRuleForTargetType(
-    const Toolchain* toolchain,
-    Target::OutputType target_type) const {
-  std::string prefix = GetRulePrefix(toolchain);
-
-  if (target_type == Target::STATIC_LIBRARY) {
-    // TODO(brettw) stuff about standalong static libraryes on Unix in
-    // WriteTarget in the Python one, and lots of postbuild steps.
-    return prefix + "alink";
-  }
-
-  if (target_type == Target::SHARED_LIBRARY)
-    return prefix + "solink";
-
-  return prefix + "link";
 }

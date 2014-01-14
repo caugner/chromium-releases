@@ -25,13 +25,6 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/perf/perf_test.h"
 
-static const base::FilePath::CharType kPeerConnectionServer[] =
-#if defined(OS_WIN)
-    FILE_PATH_LITERAL("peerconnection_server.exe");
-#else
-    FILE_PATH_LITERAL("peerconnection_server");
-#endif
-
 static const base::FilePath::CharType kReferenceFile[] =
 #if defined (OS_WIN)
     FILE_PATH_LITERAL("pyauto_private/webrtc/human-voice-win.wav");
@@ -54,13 +47,16 @@ static const base::FilePath::CharType kToolsPath[] =
 static const char kMainWebrtcTestHtmlPage[] =
     "files/webrtc/webrtc_audio_quality_test.html";
 
-base::FilePath GetTestDataDir() {
+static base::FilePath GetTestDataDir() {
   base::FilePath source_dir;
   PathService::Get(chrome::DIR_TEST_DATA, &source_dir);
   return source_dir;
 }
 
 // Test we can set up a WebRTC call and play audio through it.
+//
+// You must have the src-internal solution in your .gclient to put the required
+// pyauto_private directory into chrome/test/data/.
 //
 // This test will only work on machines that have been configured to record
 // their own input.
@@ -100,9 +96,6 @@ class WebrtcAudioQualityBrowserTest : public WebRtcTestBase {
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    // TODO(phoglund): check that user actually has the requisite devices and
-    // print a nice message if not; otherwise the test just times out which can
-    // be confusing.
     // This test expects real device handling and requires a real webcam / audio
     // device; it will not work with fake devices.
     EXPECT_FALSE(command_line->HasSwitch(
@@ -132,16 +125,6 @@ class WebrtcAudioQualityBrowserTest : public WebRtcTestBase {
     EXPECT_EQ("ok-playing", ExecuteJavascript("playAudioFile()", tab_contents));
   }
 
-  // Convenience method which executes the provided javascript in the context
-  // of the provided web contents and returns what it evaluated to.
-  std::string ExecuteJavascript(const std::string& javascript,
-                                content::WebContents* tab_contents) {
-    std::string result;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-        tab_contents, javascript, &result));
-    return result;
-  }
-
   // Ensures we didn't get any errors asynchronously (e.g. while no javascript
   // call from this test was outstanding).
   // TODO(phoglund): this becomes obsolete when we switch to communicating with
@@ -149,15 +132,6 @@ class WebrtcAudioQualityBrowserTest : public WebRtcTestBase {
   void AssertNoAsynchronousErrors(content::WebContents* tab_contents) {
     EXPECT_EQ("ok-no-errors",
               ExecuteJavascript("getAnyTestFailures()", tab_contents));
-  }
-
-  // The peer connection server lets our two tabs find each other and talk to
-  // each other (e.g. it is the application-specific "signaling solution").
-  void ConnectToPeerConnectionServer(const std::string peer_name,
-                                     content::WebContents* tab_contents) {
-    std::string javascript = base::StringPrintf(
-        "connect('http://localhost:8888', '%s');", peer_name.c_str());
-    EXPECT_EQ("ok-connected", ExecuteJavascript(javascript, tab_contents));
   }
 
   void EstablishCall(content::WebContents* from_tab,

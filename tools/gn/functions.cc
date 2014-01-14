@@ -134,7 +134,7 @@ bool EnsureSingleStringArg(const FunctionCallNode* function,
 }
 
 const Label& ToolchainLabelForScope(const Scope* scope) {
-  return scope->settings()->toolchain()->label();
+  return scope->settings()->toolchain_label();
 }
 
 Label MakeLabelForScope(const Scope* scope,
@@ -567,6 +567,7 @@ struct FunctionInfoInitializer {
     INSERT_FUNCTION(SetDefaultToolchain)
     INSERT_FUNCTION(SetSourcesAssignmentFilter)
     INSERT_FUNCTION(SharedLibrary)
+    INSERT_FUNCTION(SourceSet)
     INSERT_FUNCTION(StaticLibrary)
     INSERT_FUNCTION(Template)
     INSERT_FUNCTION(Test)

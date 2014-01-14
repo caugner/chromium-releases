@@ -530,9 +530,11 @@ void Widget::SetVisibilityChangedAnimationsEnabled(bool value) {
   native_widget_->SetVisibilityChangedAnimationsEnabled(value);
 }
 
-Widget::MoveLoopResult Widget::RunMoveLoop(const gfx::Vector2d& drag_offset,
-                                           MoveLoopSource source) {
-  return native_widget_->RunMoveLoop(drag_offset, source);
+Widget::MoveLoopResult Widget::RunMoveLoop(
+    const gfx::Vector2d& drag_offset,
+    MoveLoopSource source,
+    MoveLoopEscapeBehavior escape_behavior) {
+  return native_widget_->RunMoveLoop(drag_offset, source, escape_behavior);
 }
 
 void Widget::EndMoveLoop() {
@@ -654,6 +656,10 @@ void Widget::DisableInactiveRendering() {
 
 void Widget::SetAlwaysOnTop(bool on_top) {
   native_widget_->SetAlwaysOnTop(on_top);
+}
+
+bool Widget::IsAlwaysOnTop() const {
+  return native_widget_->IsAlwaysOnTop();
 }
 
 void Widget::Maximize() {
@@ -929,10 +935,12 @@ bool Widget::HasCapture() {
   return native_widget_->HasCapture();
 }
 
-void Widget::TooltipTextChanged(View* view) {
-  TooltipManager* manager = native_widget_private()->GetTooltipManager();
-  if (manager)
-    manager->TooltipTextChanged(view);
+TooltipManager* Widget::GetTooltipManager() {
+  return native_widget_->GetTooltipManager();
+}
+
+const TooltipManager* Widget::GetTooltipManager() const {
+  return native_widget_->GetTooltipManager();
 }
 
 bool Widget::SetInitialFocus() {
@@ -1321,7 +1329,6 @@ void Widget::SetInactiveRenderingDisabled(bool value) {
   disable_inactive_rendering_ = value;
   if (non_client_view_)
     non_client_view_->SetInactiveRenderingDisabled(value);
-  native_widget_->SetInactiveRenderingDisabled(value);
 }
 
 void Widget::SaveWindowPlacement() {
@@ -1389,7 +1396,7 @@ bool Widget::GetSavedWindowPlacement(gfx::Rect* bounds,
   // track maximized state independently of sizing information.
 
   // Restore the window's placement from the controller.
-  if (widget_delegate_->GetSavedWindowPlacement(bounds, show_state)) {
+  if (widget_delegate_->GetSavedWindowPlacement(this, bounds, show_state)) {
     if (!widget_delegate_->ShouldRestoreWindowSize()) {
       bounds->set_size(non_client_view_->GetPreferredSize());
     } else {

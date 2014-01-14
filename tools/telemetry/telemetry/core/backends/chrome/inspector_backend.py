@@ -6,8 +6,8 @@ import logging
 import socket
 import sys
 
-from telemetry.core import util
 from telemetry.core import exceptions
+from telemetry.core import util
 from telemetry.core.backends import png_bitmap
 from telemetry.core.backends.chrome import inspector_console
 from telemetry.core.backends.chrome import inspector_memory
@@ -87,18 +87,6 @@ class InspectorBackend(object):
 
   # Public methods implemented in JavaScript.
 
-  def WaitForDocumentReadyStateToBeComplete(self, timeout):
-    util.WaitFor(
-        lambda: self._runtime.Evaluate('document.readyState') == 'complete',
-        timeout)
-
-  def WaitForDocumentReadyStateToBeInteractiveOrBetter(
-      self, timeout):
-    def IsReadyStateInteractiveOrBetter():
-      rs = self._runtime.Evaluate('document.readyState')
-      return rs == 'complete' or rs == 'interactive'
-    util.WaitFor(IsReadyStateInteractiveOrBetter, timeout)
-
   @property
   def screenshot_supported(self):
     if self._runtime.Evaluate(
@@ -109,7 +97,8 @@ class InspectorBackend(object):
         'window.chrome.gpuBenchmarking.beginWindowSnapshotPNG === undefined'):
       return False
 
-    return self._browser_backend.chrome_branch_number >= 1391
+    return (self._browser_backend.chrome_branch_number >= 1391 or
+            self._browser_backend.is_content_shell)
 
   def Screenshot(self, timeout):
     if self._runtime.Evaluate(
@@ -330,15 +319,13 @@ class InspectorBackend(object):
     # This is a hack to make the nested function be able to modify the
     # variables.
     snapshot_uid = [0]
-    snapshot = [[]]
+    snapshot = []
 
     def OnNotification(res):
       if res['method'] == 'HeapProfiler.addProfileHeader':
         snapshot_uid[0] = res['params']['header']['uid']
       elif res['method'] == 'HeapProfiler.addHeapSnapshotChunk':
-        snapshot[0].append(res['params']['chunk'])
-      elif res['method'] == 'HeapProfiler.finishHeapSnapshot':
-        snapshot[0] = ''.join(snapshot[0])
+        snapshot.append(res['params']['chunk'])
 
     def OnClose():
       pass
@@ -348,10 +335,10 @@ class InspectorBackend(object):
     self.SyncRequest({'method': 'Page.getResourceTree'}, timeout)
     self.SyncRequest({'method': 'Debugger.enable'}, timeout)
     self.SyncRequest({'method': 'HeapProfiler.clearProfiles'}, timeout)
-    self.SyncRequest({'method': 'HeapProfiler.takeHeapSnapshot',
-                      'params': {'detailed': True}}, timeout)
+    self.SyncRequest({'method': 'HeapProfiler.takeHeapSnapshot'}, timeout)
     self.SyncRequest({'method': 'HeapProfiler.getHeapSnapshot',
                       'params': {'uid': snapshot_uid[0]}}, timeout)
+    snapshot = ''.join(snapshot)
 
     self.UnregisterDomain('HeapProfiler')
-    return model.Model(snapshot[0])
+    return model.Model(snapshot)

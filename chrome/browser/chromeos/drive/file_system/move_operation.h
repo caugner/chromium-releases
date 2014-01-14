@@ -42,52 +42,50 @@ class MoveOperation {
   ~MoveOperation();
 
   // Performs the move operation on the file at drive path |src_file_path|
-  // with a target of |dest_file_path|.  Invokes |callback| when finished with
-  // the result of the operation. |callback| must not be null.
+  // with a target of |dest_file_path|.
+  // If |preserve_last_modified| is set to true, this tries to preserve
+  // last modified time stamp. This is supported only on Drive API v2.
+  // Invokes |callback| when finished with the result of the operation.
+  // |callback| must not be null.
   void Move(const base::FilePath& src_file_path,
             const base::FilePath& dest_file_path,
+            bool preserve_last_modified,
             const FileOperationCallback& callback);
 
  private:
+  // Params of Move().
+  struct MoveParams;
+
   // Part of Move(). Called after local metadata look up.
-  void MoveAfterPrepare(const base::FilePath& src_file_path,
-                        const base::FilePath& dest_file_path,
-                        const FileOperationCallback& callback,
+  void MoveAfterPrepare(const MoveParams& params,
                         scoped_ptr<ResourceEntry> src_entry,
+                        scoped_ptr<ResourceEntry> src_parent_entry,
                         scoped_ptr<ResourceEntry> dest_parent_entry,
                         FileError error);
 
   // Part of Move(). Called after MoveResource is completed. This is only for
   // Drive API v2.
   void MoveAfterMoveResource(
-      const base::FilePath& src_file_path,
-      const base::FilePath& dest_file_path,
-      const FileOperationCallback& callback,
+      const MoveParams& params,
       google_apis::GDataErrorCode status,
       scoped_ptr<google_apis::ResourceEntry> resource_entry);
 
   // Part of Move(). Called after ResourceMetadata::RefreshEntry is completed.
   // This is only for Drive API v2.
-  void MoveAfterRefreshEntry(const base::FilePath& src_file_path,
-                             const base::FilePath& dest_file_path,
-                             const FileOperationCallback& callback,
-                             FileError error);
+  void MoveAfterRefreshEntry(const MoveParams& params, FileError error);
 
   // Part of Move(). Called after renaming (without moving the directory)
   // is completed.
-  void MoveAfterRename(const base::FilePath& src_file_path,
-                       const base::FilePath& dest_file_path,
-                       const FileOperationCallback& callback,
+  void MoveAfterRename(const MoveParams& params,
                        scoped_ptr<ResourceEntry> src_entry,
+                       scoped_ptr<ResourceEntry> src_parent_entry,
                        scoped_ptr<ResourceEntry> dest_parent_entry,
                        FileError error);
 
   // Part of Move(). Called after adding the entry to the parent is done.
-  void MoveAfterAddToDirectory(const base::FilePath& src_file_path,
-                               const base::FilePath& dest_file_path,
-                               const FileOperationCallback& callback,
+  void MoveAfterAddToDirectory(const MoveParams& params,
                                const std::string& resource_id,
-                               const std::string& parent_resource_id,
+                               const std::string& old_parent_resource_id,
                                FileError error);
 
 
@@ -100,22 +98,22 @@ class MoveOperation {
               const FileOperationCallback& callback);
 
   // Part of Rename(). Called after server side renaming is done.
-  void RenameAfterRenameResource(const std::string& resource_id,
+  void RenameAfterRenameResource(const std::string& local_id,
                                  const std::string& new_title,
                                  const FileOperationCallback& callback,
                                  google_apis::GDataErrorCode status);
 
 
-  // Adds the entry with |resource_id| to the directory |parent_resource_id|.
+  // Adds the entry to the specified directory.
   // Upon completion, |callback| will be called.
-  void AddToDirectory(const std::string& resource_id,
-                      const std::string& parent_resource_id,
+  void AddToDirectory(scoped_ptr<ResourceEntry> entry,
+                      scoped_ptr<ResourceEntry> directory,
                       const FileOperationCallback& callback);
 
   // Part of AddToDirectory(). Called after server side updating is done.
   void AddToDirectoryAfterAddResourceToDirectory(
-      const std::string& resource_id,
-      const std::string& parent_resource_id,
+      const std::string& local_id,
+      const std::string& parent_local_id,
       const FileOperationCallback& callback,
       google_apis::GDataErrorCode status);
 

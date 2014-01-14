@@ -110,10 +110,12 @@ void BrailleControllerImpl::WriteDots(const std::string& cells) {
 
 void BrailleControllerImpl::AddObserver(BrailleObserver* observer) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::Bind(
-                              &BrailleControllerImpl::StartConnecting,
-                              base::Unretained(this)));
+  if (!BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                               base::Bind(
+                                   &BrailleControllerImpl::StartConnecting,
+                                   base::Unretained(this)))) {
+    NOTREACHED();
+  }
   observers_.AddObserver(observer);
 }
 
@@ -134,7 +136,7 @@ void BrailleControllerImpl::SetCreateBrlapiConnectionForTesting(
 }
 
 void BrailleControllerImpl::PokeSocketDirForTesting() {
-  OnSocketDirChanged(base::FilePath(), false /*error*/);
+  OnSocketDirChangedOnIOThread();
 }
 
 void BrailleControllerImpl::StartConnecting() {
@@ -146,27 +148,49 @@ void BrailleControllerImpl::StartConnecting() {
   if (!libbrlapi_loader_.loaded()) {
     return;
   }
+  // Only try to connect after we've started to watch the
+  // socket directory.  This is necessary to avoid a race condition
+  // and because we don't retry to connect after errors that will
+  // persist until there's a change to the socket directory (i.e.
+  // ENOENT).
+  BrowserThread::PostTaskAndReply(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(
+          &BrailleControllerImpl::StartWatchingSocketDirOnFileThread,
+          base::Unretained(this)),
+      base::Bind(
+          &BrailleControllerImpl::TryToConnect,
+          base::Unretained(this)));
+  ResetRetryConnectHorizon();
+}
+
+void BrailleControllerImpl::StartWatchingSocketDirOnFileThread() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   base::FilePath brlapi_dir(BRLAPI_SOCKETPATH);
   if (!file_path_watcher_.Watch(
           brlapi_dir, false, base::Bind(
-              &BrailleControllerImpl::OnSocketDirChanged,
+              &BrailleControllerImpl::OnSocketDirChangedOnFileThread,
               base::Unretained(this)))) {
     LOG(WARNING) << "Couldn't watch brlapi directory " << BRLAPI_SOCKETPATH;
-    return;
   }
-  ResetRetryConnectHorizon();
-  TryToConnect();
 }
 
-void BrailleControllerImpl::OnSocketDirChanged(const base::FilePath& path,
-                                               bool error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(libbrlapi_loader_.loaded());
+void BrailleControllerImpl::OnSocketDirChangedOnFileThread(
+    const base::FilePath& path, bool error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (error) {
     LOG(ERROR) << "Error watching brlapi directory: " << path.value();
     return;
   }
-  LOG(INFO) << "BrlAPI directory changed";
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE, base::Bind(
+          &BrailleControllerImpl::OnSocketDirChangedOnIOThread,
+          base::Unretained(this)));
+}
+
+void BrailleControllerImpl::OnSocketDirChangedOnIOThread() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  VLOG(1) << "BrlAPI directory changed";
   // Every directory change resets the max retry time to the appropriate delay
   // into the future.
   ResetRetryConnectHorizon();
@@ -181,13 +205,21 @@ void BrailleControllerImpl::TryToConnect() {
   if (!connection_.get())
     connection_ = create_brlapi_connection_function_.Run();
   if (connection_.get() && !connection_->Connected()) {
-    LOG(INFO) << "Trying to connect to brlapi";
-    if (connection_->Connect(base::Bind(
-            &BrailleControllerImpl::DispatchKeys,
-            base::Unretained(this)))) {
-      DispatchOnDisplayStateChanged(GetDisplayState());
-    } else {
-      ScheduleTryToConnect();
+    VLOG(1) << "Trying to connect to brlapi";
+    BrlapiConnection::ConnectResult result = connection_->Connect(base::Bind(
+        &BrailleControllerImpl::DispatchKeys,
+        base::Unretained(this)));
+    switch (result) {
+      case BrlapiConnection::CONNECT_SUCCESS:
+        DispatchOnDisplayStateChanged(GetDisplayState());
+        break;
+      case BrlapiConnection::CONNECT_ERROR_NO_RETRY:
+        break;
+      case BrlapiConnection::CONNECT_ERROR_RETRY:
+        ScheduleTryToConnect();
+        break;
+      default:
+        NOTREACHED();
     }
   }
 }
@@ -206,10 +238,10 @@ void BrailleControllerImpl::ScheduleTryToConnect() {
   if (connect_scheduled_)
     return;
   if (Time::Now() + delay > retry_connect_horizon_) {
-    LOG(INFO) << "Stopping to retry to connect to brlapi";
+    VLOG(1) << "Stopping to retry to connect to brlapi";
     return;
   }
-  LOG(INFO) << "Scheduling connection retry to brlapi";
+  VLOG(1) << "Scheduling connection retry to brlapi";
   connect_scheduled_ = true;
   BrowserThread::PostDelayedTask(BrowserThread::IO, FROM_HERE,
                                  base::Bind(
@@ -289,7 +321,7 @@ void BrailleControllerImpl::DispatchKeys() {
       if (err->brlerrno == BRLAPI_ERROR_LIBCERR && err->libcerrno == EINTR)
         continue;
       // Disconnect on other errors.
-      LOG(ERROR) << "BrlAPI error: " << connection_->BrlapiStrError();
+      VLOG(1) << "BrlAPI error: " << connection_->BrlapiStrError();
       Disconnect();
       return;
     } else if (result == 0) { // No more data.
@@ -316,11 +348,13 @@ void BrailleControllerImpl::DispatchKeyEvent(scoped_ptr<KeyEvent> event) {
 void BrailleControllerImpl::DispatchOnDisplayStateChanged(
     scoped_ptr<DisplayState> new_state) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&BrailleControllerImpl::DispatchOnDisplayStateChanged,
-                   base::Unretained(this),
-                   base::Passed(&new_state)));
+    if (!BrowserThread::PostTask(
+            BrowserThread::UI, FROM_HERE,
+            base::Bind(&BrailleControllerImpl::DispatchOnDisplayStateChanged,
+                       base::Unretained(this),
+                       base::Passed(&new_state)))) {
+      NOTREACHED();
+    }
     return;
   }
   FOR_EACH_OBSERVER(BrailleObserver, observers_,

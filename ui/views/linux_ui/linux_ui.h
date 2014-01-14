@@ -6,6 +6,7 @@
 #define UI_VIEWS_LINUX_UI_LINUX_UI_H_
 
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/ime/linux/linux_input_method_context_factory.h"
 #include "ui/shell_dialogs/linux_shell_dialog.h"
 #include "ui/views/linux_ui/status_icon_linux.h"
 #include "ui/views/views_export.h"
@@ -31,7 +32,8 @@ class WindowButtonOrderObserver;
 // minimum) GTK2 and GTK3. LinuxUI::instance() should actually be a very
 // complex method that pokes around with dlopen against a libuigtk2.so, a
 // liuigtk3.so, etc.
-class VIEWS_EXPORT LinuxUI : public ui::LinuxShellDialog {
+class VIEWS_EXPORT LinuxUI : public ui::LinuxInputMethodContextFactory,
+                             public ui::LinuxShellDialog {
  public:
   virtual ~LinuxUI() {}
 
@@ -45,11 +47,24 @@ class VIEWS_EXPORT LinuxUI : public ui::LinuxShellDialog {
   // running with the "--ash" flag.)
   static LinuxUI* instance();
 
+  virtual void Initialize() = 0;
+
   // Returns an themed image per theme_provider.h
   virtual bool UseNativeTheme() const = 0;
   virtual gfx::Image GetThemeImageNamed(int id) const = 0;
   virtual bool GetColor(int id, SkColor* color) const = 0;
   virtual bool HasCustomImage(int id) const = 0;
+
+  // Returns the preferences that we pass to WebKit.
+  virtual SkColor GetFocusRingColor() const = 0;
+  virtual SkColor GetThumbActiveColor() const = 0;
+  virtual SkColor GetThumbInactiveColor() const = 0;
+  virtual SkColor GetTrackColor() const = 0;
+  virtual SkColor GetActiveSelectionBgColor() const = 0;
+  virtual SkColor GetActiveSelectionFgColor() const = 0;
+  virtual SkColor GetInactiveSelectionBgColor() const = 0;
+  virtual SkColor GetInactiveSelectionFgColor() const = 0;
+  virtual double GetCursorBlinkInterval() const = 0;
 
   // Returns a NativeTheme that will provide system colors and draw system
   // style widgets.

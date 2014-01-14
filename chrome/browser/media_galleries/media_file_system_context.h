@@ -9,9 +9,6 @@
 
 #include <string>
 
-#include "base/memory/ref_counted.h"
-#include "chrome/browser/media_galleries/scoped_mtp_device_map_entry.h"
-
 namespace base {
 class FilePath;
 }
@@ -22,17 +19,10 @@ class MediaFileSystemContext {
  public:
   virtual ~MediaFileSystemContext() {}
 
-  // Register a media file system (filtered to media files) for |path| and
-  // return the new file system id.
-  virtual std::string RegisterFileSystemForMassStorage(
+  // Register a new media file system for |path| and return the corresponding
+  // filesystem ID.
+  virtual std::string RegisterFileSystem(
       const std::string& device_id, const base::FilePath& path) = 0;
-
-  // Registers and returns the file system id for the MTP or PTP device
-  // specified by |device_id| and |path|. Updates |entry| with the corresponding
-  // ScopedMTPDeviceMapEntry object.
-  virtual std::string RegisterFileSystemForMTPDevice(
-      const std::string& device_id, const base::FilePath& path,
-      scoped_refptr<ScopedMTPDeviceMapEntry>* entry) = 0;
 
   // Revoke the passed |fsid|.
   virtual void RevokeFileSystem(const std::string& fsid) = 0;

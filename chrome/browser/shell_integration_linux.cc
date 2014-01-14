@@ -372,7 +372,7 @@ bool SetDefaultWebClient(const std::string& protocol) {
 ShellIntegration::DefaultWebClientState GetIsDefaultWebClient(
     const std::string& protocol) {
 #if defined(OS_CHROMEOS)
-  return ShellIntegration::IS_DEFAULT;
+  return ShellIntegration::UNKNOWN_DEFAULT;
 #else
   base::ThreadRestrictions::AssertIOAllowed();
 
@@ -436,6 +436,8 @@ bool GetNoDisplayFromDesktopFile(const std::string& shortcut_contents) {
     if (!g_strcmp0(nodisplay_c_string, "true"))
       nodisplay = true;
     g_free(nodisplay_c_string);
+  } else {
+    g_error_free(err);
   }
 
   g_key_file_free(key_file);
@@ -558,16 +560,7 @@ std::string GetProgramClassName() {
 
 std::string GetDesktopName(base::Environment* env) {
 #if defined(GOOGLE_CHROME_BUILD)
-    chrome::VersionInfo::Channel product_channel(
-      chrome::VersionInfo::GetChannel());
-  switch (product_channel) {
-    case chrome::VersionInfo::CHANNEL_DEV:
-      return "google-chrome-unstable.desktop";
-    case chrome::VersionInfo::CHANNEL_BETA:
-      return "google-chrome-beta.desktop";
-    default:
-      return "google-chrome.desktop";
-  }
+  return "google-chrome.desktop";
 #else  // CHROMIUM_BUILD
   // Allow $CHROME_DESKTOP to override the built-in value, so that development
   // versions can set themselves as the default without interfering with

@@ -3,8 +3,10 @@
 # found in the LICENSE file.
 
 config("re2_config") {
-  includes = [ "." ]
+  include_dirs = [ "." ]
 }
+
+gyp_file = "re2.gyp"
 
 static_library("re2") {
   sources = [
@@ -66,7 +68,7 @@ static_library("re2") {
   ]
 
   if (is_win) {
-    includes = [ "mswin" ]
+    include_dirs = [ "mswin" ]
     # TODO(brettw) 'msvs_disabled_warnings': [ 4018, 4722, 4267 ],
   } else {
     sources -= "mswin/stdint.h"

@@ -19,7 +19,6 @@
 #include "base/prefs/pref_service.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
-#include "chrome/app/breakpad_linux.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
@@ -47,7 +46,6 @@
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -58,31 +56,19 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/network/network_state_handler.h"
+#include "chromeos/settings/cros_settings_names.h"
+#include "components/breakpad/app/breakpad_linux.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
 
-namespace {
-
-// A string pref with initial locale set in VPD or manifest.
-const char kInitialLocale[] = "intl.initial_locale";
-
-// A boolean pref of the OOBE complete flag (first OOBE part before login).
-const char kOobeComplete[] = "OobeComplete";
-
-// A boolean pref of the device registered flag (second part after first login).
-const char kDeviceRegistered[] = "DeviceRegistered";
-
-// Time in seconds that we wait for the device to reboot.
 // If reboot didn't happen, ask user to reboot device manually.
 const int kWaitForRebootTimeSec = 3;
 
 // Interval in ms which is used for smooth screen showing.
 static int kShowDelayMs = 400;
-
-}  // namespace
 
 namespace chromeos {
 
@@ -352,7 +338,6 @@ void WizardController::ShowUserImageScreen() {
   screen->SetProfilePictureEnabled(profile_picture_enabled);
 
   SetCurrentScreen(screen);
-  host_->SetShutdownButtonEnabled(false);
 }
 
 void WizardController::ShowEulaScreen() {
@@ -433,10 +418,6 @@ void WizardController::SkipToLoginForTesting() {
   ShowLoginScreen();
 }
 
-void WizardController::SkipPostLoginScreensForTesting() {
-  skip_post_login_screens_ = true;
-}
-
 void WizardController::AddObserver(Observer* observer) {
   observer_list_.AddObserver(observer);
 }
@@ -497,7 +478,7 @@ void WizardController::OnEulaAccepted() {
 #if defined(GOOGLE_CHROME_BUILD)
     // The crash reporter initialization needs IO to complete.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    InitCrashReporter();
+    breakpad::InitCrashReporter();
 #endif
   }
 
@@ -635,9 +616,7 @@ void WizardController::PerformPostEulaActions() {
       NetworkStateHandler::kDefaultCheckPortalList);
   host_->CheckForAutoEnrollment();
   host_->PrewarmAuthentication();
-  NetworkPortalDetector* detector = NetworkPortalDetector::GetInstance();
-  if (NetworkPortalDetector::IsEnabledInCommandLine() && detector)
-    detector->Enable(true);
+  NetworkPortalDetector::Get()->Enable(true);
 }
 
 void WizardController::PerformPostUpdateActions() {
@@ -738,7 +717,7 @@ void WizardController::AdvanceToScreen(const std::string& screen_name) {
 ///////////////////////////////////////////////////////////////////////////////
 // WizardController, chromeos::ScreenObserver overrides:
 void WizardController::OnExit(ExitCodes exit_code) {
-  LOG(INFO) << "Wizard screen exit code: " << exit_code;
+  VLOG(1) << "Wizard screen exit code: " << exit_code;
   switch (exit_code) {
     case NETWORK_CONNECTED:
       OnNetworkConnected();
@@ -767,6 +746,9 @@ void WizardController::OnExit(ExitCodes exit_code) {
       break;
     case ENTERPRISE_ENROLLMENT_COMPLETED:
       OnEnrollmentDone();
+      break;
+    case ENTERPRISE_ENROLLMENT_BACK:
+      ShowNetworkScreen();
       break;
     case RESET_CANCELED:
       OnResetCanceled();
@@ -839,17 +821,23 @@ void WizardController::AutoLaunchKioskApp() {
 }
 
 // static
-bool WizardController::IsZeroDelayEnabled() {
-  return zero_delay_enabled_;
-}
-
-// static
 void WizardController::SetZeroDelays() {
   kShowDelayMs = 0;
   zero_delay_enabled_ = true;
 }
 
-bool WizardController::ShouldAutoStartEnrollment() const {
+// static
+bool WizardController::IsZeroDelayEnabled() {
+  return zero_delay_enabled_;
+}
+
+// static
+void WizardController::SkipPostLoginScreensForTesting() {
+  skip_post_login_screens_ = true;
+}
+
+// static
+bool WizardController::ShouldAutoStartEnrollment() {
   return g_browser_process->browser_policy_connector()->
       GetDeviceCloudPolicyManager()->ShouldAutoStartEnrollment();
 }

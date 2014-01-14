@@ -101,15 +101,22 @@ bool ConvertToResourceEntry(const google_apis::ResourceEntry& input,
     file_specific_info->set_content_mime_type(input.content_mime_type());
     file_specific_info->set_is_hosted_document(input.is_hosted_document());
 
-    const google_apis::Link* thumbnail_link =
-        input.GetLinkByType(google_apis::Link::LINK_THUMBNAIL);
-    if (thumbnail_link)
-      file_specific_info->set_thumbnail_url(thumbnail_link->href().spec());
-
     const google_apis::Link* alternate_link =
         input.GetLinkByType(google_apis::Link::LINK_ALTERNATE);
     if (alternate_link)
       file_specific_info->set_alternate_url(alternate_link->href().spec());
+
+    const int64 image_width = input.image_width();
+    if (image_width != -1)
+      file_specific_info->set_image_width(image_width);
+
+    const int64 image_height = input.image_height();
+    if (image_height != -1)
+      file_specific_info->set_image_height(image_height);
+
+    const int64 image_rotation = input.image_rotation();
+    if (image_rotation != -1)
+      file_specific_info->set_image_rotation(image_rotation);
   } else if (input.is_folder()) {
     file_info->set_is_directory(true);
   } else {

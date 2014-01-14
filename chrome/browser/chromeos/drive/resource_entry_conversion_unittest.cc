@@ -78,8 +78,6 @@ TEST(ResourceEntryConversionTest, ConvertToResourceEntry_File) {
   EXPECT_EQ("audio/mpeg",
             entry.file_specific_info().content_mime_type());
   EXPECT_FALSE(entry.file_specific_info().is_hosted_document());
-  EXPECT_EQ("",
-            entry.file_specific_info().thumbnail_url());
   EXPECT_EQ("https://file_link_alternate/",
             entry.file_specific_info().alternate_url());
 
@@ -162,8 +160,6 @@ TEST(ResourceEntryConversionTest,
   EXPECT_EQ("text/html",
             entry.file_specific_info().content_mime_type());
   EXPECT_TRUE(entry.file_specific_info().is_hosted_document());
-  EXPECT_EQ("https://3_document_thumbnail_link/",
-            entry.file_specific_info().thumbnail_url());
   EXPECT_EQ("https://3_document_alternate_link/",
             entry.file_specific_info().alternate_url());
 
@@ -316,8 +312,6 @@ TEST(ResourceEntryConversionTest,
   EXPECT_EQ("text/html",
             entry.file_specific_info().content_mime_type());
   EXPECT_TRUE(entry.file_specific_info().is_hosted_document());
-  EXPECT_EQ("",
-            entry.file_specific_info().thumbnail_url());
   EXPECT_EQ("https://alternate/document%3Adeleted_in_root_id/edit",
             entry.file_specific_info().alternate_url());
 
@@ -388,6 +382,55 @@ TEST(ResourceEntryConversionTest, FromPlatformFileInfo) {
             base::Time::FromInternalValue(entry.file_info().last_modified()));
   EXPECT_EQ(file_info.last_accessed,
             base::Time::FromInternalValue(entry.file_info().last_accessed()));
+}
+
+TEST(ResourceEntryConversionTest, ConvertToResourceEntry_ImageMediaMetadata) {
+  google_apis::ResourceEntry entry_all_fields;
+  google_apis::ResourceEntry entry_zero_fields;
+  google_apis::ResourceEntry entry_no_fields;
+
+  entry_all_fields.set_image_width(640);
+  entry_all_fields.set_image_height(480);
+  entry_all_fields.set_image_rotation(90);
+  entry_all_fields.set_kind(google_apis::ENTRY_KIND_FILE);
+
+  entry_zero_fields.set_image_width(0);
+  entry_zero_fields.set_image_height(0);
+  entry_zero_fields.set_image_rotation(0);
+  entry_zero_fields.set_kind(google_apis::ENTRY_KIND_FILE);
+
+  entry_no_fields.set_kind(google_apis::ENTRY_KIND_FILE);
+
+  {
+    ResourceEntry entry;
+    std::string parent_resource_id;
+    EXPECT_TRUE(ConvertToResourceEntry(entry_all_fields, &entry,
+                                       &parent_resource_id));
+    EXPECT_EQ(640, entry.file_specific_info().image_width());
+    EXPECT_EQ(480, entry.file_specific_info().image_height());
+    EXPECT_EQ(90, entry.file_specific_info().image_rotation());
+  }
+  {
+    ResourceEntry entry;
+    std::string parent_resource_id;
+    EXPECT_TRUE(ConvertToResourceEntry(entry_zero_fields, &entry,
+                                       &parent_resource_id));
+    EXPECT_TRUE(entry.file_specific_info().has_image_width());
+    EXPECT_TRUE(entry.file_specific_info().has_image_height());
+    EXPECT_TRUE(entry.file_specific_info().has_image_rotation());
+    EXPECT_EQ(0, entry.file_specific_info().image_width());
+    EXPECT_EQ(0, entry.file_specific_info().image_height());
+    EXPECT_EQ(0, entry.file_specific_info().image_rotation());
+  }
+  {
+    ResourceEntry entry;
+    std::string parent_resource_id;
+    EXPECT_TRUE(ConvertToResourceEntry(entry_no_fields, &entry,
+                                       &parent_resource_id));
+    EXPECT_FALSE(entry.file_specific_info().has_image_width());
+    EXPECT_FALSE(entry.file_specific_info().has_image_height());
+    EXPECT_FALSE(entry.file_specific_info().has_image_rotation());
+  }
 }
 
 }  // namespace drive

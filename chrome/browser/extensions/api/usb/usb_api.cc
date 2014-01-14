@@ -65,7 +65,9 @@ const char kErrorOpen[] = "Failed to open device.";
 const char kErrorCancelled[] = "Transfer was cancelled.";
 const char kErrorDisconnect[] = "Device disconnected.";
 const char kErrorGeneric[] = "Transfer failed.";
+#if !defined(OS_CHROMEOS)
 const char kErrorNotSupported[] = "Not supported on this platform.";
+#endif
 const char kErrorOverflow[] = "Inbound transfer overflow.";
 const char kErrorStalled[] = "Transfer stalled.";
 const char kErrorTimeout[] = "Transfer timed out.";
@@ -329,10 +331,11 @@ void RequestUsbDevicesAccess(
     callback.Run(devices.Pass());
     return;
   }
-  (*devices->begin())->RequestUsbAcess(
+  std::vector<scoped_refptr<UsbDevice> >::iterator i = devices->begin();
+  (*i)->RequestUsbAcess(
       interface_id,
       base::Bind(RequestUsbDevicesAccessHelper, base::Passed(devices.Pass()),
-                 devices->begin(), interface_id, callback));
+                 i, interface_id, callback));
 }
 #endif  // OS_CHROMEOS
 
@@ -393,7 +396,7 @@ UsbAsyncApiFunction::~UsbAsyncApiFunction() {
 }
 
 bool UsbAsyncApiFunction::PrePrepare() {
-  manager_ = ApiResourceManager<UsbDeviceResource>::Get(profile());
+  manager_ = ApiResourceManager<UsbDeviceResource>::Get(GetProfile());
   set_work_thread_id(BrowserThread::FILE);
   return manager_ != NULL;
 }
@@ -453,6 +456,13 @@ UsbAsyncApiFunction::GetDeviceHandleOrCompleteWithError(
     CompleteWithError(kErrorNoDevice);
     return NULL;
   }
+
+  if (!resource->device() || !resource->device()->device()) {
+    CompleteWithError(kErrorDisconnect);
+    manager_->Remove(extension_->id(), input_device_handle.handle);
+    return NULL;
+  }
+
   if (resource->device()->device()->vendor_id() !=
           input_device_handle.vendor_id ||
       resource->device()->device()->product_id() !=

@@ -16,6 +16,7 @@
 #include "base/synchronization/lock.h"
 #include "tools/gn/config_values.h"
 #include "tools/gn/item.h"
+#include "tools/gn/label_ptr.h"
 #include "tools/gn/ordered_set.h"
 #include "tools/gn/script_values.h"
 #include "tools/gn/source_file.h"
@@ -32,6 +33,7 @@ class Target : public Item {
     EXECUTABLE,
     SHARED_LIBRARY,
     STATIC_LIBRARY,
+    SOURCE_SET,
     COPY_FILES,
     CUSTOM,
   };
@@ -56,8 +58,6 @@ class Target : public Item {
   bool HasBeenGenerated() const;
   void SetGenerated(const Token* token);
 
-  const Settings* settings() const { return settings_; }
-
   OutputType output_type() const { return output_type_; }
   void set_output_type(OutputType t) { output_type_ = t; }
 
@@ -69,72 +69,57 @@ class Target : public Item {
 
   const FileList& sources() const { return sources_; }
   FileList& sources() { return sources_; }
-  void swap_in_sources(FileList* s) { sources_.swap(*s); }
 
   // Compile-time extra dependencies.
   const FileList& source_prereqs() const { return source_prereqs_; }
   FileList& source_prereqs() { return source_prereqs_; }
-  void swap_in_source_prereqs(FileList* i) { source_prereqs_.swap(*i); }
 
   // Runtime dependencies.
   const FileList& data() const { return data_; }
   FileList& data() { return data_; }
-  void swap_in_data(FileList* d) { data_.swap(*d); }
 
   // Targets depending on this one should have an order dependency.
   bool hard_dep() const { return hard_dep_; }
   void set_hard_dep(bool hd) { hard_dep_ = hd; }
 
   // Linked dependencies.
-  const std::vector<const Target*>& deps() const { return deps_; }
-  std::vector<const Target*>& deps() { return deps_; }
-  void swap_in_deps(std::vector<const Target*>* d) { deps_.swap(*d); }
+  const LabelTargetVector& deps() const { return deps_; }
+  LabelTargetVector& deps() { return deps_; }
 
   // Non-linked dependencies.
-  const std::vector<const Target*>& datadeps() const { return datadeps_; }
-  std::vector<const Target*>& datadeps() { return datadeps_; }
-  void swap_in_datadeps(std::vector<const Target*>* d) { datadeps_.swap(*d); }
+  const LabelTargetVector& datadeps() const { return datadeps_; }
+  LabelTargetVector& datadeps() { return datadeps_; }
 
   // List of configs that this class inherits settings from.
-  const std::vector<const Config*>& configs() const { return configs_; }
-  std::vector<const Config*>& configs() { return configs_; }
-  void swap_in_configs(std::vector<const Config*>* c) { configs_.swap(*c); }
+  const LabelConfigVector& configs() const { return configs_; }
+  LabelConfigVector& configs() { return configs_; }
 
   // List of configs that all dependencies (direct and indirect) of this
   // target get. These configs are not added to this target. Note that due
   // to the way this is computed, there may be duplicates in this list.
-  const std::vector<const Config*>& all_dependent_configs() const {
+  const LabelConfigVector& all_dependent_configs() const {
     return all_dependent_configs_;
   }
-  std::vector<const Config*>& all_dependent_configs() {
+  LabelConfigVector& all_dependent_configs() {
     return all_dependent_configs_;
-  }
-  void swap_in_all_dependent_configs(std::vector<const Config*>* c) {
-    all_dependent_configs_.swap(*c);
   }
 
   // List of configs that targets depending directly on this one get. These
   // configs are not added to this target.
-  const std::vector<const Config*>& direct_dependent_configs() const {
+  const LabelConfigVector& direct_dependent_configs() const {
     return direct_dependent_configs_;
   }
-  std::vector<const Config*>& direct_dependent_configs() {
+  LabelConfigVector& direct_dependent_configs() {
     return direct_dependent_configs_;
-  }
-  void swap_in_direct_dependent_configs(std::vector<const Config*>* c) {
-    direct_dependent_configs_.swap(*c);
   }
 
   // A list of a subset of deps where we'll re-export direct_dependent_configs
   // as direct_dependent_configs of this target.
-  const std::vector<const Target*>& forward_dependent_configs() const {
+  const LabelTargetVector& forward_dependent_configs() const {
     return forward_dependent_configs_;
   }
-  std::vector<const Target*>& forward_dependent_configs() {
+  LabelTargetVector& forward_dependent_configs() {
     return forward_dependent_configs_;
-  }
-  void swap_in_forward_dependent_configs(std::vector<const Target*>* t) {
-    forward_dependent_configs_.swap(*t);
   }
 
   bool external() const { return external_; }
@@ -151,14 +136,17 @@ class Target : public Item {
   ScriptValues& script_values() { return script_values_; }
   const ScriptValues& script_values() const { return script_values_; }
 
-  const OrderedSet<std::string>& all_ldflags() const { return all_ldflags_; }
+  const OrderedSet<SourceDir>& all_lib_dirs() const { return all_lib_dirs_; }
+  const OrderedSet<std::string>& all_libs() const { return all_libs_; }
+
+  const SourceFile& gyp_file() const { return gyp_file_; }
+  void set_gyp_file(const SourceFile& gf) { gyp_file_ = gf; }
 
  private:
   // Pulls necessary information from dependents to this one when all
   // dependencies have been resolved.
   void PullDependentTargetInfo(std::set<const Config*>* unique_configs);
 
-  const Settings* settings_;
   OutputType output_type_;
   std::string output_name_;
 
@@ -179,30 +167,30 @@ class Target : public Item {
   // so we also need the group in the list so we find these things. But you
   // shouldn't need to look inside the deps of the group since those will
   // already be added.
-  std::vector<const Target*> deps_;
-  std::vector<const Target*> datadeps_;
+  LabelTargetVector deps_;
+  LabelTargetVector datadeps_;
 
-  std::vector<const Config*> configs_;
-  std::vector<const Config*> all_dependent_configs_;
-  std::vector<const Config*> direct_dependent_configs_;
-  std::vector<const Target*> forward_dependent_configs_;
+  LabelConfigVector configs_;
+  LabelConfigVector all_dependent_configs_;
+  LabelConfigVector direct_dependent_configs_;
+  LabelTargetVector forward_dependent_configs_;
 
   bool external_;
 
-  // Libraries from transitive deps. Libraries need to be linked only
-  // with the end target (executable, shared library). These do not get
-  // pushed beyond shared library boundaries.
+  // Static libraries and source sets from transitive deps. These things need
+  // to be linked only with the end target (executable, shared library). These
+  // do not get pushed beyond shared library boundaries.
   std::set<const Target*> inherited_libraries_;
 
-  // Linker flags that apply to this target. These are inherited from
-  // statically linked deps and all configs applying to this target. These
-  // values may include duplicates.
-  OrderedSet<std::string> all_ldflags_;
+  // These libs and dirs are inherited from statically linked deps and all
+  // configs applying to this target.
+  OrderedSet<SourceDir> all_lib_dirs_;
+  OrderedSet<std::string> all_libs_;
 
   ConfigValues config_values_;  // Used for all binary targets.
   ScriptValues script_values_;  // Used for script (CUSTOM) targets.
 
-  SourceDir destdir_;
+  SourceFile gyp_file_;
 
   bool generated_;
   const Token* generator_function_;  // Who generated this: for error messages.

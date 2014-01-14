@@ -27,12 +27,14 @@
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/theme_provider.h"
+#include "ui/gfx/font.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/widget/native_widget.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "chrome/browser/ui/views/frame/glass_browser_frame_view.h"
+#include "ui/views/widget/native_widget_win.h"
 #endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -41,6 +43,10 @@
 
 #if defined(USE_ASH)
 #include "chrome/browser/ui/ash/ash_init.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "ash/session_state_delegate.h"
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -62,6 +68,17 @@ BrowserFrame::BrowserFrame(BrowserView* browser_view)
 BrowserFrame::~BrowserFrame() {
 }
 
+// static
+const gfx::Font& BrowserFrame::GetTitleFont() {
+#if !defined(OS_WIN) || defined(USE_AURA)
+  static gfx::Font* title_font = new gfx::Font;
+#else
+  static gfx::Font* title_font =
+      new gfx::Font(views::NativeWidgetWin::GetWindowTitleFont());
+#endif
+  return *title_font;
+}
+
 void BrowserFrame::InitBrowserFrame() {
   native_browser_frame_ =
       NativeBrowserFrameFactory::CreateNativeBrowserFrame(this, browser_view_);
@@ -79,6 +96,10 @@ void BrowserFrame::InitBrowserFrame() {
   if (browser_view_->browser()->host_desktop_type() ==
       chrome::HOST_DESKTOP_TYPE_ASH || chrome::ShouldOpenAshOnStartup()) {
     params.context = ash::Shell::GetPrimaryRootWindow();
+#if defined(OS_WIN)
+   // If this window is under ASH on Windows, we need it to be translucent.
+   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+#endif
   }
 #endif
 
@@ -227,6 +248,17 @@ void BrowserFrame::ShowContextMenuForView(views::View* source,
 }
 
 ui::MenuModel* BrowserFrame::GetSystemMenuModel() {
+#if defined(OS_CHROMEOS)
+  ash::SessionStateDelegate* delegate =
+      ash::Shell::GetInstance()->session_state_delegate();
+  if (delegate && delegate->NumberOfLoggedInUsers() > 1) {
+    // In Multi user mode, the number of users as well as the order of users
+    // can change. Coming here we have more then one user and since the menu
+    // model contains the user information, it must get updated to show any
+    // changes happened since the last invocation.
+    menu_model_builder_.reset();
+  }
+#endif
   if (!menu_model_builder_.get()) {
     menu_model_builder_.reset(
         new SystemMenuModelBuilder(browser_view_, browser_view_->browser()));
@@ -237,6 +269,10 @@ ui::MenuModel* BrowserFrame::GetSystemMenuModel() {
 
 AvatarMenuButton* BrowserFrame::GetAvatarMenuButton() {
   return browser_frame_view_->avatar_button();
+}
+
+NewAvatarButton* BrowserFrame::GetNewAvatarMenuButton() {
+  return browser_frame_view_->new_avatar_button();
 }
 
 #if !defined(OS_WIN) || defined(USE_AURA)

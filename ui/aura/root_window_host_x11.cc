@@ -17,6 +17,7 @@
 #include <limits>
 #include <string>
 
+#include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop.h"
@@ -25,28 +26,25 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "ui/aura/client/capture_client.h"
+#include "base/sys_info.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/user_action_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/cursor/cursor.h"
-#include "ui/base/touch/touch_factory_x11.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/view_prop.h"
-#include "ui/base/x/device_list_cache_x.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/events/x/device_data_manager.h"
+#include "ui/events/x/device_list_cache_x.h"
+#include "ui/events/x/touch_factory_x11.h"
 #include "ui/gfx/screen.h"
-
-#if defined(OS_CHROMEOS)
-#include "base/chromeos/chromeos_version.h"
-#endif
 
 using std::max;
 using std::min;
@@ -81,7 +79,7 @@ const char* kAtomsToCache[] = {
 bool IsSideBezelsEnabled() {
   static bool side_bezels_enabled =
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kTouchSideBezels) == "1";
+          switches::kTouchSideBezels) != "0";
   return side_bezels_enabled;
 }
 #endif
@@ -424,7 +422,9 @@ RootWindowHostX11::RootWindowHostX11(const gfx::Rect& bounds)
 
   // Likewise, the X server needs to know this window's pid so it knows which
   // program to kill if the window hangs.
-  pid_t pid = getpid();
+  // XChangeProperty() expects "pid" to be long.
+  COMPILE_ASSERT(sizeof(long) >= sizeof(pid_t), pid_t_bigger_than_long);
+  long pid = getpid();
   XChangeProperty(xdisplay_,
                   xwindow_,
                   atom_cache_.GetAtom("_NET_WM_PID"),
@@ -566,7 +566,7 @@ bool RootWindowHostX11::Dispatch(const base::NativeEvent& event) {
           delegate_->AsRootWindow()->OnKeyboardMappingChanged();
           break;
         case MappingPointer:
-          ui::UpdateButtonMap();
+          ui::DeviceDataManager::GetInstance()->UpdateButtonMap();
           break;
         default:
           NOTIMPLEMENTED() << " Unknown request: " << xev->xmapping.request;
@@ -913,6 +913,18 @@ void RootWindowHostX11::DispatchXI2Event(const base::NativeEvent& event) {
     case ui::ET_TOUCH_PRESSED:
     case ui::ET_TOUCH_CANCELLED:
     case ui::ET_TOUCH_RELEASED: {
+#if defined(OS_CHROMEOS)
+      // Bail out early before generating a ui::TouchEvent if this event
+      // is not within the range of this RootWindow. Converting an xevent
+      // to ui::TouchEvent might change the state of the global touch tracking
+      // state, e.g. touch release event can remove the touch id from the
+      // record, and doing this multiple time when there are multiple
+      // RootWindow will cause problem. So only generate the ui::TouchEvent
+      // when we are sure it belongs to this RootWindow.
+      if (base::SysInfo::IsRunningOnChromeOS() &&
+          !bounds_.Contains(ui::EventLocationFromNative(xev)))
+        break;
+#endif  // defined(OS_CHROMEOS)
       ui::TouchEvent touchev(xev);
 #if defined(USE_XI2_MT)
       // Ignore touch events with touch press happening on the side bezel.
@@ -930,9 +942,7 @@ void RootWindowHostX11::DispatchXI2Event(const base::NativeEvent& event) {
       }
 #endif  // defined(USE_XI2_MT)
 #if defined(OS_CHROMEOS)
-      if (base::chromeos::IsRunningOnChromeOS()) {
-        if (!bounds_.Contains(touchev.location()))
-          break;
+      if (base::SysInfo::IsRunningOnChromeOS()) {
         // X maps the touch-surface to the size of the X root-window.
         // In multi-monitor setup, Coordinate Transformation Matrix
         // repositions the touch-surface onto part of X root-window

@@ -17,7 +17,7 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/lazy_background_task_queue.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/extensions/api/file_browser_handlers/file_browser_handler.h"
@@ -27,9 +27,12 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/lazy_background_task_queue.h"
 #include "net/base/escape.h"
 #include "webkit/browser/fileapi/file_system_context.h"
 #include "webkit/browser/fileapi/file_system_url.h"
+#include "webkit/common/fileapi/file_system_info.h"
+#include "webkit/common/fileapi/file_system_util.h"
 
 using content::BrowserThread;
 using content::ChildProcessSecurityPolicy;
@@ -103,7 +106,7 @@ FileBrowserHandlerList FindFileBrowserHandlersForURL(
        ++iter) {
     const Extension* extension = iter->get();
     if (profile->IsOffTheRecord() &&
-        !service->IsIncognitoEnabled(extension->id()))
+        !extension_util::IsIncognitoEnabled(extension->id(), service))
       continue;
 
     FileBrowserHandler::List* handler_list =
@@ -188,15 +191,8 @@ class FileBrowserHandlerExecutor {
       const scoped_refptr<const Extension>& handler_extension,
       const std::vector<FileSystemURL>& file_urls);
 
-  void DidOpenFileSystem(const std::vector<FileSystemURL>& file_urls,
-                         base::PlatformFileError result,
-                         const std::string& file_system_name,
-                         const GURL& file_system_root);
-
   void ExecuteDoneOnUIThread(bool success);
-  void ExecuteFileActionsOnUIThread(const std::string& file_system_name,
-                                    const GURL& file_system_root,
-                                    const FileDefinitionList& file_list);
+  void ExecuteFileActionsOnUIThread(const FileDefinitionList& file_list);
   void SetupPermissionsAndDispatchEvent(const std::string& file_system_name,
                                         const GURL& file_system_root,
                                         const FileDefinitionList& file_list,
@@ -300,29 +296,10 @@ void FileBrowserHandlerExecutor::Execute(
   // Get file system context for the extension to which onExecute event will be
   // sent. The file access permissions will be granted to the extension in the
   // file system context for the files in |file_urls|.
-  util::GetFileSystemContextForExtensionId(
-      profile_, extension_->id())->OpenFileSystem(
-          Extension::GetBaseURLFromExtensionId(extension_->id()).GetOrigin(),
-          fileapi::kFileSystemTypeExternal,
-          fileapi::OPEN_FILE_SYSTEM_FAIL_IF_NONEXISTENT,
-          base::Bind(&FileBrowserHandlerExecutor::DidOpenFileSystem,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     file_urls));
-}
-
-void FileBrowserHandlerExecutor::DidOpenFileSystem(
-    const std::vector<FileSystemURL>& file_urls,
-    base::PlatformFileError result,
-    const std::string& file_system_name,
-    const GURL& file_system_root) {
-  if (result != base::PLATFORM_FILE_OK) {
-    ExecuteDoneOnUIThread(false);
-    return;
-  }
-
   scoped_refptr<fileapi::FileSystemContext> file_system_context(
       util::GetFileSystemContextForExtensionId(
           profile_, extension_->id()));
+
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE,
       FROM_HERE,
@@ -331,9 +308,7 @@ void FileBrowserHandlerExecutor::DidOpenFileSystem(
                  extension_,
                  file_urls),
       base::Bind(&FileBrowserHandlerExecutor::ExecuteFileActionsOnUIThread,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 file_system_name,
-                 file_system_root));
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void FileBrowserHandlerExecutor::ExecuteDoneOnUIThread(bool success) {
@@ -344,8 +319,6 @@ void FileBrowserHandlerExecutor::ExecuteDoneOnUIThread(bool success) {
 }
 
 void FileBrowserHandlerExecutor::ExecuteFileActionsOnUIThread(
-    const std::string& file_system_name,
-    const GURL& file_system_root,
     const FileDefinitionList& file_list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -361,8 +334,12 @@ void FileBrowserHandlerExecutor::ExecuteFileActionsOnUIThread(
     return;
   }
 
+  fileapi::FileSystemInfo info =
+      fileapi::GetFileSystemInfoForChromeOS(
+          Extension::GetBaseURLFromExtensionId(extension_->id()).GetOrigin());
+
   if (handler_pid > 0) {
-    SetupPermissionsAndDispatchEvent(file_system_name, file_system_root,
+    SetupPermissionsAndDispatchEvent(info.name, info.root_url,
                                      file_list, handler_pid, NULL);
   } else {
     // We have to wake the handler background page before we proceed.
@@ -378,10 +355,7 @@ void FileBrowserHandlerExecutor::ExecuteFileActionsOnUIThread(
         base::Bind(
             &FileBrowserHandlerExecutor::SetupPermissionsAndDispatchEvent,
             weak_ptr_factory_.GetWeakPtr(),
-            file_system_name,
-            file_system_root,
-            file_list,
-            handler_pid));
+            info.name, info.root_url, file_list, handler_pid));
   }
 }
 
@@ -472,7 +446,6 @@ bool ShouldBeOpenedWithBrowser(const std::string& extension_id,
           (action_id == "view-pdf" ||
            action_id == "view-swf" ||
            action_id == "view-in-browser" ||
-           action_id == "install-crx" ||
            action_id == "open-hosted-generic" ||
            action_id == "open-hosted-gdoc" ||
            action_id == "open-hosted-gsheet" ||

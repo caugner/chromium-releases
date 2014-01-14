@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "content/public/browser/web_contents.h"
@@ -26,8 +27,8 @@
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/webui/web_ui_util.h"
 #include "ui/gfx/image/image_util.h"
-#include "ui/webui/web_ui_util.h"
 
 #if defined(ENABLE_MANAGED_USERS)
 #include "chrome/browser/managed_mode/managed_user_service.h"
@@ -47,14 +48,6 @@ const char kKeyIsOwner[] = "isOwner";
 const char kKeyIsDesktop[] = "isDesktopUser";
 const char kKeyAvatarUrl[] = "userImage";
 const char kKeyNeedsSignin[] = "needsSignin";
-const char kGAIAPictureFileNameKey[] = "gaia_picture_file_name";
-
-// Max number of users to show.
-const size_t kMaxUsers = 18;
-
-// Type of the login screen UI that is currently presented to user.
-const char kSourceGaiaSignin[] = "gaia-signin";
-const char kSourceAccountPicker[] = "account-picker";
 
 // JS API callback names.
 const char kJsApiUserManagerInitialize[] = "userManagerInitialize";
@@ -63,7 +56,7 @@ const char kJsApiUserManagerLaunchGuest[] = "launchGuest";
 const char kJsApiUserManagerLaunchUser[] = "launchUser";
 const char kJsApiUserManagerRemoveUser[] = "removeUser";
 
-const size_t kAvatarIconSize = 160;
+const size_t kAvatarIconSize = 180;
 
 void HandleAndDoNothing(const base::ListValue* args) {
 }
@@ -173,16 +166,8 @@ void UserManagerScreenHandler::HandleInitialize(const base::ListValue* args) {
 }
 
 void UserManagerScreenHandler::HandleAddUser(const base::ListValue* args) {
-  // TODO(noms): Should display the addUser page here, not do a redirect.
-  Browser* browser = chrome::FindOrCreateTabbedBrowser(
-      ProfileManager::GetLastUsedProfileAllowedByPolicy(), desktop_type_);
-  DCHECK(browser);
-  chrome::NavigateParams params(browser,
-                                GURL("chrome://settings/createProfile"),
-                                content::PAGE_TRANSITION_LINK);
-  params.disposition = NEW_FOREGROUND_TAB;
-  params.window_action = chrome::NavigateParams::SHOW_WINDOW;
-  chrome::Navigate(&params);
+  profiles::CreateAndSwitchToNewProfile(desktop_type_,
+                                        base::Bind(&chrome::HideUserManager));
 }
 
 void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
@@ -209,9 +194,8 @@ void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
 }
 
 void UserManagerScreenHandler::HandleLaunchGuest(const base::ListValue* args) {
-  Browser* browser = chrome::FindOrCreateTabbedBrowser(
-      ProfileManager::GetLastUsedProfileAllowedByPolicy(), desktop_type_);
-  AvatarMenu::SwitchToGuestProfileWindow(browser);
+  profiles::SwitchToGuestProfile(desktop_type_,
+                                 base::Bind(&chrome::HideUserManager));
 }
 
 void UserManagerScreenHandler::HandleLaunchUser(const base::ListValue* args) {
@@ -231,7 +215,8 @@ void UserManagerScreenHandler::HandleLaunchUser(const base::ListValue* args) {
     if (info_cache.GetUserNameOfProfileAtIndex(i) == emailAddress &&
         info_cache.GetNameOfProfileAtIndex(i) == displayName) {
       base::FilePath path = info_cache.GetPathOfProfileAtIndex(i);
-      profiles::SwitchToProfile(path, desktop_type_, true);
+      profiles::SwitchToProfile(path, chrome::GetActiveDesktop(), true,
+                                base::Bind(&chrome::HideUserManager));
       break;
     }
   }
@@ -315,6 +300,7 @@ void UserManagerScreenHandler::GetLocalizedValues(
   localized_strings->SetString("publicAccountReminder", string16());
   localized_strings->SetString("publicAccountEnter", string16());
   localized_strings->SetString("publicAccountEnterAccessibleName", string16());
+  localized_strings->SetString("multiple-signin-banner-text", string16());
  }
 
 void UserManagerScreenHandler::SendUserList() {
