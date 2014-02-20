@@ -16,8 +16,8 @@
 #include "chrome/browser/chromeos/drive/job_scheduler.h"
 #include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
-#include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "content/public/browser/browser_thread.h"
+#include "google_apis/drive/gdata_errorcode.h"
 
 using content::BrowserThread;
 
@@ -62,12 +62,12 @@ FileError CheckPreConditionForEnsureFileDownloaded(
   if (entry->file_specific_info().is_hosted_document()) {
     base::FilePath gdoc_file_path;
     base::PlatformFileInfo file_info;
-    if (!file_util::CreateTemporaryFileInDir(temporary_file_directory,
-                                             &gdoc_file_path) ||
+    if (!base::CreateTemporaryFileInDir(temporary_file_directory,
+                                        &gdoc_file_path) ||
         !util::CreateGDocFile(gdoc_file_path,
                               GURL(entry->file_specific_info().alternate_url()),
                               entry->resource_id()) ||
-        !file_util::GetFileInfo(gdoc_file_path, &file_info))
+        !base::GetFileInfo(gdoc_file_path, &file_info))
       return FILE_ERROR_FAILED;
 
     *cache_file_path = gdoc_file_path;
@@ -98,7 +98,7 @@ FileError CheckPreConditionForEnsureFileDownloaded(
   // the drive::FS side is also converted to run fully on blocking pool.
   if (cache_entry.is_dirty()) {
     base::PlatformFileInfo file_info;
-    if (file_util::GetFileInfo(*cache_file_path, &file_info))
+    if (base::GetFileInfo(*cache_file_path, &file_info))
       SetPlatformFileInfoToResourceEntry(file_info, entry);
   }
 
@@ -128,14 +128,14 @@ FileError CheckPreConditionForEnsureFileDownloadedByPath(
     internal::FileCache* cache,
     const base::FilePath& file_path,
     const base::FilePath& temporary_file_directory,
-    std::string* local_id,
     base::FilePath* cache_file_path,
     ResourceEntry* entry) {
-  FileError error = metadata->GetIdByPath(file_path, local_id);
+  std::string local_id;
+  FileError error = metadata->GetIdByPath(file_path, &local_id);
   if (error != FILE_ERROR_OK)
     return error;
   return CheckPreConditionForEnsureFileDownloaded(
-      metadata, cache, temporary_file_directory, *local_id, entry,
+      metadata, cache, temporary_file_directory, local_id, entry,
       cache_file_path);
 }
 
@@ -146,14 +146,14 @@ FileError CheckPreConditionForEnsureFileDownloadedByPath(
 // processes (e.g., cros_disks for mounting zip files).
 bool CreateTemporaryReadableFileInDir(const base::FilePath& dir,
                                       base::FilePath* temp_file) {
-  if (!file_util::CreateTemporaryFileInDir(dir, temp_file))
+  if (!base::CreateTemporaryFileInDir(dir, temp_file))
     return false;
-  return file_util::SetPosixFilePermissions(
+  return base::SetPosixFilePermissions(
       *temp_file,
-      file_util::FILE_PERMISSION_READ_BY_USER |
-      file_util::FILE_PERMISSION_WRITE_BY_USER |
-      file_util::FILE_PERMISSION_READ_BY_GROUP |
-      file_util::FILE_PERMISSION_READ_BY_OTHERS);
+      base::FILE_PERMISSION_READ_BY_USER |
+      base::FILE_PERMISSION_WRITE_BY_USER |
+      base::FILE_PERMISSION_READ_BY_GROUP |
+      base::FILE_PERMISSION_READ_BY_OTHERS);
 }
 
 // Prepares for downloading the file. Allocates the enough space for the file
@@ -319,7 +319,6 @@ void DownloadOperation::EnsureFileDownloadedByLocalId(
                  weak_ptr_factory_.GetWeakPtr(),
                  base::Passed(&params),
                  context,
-                 base::Owned(new std::string(local_id)),
                  base::Owned(drive_file_path),
                  base::Owned(cache_file_path)));
 }
@@ -333,7 +332,6 @@ void DownloadOperation::EnsureFileDownloadedByPath(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!completion_callback.is_null());
 
-  std::string* local_id = new std::string;
   base::FilePath* drive_file_path = new base::FilePath(file_path);
   base::FilePath* cache_file_path = new base::FilePath;
   ResourceEntry* entry = new ResourceEntry;
@@ -348,14 +346,12 @@ void DownloadOperation::EnsureFileDownloadedByPath(
                  base::Unretained(cache_),
                  file_path,
                  temporary_file_directory_,
-                 local_id,
                  cache_file_path,
                  entry),
       base::Bind(&DownloadOperation::EnsureFileDownloadedAfterCheckPreCondition,
                  weak_ptr_factory_.GetWeakPtr(),
                  base::Passed(&params),
                  context,
-                 base::Owned(local_id),
                  base::Owned(drive_file_path),
                  base::Owned(cache_file_path)));
 }
@@ -363,13 +359,11 @@ void DownloadOperation::EnsureFileDownloadedByPath(
 void DownloadOperation::EnsureFileDownloadedAfterCheckPreCondition(
     scoped_ptr<DownloadParams> params,
     const ClientContext& context,
-    std::string* local_id,
     base::FilePath* drive_file_path,
     base::FilePath* cache_file_path,
     FileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(params);
-  DCHECK(local_id);
   DCHECK(drive_file_path);
   DCHECK(cache_file_path);
 
@@ -406,7 +400,6 @@ void DownloadOperation::EnsureFileDownloadedAfterCheckPreCondition(
           weak_ptr_factory_.GetWeakPtr(),
           base::Passed(&params),
           context,
-          *local_id,
           *drive_file_path,
           base::Owned(temp_download_file_path)));
 }
@@ -414,7 +407,6 @@ void DownloadOperation::EnsureFileDownloadedAfterCheckPreCondition(
 void DownloadOperation::EnsureFileDownloadedAfterPrepareForDownloadFile(
     scoped_ptr<DownloadParams> params,
     const ClientContext& context,
-    const std::string& local_id,
     const base::FilePath& drive_file_path,
     base::FilePath* temp_download_file_path,
     FileError error) {
@@ -437,7 +429,6 @@ void DownloadOperation::EnsureFileDownloadedAfterPrepareForDownloadFile(
       base::Bind(&DownloadOperation::EnsureFileDownloadedAfterDownloadFile,
                  weak_ptr_factory_.GetWeakPtr(),
                  drive_file_path,
-                 local_id,
                  base::Passed(&params)),
       params_ptr->get_content_callback());
 
@@ -449,12 +440,12 @@ void DownloadOperation::EnsureFileDownloadedAfterPrepareForDownloadFile(
 
 void DownloadOperation::EnsureFileDownloadedAfterDownloadFile(
     const base::FilePath& drive_file_path,
-    const std::string& local_id,
     scoped_ptr<DownloadParams> params,
     google_apis::GDataErrorCode gdata_error,
     const base::FilePath& downloaded_file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+  const std::string& local_id = params->entry().local_id();
   const std::string& md5 = params->entry().file_specific_info().md5();
   base::FilePath* cache_file_path = new base::FilePath;
   base::PostTaskAndReplyWithResult(

@@ -312,7 +312,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
                               << signal_name << ".";
   }
 
-  // Make a method call to power manager with no arguments and no response.
+  // Makes a method call to power manager with no arguments and no response.
   void SimpleMethodCallToPowerManager(const std::string& method_name) {
     dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
                                  method_name);
@@ -324,10 +324,16 @@ class PowerManagerClientImpl : public PowerManagerClient {
 
   void NameOwnerChangedReceived(const std::string& old_owner,
                                 const std::string& new_owner) {
-    VLOG(1) << "Power manager restarted";
-    RegisterSuspendDelay();
-    SetIsProjecting(last_is_projecting_);
-    FOR_EACH_OBSERVER(Observer, observers_, PowerManagerRestarted());
+    VLOG(1) << "Power manager restarted (old owner was "
+            << (old_owner.empty() ? "[none]" : old_owner.c_str())
+            << ", new owner is "
+            << (new_owner.empty() ? "[none]" : new_owner.c_str()) << ")";
+    if (!new_owner.empty()) {
+      VLOG(1) << "Sending initial state to power manager";
+      RegisterSuspendDelay();
+      SetIsProjecting(last_is_projecting_);
+      FOR_EACH_OBSERVER(Observer, observers_, PowerManagerRestarted());
+    }
   }
 
   void BrightnessChangedReceived(dbus::Signal* signal) {
@@ -485,10 +491,23 @@ class PowerManagerClientImpl : public PowerManagerClient {
     switch (proto.type()) {
       case power_manager::InputEvent_Type_POWER_BUTTON_DOWN:
       case power_manager::InputEvent_Type_POWER_BUTTON_UP: {
-        bool down =
+        const bool down =
             (proto.type() == power_manager::InputEvent_Type_POWER_BUTTON_DOWN);
         FOR_EACH_OBSERVER(PowerManagerClient::Observer, observers_,
                           PowerButtonEventReceived(down, timestamp));
+
+        // Tell powerd that Chrome has handled power button presses.
+        if (down) {
+          dbus::MethodCall method_call(
+              power_manager::kPowerManagerInterface,
+              power_manager::kHandlePowerButtonAcknowledgmentMethod);
+          dbus::MessageWriter writer(&method_call);
+          writer.AppendInt64(proto.timestamp());
+          power_manager_proxy_->CallMethod(
+              &method_call,
+              dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+              dbus::ObjectProxy::EmptyResponseCallback());
+        }
         break;
       }
       case power_manager::InputEvent_Type_LID_OPEN:

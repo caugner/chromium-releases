@@ -10,8 +10,11 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
+#include "base/strings/string16.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/app_list/speech_ui_model_observer.h"
 
 namespace extensions {
 class Extension;
@@ -22,6 +25,7 @@ class Profile;
 namespace app_list {
 
 class RecommendedApps;
+class StartPageObserver;
 
 // StartPageService collects data to be displayed in app list's start page
 // and hosts the start page contents.
@@ -32,17 +36,30 @@ class StartPageService : public BrowserContextKeyedService {
   // Gets the instance for the given profile.
   static StartPageService* Get(Profile* profile);
 
+  void AddObserver(StartPageObserver* observer);
+  void RemoveObserver(StartPageObserver* observer);
+
+  void ToggleSpeechRecognition();
+
   content::WebContents* contents() { return contents_.get(); }
   RecommendedApps* recommended_apps() { return recommended_apps_.get(); }
+  Profile* profile() { return profile_; }
+  void OnSpeechResult(const base::string16& query, bool is_final);
+  void OnSpeechSoundLevelChanged(int16 level);
+  void OnSpeechRecognitionStateChanged(SpeechRecognitionState new_state);
 
  private:
   // A BrowserContextKeyedServiceFactory for this service.
   class Factory;
 
-  // ExitObserver to shutdown the service on exiting. WebContents depends
-  // on the profile and needs to be closed before the profile and its
+  // ProfileDestroyObserver to shutdown the service on exiting. WebContents
+  // depends on the profile and needs to be closed before the profile and its
   // keyed service shutdown.
-  class ExitObserver;
+  class ProfileDestroyObserver;
+
+  // The WebContentsDelegate implementation for the start page. This allows
+  // getUserMedia() request from the web contents.
+  class StartPageWebContentsDelegate;
 
   explicit StartPageService(Profile* profile);
   virtual ~StartPageService();
@@ -52,8 +69,10 @@ class StartPageService : public BrowserContextKeyedService {
 
   Profile* profile_;
   scoped_ptr<content::WebContents> contents_;
-  scoped_ptr<ExitObserver> exit_observer_;
+  scoped_ptr<StartPageWebContentsDelegate> contents_delegate_;
+  scoped_ptr<ProfileDestroyObserver> profile_destroy_observer_;
   scoped_ptr<RecommendedApps> recommended_apps_;
+  ObserverList<StartPageObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(StartPageService);
 };

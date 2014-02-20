@@ -9,6 +9,7 @@
           '../testing/xvfb.py',
           '<(PRODUCT_DIR)',
           '<(PRODUCT_DIR)/browser_tests<(EXECUTABLE_SUFFIX)',
+          '--test-launcher-bot-mode',
         ],
         'isolate_dependency_tracked': [
           '../testing/xvfb.py',
@@ -21,6 +22,9 @@
           '<(PRODUCT_DIR)/nacl_helper<(EXECUTABLE_SUFFIX)',
           '<(PRODUCT_DIR)/nacl_helper_bootstrap<(EXECUTABLE_SUFFIX)',
           '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+        ],
+        'isolate_dependency_untracked': [
+          '<(PRODUCT_DIR)/chromevox_test_data/',
         ],
       },
     }],
@@ -128,6 +132,7 @@
         'command': [
           '../testing/test_env.py',
           '<(PRODUCT_DIR)/browser_tests<(EXECUTABLE_SUFFIX)',
+          '--test-launcher-bot-mode',
         ],
       },
     }],
@@ -156,7 +161,6 @@
         'isolate_dependency_untracked': [
           '../third_party/npapi/npspy/extern/plugin/',
           '../third_party/psyco_win32/psyco/',
-          '../third_party/python_26/',
         ],
       },
     }],

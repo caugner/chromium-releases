@@ -7,6 +7,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "components/autofill/content/browser/wallet/gaia_account.h"
 #include "components/autofill/content/browser/wallet/required_action.h"
 #include "components/autofill/content/browser/wallet/wallet_items.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -199,7 +200,6 @@ const char kLegalDocumentMissingDisplayName[] =
 
 const char kWalletItemsWithRequiredActions[] =
     "{"
-    "  \"obfuscated_gaia_id\":\"\","
     "  \"required_action\":"
     "  ["
     "    \"  setup_wallet\","
@@ -215,7 +215,6 @@ const char kWalletItemsWithRequiredActions[] =
 
 const char kWalletItemsWithInvalidRequiredActions[] =
     "{"
-    "  \"obfuscated_gaia_id\":\"\","
     "  \"required_action\":"
     "  ["
     "    \"verify_CVV\","
@@ -278,7 +277,6 @@ const char kWalletItemsMissingGoogleTransactionId[] =
     "    }"
     "  ],"
     "  \"default_address_id\":\"default_address_id\","
-    "  \"obfuscated_gaia_id\":\"obfuscated_gaia_id\","
     "  \"amex_disallowed\":true,"
     "  \"required_legal_document\":"
     "  ["
@@ -345,8 +343,33 @@ const char kWalletItems[] =
     "    }"
     "  ],"
     "  \"default_address_id\":\"default_address_id\","
-    "  \"obfuscated_gaia_id\":\"obfuscated_gaia_id\","
-    "  \"amex_disallowed\":true";
+    "  \"obfuscated_gaia_id\":\"ignore_this_value\","
+    "  \"amex_disallowed\":true,"
+    "  \"gaia_profile\":"
+    "  ["
+    "    {"
+    "      \"buyer_email\":\"user@chromium.org\","
+    "      \"gaia_index\":0,"
+    "      \"gaia_id\":\"123456789\","
+    "      \"buyer_name\":\"Joe Usecase\","
+    "      \"is_active\":true,"
+    "      \"avatar_url_27x27\":\"https://lh3.googleusercontent.com/27.jpg\","
+    "      \"avatar_url_54x54\":\"https://lh3.googleusercontent.com/54.jpg\","
+    "      \"avatar_url_48x48\":\"https://lh3.googleusercontent.com/48.jpg\","
+    "      \"avatar_url_96x96\":\"https://lh3.googleusercontent.com/96.jpg\""
+    "    },"
+    "    {"
+    "      \"buyer_email\":\"user2@chromium.org\","
+    "      \"gaia_index\":1,"
+    "      \"gaia_id\":\"obfuscated_gaia_id\","
+    "      \"buyer_name\":\"Jill Usecase\","
+    "      \"is_active\":false,"
+    "      \"avatar_url_27x27\":\"https://lh3.googleusercontent.com/27.jpg\","
+    "      \"avatar_url_54x54\":\"https://lh3.googleusercontent.com/54.jpg\","
+    "      \"avatar_url_48x48\":\"https://lh3.googleusercontent.com/48.jpg\","
+    "      \"avatar_url_96x96\":\"https://lh3.googleusercontent.com/96.jpg\""
+    "    }"
+    "  ]";
 
 const char kRequiredLegalDocument[] =
     "  ,"
@@ -487,14 +510,12 @@ TEST_F(WalletItemsTest, CreateWalletItemsWithRequiredActions) {
                        std::string(),
                        std::string(),
                        std::string(),
-                       std::string(),
                        AMEX_DISALLOWED);
   EXPECT_EQ(expected, *WalletItems::CreateWalletItems(*dict));
 
   ASSERT_FALSE(required_actions.empty());
   required_actions.pop_back();
   WalletItems different_required_actions(required_actions,
-                                         std::string(),
                                          std::string(),
                                          std::string(),
                                          std::string(),
@@ -529,8 +550,21 @@ TEST_F(WalletItemsTest, CreateWalletItems) {
                        "google_transaction_id",
                        "default_instrument_id",
                        "default_address_id",
-                       "obfuscated_gaia_id",
                        AMEX_DISALLOWED);
+
+  scoped_ptr<GaiaAccount> user1(GaiaAccount::CreateForTesting(
+      "user@chromium.org",
+      "123456789",
+      0,
+      true));
+  expected.AddAccount(user1.Pass());
+  scoped_ptr<GaiaAccount> user2(GaiaAccount::CreateForTesting(
+      "user2@chromium.org",
+      "obfuscated_gaia_id",
+      1,
+      false));
+  expected.AddAccount(user2.Pass());
+  EXPECT_EQ("123456789", expected.ObfuscatedGaiaId());
 
   scoped_ptr<Address> billing_address(new Address("US",
                                                   ASCIIToUTF16("name"),

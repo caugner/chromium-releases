@@ -27,10 +27,10 @@ ContextMenuMatcher::ContextMenuMatcher(
       filter_(filter) {
 }
 
-void ContextMenuMatcher::AppendExtensionItems(const std::string& extension_id,
-                                              const string16& selection_text,
-                                              int* index)
-{
+void ContextMenuMatcher::AppendExtensionItems(
+    const std::string& extension_id,
+    const base::string16& selection_text,
+    int* index) {
   DCHECK_GE(*index, 0);
   int max_index =
       IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST - IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST;
@@ -61,7 +61,7 @@ void ContextMenuMatcher::AppendExtensionItems(const std::string& extension_id,
                                     menu_model_, index);
   } else {
     int menu_id = IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + (*index)++;
-    string16 title;
+    base::string16 title;
     MenuItem::List submenu_items;
 
     if (items.size() > 1 || items[0]->type() != MenuItem::NORMAL) {
@@ -97,7 +97,7 @@ void ContextMenuMatcher::Clear() {
 
 base::string16 ContextMenuMatcher::GetTopLevelContextMenuTitle(
     const std::string& extension_id,
-    const string16& selection_text) {
+    const base::string16& selection_text) {
   const Extension* extension = NULL;
   MenuItem::List items;
   bool can_cross_incognito;
@@ -135,12 +135,11 @@ bool ContextMenuMatcher::IsCommandIdEnabled(int command_id) const {
 void ContextMenuMatcher::ExecuteCommand(int command_id,
     content::WebContents* web_contents,
     const content::ContextMenuParams& params) {
-  MenuManager* manager = extensions::ExtensionSystem::Get(profile_)->
-      extension_service()->menu_manager();
   MenuItem* item = GetExtensionMenuItem(command_id);
   if (!item)
     return;
 
+  MenuManager* manager = MenuManager::Get(profile_);
   manager->ExecuteCommand(profile_, web_contents, params, item->id());
 }
 
@@ -151,13 +150,13 @@ bool ContextMenuMatcher::GetRelevantExtensionTopLevelItems(
     MenuItem::List& items) {
   ExtensionService* service =
       extensions::ExtensionSystem::Get(profile_)->extension_service();
-  MenuManager* manager = service->menu_manager();
   *extension = service->GetExtensionById(extension_id, false);
 
   if (!*extension)
     return false;
 
   // Find matching items.
+  MenuManager* manager = MenuManager::Get(profile_);
   const MenuItem::List* all_items = manager->MenuItems(extension_id);
   if (!all_items || all_items->empty())
     return false;
@@ -190,7 +189,7 @@ MenuItem::List ContextMenuMatcher::GetRelevantExtensionItems(
 void ContextMenuMatcher::RecursivelyAppendExtensionItems(
     const MenuItem::List& items,
     bool can_cross_incognito,
-    const string16& selection_text,
+    const base::string16& selection_text,
     ui::SimpleMenuModel* menu_model,
     int* index)
 {
@@ -213,7 +212,7 @@ void ContextMenuMatcher::RecursivelyAppendExtensionItems(
     if (menu_id >= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST)
       return;
     extension_item_map_[menu_id] = item->id();
-    string16 title = item->TitleWithReplacement(selection_text,
+    base::string16 title = item->TitleWithReplacement(selection_text,
                                                 kMaxExtensionItemTitleLength);
     if (item->type() == MenuItem::NORMAL) {
       MenuItem::List children =
@@ -247,8 +246,7 @@ void ContextMenuMatcher::RecursivelyAppendExtensionItems(
 }
 
 MenuItem* ContextMenuMatcher::GetExtensionMenuItem(int id) const {
-  MenuManager* manager = extensions::ExtensionSystem::Get(profile_)->
-      extension_service()->menu_manager();
+  MenuManager* manager = MenuManager::Get(profile_);
   std::map<int, MenuItem::Id>::const_iterator i =
       extension_item_map_.find(id);
   if (i != extension_item_map_.end()) {
@@ -260,9 +258,7 @@ MenuItem* ContextMenuMatcher::GetExtensionMenuItem(int id) const {
 }
 
 void ContextMenuMatcher::SetExtensionIcon(const std::string& extension_id) {
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile_)->extension_service();
-  MenuManager* menu_manager = service->menu_manager();
+  MenuManager* menu_manager = MenuManager::Get(profile_);
 
   int index = menu_model_->GetItemCount() - 1;
   DCHECK_GE(index, 0);

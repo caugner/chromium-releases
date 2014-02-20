@@ -198,24 +198,28 @@ void PanelWindowResizer::StartedDragging() {
     // is reparented to a container in the root window that has that window.
     aura::Window* target = GetTarget();
     aura::Window* target_root = target->GetRootWindow();
+    aura::Window* old_parent = target->parent();
     aura::client::ParentWindowWithContext(
         target, target_root, target_root->GetBoundsInScreen());
-    wm::ReparentTransientChildrenOfChild(target->parent(), target);
+    wm::ReparentTransientChildrenOfChild(target, old_parent, target->parent());
   }
 }
 
 void PanelWindowResizer::FinishDragging() {
   if (!did_move_or_resize_)
     return;
+  if (details_.bounds_change & WindowResizer::kBoundsChange_Resizes)
+    should_attach_ = was_attached_;
   if (wm::GetWindowState(GetTarget())->panel_attached() != should_attach_) {
     wm::GetWindowState(GetTarget())->set_panel_attached(should_attach_);
     // We use last known location to ensure that after the drag the panel
     // is reparented to a container in the root window that has that location.
     aura::Window* target = GetTarget();
     aura::Window* target_root = target->GetRootWindow();
+    aura::Window* old_parent = target->parent();
     aura::client::ParentWindowWithContext(
         target, target_root, gfx::Rect(last_location_, gfx::Size()));
-    wm::ReparentTransientChildrenOfChild(target->parent(), GetTarget());
+    wm::ReparentTransientChildrenOfChild(target, old_parent, target->parent());
   }
 
   // If we started the drag in one root window and moved into another root

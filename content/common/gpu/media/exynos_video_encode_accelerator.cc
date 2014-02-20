@@ -115,19 +115,19 @@ ExynosVideoEncodeAccelerator::~ExynosVideoEncodeAccelerator() {
   DCHECK(!device_poll_thread_.IsRunning());
 
   if (device_poll_interrupt_fd_ != -1) {
-    HANDLE_EINTR(close(device_poll_interrupt_fd_));
+    close(device_poll_interrupt_fd_);
     device_poll_interrupt_fd_ = -1;
   }
   if (gsc_fd_ != -1) {
     DestroyGscInputBuffers();
     DestroyGscOutputBuffers();
-    HANDLE_EINTR(close(gsc_fd_));
+    close(gsc_fd_);
     gsc_fd_ = -1;
   }
   if (mfc_fd_ != -1) {
     DestroyMfcInputBuffers();
     DestroyMfcOutputBuffers();
-    HANDLE_EINTR(close(mfc_fd_));
+    close(mfc_fd_);
     mfc_fd_ = -1;
   }
 }
@@ -156,9 +156,6 @@ void ExynosVideoEncodeAccelerator::Initialize(
   output_visible_size_ = converted_visible_size_;
 
   switch (input_format) {
-    case media::VideoFrame::RGB32:
-      input_format_fourcc_ = V4L2_PIX_FMT_RGB32;
-      break;
     case media::VideoFrame::I420:
       input_format_fourcc_ = V4L2_PIX_FMT_YUV420M;
       break;
@@ -799,14 +796,6 @@ bool ExynosVideoEncodeAccelerator::EnqueueGscInputRecord() {
   qbuf.memory   = V4L2_MEMORY_USERPTR;
   qbuf.m.planes = qbuf_planes;
   switch (input_format_fourcc_) {
-    case V4L2_PIX_FMT_RGB32: {
-      qbuf.m.planes[0].bytesused = input_allocated_size_.GetArea() * 4;
-      qbuf.m.planes[0].length    = input_allocated_size_.GetArea() * 4;
-      qbuf.m.planes[0].m.userptr = reinterpret_cast<unsigned long>(
-          frame->data(media::VideoFrame::kRGBPlane));
-      qbuf.length = 1;
-      break;
-    }
     case V4L2_PIX_FMT_YUV420M: {
       qbuf.m.planes[0].bytesused = input_allocated_size_.GetArea();
       qbuf.m.planes[0].length    = input_allocated_size_.GetArea();
@@ -1523,7 +1512,7 @@ void ExynosVideoEncodeAccelerator::DestroyMfcInputBuffers() {
     MfcInputRecord& input_record = mfc_input_buffer_map_[buf];
 
     for (size_t plane = 0; plane < arraysize(input_record.fd); ++plane)
-      HANDLE_EINTR(close(mfc_input_buffer_map_[buf].fd[plane]));
+      close(mfc_input_buffer_map_[buf].fd[plane]);
   }
 
   struct v4l2_requestbuffers reqbufs;

@@ -29,12 +29,15 @@ class ASH_EXPORT DefaultAccessibilityDelegate : public AccessibilityDelegate {
   virtual bool IsLargeCursorEnabled() const OVERRIDE;
   virtual void SetAutoclickEnabled(bool enabled) OVERRIDE;
   virtual bool IsAutoclickEnabled() const OVERRIDE;
-  virtual bool ShouldAlwaysShowAccessibilityMenu() const OVERRIDE;
+  virtual bool ShouldShowAccessibilityMenu() const OVERRIDE;
   virtual void SilenceSpokenFeedback() const OVERRIDE;
   virtual void ToggleSpokenFeedback(
       AccessibilityNotificationVisibility notify) OVERRIDE;
   virtual void SaveScreenMagnifierScale(double scale) OVERRIDE;
   virtual double GetSavedScreenMagnifierScale() OVERRIDE;
+  virtual void TriggerAccessibilityAlert(AccessibilityAlert alert) OVERRIDE;
+  virtual AccessibilityAlert GetLastAccessibilityAlert() OVERRIDE;
+  virtual base::TimeDelta PlayShutdownSound() const OVERRIDE;
 
  private:
   bool spoken_feedback_enabled_;
@@ -43,7 +46,7 @@ class ASH_EXPORT DefaultAccessibilityDelegate : public AccessibilityDelegate {
   MagnifierType screen_magnifier_type_;
   bool large_cursor_enabled_;
   bool autoclick_enabled_;
-
+  AccessibilityAlert accessibility_alert_;
   DISALLOW_COPY_AND_ASSIGN(DefaultAccessibilityDelegate);
 };
 

@@ -17,10 +17,9 @@
         '../../skia/skia.gyp:skia',
         '../../url/url.gyp:url_lib',
         '../base/strings/ui_strings.gyp:ui_strings',
-        '../events/events.gyp:events',
         '../gfx/gfx.gyp:gfx',
+        '../resources/ui_resources.gyp:ui_resources',
         '../ui.gyp:ui',
-        '../ui.gyp:ui_resources',
       ],
       'defines': [
         'MESSAGE_CENTER_IMPLEMENTATION',
@@ -73,14 +72,16 @@
         'notifier_settings.h',
         'views/bounded_label.cc',
         'views/bounded_label.h',
+        'views/group_view.cc',
+        'views/group_view.h',
+        'views/constants.h',
         'views/message_bubble_base.cc',
         'views/message_bubble_base.h',
+        'views/message_center_controller.h',
         'views/message_center_bubble.cc',
         'views/message_center_bubble.h',
         'views/message_center_button_bar.cc',
         'views/message_center_button_bar.h',
-        'views/message_center_focus_border.h',
-        'views/message_center_focus_border.cc',
         'views/message_center_view.cc',
         'views/message_center_view.h',
         'views/message_popup_collection.cc',
@@ -89,16 +90,31 @@
         'views/message_view.h',
         'views/notifier_settings_view.cc',
         'views/notifier_settings_view.h',
+        'views/notification_button.cc',
+        'views/notification_button.h',
         'views/notification_view.cc',
         'views/notification_view.h',
+        'views/padded_button.cc',
+        'views/padded_button.h',
+        'views/proportional_image_view.cc',
+        'views/proportional_image_view.h',
         'views/toast_contents_view.cc',
         'views/toast_contents_view.h',
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
       'conditions': [
+        # This condition is for Windows 8 Metro mode support.  We need to
+        # specify a particular desktop during widget creation in that case.
+        # This is done using the desktop aura native widget framework.
+        ['use_ash==1 and OS=="win"', {
+          'dependencies': [
+            '../aura/aura.gyp:aura',
+          ],
+        }],
         ['toolkit_views==1', {
           'dependencies': [
+            '../events/events.gyp:events',
             '../views/views.gyp:views',
           ],
         }, {
@@ -148,7 +164,6 @@
         '../../base/base.gyp:base',
         '../../base/base.gyp:test_support_base',
         '../../skia/skia.gyp:skia',
-        '../events/events.gyp:events',
         '../gfx/gfx.gyp:gfx',
         '../ui.gyp:ui',
         'message_center',
@@ -170,12 +185,11 @@
         '../../skia/skia.gyp:skia',
         '../../testing/gtest.gyp:gtest',
         '../../url/url.gyp:url_lib',
-        '../events/events.gyp:events',
+        '../../url/url.gyp:url_lib',
         '../gfx/gfx.gyp:gfx',
+        '../resources/ui_resources.gyp:ui_resources',
         '../ui.gyp:ui',
         '../ui_unittests.gyp:run_ui_unittests',
-        '../ui.gyp:ui_resources',
-        '../../url/url.gyp:url_lib',
         'message_center',
         'message_center_test_support',
       ],
@@ -193,7 +207,7 @@
         'test/run_all_unittests.cc',
       ],
       'conditions': [
-        ['use_glib == 1 or OS == "ios"', {
+        ['desktop_linux == 1 or chromeos == 1 or OS=="ios"', {
          'dependencies': [
            '../base/strings/ui_strings.gyp:ui_unittest_strings',
          ],

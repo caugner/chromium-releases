@@ -5,10 +5,10 @@
 #include "base/values.h"
 #include "chrome/browser/download/download_dir_policy_handler.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/policy/configuration_policy_pref_store.h"
-#include "chrome/browser/policy/configuration_policy_pref_store_unittest.h"
-#include "chrome/browser/policy/policy_map.h"
+#include "chrome/browser/policy/configuration_policy_pref_store_test.h"
 #include "chrome/common/pref_names.h"
+#include "components/policy/core/browser/configuration_policy_pref_store.h"
+#include "components/policy/core/common/policy_map.h"
 #include "policy/policy_constants.h"
 
 class DownloadDirPolicyHandlerTest

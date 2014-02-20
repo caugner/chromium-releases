@@ -6,13 +6,12 @@
 
 #include "ash/ash_switches.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/caption_buttons/frame_caption_button.h"
 #include "base/command_line.h"
 #include "grit/ash_resources.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/border.h"
-#include "ui/views/controls/button/custom_button.h"
-#include "ui/views/controls/button/image_button.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -68,10 +67,9 @@ class FrameCaptionButtonContainerViewTest : public ash::test::AshTestBase {
 
   // Tests that |leftmost| and |rightmost| are at |container|'s edges.
   bool CheckButtonsAtEdges(FrameCaptionButtonContainerView* container,
-                           const views::CustomButton& leftmost,
-                           const views::CustomButton& rightmost) {
+                           const ash::FrameCaptionButton& leftmost,
+                           const ash::FrameCaptionButton& rightmost) {
     gfx::Rect expected(container->GetPreferredSize());
-    expected.Inset(container->GetLeftInset(), 0, container->GetRightInset(), 0);
 
     gfx::Rect container_size(container->GetPreferredSize());
     if (leftmost.y() == rightmost.y() &&
@@ -89,26 +87,11 @@ class FrameCaptionButtonContainerViewTest : public ash::test::AshTestBase {
     return false;
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(FrameCaptionButtonContainerViewTest);
-};
-
-class FrameCaptionButtonContainerViewTestOldStyle
-    : public FrameCaptionButtonContainerViewTest {
- public:
-  FrameCaptionButtonContainerViewTestOldStyle() {
-  }
-
-  virtual ~FrameCaptionButtonContainerViewTestOldStyle() {
-  }
-
   // Returns true if the images for |button|'s states match the passed in ids.
-  bool ImagesMatch(views::CustomButton* custom_button,
+  bool ImagesMatch(ash::FrameCaptionButton* button,
                    int normal_image_id,
                    int hovered_image_id,
                    int pressed_image_id) {
-    views::ImageButton* button =
-        static_cast<views::ImageButton*>(custom_button);
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     gfx::ImageSkia* normal = rb.GetImageSkiaNamed(normal_image_id);
     gfx::ImageSkia* hovered = rb.GetImageSkiaNamed(hovered_image_id);
@@ -120,6 +103,19 @@ class FrameCaptionButtonContainerViewTestOldStyle
     return actual_normal.BackedBySameObjectAs(*normal) &&
         actual_hovered.BackedBySameObjectAs(*hovered) &&
         actual_pressed.BackedBySameObjectAs(*pressed);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FrameCaptionButtonContainerViewTest);
+};
+
+class FrameCaptionButtonContainerViewTestOldStyle
+    : public FrameCaptionButtonContainerViewTest {
+ public:
+  FrameCaptionButtonContainerViewTestOldStyle() {
+  }
+
+  virtual ~FrameCaptionButtonContainerViewTestOldStyle() {
   }
 
   virtual void SetUp() OVERRIDE {
@@ -173,29 +169,6 @@ TEST_F(FrameCaptionButtonContainerViewTestOldStyle, ButtonVisibility) {
   EXPECT_TRUE(t3.close_button()->visible());
   EXPECT_TRUE(CheckButtonsAtEdges(
       &container3, *t3.close_button(), *t3.close_button()));
-}
-
-// Test the layout when a border is set on the container.
-TEST_F(FrameCaptionButtonContainerViewTestOldStyle, LayoutBorder) {
-  const int kTopInset = 1;
-  const int kLeftInset = 2;
-  const int kBottomInset = 3;
-  const int kRightInset = 4;
-
-  scoped_ptr<views::Widget> widget(CreateTestWidget(MAXIMIZE_ALLOWED));
-  FrameCaptionButtonContainerView container(widget.get(),
-      FrameCaptionButtonContainerView::MINIMIZE_ALLOWED);
-  container.set_border(views::Border::CreateEmptyBorder(
-      kTopInset, kLeftInset, kBottomInset, kRightInset));
-  container.Layout();
-  FrameCaptionButtonContainerView::TestApi t(&container);
-
-  EXPECT_EQ(kLeftInset, t.size_button()->x());
-  EXPECT_EQ(kTopInset, t.close_button()->y());
-  EXPECT_EQ(container.GetPreferredSize().height(),
-            t.close_button()->bounds().bottom() + kBottomInset);
-  EXPECT_EQ(container.GetPreferredSize().width(),
-            t.close_button()->bounds().right() + kRightInset);
 }
 
 // Test how the header style affects which images are used for the buttons.
@@ -255,19 +228,6 @@ TEST_F(FrameCaptionButtonContainerViewTestOldStyle, HeaderStyle) {
                           IDR_AURA_WINDOW_MAXIMIZED_CLOSE2,
                           IDR_AURA_WINDOW_MAXIMIZED_CLOSE2_H,
                           IDR_AURA_WINDOW_MAXIMIZED_CLOSE2_P));
-
-  // AppNonClientFrameViewAsh has a dedicated set of images.
-  container.set_header_style(
-      FrameCaptionButtonContainerView::HEADER_STYLE_MAXIMIZED_HOSTED_APP);
-  container.Layout();
-  EXPECT_TRUE(ImagesMatch(t.size_button(),
-                          IDR_AURA_WINDOW_FULLSCREEN_RESTORE,
-                          IDR_AURA_WINDOW_FULLSCREEN_RESTORE_H,
-                          IDR_AURA_WINDOW_FULLSCREEN_RESTORE_P));
-  EXPECT_TRUE(ImagesMatch(t.close_button(),
-                          IDR_AURA_WINDOW_FULLSCREEN_CLOSE,
-                          IDR_AURA_WINDOW_FULLSCREEN_CLOSE_H,
-                          IDR_AURA_WINDOW_FULLSCREEN_CLOSE_P));
 }
 
 class FrameCaptionButtonContainerViewTestAlternateStyle
@@ -283,7 +243,6 @@ class FrameCaptionButtonContainerViewTestAlternateStyle
     FrameCaptionButtonContainerViewTest::SetUp();
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kAshEnableAlternateFrameCaptionButtonStyle);
-    ASSERT_TRUE(switches::UseAlternateFrameCaptionButtonStyle());
   }
 
  private:
@@ -293,6 +252,11 @@ class FrameCaptionButtonContainerViewTestAlternateStyle
 // Test how the alternate button style affects which buttons are visible in the
 // default case.
 TEST_F(FrameCaptionButtonContainerViewTestAlternateStyle, ButtonVisibility) {
+  // Using the alternate caption button style is dependant on all snapped
+  // windows being 50% of the screen's width.
+  if (!switches::UseAlternateFrameCaptionButtonStyle())
+    return;
+
   // Both the minimize button and the maximize button should be visible when
   // both minimizing and maximizing are allowed when using the alternate
   // button style.

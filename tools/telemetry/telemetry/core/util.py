@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import inspect
+import logging
 import os
 import socket
 import sys
@@ -39,7 +40,7 @@ def AddDirToPythonPath(*path_parts):
     sys.path.append(path)
 
 
-def WaitFor(condition, timeout, pass_time_left_to_func=False):
+def WaitFor(condition, timeout):
   """Waits for up to |timeout| secs for the function |condition| to return True.
 
   Polling frequency is (elapsed_time / 10), with a min of .1s and max of 5s.
@@ -47,27 +48,36 @@ def WaitFor(condition, timeout, pass_time_left_to_func=False):
   Returns:
     Result of |condition| function (if present).
   """
+  min_poll_interval =   0.1
+  max_poll_interval =   5
+  output_interval   = 300
+
+  def GetConditionString():
+    if condition.__name__ == '<lambda>':
+      try:
+        return inspect.getsource(condition).strip()
+      except IOError:
+        pass
+    return condition.__name__
+
   start_time = time.time()
+  last_output_time = start_time
   while True:
-    elapsed_time = time.time() - start_time
-    if pass_time_left_to_func:
-      remaining_time = timeout - elapsed_time
-      res = condition(max(remaining_time, 0.0))
-    else:
-      res = condition()
+    res = condition()
     if res:
       return res
+    now = time.time()
+    elapsed_time = now - start_time
+    last_output_elapsed_time = now - last_output_time
     if elapsed_time > timeout:
-      if condition.__name__ == '<lambda>':
-        try:
-          condition_string = inspect.getsource(condition).strip()
-        except IOError:
-          condition_string = condition.__name__
-      else:
-        condition_string = condition.__name__
       raise TimeoutException('Timed out while waiting %ds for %s.' %
-                             (timeout, condition_string))
-    poll_interval = min(max(elapsed_time / 10., .1), 5)
+                             (timeout, GetConditionString()))
+    if last_output_elapsed_time > output_interval:
+      logging.info('Continuing to wait %ds for %s. Elapsed: %ds.',
+                   timeout, GetConditionString(), elapsed_time)
+      last_output_time = time.time()
+    poll_interval = min(max(elapsed_time / 10., min_poll_interval),
+                        max_poll_interval)
     time.sleep(poll_interval)
 
 
@@ -100,7 +110,12 @@ class PortPair(object):
     self.remote_port = remote_port
 
 
-def GetAvailableLocalPort():
+def GetUnreservedAvailableLocalPort():
+  """Returns an available port on the system.
+
+  WARNING: This method does not reserve the port it returns, so it may be used
+  by something else before you get to use it. This can lead to flake.
+  """
   tmp = socket.socket()
   tmp.bind(('', 0))
   port = tmp.getsockname()[1]

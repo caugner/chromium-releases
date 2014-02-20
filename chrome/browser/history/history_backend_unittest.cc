@@ -362,8 +362,8 @@ class HistoryBackendTest : public testing::Test {
  protected:
   // testing::Test
   virtual void SetUp() {
-    if (!file_util::CreateNewTempDirectory(FILE_PATH_LITERAL("BackendTest"),
-                                           &test_dir_))
+    if (!base::CreateNewTempDirectory(FILE_PATH_LITERAL("BackendTest"),
+                                      &test_dir_))
       return;
     backend_ = new HistoryBackend(test_dir_,
                                   0,
@@ -504,7 +504,7 @@ TEST_F(HistoryBackendTest, DeleteAll) {
 
   // Star row1.
   bookmark_model_.AddURL(
-      bookmark_model_.bookmark_bar_node(), 0, string16(), row1.url());
+      bookmark_model_.bookmark_bar_node(), 0, base::string16(), row1.url());
 
   // Now finally clear all history.
   backend_->DeleteAllHistory();
@@ -654,8 +654,10 @@ TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
   URLID row2_id = backend_->db_->GetRowForURL(row2.url(), NULL);
 
   // Star the two URLs.
-  bookmark_utils::AddIfNotBookmarked(&bookmark_model_, row1.url(), string16());
-  bookmark_utils::AddIfNotBookmarked(&bookmark_model_, row2.url(), string16());
+  bookmark_utils::AddIfNotBookmarked(&bookmark_model_, row1.url(),
+                                     base::string16());
+  bookmark_utils::AddIfNotBookmarked(&bookmark_model_, row2.url(),
+                                     base::string16());
 
   // Delete url 2. Because url 2 is starred this won't delete the URL, only
   // the visits.
@@ -862,8 +864,8 @@ TEST_F(HistoryBackendTest, ImportedFaviconsTest) {
   EXPECT_TRUE(backend_->db_->GetRowForURL(url3, &url_row3) == 0);
 
   // If the URL is bookmarked, it should get added to history with 0 visits.
-  bookmark_model_.AddURL(bookmark_model_.bookmark_bar_node(), 0, string16(),
-                         url3);
+  bookmark_model_.AddURL(bookmark_model_.bookmark_bar_node(), 0,
+                         base::string16(), url3);
   backend_->SetImportedFavicons(favicons);
   EXPECT_FALSE(backend_->db_->GetRowForURL(url3, &url_row3) == 0);
   EXPECT_TRUE(url_row3.visit_count() == 0);
@@ -1208,7 +1210,7 @@ TEST_F(HistoryBackendTest, MigrationVisitSource) {
   // in Teardown.
   base::FilePath new_history_path(getTestDir());
   base::DeleteFile(new_history_path, true);
-  file_util::CreateDirectory(new_history_path);
+  base::CreateDirectory(new_history_path);
   base::FilePath new_history_file =
       new_history_path.Append(chrome::kHistoryFilename);
   ASSERT_TRUE(base::CopyFile(old_history_path, new_history_file));
@@ -2556,7 +2558,7 @@ TEST_F(HistoryBackendTest, MigrationVisitDuration) {
   // in Teardown.
   base::FilePath new_history_path(getTestDir());
   base::DeleteFile(new_history_path, true);
-  file_util::CreateDirectory(new_history_path);
+  base::CreateDirectory(new_history_path);
   base::FilePath new_history_file =
       new_history_path.Append(chrome::kHistoryFilename);
   base::FilePath new_archived_file =
@@ -2612,7 +2614,7 @@ TEST_F(HistoryBackendTest, AddPageNoVisitForBookmark) {
   ASSERT_TRUE(backend_.get());
 
   GURL url("http://www.google.com");
-  string16 title(UTF8ToUTF16("Bookmark title"));
+  base::string16 title(UTF8ToUTF16("Bookmark title"));
   backend_->AddPageNoVisitForBookmark(url, title);
 
   URLRow row;
@@ -2622,7 +2624,7 @@ TEST_F(HistoryBackendTest, AddPageNoVisitForBookmark) {
   EXPECT_EQ(0, row.visit_count());
 
   backend_->DeleteURL(url);
-  backend_->AddPageNoVisitForBookmark(url, string16());
+  backend_->AddPageNoVisitForBookmark(url, base::string16());
   backend_->GetURL(url, &row);
   EXPECT_EQ(url, row.url());
   EXPECT_EQ(UTF8ToUTF16(url.spec()), row.title());
@@ -2739,6 +2741,63 @@ TEST_F(HistoryBackendTest, ExpireHistory) {
 
   backend_->db()->GetAllVisitsInRange(base::Time(), base::Time(), 0, &visits);
   ASSERT_EQ(0U, visits.size());
+}
+
+TEST_F(HistoryBackendTest, DeleteMatchingUrlsForKeyword) {
+  // Set up urls and keyword_search_terms
+  GURL url1("https://www.bing.com/?q=bar");
+  URLRow url_info1(url1);
+  url_info1.set_visit_count(0);
+  url_info1.set_typed_count(0);
+  url_info1.set_last_visit(Time());
+  url_info1.set_hidden(false);
+  const URLID url1_id = backend_->db()->AddURL(url_info1);
+  EXPECT_NE(0, url1_id);
+
+  TemplateURLID keyword_id = 1;
+  base::string16 keyword = UTF8ToUTF16("bar");
+  ASSERT_TRUE(backend_->db()->SetKeywordSearchTermsForURL(
+      url1_id, keyword_id, keyword));
+
+  GURL url2("https://www.google.com/?q=bar");
+  URLRow url_info2(url2);
+  url_info2.set_visit_count(0);
+  url_info2.set_typed_count(0);
+  url_info2.set_last_visit(Time());
+  url_info2.set_hidden(false);
+  const URLID url2_id = backend_->db()->AddURL(url_info2);
+  EXPECT_NE(0, url2_id);
+
+  TemplateURLID keyword_id2 = 2;
+  ASSERT_TRUE(backend_->db()->SetKeywordSearchTermsForURL(
+      url2_id, keyword_id2, keyword));
+
+  // Add another visit to the same URL
+  URLRow url_info3(url2);
+  url_info3.set_visit_count(0);
+  url_info3.set_typed_count(0);
+  url_info3.set_last_visit(Time());
+  url_info3.set_hidden(false);
+  const URLID url3_id = backend_->db()->AddURL(url_info3);
+  EXPECT_NE(0, url3_id);
+  ASSERT_TRUE(backend_->db()->SetKeywordSearchTermsForURL(
+      url3_id, keyword_id2, keyword));
+
+  // Test that deletion works correctly
+  backend_->DeleteMatchingURLsForKeyword(keyword_id2, keyword);
+
+  // Test that rows 2 and 3 are deleted, while 1 is intact
+  URLRow row;
+  EXPECT_TRUE(backend_->db()->GetURLRow(url1_id, &row));
+  EXPECT_EQ(url1.spec(), row.url().spec());
+  EXPECT_FALSE(backend_->db()->GetURLRow(url2_id, &row));
+  EXPECT_FALSE(backend_->db()->GetURLRow(url3_id, &row));
+
+  // Test that corresponding keyword search terms are deleted for rows 2 & 3,
+  // but not for row 1
+  EXPECT_TRUE(backend_->db()->GetKeywordSearchTermRow(url1_id, NULL));
+  EXPECT_FALSE(backend_->db()->GetKeywordSearchTermRow(url2_id, NULL));
+  EXPECT_FALSE(backend_->db()->GetKeywordSearchTermRow(url3_id, NULL));
 }
 
 class HistoryBackendSegmentDurationTest : public HistoryBackendTest {
@@ -2872,7 +2931,7 @@ TEST_F(HistoryBackendTest, DeleteFTSIndexDatabases) {
   ASSERT_TRUE(file_util::WriteFile(db1_wal, data, data_len));
   ASSERT_TRUE(file_util::WriteFile(db2_actual, data, data_len));
 #if defined(OS_POSIX)
-  EXPECT_TRUE(file_util::CreateSymbolicLink(db2_actual, db2_symlink));
+  EXPECT_TRUE(base::CreateSymbolicLink(db2_actual, db2_symlink));
 #endif
 
   // Delete all DTS index databases.

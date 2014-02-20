@@ -10,7 +10,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/toolbar_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -39,7 +39,7 @@ typedef InProcessBrowserTest StarViewTest;
 IN_PROC_BROWSER_TEST_F(StarViewTest, MAYBE_HideOnSecondClick) {
   BrowserView* browser_view = reinterpret_cast<BrowserView*>(
       browser()->window());
-  views::ImageView* star_view =
+  views::View* star_view =
       browser_view->GetToolbarView()->location_bar()->star_view();
 
   ui::MouseEvent pressed_event(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
@@ -99,7 +99,7 @@ IN_PROC_BROWSER_TEST_F(StarViewTestNoDWM, WindowedNPAPIPluginHidden) {
   browser()->tab_strip_model()->ActivateTabAt(0, true);
 
   // First load the page and wait for the NPAPI plugin's window to display.
-  string16 expected_title(ASCIIToUTF16("ready"));
+  base::string16 expected_title(ASCIIToUTF16("ready"));
   content::WebContents* tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::TitleWatcher title_watcher(tab, expected_title);
@@ -111,8 +111,8 @@ IN_PROC_BROWSER_TEST_F(StarViewTestNoDWM, WindowedNPAPIPluginHidden) {
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 
   // Now get the region of the plugin before the star view is shown.
-  HWND hwnd =
-      tab->GetView()->GetNativeView()->GetDispatcher()->GetAcceleratedWidget();
+  HWND hwnd = tab->GetView()->GetNativeView()->GetDispatcher()->host()->
+      GetAcceleratedWidget();
   HWND child = NULL;
   EnumChildWindows(hwnd, EnumerateChildren,reinterpret_cast<LPARAM>(&child));
 

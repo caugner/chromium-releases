@@ -12,8 +12,8 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/common/extensions/extension.h"
 #include "content/public/test/mock_download_item.h"
+#include "extensions/common/extension.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -266,8 +266,8 @@ TEST_F(DownloadItemModelTest, InterruptTooltip) {
 
     // Check that if the width is small, the returned tooltip only contains
     // lines of the given width or smaller.
-    std::vector<string16> lines;
-    string16 truncated_tooltip =
+    std::vector<base::string16> lines;
+    base::string16 truncated_tooltip =
         model().GetTooltipText(font_list, kSmallTooltipWidth);
     Tokenize(truncated_tooltip, ASCIIToUTF16("\n"), &lines);
     for (unsigned i = 0; i < lines.size(); ++i)

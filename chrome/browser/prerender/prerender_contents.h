@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_PRERENDER_PRERENDER_CONTENTS_H_
 #define CHROME_BROWSER_PRERENDER_PRERENDER_CONTENTS_H_
 
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -171,7 +172,7 @@ class PrerenderContents : public content::NotificationObserver,
 
   PrerenderManager* prerender_manager() { return prerender_manager_; }
 
-  string16 title() const { return title_; }
+  base::string16 title() const { return title_; }
   int32 page_id() const { return page_id_; }
   GURL icon_url() const { return icon_url_; }
   const GURL& prerender_url() const { return prerender_url_; }
@@ -202,6 +203,7 @@ class PrerenderContents : public content::NotificationObserver,
 
   Origin origin() const { return origin_; }
   uint8 experiment_id() const { return experiment_id_; }
+  int child_id() const { return child_id_; }
 
   base::TimeTicks load_start_time() const { return load_start_time_; }
 
@@ -212,6 +214,10 @@ class PrerenderContents : public content::NotificationObserver,
       const content::SessionStorageNamespace* session_storage_namespace) const;
 
   // content::WebContentsObserver implementation.
+  virtual void RenderFrameCreated(
+      content::RenderFrameHost* render_frame_host) OVERRIDE;
+  virtual void RenderFrameDeleted(
+      content::RenderFrameHost* render_frame_host) OVERRIDE;
   virtual void DidStopLoading(
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
@@ -288,6 +294,24 @@ class PrerenderContents : public content::NotificationObserver,
   // clears the list of pending requests. Sends notifications.
   void PrepareForUse();
 
+  content::SessionStorageNamespace* GetSessionStorageNamespace() const;
+
+  // Cookie events
+  enum CookieEvent {
+    COOKIE_EVENT_SEND = 0,
+    COOKIE_EVENT_CHANGE = 1,
+    COOKIE_EVENT_MAX
+  };
+
+  // Record a cookie transaction for this prerender contents.
+  // In the event of cookies being sent, |earliest_create_date| contains
+  // the time that the earliest of the cookies sent was created.
+  void RecordCookieEvent(CookieEvent event,
+                         bool main_frame_http_request,
+                         base::Time earliest_create_date);
+
+  static const int kNumCookieStatuses;
+
  protected:
   PrerenderContents(PrerenderManager* prerender_manager,
                     Profile* profile,
@@ -329,6 +353,18 @@ class PrerenderContents : public content::NotificationObserver,
   // (potentially only partially) prerendered page is shown to the user.
   base::TimeTicks load_start_time_;
 
+  // The prerendered WebContents; may be null.
+  scoped_ptr<content::WebContents> prerender_contents_;
+
+  // The session storage namespace id for use in matching. We must save it
+  // rather than get it from the RenderViewHost since in the control group
+  // we won't have a RenderViewHost.
+  int64 session_storage_namespace_id_;
+
+  // The time at which we started prerendering, for the purpose of comparing
+  // cookie creation times.
+  base::Time start_time_;
+
  private:
   class WebContentsDelegateImpl;
 
@@ -360,7 +396,7 @@ class PrerenderContents : public content::NotificationObserver,
   // Used to apply to the new RenderViewHost delegate that might eventually
   // own the contained RenderViewHost when the prerendered page is shown
   // in a WebContents.
-  string16 title_;
+  base::string16 title_;
   int32 page_id_;
   GURL url_;
   GURL icon_url_;
@@ -370,11 +406,6 @@ class PrerenderContents : public content::NotificationObserver,
   // This array can contain more than element as a result of redirects,
   // such as HTTP redirects or javascript redirects.
   std::vector<GURL> alias_urls_;
-
-  // The session storage namespace id for use in matching. We must save it
-  // rather than get it from the RenderViewHost since in the control group
-  // we won't have a RenderViewHost.
-  int64 session_storage_namespace_id_;
 
   bool has_stopped_loading_;
 
@@ -397,9 +428,6 @@ class PrerenderContents : public content::NotificationObserver,
   // Process Metrics of the render process associated with the
   // RenderViewHost for this object.
   scoped_ptr<base::ProcessMetrics> process_metrics_;
-
-  // The prerendered WebContents; may be null.
-  scoped_ptr<content::WebContents> prerender_contents_;
 
   scoped_ptr<WebContentsDelegateImpl> web_contents_delegate_;
 
@@ -427,6 +455,17 @@ class PrerenderContents : public content::NotificationObserver,
 
   // Caches pages to be added to the history.
   AddPageVector add_page_vector_;
+
+  // The alias session storage namespace for this prerender.
+  scoped_refptr<content::SessionStorageNamespace>
+      alias_session_storage_namespace;
+
+  // The RenderFrameHosts for prerender_contents_.
+  std::set<content::RenderFrameHost*> render_frame_hosts_;
+
+  // Indicates what internal cookie events (see prerender_contents.cc) have
+  // occurred, using 1 bit for each possible InternalCookieEvent.
+  int cookie_status_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderContents);
 };

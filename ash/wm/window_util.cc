@@ -7,8 +7,10 @@
 #include <vector>
 
 #include "ash/ash_constants.h"
+#include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/wm/window_properties.h"
+#include "ash/wm/window_state.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
@@ -55,11 +57,25 @@ bool IsWindowMinimized(aura::Window* window) {
 }
 
 void CenterWindow(aura::Window* window) {
+  wm::WindowState* window_state = wm::GetWindowState(window);
+  if (!window_state->IsNormalShowState())
+    return;
   const gfx::Display display =
       Shell::GetScreen()->GetDisplayNearestWindow(window);
   gfx::Rect center = display.work_area();
-  center.ClampToCenteredSize(window->bounds().size());
-  window->SetBoundsInScreen(center, display);
+  gfx::Size size = window->bounds().size();
+  if (window_state->IsSnapped()) {
+    if (window_state->HasRestoreBounds())
+      size = window_state->GetRestoreBoundsInScreen().size();
+    center.ClampToCenteredSize(size);
+    window_state->SetRestoreBoundsInScreen(center);
+    window_state->Restore();
+  } else {
+    center = ScreenAsh::ConvertRectFromScreen(window->parent(),
+        center);
+    center.ClampToCenteredSize(size);
+    window->SetBounds(center);
+  }
 }
 
 void AdjustBoundsToEnsureMinimumWindowVisibility(const gfx::Rect& visible_area,
@@ -107,16 +123,22 @@ bool MoveWindowToEventRoot(aura::Window* window, const ui::Event& event) {
   return true;
 }
 
-void ReparentChildWithTransientChildren(aura::Window* window,
-                                        aura::Window* child) {
-  window->AddChild(child);
-  ReparentTransientChildrenOfChild(window, child);
+void ReparentChildWithTransientChildren(aura::Window* child,
+                                        aura::Window* old_parent,
+                                        aura::Window* new_parent) {
+  if (child->parent() == old_parent)
+    new_parent->AddChild(child);
+  ReparentTransientChildrenOfChild(child, old_parent, new_parent);
 }
 
-void ReparentTransientChildrenOfChild(aura::Window* window,
-                                      aura::Window* child) {
-  for (size_t i = 0; i < child->transient_children().size(); ++i)
-    ReparentChildWithTransientChildren(window, child->transient_children()[i]);
+void ReparentTransientChildrenOfChild(aura::Window* child,
+                                      aura::Window* old_parent,
+                                      aura::Window* new_parent) {
+  for (size_t i = 0; i < child->transient_children().size(); ++i) {
+    ReparentChildWithTransientChildren(child->transient_children()[i],
+                                       old_parent,
+                                       new_parent);
+  }
 }
 
 }  // namespace wm

@@ -257,7 +257,7 @@ name="DOMAIN">$1<ex>paypal.com</ex></ph>&lt;/strong&gt;, but the server presente
         Google Inc.
       </message>
       <message name="IDS_ABOUT_VERSION_COPYRIGHT" desc="Copyright information on the about pages">
-        Copyright 2013 Google Inc. All rights reserved.
+        Copyright <ph name="YEAR">$1</ph> Google Inc. All rights reserved.
       </message>
       <message name="IDS_ABOUT_VERSION_LICENSE" desc="The label below the copyright message, containing the URLs.">
         Google Chrome is made possible by the <ph name="BEGIN_LINK_CHROMIUM">&lt;a target="_blank" href="$1"&gt;</ph>Chromium<ph name="END_LINK_CHROMIUM">&lt;/a&gt;</ph> open source project and other <ph name="BEGIN_LINK_OSS">&lt;a target="_blank" href="$2"&gt;</ph>open source software<ph name="END_LINK_OSS">&lt;/a&gt;</ph>.
@@ -425,6 +425,11 @@ Google Chrome is unable to recover your settings.
           Google Chrome is trying to show passwords.
         </message>
       </if>
+      <if expr="is_win">
+        <message name="IDS_PASSWORDS_PAGE_AUTHENTICATION_PROMPT" desc="Text for the dialog box that prompts the user for their OS account password before revealing plaintext passwords on the password page.">
+          Google Chrome is trying to show passwords. Type your Windows password to allow this.
+        </message>
+      </if>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_EXIT_BUTTON" desc="Text on button of dialog that closes Chrome if we can't create a directory for this user.">
         Exit Chrome
       </message>
@@ -437,12 +442,6 @@ Google Chrome is unable to recover your settings.
       <message name="IDS_INSTALL_HIGHER_VERSION_APP_LAUNCHER" desc="Error displayed when higher version of the Chrome App Launcher already exists.">
         This computer already has a more recent version of the Google Chrome components. Please use a more recent installer.
       </message>
-      <message name="IDS_INSTALL_HIGHER_VERSION_CF" desc="Error displayed when higher version of Chrome Frame already exists">
-        This computer already has a more recent version of Google Chrome Frame. If the software is not working, please uninstall Google Chrome Frame and try again.
-      </message>
-      <message name="IDS_INSTALL_HIGHER_VERSION_CB_CF" desc="Error displayed when higher version of Chrome and Chrome Frame already exists">
-        This computer already has a more recent version of Google Chrome and Google Chrome Frame. If the software is not working, please uninstall both Google Chrome and Google Chrome Frame and try again.
-      </message>
       <message name="IDS_INSTALL_SYSTEM_LEVEL_EXISTS" desc="Error displayed during user level install if system level Chrome Frame is already installed.">
         Google Chrome Frame is already installed and available to all users of this computer. If you want to install Google Chrome Frame at the user level, you must first uninstall the system-level version installed by an administrator.
       </message>
@@ -451,9 +450,6 @@ Google Chrome is unable to recover your settings.
       </message>
       <message name="IDS_SAME_VERSION_REPAIR_FAILED" desc="Error displayed if installation fails due to Chrome running.">
         Can not install the same Google Chrome version that is currently running. Please close Google Chrome and try again.
-      </message>
-      <message name="IDS_SAME_VERSION_REPAIR_FAILED_CF" desc="Error displayed if installation fails due to Chrome Frame already running.">
-        Can not install the same Google Chrome Frame version that is currently running. Please close Google Chrome Frame and try again.
       </message>
       <message name="IDS_SETUP_PATCH_FAILED" desc="Error message when setup.exe fails to patch itself.">
         Installation failed due to unspecified error. Please download Google Chrome again.
@@ -630,9 +626,6 @@ Google Chrome is unable to recover your settings.
       <if expr="pp_ifdef('chromeos')">
         <message name="IDS_FLAGS_RELAUNCH_NOTICE" desc="Notifies the user that he needs to restart Chrome OS. Shown next to a button that says 'Restart Now'.">
           Your changes will take effect the next time you restart your device.
-        </message>
-        <message name="IDS_FLAGS_CHROME_CAPTIVE_PORTAL_DETECTOR" desc="Description for the option of Captive Portal detector.">
-          Chrome Captive Portal detector
         </message>
       </if>
 
@@ -983,9 +976,6 @@ Signing in anyway will merge Chrome information like bookmarks, history, and oth
       <!-- ProcessSingleton -->
       <message name="IDS_PROFILE_IN_USE_LINUX" desc="Message shown when the browser cannot start because the profile is in use on a different host.">
         The profile appears to be in use by another Google Chrome process (<ph name="PROCESS_ID">$1<ex>12345</ex></ph>) on another computer (<ph name="HOST_NAME">$2<ex>example.com</ex></ph>).  Chrome has locked the profile so that it doesn't get corrupted.  If you are sure no other processes are using this profile, you can unlock the profile and relaunch Chrome.
-      </message>
-      <message name="IDS_PROFILE_IN_USE_LINUX_RELAUNCH" desc="Text of button in dialog to delete the profile lock file.">
-        Unlock Profile and Relaunch
       </message>
 
     </messages>

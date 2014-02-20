@@ -15,7 +15,6 @@
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/window_open_disposition.h"
@@ -49,7 +48,7 @@ TabModalConfirmDialogViews::TabModalConfirmDialogViews(
       views::kUnrelatedControlVerticalSpacing;
   message_box_view_ = new views::MessageBoxView(init_params);
 
-  string16 link_text(delegate->GetLinkText());
+  base::string16 link_text(delegate->GetLinkText());
   if (!link_text.empty())
     message_box_view_->SetLink(link_text, this);
 
@@ -59,9 +58,7 @@ TabModalConfirmDialogViews::TabModalConfirmDialogViews(
       web_contents_modal_dialog_manager->delegate();
   DCHECK(modal_delegate);
   dialog_ = views::Widget::CreateWindowAsFramelessChild(
-      this,
-      web_contents->GetView()->GetNativeView(),
-      modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
+      this, modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
   web_contents_modal_dialog_manager->ShowDialog(dialog_->GetNativeView());
   delegate_->set_close_delegate(this);
 }
@@ -92,17 +89,17 @@ void TabModalConfirmDialogViews::LinkClicked(views::Link* source,
 //////////////////////////////////////////////////////////////////////////////
 // TabModalConfirmDialogViews, views::DialogDelegate implementation:
 
-string16 TabModalConfirmDialogViews::GetWindowTitle() const {
+base::string16 TabModalConfirmDialogViews::GetWindowTitle() const {
   return delegate_->GetTitle();
 }
 
-string16 TabModalConfirmDialogViews::GetDialogButtonLabel(
+base::string16 TabModalConfirmDialogViews::GetDialogButtonLabel(
     ui::DialogButton button) const {
   if (button == ui::DIALOG_BUTTON_OK)
     return delegate_->GetAcceptButtonTitle();
   if (button == ui::DIALOG_BUTTON_CANCEL)
     return delegate_->GetCancelButtonTitle();
-  return string16();
+  return base::string16();
 }
 
 bool TabModalConfirmDialogViews::Cancel() {

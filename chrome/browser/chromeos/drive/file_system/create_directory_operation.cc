@@ -9,9 +9,9 @@
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/job_scheduler.h"
 #include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
-#include "chrome/browser/google_apis/gdata_errorcode.h"
-#include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "content/public/browser/browser_thread.h"
+#include "google_apis/drive/gdata_errorcode.h"
+#include "google_apis/drive/gdata_wapi_parser.h"
 
 using content::BrowserThread;
 
@@ -114,11 +114,13 @@ base::FilePath CreateDirectoryOperation::GetExistingDeepestDirectory(
   if (components.empty() || components[0] != util::kDriveGrandRootDirName)
     return base::FilePath();
 
-  std::string local_id = util::kDriveGrandRootSpecialResourceId;
+  base::FilePath result_path(components[0]);
+  std::string local_id = util::kDriveGrandRootLocalId;
   for (size_t i = 1; i < components.size(); ++i) {
     std::string child_local_id = metadata->GetChildId(local_id, components[i]);
     if (child_local_id.empty())
       break;
+    result_path = result_path.Append(components[i]);
     local_id = child_local_id;
   }
 
@@ -128,7 +130,7 @@ base::FilePath CreateDirectoryOperation::GetExistingDeepestDirectory(
   if (!entry->file_info().is_directory())
     return base::FilePath();
 
-  return metadata->GetFilePath(local_id);
+  return result_path;
 }
 
 void CreateDirectoryOperation::CreateDirectoryAfterGetExistingDeepestDirectory(

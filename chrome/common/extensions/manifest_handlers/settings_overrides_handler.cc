@@ -4,14 +4,23 @@
 
 #include "chrome/common/extensions/manifest_handlers/settings_overrides_handler.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/common/extensions/permissions/permissions_data.h"
+#include "base/values.h"
+#include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/permissions/settings_override_permission.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/api_permission_set.h"
+#include "extensions/common/permissions/manifest_permission.h"
+#include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/permissions/permissions_info.h"
+#include "grit/generated_resources.h"
+#include "ipc/ipc_message.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
 using extensions::api::manifest_types::ChromeSettingsOverrides;
@@ -30,7 +39,7 @@ scoped_ptr<GURL> CreateManifestURL(const std::string& url) {
 }
 
 scoped_ptr<GURL> ParseHomepage(const ChromeSettingsOverrides& overrides,
-                               string16* error) {
+                               base::string16* error) {
   if (!overrides.homepage)
     return scoped_ptr<GURL>();
   scoped_ptr<GURL> manifest_url = CreateManifestURL(*overrides.homepage);
@@ -42,7 +51,7 @@ scoped_ptr<GURL> ParseHomepage(const ChromeSettingsOverrides& overrides,
 }
 
 std::vector<GURL> ParseStartupPage(const ChromeSettingsOverrides& overrides,
-                                   string16* error) {
+                                   base::string16* error) {
   std::vector<GURL> urls;
   if (!overrides.startup_pages)
     return urls;
@@ -62,6 +71,26 @@ std::vector<GURL> ParseStartupPage(const ChromeSettingsOverrides& overrides,
   return urls;
 }
 
+scoped_ptr<ChromeSettingsOverrides::Search_provider> ParseSearchEngine(
+    ChromeSettingsOverrides* overrides,
+    base::string16* error) {
+  if (!overrides->search_provider)
+    return scoped_ptr<ChromeSettingsOverrides::Search_provider>();
+  if (!CreateManifestURL(overrides->search_provider->favicon_url)) {
+    *error = extensions::ErrorUtils::FormatErrorMessageUTF16(
+        manifest_errors::kInvalidSearchEngineURL,
+        overrides->search_provider->favicon_url);
+    return scoped_ptr<ChromeSettingsOverrides::Search_provider>();
+  }
+  if (!CreateManifestURL(overrides->search_provider->search_url)) {
+    *error = extensions::ErrorUtils::FormatErrorMessageUTF16(
+        manifest_errors::kInvalidSearchEngineURL,
+        overrides->search_provider->search_url);
+    return scoped_ptr<ChromeSettingsOverrides::Search_provider>();
+  }
+  return overrides->search_provider.Pass();
+}
+
 // A www. prefix is not informative and thus not worth the limited real estate
 // in the permissions UI.
 std::string RemoveWwwPrefix(const std::string& url) {
@@ -71,6 +100,114 @@ std::string RemoveWwwPrefix(const std::string& url) {
 }
 
 }  // namespace
+
+// The manifest permission implementation supports a permission for hiding
+// the bookmark button.
+class SettingsOverridesHandler::ManifestPermissionImpl
+    : public ManifestPermission {
+ public:
+  explicit ManifestPermissionImpl(bool hide_bookmark_button_permission)
+      : hide_bookmark_button_permission_(hide_bookmark_button_permission) {}
+
+  // extensions::ManifestPermission overrides.
+  virtual std::string name() const OVERRIDE {
+    return manifest_keys::kSettingsOverride;
+  }
+
+  virtual std::string id() const OVERRIDE {
+    return name();
+  }
+
+  virtual bool HasMessages() const OVERRIDE {
+    return hide_bookmark_button_permission_;
+  }
+
+  virtual PermissionMessages GetMessages() const OVERRIDE {
+    PermissionMessages result;
+    if (hide_bookmark_button_permission_) {
+      result.push_back(PermissionMessage(
+          PermissionMessage::kHideBookmarkButton,
+          l10n_util::GetStringUTF16(
+              IDS_EXTENSION_PROMPT_WARNING_HIDE_BOOKMARK_STAR)));
+    }
+    return result;
+  }
+
+  virtual bool FromValue(const base::Value* value) OVERRIDE {
+    return value && value->GetAsBoolean(&hide_bookmark_button_permission_);
+  }
+
+  virtual scoped_ptr<base::Value> ToValue() const OVERRIDE {
+    return scoped_ptr<base::Value>(
+        new base::FundamentalValue(hide_bookmark_button_permission_)).Pass();
+  }
+
+  virtual ManifestPermission* Clone() const OVERRIDE {
+    return scoped_ptr<ManifestPermissionImpl>(
+        new ManifestPermissionImpl(hide_bookmark_button_permission_)).release();
+  }
+
+  virtual ManifestPermission* Diff(const ManifestPermission* rhs) const
+      OVERRIDE {
+    const ManifestPermissionImpl* other =
+        static_cast<const ManifestPermissionImpl*>(rhs);
+
+    return scoped_ptr<ManifestPermissionImpl>(new ManifestPermissionImpl(
+        hide_bookmark_button_permission_ &&
+        !other->hide_bookmark_button_permission_)).release();
+  }
+
+  virtual ManifestPermission* Union(const ManifestPermission* rhs) const
+      OVERRIDE {
+    const ManifestPermissionImpl* other =
+        static_cast<const ManifestPermissionImpl*>(rhs);
+
+    return scoped_ptr<ManifestPermissionImpl>(new ManifestPermissionImpl(
+        hide_bookmark_button_permission_ ||
+        other->hide_bookmark_button_permission_)).release();
+  }
+
+  virtual ManifestPermission* Intersect(const ManifestPermission* rhs) const
+      OVERRIDE {
+    const ManifestPermissionImpl* other =
+        static_cast<const ManifestPermissionImpl*>(rhs);
+
+    return scoped_ptr<ManifestPermissionImpl>(new ManifestPermissionImpl(
+        hide_bookmark_button_permission_ &&
+        other->hide_bookmark_button_permission_)).release();
+  }
+
+  virtual bool Contains(const ManifestPermission* rhs) const OVERRIDE {
+    const ManifestPermissionImpl* other =
+        static_cast<const ManifestPermissionImpl*>(rhs);
+
+    return !other->hide_bookmark_button_permission_ ||
+        hide_bookmark_button_permission_;
+  }
+
+  virtual bool Equal(const ManifestPermission* rhs) const OVERRIDE {
+    const ManifestPermissionImpl* other =
+        static_cast<const ManifestPermissionImpl*>(rhs);
+
+    return hide_bookmark_button_permission_ ==
+        other->hide_bookmark_button_permission_;
+  }
+
+  virtual void Write(IPC::Message* m) const OVERRIDE {
+    IPC::WriteParam(m, hide_bookmark_button_permission_);
+  }
+
+  virtual bool Read(const IPC::Message* m, PickleIterator* iter) OVERRIDE {
+    return IPC::ReadParam(m, iter, &hide_bookmark_button_permission_);
+  }
+
+  virtual void Log(std::string* log) const OVERRIDE {
+    IPC::LogParam(hide_bookmark_button_permission_, log);
+  }
+
+ private:
+  bool hide_bookmark_button_permission_;
+};
 
 SettingsOverrides::SettingsOverrides() {}
 
@@ -82,11 +219,17 @@ const SettingsOverrides* SettingsOverrides::Get(
       extension->GetManifestData(manifest_keys::kSettingsOverride));
 }
 
+bool SettingsOverrides::RequiresHideBookmarkButtonPermission() const {
+  return bookmarks_ui && bookmarks_ui->hide_bookmark_button &&
+      *bookmarks_ui->hide_bookmark_button;
+}
+
 SettingsOverridesHandler::SettingsOverridesHandler() {}
 
 SettingsOverridesHandler::~SettingsOverridesHandler() {}
 
-bool SettingsOverridesHandler::Parse(Extension* extension, string16* error) {
+bool SettingsOverridesHandler::Parse(Extension* extension,
+                                     base::string16* error) {
   const base::Value* dict = NULL;
   CHECK(extension->manifest()->Get(manifest_keys::kSettingsOverride, &dict));
   scoped_ptr<ChromeSettingsOverrides> settings(
@@ -95,13 +238,18 @@ bool SettingsOverridesHandler::Parse(Extension* extension, string16* error) {
     return false;
 
   scoped_ptr<SettingsOverrides> info(new SettingsOverrides);
+  info->bookmarks_ui.swap(settings->bookmarks_ui);
   info->homepage = ParseHomepage(*settings, error);
-  info->search_engine = settings->search_provider.Pass();
+  info->search_engine = ParseSearchEngine(settings.get(), error);
   info->startup_pages = ParseStartupPage(*settings, error);
-  if (!info->homepage && !info->search_engine && info->startup_pages.empty()) {
+  if (!info->bookmarks_ui && !info->homepage &&
+      !info->search_engine && info->startup_pages.empty()) {
     *error = ASCIIToUTF16(manifest_errors::kInvalidEmptySettingsOverrides);
     return false;
   }
+  info->manifest_permission.reset(new ManifestPermissionImpl(
+      info->RequiresHideBookmarkButtonPermission()));
+
   APIPermissionSet* permission_set =
       PermissionsData::GetInitialAPIPermissions(extension);
   DCHECK(permission_set);
@@ -128,6 +276,36 @@ bool SettingsOverridesHandler::Parse(Extension* extension, string16* error) {
   return true;
 }
 
+bool SettingsOverridesHandler::Validate(
+    const Extension* extension,
+    std::string* error,
+    std::vector<InstallWarning>* warnings) const {
+  const SettingsOverrides* settings_overrides =
+      SettingsOverrides::Get(extension);
+
+  if (settings_overrides && settings_overrides->bookmarks_ui &&
+      !FeatureSwitch::enable_override_bookmarks_ui()->IsEnabled()) {
+    warnings->push_back(InstallWarning(
+        ErrorUtils::FormatErrorMessage(
+            manifest_errors::kUnrecognizedManifestProperty,
+            manifest_keys::kHideBookmarkButton,
+            manifest_keys::kBookmarkUI)));
+  }
+
+  return true;
+}
+
+ManifestPermission* SettingsOverridesHandler::CreatePermission() {
+  return new ManifestPermissionImpl(false);
+}
+
+ManifestPermission* SettingsOverridesHandler::CreateInitialRequiredPermission(
+    const Extension* extension) {
+  const SettingsOverrides* data = SettingsOverrides::Get(extension);
+  if (data)
+    return data->manifest_permission->Clone();
+  return NULL;
+}
 const std::vector<std::string> SettingsOverridesHandler::Keys() const {
   return SingleKey(manifest_keys::kSettingsOverride);
 }

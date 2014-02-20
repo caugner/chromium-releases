@@ -8,6 +8,7 @@
 
 #include "base/format_macros.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,8 +20,8 @@
 #include "ui/gfx/render_text_win.h"
 #endif
 
-#if defined(OS_LINUX)
-#include "ui/gfx/render_text_linux.h"
+#if defined(OS_LINUX) && !defined(USE_OZONE)
+#include "ui/gfx/render_text_pango.h"
 #endif
 
 #if defined(TOOLKIT_GTK)
@@ -65,6 +66,7 @@ void SetRTL(bool rtl) {
   EXPECT_EQ(rtl, base::i18n::IsRTL());
 }
 
+#if !defined(OS_MACOSX)
 // Ensure cursor movement in the specified |direction| yields |expected| values.
 void RunMoveCursorLeftRightTest(RenderText* render_text,
                                 const std::vector<SelectionModel>& expected,
@@ -81,6 +83,7 @@ void RunMoveCursorLeftRightTest(RenderText* render_text,
   render_text->MoveCursor(LINE_BREAK, direction, false);
   EXPECT_EQ(expected.back(), render_text->selection_model());
 }
+#endif  // !defined(OS_MACOSX)
 
 }  // namespace
 
@@ -184,7 +187,7 @@ TEST_F(RenderTextTest, ApplyColorAndStyle) {
   EXPECT_TRUE(render_text->styles()[ITALIC].EqualsForTesting(expected_italic));
 }
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) && !defined(USE_OZONE)
 TEST_F(RenderTextTest, PangoAttributes) {
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   render_text->SetText(ASCIIToUTF16("012345678"));
@@ -207,7 +210,7 @@ TEST_F(RenderTextTest, PangoAttributes) {
   };
 
   int start = 0, end = 0;
-  RenderTextLinux* rt_linux = static_cast<RenderTextLinux*>(render_text.get());
+  RenderTextPango* rt_linux = static_cast<RenderTextPango*>(render_text.get());
   rt_linux->EnsureLayout();
   PangoAttrList* attributes = pango_layout_get_attributes(rt_linux->layout_);
   PangoAttrIterator* iter = pango_attr_list_get_iterator(attributes);
@@ -1157,7 +1160,11 @@ TEST_F(RenderTextTest, StringSizeEmptyString) {
 TEST_F(RenderTextTest, StringSizeRespectsFontListMetrics) {
   // Check that Arial and Symbol have different font metrics.
   Font arial_font("Arial", 16);
+  ASSERT_EQ("arial",
+            StringToLowerASCII(arial_font.GetActualFontNameForTesting()));
   Font symbol_font("Symbol", 16);
+  ASSERT_EQ("symbol",
+            StringToLowerASCII(symbol_font.GetActualFontNameForTesting()));
   EXPECT_NE(arial_font.GetHeight(), symbol_font.GetHeight());
   EXPECT_NE(arial_font.GetBaseline(), symbol_font.GetBaseline());
   // "a" should be rendered with Arial, not with Symbol.
@@ -1728,6 +1735,53 @@ TEST_F(RenderTextTest, Multiline_SufficientWidth) {
     EXPECT_EQ(1U, render_text->lines_.size());
   }
 }
+
+TEST_F(RenderTextTest, Multiline_Newline) {
+  const struct {
+    const wchar_t* const text;
+    // Ranges of the characters on each line preceding the newline.
+    const Range first_line_char_range;
+    const Range second_line_char_range;
+  } kTestStrings[] = {
+    { L"abc\ndef", Range(0, 3), Range(4, 7) },
+    { L"a \n b ", Range(0, 2), Range(3, 6) },
+    { L"\n" , Range::InvalidRange(), Range::InvalidRange() }
+  };
+
+  scoped_ptr<RenderTextWin> render_text(
+      static_cast<RenderTextWin*>(RenderText::CreateInstance()));
+  render_text->SetDisplayRect(Rect(200, 1000));
+  render_text->SetMultiline(true);
+  Canvas canvas;
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestStrings); ++i) {
+    SCOPED_TRACE(base::StringPrintf("kTestStrings[%" PRIuS "]", i));
+    render_text->SetText(WideToUTF16(kTestStrings[i].text));
+    render_text->Draw(&canvas);
+
+    ASSERT_EQ(2U, render_text->lines_.size());
+
+    const Range first_expected_range = kTestStrings[i].first_line_char_range;
+    ASSERT_EQ(first_expected_range.IsValid() ? 2U : 1U,
+              render_text->lines_[0].segments.size());
+    if (first_expected_range.IsValid())
+      EXPECT_EQ(first_expected_range,
+                render_text->lines_[0].segments[0].char_range);
+
+    const internal::LineSegment& newline_segment =
+        render_text->lines_[0].segments[first_expected_range.IsValid() ? 1 : 0];
+    ASSERT_EQ(1U, newline_segment.char_range.length());
+    EXPECT_EQ(L'\n', kTestStrings[i].text[newline_segment.char_range.start()]);
+
+    const Range second_expected_range = kTestStrings[i].second_line_char_range;
+    ASSERT_EQ(second_expected_range.IsValid() ? 1U : 0U,
+              render_text->lines_[1].segments.size());
+    if (second_expected_range.IsValid())
+      EXPECT_EQ(second_expected_range,
+                render_text->lines_[1].segments[0].char_range);
+  }
+}
+
 
 TEST_F(RenderTextTest, Win_BreakRunsByUnicodeBlocks) {
   scoped_ptr<RenderTextWin> render_text(

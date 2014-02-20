@@ -13,6 +13,7 @@
 #include "net/base/net_errors.h"
 #include "net/udp/udp_server_socket.h"
 #include "third_party/libjingle/source/talk/base/asyncpacketsocket.h"
+#include "third_party/libjingle/source/talk/base/nethelpers.h"
 
 namespace remoting {
 
@@ -326,7 +327,8 @@ void UdpPacketSocket::HandleReadResult(int result) {
       LOG(ERROR) << "Failed to convert address received from RecvFrom().";
       return;
     }
-    SignalReadPacket(this, receive_buffer_->data(), result, address);
+    SignalReadPacket(this, receive_buffer_->data(), result, address,
+                     talk_base::CreatePacketTime(0));
   } else {
     LOG(ERROR) << "Received error when reading from UDP socket: " << result;
   }
@@ -369,6 +371,11 @@ ChromiumPacketSocketFactory::CreateClientTcpSocket(
   // We don't use TCP sockets for remoting connections.
   NOTREACHED();
   return NULL;
+}
+
+talk_base::AsyncResolverInterface*
+ChromiumPacketSocketFactory::CreateAsyncResolver() {
+  return new talk_base::AsyncResolver();
 }
 
 }  // namespace remoting

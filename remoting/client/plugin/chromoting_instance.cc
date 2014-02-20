@@ -647,8 +647,8 @@ void ChromotingInstance::ConnectWithConfig(const ClientConfig& config,
   mouse_input_filter_.set_input_stub(host_connection_->input_stub());
   mouse_input_filter_.set_input_size(view_->get_view_size_dips());
 
-  LOG(INFO) << "Connecting to " << config.host_jid
-            << ". Local jid: " << local_jid << ".";
+  VLOG(0) << "Connecting to " << config.host_jid
+          << ". Local jid: " << local_jid << ".";
 
   // Setup the signal strategy.
   signal_strategy_.reset(new DelegatingSignalStrategy(
@@ -658,7 +658,9 @@ void ChromotingInstance::ConnectWithConfig(const ClientConfig& config,
   scoped_ptr<cricket::HttpPortAllocatorBase> port_allocator(
       PepperPortAllocator::Create(this));
   scoped_ptr<protocol::TransportFactory> transport_factory(
-      new protocol::LibjingleTransportFactory(port_allocator.Pass(), false));
+      new protocol::LibjingleTransportFactory(
+          signal_strategy_.get(), port_allocator.Pass(),
+          NetworkSettings(NetworkSettings::NAT_TRAVERSAL_ENABLED)));
 
   // Kick off the connection.
   client_->Start(signal_strategy_.get(), transport_factory.Pass());
@@ -677,7 +679,7 @@ void ChromotingInstance::HandleDisconnect(const base::DictionaryValue& data) {
   view_weak_factory_.reset();
   view_.reset();
 
-  LOG(INFO) << "Disconnecting from host.";
+  VLOG(0) << "Disconnecting from host.";
 
   client_.reset();
 

@@ -33,12 +33,12 @@ class MockFileSystem(FileSystem):
   # FileSystem implementation.
   #
 
-  def Read(self, paths, binary=False):
+  def Read(self, paths):
     '''Reads |paths| from |_file_system|, then applies the most recent update
     from |_updates|, if any.
     '''
     self._read_count += 1
-    future_result = self._file_system.Read(paths, binary=binary)
+    future_result = self._file_system.Read(paths)
     def resolve():
       self._read_resolve_count += 1
       result = future_result.Get()
@@ -48,6 +48,9 @@ class MockFileSystem(FileSystem):
           result[path] = update
       return result
     return Future(delegate=Gettable(resolve))
+
+  def Refresh(self):
+    return self._file_system.Refresh()
 
   def _GetMostRecentUpdate(self, path):
     for revision, update in reversed(list(enumerate(self._updates))):

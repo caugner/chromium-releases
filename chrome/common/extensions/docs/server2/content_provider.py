@@ -2,14 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from HTMLParser import HTMLParser
 import mimetypes
-import logging
 import os
 
 from compiled_file_system import SingleFile
 from directory_zipper import DirectoryZipper
-from file_system import ToUnicode
+from docs_server_utils import ToUnicode
 from future import Gettable, Future
 from third_party.handlebar import Handlebar
 
@@ -63,7 +61,7 @@ class ContentProvider(object):
     elif mimetype == 'text/html':
       content = ToUnicode(text)
       if self._supports_templates:
-        content = Handlebar(content)
+        content = Handlebar(content, name=path)
     elif (mimetype.startswith('text/') or
           mimetype in ('application/javascript', 'application/json')):
       content = ToUnicode(text)
@@ -71,7 +69,7 @@ class ContentProvider(object):
       content = text
     return ContentAndType(content, mimetype)
 
-  def GetContentAndType(self, host, path):
+  def GetContentAndType(self, path):
     path = path.lstrip('/')
     base, ext = os.path.splitext(path)
 
@@ -81,8 +79,14 @@ class ContentProvider(object):
       return Future(delegate=Gettable(
           lambda: ContentAndType(zip_future.Get(), 'application/zip')))
 
-    return self._content_cache.GetFromFile(path, binary=True)
+    return self._content_cache.GetFromFile(path)
 
   def Cron(self):
-    # TODO(kalman): Implement.
-    pass
+    # Running Refresh() on the file system is enough to pull GitHub content,
+    # which is all we need for now while the full render-every-page cron step
+    # is in effect.
+    # TODO(kalman): Walk over the whole filesystem and compile the content.
+    return self.file_system.Refresh()
+
+  def __repr__(self):
+    return 'ContentProvider of <%s>' % repr(self.file_system)

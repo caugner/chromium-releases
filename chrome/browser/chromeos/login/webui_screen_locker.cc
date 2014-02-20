@@ -19,6 +19,7 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
+#include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -76,7 +77,7 @@ void WebUIScreenLocker::LockScreen() {
   login_display_->Init(screen_locker()->users(), false, true, false);
 
   static_cast<OobeUI*>(GetWebUI()->GetController())->ShowSigninScreen(
-      login_display_.get(), login_display_.get());
+      LoginScreenContext(), login_display_.get(), login_display_.get());
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
@@ -95,6 +96,21 @@ void WebUIScreenLocker::OnAuthenticate() {
 
 void WebUIScreenLocker::SetInputEnabled(bool enabled) {
   login_display_->SetUIEnabled(enabled);
+}
+
+void WebUIScreenLocker::ShowBannerMessage(const std::string& message) {
+  if (!webui_ready_)
+    return;
+  login_display_->ShowBannerMessage(message);
+}
+
+void WebUIScreenLocker::ShowUserPodButton(
+    const std::string& username,
+    const std::string& iconURL,
+    const base::Closure& click_callback) {
+  if (!webui_ready_)
+    return;
+  login_display_->ShowUserPodButton(username, iconURL, click_callback);
 }
 
 void WebUIScreenLocker::ShowErrorMessage(
@@ -191,7 +207,7 @@ void WebUIScreenLocker::CompleteLogin(const UserContext& user_context) {
   NOTREACHED();
 }
 
-string16 WebUIScreenLocker::GetConnectedNetworkName() {
+base::string16 WebUIScreenLocker::GetConnectedNetworkName() {
   return network_state_helper_->GetCurrentNetworkName();
 }
 

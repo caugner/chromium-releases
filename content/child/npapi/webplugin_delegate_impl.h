@@ -76,6 +76,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
     PLUGIN_QUIRK_IGNORE_FIRST_SETWINDOW_CALL = 65536,  // Windows.
     PLUGIN_QUIRK_EMULATE_IME = 131072,  // Windows.
     PLUGIN_QUIRK_FAKE_WINDOW_FROM_POINT = 262144,  // Windows.
+    PLUGIN_QUIRK_COPY_STREAM_DATA = 524288,  // All platforms
   };
 
   static WebPluginDelegateImpl* Create(WebPlugin* plugin,
@@ -92,7 +93,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
                               const gfx::Rect& clip_rect) OVERRIDE;
   virtual void Paint(SkCanvas* canvas, const gfx::Rect& rect) OVERRIDE;
   virtual void SetFocus(bool focused) OVERRIDE;
-  virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
+  virtual bool HandleInputEvent(const blink::WebInputEvent& event,
                                 WebCursor::CursorInfo* cursor_info) OVERRIDE;
   virtual NPObject* GetPluginScriptableObject() OVERRIDE;
   virtual NPP GetPluginNPP() OVERRIDE;
@@ -281,7 +282,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 
   // Does platform-specific event handling. Arguments and return are identical
   // to HandleInputEvent.
-  bool PlatformHandleInputEvent(const WebKit::WebInputEvent& event,
+  bool PlatformHandleInputEvent(const blink::WebInputEvent& event,
                                 WebCursor::CursorInfo* cursor_info);
 
   // Closes down and destroys our plugin instance.
@@ -449,7 +450,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   void OnModalLoopEntered();
 
   // Returns true if the message passed in corresponds to a user gesture.
-  static bool IsUserGesture(const WebKit::WebInputEvent& event);
+  static bool IsUserGesture(const blink::WebInputEvent& event);
 
   // The url with which the plugin was instantiated.
   std::string plugin_url_;

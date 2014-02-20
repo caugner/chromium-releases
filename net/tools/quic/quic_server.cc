@@ -44,6 +44,8 @@ QuicServer::QuicServer()
   // Use hardcoded crypto parameters for now.
   config_.SetDefaults();
   config_.set_initial_round_trip_time_us(kMaxInitialRoundTripTimeUs, 0);
+  config_.set_server_initial_congestion_window(kMaxInitialWindow,
+                                               kDefaultInitialWindow);
   Initialize();
 }
 
@@ -198,7 +200,10 @@ void QuicServer::MaybeDispatchPacket(QuicDispatcher* dispatcher,
     return;
   }
 
-  dispatcher->ProcessPacket(server_address, client_address, guid, packet);
+  bool has_version_flag = QuicFramer::HasVersionFlag(packet);
+
+  dispatcher->ProcessPacket(
+      server_address, client_address, guid, has_version_flag, packet);
 }
 
 bool QuicServer::ReadAndDispatchSinglePacket(int fd,

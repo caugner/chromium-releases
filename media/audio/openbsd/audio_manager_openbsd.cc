@@ -64,8 +64,9 @@ AudioParameters AudioManagerOpenBSD::GetInputStreamParameters(
       kDefaultSampleRate, 16, kDefaultInputBufferSize);
 }
 
-AudioManagerOpenBSD::AudioManagerOpenBSD()
-    : pulse_library_is_initialized_(false) {
+AudioManagerOpenBSD::AudioManagerOpenBSD(AudioLogFactory* audio_log_factory)
+    : AudioManagerBase(audio_log_factory),
+      pulse_library_is_initialized_(false) {
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
   StubPathMap paths;
 
@@ -138,7 +139,7 @@ AudioParameters AudioManagerOpenBSD::GetPreferredOutputStreamParameters(
 
   return AudioParameters(
       AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout, input_channels,
-      sample_rate, bits_per_sample, buffer_size);
+      sample_rate, bits_per_sample, buffer_size, AudioParameters::NO_EFFECTS);
 }
 
 AudioOutputStream* AudioManagerOpenBSD::MakeOutputStream(
@@ -151,8 +152,8 @@ AudioOutputStream* AudioManagerOpenBSD::MakeOutputStream(
 
 // TODO(xians): Merge AudioManagerOpenBSD with AudioManagerPulse;
 // static
-AudioManager* CreateAudioManager() {
-  return new AudioManagerOpenBSD();
+AudioManager* CreateAudioManager(AudioLogFactory* audio_log_factory) {
+  return new AudioManagerOpenBSD(audio_log_factory);
 }
 
 }  // namespace media

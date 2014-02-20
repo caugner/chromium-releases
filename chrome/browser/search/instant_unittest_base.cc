@@ -20,12 +20,31 @@
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/variations/entropy_provider.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 
+InstantUnitTestBase::InstantUnitTestBase() {
+  field_trial_list_.reset(new base::FieldTrialList(
+      new metrics::SHA1EntropyProvider("42")));
+}
+
+InstantUnitTestBase::~InstantUnitTestBase() {
+}
+
 void InstantUnitTestBase::SetUp() {
-  chrome::EnableInstantExtendedAPIForTesting();
+  SetUpHelper();
+}
+
+void InstantUnitTestBase::SetUpWithoutCacheableNTP() {
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "InstantExtended", "Group1 use_cacheable_ntp:0"));
+  SetUpHelper();
+}
+
+void InstantUnitTestBase::SetUpHelper() {
+  chrome::EnableQueryExtractionForTesting();
   BrowserWithTestWindowTest::SetUp();
 
   TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -50,8 +69,9 @@ void InstantUnitTestBase::SetDefaultSearchProvider(
     const std::string& base_url) {
   TemplateURLData data;
   data.SetURL(base_url + "url?bar={searchTerms}");
-  data.instant_url = base_url + "instant?"
-                     "{google:omniboxStartMarginParameter}foo=foo#foo=foo&strk";
+  data.instant_url = base_url +
+      "instant?{google:omniboxStartMarginParameter}{google:forceInstantResults}"
+      "foo=foo#foo=foo&strk";
   data.new_tab_url = base_url + "newtab";
   data.alternate_urls.push_back(base_url + "alt#quux={searchTerms}");
   data.search_terms_replacement_key = "strk";

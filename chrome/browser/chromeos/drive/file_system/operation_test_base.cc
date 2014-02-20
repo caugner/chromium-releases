@@ -14,8 +14,8 @@
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
 #include "chrome/browser/chromeos/drive/test_util.h"
 #include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/google_apis/test_util.h"
 #include "content/public/browser/browser_thread.h"
+#include "google_apis/drive/test_util.h"
 
 namespace drive {
 namespace file_system {
@@ -34,6 +34,11 @@ void OperationTestBase::LoggingObserver::OnDirectoryChangedByOperation(
 void OperationTestBase::LoggingObserver::OnCacheFileUploadNeededByOperation(
     const std::string& local_id) {
   upload_needed_local_ids_.insert(local_id);
+}
+
+void OperationTestBase::LoggingObserver::OnEntryUpdatedByOperation(
+    const std::string& local_id) {
+  updated_local_ids_.insert(local_id);
 }
 
 OperationTestBase::OperationTestBase() {
@@ -129,6 +134,20 @@ FileError OperationTestBase::GetLocalResourceEntry(const base::FilePath& path,
       FROM_HERE,
       base::Bind(&internal::ResourceMetadata::GetResourceEntryByPath,
                  base::Unretained(metadata()), path, entry),
+      base::Bind(google_apis::test_util::CreateCopyResultCallback(&error)));
+  test_util::RunBlockingPoolTask();
+  return error;
+}
+
+FileError OperationTestBase::GetLocalResourceEntryById(
+    const std::string& local_id,
+    ResourceEntry* entry) {
+  FileError error = FILE_ERROR_FAILED;
+  base::PostTaskAndReplyWithResult(
+      blocking_task_runner(),
+      FROM_HERE,
+      base::Bind(&internal::ResourceMetadata::GetResourceEntryById,
+                 base::Unretained(metadata()), local_id, entry),
       base::Bind(google_apis::test_util::CreateCopyResultCallback(&error)));
   test_util::RunBlockingPoolTask();
   return error;

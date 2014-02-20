@@ -7,10 +7,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/feature_switch.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "grit/generated_resources.h"
@@ -24,7 +24,7 @@ BrowserActionHandler::~BrowserActionHandler() {
 }
 
 bool BrowserActionHandler::Parse(Extension* extension,
-                                 string16* error) {
+                                 base::string16* error) {
   const base::DictionaryValue* dict = NULL;
   if (!extension->manifest()->GetDictionary(
           manifest_keys::kBrowserAction, &dict)) {

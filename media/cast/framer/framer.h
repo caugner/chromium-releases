@@ -16,12 +16,12 @@
 #include "media/cast/framer/frame_buffer.h"
 #include "media/cast/framer/frame_id_map.h"
 #include "media/cast/rtcp/rtcp.h"
-#include "media/cast/rtp_common/rtp_defines.h"
+#include "media/cast/rtp_receiver/rtp_receiver_defines.h"
 
 namespace media {
 namespace cast {
 
-typedef std::map<uint8, linked_ptr<FrameBuffer> > FrameList;
+typedef std::map<uint32, linked_ptr<FrameBuffer> > FrameList;
 
 class Framer {
  public:
@@ -50,7 +50,7 @@ class Framer {
                             uint32* rtp_timestamp,
                             bool* next_frame);
 
-  void ReleaseFrame(uint8 frame_id);
+  void ReleaseFrame(uint32 frame_id);
 
   // Reset framer state to original state and flush all pending buffers.
   void Reset();

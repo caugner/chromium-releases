@@ -13,9 +13,9 @@
 #include "chrome/browser/sync/about_sync_util.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/common/extension.h"
 
 
 namespace {
@@ -44,9 +44,10 @@ void ChromeInternalLogSource::Fetch(const SysLogsSourceCallback& callback) {
 }
 
 void ChromeInternalLogSource::PopulateSyncLogs(SystemLogsResponse* response) {
-  Profile* profile = ProfileManager::GetDefaultProfile();
-  if (!ProfileSyncServiceFactory::GetInstance()->HasProfileSyncService(
-      profile))
+  // We are only interested in sync logs for the primary user profile.
+  Profile* profile = ProfileManager::GetPrimaryUserProfile();
+  if (!profile ||
+      !ProfileSyncServiceFactory::GetInstance()->HasProfileSyncService(profile))
     return;
 
   ProfileSyncService* service =
@@ -54,7 +55,7 @@ void ChromeInternalLogSource::PopulateSyncLogs(SystemLogsResponse* response) {
   scoped_ptr<base::DictionaryValue> sync_logs(
       sync_ui_util::ConstructAboutInformation(service));
 
-  // Remove credentials section.
+  // Remove identity section.
   base::ListValue* details = NULL;
   sync_logs->GetList(kDetailsKey, &details);
   if (!details)
@@ -65,7 +66,7 @@ void ChromeInternalLogSource::PopulateSyncLogs(SystemLogsResponse* response) {
     if ((*it)->GetAsDictionary(&dict)) {
       std::string title;
       dict->GetString("title", &title);
-      if (title == kCredentialsTitle) {
+      if (title == kIdentityTitle) {
         details->Erase(it, NULL);
         break;
       }
@@ -88,13 +89,13 @@ void ChromeInternalLogSource::PopulateExtensionInfoLogs(
   if (!reporting_enabled)
     return;
 
-  Profile* default_profile =
-      g_browser_process->profile_manager()->GetDefaultProfile();
-  if (!default_profile)
+  Profile* primary_profile =
+      g_browser_process->profile_manager()->GetPrimaryUserProfile();
+  if (!primary_profile)
     return;
 
   ExtensionService* service =
-      extensions::ExtensionSystem::Get(default_profile)->extension_service();
+      extensions::ExtensionSystem::Get(primary_profile)->extension_service();
   if (!service)
     return;
 

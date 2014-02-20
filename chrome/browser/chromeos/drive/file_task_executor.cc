@@ -60,7 +60,7 @@ void FileTaskExecutor::Execute(
   current_index_ = paths.size();
 
   for (size_t i = 0; i < paths.size(); ++i) {
-    file_system->GetResourceEntryByPath(
+    file_system->GetResourceEntry(
         paths[i],
         base::Bind(&FileTaskExecutor::OnFileEntryFetched,
                    weak_ptr_factory_.GetWeakPtr()));
@@ -105,10 +105,8 @@ void FileTaskExecutor::OnAppAuthorized(const std::string& resource_id,
   }
 
   {
-    Profile* profile = profile_ ?
-        profile_ : ProfileManager::GetDefaultProfileOrOffTheRecord();
     chrome::ScopedTabbedBrowserDisplayer displayer(
-         profile, chrome::HOST_DESKTOP_TYPE_ASH);
+         profile_, chrome::HOST_DESKTOP_TYPE_ASH);
     chrome::AddSelectedTabWithURL(displayer.browser(), open_link,
                                   content::PAGE_TRANSITION_LINK);
   }

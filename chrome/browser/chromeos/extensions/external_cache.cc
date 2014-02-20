@@ -18,12 +18,12 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/external_provider_impl.h"
 #include "chrome/browser/extensions/updater/extension_downloader.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/common/extension.h"
 
 namespace chromeos {
 
@@ -290,7 +290,7 @@ void ExternalCache::BackendCheckCacheContentsInternal(
   // Start by verifying that the cache_dir exists.
   if (!base::DirectoryExists(cache_dir)) {
     // Create it now.
-    if (!file_util::CreateDirectory(cache_dir)) {
+    if (!base::CreateDirectory(cache_dir)) {
       LOG(ERROR) << "Failed to create ExternalCache directory at "
                  << cache_dir.value();
     }
@@ -309,7 +309,7 @@ void ExternalCache::BackendCheckCacheContentsInternal(
     base::FileEnumerator::FileInfo info = enumerator.GetInfo();
     std::string basename = path.BaseName().value();
 
-    if (info.IsDirectory() || file_util::IsLink(info.GetName())) {
+    if (info.IsDirectory() || base::IsLink(info.GetName())) {
       LOG(ERROR) << "Erasing bad file in ExternalCache directory: " << basename;
       base::DeleteFile(path, true /* recursive */);
       continue;
@@ -492,7 +492,7 @@ void ExternalCache::BackendInstallCacheEntry(
   if (!base::DirectoryExists(cache_dir)) {
     LOG(ERROR) << "AppPack cache directory does not exist, creating now: "
                << cache_dir.value();
-    if (!file_util::CreateDirectory(cache_dir)) {
+    if (!base::CreateDirectory(cache_dir)) {
       LOG(ERROR) << "Failed to create the AppPack cache dir!";
       base::DeleteFile(path, true /* recursive */);
       return;

@@ -16,9 +16,9 @@ namespace plugins {
 // mobile youtube app.
 class MobileYouTubePlugin : public PluginPlaceholder {
  public:
-  MobileYouTubePlugin(content::RenderView* render_view,
-                      WebKit::WebFrame* frame,
-                      const WebKit::WebPluginParams& params,
+  MobileYouTubePlugin(content::RenderFrame* render_frame,
+                      blink::WebFrame* frame,
+                      const blink::WebPluginParams& params,
                       base::StringPiece& template_html,
                       GURL placeholderDataUrl);
 
@@ -31,7 +31,7 @@ class MobileYouTubePlugin : public PluginPlaceholder {
                               webkit_glue::CppVariant* result);
 
   // WebViewPlugin::Delegate (via PluginPlaceholder) method
-  virtual void BindWebFrame(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void BindWebFrame(blink::WebFrame* frame) OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(MobileYouTubePlugin);
 };

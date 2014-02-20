@@ -95,7 +95,7 @@ class ExtensionSettingsHandler
   // content::WebContentsObserver implementation.
   virtual void RenderViewDeleted(
       content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void NavigateToPendingEntry(
+  virtual void DidStartNavigationToPendingEntry(
       const GURL& url,
       content::NavigationController::ReloadType reload_type) OVERRIDE;
 
@@ -269,6 +269,10 @@ class ExtensionSettingsHandler
 
   // An observer to listen for when Extension errors are reported.
   ScopedObserver<ErrorConsole, ErrorConsole::Observer> error_console_observer_;
+
+  // Whether we found any DISABLE_NOT_VERIFIED extensions and want to kick off
+  // a verification check to try and rescue them.
+  bool should_do_verification_check_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionSettingsHandler);
 };

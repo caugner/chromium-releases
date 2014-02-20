@@ -328,7 +328,8 @@ void UdpPacketSocket::OnReadCompleted(int result, pp::NetAddress address) {
   if (result > 0) {
     talk_base::SocketAddress socket_address;
     PpNetAddressToSocketAddress(address, &socket_address);
-    SignalReadPacket(this, &receive_buffer_[0], result, socket_address);
+    SignalReadPacket(this, &receive_buffer_[0], result, socket_address,
+                     talk_base::CreatePacketTime(0));
   } else if (result != PP_ERROR_ABORTED) {
     LOG(ERROR) << "Received error when reading from UDP socket: " << result;
   }
@@ -371,6 +372,12 @@ talk_base::AsyncPacketSocket* PepperPacketSocketFactory::CreateClientTcpSocket(
       const std::string& user_agent,
       int opts) {
   // We don't use TCP sockets for remoting connections.
+  NOTREACHED();
+  return NULL;
+}
+
+talk_base::AsyncResolverInterface*
+PepperPacketSocketFactory::CreateAsyncResolver() {
   NOTREACHED();
   return NULL;
 }

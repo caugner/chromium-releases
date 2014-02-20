@@ -26,7 +26,7 @@ MockRenderThread::~MockRenderThread() {
 }
 
 void MockRenderThread::VerifyRunJavaScriptMessageSend(
-    const string16& expected_alert_message) {
+    const base::string16& expected_alert_message) {
   const IPC::Message* alert_msg =
       sink_.GetUniqueMessageMatching(ViewHostMsg_RunJavaScriptMessage::ID);
   ASSERT_TRUE(alert_msg);
@@ -144,7 +144,10 @@ void MockRenderThread::WidgetRestored() {
 void MockRenderThread::EnsureWebKitInitialized() {
 }
 
-void MockRenderThread::RecordUserMetrics(const std::string& action) {
+void MockRenderThread::RecordAction(const UserMetricsAction& action) {
+}
+
+void MockRenderThread::RecordComputedAction(const std::string& action) {
 }
 
 scoped_ptr<base::SharedMemory>
@@ -160,7 +163,7 @@ scoped_ptr<base::SharedMemory>
 }
 
 void MockRenderThread::RegisterExtension(v8::Extension* extension) {
-  WebKit::WebScriptController::registerExtension(extension);
+  blink::WebScriptController::registerExtension(extension);
 }
 
 void MockRenderThread::ScheduleIdleHandler(int64 initial_delay_ms) {
@@ -207,7 +210,7 @@ void MockRenderThread::SendCloseMessage() {
 
 // The Widget expects to be returned valid route_id.
 void MockRenderThread::OnCreateWidget(int opener_id,
-                                      WebKit::WebPopupType popup_type,
+                                      blink::WebPopupType popup_type,
                                       int* route_id,
                                       int* surface_id) {
   opener_id_ = opener_id;

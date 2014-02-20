@@ -262,6 +262,8 @@ Status ParseChromeOptions(
         base::Bind(&ParseString, &capabilities->android_package);
     parser_map["androidProcess"] =
         base::Bind(&ParseString, &capabilities->android_process);
+    parser_map["androidUseRunningApp"] =
+        base::Bind(&ParseBoolean, &capabilities->android_use_running_app);
     parser_map["args"] = base::Bind(&ParseSwitches);
   } else if (is_existing) {
     parser_map["debuggerAddress"] = base::Bind(&ParseUseExistingBrowser);
@@ -393,7 +395,7 @@ std::string Switches::ToString() const {
     std::string value = GetSwitchValue(iter->first);
     if (value.length()) {
       if (value.find(' ') != std::string::npos)
-        value = base::GetDoubleQuotedJson(value);
+        value = base::GetQuotedJSONString(value);
       str += "=" + value;
     }
     ++iter;
@@ -405,7 +407,8 @@ std::string Switches::ToString() const {
 }
 
 Capabilities::Capabilities()
-    : detach(false),
+    : android_use_running_app(false),
+      detach(false),
       force_devtools_screenshot(false) {}
 
 Capabilities::~Capabilities() {}

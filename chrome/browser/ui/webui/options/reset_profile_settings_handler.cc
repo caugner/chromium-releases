@@ -39,18 +39,19 @@ void ResetProfileSettingsHandler::InitializeHandler() {
   resetter_.reset(new ProfileResetter(profile));
   automatic_profile_resetter_ =
       AutomaticProfileResetterFactory::GetForBrowserContext(profile);
-  DCHECK(automatic_profile_resetter_);
 }
 
 void ResetProfileSettingsHandler::InitializePage() {
   web_ui()->CallJavascriptFunction(
       "ResetProfileSettingsOverlay.setResettingState",
       base::FundamentalValue(resetter_->IsActive()));
+  if (automatic_profile_resetter_ &&
+      automatic_profile_resetter_->ShouldShowResetBanner())
+    web_ui()->CallJavascriptFunction("ResetProfileSettingsBanner.show");
 }
 
 void ResetProfileSettingsHandler::Uninitialize() {
-  if (has_shown_confirmation_dialog_) {
-    DCHECK(automatic_profile_resetter_);
+  if (has_shown_confirmation_dialog_ && automatic_profile_resetter_) {
     automatic_profile_resetter_->NotifyDidCloseWebUIResetDialog(
         false /*performed_reset*/);
   }
@@ -61,9 +62,11 @@ void ResetProfileSettingsHandler::GetLocalizedValues(
   DCHECK(localized_strings);
 
   static OptionsStringResource resources[] = {
+    { "resetProfileSettingsBannerText",
+        IDS_RESET_PROFILE_SETTINGS_BANNER_TEXT },
     { "resetProfileSettingsCommit", IDS_RESET_PROFILE_SETTINGS_COMMIT_BUTTON },
     { "resetProfileSettingsExplanation",
-        IDS_RESET_PROFILE_SETTINGS_EXPLANATION},
+        IDS_RESET_PROFILE_SETTINGS_EXPLANATION },
     { "resetProfileSettingsFeedback", IDS_RESET_PROFILE_SETTINGS_FEEDBACK }
   };
 
@@ -82,6 +85,10 @@ void ResetProfileSettingsHandler::RegisterMessages() {
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("onShowResetProfileDialog",
       base::Bind(&ResetProfileSettingsHandler::OnShowResetProfileDialog,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("onDismissedResetProfileSettingsBanner",
+      base::Bind(&ResetProfileSettingsHandler::
+                 OnDismissedResetProfileSettingsBanner,
                  base::Unretained(this)));
 }
 
@@ -104,7 +111,6 @@ void ResetProfileSettingsHandler::HandleResetProfileSettings(
 }
 
 void ResetProfileSettingsHandler::OnResetProfileSettingsDone() {
-  DCHECK(automatic_profile_resetter_);
   web_ui()->CallJavascriptFunction("ResetProfileSettingsOverlay.doneResetting");
   if (setting_snapshot_) {
     Profile* profile = Profile::FromWebUI(web_ui());
@@ -114,15 +120,17 @@ void ResetProfileSettingsHandler::OnResetProfileSettingsDone() {
       setting_snapshot_->Subtract(current_snapshot);
       std::string report = SerializeSettingsReport(*setting_snapshot_,
                                                    difference);
-      bool is_reset_prompt_active =
+      bool is_reset_prompt_active = automatic_profile_resetter_ &&
           automatic_profile_resetter_->IsResetPromptFlowActive();
       SendSettingsFeedback(report, profile, is_reset_prompt_active ?
           PROFILE_RESET_PROMPT : PROFILE_RESET_WEBUI);
     }
     setting_snapshot_.reset();
   }
-  automatic_profile_resetter_->NotifyDidCloseWebUIResetDialog(
-      true /*performed_reset*/);
+  if (automatic_profile_resetter_) {
+    automatic_profile_resetter_->NotifyDidCloseWebUIResetDialog(
+        true /*performed_reset*/);
+  }
 }
 
 void ResetProfileSettingsHandler::OnShowResetProfileDialog(const ListValue*) {
@@ -133,7 +141,8 @@ void ResetProfileSettingsHandler::OnShowResetProfileDialog(const ListValue*) {
       "ResetProfileSettingsOverlay.setFeedbackInfo",
       flashInfo);
 
-  automatic_profile_resetter_->NotifyDidOpenWebUIResetDialog();
+  if (automatic_profile_resetter_)
+    automatic_profile_resetter_->NotifyDidOpenWebUIResetDialog();
   has_shown_confirmation_dialog_ = true;
 
   if (brandcode_.empty())
@@ -143,6 +152,12 @@ void ResetProfileSettingsHandler::OnShowResetProfileDialog(const ListValue*) {
                  Unretained(this)),
       GURL("https://tools.google.com/service/update2"),
       brandcode_));
+}
+
+void ResetProfileSettingsHandler::OnDismissedResetProfileSettingsBanner(
+    const base::ListValue* args) {
+  if (automatic_profile_resetter_)
+    automatic_profile_resetter_->NotifyDidCloseWebUIResetBanner();
 }
 
 void ResetProfileSettingsHandler::OnSettingsFetched() {

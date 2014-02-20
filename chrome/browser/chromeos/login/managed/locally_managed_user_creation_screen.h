@@ -68,7 +68,7 @@ class LocallyManagedUserCreationScreen
   virtual void OnActorDestroyed(LocallyManagedUserCreationScreenHandler* actor)
       OVERRIDE;
   virtual void CreateManagedUser(
-      const string16& display_name,
+      const base::string16& display_name,
       const std::string& managed_user_password) OVERRIDE;
   virtual void ImportManagedUser(const std::string& user_id) OVERRIDE;
   virtual void ImportManagedUserWithPassword(
@@ -79,7 +79,7 @@ class LocallyManagedUserCreationScreen
       const std::string& manager_password) OVERRIDE;
   virtual void AbortFlow() OVERRIDE;
   virtual void FinishFlow() OVERRIDE;
-  virtual bool FindUserByDisplayName(const string16& display_name,
+  virtual bool FindUserByDisplayName(const base::string16& display_name,
                                      std::string *out_id) const OVERRIDE;
   virtual void OnPageSelected(const std::string& page) OVERRIDE;
 
@@ -127,6 +127,9 @@ class LocallyManagedUserCreationScreen
   scoped_refptr<ImageDecoder> image_decoder_;
   bool apply_photo_after_decoding_;
   int selected_image_;
+
+  // True if camera was available last time.
+  bool was_camera_present_;
 
   DISALLOW_COPY_AND_ASSIGN(LocallyManagedUserCreationScreen);
 };

@@ -23,7 +23,6 @@
 #include "gpu/GLES2/gl2extchromium.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "ui/gfx/rect.h"
@@ -34,12 +33,6 @@ using testing::Return;
 using testing::SetArgPointee;
 using testing::StrictMock;
 using testing::_;
-using WebKit::WGC3Dbyte;
-using WebKit::WGC3Denum;
-using WebKit::WGC3Dint;
-using WebKit::WGC3Dsizei;
-using WebKit::WGC3Duint;
-using WebKit::WebGLId;
 
 namespace cc {
 namespace {
@@ -83,24 +76,22 @@ static scoped_ptr<base::SharedMemory> CreateAndFillSharedMemory(
 
 class TextureStateTrackingContext : public TestWebGraphicsContext3D {
  public:
-  MOCK_METHOD2(bindTexture, void(WGC3Denum target, WebGLId texture));
-  MOCK_METHOD3(texParameteri,
-               void(WGC3Denum target, WGC3Denum pname, WGC3Dint param));
+  MOCK_METHOD2(bindTexture, void(GLenum target, GLuint texture));
+  MOCK_METHOD3(texParameteri, void(GLenum target, GLenum pname, GLint param));
   MOCK_METHOD1(waitSyncPoint, void(unsigned sync_point));
   MOCK_METHOD0(insertSyncPoint, unsigned(void));
-  MOCK_METHOD2(produceTextureCHROMIUM, void(WGC3Denum target,
-                                            const WGC3Dbyte* mailbox));
-  MOCK_METHOD2(consumeTextureCHROMIUM, void(WGC3Denum target,
-                                            const WGC3Dbyte* mailbox));
+  MOCK_METHOD2(produceTextureCHROMIUM,
+               void(GLenum target, const GLbyte* mailbox));
+  MOCK_METHOD2(consumeTextureCHROMIUM,
+               void(GLenum target, const GLbyte* mailbox));
 
   // Force all textures to be consecutive numbers starting at "1",
   // so we easily can test for them.
-  virtual WebKit::WebGLId NextTextureId() OVERRIDE {
+  virtual GLuint NextTextureId() OVERRIDE {
     base::AutoLock lock(namespace_->lock);
     return namespace_->next_texture_id++;
   }
-  virtual void RetireTextureId(WebKit::WebGLId) OVERRIDE {
-  }
+  virtual void RetireTextureId(GLuint) OVERRIDE {}
 };
 
 // Shared data between multiple ResourceProviderContext. This contains mailbox
@@ -113,13 +104,13 @@ class ContextSharedData {
 
   unsigned InsertSyncPoint() { return next_sync_point_++; }
 
-  void GenMailbox(WGC3Dbyte* mailbox) {
-    memset(mailbox, 0, sizeof(WGC3Dbyte[64]));
+  void GenMailbox(GLbyte* mailbox) {
+    memset(mailbox, 0, sizeof(GLbyte[64]));
     memcpy(mailbox, &next_mailbox_, sizeof(next_mailbox_));
     ++next_mailbox_;
   }
 
-  void ProduceTexture(const WGC3Dbyte* mailbox_name,
+  void ProduceTexture(const GLbyte* mailbox_name,
                       unsigned sync_point,
                       scoped_refptr<TestTexture> texture) {
     unsigned mailbox = 0;
@@ -130,7 +121,7 @@ class ContextSharedData {
     sync_point_for_mailbox_[mailbox] = sync_point;
   }
 
-  scoped_refptr<TestTexture> ConsumeTexture(const WGC3Dbyte* mailbox_name,
+  scoped_refptr<TestTexture> ConsumeTexture(const GLbyte* mailbox_name,
                                             unsigned sync_point) {
     unsigned mailbox = 0;
     memcpy(&mailbox, mailbox_name, sizeof(mailbox));
@@ -182,15 +173,15 @@ class ResourceProviderContext : public TestWebGraphicsContext3D {
     last_waited_sync_point_ = std::max(sync_point, last_waited_sync_point_);
   }
 
-  virtual void texStorage2DEXT(WGC3Denum target,
-                               WGC3Dint levels,
-                               WGC3Duint internalformat,
-                               WGC3Dint width,
-                               WGC3Dint height) OVERRIDE {
+  virtual void texStorage2DEXT(GLenum target,
+                               GLint levels,
+                               GLuint internalformat,
+                               GLint width,
+                               GLint height) OVERRIDE {
     CheckTextureIsBound(target);
     ASSERT_EQ(static_cast<unsigned>(GL_TEXTURE_2D), target);
     ASSERT_EQ(1, levels);
-    WGC3Denum format = GL_RGBA;
+    GLenum format = GL_RGBA;
     switch (internalformat) {
       case GL_RGBA8_OES:
         break;
@@ -203,14 +194,14 @@ class ResourceProviderContext : public TestWebGraphicsContext3D {
     AllocateTexture(gfx::Size(width, height), format);
   }
 
-  virtual void texImage2D(WGC3Denum target,
-                          WGC3Dint level,
-                          WGC3Denum internalformat,
-                          WGC3Dsizei width,
-                          WGC3Dsizei height,
-                          WGC3Dint border,
-                          WGC3Denum format,
-                          WGC3Denum type,
+  virtual void texImage2D(GLenum target,
+                          GLint level,
+                          GLenum internalformat,
+                          GLsizei width,
+                          GLsizei height,
+                          GLint border,
+                          GLenum format,
+                          GLenum type,
                           const void* pixels) OVERRIDE {
     CheckTextureIsBound(target);
     ASSERT_EQ(static_cast<unsigned>(GL_TEXTURE_2D), target);
@@ -223,14 +214,14 @@ class ResourceProviderContext : public TestWebGraphicsContext3D {
       SetPixels(0, 0, width, height, pixels);
   }
 
-  virtual void texSubImage2D(WGC3Denum target,
-                             WGC3Dint level,
-                             WGC3Dint xoffset,
-                             WGC3Dint yoffset,
-                             WGC3Dsizei width,
-                             WGC3Dsizei height,
-                             WGC3Denum format,
-                             WGC3Denum type,
+  virtual void texSubImage2D(GLenum target,
+                             GLint level,
+                             GLint xoffset,
+                             GLint yoffset,
+                             GLsizei width,
+                             GLsizei height,
+                             GLenum format,
+                             GLenum type,
                              const void* pixels) OVERRIDE {
     CheckTextureIsBound(target);
     ASSERT_EQ(static_cast<unsigned>(GL_TEXTURE_2D), target);
@@ -244,22 +235,12 @@ class ResourceProviderContext : public TestWebGraphicsContext3D {
     SetPixels(xoffset, yoffset, width, height, pixels);
   }
 
-  virtual void texParameteri(WGC3Denum target, WGC3Denum param, WGC3Dint value)
-      OVERRIDE {
-    CheckTextureIsBound(target);
-    base::AutoLock lock_for_texture_access(namespace_->lock);
-    scoped_refptr<TestTexture> texture = BoundTexture(target);
-    if (param != GL_TEXTURE_MIN_FILTER)
-      return;
-    texture->filter = value;
-  }
-
-  virtual void genMailboxCHROMIUM(WGC3Dbyte* mailbox) OVERRIDE {
+  virtual void genMailboxCHROMIUM(GLbyte* mailbox) OVERRIDE {
     return shared_data_->GenMailbox(mailbox);
   }
 
-  virtual void produceTextureCHROMIUM(WGC3Denum target,
-                                      const WGC3Dbyte* mailbox) OVERRIDE {
+  virtual void produceTextureCHROMIUM(GLenum target,
+                                      const GLbyte* mailbox) OVERRIDE {
     CheckTextureIsBound(target);
 
     // Delay moving the texture into the mailbox until the next
@@ -272,8 +253,8 @@ class ResourceProviderContext : public TestWebGraphicsContext3D {
     pending_produce_textures_.push_back(pending.Pass());
   }
 
-  virtual void consumeTextureCHROMIUM(WGC3Denum target,
-                                      const WGC3Dbyte* mailbox) OVERRIDE {
+  virtual void consumeTextureCHROMIUM(GLenum target,
+                                      const GLbyte* mailbox) OVERRIDE {
     CheckTextureIsBound(target);
     base::AutoLock lock_for_texture_access(namespace_->lock);
     scoped_refptr<TestTexture> texture =
@@ -290,29 +271,13 @@ class ResourceProviderContext : public TestWebGraphicsContext3D {
     memcpy(pixels, texture->data.get(), TextureSizeBytes(size, format));
   }
 
-  WGC3Denum GetTextureFilter() {
-    CheckTextureIsBound(GL_TEXTURE_2D);
-    base::AutoLock lock_for_texture_access(namespace_->lock);
-    return BoundTexture(GL_TEXTURE_2D)->filter;
-  }
-
-  scoped_refptr<TestTexture> BoundTexture(WGC3Denum target) {
-    // The caller is expected to lock the namespace for texture access.
-    namespace_->lock.AssertAcquired();
-    return namespace_->textures.TextureForId(BoundTextureId(target));
-  }
-
-  void CheckTextureIsBound(WGC3Denum target) {
-    ASSERT_TRUE(BoundTextureId(target));
-  }
-
  protected:
   explicit ResourceProviderContext(ContextSharedData* shared_data)
       : shared_data_(shared_data),
         last_waited_sync_point_(0) {}
 
  private:
-  void AllocateTexture(gfx::Size size, WGC3Denum format) {
+  void AllocateTexture(gfx::Size size, GLenum format) {
     CheckTextureIsBound(GL_TEXTURE_2D);
     ResourceFormat texture_format = RGBA_8888;
     switch (format) {
@@ -353,7 +318,7 @@ class ResourceProviderContext : public TestWebGraphicsContext3D {
   }
 
   struct PendingProduceTexture {
-    WGC3Dbyte mailbox[64];
+    GLbyte mailbox[64];
     scoped_refptr<TestTexture> texture;
   };
   typedef ScopedPtrDeque<PendingProduceTexture> PendingProduceTextureList;
@@ -501,7 +466,7 @@ class ResourceProviderTest
 
   static void SetResourceFilter(ResourceProvider* resource_provider,
                                 ResourceProvider::ResourceId id,
-                                WGC3Denum filter) {
+                                GLenum filter) {
     ResourceProvider::ScopedSamplerGL sampler(
         resource_provider, id, GL_TEXTURE_2D, filter);
   }
@@ -682,7 +647,7 @@ TEST_P(ResourceProviderTest, TransferGLResources) {
   uint8_t data2[4] = { 5, 5, 5, 5 };
   child_resource_provider_->SetPixels(id2, data2, rect, rect, gfx::Vector2d());
 
-  WebGLId external_texture_id = child_context_->createExternalTexture();
+  GLuint external_texture_id = child_context_->createExternalTexture();
   child_context_->bindTexture(GL_TEXTURE_EXTERNAL_OES, external_texture_id);
 
   gpu::Mailbox external_mailbox;
@@ -2158,7 +2123,11 @@ TEST_P(ResourceProviderTest, ManagedResource) {
 
   // Check that the texture gets created with the right sampler settings.
   ResourceProvider::ResourceId id = resource_provider->CreateManagedResource(
-      size, GL_CLAMP_TO_EDGE, ResourceProvider::TextureUsageAny, format);
+      size,
+      GL_TEXTURE_2D,
+      GL_CLAMP_TO_EDGE,
+      ResourceProvider::TextureUsageAny,
+      format);
   EXPECT_CALL(*context, bindTexture(GL_TEXTURE_2D, texture_id));
   EXPECT_CALL(*context,
               texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
@@ -2206,6 +2175,7 @@ TEST_P(ResourceProviderTest, TextureWrapMode) {
     // Check that the texture gets created with the right sampler settings.
     ResourceProvider::ResourceId id =
         resource_provider->CreateGLTexture(size,
+                                           GL_TEXTURE_2D,
                                            texture_pool,
                                            wrap_mode,
                                            ResourceProvider::TextureUsageAny,
@@ -2398,68 +2368,77 @@ TEST_P(ResourceProviderTest, TextureMailbox_GLTextureExternalOES) {
 
 class AllocationTrackingContext3D : public TestWebGraphicsContext3D {
  public:
-  MOCK_METHOD0(NextTextureId, WebGLId());
-  MOCK_METHOD1(RetireTextureId, void(WebGLId id));
-  MOCK_METHOD2(bindTexture, void(WGC3Denum target, WebGLId texture));
+  MOCK_METHOD0(NextTextureId, GLuint());
+  MOCK_METHOD1(RetireTextureId, void(GLuint id));
+  MOCK_METHOD2(bindTexture, void(GLenum target, GLuint texture));
+  MOCK_METHOD5(texStorage2DEXT,
+               void(GLenum target,
+                    GLint levels,
+                    GLuint internalformat,
+                    GLint width,
+                    GLint height));
   MOCK_METHOD9(texImage2D,
-               void(WGC3Denum target,
-                    WGC3Dint level,
-                    WGC3Denum internalformat,
-                    WGC3Dsizei width,
-                    WGC3Dsizei height,
-                    WGC3Dint border,
-                    WGC3Denum format,
-                    WGC3Denum type,
+               void(GLenum target,
+                    GLint level,
+                    GLenum internalformat,
+                    GLsizei width,
+                    GLsizei height,
+                    GLint border,
+                    GLenum format,
+                    GLenum type,
                     const void* pixels));
   MOCK_METHOD9(texSubImage2D,
-               void(WGC3Denum target,
-                    WGC3Dint level,
-                    WGC3Dint xoffset,
-                    WGC3Dint yoffset,
-                    WGC3Dsizei width,
-                    WGC3Dsizei height,
-                    WGC3Denum format,
-                    WGC3Denum type,
+               void(GLenum target,
+                    GLint level,
+                    GLint xoffset,
+                    GLint yoffset,
+                    GLsizei width,
+                    GLsizei height,
+                    GLenum format,
+                    GLenum type,
                     const void* pixels));
   MOCK_METHOD9(asyncTexImage2DCHROMIUM,
-               void(WGC3Denum target,
-                    WGC3Dint level,
-                    WGC3Denum internalformat,
-                    WGC3Dsizei width,
-                    WGC3Dsizei height,
-                    WGC3Dint border,
-                    WGC3Denum format,
-                    WGC3Denum type,
+               void(GLenum target,
+                    GLint level,
+                    GLenum internalformat,
+                    GLsizei width,
+                    GLsizei height,
+                    GLint border,
+                    GLenum format,
+                    GLenum type,
                     const void* pixels));
   MOCK_METHOD9(asyncTexSubImage2DCHROMIUM,
-               void(WGC3Denum target,
-                    WGC3Dint level,
-                    WGC3Dint xoffset,
-                    WGC3Dint yoffset,
-                    WGC3Dsizei width,
-                    WGC3Dsizei height,
-                    WGC3Denum format,
-                    WGC3Denum type,
+               void(GLenum target,
+                    GLint level,
+                    GLint xoffset,
+                    GLint yoffset,
+                    GLsizei width,
+                    GLsizei height,
+                    GLenum format,
+                    GLenum type,
                     const void* pixels));
   MOCK_METHOD8(compressedTexImage2D,
-               void(WGC3Denum target,
-                    WGC3Dint level,
-                    WGC3Denum internalformat,
-                    WGC3Dsizei width,
-                    WGC3Dsizei height,
-                    WGC3Dint border,
-                    WGC3Dsizei image_size,
+               void(GLenum target,
+                    GLint level,
+                    GLenum internalformat,
+                    GLsizei width,
+                    GLsizei height,
+                    GLint border,
+                    GLsizei image_size,
                     const void* data));
-  MOCK_METHOD1(waitAsyncTexImage2DCHROMIUM, void(WGC3Denum));
-  MOCK_METHOD3(createImageCHROMIUM, WGC3Duint(WGC3Dsizei, WGC3Dsizei,
-                                              WGC3Denum));
-  MOCK_METHOD1(destroyImageCHROMIUM, void(WGC3Duint));
-  MOCK_METHOD2(mapImageCHROMIUM, void*(WGC3Duint, WGC3Denum));
-  MOCK_METHOD3(getImageParameterivCHROMIUM, void(WGC3Duint, WGC3Denum,
-                                                 GLint*));
-  MOCK_METHOD1(unmapImageCHROMIUM, void(WGC3Duint));
-  MOCK_METHOD2(bindTexImage2DCHROMIUM, void(WGC3Denum, WGC3Dint));
-  MOCK_METHOD2(releaseTexImage2DCHROMIUM, void(WGC3Denum, WGC3Dint));
+  MOCK_METHOD1(waitAsyncTexImage2DCHROMIUM, void(GLenum));
+  MOCK_METHOD3(createImageCHROMIUM, GLuint(GLsizei, GLsizei, GLenum));
+  MOCK_METHOD1(destroyImageCHROMIUM, void(GLuint));
+  MOCK_METHOD2(mapImageCHROMIUM, void*(GLuint, GLenum));
+  MOCK_METHOD3(getImageParameterivCHROMIUM, void(GLuint, GLenum, GLint*));
+  MOCK_METHOD1(unmapImageCHROMIUM, void(GLuint));
+  MOCK_METHOD2(bindTexImage2DCHROMIUM, void(GLenum, GLint));
+  MOCK_METHOD2(releaseTexImage2DCHROMIUM, void(GLenum, GLint));
+
+  // We're mocking bindTexture, so we override
+  // TestWebGraphicsContext3D::texParameteri to avoid assertions related to the
+  // currently bound texture.
+  virtual void texParameteri(GLenum target, GLenum pname, GLint param) {}
 };
 
 TEST_P(ResourceProviderTest, TextureAllocation) {
@@ -2527,6 +2506,83 @@ TEST_P(ResourceProviderTest, TextureAllocation) {
   ASSERT_TRUE(resource_provider->DidSetPixelsComplete(id));
 
   resource_provider->ReleasePixelBuffer(id);
+
+  EXPECT_CALL(*context, RetireTextureId(texture_id)).Times(1);
+  resource_provider->DeleteResource(id);
+
+  Mock::VerifyAndClearExpectations(context);
+}
+
+TEST_P(ResourceProviderTest, TextureAllocationStorageUsageAny) {
+  // Only for GL textures.
+  if (GetParam() != ResourceProvider::GLTexture)
+    return;
+  scoped_ptr<AllocationTrackingContext3D> context_owned(
+      new StrictMock<AllocationTrackingContext3D>);
+  AllocationTrackingContext3D* context = context_owned.get();
+  context->set_support_texture_storage(true);
+
+  FakeOutputSurfaceClient output_surface_client;
+  scoped_ptr<OutputSurface> output_surface(FakeOutputSurface::Create3d(
+      context_owned.PassAs<TestWebGraphicsContext3D>()));
+  CHECK(output_surface->BindToClient(&output_surface_client));
+
+  scoped_ptr<ResourceProvider> resource_provider(
+      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+
+  gfx::Size size(2, 2);
+  ResourceFormat format = RGBA_8888;
+  ResourceProvider::ResourceId id = 0;
+  int texture_id = 123;
+
+  // Lazy allocation. Don't allocate when creating the resource.
+  id = resource_provider->CreateResource(
+      size, GL_CLAMP_TO_EDGE, ResourceProvider::TextureUsageAny, format);
+
+  EXPECT_CALL(*context, NextTextureId()).WillOnce(Return(texture_id));
+  EXPECT_CALL(*context, bindTexture(GL_TEXTURE_2D, texture_id)).Times(2);
+  EXPECT_CALL(*context, texStorage2DEXT(_, _, _, 2, 2)).Times(1);
+  resource_provider->AllocateForTesting(id);
+
+  EXPECT_CALL(*context, RetireTextureId(texture_id)).Times(1);
+  resource_provider->DeleteResource(id);
+
+  Mock::VerifyAndClearExpectations(context);
+}
+
+TEST_P(ResourceProviderTest, TextureAllocationStorageUsageFramebuffer) {
+  // Only for GL textures.
+  if (GetParam() != ResourceProvider::GLTexture)
+    return;
+  scoped_ptr<AllocationTrackingContext3D> context_owned(
+      new StrictMock<AllocationTrackingContext3D>);
+  AllocationTrackingContext3D* context = context_owned.get();
+  context->set_support_texture_storage(true);
+
+  FakeOutputSurfaceClient output_surface_client;
+  scoped_ptr<OutputSurface> output_surface(FakeOutputSurface::Create3d(
+      context_owned.PassAs<TestWebGraphicsContext3D>()));
+  CHECK(output_surface->BindToClient(&output_surface_client));
+
+  scoped_ptr<ResourceProvider> resource_provider(
+      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+
+  gfx::Size size(2, 2);
+  ResourceFormat format = RGBA_8888;
+  ResourceProvider::ResourceId id = 0;
+  int texture_id = 123;
+
+  // Lazy allocation. Don't allocate when creating the resource.
+  id = resource_provider->CreateResource(
+      size,
+      GL_CLAMP_TO_EDGE,
+      ResourceProvider::TextureUsageFramebuffer,
+      format);
+
+  EXPECT_CALL(*context, NextTextureId()).WillOnce(Return(texture_id));
+  EXPECT_CALL(*context, bindTexture(GL_TEXTURE_2D, texture_id)).Times(2);
+  EXPECT_CALL(*context, texImage2D(_, _, _, 2, 2, _, _, _, _)).Times(1);
+  resource_provider->AllocateForTesting(id);
 
   EXPECT_CALL(*context, RetireTextureId(texture_id)).Times(1);
   resource_provider->DeleteResource(id);
@@ -2954,13 +3010,12 @@ INSTANTIATE_TEST_CASE_P(
 
 class TextureIdAllocationTrackingContext : public TestWebGraphicsContext3D {
  public:
-  virtual WebKit::WebGLId NextTextureId() OVERRIDE {
+  virtual GLuint NextTextureId() OVERRIDE {
     base::AutoLock lock(namespace_->lock);
     return namespace_->next_texture_id++;
   }
-  virtual void RetireTextureId(WebKit::WebGLId) OVERRIDE {
-  }
-  WebKit::WebGLId PeekTextureId() {
+  virtual void RetireTextureId(GLuint) OVERRIDE {}
+  GLuint PeekTextureId() {
     base::AutoLock lock(namespace_->lock);
     return namespace_->next_texture_id;
   }

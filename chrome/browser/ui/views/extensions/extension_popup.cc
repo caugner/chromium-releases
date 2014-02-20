@@ -8,13 +8,14 @@
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/extensions/extension_process_manager.h"
-#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_view_host.h"
+#include "chrome/browser/extensions/extension_view_host_factory.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_manager.h"
@@ -37,6 +38,7 @@
 #include "ui/views/win/hwnd_util.h"
 #endif
 
+using content::BrowserContext;
 using content::RenderViewHost;
 using content::WebContents;
 
@@ -64,12 +66,12 @@ const int ExtensionPopup::kMinHeight = 25;
 const int ExtensionPopup::kMaxWidth = 800;
 const int ExtensionPopup::kMaxHeight = 600;
 
-ExtensionPopup::ExtensionPopup(extensions::ExtensionHost* host,
+ExtensionPopup::ExtensionPopup(extensions::ExtensionViewHost* host,
                                views::View* anchor_view,
                                views::BubbleBorder::Arrow arrow,
                                ShowAction show_action)
     : BubbleDelegateView(anchor_view, arrow),
-      extension_host_(host),
+      host_(host),
       devtools_callback_(base::Bind(
           &ExtensionPopup::OnDevToolsStateChanged, base::Unretained(this))) {
   inspect_with_devtools_ = show_action == SHOW_AND_INSPECT;
@@ -90,14 +92,18 @@ ExtensionPopup::ExtensionPopup(extensions::ExtensionHost* host,
 
   // Listen for the containing view calling window.close();
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-                 content::Source<Profile>(host->profile()));
+                 content::Source<BrowserContext>(host->browser_context()));
   content::DevToolsManager::GetInstance()->AddAgentStateCallback(
       devtools_callback_);
+
+  host_->view()->browser()->tab_strip_model()->AddObserver(this);
 }
 
 ExtensionPopup::~ExtensionPopup() {
   content::DevToolsManager::GetInstance()->RemoveAgentStateCallback(
       devtools_callback_);
+
+  host_->view()->browser()->tab_strip_model()->RemoveObserver(this);
 }
 
 void ExtensionPopup::Observe(int type,
@@ -191,15 +197,21 @@ void ExtensionPopup::OnWindowActivated(aura::Window* gained_active,
 }
 #endif
 
+void ExtensionPopup::ActiveTabChanged(content::WebContents* old_contents,
+                                      content::WebContents* new_contents,
+                                      int index,
+                                      int reason) {
+  GetWidget()->Close();
+}
+
 // static
 ExtensionPopup* ExtensionPopup::ShowPopup(const GURL& url,
                                           Browser* browser,
                                           views::View* anchor_view,
                                           views::BubbleBorder::Arrow arrow,
                                           ShowAction show_action) {
-  ExtensionProcessManager* manager =
-      extensions::ExtensionSystem::Get(browser->profile())->process_manager();
-  extensions::ExtensionHost* host = manager->CreatePopupHost(url, browser);
+  extensions::ExtensionViewHost* host =
+      extensions::ExtensionViewHostFactory::CreatePopupHost(url, browser);
   ExtensionPopup* popup = new ExtensionPopup(host, anchor_view, arrow,
       show_action);
   views::BubbleDelegateView::CreateBubble(popup);

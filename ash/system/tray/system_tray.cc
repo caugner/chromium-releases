@@ -5,10 +5,10 @@
 #include "ash/system/tray/system_tray.h"
 
 #include "ash/ash_switches.h"
+#include "ash/metrics/user_metrics_recorder.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/shell/panel_window.h"
-#include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/bluetooth/tray_bluetooth.h"
 #include "ash/system/date/tray_date.h"
@@ -26,6 +26,7 @@
 #include "ash/system/tray_update.h"
 #include "ash/system/user/login_status.h"
 #include "ash/system/user/tray_user.h"
+#include "ash/system/user/tray_user_separator.h"
 #include "ash/system/web_notification/web_notification_tray.h"
 #include "base/command_line.h"
 #include "base/logging.h"
@@ -100,11 +101,11 @@ class SystemBubbleWrapper {
     }
     is_persistent_ = is_persistent;
 
-    // If ChromeVox is enabled, focus the default item.
-    AccessibilityDelegate* delegate =
-        Shell::GetInstance()->accessibility_delegate();
-    if (delegate->IsSpokenFeedbackEnabled())
-      bubble_->FocusDefault();
+    // If ChromeVox is enabled, focus the default item if no item is focused.
+    if (Shell::GetInstance()->accessibility_delegate()->
+        IsSpokenFeedbackEnabled()) {
+      bubble_->FocusDefaultIfNeeded();
+    }
   }
 
   // Convenience accessors:
@@ -159,18 +160,19 @@ void SystemTray::InitializeTrayItems(SystemTrayDelegate* delegate) {
 void SystemTray::CreateItems(SystemTrayDelegate* delegate) {
 #if !defined(OS_WIN)
   AddTrayItem(new internal::TraySessionLengthLimit(this));
-  // In multi-profile user mode we can have multiple user tiles.
+  // Create user items for each possible user.
   ash::Shell* shell = ash::Shell::GetInstance();
   int maximum_user_profiles =
-      shell->delegate()->IsMultiProfilesEnabled() ?
-          shell->session_state_delegate()->GetMaximumNumberOfLoggedInUsers() :
-          0;
-  // Note: We purposely use one more item then logged in users to account for
-  // the additional separator.
-  for (int i = 0; i <= maximum_user_profiles; i++) {
+          shell->session_state_delegate()->GetMaximumNumberOfLoggedInUsers();
+  for (int i = 0; i < maximum_user_profiles; i++) {
     internal::TrayUser* tray_user = new internal::TrayUser(this, i);
     AddTrayItem(tray_user);
     user_items_.push_back(tray_user);
+  }
+  if (maximum_user_profiles > 1) {
+    // Add a special double line separator between users and the rest of the
+    // menu if more then one user is logged in.
+    AddTrayItem(new internal::TrayUserSeparator(this));
   }
 #endif
 
@@ -257,10 +259,12 @@ void SystemTray::ShowDefaultView(BubbleCreationType creation_type) {
 }
 
 void SystemTray::ShowPersistentDefaultView() {
-  ShowDefaultViewWithOffset(
-      BUBBLE_CREATE_NEW,
-      TrayBubbleView::InitParams::kArrowDefaultOffset,
-      true);
+  ShowItems(items_.get(),
+            false,
+            false,
+            BUBBLE_CREATE_NEW,
+            TrayBubbleView::InitParams::kArrowDefaultOffset,
+            true);
 }
 
 void SystemTray::ShowDetailedView(SystemTrayItem* item,
@@ -434,6 +438,10 @@ int SystemTray::GetTrayXOffset(SystemTrayItem* item) const {
 void SystemTray::ShowDefaultViewWithOffset(BubbleCreationType creation_type,
                                            int arrow_offset,
                                            bool persistent) {
+  if (creation_type != BUBBLE_USE_EXISTING) {
+    Shell::GetInstance()->metrics()->RecordUserMetricsAction(
+        ash::UMA_STATUS_AREA_MENU_OPENED);
+  }
   ShowItems(items_.get(), false, true, creation_type, arrow_offset, persistent);
 }
 
@@ -459,6 +467,11 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
   notification_bubble_.reset();
   if (system_bubble_.get() && creation_type == BUBBLE_USE_EXISTING) {
     system_bubble_->bubble()->UpdateView(items, bubble_type);
+    // If ChromeVox is enabled, focus the default item if no item is focused.
+    if (Shell::GetInstance()->accessibility_delegate()->
+        IsSpokenFeedbackEnabled()) {
+      system_bubble_->bubble()->FocusDefaultIfNeeded();
+    }
   } else {
     // Remember if the menu is a single property (like e.g. volume) or the
     // full tray menu. Note that in case of the |BUBBLE_USE_EXISTING| case

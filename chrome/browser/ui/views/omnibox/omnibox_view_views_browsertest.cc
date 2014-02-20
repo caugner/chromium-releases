@@ -11,7 +11,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/omnibox/omnibox_views.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "grit/generated_resources.h"
@@ -22,8 +21,8 @@
 
 #if defined(USE_AURA)
 #include "ui/aura/root_window.h"
-#include "ui/aura/root_window_host_delegate.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_tree_host_delegate.h"
 #endif // defined(USE_AURA)
 
 class OmniboxViewViewsTest : public InProcessBrowserTest {
@@ -36,7 +35,7 @@ class OmniboxViewViewsTest : public InProcessBrowserTest {
     ASSERT_TRUE(window);
     LocationBar* location_bar = window->GetLocationBar();
     ASSERT_TRUE(location_bar);
-    *omnibox_view = location_bar->GetLocationEntry();
+    *omnibox_view = location_bar->GetOmniboxView();
     ASSERT_TRUE(*omnibox_view);
   }
 
@@ -112,12 +111,8 @@ class OmniboxViewViewsTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, PasteAndGoDoesNotLeavePopupOpen) {
-  OmniboxView* view = browser()->window()->GetLocationBar()->GetLocationEntry();
-  OmniboxViewViews* omnibox_view_views = GetOmniboxViewViews(view);
-  // This test is only relevant when OmniboxViewViews is present and is using
-  // the native textfield wrapper.
-  if (!omnibox_view_views)
-    return;
+  OmniboxView* view = browser()->window()->GetLocationBar()->GetOmniboxView();
+  OmniboxViewViews* omnibox_view_views = static_cast<OmniboxViewViews*>(view);
   views::NativeTextfieldWrapper* native_textfield_wrapper =
       static_cast<views::NativeTextfieldWrapper*>(
           omnibox_view_views->GetNativeWrapperForTesting());

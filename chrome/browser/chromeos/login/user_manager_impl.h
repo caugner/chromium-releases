@@ -42,8 +42,6 @@ class RemoveUserDelegate;
 class SupervisedUserManagerImpl;
 class SessionLengthLimiter;
 
-struct UpdateUserAccountDataCallbackData;
-
 // Implementation of the UserManager.
 class UserManagerImpl
     : public UserManager,
@@ -75,6 +73,7 @@ class UserManagerImpl
   virtual void RemoveUserFromList(const std::string& user_id) OVERRIDE;
   virtual bool IsKnownUser(const std::string& user_id) const OVERRIDE;
   virtual const User* FindUser(const std::string& user_id) const OVERRIDE;
+  virtual User* FindUserAndModify(const std::string& user_id) OVERRIDE;
   virtual const User* GetLoggedInUser() const OVERRIDE;
   virtual User* GetLoggedInUser() OVERRIDE;
   virtual const User* GetActiveUser() const OVERRIDE;
@@ -86,16 +85,16 @@ class UserManagerImpl
       const std::string& user_id,
       User::OAuthTokenStatus oauth_token_status) OVERRIDE;
   virtual void SaveUserDisplayName(const std::string& user_id,
-                                   const string16& display_name) OVERRIDE;
-  virtual void UpdateUserAccountData(const std::string& user_id,
-                                     const string16& display_name,
-                                     const std::string& locale) OVERRIDE;
-  virtual string16 GetUserDisplayName(
+                                   const base::string16& display_name) OVERRIDE;
+  virtual base::string16 GetUserDisplayName(
       const std::string& user_id) const OVERRIDE;
   virtual void SaveUserDisplayEmail(const std::string& user_id,
                                     const std::string& display_email) OVERRIDE;
   virtual std::string GetUserDisplayEmail(
       const std::string& user_id) const OVERRIDE;
+  virtual void UpdateUserAccountData(
+      const std::string& user_id,
+      const UserAccountData& account_data) OVERRIDE;
   virtual bool IsCurrentUserOwner() const OVERRIDE;
   virtual bool IsCurrentUserNew() const OVERRIDE;
   virtual bool IsCurrentUserNonCryptohomeDataEphemeral() const OVERRIDE;
@@ -144,8 +143,10 @@ class UserManagerImpl
   virtual void OnPolicyUpdated(const std::string& user_id) OVERRIDE;
   virtual void OnDeviceLocalAccountsChanged() OVERRIDE;
 
-  virtual void RespectLocalePreference(Profile* profile, const User* user) const
-      OVERRIDE;
+  virtual bool RespectLocalePreference(
+      Profile* profile,
+      const User* user,
+      scoped_ptr<locale_util::SwitchLanguageCallback> callback) const OVERRIDE;
 
  private:
   friend class SupervisedUserManagerImpl;
@@ -184,11 +185,6 @@ class UserManagerImpl
   // Returns a list of users who have logged into this device previously.
   // Same as GetUsers but used if you need to modify User from that list.
   UserList& GetUsersAndModify();
-
-  // Returns the user with the given email address if found in the persistent
-  // list or currently logged in as ephemeral. Returns |NULL| otherwise.
-  // Same as FindUser but returns non-const pointer to User object.
-  User* FindUserAndModify(const std::string& user_id);
 
   // Returns the user with the given email address if found in the persistent
   // list. Returns |NULL| otherwise.
@@ -311,22 +307,6 @@ class UserManagerImpl
   // Sends metrics in response to a regular user logging in.
   void SendRegularUserLoginMetrics(const std::string& user_id);
 
-  // UpdateUserAccountData() + SaveUserDisplayName() .
-  void UpdateUserAccountDataImpl(const std::string& user_id,
-                                 const string16& display_name,
-                                 const std::string* locale);
-
-  // Account locale needs to be translated to device locale.
-  // This might be called as callback after FILE thread translates locale.
-  void UpdateUserAccountDataImplCallback(
-      const std::string& user_id,
-      const string16& display_name,
-      const std::string* resolved_account_locale);
-
-  // Decorator to the previous function.
-  void UpdateUserAccountDataImplCallbackDecorator(
-      const scoped_ptr<UpdateUserAccountDataCallbackData>& data);
-
   // Implementation for RemoveUser method. This is an asynchronous part of the
   // method, that verifies that owner will not get deleted, and calls
   // |RemoveNonOwnerUserInternal|.
@@ -340,6 +320,14 @@ class UserManagerImpl
 
   // MultiProfileUserControllerDelegate implementation:
   virtual void OnUserNotAllowed() OVERRIDE;
+
+  // Sets account locale for user with id |user_id|.
+  virtual void UpdateUserAccountLocale(const std::string& user_id,
+                                       const std::string& locale);
+
+  // Updates user account after locale was resolved.
+  void DoUpdateAccountLocale(const std::string& user_id,
+                             const std::string& resolved_locale);
 
   // Interface to the signed settings store.
   CrosSettings* cros_settings_;

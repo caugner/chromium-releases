@@ -11,12 +11,12 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/extensions/pending_extension_info.h"
-#include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "chrome/common/extensions/extension.h"
+#include "extensions/browser/pending_extension_info.h"
+#include "extensions/browser/pending_extension_manager.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/id_util.h"
 #include "extensions/common/manifest_constants.h"
 #include "sync/api/string_ordinal.h"
@@ -253,7 +253,7 @@ bool SyncExtensionHelper::ExtensionStatesMatch(
 }
 
 void SyncExtensionHelper::SetupProfile(Profile* profile) {
-  extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(true, false);
+  extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(true);
   profile_extensions_.insert(make_pair(profile, ExtensionNameMap()));
 }
 
@@ -308,12 +308,12 @@ scoped_refptr<Extension> CreateExtension(const base::FilePath& base_dir,
   const base::FilePath sub_dir = base::FilePath().AppendASCII(name);
   base::FilePath extension_dir;
   if (!base::PathExists(base_dir) &&
-      !file_util::CreateDirectory(base_dir)) {
+      !base::CreateDirectory(base_dir)) {
     ADD_FAILURE();
     return NULL;
   }
-  if (!file_util::CreateTemporaryDirInDir(
-          base_dir, sub_dir.value(), &extension_dir)) {
+  if (!base::CreateTemporaryDirInDir(base_dir, sub_dir.value(),
+                                     &extension_dir)) {
     ADD_FAILURE();
     return NULL;
   }

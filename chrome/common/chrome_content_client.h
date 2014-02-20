@@ -12,8 +12,6 @@
 #include "base/files/file_path.h"
 #include "content/public/common/content_client.h"
 
-namespace chrome {
-
 class ChromeContentClient : public content::ContentClient {
  public:
   static const char* const kPDFPluginName;
@@ -31,7 +29,7 @@ class ChromeContentClient : public content::ContentClient {
   virtual bool CanHandleWhileSwappedOut(const IPC::Message& msg) OVERRIDE;
   virtual std::string GetProduct() const OVERRIDE;
   virtual std::string GetUserAgent() const OVERRIDE;
-  virtual string16 GetLocalizedString(int message_id) const OVERRIDE;
+  virtual base::string16 GetLocalizedString(int message_id) const OVERRIDE;
   virtual base::StringPiece GetDataResource(
       int resource_id,
       ui::ScaleFactor scale_factor) const OVERRIDE;
@@ -47,7 +45,5 @@ class ChromeContentClient : public content::ContentClient {
   virtual std::string GetCarbonInterposePath() const OVERRIDE;
 #endif
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_COMMON_CHROME_CONTENT_CLIENT_H_

@@ -14,6 +14,7 @@ import com.google.common.base.Preconditions;
 import org.chromium.base.ActivityStatus;
 import org.chromium.base.CalledByNative;
 import org.chromium.sync.internal_api.pub.base.ModelType;
+import org.chromium.sync.notifier.InvalidationClientNameProvider;
 import org.chromium.sync.notifier.InvalidationIntentProtocol;
 import org.chromium.sync.notifier.InvalidationPreferences;
 import org.chromium.sync.notifier.InvalidationService;
@@ -130,5 +131,17 @@ public class InvalidationController implements ActivityStatus.StateListener {
                 start();
             }
         }
+    }
+
+    /**
+     * Fetches the Invalidator client name.
+     *
+     * Note that there is a naming discrepancy here.  In C++, we refer to the invalidation client
+     * identifier that is unique for every invalidation client instance in an account as the client
+     * ID.  In Java, we call it the client name.
+     */
+    @CalledByNative
+    public byte[] getInvalidatorClientId() {
+        return InvalidationClientNameProvider.get().getInvalidatorClientName();
     }
 }

@@ -1,10 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser.input;
 
 import android.test.suitebuilder.annotation.LargeTest;
+
+import static org.chromium.base.test.util.ScalableTimeout.ScaleTimeout;
 
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
@@ -19,7 +21,7 @@ import org.chromium.content_shell_apk.ContentShellTestBase;
 import java.util.concurrent.TimeUnit;
 
 public class SelectPopupTest extends ContentShellTestBase {
-    private static final int WAIT_TIMEOUT_SECONDS = 2;
+    private static final long WAIT_TIMEOUT_SECONDS = ScaleTimeout(2);
     private static final String SELECT_URL = UrlUtils.encodeHtmlDataUri(
             "<html><head><meta name=\"viewport\"" +
             "content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0\" /></head>" +

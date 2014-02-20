@@ -104,6 +104,10 @@ CancelCallback DummyDriveService::DeleteResource(
     const std::string& etag,
     const EntryActionCallback& callback) { return CancelCallback(); }
 
+CancelCallback DummyDriveService::TrashResource(
+    const std::string& resource_id,
+    const EntryActionCallback& callback) { return CancelCallback(); }
+
 CancelCallback DummyDriveService::DownloadFile(
     const base::FilePath& local_cache_path,
     const std::string& resource_id,
@@ -118,16 +122,12 @@ CancelCallback DummyDriveService::CopyResource(
     const base::Time& last_modified,
     const GetResourceEntryCallback& callback) { return CancelCallback(); }
 
-CancelCallback DummyDriveService::CopyHostedDocument(
-    const std::string& resource_id,
-    const std::string& new_title,
-    const GetResourceEntryCallback& callback) { return CancelCallback(); }
-
-CancelCallback DummyDriveService::MoveResource(
+CancelCallback DummyDriveService::UpdateResource(
     const std::string& resource_id,
     const std::string& parent_resource_id,
     const std::string& new_title,
     const base::Time& last_modified,
+    const base::Time& last_viewed_by_me,
     const google_apis::GetResourceEntryCallback& callback) {
   return CancelCallback();
 }
@@ -136,12 +136,6 @@ CancelCallback DummyDriveService::RenameResource(
     const std::string& resource_id,
     const std::string& new_title,
     const EntryActionCallback& callback) { return CancelCallback(); }
-
-CancelCallback DummyDriveService::TouchResource(
-    const std::string& resource_id,
-    const base::Time& modified_date,
-    const base::Time& last_viewed_by_me_date,
-    const GetResourceEntryCallback& callback) { return CancelCallback(); }
 
 CancelCallback DummyDriveService::AddResourceToDirectory(
     const std::string& parent_resource_id,

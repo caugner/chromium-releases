@@ -81,7 +81,9 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_Z, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     TOGGLE_SPOKEN_FEEDBACK },
   { true, ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN, SILENCE_SPOKEN_FEEDBACK},
-  { true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
+  { true, ui::VKEY_OEM_COMMA, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
+    SWITCH_TO_PREVIOUS_USER },
+  { true, ui::VKEY_OEM_PERIOD, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     SWITCH_TO_NEXT_USER },
 #endif  // defined(OS_CHROMEOS)
   { true, ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, OPEN_FEEDBACK_PAGE },
@@ -374,7 +376,6 @@ const AcceleratorAction kActionsAllowedInAppMode[] = {
   CYCLE_FORWARD_MRU,
   CYCLE_LINEAR,
   DISABLE_CAPS_LOCK,
-  EXIT,
   KEYBOARD_BRIGHTNESS_DOWN,
   KEYBOARD_BRIGHTNESS_UP,
   MAGNIFY_SCREEN_ZOOM_IN,  // Control+F7
@@ -412,5 +413,22 @@ const AcceleratorAction kActionsAllowedInAppMode[] = {
 
 const size_t kActionsAllowedInAppModeLength =
     arraysize(kActionsAllowedInAppMode);
+
+const AcceleratorAction kActionsNeedingWindow[] = {
+    ACCESSIBLE_FOCUS_NEXT,
+    ACCESSIBLE_FOCUS_PREVIOUS,
+    CYCLE_BACKWARD_MRU,
+    CYCLE_FORWARD_MRU,
+    CYCLE_LINEAR,
+    WINDOW_SNAP_LEFT,
+    WINDOW_SNAP_RIGHT,
+    WINDOW_MINIMIZE,
+    TOGGLE_FULLSCREEN,
+    TOGGLE_MAXIMIZED,
+    WINDOW_POSITION_CENTER,
+    ROTATE_WINDOW,
+};
+
+const size_t kActionsNeedingWindowLength = arraysize(kActionsNeedingWindow);
 
 }  // namespace ash

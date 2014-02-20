@@ -46,7 +46,7 @@ public:
 
   // WebDialogDelegate declarations.
   virtual ui::ModalType GetDialogModalType() const OVERRIDE;
-  virtual string16 GetDialogTitle() const OVERRIDE;
+  virtual base::string16 GetDialogTitle() const OVERRIDE;
   virtual GURL GetDialogContentURL() const OVERRIDE;
   virtual void GetWebUIMessageHandlers(
       std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE;
@@ -150,8 +150,8 @@ ui::ModalType WebDialogWindowDelegateBridge::GetDialogModalType() const {
   return ui::MODAL_TYPE_NONE;
 }
 
-string16 WebDialogWindowDelegateBridge::GetDialogTitle() const {
-  return delegate_ ? delegate_->GetDialogTitle() : string16();
+base::string16 WebDialogWindowDelegateBridge::GetDialogTitle() const {
+  return delegate_ ? delegate_->GetDialogTitle() : base::string16();
 }
 
 GURL WebDialogWindowDelegateBridge::GetDialogContentURL() const {

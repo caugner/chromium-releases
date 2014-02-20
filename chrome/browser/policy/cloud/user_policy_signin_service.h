@@ -33,8 +33,8 @@ class UserPolicySigninService : public UserPolicySigninServiceBase,
   UserPolicySigninService(
       Profile* profile,
       PrefService* local_state,
-      scoped_refptr<net::URLRequestContextGetter> request_context,
       DeviceManagementService* device_management_service,
+      scoped_refptr<net::URLRequestContextGetter> system_request_context,
       ProfileOAuth2TokenService* oauth2_token_service);
   virtual ~UserPolicySigninService();
 
@@ -43,9 +43,9 @@ class UserPolicySigninService : public UserPolicySigninServiceBase,
   // the user is not signed in yet (ProfileOAuth2TokenService does not have
   // any tokens yet to prevent services from using it until after we've fetched
   // policy).
-  void RegisterPolicyClient(const std::string& username,
-                            const std::string& oauth2_login_token,
-                            const PolicyRegistrationCallback& callback);
+  void RegisterForPolicy(const std::string& username,
+                         const std::string& oauth2_login_token,
+                         const PolicyRegistrationCallback& callback);
 
   // OAuth2TokenService::Observer implementation:
   virtual void OnRefreshTokenAvailable(const std::string& account_id) OVERRIDE;
@@ -59,6 +59,7 @@ class UserPolicySigninService : public UserPolicySigninServiceBase,
  protected:
   // UserPolicySigninServiceBase implementation:
   virtual void InitializeUserCloudPolicyManager(
+      const std::string& username,
       scoped_ptr<CloudPolicyClient> client) OVERRIDE;
 
   virtual void PrepareForUserCloudPolicyManagerShutdown() OVERRIDE;

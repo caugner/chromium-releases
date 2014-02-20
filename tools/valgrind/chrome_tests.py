@@ -119,8 +119,17 @@ class ChromeTests:
       # Valgrind runs tests slowly, so slow tests hurt more; show elapased time
       # so we can find the slowpokes.
       cmd.append("--gtest_print_time")
+      # Built-in test launcher for gtest-based executables runs tests using
+      # multiple process by default. Force the single-process mode back.
+      cmd.append("--single-process-tests")
     if self._options.gtest_repeat:
       cmd.append("--gtest_repeat=%s" % self._options.gtest_repeat)
+    if self._options.gtest_shuffle:
+      cmd.append("--gtest_shuffle")
+    if self._options.brave_new_test_launcher:
+      cmd.append("--brave-new-test-launcher")
+    if self._options.test_launcher_bot_mode:
+      cmd.append("--test-launcher-bot-mode")
     return cmd
 
   def Run(self):
@@ -280,6 +289,9 @@ class ChromeTests:
 
   def TestDevice(self):
     return self.SimpleTest("device", "device_unittests")
+
+  def TestEvents(self):
+    return self.SimpleTest("events", "events_unittests")
 
   def TestFFmpeg(self):
     return self.SimpleTest("chrome", "ffmpeg_unittests")
@@ -533,6 +545,7 @@ class ChromeTests:
     "courgette": TestCourgette,  "courgette_unittests": TestCourgette,
     "crypto": TestCrypto,        "crypto_unittests": TestCrypto,
     "device": TestDevice,        "device_unittests": TestDevice,
+    "events": TestEvents,        "events_unittests": TestEvents,
     "ffmpeg": TestFFmpeg,        "ffmpeg_unittests": TestFFmpeg,
     "ffmpeg_regression_tests": TestFFmpegRegressions,
     "gpu": TestGPU,              "gpu_unittests": TestGPU,
@@ -580,6 +593,8 @@ def _main():
   parser.add_option("--gtest_filter",
                     help="additional arguments to --gtest_filter")
   parser.add_option("--gtest_repeat", help="argument for --gtest_repeat")
+  parser.add_option("--gtest_shuffle", action="store_true", default=False,
+                    help="Randomize tests' orders on every iteration.")
   parser.add_option("-v", "--verbose", action="store_true", default=False,
                     help="verbose output - enable debug log messages")
   parser.add_option("--tool", dest="valgrind_tool", default="memcheck",
@@ -597,6 +612,10 @@ def _main():
   # TODO(thestig) Remove this if we can.
   parser.add_option("--gtest_color", dest="gtest_color", default="no",
                     help="dummy compatibility flag for sharding_supervisor.")
+  parser.add_option("--brave-new-test-launcher", action="store_true",
+                    help="run the tests with --brave-new-test-launcher")
+  parser.add_option("--test-launcher-bot-mode", action="store_true",
+                    help="run the tests with --test-launcher-bot-mode")
 
   options, args = parser.parse_args()
 

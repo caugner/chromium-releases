@@ -104,7 +104,7 @@ class RasterWorkerPoolTest : public testing::Test,
   void RunTest(bool use_map_image) {
     if (use_map_image) {
       raster_worker_pool_ = ImageRasterWorkerPool::Create(
-          resource_provider(), 1);
+          resource_provider(), 1, GL_TEXTURE_2D);
     } else {
       raster_worker_pool_ =
           PixelBufferRasterWorkerPool::Create(
@@ -159,7 +159,7 @@ class RasterWorkerPoolTest : public testing::Test,
     const gfx::Size size(1, 1);
 
     scoped_ptr<ScopedResource> resource(
-        ScopedResource::create(resource_provider()));
+        ScopedResource::Create(resource_provider()));
     resource->Allocate(size, ResourceProvider::TextureUsageAny, RGBA_8888);
     const Resource* const_resource = resource.get();
 

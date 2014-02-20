@@ -9,20 +9,23 @@
 #include "ash/caps_lock_delegate_stub.h"
 #include "ash/default_accessibility_delegate.h"
 #include "ash/host/root_window_host_factory.h"
-#include "ash/keyboard_controller_proxy_stub.h"
 #include "ash/media_delegate.h"
 #include "ash/new_window_delegate.h"
 #include "ash/session_state_delegate.h"
 #include "ash/shell.h"
+#include "ash/shell/keyboard_controller_proxy_stub.h"
 #include "ash/shell_window_ids.h"
-#include "ash/test/test_launcher_delegate.h"
 #include "ash/test/test_session_state_delegate.h"
+#include "ash/test/test_shelf_delegate.h"
 #include "ash/test/test_system_tray_delegate.h"
 #include "ash/test/test_user_wallpaper_delegate.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/logging.h"
 #include "content/public/test/test_browser_context.h"
+#include "ui/app_list/app_list_model.h"
+#include "ui/app_list/app_list_view_delegate.h"
+#include "ui/app_list/test/app_list_test_view_delegate.h"
 #include "ui/aura/window.h"
 
 namespace ash {
@@ -89,18 +92,17 @@ keyboard::KeyboardControllerProxy*
   return new KeyboardControllerProxyStub();
 }
 
-content::BrowserContext* TestShellDelegate::GetCurrentBrowserContext() {
-  current_browser_context_.reset(new content::TestBrowserContext());
-  return current_browser_context_.get();
+content::BrowserContext* TestShellDelegate::GetActiveBrowserContext() {
+  active_browser_context_.reset(new content::TestBrowserContext());
+  return active_browser_context_.get();
 }
 
 app_list::AppListViewDelegate* TestShellDelegate::CreateAppListViewDelegate() {
-  return NULL;
+  return new app_list::test::AppListTestViewDelegate;
 }
 
-LauncherDelegate* TestShellDelegate::CreateLauncherDelegate(
-    ash::LauncherModel* model) {
-  return new TestLauncherDelegate(model);
+ShelfDelegate* TestShellDelegate::CreateShelfDelegate(ShelfModel* model) {
+  return new TestShelfDelegate(model);
 }
 
 SystemTrayDelegate* TestShellDelegate::CreateSystemTrayDelegate() {
@@ -135,9 +137,6 @@ MediaDelegate* TestShellDelegate::CreateMediaDelegate() {
 
 aura::client::UserActionClient* TestShellDelegate::CreateUserActionClient() {
   return NULL;
-}
-
-void TestShellDelegate::RecordUserMetricsAction(UserMetricsAction action) {
 }
 
 ui::MenuModel* TestShellDelegate::CreateContextMenu(aura::Window* root) {

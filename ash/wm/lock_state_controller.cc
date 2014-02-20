@@ -9,6 +9,7 @@
 #include "ash/accessibility_delegate.h"
 #include "ash/ash_switches.h"
 #include "ash/cancel_mode.h"
+#include "ash/metrics/user_metrics_recorder.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
@@ -16,6 +17,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/timer/timer.h"
+#include "content/public/browser/user_metrics.h"
 #include "ui/aura/root_window.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
@@ -269,7 +271,6 @@ void LockStateController::RequestShutdown() {
   shutting_down_ = true;
 
   Shell* shell = ash::Shell::GetInstance();
-  shell->env_filter()->set_cursor_hidden_by_filter(false);
   shell->cursor_manager()->HideCursor();
 
   animator_->StartGlobalAnimation(
@@ -307,8 +308,8 @@ void LockStateController::OnAppTerminating() {
   if (!shutting_down_) {
     shutting_down_ = true;
     Shell* shell = ash::Shell::GetInstance();
-    shell->env_filter()->set_cursor_hidden_by_filter(false);
     shell->cursor_manager()->HideCursor();
+    shell->cursor_manager()->LockCursor();
     animator_->StartAnimation(
         internal::SessionStateAnimator::kAllContainersMask,
         internal::SessionStateAnimator::ANIMATION_HIDE_IMMEDIATELY,
@@ -364,14 +365,12 @@ void LockStateController::OnPreShutdownAnimationTimeout() {
   shutting_down_ = true;
 
   Shell* shell = ash::Shell::GetInstance();
-  shell->env_filter()->set_cursor_hidden_by_filter(false);
   shell->cursor_manager()->HideCursor();
 
   StartRealShutdownTimer(false);
 }
 
-void LockStateController::StartRealShutdownTimer(
-    bool with_animation_time) {
+void LockStateController::StartRealShutdownTimer(bool with_animation_time) {
   base::TimeDelta duration =
       base::TimeDelta::FromMilliseconds(kShutdownRequestDelayMs);
   if (with_animation_time) {
@@ -382,20 +381,15 @@ void LockStateController::StartRealShutdownTimer(
 #if defined(OS_CHROMEOS)
   const AccessibilityDelegate* const delegate =
       Shell::GetInstance()->accessibility_delegate();
-  if (delegate->IsSpokenFeedbackEnabled()) {
-    const base::TimeDelta shutdown_sound_duration = std::min(
-        SoundsManager::Get()->GetDuration(SoundsManager::SOUND_SHUTDOWN),
-        base::TimeDelta::FromMilliseconds(kMaxShutdownSoundDurationMs));
-    duration = std::max(duration, shutdown_sound_duration);
-    SoundsManager::Get()->Play(SoundsManager::SOUND_SHUTDOWN);
-  }
+  base::TimeDelta sound_duration = delegate->PlayShutdownSound();
+  sound_duration =
+      std::min(sound_duration,
+               base::TimeDelta::FromMilliseconds(kMaxShutdownSoundDurationMs));
+  duration = std::max(duration, sound_duration);
 #endif
 
   real_shutdown_timer_.Start(
-      FROM_HERE,
-      duration,
-      this,
-      &LockStateController::OnRealShutdownTimeout);
+      FROM_HERE, duration, this, &LockStateController::OnRealShutdownTimeout);
 }
 
 void LockStateController::OnRealShutdownTimeout() {
@@ -409,7 +403,7 @@ void LockStateController::OnRealShutdownTimeout() {
     }
   }
 #endif
-  Shell::GetInstance()->delegate()->RecordUserMetricsAction(
+  Shell::GetInstance()->metrics()->RecordUserMetricsAction(
       UMA_ACCEL_SHUT_DOWN_POWER_BUTTON);
   delegate_->RequestShutdown();
 }
@@ -417,7 +411,6 @@ void LockStateController::OnRealShutdownTimeout() {
 void LockStateController::StartCancellableShutdownAnimation() {
   Shell* shell = ash::Shell::GetInstance();
   // Hide cursor, but let it reappear if the mouse moves.
-  shell->env_filter()->set_cursor_hidden_by_filter(true);
   shell->cursor_manager()->HideCursor();
 
   animator_->StartGlobalAnimation(
@@ -590,7 +583,7 @@ void LockStateController::PreLockAnimationFinished(bool request_lock) {
   can_cancel_lock_animation_ = false;
 
   if (request_lock) {
-    Shell::GetInstance()->delegate()->RecordUserMetricsAction(
+    Shell::GetInstance()->metrics()->RecordUserMetricsAction(
         shutdown_after_lock_ ?
         UMA_ACCEL_LOCK_SCREEN_POWER_BUTTON :
         UMA_ACCEL_LOCK_SCREEN_LOCK_BUTTON);

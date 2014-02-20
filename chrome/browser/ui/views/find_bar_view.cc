@@ -99,7 +99,7 @@ FindBarView::FindBarView(FindBarHost* host)
 
   find_previous_button_ = new views::ImageButton(this);
   find_previous_button_->set_tag(FIND_PREVIOUS_TAG);
-  find_previous_button_->set_focusable(true);
+  find_previous_button_->SetFocusable(true);
   find_previous_button_->SetImage(views::CustomButton::STATE_NORMAL,
       rb.GetImageSkiaNamed(IDR_FINDINPAGE_PREV));
   find_previous_button_->SetImage(views::CustomButton::STATE_HOVERED,
@@ -116,7 +116,7 @@ FindBarView::FindBarView(FindBarHost* host)
 
   find_next_button_ = new views::ImageButton(this);
   find_next_button_->set_tag(FIND_NEXT_TAG);
-  find_next_button_->set_focusable(true);
+  find_next_button_->SetFocusable(true);
   find_next_button_->SetImage(views::CustomButton::STATE_NORMAL,
       rb.GetImageSkiaNamed(IDR_FINDINPAGE_NEXT));
   find_next_button_->SetImage(views::CustomButton::STATE_HOVERED,
@@ -133,7 +133,7 @@ FindBarView::FindBarView(FindBarHost* host)
 
   close_button_ = new views::ImageButton(this);
   close_button_->set_tag(CLOSE_TAG);
-  close_button_->set_focusable(true);
+  close_button_->SetFocusable(true);
   close_button_->SetImage(views::CustomButton::STATE_NORMAL,
                           rb.GetImageSkiaNamed(IDR_CLOSE_1));
   close_button_->SetImage(views::CustomButton::STATE_HOVERED,
@@ -167,13 +167,13 @@ FindBarView::~FindBarView() {
 }
 
 void FindBarView::SetFindTextAndSelectedRange(
-    const string16& find_text,
+    const base::string16& find_text,
     const gfx::Range& selected_range) {
   find_text_->SetText(find_text);
   find_text_->SelectRange(selected_range);
 }
 
-string16 FindBarView::GetFindText() const {
+base::string16 FindBarView::GetFindText() const {
   return find_text_->text();
 }
 
@@ -181,16 +181,16 @@ gfx::Range FindBarView::GetSelectedRange() const {
   return find_text_->GetSelectedRange();
 }
 
-string16 FindBarView::GetFindSelectedText() const {
+base::string16 FindBarView::GetFindSelectedText() const {
   return find_text_->GetSelectedText();
 }
 
-string16 FindBarView::GetMatchCountText() const {
+base::string16 FindBarView::GetMatchCountText() const {
   return match_count_text_->text();
 }
 
 void FindBarView::UpdateForResult(const FindNotificationDetails& result,
-                                  const string16& find_text) {
+                                  const base::string16& find_text) {
   bool have_valid_range =
       result.number_of_matches() != -1 && result.active_match_ordinal() != -1;
 
@@ -224,7 +224,7 @@ void FindBarView::UpdateForResult(const FindNotificationDetails& result,
 }
 
 void FindBarView::ClearMatchCount() {
-  match_count_text_->SetText(string16());
+  match_count_text_->SetText(base::string16());
   UpdateMatchCountAppearance(false);
   Layout();
   SchedulePaint();
@@ -401,16 +401,6 @@ void FindBarView::ButtonPressed(
 ////////////////////////////////////////////////////////////////////////////////
 // FindBarView, views::TextfieldController implementation:
 
-void FindBarView::ContentsChanged(views::Textfield* sender,
-                                  const string16& new_contents) {
-  // TextfieldController::OnAfterUserAction() is supported only by Views
-  // implementation, and NativeTextfieldWin doesn't call OnAfterUserAction().
-  // Call Find() here.
-  // TODO(yukishiino): Remove this code after the migration to Views.
-  if (!views::Textfield::IsViewsTextfieldEnabled())
-    Find(new_contents);
-}
-
 bool FindBarView::HandleKeyEvent(views::Textfield* sender,
                                  const ui::KeyEvent& key_event) {
   // If the dialog is not visible, there is no reason to process keyboard input.
@@ -422,7 +412,7 @@ bool FindBarView::HandleKeyEvent(views::Textfield* sender,
 
   if (key_event.key_code() == ui::VKEY_RETURN) {
     // Pressing Return/Enter starts the search (unless text box is empty).
-    string16 find_string = find_text_->text();
+    base::string16 find_string = find_text_->text();
     if (!find_string.empty()) {
       FindBarController* controller = find_bar_host()->GetFindBarController();
       FindTabHelper* find_tab_helper =
@@ -441,11 +431,7 @@ bool FindBarView::HandleKeyEvent(views::Textfield* sender,
 void FindBarView::OnAfterUserAction(views::Textfield* sender) {
   // The composition text wouldn't be what the user is really looking for.
   // We delay the search until the user commits the composition text.
-  if (sender->IsIMEComposing() || sender->text() == last_searched_text_)
-    return;
-
-  // TODO(yukishiino): Remove this condition check after the migration to Views.
-  if (views::Textfield::IsViewsTextfieldEnabled())
+  if (!sender->IsIMEComposing() && sender->text() != last_searched_text_)
     Find(sender->text());
 }
 
@@ -456,7 +442,7 @@ void FindBarView::OnAfterPaste() {
   last_searched_text_.clear();
 }
 
-void FindBarView::Find(const string16& search_text) {
+void FindBarView::Find(const base::string16& search_text) {
   FindBarController* controller = find_bar_host()->GetFindBarController();
   DCHECK(controller);
   content::WebContents* web_contents = controller->web_contents();
@@ -477,7 +463,7 @@ void FindBarView::Find(const string16& search_text) {
     find_tab_helper->StartFinding(search_text, true, false);
   } else {
     find_tab_helper->StopFinding(FindBarController::kClearSelectionOnPage);
-    UpdateForResult(find_tab_helper->find_result(), string16());
+    UpdateForResult(find_tab_helper->find_result(), base::string16());
     find_bar_host()->MoveWindowIfNecessary(gfx::Rect(), false);
 
     // Clearing the text box should clear the prepopulate state so that when
@@ -488,7 +474,7 @@ void FindBarView::Find(const string16& search_text) {
     Profile* profile =
         Profile::FromBrowserContext(web_contents->GetBrowserContext());
     FindBarState* find_bar_state = FindBarStateFactory::GetForProfile(profile);
-    find_bar_state->set_last_prepopulate_text(string16());
+    find_bar_state->set_last_prepopulate_text(base::string16());
   }
 }
 

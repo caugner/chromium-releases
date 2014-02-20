@@ -21,6 +21,10 @@ class URLRequestContextGetter;
 class URLRequest;
 }
 
+namespace component_updater {
+class OnDemandTester;
+}
+
 namespace content {
 class ResourceThrottle;
 }
@@ -92,6 +96,10 @@ class ComponentObserver {
 // |pk_hash| is the SHA256 hash of the component's public key. If the component
 // is to be installed then version should be "0" or "0.0", else it should be
 // the current version. |observer|, |fingerprint|, and |name| are optional.
+// |allow_background_download| specifies that the component can be background
+// downloaded in some cases. The default for this value is |true| and the value
+// can be overriden at the registration time. This is a temporary change until
+// the issue 340448 is resolved.
 struct CrxComponent {
   std::vector<uint8> pk_hash;
   ComponentInstaller* installer;
@@ -99,6 +107,7 @@ struct CrxComponent {
   Version version;
   std::string fingerprint;
   std::string name;
+  bool allow_background_download;
   CrxComponent();
   ~CrxComponent();
 };
@@ -164,7 +173,7 @@ class ComponentUpdateService {
     // pings are disabled.
     virtual GURL PingUrl() = 0;
     // Parameters added to each url request. It can be null if none are needed.
-    virtual const char* ExtraRequestParams() = 0;
+    virtual std::string ExtraRequestParams() = 0;
     // How big each update request can be. Don't go above 2000.
     virtual size_t UrlSizeLimit() = 0;
     // The source of contexts for all the url requests.
@@ -176,6 +185,9 @@ class ComponentUpdateService {
     virtual ComponentPatcher* CreateComponentPatcher() = 0;
     // True means that this client can handle delta updates.
     virtual bool DeltasEnabled() const = 0;
+    // True means that the background downloader can be used for downloading
+    // non on-demand components.
+    virtual bool UseBackgroundDownloader() const = 0;
   };
 
   // Start doing update checks and installing new versions of registered
@@ -202,7 +214,7 @@ class ComponentUpdateService {
   virtual ~ComponentUpdateService() {}
 
   friend class ComponentsUI;
-  friend class OnDemandTester;
+  friend class component_updater::OnDemandTester;
 
  private:
   // Ask the component updater to do an update check for a previously

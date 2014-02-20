@@ -13,8 +13,8 @@
 #include "base/values.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/context_menu_params.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
-#include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
@@ -25,30 +25,31 @@
 #include "third_party/re2/re2/re2.h"
 
 using content::RenderThread;
-using WebKit::WebElement;
-using WebKit::WebFrame;
-using WebKit::WebMouseEvent;
-using WebKit::WebNode;
-using WebKit::WebPlugin;
-using WebKit::WebPluginContainer;
-using WebKit::WebPluginParams;
-using WebKit::WebScriptSource;
-using WebKit::WebURLRequest;
+using content::UserMetricsAction;
+using blink::WebElement;
+using blink::WebFrame;
+using blink::WebMouseEvent;
+using blink::WebNode;
+using blink::WebPlugin;
+using blink::WebPluginContainer;
+using blink::WebPluginParams;
+using blink::WebScriptSource;
+using blink::WebURLRequest;
 using webkit_glue::CppArgumentList;
 using webkit_glue::CppVariant;
 
 namespace plugins {
 
-PluginPlaceholder::PluginPlaceholder(content::RenderView* render_view,
+PluginPlaceholder::PluginPlaceholder(content::RenderFrame* render_frame,
                                      WebFrame* frame,
                                      const WebPluginParams& params,
                                      const std::string& html_data,
                                      GURL placeholderDataUrl)
-    : content::RenderViewObserver(render_view),
+    : content::RenderFrameObserver(render_frame),
       frame_(frame),
       plugin_params_(params),
       plugin_(WebViewPlugin::Create(this,
-                                    render_view->GetWebkitPreferences(),
+                                    render_frame->GetWebkitPreferences(),
                                     html_data,
                                     placeholderDataUrl)),
       is_blocked_for_prerendering_(false),
@@ -153,7 +154,7 @@ void PluginPlaceholder::HidePlugin() {
 
 void PluginPlaceholder::WillDestroyPlugin() { delete this; }
 
-void PluginPlaceholder::SetMessage(const string16& message) {
+void PluginPlaceholder::SetMessage(const base::string16& message) {
   message_ = message;
   if (finished_loading_)
     UpdateMessage();
@@ -161,7 +162,7 @@ void PluginPlaceholder::SetMessage(const string16& message) {
 
 void PluginPlaceholder::UpdateMessage() {
   std::string script =
-      "window.setMessage(" + base::GetDoubleQuotedJson(message_) + ")";
+      "window.setMessage(" + base::GetQuotedJSONString(message_) + ")";
   plugin_->web_view()->mainFrame()->executeScript(
       WebScriptSource(ASCIIToUTF16(script)));
 }
@@ -176,7 +177,7 @@ void PluginPlaceholder::OnLoadBlockedPlugins(const std::string& identifier) {
   if (!identifier.empty() && identifier != identifier_)
     return;
 
-  RenderThread::Get()->RecordUserMetrics("Plugin_Load_UI");
+  RenderThread::Get()->RecordAction(UserMetricsAction("Plugin_Load_UI"));
   LoadPlugin();
 }
 
@@ -202,19 +203,19 @@ void PluginPlaceholder::LoadPlugin() {
   //                ChromeContentRendererClient::CreatePlugin instead, to
   //                reduce the chance of future regressions.
   WebPlugin* plugin =
-      render_view()->CreatePlugin(frame_, plugin_info_, plugin_params_);
+      render_frame()->CreatePlugin(frame_, plugin_info_, plugin_params_);
   ReplacePlugin(plugin);
 }
 
 void PluginPlaceholder::LoadCallback(const CppArgumentList& args,
                                      CppVariant* result) {
-  RenderThread::Get()->RecordUserMetrics("Plugin_Load_Click");
+  RenderThread::Get()->RecordAction(UserMetricsAction("Plugin_Load_Click"));
   LoadPlugin();
 }
 
 void PluginPlaceholder::HideCallback(const CppArgumentList& args,
                                      CppVariant* result) {
-  RenderThread::Get()->RecordUserMetrics("Plugin_Hide_Click");
+  RenderThread::Get()->RecordAction(UserMetricsAction("Plugin_Hide_Click"));
   HidePlugin();
 }
 
@@ -238,9 +239,9 @@ void PluginPlaceholder::SetIdentifier(const std::string& identifier) {
   identifier_ = identifier;
 }
 
-WebKit::WebFrame* PluginPlaceholder::GetFrame() { return frame_; }
+blink::WebFrame* PluginPlaceholder::GetFrame() { return frame_; }
 
-const WebKit::WebPluginParams& PluginPlaceholder::GetPluginParams() const {
+const blink::WebPluginParams& PluginPlaceholder::GetPluginParams() const {
   return plugin_params_;
 }
 

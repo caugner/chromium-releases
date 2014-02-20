@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "chrome/browser/chromeos/base/locale_util.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
 
@@ -53,6 +54,25 @@ class UserManager {
 
    protected:
     virtual ~UserSessionStateObserver();
+  };
+
+  // Data retrieved from user account.
+  class UserAccountData {
+   public:
+    UserAccountData(const base::string16& display_name,
+                    const base::string16& given_name,
+                    const std::string& locale);
+    ~UserAccountData();
+    const base::string16& display_name() const { return display_name_; }
+    const base::string16& given_name() const { return given_name_; }
+    const std::string& locale() const { return locale_; }
+
+   private:
+    const base::string16 display_name_;
+    const base::string16 given_name_;
+    const std::string locale_;
+
+    DISALLOW_COPY_AND_ASSIGN(UserAccountData);
   };
 
   // Username for stub login when not running on ChromeOS.
@@ -173,6 +193,11 @@ class UserManager {
   // list or currently logged in as ephemeral. Returns |NULL| otherwise.
   virtual const User* FindUser(const std::string& user_id) const = 0;
 
+  // Returns the user with the given user id if found in the persistent
+  // list or currently logged in as ephemeral. Returns |NULL| otherwise.
+  // Same as FindUser but returns non-const pointer to User object.
+  virtual User* FindUserAndModify(const std::string& user_id) = 0;
+
   // Returns the logged-in user.
   // TODO(nkostylev): Deprecate this call, move clients to GetActiveUser().
   // http://crbug.com/230852
@@ -192,7 +217,7 @@ class UserManager {
   // Returns NULL if User is not created.
   virtual User* GetUserByProfile(Profile* profile) const = 0;
 
-  /// Returns NULL if profile for user was not found.
+  /// Returns NULL if profile for user is not found or is not fully loaded.
   virtual Profile* GetProfileByUser(const User* user) const = 0;
 
   // Saves user's oauth token status in local state preferences.
@@ -203,17 +228,16 @@ class UserManager {
   // Saves user's displayed name in local state preferences.
   // Ignored If there is no such user.
   virtual void SaveUserDisplayName(const std::string& user_id,
-                                   const string16& display_name) = 0;
+                                   const base::string16& display_name) = 0;
 
   // Updates data upon User Account download.
   virtual void UpdateUserAccountData(const std::string& user_id,
-                                     const string16& display_name,
-                                     const std::string& locale) = 0;
+                                     const UserAccountData& account_data) = 0;
 
   // Returns the display name for user |user_id| if it is known (was
   // previously set by a |SaveUserDisplayName| call).
   // Otherwise, returns an empty string.
-  virtual string16 GetUserDisplayName(
+  virtual base::string16 GetUserDisplayName(
       const std::string& user_id) const = 0;
 
   // Saves user's displayed (non-canonical) email in local state preferences.
@@ -329,9 +353,11 @@ class UserManager {
       const = 0;
 
   // Changes browser locale (selects best suitable locale from different
-  // user settings).
-  virtual void RespectLocalePreference(Profile* profile,
-                                       const User* user) const = 0;
+  // user settings). Returns true if callback will be called.
+  virtual bool RespectLocalePreference(
+      Profile* profile,
+      const User* user,
+      scoped_ptr<locale_util::SwitchLanguageCallback> callback) const = 0;
 
  private:
   friend class ScopedUserManagerEnabler;

@@ -16,8 +16,8 @@
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
 #include "chrome/browser/chromeos/drive/test_util.h"
 #include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/google_apis/test_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "google_apis/drive/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace drive {
@@ -140,6 +140,8 @@ TEST_F(ChangeListLoaderTest, LoadIfNeeded) {
   // Start initial load.
   TestChangeListLoaderObserver observer(change_list_loader_.get());
 
+  EXPECT_EQ(0, drive_service_->about_resource_load_count());
+
   FileError error = FILE_ERROR_FAILED;
   change_list_loader_->LoadIfNeeded(
       DirectoryFetchInfo(),
@@ -151,6 +153,7 @@ TEST_F(ChangeListLoaderTest, LoadIfNeeded) {
   EXPECT_FALSE(change_list_loader_->IsRefreshing());
   EXPECT_LT(0, metadata_->GetLargestChangestamp());
   EXPECT_EQ(1, drive_service_->resource_list_load_count());
+  EXPECT_EQ(1, drive_service_->about_resource_load_count());
   EXPECT_EQ(1, observer.initial_load_complete_count());
   EXPECT_EQ(1, observer.load_from_server_complete_count());
   EXPECT_TRUE(observer.changed_directories().empty());
@@ -173,6 +176,8 @@ TEST_F(ChangeListLoaderTest, LoadIfNeeded) {
   EXPECT_EQ(FILE_ERROR_OK, error);
 
   EXPECT_FALSE(change_list_loader_->IsRefreshing());
+  // Cached value is used.
+  EXPECT_EQ(1, drive_service_->about_resource_load_count());
   EXPECT_EQ(previous_changestamp, metadata_->GetLargestChangestamp());
   EXPECT_EQ(previous_resource_list_load_count,
             drive_service_->resource_list_load_count());
@@ -238,7 +243,7 @@ TEST_F(ChangeListLoaderTest, LoadIfNeeded_MyDrive) {
   // Load grand root.
   FileError error = FILE_ERROR_FAILED;
   change_list_loader_->LoadIfNeeded(
-      DirectoryFetchInfo(util::kDriveGrandRootSpecialResourceId, 0),
+      DirectoryFetchInfo(util::kDriveGrandRootLocalId, 0),
       google_apis::test_util::CreateCopyResultCallback(&error));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -325,13 +330,13 @@ TEST_F(ChangeListLoaderTest, LoadIfNeeded_MultipleCalls) {
   // Load grand root.
   FileError error = FILE_ERROR_FAILED;
   change_list_loader_->LoadIfNeeded(
-      DirectoryFetchInfo(util::kDriveGrandRootSpecialResourceId, 0),
+      DirectoryFetchInfo(util::kDriveGrandRootLocalId, 0),
       google_apis::test_util::CreateCopyResultCallback(&error));
 
   // Load grand root again without waiting for the result.
   FileError error2 = FILE_ERROR_FAILED;
   change_list_loader_->LoadIfNeeded(
-      DirectoryFetchInfo(util::kDriveGrandRootSpecialResourceId, 0),
+      DirectoryFetchInfo(util::kDriveGrandRootLocalId, 0),
       google_apis::test_util::CreateCopyResultCallback(&error2));
   base::RunLoop().RunUntilIdle();
 
@@ -357,6 +362,7 @@ TEST_F(ChangeListLoaderTest, CheckForUpdates) {
             check_for_updates_error);  // Callback was not run.
   EXPECT_EQ(0, metadata_->GetLargestChangestamp());
   EXPECT_EQ(0, drive_service_->resource_list_load_count());
+  EXPECT_EQ(0, drive_service_->about_resource_load_count());
 
   // Start initial load.
   FileError load_error = FILE_ERROR_FAILED;

@@ -25,7 +25,6 @@
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ime/win/tsf_bridge.h"
-#include "ui/base/win/extra_sdk_defines.h"
 #include "ui/events/gestures/gesture_recognizer.h"
 #include "ui/events/gestures/gesture_types.h"
 #include "ui/gfx/native_widget_types.h"
@@ -49,7 +48,7 @@ class IMM32Manager;
 class ViewProp;
 }
 
-namespace WebKit {
+namespace blink {
 struct WebScreenInfo;
 }
 
@@ -203,7 +202,7 @@ class RenderWidgetHostViewWin
   // called by WebContentsImpl before DestroyWindow
   virtual void WillWmDestroy() OVERRIDE;
   virtual void Destroy() OVERRIDE;
-  virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
+  virtual void SetTooltipText(const base::string16& tooltip_text) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
@@ -215,13 +214,15 @@ class RenderWidgetHostViewWin
       const base::Callback<void(bool)>& callback) OVERRIDE;
   virtual bool CanCopyToVideoFrame() const OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
+  virtual void AcceleratedSurfaceInitialized(int host_id,
+                                             int route_id) OVERRIDE;
   virtual void ProcessAckedTouchEvent(const TouchEventWithLatencyInfo& touch,
                                       InputEventAckState ack_result) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE;
-  virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
+  virtual void GetScreenInfo(blink::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
   virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
   virtual void ResizeCompositingSurface(const gfx::Size&) OVERRIDE;
@@ -269,7 +270,7 @@ class RenderWidgetHostViewWin
       const ui::CompositionText& composition) OVERRIDE;
   virtual void ConfirmCompositionText() OVERRIDE;
   virtual void ClearCompositionText() OVERRIDE;
-  virtual void InsertText(const string16& text) OVERRIDE;
+  virtual void InsertText(const base::string16& text) OVERRIDE;
   virtual void InsertChar(char16 ch, int flags) OVERRIDE;
   virtual gfx::NativeWindow GetAttachedWindow() const OVERRIDE;
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
@@ -285,12 +286,15 @@ class RenderWidgetHostViewWin
   virtual bool SetSelectionRange(const gfx::Range& range) OVERRIDE;
   virtual bool DeleteRange(const gfx::Range& range) OVERRIDE;
   virtual bool GetTextFromRange(const gfx::Range& range,
-                                string16* text) const OVERRIDE;
+                                base::string16* text) const OVERRIDE;
   virtual void OnInputMethodChanged() OVERRIDE;
   virtual bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) OVERRIDE;
   virtual void ExtendSelectionAndDelete(size_t before, size_t after) OVERRIDE;
   virtual void EnsureCaretInRect(const gfx::Rect& rect) OVERRIDE;
+  virtual void OnCandidateWindowShown() OVERRIDE;
+  virtual void OnCandidateWindowUpdated() OVERRIDE;
+  virtual void OnCandidateWindowHidden() OVERRIDE;
 
  protected:
   friend class RenderWidgetHostView;
@@ -512,7 +516,7 @@ class RenderWidgetHostViewWin
 
   // Tooltips
   // The text to be shown in the tooltip, supplied by the renderer.
-  string16 tooltip_text_;
+  base::string16 tooltip_text_;
   // The tooltip control hwnd
   HWND tooltip_hwnd_;
   // Whether or not a tooltip is currently visible. We use this to track
@@ -579,12 +583,11 @@ class RenderWidgetHostViewWin
   // A cached latest caret rectangle sent from renderer.
   gfx::Rect caret_rect_;
 
-  // TODO(ananta)
-  // The WM_POINTERDOWN and touch related members should be moved to an
+  // TODO(ananta): The pointer and touch related members should be moved to an
   // independent class to reduce the clutter. This includes members
-  // pointer_down_context_ and last_touch_location_;
+  // pointer_down_context_ and last_touch_location_.
 
-  // Set to true if we are in the context of a WM_POINTERDOWN message
+  // Set to true if we are in the context of a pointer down message.
   bool pointer_down_context_;
 
   // The global x, y coordinates of the last point a touch event was

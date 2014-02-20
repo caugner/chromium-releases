@@ -11,12 +11,12 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
-#include "chrome/browser/policy/external_data_fetcher.h"
-#include "chrome/browser/policy/policy_map.h"
-#include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
+#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/update_engine_client.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/policy/core/common/external_data_fetcher.h"
+#include "components/policy/core/common/policy_map.h"
 #include "policy/policy_constants.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -180,6 +180,14 @@ void DecodeLoginPolicies(const em::ChromeDeviceSettingsProto& policy,
                     POLICY_SCOPE_MACHINE,
                     Value::CreateBooleanValue(
                         container.enable_auto_login_bailout()),
+                    NULL);
+    }
+    if (container.has_prompt_for_network_when_offline()) {
+      policies->Set(key::kDeviceLocalAccountPromptForNetworkWhenOffline,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    Value::CreateBooleanValue(
+                        container.prompt_for_network_when_offline()),
                     NULL);
     }
   }
@@ -701,6 +709,9 @@ void DecodeGenericPolicies(const em::ChromeDeviceSettingsProto& policy,
 void DecodeDevicePolicy(const em::ChromeDeviceSettingsProto& policy,
                         PolicyMap* policies,
                         EnterpriseInstallAttributes* install_attributes) {
+  // TODO(achuith): Remove this once crbug.com/263527 is resolved.
+  VLOG(2) << "DecodeDevicePolicy " << policy.SerializeAsString();
+
   // Decode the various groups of policies.
   DecodeLoginPolicies(policy, policies);
   DecodeKioskPolicies(policy, policies, install_attributes);

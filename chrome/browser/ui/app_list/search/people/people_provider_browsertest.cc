@@ -165,10 +165,6 @@ class PeopleProviderTest : public InProcessBrowserTest {
   virtual ~PeopleProviderTest() {}
 
   // InProcessBrowserTest overrides:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    command_line->AppendSwitch(switches::kEnablePeopleSearch);
-  }
-
   virtual void SetUpOnMainThread() OVERRIDE {
     test_server_.reset(new EmbeddedTestServer);
 
@@ -178,7 +174,7 @@ class PeopleProviderTest : public InProcessBrowserTest {
                    base::Unretained(this)));
 
     people_provider_.reset(new PeopleProvider(
-        ProfileManager::GetDefaultProfile()));
+        ProfileManager::GetActiveUserProfileOrOffTheRecord()));
 
     people_provider_->SetupForTest(
         base::Bind(&PeopleProviderTest::OnSearchResultsFetched,

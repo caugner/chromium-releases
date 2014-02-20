@@ -19,6 +19,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
+#include "ui/views/background.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/label_button.h"
@@ -283,7 +284,7 @@ TryChromeDialogView::Result TryChromeDialogView::ShowModal(
   HWND toast_window;
 #if defined(USE_AURA)
   toast_window =
-      popup_->GetNativeView()->GetDispatcher()->GetAcceleratedWidget();
+      popup_->GetNativeView()->GetDispatcher()->host()->GetAcceleratedWidget();
 #else
   toast_window = popup_->GetNativeView();
 #endif

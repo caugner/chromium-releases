@@ -170,10 +170,9 @@ void WebKitTestResultPrinter::PrintEncodedBinaryData(
   *output_ << "Content-Transfer-Encoding: base64\n";
 
   std::string data_base64;
-  const bool success = base::Base64Encode(
+  base::Base64Encode(
       base::StringPiece(reinterpret_cast<const char*>(&data[0]), data.size()),
       &data_base64);
-  DCHECK(success);
 
   *output_ << "Content-Length: " << data_base64.length() << "\n";
   output_->write(data_base64.c_str(), data_base64.length());
@@ -259,7 +258,7 @@ bool WebKitTestController::PrepareForLayoutTest(
 #if (defined(OS_WIN) && !defined(USE_AURA)) || \
     defined(TOOLKIT_GTK) || defined(OS_MACOSX)
     // Shell::SizeTo is not implemented on all platforms.
-    main_window_->SizeTo(initial_size_.width(), initial_size_.height());
+    main_window_->SizeTo(initial_size_);
 #endif
     main_window_->web_contents()->GetRenderViewHost()->GetView()
         ->SetSize(initial_size_);

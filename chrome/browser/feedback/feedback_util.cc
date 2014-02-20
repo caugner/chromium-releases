@@ -92,6 +92,7 @@ const int64 kRetryDelayIncreaseFactor = 2;
 const int64 kRetryDelayLimit = 14400000;  // 4 hours
 
 const char kArbitraryMimeType[] = "application/octet-stream";
+const char kHistogramsAttachmentName[] = "histograms.zip";
 const char kLogsAttachmentName[] = "system_logs.zip";
 
 #if defined(OS_CHROMEOS)
@@ -217,6 +218,20 @@ void AddFeedbackData(userfeedback::ExtensionSubmit* feedback_data,
   *(web_data->add_product_specific_data()) = log_value;
 }
 
+// Adds data as an attachment to feedback_data if the data is non-empty.
+void AddAttachment(userfeedback::ExtensionSubmit* feedback_data,
+                   const char* name,
+                   std::string* data) {
+  if (data == NULL || data->empty())
+    return;
+
+  userfeedback::ProductSpecificBinaryData* attachment =
+      feedback_data->add_product_specific_binary_data();
+  attachment->set_mime_type(kArbitraryMimeType);
+  attachment->set_name(name);
+  attachment->set_data(*data);
+}
+
 }  // namespace
 
 namespace chrome {
@@ -288,27 +303,21 @@ void SendReport(scoped_refptr<FeedbackData> data) {
         AddFeedbackData(&feedback_data, i->first, i->second);
     }
 
-    if (data->compressed_logs() && data->compressed_logs()->size()) {
-      userfeedback::ProductSpecificBinaryData attachment;
-      attachment.set_mime_type(kArbitraryMimeType);
-      attachment.set_name(kLogsAttachmentName);
-      attachment.set_data(*(data->compressed_logs()));
-      *(feedback_data.add_product_specific_binary_data()) = attachment;
-    }
+    AddAttachment(&feedback_data, kLogsAttachmentName, data->compressed_logs());
   }
 
-  if (!data->attached_filename().empty() &&
-      data->attached_filedata() &&
-      !data->attached_filedata()->empty()) {
-    userfeedback::ProductSpecificBinaryData attached_file;
-    attached_file.set_mime_type(kArbitraryMimeType);
+  if (data->histograms()) {
+    AddAttachment(&feedback_data,
+                  kHistogramsAttachmentName,
+                  data->compressed_histograms());
+  }
+
+  if (!data->attached_filename().empty()) {
     // We need to use the UTF8Unsafe methods here to accomodate Windows, which
     // uses wide strings to store filepaths.
     std::string name = base::FilePath::FromUTF8Unsafe(
         data->attached_filename()).BaseName().AsUTF8Unsafe();
-    attached_file.set_name(name);
-    attached_file.set_data(*data->attached_filedata());
-    *(feedback_data.add_product_specific_binary_data()) = attached_file;
+    AddAttachment(&feedback_data, name.c_str(), data->attached_filedata());
   }
 
   // NOTE: Screenshot needs to be processed after system info since we'll get
@@ -369,21 +378,20 @@ bool ZipString(const base::FilePath& filename,
 
   // Create a temporary directory, put the logs into a file in it. Create
   // another temporary file to receive the zip file in.
-  if (!file_util::CreateNewTempDirectory(FILE_PATH_LITERAL(""), &temp_path))
+  if (!base::CreateNewTempDirectory(base::FilePath::StringType(), &temp_path))
     return false;
   if (file_util::WriteFile(temp_path.Append(filename),
                            data.c_str(), data.size()) == -1)
     return false;
-  if (!file_util::CreateTemporaryFile(&zip_file))
-    return false;
 
-  if (!zip::Zip(temp_path, zip_file, false))
-    return false;
+  bool succeed = base::CreateTemporaryFile(&zip_file) &&
+      zip::Zip(temp_path, zip_file, false) &&
+      base::ReadFileToString(zip_file, compressed_logs);
 
-  if (!base::ReadFileToString(zip_file, compressed_logs))
-    return false;
+  base::DeleteFile(temp_path, true);
+  base::DeleteFile(zip_file, false);
 
-  return true;
+  return succeed;
 }
 
 }  // namespace feedback_util

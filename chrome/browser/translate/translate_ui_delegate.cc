@@ -28,6 +28,8 @@ const char kNeverTranslateSite[] = "Translate.NeverTranslateSite";
 const char kAlwaysTranslateLang[] = "Translate.AlwaysTranslateLang";
 const char kModifyOriginalLang[] = "Translate.ModifyOriginalLang";
 const char kModifyTargetLang[] = "Translate.ModifyTargetLang";
+const char kDeclineTranslateDismissUI[] = "Translate.DeclineTranslateDismissUI";
+const char kShowErrorUI[] = "Translate.ShowErrorUI";
 
 }  // namespace
 
@@ -38,6 +40,8 @@ TranslateUIDelegate::TranslateUIDelegate(content::WebContents* web_contents,
       original_language_index_(NO_INDEX),
       initial_original_language_index_(NO_INDEX),
       target_language_index_(NO_INDEX) {
+  DCHECK(web_contents_);
+
   std::vector<std::string> language_codes;
   TranslateManager::GetSupportedLanguages(&language_codes);
 
@@ -53,7 +57,7 @@ TranslateUIDelegate::TranslateUIDelegate(content::WebContents* web_contents,
        iter != language_codes.end(); ++iter) {
     std::string language_code = *iter;
 
-    string16 language_name = l10n_util::GetDisplayNameForLocale(
+    base::string16 language_name = l10n_util::GetDisplayNameForLocale(
         language_code, g_browser_process->GetApplicationLocale(), true);
     // Insert the language in languages_ in alphabetical order.
     std::vector<LanguageNamePair>::iterator iter2;
@@ -77,11 +81,22 @@ TranslateUIDelegate::TranslateUIDelegate(content::WebContents* web_contents,
   }
 
   Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
   prefs_.reset(new TranslatePrefs(profile->GetPrefs()));
 }
 
 TranslateUIDelegate::~TranslateUIDelegate() {
+}
+
+void TranslateUIDelegate::OnErrorShown(TranslateErrors::Type error_type) {
+  DCHECK_LE(TranslateErrors::NONE, error_type);
+  DCHECK_LT(error_type, TranslateErrors::TRANSLATE_ERROR_MAX);
+
+  if (error_type == TranslateErrors::NONE)
+    return;
+
+  UMA_HISTOGRAM_ENUMERATION(kShowErrorUI, error_type,
+                            TranslateErrors::TRANSLATE_ERROR_MAX);
 }
 
 size_t TranslateUIDelegate::GetNumberOfLanguages() const {
@@ -119,9 +134,9 @@ std::string TranslateUIDelegate::GetLanguageCodeAt(size_t index) const {
   return languages_[index].first;
 }
 
-string16 TranslateUIDelegate::GetLanguageNameAt(size_t index) const {
+base::string16 TranslateUIDelegate::GetLanguageNameAt(size_t index) const {
   if (index == static_cast<size_t>(NO_INDEX))
-    return string16();
+    return base::string16();
   DCHECK_LT(index, GetNumberOfLanguages());
   return languages_[index].second;
 }
@@ -154,7 +169,7 @@ void TranslateUIDelegate::RevertTranslation() {
   UMA_HISTOGRAM_BOOLEAN(kRevertTranslation, true);
 }
 
-void TranslateUIDelegate::TranslationDeclined() {
+void TranslateUIDelegate::TranslationDeclined(bool explicitly_closed) {
   if (!web_contents()->GetBrowserContext()->IsOffTheRecord()) {
     prefs_->ResetTranslationAcceptedCount(GetOriginalLanguageCode());
     prefs_->IncrementTranslationDeniedCount(GetOriginalLanguageCode());
@@ -169,6 +184,9 @@ void TranslateUIDelegate::TranslationDeclined() {
       language_state().set_translation_declined(true);
 
   UMA_HISTOGRAM_BOOLEAN(kDeclineTranslate, true);
+
+  if (!explicitly_closed)
+    UMA_HISTOGRAM_BOOLEAN(kDeclineTranslateDismissUI, true);
 }
 
 bool TranslateUIDelegate::IsLanguageBlocked() {

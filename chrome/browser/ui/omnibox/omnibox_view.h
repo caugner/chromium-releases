@@ -86,7 +86,7 @@ class OmniboxView {
   // Returns the current text of the edit control, which could be the
   // "temporary" text set by the popup, the "permanent" text set by the
   // browser, or just whatever the user has currently typed.
-  virtual string16 GetText() const = 0;
+  virtual base::string16 GetText() const = 0;
 
   // |true| if the user is in the process of editing the field, or if
   // the field is empty.
@@ -98,14 +98,14 @@ class OmniboxView {
   // The user text is the text the user has manually keyed in.  When present,
   // this is shown in preference to the permanent text; hitting escape will
   // revert to the permanent text.
-  void SetUserText(const string16& text);
-  virtual void SetUserText(const string16& text,
-                           const string16& display_text,
+  void SetUserText(const base::string16& text);
+  virtual void SetUserText(const base::string16& text,
+                           const base::string16& display_text,
                            bool update_popup);
 
   // Sets the window text and the caret position. |notify_text_changed| is true
   // if the model should be notified of the change.
-  virtual void SetWindowTextAndCaretPos(const string16& text,
+  virtual void SetWindowTextAndCaretPos(const base::string16& text,
                                         size_t caret_pos,
                                         bool update_popup,
                                         bool notify_text_changed) = 0;
@@ -134,6 +134,10 @@ class OmniboxView {
   // Selects all the text in the edit.  Use this in place of SetSelAll() to
   // avoid selecting the "phantom newline" at the end of the edit.
   virtual void SelectAll(bool reversed) = 0;
+
+  // Sets focus, disables search term replacement, reverts the omnibox, and
+  // selects all.
+  void ShowURL();
 
   // Re-enables search term replacement on the ToolbarModel, and reverts the
   // edit and popup back to their unedited state (permanent text showing, popup
@@ -164,7 +168,7 @@ class OmniboxView {
   // when there wasn't previously a temporary text and thus we need to save off
   // the user's existing selection. |notify_text_changed| is true if the model
   // should be notified of the change.
-  virtual void OnTemporaryTextMaybeChanged(const string16& display_text,
+  virtual void OnTemporaryTextMaybeChanged(const base::string16& display_text,
                                            bool save_original_selection,
                                            bool notify_text_changed) = 0;
 
@@ -173,7 +177,10 @@ class OmniboxView {
   // the user input portion of that (so, up to but not including the inline
   // autocompletion).  Returns whether the display text actually changed.
   virtual bool OnInlineAutocompleteTextMaybeChanged(
-      const string16& display_text, size_t user_text_length) = 0;
+      const base::string16& display_text, size_t user_text_length) = 0;
+
+  // Called when the inline autocomplete text in the model has been cleared.
+  virtual void OnInlineAutocompleteTextCleared() = 0;
 
   // Called when the temporary text has been reverted by the user.  This will
   // reset the user's original selection.
@@ -198,14 +205,17 @@ class OmniboxView {
   virtual gfx::NativeView GetRelativeWindowForPopup() const = 0;
 
   // Shows |input| as gray suggested text after what the user has typed.
-  virtual void SetGrayTextAutocompletion(const string16& input) = 0;
+  virtual void SetGrayTextAutocompletion(const base::string16& input) = 0;
 
   // Returns the current gray suggested text.
-  virtual string16 GetGrayTextAutocompletion() const = 0;
+  virtual base::string16 GetGrayTextAutocompletion() const = 0;
 
   // Returns the width in pixels needed to display the current text. The
   // returned value includes margins.
-  virtual int TextWidth() const = 0;
+  virtual int GetTextWidth() const = 0;
+
+  // Returns the omnibox's width in pixels.
+  virtual int GetWidth() const = 0;
 
   // Returns true if the user is composing something in an IME.
   virtual bool IsImeComposing() const = 0;
@@ -222,18 +232,12 @@ class OmniboxView {
   virtual bool IsIndicatingQueryRefinement() const;
 
 #if defined(TOOLKIT_VIEWS)
-  virtual int GetMaxEditWidth(int entry_width) const = 0;
-
-  // Adds the autocomplete edit view to view hierarchy and
-  // returns the views::View of the edit view.
-  virtual views::View* AddToView(views::View* parent) = 0;
-
   // Performs the drop of a drag and drop operation on the view.
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) = 0;
 #endif
 
   // Returns |text| with any leading javascript schemas stripped.
-  static string16 StripJavascriptSchemas(const string16& text);
+  static base::string16 StripJavascriptSchemas(const base::string16& text);
 
   // First, calls StripJavascriptSchemas().  Then automatically collapses
   // internal whitespace as follows:
@@ -242,12 +246,12 @@ class OmniboxView {
   // etc. So all newlines are removed.
   // * Otherwise, users may be pasting in search data, e.g. street addresses. In
   // this case, runs of whitespace are collapsed down to single spaces.
-  static string16 SanitizeTextForPaste(const string16& text);
+  static base::string16 SanitizeTextForPaste(const base::string16& text);
 
   // Returns the current clipboard contents as a string that can be pasted in.
   // In addition to just getting CF_UNICODETEXT out, this can also extract URLs
   // from bookmarks on the clipboard.
-  static string16 GetClipboardText();
+  static base::string16 GetClipboardText();
 
  protected:
   OmniboxView(Profile* profile,
@@ -256,9 +260,6 @@ class OmniboxView {
 
   // Internally invoked whenever the text changes in some way.
   virtual void TextChanged();
-
-  // Disables search term replacement, reverts the omnibox, and selects all.
-  void ShowURL();
 
   // Return the number of characters in the current buffer. The name
   // |GetTextLength| can't be used as the Windows override of this class

@@ -27,9 +27,11 @@ class CoreOobeHandler;
 class ErrorScreenHandler;
 class KioskAppMenuHandler;
 class KioskEnableScreenActor;
+class LoginScreenContext;
 class NativeWindowDelegate;
 class NetworkDropdownHandler;
 class NetworkStateInformer;
+class GaiaScreenHandler;
 class SigninScreenHandler;
 class SigninScreenHandlerDelegate;
 class UpdateScreenHandler;
@@ -100,6 +102,10 @@ class OobeUI : public OobeDisplay,
   // Initializes the handlers.
   void InitializeHandlers();
 
+  // Invoked after the async assets load. The screen handler that has the same
+  // async assets load id will be initialized.
+  void OnScreenAssetsLoaded(const std::string& async_assets_load_id);
+
   // Shows or hides OOBE UI elements.
   void ShowOobeUI(bool show);
 
@@ -109,7 +115,8 @@ class OobeUI : public OobeDisplay,
   void ShowRetailModeLoginSpinner();
 
   // Shows the signin screen.
-  void ShowSigninScreen(SigninScreenHandlerDelegate* delegate,
+  void ShowSigninScreen(const LoginScreenContext& context,
+                        SigninScreenHandlerDelegate* delegate,
                         NativeWindowDelegate* native_window_delegate);
 
   // Shows the kiosk splash screen.
@@ -170,8 +177,12 @@ class OobeUI : public OobeDisplay,
   // requests and forward calls from native code to JS side.
   ErrorScreenHandler* error_screen_handler_;
 
+  // Reference to GaiaScreenHandler that handles gaia screen requests and
+  // forwards calls from native code to JS side.
+  GaiaScreenHandler* gaia_screen_handler_;
+
   // Reference to SigninScreenHandler that handles sign-in screen requests and
-  // forward calls from native code to JS side.
+  // forwards calls from native code to JS side.
   SigninScreenHandler* signin_screen_handler_;
 
   TermsOfServiceScreenActor* terms_of_service_screen_actor_;

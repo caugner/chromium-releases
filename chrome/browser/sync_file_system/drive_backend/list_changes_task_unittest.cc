@@ -7,8 +7,6 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/run_loop.h"
-#include "base/strings/stringprintf.h"
-#include "chrome/browser/google_apis/drive_api_parser.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_constants.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.h"
 #include "chrome/browser/sync_file_system/drive_backend/register_app_task.h"
@@ -17,6 +15,7 @@
 #include "chrome/browser/sync_file_system/drive_backend_v1/fake_drive_service_helper.h"
 #include "chrome/browser/sync_file_system/sync_file_system_test_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "google_apis/drive/drive_api_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace sync_file_system {
@@ -64,15 +63,20 @@ class ListChangesTaskTest : public testing::Test,
     return fake_drive_service_.get();
   }
 
+  virtual drive::DriveUploader* GetDriveUploader() OVERRIDE {
+    return NULL;
+  }
+
   virtual MetadataDatabase* GetMetadataDatabase() OVERRIDE {
     return metadata_database_.get();
   }
 
-  int64 GetRemoteLargestChangeID() {
-    scoped_ptr<google_apis::AboutResource> about_resource;
-    EXPECT_EQ(google_apis::HTTP_SUCCESS,
-              fake_drive_service_helper_->GetAboutResource(&about_resource));
-    return about_resource->largest_change_id();
+  virtual RemoteChangeProcessor* GetRemoteChangeProcessor() OVERRIDE {
+    return NULL;
+  }
+
+  virtual base::SequencedTaskRunner* GetBlockingTaskRunner() OVERRIDE {
+    return base::MessageLoopProxy::current();
   }
 
  protected:
@@ -89,10 +93,6 @@ class ListChangesTaskTest : public testing::Test,
 
   FakeDriveServiceHelper* fake_drive_service_helper() {
     return fake_drive_service_helper_.get();
-  }
-
-  drive::FakeDriveService* fake_drive_service() {
-    return fake_drive_service_.get();
   }
 
   void SetUpChangesInFolder(const std::string& folder_id) {
@@ -121,21 +121,17 @@ class ListChangesTaskTest : public testing::Test,
                   modified_file_id, "modified file content"));
 
 
-    std::string trashed_file_id;
+    std::string deleted_file_id;
     ASSERT_EQ(google_apis::HTTP_SUCCESS,
               fake_drive_service_helper()->AddFile(
                   folder_id, "trashed file", "file content",
-                  &trashed_file_id));
-    ASSERT_EQ(google_apis::HTTP_SUCCESS,
-              fake_drive_service_helper()->RemoveResource(trashed_file_id));
+                  &deleted_file_id));
+    ASSERT_EQ(google_apis::HTTP_NO_CONTENT,
+              fake_drive_service_helper()->DeleteResource(deleted_file_id));
   }
 
   std::string root_resource_id() {
     return fake_drive_service_->GetRootResourceId();
-  }
-
-  std::string sync_root_folder_id() {
-    return sync_root_folder_id_;
   }
 
   std::string app_root_folder_id() {
@@ -161,7 +157,8 @@ class ListChangesTaskTest : public testing::Test,
   }
 
   void InitializeMetadataDatabase() {
-    SyncEngineInitializer initializer(base::MessageLoopProxy::current(),
+    SyncEngineInitializer initializer(this,
+                                      base::MessageLoopProxy::current(),
                                       fake_drive_service_.get(),
                                       database_dir_.path());
     EXPECT_EQ(SYNC_STATUS_OK, RunTask(&initializer));
@@ -173,16 +170,9 @@ class ListChangesTaskTest : public testing::Test,
     EXPECT_EQ(SYNC_STATUS_OK, RunTask(&register_app));
   }
 
-  std::string GenerateFileID() {
-    return base::StringPrintf("file_id_%" PRId64, next_file_id_++);
-  }
-
   std::string sync_root_folder_id_;
   std::string app_root_folder_id_;
   std::string unregistered_app_root_folder_id_;
-
-  int64 next_file_id_;
-  int64 next_tracker_id_;
 
   content::TestBrowserThreadBundle browser_threads_;
   base::ScopedTempDir database_dir_;
@@ -200,7 +190,7 @@ TEST_F(ListChangesTaskTest, NoChange) {
   size_t num_dirty_trackers = CountDirtyTracker();
 
   ListChangesTask list_changes(this);
-  EXPECT_EQ(SYNC_STATUS_OK, RunTask(&list_changes));
+  EXPECT_EQ(SYNC_STATUS_NO_CHANGE_TO_SYNC, RunTask(&list_changes));
 
   EXPECT_EQ(num_dirty_trackers, CountDirtyTracker());
 }

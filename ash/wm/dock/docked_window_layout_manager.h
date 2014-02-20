@@ -17,6 +17,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "base/time/time.h"
 #include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/window.h"
@@ -40,6 +41,7 @@ namespace ash {
 class Launcher;
 
 namespace internal {
+class DockedBackgroundWidget;
 class DockedWindowLayoutManagerObserver;
 class DockedWindowResizerTest;
 class ShelfLayoutManager;
@@ -73,6 +75,7 @@ class ASH_EXPORT DockedWindowLayoutManager
       public aura::WindowObserver,
       public aura::client::ActivationChangeObserver,
       public keyboard::KeyboardControllerObserver,
+      public ShelfLayoutManagerObserver,
       public wm::WindowStateObserver {
  public:
   // Maximum width of the docked windows area.
@@ -104,7 +107,8 @@ class ASH_EXPORT DockedWindowLayoutManager
 
   // Called by a DockedWindowResizer when a window is no longer being dragged.
   // Stops observing the window unless it is a child.
-  void FinishDragging();
+  // Records |action| by |source| in UMA.
+  void FinishDragging(DockedAction action, DockedActionSource source);
 
   ash::Launcher* launcher() { return launcher_; }
   void SetLauncher(ash::Launcher* launcher);
@@ -130,6 +134,9 @@ class ASH_EXPORT DockedWindowLayoutManager
   // Returns true if currently dragged window is docked at the screen edge.
   bool is_dragged_window_docked() const { return is_dragged_window_docked_; }
 
+  // Updates docked layout when launcher shelf bounds change.
+  void OnShelfBoundsChanged();
+
   // aura::LayoutManager:
   virtual void OnWindowResized() OVERRIDE;
   virtual void OnWindowAddedToLayout(aura::Window* child) OVERRIDE;
@@ -145,6 +152,11 @@ class ASH_EXPORT DockedWindowLayoutManager
   virtual void OnFullscreenStateChanged(bool is_fullscreen,
                                         aura::Window* root_window) OVERRIDE;
   virtual void OnShelfAlignmentChanged(aura::Window* root_window) OVERRIDE;
+
+  // ShelfLayoutManagerObserver:
+  virtual void OnBackgroundUpdated(
+      ShelfBackgroundType background_type,
+      BackgroundAnimatorChangeType change_type) OVERRIDE;
 
   // wm::WindowStateObserver:
   virtual void OnWindowShowTypeChanged(wm::WindowState* window_state,
@@ -163,6 +175,7 @@ class ASH_EXPORT DockedWindowLayoutManager
                                  aura::Window* lost_active) OVERRIDE;
 
  private:
+  class ShelfWindowObserver;
   friend class DockedWindowLayoutManagerTest;
   friend class DockedWindowResizerTest;
 
@@ -179,6 +192,12 @@ class ASH_EXPORT DockedWindowLayoutManager
   // Minimize / restore window and relayout.
   void MinimizeDockedWindow(wm::WindowState* window_state);
   void RestoreDockedWindow(wm::WindowState* window_state);
+
+  // Record user-initiated |action| by |source| in UMA metrics.
+  void RecordUmaAction(DockedAction action, DockedActionSource source);
+
+  // Updates |docked_width_| and UMA histograms.
+  void UpdateDockedWidth(int width);
 
   // Updates docked layout state when a window gets inside the dock.
   void OnDraggedWindowDocked(aura::Window* window);
@@ -247,6 +266,7 @@ class ASH_EXPORT DockedWindowLayoutManager
 
   // The launcher to respond to launcher alignment changes.
   Launcher* launcher_;
+
   // Workspace controller that can be checked for fullscreen mode.
   WorkspaceController* workspace_controller_;
   // Tracks if any window in the same root window is in fullscreen mode.
@@ -267,8 +287,15 @@ class ASH_EXPORT DockedWindowLayoutManager
   // are currently focused.
   aura::Window* last_active_window_;
 
+  // Timestamp of the last user-initiated action that changed docked state.
+  // Used in UMA metrics.
+  base::Time last_action_time_;
+
+  // Observes launcher shelf for bounds changes.
+  scoped_ptr<ShelfWindowObserver> shelf_observer_;
+
   // Widget used to paint a background for the docked area.
-  scoped_ptr<views::Widget> background_widget_;
+  scoped_ptr<DockedBackgroundWidget> background_widget_;
 
   // Observers of dock bounds changes.
   ObserverList<DockedWindowLayoutManagerObserver> observer_list_;

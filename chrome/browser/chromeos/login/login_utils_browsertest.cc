@@ -23,6 +23,7 @@
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
@@ -30,9 +31,6 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/cloud/device_management_service.h"
-#include "chrome/browser/policy/policy_service.h"
-#include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
 #include "chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/rlz/rlz.h"
@@ -51,6 +49,8 @@
 #include "chromeos/network/network_handler.h"
 #include "chromeos/system/mock_statistics_provider.h"
 #include "chromeos/system/statistics_provider.h"
+#include "components/policy/core/common/cloud/device_management_service.h"
+#include "components/policy/core/common/policy_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
@@ -62,6 +62,7 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
+#include "policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -113,12 +114,6 @@ const char kDMPolicyRequest[] =
     "http://server/device_management?request=policy";
 
 const char kDMToken[] = "1234";
-
-// Used to mark |flag|, indicating that RefreshPolicies() has executed its
-// callback.
-void SetFlag(bool* flag) {
-  *flag = true;
-}
 
 // Single task of the fake IO loop used in the test, that just waits until
 // it is signaled to quit or perform some work.
@@ -204,7 +199,7 @@ class LoginUtilsTest : public testing::Test,
     // DBusThreadManager should be initialized before io_thread_state_, as
     // DBusThreadManager is used from chromeos::ProxyConfigServiceImpl,
     // which is part of io_thread_state_.
-    DBusThreadManager::InitializeForTesting(&fake_dbus_thread_manager_);
+    DBusThreadManager::InitializeWithStub();
 
     SystemSaltGetter::Initialize();
     LoginState::Initialize();
@@ -367,7 +362,6 @@ class LoginUtilsTest : public testing::Test,
     // we need to trigger creation of Profile-related services.
     ChromeBrowserMainExtraPartsProfiles::
         EnsureBrowserContextKeyedServiceFactoriesBuilt();
-    ProfileManager::AllowGetDefaultProfile();
 
     DeviceSettingsTestHelper device_settings_test_helper;
     DeviceSettingsService::Get()->SetSessionManager(
@@ -380,7 +374,7 @@ class LoginUtilsTest : public testing::Test,
 
     scoped_refptr<Authenticator> authenticator =
         LoginUtils::Get()->CreateAuthenticator(this);
-    authenticator->CompleteLogin(ProfileManager::GetDefaultProfile(),
+    authenticator->CompleteLogin(ProfileHelper::GetSigninProfile(),
                                  UserContext(username,
                                              "password",
                                              std::string(),
@@ -453,6 +447,10 @@ class LoginUtilsTest : public testing::Test,
   }
 
  protected:
+  // Must be the first member variable as browser_process_ and local_state_
+  // rely on this being set up.
+  TestingBrowserProcessInitializer initializer_;
+
   base::Closure fake_io_thread_work_;
   base::WaitableEvent fake_io_thread_completion_;
   base::Thread fake_io_thread_;
@@ -467,7 +465,6 @@ class LoginUtilsTest : public testing::Test,
   scoped_ptr<content::TestBrowserThread> io_thread_;
   scoped_ptr<IOThread> io_thread_state_;
 
-  FakeDBusThreadManager fake_dbus_thread_manager_;
   input_method::MockInputMethodManager* mock_input_method_manager_;
   disks::MockDiskMountManager mock_disk_mount_manager_;
   net::TestURLFetcherFactory test_url_fetcher_factory_;
@@ -478,7 +475,6 @@ class LoginUtilsTest : public testing::Test,
 
   policy::BrowserPolicyConnector* connector_;
 
-  // Initialized after |fake_dbus_thread_manager_| is set up.
   scoped_ptr<ScopedTestDeviceSettingsService> test_device_settings_service_;
   scoped_ptr<ScopedTestCrosSettings> test_cros_settings_;
   scoped_ptr<ScopedTestUserManager> test_user_manager_;
@@ -559,10 +555,10 @@ TEST_F(LoginUtilsTest, RlzInitialized) {
   EXPECT_EQ(std::string(), local_state_.Get()->GetString(prefs::kRLZBrand));
 
   // RLZ value for homepage access point should have been initialized.
-  string16 rlz_string;
+  base::string16 rlz_string;
   EXPECT_TRUE(RLZTracker::GetAccessPointRlz(
       RLZTracker::CHROME_HOME_PAGE, &rlz_string));
-  EXPECT_EQ(string16(), rlz_string);
+  EXPECT_EQ(base::string16(), rlz_string);
 }
 #endif
 

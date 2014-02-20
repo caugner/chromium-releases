@@ -23,10 +23,10 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/extensions/api/echo_private.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/system/statistics_provider.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/common/extension.h"
 
 namespace echo_api = extensions::api::echo_private;
 
@@ -171,7 +171,7 @@ bool EchoPrivateGetOobeTimestampFunction::GetOobeTimestampOnFileThread() {
   const char kOobeTimestampFile[] = "/home/chronos/.oobe_completed";
   std::string timestamp = "";
   base::PlatformFileInfo fileInfo;
-  if (file_util::GetFileInfo(base::FilePath(kOobeTimestampFile), &fileInfo)) {
+  if (base::GetFileInfo(base::FilePath(kOobeTimestampFile), &fileInfo)) {
     base::Time::Exploded ctime;
     fileInfo.creation_time.UTCExplode(&ctime);
     timestamp += base::StringPrintf("%u-%u-%u",

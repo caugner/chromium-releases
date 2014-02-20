@@ -66,6 +66,9 @@ FileManager.prototype = {
   },
   get backgroundPage() {
     return this.backgroundPage_;
+  },
+  get volumeManager() {
+    return this.volumeManager_;
   }
 };
 
@@ -114,6 +117,15 @@ DialogType.isModal = function(type) {
 DialogType.isOpenDialog = function(type) {
   return type == DialogType.SELECT_OPEN_FILE ||
          type == DialogType.SELECT_OPEN_MULTI_FILE;
+};
+
+/**
+ * @param {string} type Dialog type.
+ * @return {boolean} Whether the type is folder selection dialog.
+ */
+DialogType.isFolderDialog = function(type) {
+  return type == DialogType.SELECT_FOLDER ||
+         type == DialogType.SELECT_UPLOAD_FOLDER;
 };
 
 /**
@@ -209,14 +221,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     }.bind(this));
 
     // TODO(yoshiki): Remove the flag when the feature is launched.
-    this.enableExperimentalWebstoreIntegration_ = false;
-    group.add(function(done) {
-      chrome.commandLinePrivate.hasSwitch(
-          'file-manager-enable-webstore-integration', function(flag) {
-        this.enableExperimentalWebstoreIntegration_ = flag;
-        done();
-      }.bind(this));
-    }.bind(this));
+    this.enableExperimentalWebstoreIntegration_ = true;
 
     group.run(callback);
   };
@@ -273,24 +278,8 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     dm.addEventListener('rescan-completed',
                         this.onRescanCompleted_.bind(this));
 
-    var sm = this.directoryModel_.getFileListSelection();
-    sm.addEventListener('change', function() {
-      if (sm.selectedIndexes.length != 1)
-        return;
-      var view = (this.listType_ == FileManager.ListType.DETAIL) ?
-          this.table_.list : this.grid_;
-      var selectedItem = view.getListItemByIndex(sm.selectedIndex);
-      if (!selectedItem)
-        return;
-      this.ensureItemNotBehindPreviewPanel_(selectedItem, view);
-    }.bind(this));
-
     this.directoryTree_.addEventListener('change', function() {
-      var selectedSubTree = this.directoryTree_.selectedItem;
-      if (!selectedSubTree)
-        return;
-      var selectedItem = selectedSubTree.rowElement;
-      this.ensureItemNotBehindPreviewPanel_(selectedItem, this.directoryTree_);
+      this.ensureDirectoryTreeItemNotBehindPreviewPanel_();
     }.bind(this));
 
     var stateChangeHandler =
@@ -332,17 +321,21 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
   };
 
   /**
-   * If |item| in |parentView| is behind the preview panel, scrolls up the
+   * If |item| in the directory tree is behind the preview panel, scrolls up the
    * parent view and make the item visible. This should be called when:
-   *  - the selected item is changed.
+   *  - the selected item is changed in the directory tree.
    *  - the visibility of the the preview panel is changed.
    *
-   * @param {HTMLElement} item Item to be visible in the parent.
-   * @param {HTMLElement} parentView View contains |selectedItem|.
    * @private
    */
-  FileManager.prototype.ensureItemNotBehindPreviewPanel_ =
-      function(item, parentView) {
+  FileManager.prototype.ensureDirectoryTreeItemNotBehindPreviewPanel_ =
+      function() {
+    var selectedSubTree = this.directoryTree_.selectedItem;
+    if (!selectedSubTree)
+      return;
+    var item = selectedSubTree.rowElement;
+    var parentView = this.directoryTree_;
+
     var itemRect = item.getBoundingClientRect();
     if (!itemRect)
       return;
@@ -379,10 +372,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     this.fileOperationManager_ = FileOperationManagerWrapper.getInstance(
         this.backgroundPage_);
 
-    this.butterBar_ = new ButterBar(
-        this.dialogDom_, this.fileOperationManager_);
-
-    // CopyManager and ButterBar are required for 'Delete' operation in
+    // CopyManager are required for 'Delete' operation in
     // Open and Save dialogs. But drag-n-drop and copy-paste are not needed.
     if (this.dialogType != DialogType.FULL_PAGE) return;
 
@@ -530,7 +520,8 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     CommandUtil.forceDefaultHandler(node, 'paste');
     CommandUtil.forceDefaultHandler(node, 'delete');
     node.addEventListener('keydown', function(e) {
-      if (util.getKeyModifiers(e) + e.keyCode == '191') {
+      var key = util.getKeyModifiers(e) + e.keyCode;
+      if (key === '190' /* '/' */ || key === '191' /* '.' */) {
         // If this key event is propagated, this is handled search command,
         // which calls 'preventDefault' method.
         e.stopPropagation();
@@ -624,9 +615,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
   FileManager.prototype.initVolumeManager_ = function(callback) {
     // Auto resolving to local path does not work for folders (e.g., dialog for
     // loading unpacked extensions).
-    var noLocalPathResolution =
-      this.params_.type == DialogType.SELECT_FOLDER ||
-      this.params_.type == DialogType.SELECT_UPLOAD_FOLDER;
+    var noLocalPathResolution = DialogType.isFolderDialog(this.params_.type);
 
     // If this condition is false, VolumeManagerWrapper hides all drive
     // related event and data, even if Drive is enabled on preference.
@@ -742,8 +731,8 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
         DialogType.isOpenDialog(this.dialogType) ?
             PreviewPanel.VisibilityType.ALWAYS_VISIBLE :
             PreviewPanel.VisibilityType.AUTO,
-        this.getCurrentDirectory(),
-        this.metadataCache_);
+        this.metadataCache_,
+        this.volumeManager_);
     this.previewPanel_.addEventListener(
         PreviewPanel.Event.VISIBILITY_CHANGE,
         this.onPreviewPanelVisibilityChange_.bind(this));
@@ -754,29 +743,9 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
 
     // Initialize progress center panel.
     this.progressCenterPanel_ = new ProgressCenterPanel(
-        dom.querySelector('#progress-center'),
-        this.backgroundPage_.background.progressCenter.requestCancel.bind(
-            this.backgroundPage_.background.progressCenter));
-    var initialItems =
-        this.backgroundPage_.background.progressCenter.applicationItems;
-    for (var i = 0; i < initialItems.length; i++) {
-      this.progressCenterPanel_.updateItem(
-          initialItems[i],
-          this.backgroundPage_.background.progressCenter.getSummarizedItem());
-    }
-    this.backgroundPage_.background.progressCenter.addEventListener(
-        ProgressCenterEvent.ITEM_UPDATED,
-        function(event) {
-          this.progressCenterPanel_.updateItem(
-              event.item,
-              this.backgroundPage_.background.progressCenter.
-                  getSummarizedItem());
-        }.bind(this));
-    this.backgroundPage_.background.progressCenter.addEventListener(
-        ProgressCenterEvent.RESET,
-        function(event) {
-          this.progressCenterPanel_.reset();
-        }.bind(this));
+        dom.querySelector('#progress-center'));
+    this.backgroundPage_.background.progressCenter.addPanel(
+        this.progressCenterPanel_);
 
     this.document_.addEventListener('keydown', this.onKeyDown_.bind(this));
 
@@ -794,6 +763,9 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     this.renameInput_.addEventListener(
         'blur', this.onRenameInputBlur_.bind(this));
 
+    // TODO(hirono): Rename the handler after creating the DialogFooter class.
+    this.filenameInput_.addEventListener(
+        'input', this.onFilenameInputInput_.bind(this));
     this.filenameInput_.addEventListener(
         'keydown', this.onFilenameInputKeyDown_.bind(this));
     this.filenameInput_.addEventListener(
@@ -828,12 +800,12 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
 
     this.detailViewButton_ =
         this.dialogDom_.querySelector('#detail-view');
-    this.detailViewButton_.addEventListener('click',
+    this.detailViewButton_.addEventListener('activate',
         this.onDetailViewButtonClick_.bind(this));
 
     this.thumbnailViewButton_ =
         this.dialogDom_.querySelector('#thumbnail-view');
-    this.thumbnailViewButton_.addEventListener('click',
+    this.thumbnailViewButton_.addEventListener('activate',
         this.onThumbnailViewButtonClick_.bind(this));
 
     cr.ui.ComboButton.decorate(this.taskItems_);
@@ -907,7 +879,12 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
    * @private
    */
   FileManager.prototype.onBreadcrumbClick_ = function(event) {
-    this.directoryModel_.changeDirectory(event.path);
+    // TODO(hirono): Use directoryModel#changeDirectoryEntry after implementing
+    // it.
+    if (event.entry === RootType.DRIVE_SHARED_WITH_ME)
+      this.directoryModel_.changeDirectory(RootDirectory.DRIVE_SHARED_WITH_ME);
+    else
+      this.directoryModel_.changeDirectory(event.entry.fullPath);
   };
 
   /**
@@ -927,11 +904,6 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
         this.dialogType == DialogType.SELECT_UPLOAD_FOLDER ||
         this.dialogType == DialogType.SELECT_SAVEAS_FILE;
 
-    var showSpecialSearchRoots =
-        this.dialogType == DialogType.SELECT_OPEN_FILE ||
-        this.dialogType == DialogType.SELECT_OPEN_MULTI_FILE ||
-        this.dialogType == DialogType.FULL_PAGE;
-
     this.fileFilter_ = new FileFilter(
         this.metadataCache_,
         false  /* Don't show dot files by default. */);
@@ -946,8 +918,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
         this.fileFilter_,
         this.fileWatcher_,
         this.metadataCache_,
-        this.volumeManager_,
-        showSpecialSearchRoots);
+        this.volumeManager_);
 
     this.folderShortcutsModel_ = new FolderShortcutsDataModel();
 
@@ -1050,7 +1021,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     if (!entry)
       return;
 
-    var driveVolume = this.volumeManager_.getVolumeInfo(RootDirectory.DRIVE);
+    var driveVolume = this.volumeManager_.getVolumeInfo(entry);
     var visible =
         DirectoryTreeUtil.isEligiblePathForDirectoryTree(entry.fullPath) &&
         driveVolume && !driveVolume.error;
@@ -1221,18 +1192,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
           strf('DRIVE_SERVER_OUT_OF_SPACE_MESSAGE',
               decodeURIComponent(
                   event.error.data.sourceFileUrl.split('/').pop()),
-              urlConstants.GOOGLE_DRIVE_BUY_STORAGE));
-    }
-
-    // TODO(benchan): Currently, there is no FileWatcher emulation for
-    // drive::FileSystem, so we need to manually trigger the directory rescan
-    // after paste operations complete. Remove this once we emulate file
-    // watching functionalities in drive::FileSystem.
-    if (this.isOnDrive()) {
-      if (event.reason == 'SUCCESS' || event.reason == 'ERROR' ||
-          event.reason == 'CANCELLED') {
-        this.directoryModel_.rescanLater();
-      }
+              str('GOOGLE_DRIVE_BUY_STORAGE_URL')));
     }
   };
 
@@ -1374,7 +1334,8 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
    * @private
    */
   FileManager.prototype.onWatcherMetadataChanged_ = function(event) {
-    this.updateMetadataInUI_(event.metadataType, event.urls, event.properties);
+    this.updateMetadataInUI_(
+        event.metadataType, event.entries, event.properties);
   };
 
   /**
@@ -1391,18 +1352,10 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
       this.grid_.setBottomMarginForPanel(panelHeight);
     if (this.table_)
       this.table_.setBottomMarginForPanel(panelHeight);
-    if (this.directoryTree_)
-      this.directoryTree_.setBottomMarginForPanel(panelHeight);
 
-    // Make sure that the selected item is not behind the preview panel.
-    if (this.directoryModel_) {
-      var sm = this.directoryModel_.getFileListSelection();
-      var view = (this.listType_ == FileManager.ListType.DETAIL) ?
-          this.table_.list : this.grid_;
-      var selectedItem = view.getListItemByIndex(sm.selectedIndex);
-      if (!selectedItem)
-        return;
-      this.ensureItemNotBehindPreviewPanel_(selectedItem, view);
+    if (this.directoryTree_) {
+      this.directoryTree_.setBottomMarginForPanel(panelHeight);
+      this.ensureDirectoryTreeItemNotBehindPreviewPanel_();
     }
   };
 
@@ -1431,106 +1384,237 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
 
   /**
    * Restores current directory and may be a selected item after page load (or
-   * reload) or popping a state (after click on back/forward). If location.hash
-   * is present it means that the user has navigated somewhere and that place
-   * will be restored. defaultPath primarily is used with save/open dialogs.
+   * reload) or popping a state (after click on back/forward). defaultPath
+   * primarily is used with save/open dialogs.
    * Default path may also contain a file name. Freshly opened file manager
    * window has neither.
    *
    * @private
    */
   FileManager.prototype.setupCurrentDirectory_ = function() {
-    var path = location.hash ?  // Location hash has the highest priority.
-        decodeURIComponent(location.hash.substr(1)) :
-        this.defaultPath;
-
-    if (!path) {
-      path = PathUtil.DEFAULT_DIRECTORY;
-    } else if (path.indexOf('/') == -1) {
-      // Path is a file name.
-      path = PathUtil.DEFAULT_DIRECTORY + '/' + path;
-    }
-
     var tracker = this.directoryModel_.createDirectoryChangeTracker();
-    tracker.start();
-    this.volumeManager_.ensureInitialized(function() {
-      tracker.stop();
-      if (tracker.hasChanged)
+    var queue = new AsyncUtil.Queue();
+
+    // Wait until the volume manager is initialized.
+    queue.run(function(callback) {
+      tracker.start();
+      this.volumeManager_.ensureInitialized(callback);
+    }.bind(this));
+
+    // Resolve the default path.
+    var defaultFullPath;
+    var candidateFullPath;
+    var candidateEntry;
+    queue.run(function(callback) {
+      // Cancel this sequence if the current directory has already changed.
+      if (tracker.hasChanged) {
+        callback();
         return;
+      }
 
-      // If Drive is disabled but the path points to Drive's entry,
-      // fallback to DEFAULT_DIRECTORY.
-      if (PathUtil.isDriveBasedPath(path) &&
-          !this.volumeManager_.getVolumeInfo(RootDirectory.DRIVE))
-        path = PathUtil.DEFAULT_DIRECTORY + '/' + PathUtil.basename(path);
+      // Resolve the absolute path in case only the file name or an empty string
+      // is passed.
+      if (!this.defaultPath) {
+        defaultFullPath = PathUtil.DEFAULT_MOUNT_POINT;
+      } else if (this.defaultPath.indexOf('/') === -1) {
+        // Path is a file name.
+        defaultFullPath = PathUtil.DEFAULT_MOUNT_POINT + '/' + this.defaultPath;
+      } else {
+        defaultFullPath = this.defaultPath;
+      }
 
-      this.finishSetupCurrentDirectory_(path);
+      // If Drive is disabled but the path points to Drive's entry, fallback to
+      // DEFAULT_MOUNT_POINT.
+      if (PathUtil.isDriveBasedPath(defaultFullPath) &&
+          !this.volumeManager_.getVolumeInfo(RootDirectory.DRIVE)) {
+        candidateFullPath = PathUtil.DEFAULT_MOUNT_POINT + '/' +
+            PathUtil.basename(defaultFullPath);
+      } else {
+        candidateFullPath = defaultFullPath;
+      }
+
+      // If the path points a fake entry, use the entry directly.
+      var fakeEntries = DirectoryModel.FAKE_DRIVE_SPECIAL_SEARCH_ENTRIES;
+      for (var i = 0; i < fakeEntries.length; i++) {
+        if (candidateFullPath === fakeEntries[i].fullPath) {
+          candidateEntry = fakeEntries[i];
+          callback();
+          return;
+        }
+      }
+
+      // Convert the path to the directory entry and an optional selection
+      // entry.
+      // TODO(hirono): There may be a race here. The path on Drive, may not
+      // be available yet.
+      this.volumeManager_.resolveAbsolutePath(candidateFullPath,
+                                              function(inEntry) {
+        candidateEntry = inEntry;
+        callback();
+      }, function() {
+        callback();
+      });
+    }.bind(this));
+
+    // Check the obtained entry.
+    var nextCurrentDirEntry;
+    var selectionEntry = null;
+    var suggestedName = null;
+    var error = null;
+    queue.run(function(callback) {
+      // Cancel this sequence if the current directory has already changed.
+      if (tracker.hasChanged) {
+        callback();
+        return;
+      }
+
+      if (candidateEntry) {
+        // The entry is directory. Use it.
+        if (candidateEntry.isDirectory) {
+          nextCurrentDirEntry = candidateEntry;
+          callback();
+          return;
+        }
+        // The entry exists, but it is not a directory. Therefore use a
+        // parent.
+        candidateEntry.getParent(function(parentEntry) {
+          nextCurrentDirEntry = parentEntry;
+          selectionEntry = candidateEntry;
+          callback();
+        }, function() {
+          error = new Error('Unable to resolve parent for: ' +
+              candidateEntry.fullPath);
+          callback();
+        });
+        return;
+      }
+
+      // If the entry doesn't exist, most probably because the path contains a
+      // suggested name. Therefore try to open its parent. However, the parent
+      // may also not exist. In such situation, fallback.
+      var pathNodes = candidateFullPath.split('/');
+      var baseName = pathNodes.pop();
+      var parentPath = pathNodes.join('/');
+      this.volumeManager_.resolveAbsolutePath(
+          parentPath,
+          function(parentEntry) {
+            nextCurrentDirEntry = parentEntry;
+            suggestedName = baseName;
+            callback();
+          },
+          callback);  // In case of an error, continue.
+    }.bind(this));
+
+    // If the directory is not set at this stage, fallback to the default
+    // mount point.
+    queue.run(function(callback) {
+      // Cancel this sequence if the current directory has already changed,
+      // or the next current directory is already set.
+      if (tracker.hasChanged || nextCurrentDirEntry) {
+        callback();
+        return;
+      }
+      this.volumeManager_.resolveAbsolutePath(
+          PathUtil.DEFAULT_MOUNT_POINT,
+          function(fallbackEntry) {
+            nextCurrentDirEntry = fallbackEntry;
+            callback();
+          },
+          function() {
+            // Fallback directory not available? Throw an error.
+            error = new Error('Unable to resolve the fallback directory: ' +
+                PathUtil.DEFAULT_MOUNT_POINT);
+            callback();
+          });
+    }.bind(this));
+
+    queue.run(function(callback) {
+      // Check error.
+      if (error) {
+        callback();
+        throw error;
+      }
+      // Check directory change.
+      tracker.stop();
+      if (tracker.hasChanged) {
+        callback();
+        return;
+      }
+      // Finish setup current directory.
+      this.finishSetupCurrentDirectory_(
+          nextCurrentDirEntry, selectionEntry, suggestedName);
+      callback();
     }.bind(this));
   };
 
   /**
-   * @param {string} path Path to setup.
+   * @param {DirectoryEntry} directoryEntry Directory to be opened.
+   * @param {Entry=} opt_selectionEntry Entry to be selected.
+   * @param {string=} opt_suggestedName Suggested name for a non-existing\
+   *     selection.
    * @private
    */
-  FileManager.prototype.finishSetupCurrentDirectory_ = function(path) {
-    this.directoryModel_.setupPath(path, function(baseName, leafName, exists) {
-      if (this.dialogType == DialogType.FULL_PAGE) {
-        // In the FULL_PAGE mode if the hash path points to a file we might have
-        // to invoke a task after selecting it.
-        // If the file path is in params_ we only want to select the file.
-        if (this.params_.action == 'select')
-          return;
+  FileManager.prototype.finishSetupCurrentDirectory_ = function(
+      directoryEntry, opt_selectionEntry, opt_suggestedName) {
+    // Open the directory, and select the selection (if passed).
+    if (util.isFakeEntry(directoryEntry)) {
+      this.directoryModel_.specialSearch(directoryEntry.fullPath, '');
+    } else {
+      this.directoryModel_.changeDirectoryEntry(directoryEntry, function() {
+        if (opt_selectionEntry)
+          this.directoryModel_.selectEntry(opt_selectionEntry);
+      }.bind(this));
+    }
 
-        var task = null;
-        if (!exists || leafName == '') {
-          // Non-existent file or a directory.
-          if (this.params_.gallery) {
-            // Reloading while the Gallery is open with empty or multiple
-            // selection. Open the Gallery when the directory is scanned.
-            task = function() {
-              new FileTasks(this, this.params_).openGallery([]);
-            }.bind(this);
-          }
-        } else {
-          // There are 3 ways we can get here:
-          // 1. Invoked from file_manager_util::ViewFile. This can only
-          //    happen for 'gallery' and 'mount-archive' actions.
-          // 2. Reloading a Gallery page. Must be an image or a video file.
-          // 3. A user manually entered a URL pointing to a file.
-          // We call the appropriate methods of FileTasks directly as we do
-          // not need any of the preparations that |execute| method does.
-          var mediaType = FileType.getMediaType(path);
-          if (mediaType == 'image' || mediaType == 'video') {
-            task = function() {
-              new FileTasks(this, this.params_).openGallery(
-                  [util.makeFilesystemUrl(path)]);
-            }.bind(this);
-          } else if (mediaType == 'archive') {
-            task = function() {
-              new FileTasks(this, this.params_).mountArchives(
-                  [util.makeFilesystemUrl(path)]);
-            }.bind(this);
-          }
-        }
+    if (this.dialogType == DialogType.FULL_PAGE) {
+      // In the FULL_PAGE mode if the restored path points to a file we might
+      // have to invoke a task after selecting it.
+      if (this.params_.action == 'select')
+        return;
 
-        // If there is a task to be run, run it after the scan is completed.
-        if (task) {
-          var listener = function() {
-            this.directoryModel_.removeEventListener(
-                'scan-completed', listener);
-            task();
+      var task = null;
+      if (opt_suggestedName) {
+        // Non-existent file or a directory.
+        if (this.params_.gallery) {
+          // Reloading while the Gallery is open with empty or multiple
+          // selection. Open the Gallery when the directory is scanned.
+          task = function() {
+            new FileTasks(this, this.params_).openGallery([]);
           }.bind(this);
-          this.directoryModel_.addEventListener('scan-completed', listener);
         }
-        return;
+      } else if (opt_selectionEntry) {
+        // There is a file to be selected. It means, that we are recovering
+        // the Files app.
+        // We call the appropriate methods of FileTasks directly as we do
+        // not need any of the preparations that |execute| method does.
+        // TODO(mtomasz): Change Entry.fullPath to Entry.
+        var mediaType = FileType.getMediaType(opt_selectionEntry.fullPath);
+        if (mediaType == 'image' || mediaType == 'video') {
+          task = function() {
+            // TODO(mtomasz): Replace the url with an entry.
+            new FileTasks(this, this.params_).openGallery([opt_selectionEntry]);
+          }.bind(this);
+        } else if (mediaType == 'archive') {
+          task = function() {
+            new FileTasks(this, this.params_).mountArchives(
+                [opt_selectionEntry]);
+          }.bind(this);
+        }
       }
 
-      if (this.dialogType == DialogType.SELECT_SAVEAS_FILE) {
-        this.filenameInput_.value = leafName;
-        this.selectDefaultPathInFilenameInput_();
-        return;
+      // If there is a task to be run, run it after the scan is completed.
+      if (task) {
+        var listener = function() {
+          this.directoryModel_.removeEventListener(
+              'scan-completed', listener);
+          task();
+        }.bind(this);
+        this.directoryModel_.addEventListener('scan-completed', listener);
       }
-    }.bind(this));
+    } else if (this.dialogType == DialogType.SELECT_SAVEAS_FILE) {
+      this.filenameInput_.value = opt_suggestedName || '';
+      this.selectDefaultPathInFilenameInput_();
+    }
   };
 
   /**
@@ -1557,9 +1641,10 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
 
     // TODO(dgozman): refresh content metadata only when modificationTime
     // changed.
-    var isFakeEntry = typeof directoryEntry.toURL !== 'function';
+    var isFakeEntry = util.isFakeEntry(directoryEntry);
     var getEntries = (isFakeEntry ? [] : [directoryEntry]).concat(entries);
-    this.metadataCache_.clearRecursively(directoryEntry, '*');
+    if (!isFakeEntry)
+      this.metadataCache_.clearRecursively(directoryEntry, '*');
     this.metadataCache_.get(getEntries, 'filesystem', null);
 
     if (this.isOnDrive())
@@ -1582,13 +1667,14 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
    */
   FileManager.prototype.dailyUpdateModificationTime_ = function() {
     var fileList = this.directoryModel_.getFileList();
-    var urls = [];
+    var entries = [];
     for (var i = 0; i < fileList.length; i++) {
-      urls.push(fileList.item(i).toURL());
+      entries.push(fileList.item(i));
     }
     this.metadataCache_.get(
-        fileList.slice(), 'filesystem',
-        this.updateMetadataInUI_.bind(this, 'filesystem', urls));
+        entries,
+        'filesystem',
+        this.updateMetadataInUI_.bind(this, 'filesystem', entries));
 
     setTimeout(this.dailyUpdateModificationTime_.bind(this),
                MILLISECONDS_IN_DAY);
@@ -1596,22 +1682,17 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
 
   /**
    * @param {string} type Type of metadata changed.
-   * @param {Array.<string>} urls Array of urls.
+   * @param {Array.<Entry>} entries Array of entries.
    * @param {Object.<string, Object>} props Map from entry URLs to metadata
    *     props.
    * @private
    */
   FileManager.prototype.updateMetadataInUI_ = function(
-      type, urls, properties) {
-    var propertyByUrl = urls.reduce(function(map, url, index) {
-      map[url] = properties[index];
-      return map;
-    }, {});
-
+      type, entries, properties) {
     if (this.listType_ == FileManager.ListType.DETAIL)
-      this.table_.updateListItemsMetadata(type, propertyByUrl);
+      this.table_.updateListItemsMetadata(type, properties);
     else
-      this.grid_.updateListItemsMetadata(type, propertyByUrl);
+      this.grid_.updateListItemsMetadata(type, properties);
     // TODO: update bottom panel thumbnails.
   };
 
@@ -1689,8 +1770,8 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     } else {
       var extensions = [];
 
-      for (var i = 0; i < selection.urls.length; i++) {
-        var match = /\.(\w+)$/g.exec(selection.urls[i]);
+      for (var i = 0; i < selection.entries.length; i++) {
+        var match = /\.(\w+)$/g.exec(selection.entries[i].toURL());
         if (match) {
           var ext = match[1].toUpperCase();
           if (extensions.indexOf(ext) == -1) {
@@ -1713,7 +1794,6 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     }
   };
 
-
   /**
    * Sets the given task as default, when this task is applicable.
    *
@@ -1723,10 +1803,12 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
   FileManager.prototype.onDefaultTaskDone_ = function(task) {
     // TODO(dgozman): move this method closer to tasks.
     var selection = this.getSelection();
-    chrome.fileBrowserPrivate.setDefaultTask(task.taskId,
-      selection.urls, selection.mimeTypes);
+    chrome.fileBrowserPrivate.setDefaultTask(
+        task.taskId,
+        util.entriesToURLs(selection.entries),
+        selection.mimeTypes);
     selection.tasks = new FileTasks(this);
-    selection.tasks.init(selection.urls, selection.mimeTypes);
+    selection.tasks.init(selection.entries, selection.mimeTypes);
     selection.tasks.display(this.taskItems_);
     this.refreshCurrentDirectoryMetadata_();
     this.selectionHandler_.onFileSelectionChanged();
@@ -1869,13 +1951,11 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     this.document_.querySelector('#iframe-drag-area').hidden = !visible;
   };
 
-  FileManager.prototype.getAllUrlsInCurrentDirectory = function() {
-    var urls = [];
-    var fileList = this.directoryModel_.getFileList();
-    for (var i = 0; i != fileList.length; i++) {
-      urls.push(fileList.item(i).toURL());
-    }
-    return urls;
+  /**
+   * @return {Array.<Entry>} List of all entries in the current directory.
+   */
+  FileManager.prototype.getAllEntriesInCurrentDirectory = function() {
+    return this.directoryModel_.getFileList().slice();
   };
 
   FileManager.prototype.isRenamingInProgress = function() {
@@ -2080,27 +2160,26 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
   /**
    * Opens the suggest file dialog.
    *
-   * @param {string} url URL of files.
+   * @param {Entry} entry Entry of the file.
    * @param {function()} onSuccess Success callback.
    * @param {function()} onCancelled User-cancelled callback.
    * @param {function()} onFailure Failure callback.
    * @private
    */
   FileManager.prototype.openSuggestAppsDialog =
-      function(url, onSuccess, onCancelled, onFailure) {
+      function(entry, onSuccess, onCancelled, onFailure) {
     if (!url) {
       onFailure();
       return;
     }
 
-    this.metadataCache_.get([url], 'drive', function(props) {
+    this.metadataCache_.get([entry], 'drive', function(props) {
       if (!props || !props[0] || !props[0].contentMimeType) {
         onFailure();
         return;
       }
 
-      var path = util.extractFilePath(url);
-      var basename = PathUtil.basename(path);
+      var basename = entry.name;
       var splitted = PathUtil.splitExtension(basename);
       var filename = splitted[0];
       var extension = splitted[1];
@@ -2238,17 +2317,17 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
 
     if (this.commandHandler)
       this.commandHandler.updateAvailability();
-    this.updateUnformattedDriveStatus_();
+    this.updateUnformattedVolumeStatus_();
     this.updateTitle_();
     this.updateGearMenu_();
-    this.previewPanel_.currentPath_ = this.getCurrentDirectory();
+    var currentEntry = this.getCurrentDirectoryEntry();
+    this.previewPanel_.currentEntry = util.isFakeEntry(currentEntry) ?
+        null : currentEntry;
   };
 
-  // TODO(haruki): Rename this method. "Drive" here does not refer
-  // "Google Drive".
-  FileManager.prototype.updateUnformattedDriveStatus_ = function() {
+  FileManager.prototype.updateUnformattedVolumeStatus_ = function() {
     var volumeInfo = this.volumeManager_.getVolumeInfo(
-        PathUtil.getRootPath(this.directoryModel_.getCurrentRootPath()));
+        this.directoryModel_.getCurrentDirEntry());
 
     if (volumeInfo && volumeInfo.error) {
       this.dialogDom_.setAttribute('unformatted', '');
@@ -2297,8 +2376,9 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
         this.filePopup_.contentWindow &&
         this.filePopup_.contentWindow.unload)
       this.filePopup_.contentWindow.unload(true /* exiting */);
-    if (this.butterBar_)
-      this.butterBar_.dispose();
+    if (this.progressCenterPanel_)
+      this.backgroundPage_.background.progressCenter.removePanel(
+          this.progressCenterPanel_);
     if (this.fileOperationManager_) {
       if (this.onCopyProgressBound_) {
         this.fileOperationManager_.removeEventListener(
@@ -2311,7 +2391,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     }
     window.closing = true;
     if (this.backgroundPage_ && util.platform.runningInBrowser())
-      this.backgroundPage_.maybeCloseBackgroundPage();
+      this.backgroundPage_.background.tryClose();
   };
 
   FileManager.prototype.initiateRename = function() {
@@ -2465,11 +2545,17 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
    * @param {Event} Key event.
    * @private
    */
+  FileManager.prototype.onFilenameInputInput_ = function() {
+    this.selectionHandler_.updateOkButton();
+  };
+
+  /**
+   * @param {Event} Key event.
+   * @private
+   */
   FileManager.prototype.onFilenameInputKeyDown_ = function(event) {
-    var enabled = this.selectionHandler_.updateOkButton();
-    if (enabled &&
-        (util.getKeyModifiers(event) + event.keyCode) == '13' /* Enter */)
-      this.onOk_();
+    if ((util.getKeyModifiers(event) + event.keyCode) === '13' /* Enter */)
+      this.okButton_.click();
   };
 
   /**
@@ -2538,7 +2624,6 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     if (this.commandHandler)
       this.commandHandler.updateAvailability();
     this.hideSpinnerLater_();
-    this.refreshCurrentDirectoryMetadata_();
 
     if (this.scanUpdatedTimer_) {
       clearTimeout(this.scanUpdatedTimer_);
@@ -2630,7 +2715,6 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
    * @private
    */
   FileManager.prototype.onRescanCompleted_ = function() {
-    this.refreshCurrentDirectoryMetadata_();
     this.selectionHandler_.onFileSelectionChanged();
   };
 
@@ -2727,6 +2811,11 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
    * @private
    */
   FileManager.prototype.onDetailViewButtonClick_ = function(event) {
+    // Stop propagate and hide the menu manually, in order to prevent the focus
+    // from being back to the button. (cf. http://crbug.com/248479)
+    event.stopPropagation();
+    this.gearButton_.hideMenu();
+
     this.setListType(FileManager.ListType.DETAIL);
     this.currentList_.focus();
   };
@@ -2736,6 +2825,11 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
    * @private
    */
   FileManager.prototype.onThumbnailViewButtonClick_ = function(event) {
+    // Stop propagate and hide the menu manually, in order to prevent the focus
+    // from being back to the button. (cf. http://crbug.com/248479)
+    event.stopPropagation();
+    this.gearButton_.hideMenu();
+
     this.setListType(FileManager.ListType.THUMBNAIL);
     this.currentList_.focus();
   };
@@ -2794,8 +2888,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
         var selection = this.getSelection();
         if (selection.totalCount == 1 &&
             selection.entries[0].isDirectory &&
-            this.dialogType != DialogType.SELECT_FOLDER &&
-            this.dialogType != DialogType.SELECT_UPLOAD_FOLDER) {
+            !DialogType.isFolderDialog(this.dialogType)) {
           event.preventDefault();
           this.onDirectoryAction_(selection.entries[0]);
         } else if (this.dispatchSelectionAction_()) {
@@ -3049,7 +3142,11 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     }.bind(this);
 
     setup();
-    this.metadataCache_.get(selection.urls, 'drive', onProperties);
+
+    // TODO(mtomasz): Use Entry instead of URLs, if possible.
+    util.URLsToEntries(selection.urls, function(entries) {
+      this.metadataCache_.get(entries, 'drive', onProperties);
+    }.bind(this));
   };
 
   /**
@@ -3077,7 +3174,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
         if (!isValid)
           return;
 
-        if (util.isFakeDirectoryEntry(directory)) {
+        if (util.isFakeEntry(directory)) {
           // Can't save a file into a fake directory.
           return;
         }
@@ -3122,8 +3219,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     var files = [];
     var selectedIndexes = this.currentList_.selectionModel.selectedIndexes;
 
-    if ((this.dialogType == DialogType.SELECT_FOLDER ||
-         this.dialogType == DialogType.SELECT_UPLOAD_FOLDER) &&
+    if (DialogType.isFolderDialog(this.dialogType) &&
         selectedIndexes.length == 0) {
       var url = this.getCurrentDirectoryURL();
       var singleSelection = {
@@ -3168,8 +3264,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
 
     var selectedEntry = dm.item(selectedIndexes[0]);
 
-    if (this.dialogType == DialogType.SELECT_FOLDER ||
-        this.dialogType == DialogType.SELECT_UPLOAD_FOLDER) {
+    if (DialogType.isFolderDialog(this.dialogType)) {
       if (!selectedEntry.isDirectory)
         throw new Error('Selected entry is not a folder!');
     } else if (this.dialogType == DialogType.SELECT_OPEN_FILE) {
@@ -3423,17 +3518,17 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
       return;
     }
 
-    var urls = [entry.toURL()];
+    var entries = [entry];
     var self = this;
 
     // To open a file, first get the mime type.
-    this.metadataCache_.get(urls, 'drive', function(props) {
+    this.metadataCache_.get(entries, 'drive', function(props) {
       var mimeType = props[0].contentMimeType || '';
       var mimeTypes = [mimeType];
       var openIt = function() {
         if (self.dialogType == DialogType.FULL_PAGE) {
           var tasks = new FileTasks(self);
-          tasks.init(urls, mimeTypes);
+          tasks.init(entries, mimeTypes);
           tasks.executeDefault();
         } else {
           self.onOk_();
@@ -3450,7 +3545,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
         var onDirectoryChanged = function(event) {
           self.directoryModel_.removeEventListener('scan-completed',
                                                    onDirectoryChanged);
-          self.directoryModel_.selectEntry(entry.name);
+          self.directoryModel_.selectEntry(entry);
           openIt();
         };
         // changeDirectory() returns immediately. We should wait until the
@@ -3464,48 +3559,6 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
             self.directoryModel_.removeEventListener('scan-completed',
                                                      onDirectoryChanged);
           });
-      });
-    });
-  };
-
-  /**
-   * Opens the default app change dialog.
-   */
-  FileManager.prototype.showChangeDefaultAppPicker = function() {
-    var onActionsReady = function(actions, rememberedActionId) {
-      var items = [];
-      var defaultIndex = -1;
-      for (var i = 0; i < actions.length; i++) {
-        if (actions[i].hidden)
-          continue;
-        var title = actions[i].title;
-        if (actions[i].id == rememberedActionId) {
-          title += ' ' + loadTimeData.getString('DEFAULT_ACTION_LABEL');
-          defaultIndex = i;
-        }
-        var item = {
-          id: actions[i].id,
-          label: title,
-          class: actions[i].class,
-          iconUrl: actions[i].icon100
-        };
-        items.push(item);
-      }
-      var show = this.defaultTaskPicker.showOkCancelDialog(
-          str('CHANGE_DEFAULT_APP_BUTTON_LABEL'),
-          '',
-          items,
-          defaultIndex,
-          function(action) {
-            ActionChoiceUtil.setRememberedActionId(action.id);
-          });
-      if (!show)
-        console.error('DefaultTaskPicker can\'t be shown.');
-    }.bind(this);
-
-    ActionChoiceUtil.getDefinedActions(loadTimeData, function(actions) {
-      ActionChoiceUtil.getRememberedActionId(function(actionId) {
-        onActionsReady(actions, actionId);
       });
     });
   };

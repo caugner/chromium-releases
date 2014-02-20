@@ -19,7 +19,6 @@
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/extensions/chrome_extensions_client.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_process_policy.h"
 #include "chrome/common/extensions/extension_set.h"
@@ -28,6 +27,7 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/benchmarking_extension.h"
+#include "chrome/renderer/chrome_render_frame_observer.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/chrome_render_view_observer.h"
 #include "chrome/renderer/content_settings_observer.h"
@@ -46,7 +46,6 @@
 #include "chrome/renderer/net_benchmarking_extension.h"
 #include "chrome/renderer/page_load_histograms.h"
 #include "chrome/renderer/pepper/pepper_helper.h"
-#include "chrome/renderer/pepper/ppb_nacl_private_impl.h"
 #include "chrome/renderer/pepper/ppb_pdf_impl.h"
 #include "chrome/renderer/playback_extension.h"
 #include "chrome/renderer/plugins/chrome_plugin_placeholder.h"
@@ -55,6 +54,7 @@
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/prerender/prerender_media_load_deferrer.h"
 #include "chrome/renderer/prerender/prerenderer_client.h"
+#include "chrome/renderer/principals_extension_bindings.h"
 #include "chrome/renderer/printing/print_web_view_helper.h"
 #include "chrome/renderer/safe_browsing/malware_dom_details.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
@@ -62,19 +62,21 @@
 #include "chrome/renderer/searchbox/searchbox.h"
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 #include "chrome/renderer/tts_dispatcher.h"
-#include "chrome/renderer/validation_message_agent.h"
 #include "chrome/renderer/worker_permission_client_proxy.h"
 #include "components/autofill/content/renderer/autofill_agent.h"
 #include "components/autofill/content/renderer/password_autofill_agent.h"
 #include "components/autofill/content/renderer/password_generation_agent.h"
 #include "components/autofill/core/common/password_generation_util.h"
+#include "components/nacl/renderer/ppb_nacl_private_impl.h"
 #include "components/plugins/renderer/mobile_youtube_plugin.h"
 #include "components/visitedlink/renderer/visitedlink_slave.h"
 #include "content/public/common/content_constants.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_view_visitor.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -115,33 +117,34 @@ using autofill::AutofillAgent;
 using autofill::PasswordAutofillAgent;
 using autofill::PasswordGenerationAgent;
 using content::RenderThread;
+using content::UserMetricsAction;
 using content::WebPluginInfo;
 using extensions::Extension;
-using WebKit::WebCache;
-using WebKit::WebConsoleMessage;
-using WebKit::WebDataSource;
-using WebKit::WebDocument;
-using WebKit::WebFrame;
-using WebKit::WebPlugin;
-using WebKit::WebPluginParams;
-using WebKit::WebSecurityOrigin;
-using WebKit::WebSecurityPolicy;
-using WebKit::WebString;
-using WebKit::WebURL;
-using WebKit::WebURLError;
-using WebKit::WebURLRequest;
-using WebKit::WebURLResponse;
-using WebKit::WebVector;
+using blink::WebCache;
+using blink::WebConsoleMessage;
+using blink::WebDataSource;
+using blink::WebDocument;
+using blink::WebFrame;
+using blink::WebPlugin;
+using blink::WebPluginParams;
+using blink::WebSecurityOrigin;
+using blink::WebSecurityPolicy;
+using blink::WebString;
+using blink::WebURL;
+using blink::WebURLError;
+using blink::WebURLRequest;
+using blink::WebURLResponse;
+using blink::WebVector;
 
 namespace {
 
 const char kWebViewTagName[] = "WEBVIEW";
 const char kAdViewTagName[] = "ADVIEW";
 
-chrome::ChromeContentRendererClient* g_current_client;
+ChromeContentRendererClient* g_current_client;
 
-static void AppendParams(const std::vector<string16>& additional_names,
-                         const std::vector<string16>& additional_values,
+static void AppendParams(const std::vector<base::string16>& additional_names,
+                         const std::vector<base::string16>& additional_values,
                          WebVector<WebString>* existing_names,
                          WebVector<WebString>* existing_values) {
   DCHECK(additional_names.size() == additional_values.size());
@@ -195,7 +198,7 @@ bool ShouldUseJavaScriptSettingForPlugin(const WebPluginInfo& plugin) {
   }
 
   // Treat Native Client invocations like JavaScript.
-  if (plugin.name == ASCIIToUTF16(chrome::ChromeContentClient::kNaClPluginName))
+  if (plugin.name == ASCIIToUTF16(ChromeContentClient::kNaClPluginName))
     return true;
 
 #if defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS)
@@ -209,24 +212,10 @@ bool ShouldUseJavaScriptSettingForPlugin(const WebPluginInfo& plugin) {
   return false;
 }
 
-#if defined(ENABLE_PLUGINS)
-const char* kPredefinedAllowedFileHandleOrigins[] = {
-  "6EAED1924DB611B6EEF2A664BD077BE7EAD33B8F",  // see crbug.com/234789
-  "4EB74897CB187C7633357C2FE832E0AD6A44883A"   // see crbug.com/234789
-};
-#endif
-
 }  // namespace
-
-namespace chrome {
 
 ChromeContentRendererClient::ChromeContentRendererClient() {
   g_current_client = this;
-
-#if defined(ENABLE_PLUGINS)
-  for (size_t i = 0; i < arraysize(kPredefinedAllowedFileHandleOrigins); ++i)
-    allowed_file_handle_origins_.insert(kPredefinedAllowedFileHandleOrigins[i]);
-#endif
 }
 
 ChromeContentRendererClient::~ChromeContentRendererClient() {
@@ -295,10 +284,14 @@ void ChromeContentRendererClient::RenderThreadStarted() {
     thread->RegisterExtension(extensions_v8::PlaybackExtension::Get());
   }
 
-  // chrome:, chrome-search:, chrome-devtools:, and chrome-internal: pages
-  // should not be accessible by normal content, and should also be unable to
-  // script anything but themselves (to help limit the damage that a corrupt
-  // page could cause).
+  // TODO(guohui): needs to forward the new-profile-management switch to
+  // renderer processes.
+  if (command_line->HasSwitch(switches::kNewProfileManagement))
+    thread->RegisterExtension(extensions_v8::PrincipalsExtension::Get());
+
+  // chrome:, chrome-search:, and chrome-devtools: pages should not be
+  // accessible by normal content, and should also be unable to script anything
+  // but themselves (to help limit the damage that a corrupt page could cause).
   WebString chrome_ui_scheme(ASCIIToUTF16(chrome::kChromeUIScheme));
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_ui_scheme);
 
@@ -310,9 +303,6 @@ void ChromeContentRendererClient::RenderThreadStarted() {
 
   WebString dev_tools_scheme(ASCIIToUTF16(chrome::kChromeDevToolsScheme));
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(dev_tools_scheme);
-
-  WebString internal_scheme(ASCIIToUTF16(chrome::kChromeInternalScheme));
-  WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(internal_scheme);
 
 #if defined(OS_CHROMEOS)
   WebString drive_scheme(ASCIIToUTF16(chrome::kDriveScheme));
@@ -356,10 +346,18 @@ void ChromeContentRendererClient::RenderThreadStarted() {
       extensions::ChromeExtensionsClient::GetInstance());
 }
 
+void ChromeContentRendererClient::RenderFrameCreated(
+    content::RenderFrame* render_frame) {
+  new ChromeRenderFrameObserver(render_frame);
+#if defined(ENABLE_PLUGINS)
+  new PepperHelper(render_frame);
+#endif
+}
+
 void ChromeContentRendererClient::RenderViewCreated(
     content::RenderView* render_view) {
   ContentSettingsObserver* content_settings =
-      new ContentSettingsObserver(render_view);
+      new ContentSettingsObserver(render_view, extension_dispatcher_.get());
   if (chrome_observer_.get()) {
     content_settings->SetContentSettingRules(
         chrome_observer_->content_setting_rules());
@@ -380,7 +378,6 @@ void ChromeContentRendererClient::RenderViewCreated(
   PasswordAutofillAgent* password_autofill_agent =
       new PasswordAutofillAgent(render_view);
   new AutofillAgent(render_view, password_autofill_agent);
-  new ValidationMessageAgent(render_view);
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (autofill::password_generation::IsPasswordGenerationEnabled())
@@ -388,13 +385,7 @@ void ChromeContentRendererClient::RenderViewCreated(
   if (command_line->HasSwitch(switches::kInstantProcess))
     new SearchBox(render_view);
 
-  new ChromeRenderViewObserver(
-      render_view, content_settings, chrome_observer_.get(),
-      extension_dispatcher_.get());
-
-#if defined(ENABLE_PLUGINS)
-  new PepperHelper(render_view);
-#endif
+  new ChromeRenderViewObserver(render_view, chrome_observer_.get());
 
   new NetErrorHelper(render_view);
 }
@@ -428,7 +419,7 @@ const Extension* ChromeContentRendererClient::GetExtensionByOrigin(
 }
 
 bool ChromeContentRendererClient::OverrideCreatePlugin(
-    content::RenderView* render_view,
+    content::RenderFrame* render_frame,
     WebFrame* frame,
     const WebPluginParams& params,
     WebPlugin** plugin) {
@@ -454,51 +445,51 @@ bool ChromeContentRendererClient::OverrideCreatePlugin(
 
   ChromeViewHostMsg_GetPluginInfo_Output output;
 #if defined(ENABLE_PLUGINS)
-  render_view->Send(new ChromeViewHostMsg_GetPluginInfo(
-      render_view->GetRoutingID(), GURL(params.url),
+  render_frame->Send(new ChromeViewHostMsg_GetPluginInfo(
+      render_frame->GetRoutingID(), GURL(params.url),
       frame->top()->document().url(), orig_mime_type, &output));
 #else
   output.status.value = ChromeViewHostMsg_GetPluginInfo_Status::kNotFound;
 #endif
-  *plugin = CreatePlugin(render_view, frame, params, output);
+  *plugin = CreatePlugin(render_frame, frame, params, output);
   return true;
 }
 
 WebPlugin* ChromeContentRendererClient::CreatePluginReplacement(
-    content::RenderView* render_view,
+    content::RenderFrame* render_frame,
     const base::FilePath& plugin_path) {
   ChromePluginPlaceholder* placeholder =
-      ChromePluginPlaceholder::CreateErrorPlugin(render_view, plugin_path);
+      ChromePluginPlaceholder::CreateErrorPlugin(render_frame, plugin_path);
   return placeholder->plugin();
 }
 
 void ChromeContentRendererClient::DeferMediaLoad(
-    content::RenderView* render_view,
+    content::RenderFrame* render_frame,
     const base::Closure& closure) {
 #if defined(OS_ANDROID)
   // Chromium for Android doesn't support prerender yet.
   closure.Run();
   return;
 #else
-  if (!prerender::PrerenderHelper::IsPrerendering(render_view)) {
+  if (!prerender::PrerenderHelper::IsPrerendering(render_frame)) {
     closure.Run();
     return;
   }
 
-  // Lifetime is tied to |render_view| via content::RenderViewObserver.
-  new prerender::PrerenderMediaLoadDeferrer(render_view, closure);
+  // Lifetime is tied to |render_frame| via content::RenderFrameObserver.
+  new prerender::PrerenderMediaLoadDeferrer(render_frame, closure);
 #endif
 }
 
 WebPlugin* ChromeContentRendererClient::CreatePlugin(
-    content::RenderView* render_view,
+    content::RenderFrame* render_frame,
     WebFrame* frame,
     const WebPluginParams& original_params,
     const ChromeViewHostMsg_GetPluginInfo_Output& output) {
   const ChromeViewHostMsg_GetPluginInfo_Status& status = output.status;
   const WebPluginInfo& plugin = output.plugin;
   const std::string& actual_mime_type = output.actual_mime_type;
-  const string16& group_name = output.group_name;
+  const base::string16& group_name = output.group_name;
   const std::string& identifier = output.group_identifier;
   ChromeViewHostMsg_GetPluginInfo_Status::Value status_value = status.value;
   GURL url(original_params.url);
@@ -516,7 +507,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
           ResourceBundle::GetSharedInstance().GetRawDataResource(
               IDR_MOBILE_YOUTUBE_PLUGIN_HTML));
       return (new plugins::MobileYouTubePlugin(
-                  render_view,
+                  render_frame,
                   frame,
                   original_params,
                   template_html,
@@ -526,7 +517,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
 #endif
     PluginUMAReporter::GetInstance()->ReportPluginMissing(orig_mime_type, url);
     placeholder = ChromePluginPlaceholder::CreateMissingPlugin(
-        render_view, frame, original_params);
+        render_frame, frame, original_params);
   } else {
     // TODO(bauerb): This should be in content/.
     WebPluginParams params(original_params);
@@ -547,8 +538,9 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       params.mimeType = WebString::fromUTF8(actual_mime_type.c_str());
     }
 
+    // TODO(jam): switch ContentSettingsObserver to RenderFrameObserver.
     ContentSettingsObserver* observer =
-        ContentSettingsObserver::Get(render_view);
+        ContentSettingsObserver::Get(render_frame->GetRenderView());
 
     const ContentSettingsType content_type =
         ShouldUseJavaScriptSettingForPlugin(plugin) ?
@@ -589,8 +581,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kAllowed: {
         const bool is_nacl_plugin =
-            plugin.name ==
-            ASCIIToUTF16(chrome::ChromeContentClient::kNaClPluginName);
+            plugin.name == ASCIIToUTF16(ChromeContentClient::kNaClPluginName);
         const bool is_nacl_mime_type =
             actual_mime_type == "application/x-nacl";
         const bool is_pnacl_mime_type =
@@ -640,7 +631,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
                 WebConsoleMessage(WebConsoleMessage::LevelError,
                                   error_message));
             placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
-                render_view,
+                render_frame,
                 frame,
                 params,
                 plugin,
@@ -660,9 +651,9 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
         // TODO(mmenke):  In the case of prerendering, feed into
         //                ChromeContentRendererClient::CreatePlugin instead, to
         //                reduce the chance of future regressions.
-        if (prerender::PrerenderHelper::IsPrerendering(render_view)) {
+        if (prerender::PrerenderHelper::IsPrerendering(render_frame)) {
           placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
-              render_view,
+              render_frame,
               frame,
               params,
               plugin,
@@ -675,12 +666,13 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
           break;
         }
 
-        return render_view->CreatePlugin(frame, plugin, params);
+        return render_frame->CreatePlugin(frame, plugin, params);
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kNPAPINotSupported: {
-        RenderThread::Get()->RecordUserMetrics("Plugin_NPAPINotSupported");
+        RenderThread::Get()->RecordAction(
+            UserMetricsAction("Plugin_NPAPINotSupported"));
         placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
-            render_view,
+            render_frame,
             frame,
             params,
             plugin,
@@ -688,15 +680,15 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
             group_name,
             IDR_BLOCKED_PLUGIN_HTML,
             l10n_util::GetStringUTF16(IDS_PLUGIN_NOT_SUPPORTED_METRO));
-        render_view->Send(new ChromeViewHostMsg_NPAPINotSupported(
-            render_view->GetRoutingID(), identifier));
+        render_frame->Send(new ChromeViewHostMsg_NPAPINotSupported(
+            render_frame->GetRoutingID(), identifier));
         break;
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kDisabled: {
         PluginUMAReporter::GetInstance()->ReportPluginDisabled(orig_mime_type,
                                                                url);
         placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
-            render_view,
+            render_frame,
             frame,
             params,
             plugin,
@@ -709,7 +701,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       case ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedBlocked: {
 #if defined(ENABLE_PLUGIN_INSTALLATION)
         placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
-            render_view,
+            render_frame,
             frame,
             params,
             plugin,
@@ -718,8 +710,8 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
             IDR_BLOCKED_PLUGIN_HTML,
             l10n_util::GetStringFUTF16(IDS_PLUGIN_OUTDATED, group_name));
         placeholder->set_allow_loading(true);
-        render_view->Send(new ChromeViewHostMsg_BlockedOutdatedPlugin(
-            render_view->GetRoutingID(), placeholder->CreateRoutingId(),
+        render_frame->Send(new ChromeViewHostMsg_BlockedOutdatedPlugin(
+            render_frame->GetRoutingID(), placeholder->CreateRoutingId(),
             identifier));
 #else
         NOTREACHED();
@@ -728,7 +720,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedDisallowed: {
         placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
-            render_view,
+            render_frame,
             frame,
             params,
             plugin,
@@ -740,7 +732,7 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized: {
         placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
-            render_view,
+            render_frame,
             frame,
             params,
             plugin,
@@ -749,15 +741,15 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
             IDR_BLOCKED_PLUGIN_HTML,
             l10n_util::GetStringFUTF16(IDS_PLUGIN_NOT_AUTHORIZED, group_name));
         placeholder->set_allow_loading(true);
-        render_view->Send(new ChromeViewHostMsg_BlockedUnauthorizedPlugin(
-            render_view->GetRoutingID(),
+        render_frame->Send(new ChromeViewHostMsg_BlockedUnauthorizedPlugin(
+            render_frame->GetRoutingID(),
             group_name,
             identifier));
         break;
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kClickToPlay: {
         placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
-            render_view,
+            render_frame,
             frame,
             params,
             plugin,
@@ -766,13 +758,14 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
             IDR_CLICK_TO_PLAY_PLUGIN_HTML,
             l10n_util::GetStringFUTF16(IDS_PLUGIN_LOAD, group_name));
         placeholder->set_allow_loading(true);
-        RenderThread::Get()->RecordUserMetrics("Plugin_ClickToPlay");
-        observer->DidBlockContentType(content_type, identifier);
+        RenderThread::Get()->RecordAction(
+            UserMetricsAction("Plugin_ClickToPlay"));
+        observer->DidBlockContentType(content_type);
         break;
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kBlocked: {
         placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
-            render_view,
+            render_frame,
             frame,
             params,
             plugin,
@@ -781,8 +774,8 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
             IDR_BLOCKED_PLUGIN_HTML,
             l10n_util::GetStringFUTF16(IDS_PLUGIN_BLOCKED, group_name));
         placeholder->set_allow_loading(true);
-        RenderThread::Get()->RecordUserMetrics("Plugin_Blocked");
-        observer->DidBlockContentType(content_type, identifier);
+        RenderThread::Get()->RecordAction(UserMetricsAction("Plugin_Blocked"));
+        observer->DidBlockContentType(content_type);
         break;
       }
     }
@@ -799,7 +792,7 @@ GURL ChromeContentRendererClient::GetNaClContentHandlerURL(
     const content::WebPluginInfo& plugin) {
   // Look for the manifest URL among the MIME type's additonal parameters.
   const char* kNaClPluginManifestAttribute = "nacl";
-  string16 nacl_attr = ASCIIToUTF16(kNaClPluginManifestAttribute);
+  base::string16 nacl_attr = ASCIIToUTF16(kNaClPluginManifestAttribute);
   for (size_t i = 0; i < plugin.mime_types.size(); ++i) {
     if (plugin.mime_types[i].mime_type == actual_mime_type) {
       const content::WebPluginMimeType& content_type = plugin.mime_types[i];
@@ -823,23 +816,36 @@ bool ChromeContentRendererClient::IsNaClAllowed(
   // Temporarily allow these whitelisted apps and WebUIs to use NaCl.
   std::string app_url_host = app_url.host();
   std::string manifest_url_path = manifest_url.path();
+
   bool is_whitelisted_web_ui =
       app_url.spec() == chrome::kChromeUIAppListStartPageURL;
-  bool is_whitelisted_app =
+
+  bool is_photo_app =
       // Whitelisted apps must be served over https.
       app_url.SchemeIs("https") &&
       manifest_url.SchemeIs("https") &&
-      // Photos app.
-      (((EndsWith(app_url_host, "plus.google.com", false) ||
-         EndsWith(app_url_host, "plus.sandbox.google.com", false)) &&
-       manifest_url.DomainIs("ssl.gstatic.com") &&
+      (EndsWith(app_url_host, "plus.google.com", false) ||
+       EndsWith(app_url_host, "plus.sandbox.google.com", false)) &&
+      manifest_url.DomainIs("ssl.gstatic.com") &&
       (manifest_url_path.find("s2/oz/nacl/") == 1 ||
-       manifest_url_path.find("photos/nacl/") == 1)) ||
-      // Chat app.
-      ((EndsWith(app_url_host, "talk.google.com", false) ||
-        EndsWith(app_url_host, "talkgadget.google.com", false)) &&
-       manifest_url.DomainIs("ssl.gstatic.com") &&
-       manifest_url_path.find("chat/apps/fx") == 1));
+       manifest_url_path.find("photos/nacl/") == 1);
+
+  std::string manifest_fs_host;
+  if (manifest_url.SchemeIsFileSystem() && manifest_url.inner_url()) {
+    manifest_fs_host = manifest_url.inner_url()->host();
+  }
+  bool is_hangouts_app =
+      // Whitelisted apps must be served over secure scheme.
+      app_url.SchemeIs("https") &&
+      manifest_url.SchemeIsSecure() &&
+      manifest_url.SchemeIsFileSystem() &&
+      (EndsWith(app_url_host, "talkgadget.google.com", false) ||
+       EndsWith(app_url_host, "plus.google.com", false) ||
+       EndsWith(app_url_host, "plus.sandbox.google.com", false)) &&
+      // The manifest must be loaded from the host's FileSystem.
+      (manifest_fs_host == app_url_host);
+
+  bool is_whitelisted_app = is_photo_app || is_hangouts_app;
 
   bool is_extension_from_webstore = extension &&
       extension->from_webstore();
@@ -881,8 +887,8 @@ bool ChromeContentRendererClient::IsNaClAllowed(
     if ((!is_whitelisted_app && !is_extension_from_webstore) ||
         app_can_use_dev_interfaces) {
       // Add the special '@dev' attribute.
-      std::vector<string16> param_names;
-      std::vector<string16> param_values;
+      std::vector<base::string16> param_names;
+      std::vector<base::string16> param_values;
       param_names.push_back(dev_attribute);
       param_values.push_back(WebString());
       AppendParams(
@@ -920,12 +926,12 @@ bool ChromeContentRendererClient::ShouldSuppressErrorPage(const GURL& url) {
 }
 
 void ChromeContentRendererClient::GetNavigationErrorStrings(
-    WebKit::WebFrame* frame,
-    const WebKit::WebURLRequest& failed_request,
-    const WebKit::WebURLError& error,
+    blink::WebFrame* frame,
+    const blink::WebURLRequest& failed_request,
+    const blink::WebURLError& error,
     const std::string& accept_languages,
     std::string* error_html,
-    string16* error_description) {
+    base::string16* error_description) {
   const GURL failed_url = error.unreachableURL;
   const Extension* extension = NULL;
 
@@ -985,11 +991,22 @@ bool ChromeContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
 bool ChromeContentRendererClient::AllowPopup() {
   extensions::ChromeV8Context* current_context =
       extension_dispatcher_->v8_context_set().GetCurrent();
-  return current_context && current_context->extension() &&
-      (current_context->context_type() ==
-       extensions::Feature::BLESSED_EXTENSION_CONTEXT ||
-       current_context->context_type() ==
-       extensions::Feature::CONTENT_SCRIPT_CONTEXT);
+  if (!current_context || !current_context->extension())
+    return false;
+  // See http://crbug.com/117446 for the subtlety of this check.
+  switch (current_context->context_type()) {
+    case extensions::Feature::UNSPECIFIED_CONTEXT:
+    case extensions::Feature::WEB_PAGE_CONTEXT:
+    case extensions::Feature::UNBLESSED_EXTENSION_CONTEXT:
+      return false;
+    case extensions::Feature::BLESSED_EXTENSION_CONTEXT:
+    case extensions::Feature::CONTENT_SCRIPT_CONTEXT:
+      return true;
+    case extensions::Feature::BLESSED_WEB_PAGE_CONTEXT:
+      return !current_context->web_frame()->parent();
+  }
+  NOTREACHED();
+  return false;
 }
 
 bool ChromeContentRendererClient::ShouldFork(WebFrame* frame,
@@ -1085,7 +1102,7 @@ bool ChromeContentRendererClient::ShouldFork(WebFrame* frame,
 }
 
 bool ChromeContentRendererClient::WillSendRequest(
-    WebKit::WebFrame* frame,
+    blink::WebFrame* frame,
     content::PageTransition transition_type,
     const GURL& url,
     const GURL& first_party_for_cookies,
@@ -1123,13 +1140,6 @@ bool ChromeContentRendererClient::WillSendRequest(
   return false;
 }
 
-bool ChromeContentRendererClient::ShouldPumpEventsDuringCookieMessage() {
-  // We no longer pump messages, even under Chrome Frame. We rely on cookie
-  // read requests handled by CF not putting up UI or causing other actions
-  // that would require us to pump messages. This fixes http://crbug.com/110090.
-  return false;
-}
-
 void ChromeContentRendererClient::DidCreateScriptContext(
     WebFrame* frame, v8::Handle<v8::Context> context, int extension_group,
     int world_id) {
@@ -1151,46 +1161,19 @@ bool ChromeContentRendererClient::IsLinkVisited(unsigned long long link_hash) {
   return visited_link_slave_->IsVisited(link_hash);
 }
 
-WebKit::WebPrescientNetworking*
+blink::WebPrescientNetworking*
 ChromeContentRendererClient::GetPrescientNetworking() {
   return prescient_networking_dispatcher_.get();
 }
 
 bool ChromeContentRendererClient::ShouldOverridePageVisibilityState(
-    const content::RenderView* render_view,
-    WebKit::WebPageVisibilityState* override_state) {
-  if (!prerender::PrerenderHelper::IsPrerendering(render_view))
+    const content::RenderFrame* render_frame,
+    blink::WebPageVisibilityState* override_state) {
+  if (!prerender::PrerenderHelper::IsPrerendering(render_frame))
     return false;
 
-  *override_state = WebKit::WebPageVisibilityStatePrerender;
+  *override_state = blink::WebPageVisibilityStatePrerender;
   return true;
-}
-
-bool ChromeContentRendererClient::HandleGetCookieRequest(
-    content::RenderView* sender,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    std::string* cookies) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame)) {
-    IPC::SyncMessage* msg = new ChromeViewHostMsg_GetCookies(
-        MSG_ROUTING_NONE, url, first_party_for_cookies, cookies);
-    sender->Send(msg);
-    return true;
-  }
-  return false;
-}
-
-bool ChromeContentRendererClient::HandleSetCookieRequest(
-    content::RenderView* sender,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    const std::string& value) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame)) {
-    sender->Send(new ChromeViewHostMsg_SetCookie(
-        MSG_ROUTING_NONE, url, first_party_for_cookies, value));
-    return true;
-  }
-  return false;
 }
 
 void ChromeContentRendererClient::SetExtensionDispatcher(
@@ -1291,7 +1274,7 @@ const void* ChromeContentRendererClient::CreatePPAPIInterface(
 #if defined(ENABLE_PLUGINS)
 #if !defined(DISABLE_NACL)
   if (interface_name == PPB_NACL_PRIVATE_INTERFACE)
-    return PPB_NaCl_Private_Impl::GetInterface();
+    return nacl::GetNaClPrivateInterface();
 #endif  // DISABLE_NACL
   if (interface_name == PPB_PDF_INTERFACE)
     return PPB_PDF_Impl::GetInterface();
@@ -1307,31 +1290,14 @@ bool ChromeContentRendererClient::IsExternalPepperPlugin(
   return module_name == "Native Client";
 }
 
-bool ChromeContentRendererClient::IsPluginAllowedToCallRequestOSFileHandle(
-    WebKit::WebPluginContainer* container) {
-#if defined(ENABLE_PLUGINS)
-  if (!container)
-    return false;
-  GURL url = container->element().document().baseURL();
-  const ExtensionSet* extension_set = extension_dispatcher_->extensions();
-
-  return IsExtensionOrSharedModuleWhitelisted(url, extension_set,
-                                              allowed_file_handle_origins_) ||
-         IsHostAllowedByCommandLine(url, extension_set,
-                                    switches::kAllowNaClFileHandleAPI);
-#else
-  return false;
-#endif
-}
-
-WebKit::WebSpeechSynthesizer*
+blink::WebSpeechSynthesizer*
 ChromeContentRendererClient::OverrideSpeechSynthesizer(
-    WebKit::WebSpeechSynthesizerClient* client) {
+    blink::WebSpeechSynthesizerClient* client) {
   return new TtsDispatcher(client);
 }
 
 bool ChromeContentRendererClient::AllowBrowserPlugin(
-    WebKit::WebPluginContainer* container) {
+    blink::WebPluginContainer* container) {
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableBrowserPluginForAllViewTypes))
     return true;
@@ -1359,13 +1325,15 @@ bool ChromeContentRendererClient::AllowBrowserPlugin(
 bool ChromeContentRendererClient::AllowPepperMediaStreamAPI(
     const GURL& url) {
 #if !defined(OS_ANDROID)
-  // Allow only the Chat app to use the MediaStream APIs. It's OK to check
+  // Allow only the Hangouts app to use the MediaStream APIs. It's OK to check
   // the whitelist in the renderer, since we're only preventing access until
   // these APIs are public and stable.
   std::string url_host = url.host();
   if (url.SchemeIs("https") &&
-      (EndsWith(url_host, "talk.google.com", false) ||
-       EndsWith(url_host, "talkgadget.google.com", false))) {
+      (EndsWith(url_host, "talkgadget.google.com", false) ||
+       EndsWith(url_host, "plus.google.com", false) ||
+       EndsWith(url_host, "plus.sandbox.google.com", false)) &&
+      StartsWithASCII(url.path(), "/hangouts/", false)) {
     return true;
   }
   // Allow access for tests.
@@ -1397,11 +1365,9 @@ bool ChromeContentRendererClient::ShouldEnableSiteIsolationPolicy() const {
   return !command_line->HasSwitch(switches::kExtensionProcess);
 }
 
-WebKit::WebWorkerPermissionClientProxy*
+blink::WebWorkerPermissionClientProxy*
 ChromeContentRendererClient::CreateWorkerPermissionClientProxy(
     content::RenderView* render_view,
-    WebKit::WebFrame* frame) {
+    blink::WebFrame* frame) {
   return new WorkerPermissionClientProxy(render_view, frame);
 }
-
-}  // namespace chrome

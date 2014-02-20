@@ -73,7 +73,7 @@ Profile* ExtensionBrowserTest::profile() {
     if (browser())
       profile_ = browser()->profile();
     else
-      profile_ = ProfileManager::GetDefaultProfile();
+      profile_ = ProfileManager::GetActiveUserProfile();
   }
   return profile_;
 }
@@ -162,7 +162,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithFlags(
   service->extension_prefs()->OnExtensionInstalled(
       extension,
       Extension::ENABLED,
-      extensions::Blacklist::NOT_BLACKLISTED,
+      false,
       syncer::StringOrdinal::CreateInitialOrdinal());
 
   // Toggling incognito or file access will reload the extension, so wait for
@@ -458,9 +458,9 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
       VLOG(1) << "  " << (*it)->id();
 
     VLOG(1) << "Errors follow:";
-    const std::vector<string16>* errors =
+    const std::vector<base::string16>* errors =
         ExtensionErrorReporter::GetInstance()->GetErrors();
-    for (std::vector<string16>::const_iterator iter = errors->begin();
+    for (std::vector<base::string16>::const_iterator iter = errors->begin();
          iter != errors->end(); ++iter)
       VLOG(1) << *iter;
 
@@ -557,15 +557,17 @@ void ExtensionBrowserTest::NavigateInRenderer(content::WebContents* contents,
 }
 
 extensions::ExtensionHost* ExtensionBrowserTest::FindHostWithPath(
-    ExtensionProcessManager* manager,
+    extensions::ProcessManager* manager,
     const std::string& path,
     int expected_hosts) {
   extensions::ExtensionHost* host = NULL;
   int num_hosts = 0;
-  ExtensionProcessManager::ExtensionHostSet background_hosts =
+  extensions::ProcessManager::ExtensionHostSet background_hosts =
       manager->background_hosts();
-  for (ExtensionProcessManager::const_iterator iter = background_hosts.begin();
-       iter != background_hosts.end(); ++iter) {
+  for (extensions::ProcessManager::const_iterator iter =
+           background_hosts.begin();
+       iter != background_hosts.end();
+       ++iter) {
     if ((*iter)->GetURL().path() == path) {
       EXPECT_FALSE(host);
       host = *iter;

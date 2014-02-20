@@ -11,7 +11,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -22,9 +21,10 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/extensions/api/omnibox.h"
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
-#include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
+#include "extensions/browser/event_router.h"
+#include "extensions/common/extension.h"
 #include "ui/gfx/image/image.h"
 
 namespace extensions {
@@ -101,7 +101,7 @@ void ExtensionOmniboxEventRouter::OnInputStarted(
   scoped_ptr<Event> event(new Event(
       omnibox::OnInputStarted::kEventName,
       make_scoped_ptr(new base::ListValue())));
-  event->restrict_to_profile = profile;
+  event->restrict_to_browser_context = profile;
   ExtensionSystem::Get(profile)->event_router()->
       DispatchEventToExtension(extension_id, event.Pass());
 }
@@ -121,7 +121,7 @@ bool ExtensionOmniboxEventRouter::OnInputChanged(
 
   scoped_ptr<Event> event(new Event(omnibox::OnInputChanged::kEventName,
                                     args.Pass()));
-  event->restrict_to_profile = profile;
+  event->restrict_to_browser_context = profile;
   ExtensionSystem::Get(profile)->event_router()->
       DispatchEventToExtension(extension_id, event.Pass());
   return true;
@@ -154,7 +154,7 @@ void ExtensionOmniboxEventRouter::OnInputEntered(
 
   scoped_ptr<Event> event(new Event(omnibox::OnInputEntered::kEventName,
                                     args.Pass()));
-  event->restrict_to_profile = profile;
+  event->restrict_to_browser_context = profile;
   ExtensionSystem::Get(profile)->event_router()->
       DispatchEventToExtension(extension_id, event.Pass());
 
@@ -170,7 +170,7 @@ void ExtensionOmniboxEventRouter::OnInputCancelled(
   scoped_ptr<Event> event(new Event(
       omnibox::OnInputCancelled::kEventName,
       make_scoped_ptr(new base::ListValue())));
-  event->restrict_to_profile = profile;
+  event->restrict_to_browser_context = profile;
   ExtensionSystem::Get(profile)->event_router()->
       DispatchEventToExtension(extension_id, event.Pass());
 }
@@ -317,7 +317,7 @@ ACMatchClassifications StyleTypesToACMatchClassifications(
     const omnibox::SuggestResult &suggestion) {
   ACMatchClassifications match_classifications;
   if (suggestion.description_styles) {
-    string16 description = UTF8ToUTF16(suggestion.description);
+    base::string16 description = UTF8ToUTF16(suggestion.description);
     std::vector<int> styles(description.length(), 0);
 
     for (std::vector<linked_ptr<omnibox::SuggestResult::DescriptionStylesType> >
@@ -368,7 +368,7 @@ ACMatchClassifications StyleTypesToACMatchClassifications(
 void ApplyDefaultSuggestionForExtensionKeyword(
     Profile* profile,
     const TemplateURL* keyword,
-    const string16& remaining_input,
+    const base::string16& remaining_input,
     AutocompleteMatch* match) {
   DCHECK(keyword->GetType() == TemplateURL::OMNIBOX_API_EXTENSION);
 
@@ -377,18 +377,18 @@ void ApplyDefaultSuggestionForExtensionKeyword(
   if (!suggestion || suggestion->description.empty())
     return;  // fall back to the universal default
 
-  const string16 kPlaceholderText(ASCIIToUTF16("%s"));
-  const string16 kReplacementText(ASCIIToUTF16("<input>"));
+  const base::string16 kPlaceholderText(ASCIIToUTF16("%s"));
+  const base::string16 kReplacementText(ASCIIToUTF16("<input>"));
 
-  string16 description = UTF8ToUTF16(suggestion->description);
+  base::string16 description = UTF8ToUTF16(suggestion->description);
   ACMatchClassifications& description_styles = match->contents_class;
   description_styles = StyleTypesToACMatchClassifications(*suggestion);
 
   // Replace "%s" with the user's input and adjust the style offsets to the
   // new length of the description.
   size_t placeholder(description.find(kPlaceholderText, 0));
-  if (placeholder != string16::npos) {
-    string16 replacement =
+  if (placeholder != base::string16::npos) {
+    base::string16 replacement =
         remaining_input.empty() ? kReplacementText : remaining_input;
     description.replace(placeholder, kPlaceholderText.length(), replacement);
 

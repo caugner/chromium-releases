@@ -16,23 +16,23 @@ class ChromePluginPlaceholder : public plugins::PluginPlaceholder,
   static const char kPluginPlaceholderDataURL[];
 
   static ChromePluginPlaceholder* CreateBlockedPlugin(
-      content::RenderView* render_view,
-      WebKit::WebFrame* frame,
-      const WebKit::WebPluginParams& params,
+      content::RenderFrame* render_frame,
+      blink::WebFrame* frame,
+      const blink::WebPluginParams& params,
       const content::WebPluginInfo& info,
       const std::string& identifier,
-      const string16& name,
+      const base::string16& name,
       int resource_id,
-      const string16& message);
+      const base::string16& message);
 
   // Creates a new WebViewPlugin with a MissingPlugin as a delegate.
   static ChromePluginPlaceholder* CreateMissingPlugin(
-      content::RenderView* render_view,
-      WebKit::WebFrame* frame,
-      const WebKit::WebPluginParams& params);
+      content::RenderFrame* render_frame,
+      blink::WebFrame* frame,
+      const blink::WebPluginParams& params);
 
   static ChromePluginPlaceholder* CreateErrorPlugin(
-      content::RenderView* render_view,
+      content::RenderFrame* render_frame,
       const base::FilePath& plugin_path);
 
   void SetStatus(const ChromeViewHostMsg_GetPluginInfo_Status& status);
@@ -42,21 +42,21 @@ class ChromePluginPlaceholder : public plugins::PluginPlaceholder,
 #endif
 
  private:
-  ChromePluginPlaceholder(content::RenderView* render_view,
-                          WebKit::WebFrame* frame,
-                          const WebKit::WebPluginParams& params,
+  ChromePluginPlaceholder(content::RenderFrame* render_frame,
+                          blink::WebFrame* frame,
+                          const blink::WebPluginParams& params,
                           const std::string& html_data,
-                          const string16& title);
+                          const base::string16& title);
   virtual ~ChromePluginPlaceholder();
 
   // WebViewPlugin::Delegate (via PluginPlaceholder) method
-  virtual void BindWebFrame(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void BindWebFrame(blink::WebFrame* frame) OVERRIDE;
 
   // content::RenderViewObserver (via PluginPlaceholder) override:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // WebViewPlugin::Delegate (via PluginPlaceholder) methods:
-  virtual void ShowContextMenu(const WebKit::WebMouseEvent&) OVERRIDE;
+  virtual void ShowContextMenu(const blink::WebMouseEvent&) OVERRIDE;
 
   // content::RenderProcessObserver methods:
   virtual void PluginListChanged() OVERRIDE;
@@ -74,7 +74,7 @@ class ChromePluginPlaceholder : public plugins::PluginPlaceholder,
   void OnSetIsPrerendering(bool is_prerendering);
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   void OnDidNotFindMissingPlugin();
-  void OnFoundMissingPlugin(const string16& plugin_name);
+  void OnFoundMissingPlugin(const base::string16& plugin_name);
   void OnStartedDownloadingPlugin();
   void OnFinishedDownloadingPlugin();
   void OnErrorDownloadingPlugin(const std::string& error);
@@ -85,7 +85,7 @@ class ChromePluginPlaceholder : public plugins::PluginPlaceholder,
   // an IPC message file which can't be easily included in other header files.
   scoped_ptr<ChromeViewHostMsg_GetPluginInfo_Status> status_;
 
-  string16 title_;
+  base::string16 title_;
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   // |routing_id()| is the routing ID of our associated RenderView, but we have
@@ -95,7 +95,12 @@ class ChromePluginPlaceholder : public plugins::PluginPlaceholder,
 
   bool has_host_;
   int context_menu_request_id_;  // Nonzero when request pending.
-  string16 plugin_name_;
+  base::string16 plugin_name_;
+
+  // TODO(jam): remove this class, it's temporary until ContentSettingObserver
+  // is a RenderFrameObserver.
+  class RenderViewObserver;
+  scoped_ptr<RenderViewObserver> view_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromePluginPlaceholder);
 };

@@ -38,7 +38,7 @@ class LayerTreeHostCommonPerfTest : public LayerTreeTest {
 
   void ReadTestFile(const std::string& name) {
     base::FilePath test_data_dir;
-    ASSERT_TRUE(PathService::Get(cc::DIR_TEST_DATA, &test_data_dir));
+    ASSERT_TRUE(PathService::Get(CCPaths::DIR_TEST_DATA, &test_data_dir));
     base::FilePath json_file = test_data_dir.AppendASCII(name + ".json");
     ASSERT_TRUE(base::ReadFileToString(json_file, &json_));
   }
@@ -56,12 +56,6 @@ class LayerTreeHostCommonPerfTest : public LayerTreeTest {
 
   virtual void AfterTest() OVERRIDE {
     CHECK(!test_name_.empty()) << "Must SetTestName() before TearDown().";
-    perf_test::PrintResult("calc_draw_props_count",
-                           "",
-                           test_name_,
-                           timer_.NumLaps(),
-                           "count",
-                           true);
     perf_test::PrintResult("calc_draw_props_time",
                            "",
                            test_name_,

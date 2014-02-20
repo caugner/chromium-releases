@@ -25,7 +25,7 @@
 #include "ui/gfx/vector2d.h"
 
 using base::WeakPtr;
-using WebKit::WebAutofillClient;
+using blink::WebAutofillClient;
 
 namespace autofill {
 namespace {
@@ -125,9 +125,9 @@ AutofillPopupControllerImpl::AutofillPopupControllerImpl(
 AutofillPopupControllerImpl::~AutofillPopupControllerImpl() {}
 
 void AutofillPopupControllerImpl::Show(
-    const std::vector<string16>& names,
-    const std::vector<string16>& subtexts,
-    const std::vector<string16>& icons,
+    const std::vector<base::string16>& names,
+    const std::vector<base::string16>& subtexts,
+    const std::vector<base::string16>& icons,
     const std::vector<int>& identifiers) {
   SetValues(names, subtexts, icons, identifiers);
 
@@ -226,9 +226,9 @@ void AutofillPopupControllerImpl::UpdateDataListValues(
   // Add a separator if there are any other values.
   if (!identifiers_.empty() &&
       identifiers_[0] != WebAutofillClient::MenuItemIDSeparator) {
-    names_.insert(names_.begin(), string16());
-    subtexts_.insert(subtexts_.begin(), string16());
-    icons_.insert(icons_.begin(), string16());
+    names_.insert(names_.begin(), base::string16());
+    subtexts_.insert(subtexts_.begin(), base::string16());
+    icons_.insert(icons_.begin(), base::string16());
     identifiers_.insert(identifiers_.begin(),
                         WebAutofillClient::MenuItemIDSeparator);
   }
@@ -293,7 +293,7 @@ bool AutofillPopupControllerImpl::HandleKeyPressEvent(
       return (event.modifiers & content::NativeWebKeyboardEvent::ShiftKey) &&
              RemoveSelectedLine();
     case ui::VKEY_TAB:
-      // A tab press should cause the highlighted line to be selected, but still
+      // A tab press should cause the selected line to be accepted, but still
       // return false so the tab key press propagates and changes the cursor
       // location.
       AcceptSelectedLine();
@@ -317,16 +317,16 @@ void AutofillPopupControllerImpl::UpdateBoundsAndRedrawPopup() {
   view_->UpdateBoundsAndRedrawPopup();
 }
 
-void AutofillPopupControllerImpl::MouseHovered(int x, int y) {
+void AutofillPopupControllerImpl::LineSelectedAtPoint(int x, int y) {
   SetSelectedLine(LineFromY(y));
 }
 
-void AutofillPopupControllerImpl::MouseClicked(int x, int y) {
-  MouseHovered(x, y);
+void AutofillPopupControllerImpl::LineAcceptedAtPoint(int x, int y) {
+  LineSelectedAtPoint(x, y);
   AcceptSelectedLine();
 }
 
-void AutofillPopupControllerImpl::MouseExitedPopup() {
+void AutofillPopupControllerImpl::SelectionCleared() {
   SetSelectedLine(kNoSelection);
 }
 
@@ -340,7 +340,7 @@ void AutofillPopupControllerImpl::AcceptSuggestion(size_t index) {
 }
 
 int AutofillPopupControllerImpl::GetIconResourceID(
-    const string16& resource_name) const {
+    const base::string16& resource_name) const {
   for (size_t i = 0; i < arraysize(kDataResources); ++i) {
     if (resource_name == ASCIIToUTF16(kDataResources[i].name))
       return kDataResources[i].id;
@@ -400,15 +400,16 @@ bool AutofillPopupControllerImpl::hide_on_outside_click() const {
   return hide_on_outside_click_;
 }
 
-const std::vector<string16>& AutofillPopupControllerImpl::names() const {
+const std::vector<base::string16>& AutofillPopupControllerImpl::names() const {
   return names_;
 }
 
-const std::vector<string16>& AutofillPopupControllerImpl::subtexts() const {
+const std::vector<base::string16>& AutofillPopupControllerImpl::subtexts()
+    const {
   return subtexts_;
 }
 
-const std::vector<string16>& AutofillPopupControllerImpl::icons() const {
+const std::vector<base::string16>& AutofillPopupControllerImpl::icons() const {
   return icons_;
 }
 
@@ -570,9 +571,9 @@ bool AutofillPopupControllerImpl::HasSuggestions() {
 }
 
 void AutofillPopupControllerImpl::SetValues(
-    const std::vector<string16>& names,
-    const std::vector<string16>& subtexts,
-    const std::vector<string16>& icons,
+    const std::vector<base::string16>& names,
+    const std::vector<base::string16>& subtexts,
+    const std::vector<base::string16>& icons,
     const std::vector<int>& identifiers) {
   names_ = names;
   full_names_ = names;

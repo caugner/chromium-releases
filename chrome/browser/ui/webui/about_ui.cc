@@ -459,10 +459,10 @@ std::string AboutDiscards(const std::string& path) {
 
   chromeos::OomPriorityManager* oom =
       g_browser_process->platform_part()->oom_priority_manager();
-  std::vector<string16> titles = oom->GetTabTitles();
+  std::vector<base::string16> titles = oom->GetTabTitles();
   if (!titles.empty()) {
     output.append("<ul>");
-    std::vector<string16>::iterator it = titles.begin();
+    std::vector<base::string16>::iterator it = titles.begin();
     for ( ; it != titles.end(); ++it) {
       std::string title = UTF16ToUTF8(*it);
       title = net::EscapeForHTML(title);
@@ -708,8 +708,7 @@ std::string AboutStats(const std::string& query) {
   if (query == "json" || query == kStringsJsPath) {
     base::JSONWriter::WriteWithOptions(
           &root,
-          base::JSONWriter::OPTIONS_DO_NOT_ESCAPE |
-              base::JSONWriter::OPTIONS_PRETTY_PRINT,
+          base::JSONWriter::OPTIONS_PRETTY_PRINT,
           &data);
     if (query == kStringsJsPath)
       data = "var templateData = " + data + ";";
@@ -824,7 +823,7 @@ std::string AboutSandbox() {
   AboutSandboxRow(&data,
                   std::string(),
                   IDS_ABOUT_SANDBOX_SECCOMP_BPF_SANDBOX,
-                  status & content::kSandboxLinuxSeccompBpf);
+                  status & content::kSandboxLinuxSeccompBPF);
 
   data.append("</table>");
 
@@ -833,7 +832,7 @@ std::string AboutSandbox() {
                      status & content::kSandboxLinuxPIDNS &&
                      status & content::kSandboxLinuxNetNS;
   // A second-layer sandbox is also required to be adequately sandboxed.
-  bool good_layer2 = status & content::kSandboxLinuxSeccompBpf;
+  bool good_layer2 = status & content::kSandboxLinuxSeccompBPF;
   bool good = good_layer1 && good_layer2;
 
   if (good) {
@@ -904,7 +903,7 @@ void AboutMemoryHandler::OnDetailsAvailable() {
   const std::vector<ProcessData>& browser_processes = processes();
 
   // Aggregate per-process data into browser summary data.
-  string16 log_string;
+  base::string16 log_string;
   for (size_t index = 0; index < browser_processes.size(); index++) {
     if (browser_processes[index].processes.empty())
       continue;

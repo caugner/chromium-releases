@@ -14,11 +14,11 @@
 #include "chrome/browser/storage_monitor/test_storage_monitor.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/common/extension.h"
 #include "url/gurl.h"
 
 namespace {
@@ -77,7 +77,8 @@ class MediaGalleriesPrivateApiTest : public ExtensionApiTest {
                       const std::string& js_command,
                       const std::string& ok_message) {
     ExtensionTestMessageListener listener(ok_message, false  /* no reply */);
-    host->ExecuteJavascriptInWebFrame(string16(), ASCIIToUTF16(js_command));
+    host->ExecuteJavascriptInWebFrame(base::string16(),
+                                      ASCIIToUTF16(js_command));
     EXPECT_TRUE(listener.WaitUntilSatisfied());
   }
 
@@ -89,7 +90,7 @@ class MediaGalleriesPrivateApiTest : public ExtensionApiTest {
   void Attach() {
     DCHECK(StorageMonitor::GetInstance()->IsInitialized());
     StorageInfo info(device_id_, ASCIIToUTF16(kDeviceName), kDevicePath,
-                     string16(), string16(), string16(), 0);
+                     base::string16(), base::string16(), base::string16(), 0);
     StorageMonitor::GetInstance()->receiver()->ProcessAttach(info);
     content::RunAllPendingInMessageLoop();
   }
@@ -106,7 +107,15 @@ class MediaGalleriesPrivateApiTest : public ExtensionApiTest {
   DISALLOW_COPY_AND_ASSIGN(MediaGalleriesPrivateApiTest);
 };
 
-IN_PROC_BROWSER_TEST_F(MediaGalleriesPrivateApiTest, DeviceAttachDetachEvents) {
+// Fails on official Linux bot. See http://crbug.com/315276
+// Flaky on Mac trybots. See http://crbug.com/326324
+#if (defined(GOOGLE_CHROME_BUILD) && defined(OS_LINUX)) || defined(OS_MACOSX)
+#define MAYBE_DeviceAttachDetachEvents DISABLED_DeviceAttachDetachEvents
+#else
+#define MAYBE_DeviceAttachDetachEvents DeviceAttachDetachEvents
+#endif
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPrivateApiTest,
+                       MAYBE_DeviceAttachDetachEvents) {
   // Setup.
   TestStorageMonitor::SyncInitialize();
   const extensions::Extension* extension =

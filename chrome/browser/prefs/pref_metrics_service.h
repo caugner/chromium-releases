@@ -92,18 +92,8 @@ class PrefMetricsService : public BrowserContextKeyedService {
                             const std::string& histogram_name,
                             const Value* value);
 
-  // Callback for a list pref change. Each item in the list
-  // is logged using the given histogram callback.
-  void LogListPrefChange(const LogHistogramValueCallback& item_callback,
-                         const std::string& histogram_name,
-                         const Value* value);
-
   // Callback to receive a unique device_id.
   void GetDeviceIdCallback(const std::string& device_id);
-
-  // Marks all tracked preferences as required to save their values even if
-  // empty.
-  void MarkNeedsEmptyValueForTrackedPreferences();
 
   // Checks the tracked preferences against their last known values and reports
   // any discrepancies. This must be called after |device_id| has been set.
@@ -131,6 +121,9 @@ class PrefMetricsService : public BrowserContextKeyedService {
   std::string device_id_;
   const char** tracked_pref_paths_;
   const int tracked_pref_path_count_;
+
+  // TODO(gab): preprocessor define this member out on builds that don't use
+  // DCHECKs (http://crbug.com/322713).
   bool checked_tracked_prefs_;
 
   PrefChangeRegistrar pref_registrar_;

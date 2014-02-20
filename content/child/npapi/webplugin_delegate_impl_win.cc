@@ -35,9 +35,9 @@
 #include "ui/gfx/win/hwnd_util.h"
 #include "webkit/common/cursors/webcursor.h"
 
-using WebKit::WebKeyboardEvent;
-using WebKit::WebInputEvent;
-using WebKit::WebMouseEvent;
+using blink::WebKeyboardEvent;
+using blink::WebInputEvent;
+using blink::WebMouseEvent;
 
 namespace content {
 
@@ -1022,7 +1022,13 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
     result = CallWindowProc(
         delegate->plugin_wnd_proc_, hwnd, message, wparam, lparam);
 
-    delegate->is_calling_wndproc = false;
+    // The plugin instance may have been destroyed in the CallWindowProc call
+    // above. This will also destroy the plugin window. Before attempting to
+    // access the WebPluginDelegateImpl instance we validate if the window is
+    // still valid.
+    if (::IsWindow(hwnd))
+      delegate->is_calling_wndproc = false;
+
     g_current_plugin_instance = last_plugin_instance;
 
     if (message == WM_NCDESTROY) {
@@ -1038,7 +1044,8 @@ LRESULT CALLBACK WebPluginDelegateImpl::NativeWndProc(
       ClearThrottleQueueForWindow(hwnd);
     }
   }
-  delegate->last_message_ = old_message;
+  if (::IsWindow(hwnd))
+    delegate->last_message_ = old_message;
   return result;
 }
 
@@ -1330,6 +1337,12 @@ bool WebPluginDelegateImpl::PlatformHandleInputEvent(
   // the outermost NPP_HandleEvent call unwinds.
   if (handle_event_depth_ == 0) {
     ResetEvent(handle_event_pump_messages_event_);
+  }
+
+  // If we didn't enter a modal loop, need to unhook the filter.
+  if (handle_event_message_filter_hook_) {
+    UnhookWindowsHookEx(handle_event_message_filter_hook_);
+    handle_event_message_filter_hook_ = NULL;
   }
 
   if (::IsWindow(last_focus_window)) {

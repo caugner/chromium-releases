@@ -5,11 +5,11 @@
 import copy
 import logging
 
-from compiled_file_system import SingleFile
+from compiled_file_system import SingleFile, Unicode
 from data_source import DataSource
+from extensions_paths import JSON_TEMPLATES
 from future import Gettable, Future
 from third_party.json_schema_compiler.json_parse import Parse
-from svn_constants import JSON_PATH
 
 
 def _AddLevels(items, level):
@@ -52,6 +52,7 @@ class SidenavDataSource(DataSource):
     self._request = request
 
   @SingleFile
+  @Unicode
   def _CreateSidenavDict(self, _, content):
     items = Parse(content)
     # Start at level 2, the top <ul> element is level 1.
@@ -77,14 +78,13 @@ class SidenavDataSource(DataSource):
         item['href'] = self._server_instance.base_path + href
 
   def Cron(self):
-    futures = [
-        self._cache.GetFromFile('%s/%s_sidenav.json' % (JSON_PATH, platform))
-        for platform in ('apps', 'extensions')]
-    for future in futures:
-      future.Get()
+    futures = [self._cache.GetFromFile('%s/%s_sidenav.json' %
+                                       (JSON_TEMPLATES, platform))
+               for platform in ('apps', 'extensions')]
+    return Future(delegate=Gettable(lambda: [f.Get() for f in futures]))
 
   def get(self, key):
     sidenav = copy.deepcopy(self._cache.GetFromFile(
-        '%s/%s_sidenav.json' % (JSON_PATH, key)).Get())
+        '%s/%s_sidenav.json' % (JSON_TEMPLATES, key)).Get())
     _AddSelected(sidenav, self._server_instance.base_path + self._request.path)
     return sidenav

@@ -89,7 +89,7 @@ VolumeManagerWrapper.prototype.onReady_ = function(volumeManager) {
   for (var i = 0; i < this.volumeManager_.volumeInfoList.length; i++) {
     var volumeInfo = this.volumeManager_.volumeInfoList.item(i);
     // TODO(hidehiko): Filter mounted volumes located on Drive File System.
-    if (!this.driveEnabled_ && volumeInfo.volumeType == 'drive')
+    if (!this.driveEnabled_ && volumeInfo.volumeType === util.VolumeType.DRIVE)
       continue;
     volumeInfoList.push(volumeInfo);
   }
@@ -135,9 +135,9 @@ VolumeManagerWrapper.prototype.dispose = function() {
 VolumeManagerWrapper.prototype.onEvent_ = function(event) {
   if (!this.driveEnabled_) {
     // If the drive is disabled, ignore all drive related events.
-    if (event.type == 'drive-connection-changed' ||
-        (event.type == 'externally-unmounted' &&
-         event.mountPath == RootDirectory.DRIVE))
+    if (event.type === 'drive-connection-changed' ||
+        (event.type === 'externally-unmounted' &&
+         event.volumeInfo.volumeType === util.VolumeType.DRIVE))
       return;
   }
 
@@ -159,20 +159,21 @@ VolumeManagerWrapper.prototype.onVolumeInfoListUpdated_ = function(event) {
     // Filters drive related volumes.
     var index = event.index;
     for (var i = 0; i < event.index; i++) {
-      if (this.volumeManager_.volumeInfoList.item(i).volumeType == 'drive')
+      if (this.volumeManager_.volumeInfoList.item(i).volumeType ===
+          util.VolumeType.DRIVE)
         index--;
     }
 
     var numRemovedVolumes = 0;
     for (var i = 0; i < event.removed.length; i++) {
-      if (event.removed[i].volumeType != 'drive')
+      if (event.removed[i].volumeType !== util.VolumeType.DRIVE)
         numRemovedVolumes++;
     }
 
     var addedVolumes = [];
     for (var i = 0; i < event.added.length; i++) {
       var volumeInfo = event.added[i];
-      if (volumeInfo.volumeType != 'drive')
+      if (volumeInfo.volumeType !== util.VolumeType.DRIVE)
         addedVolumes.push(volumeInfo);
     }
 
@@ -204,7 +205,7 @@ VolumeManagerWrapper.prototype.getDriveConnectionState = function() {
   if (!this.driveEnabled_ || !this.volumeManager_) {
     return {
       type: util.DriveConnectionType.OFFLINE,
-      reasons: [util.DriveConnectionReason.NO_SERVICE]
+      reason: util.DriveConnectionReason.NO_SERVICE
     };
   }
 
@@ -217,14 +218,43 @@ VolumeManagerWrapper.prototype.getDriveConnectionState = function() {
  *     mountPath, or null if no volume is found
  */
 VolumeManagerWrapper.prototype.getVolumeInfo = function(mountPath) {
-  if (!this.volumeManager_)
-    return null;
+  return this.filterDisabledDriveVolume_(
+      this.volumeManager_ && this.volumeManager_.getVolumeInfo(mountPath));
+};
 
-  var volumeInfo = this.volumeManager_.getVolumeInfo(mountPath);
-  if (!this.driveEnabled_ && volumeInfo.volumeType == 'drive')
-    return null;
+/**
+ * Obtains a volume information from a file entry URL.
+ * TODO(hirono): Check a file system to find a volume.
+ *
+ * @param {string} url URL of entry.
+ * @return {VolumeInfo} Volume info.
+ */
+VolumeManagerWrapper.prototype.getVolumeInfoByURL = function(url) {
+  return this.filterDisabledDriveVolume_(
+      this.volumeManager_ && this.volumeManager_.getVolumeInfoByURL(url));
+};
 
-  return volumeInfo;
+/**
+ * Obtains a volume infomration of the current profile.
+ *
+ * @param {util.VolumeType} volumeType Volume type.
+ * @return {VolumeInfo} Found volume info.
+ */
+VolumeManagerWrapper.prototype.getCurrentProfileVolumeInfo =
+    function(volumeType) {
+  return this.filterDisabledDriveVolume_(
+      this.volumeManager_ &&
+      this.volumeManager_.getCurrentProfileVolumeInfo(volumeType));
+};
+
+/**
+ * Obtains location information from an entry.
+ *
+ * @param {Entry} entry File or directory entry.
+ * @return {EntryLocation} Location information.
+ */
+VolumeManagerWrapper.prototype.getLocationInfo = function(entry) {
+  return this.volumeManager_ && this.volumeManager_.getLocationInfo(entry);
 };
 
 /**
@@ -265,17 +295,17 @@ VolumeManagerWrapper.prototype.unmount = function(
 };
 
 /**
- * Resolves the path to an entry instance.
+ * Resolves the absolute path to an entry instance.
  * @param {string} path The path to be resolved.
  * @param {function(Entry)} successCallback Called with the resolved entry
  *     on success.
  * @param {function(FileError)} errorCallback Called with the error on error.
  */
-VolumeManagerWrapper.prototype.resolvePath = function(
+VolumeManagerWrapper.prototype.resolveAbsolutePath = function(
     path, successCallback, errorCallback) {
   if (this.pendingTasks_) {
-    this.pendingTasks_.push(
-        this.resolvePath.bind(this, path, successCallback, errorCallback));
+    this.pendingTasks_.push(this.resolveAbsolutePath.bind(
+        this, path, successCallback, errorCallback));
     return;
   }
 
@@ -286,5 +316,19 @@ VolumeManagerWrapper.prototype.resolvePath = function(
     return;
   }
 
-  this.volumeManager_.resolvePath(path, successCallback, errorCallback);
+  this.volumeManager_.resolveAbsolutePath(path, successCallback, errorCallback);
+};
+
+/**
+ * Filters volume info by referring driveEnabled.
+ *
+ * @param {VolumeInfo} volumeInfo Volume info.
+ * @return {VolumeInfo} Null if the drive is disabled and the given volume is
+ *     drive. Otherwise just returns the volume.
+ * @private
+ */
+VolumeManagerWrapper.prototype.filterDisabledDriveVolume_ =
+    function(volumeInfo) {
+  var isDrive = volumeInfo && volumeInfo.volumeType === util.VolumeType.DRIVE;
+  return this.driveEnabled_ || !isDrive ? volumeInfo : null;
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,9 @@ import android.content.pm.ServiceInfo;
 import android.os.Bundle;
 import android.util.Log;
 
-import java.util.List;
-
 import org.chromium.base.ContextTypes;
+
+import java.util.List;
 
 /**
  * {@link PepperPluginManager} collects meta data about plugins from preloaded android apps
@@ -80,7 +80,7 @@ public class PepperPluginManager {
         plugin.append(mimetype);
 
         return plugin.toString();
-   }
+    }
 
     /**
      * Collects information about installed plugins and returns a plugin description

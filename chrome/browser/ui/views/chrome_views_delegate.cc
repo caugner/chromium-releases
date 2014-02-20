@@ -14,6 +14,8 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/accessibility/accessibility_event_router_views.h"
 #include "chrome/common/pref_names.h"
+#include "grit/chrome_unscaled_resources.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
@@ -138,11 +140,12 @@ void ChromeViewsDelegate::NotifyAccessibilityEvent(
       view, event_type);
 }
 
-void ChromeViewsDelegate::NotifyMenuItemFocused(const string16& menu_name,
-                                                const string16& menu_item_name,
-                                                int item_index,
-                                                int item_count,
-                                                bool has_submenu) {
+void ChromeViewsDelegate::NotifyMenuItemFocused(
+    const base::string16& menu_name,
+    const base::string16& menu_item_name,
+    int item_index,
+    int item_count,
+    bool has_submenu) {
   AccessibilityEventRouterViews::GetInstance()->HandleMenuItemFocused(
       menu_name, menu_item_name, item_index, item_count, has_submenu);
 }
@@ -154,6 +157,12 @@ HICON ChromeViewsDelegate::GetDefaultWindowIcon() const {
 
 bool ChromeViewsDelegate::IsWindowInMetro(gfx::NativeWindow window) const {
   return chrome::IsNativeViewInAsh(window);
+}
+
+#elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
+gfx::ImageSkia* ChromeViewsDelegate::GetDefaultWindowIcon() const {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return rb.GetImageSkiaNamed(IDR_PRODUCT_LOGO_64);
 }
 #endif
 

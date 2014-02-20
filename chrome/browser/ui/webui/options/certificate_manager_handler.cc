@@ -22,7 +22,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/certificate_dialogs.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
-#include "chrome/browser/ui/crypto_module_password_dialog.h"
+#include "chrome/browser/ui/crypto_module_password_dialog_nss.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -33,8 +33,8 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/policy/profile_policy_connector.h"
-#include "chrome/browser/policy/profile_policy_connector_factory.h"
+#include "chrome/browser/chromeos/policy/user_network_configuration_updater.h"
+#include "chrome/browser/chromeos/policy/user_network_configuration_updater_factory.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #endif
@@ -85,8 +85,8 @@ struct DictionaryIdComparator {
     DCHECK(b->GetType() == Value::TYPE_DICTIONARY);
     const DictionaryValue* a_dict = reinterpret_cast<const DictionaryValue*>(a);
     const DictionaryValue* b_dict = reinterpret_cast<const DictionaryValue*>(b);
-    string16 a_str;
-    string16 b_str;
+    base::string16 a_str;
+    base::string16 b_str;
     a_dict->GetString(kNameId, &a_str);
     b_dict->GetString(kNameId, &b_str);
     if (collator_ == NULL)
@@ -396,10 +396,6 @@ void CertificateManagerHandler::GetLocalizedValues(
 #if defined(OS_CHROMEOS)
   localized_strings->SetString("importAndBindCertificate",
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_IMPORT_AND_BIND_BUTTON));
-  localized_strings->SetString("hardwareBackedKeyFormat",
-      l10n_util::GetStringUTF16(IDS_CERT_MANAGER_HARDWARE_BACKED_KEY_FORMAT));
-  localized_strings->SetString("chromeOSDeviceName",
-      l10n_util::GetStringUTF16(IDS_CERT_MANAGER_HARDWARE_BACKED));
 #endif  // defined(OS_CHROMEOS)
 }
 
@@ -489,9 +485,11 @@ void CertificateManagerHandler::RegisterMessages() {
 void CertificateManagerHandler::CertificatesRefreshed() {
   net::CertificateList web_trusted_certs;
 #if defined(OS_CHROMEOS)
-  policy::ProfilePolicyConnectorFactory::GetForProfile(
-      Profile::FromWebUI(web_ui()))->GetWebTrustedCertificates(
-          &web_trusted_certs);
+  policy::UserNetworkConfigurationUpdater* service =
+      policy::UserNetworkConfigurationUpdaterFactory::GetForProfile(
+          Profile::FromWebUI(web_ui()));
+  if (service)
+    service->GetWebTrustedCertificates(&web_trusted_certs);
 #endif
   PopulateTree("personalCertsTab", net::USER_CERT, web_trusted_certs);
   PopulateTree("serverCertsTab", net::SERVER_CERT, web_trusted_certs);
@@ -610,7 +608,7 @@ void CertificateManagerHandler::ExportPersonal(const ListValue* args) {
   select_file_dialog_ = ui::SelectFileDialog::Create(
       this, new ChromeSelectFilePolicy(web_ui()->GetWebContents()));
   select_file_dialog_->SelectFile(
-      ui::SelectFileDialog::SELECT_SAVEAS_FILE, string16(),
+      ui::SelectFileDialog::SELECT_SAVEAS_FILE, base::string16(),
       base::FilePath(), &file_type_info, 1, FILE_PATH_LITERAL("p12"),
       GetParentWindow(),
       reinterpret_cast<void*>(EXPORT_PERSONAL_FILE_SELECTED));
@@ -645,6 +643,7 @@ void CertificateManagerHandler::ExportPersonalPasswordSelected(
       selected_cert_list_[0].get(),
       chrome::kCryptoModulePasswordCertExport,
       std::string(),  // unused.
+      GetParentWindow(),
       base::Bind(&CertificateManagerHandler::ExportPersonalSlotsUnlocked,
                  base::Unretained(this)));
 }
@@ -700,7 +699,7 @@ void CertificateManagerHandler::StartImportPersonal(const ListValue* args) {
   select_file_dialog_ = ui::SelectFileDialog::Create(
       this, new ChromeSelectFilePolicy(web_ui()->GetWebContents()));
   select_file_dialog_->SelectFile(
-      ui::SelectFileDialog::SELECT_OPEN_FILE, string16(),
+      ui::SelectFileDialog::SELECT_OPEN_FILE, base::string16(),
       base::FilePath(), &file_type_info, 1, FILE_PATH_LITERAL("p12"),
       GetParentWindow(),
       reinterpret_cast<void*>(IMPORT_PERSONAL_FILE_SELECTED));
@@ -753,6 +752,7 @@ void CertificateManagerHandler::ImportPersonalFileRead(
       modules,
       chrome::kCryptoModulePasswordCertImport,
       std::string(),  // unused.
+      GetParentWindow(),
       base::Bind(&CertificateManagerHandler::ImportPersonalSlotUnlocked,
                  base::Unretained(this)));
 }

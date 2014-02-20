@@ -17,12 +17,15 @@
 #include "chrome/browser/android/foreign_session_helper.h"
 #include "chrome/browser/android/intent_helper.h"
 #include "chrome/browser/android/most_visited_sites.h"
+#include "chrome/browser/android/new_tab_page_prefs.h"
 #include "chrome/browser/android/omnibox/omnibox_prerender.h"
+#include "chrome/browser/android/password_ui_view_android.h"
 #include "chrome/browser/android/provider/chrome_browser_provider.h"
 #include "chrome/browser/android/recently_closed_tabs_bridge.h"
 #include "chrome/browser/android/shortcut_helper.h"
 #include "chrome/browser/android/signin/signin_manager_android.h"
 #include "chrome/browser/android/tab_android.h"
+#include "chrome/browser/android/uma_bridge.h"
 #include "chrome/browser/android/uma_utils.h"
 #include "chrome/browser/android/url_utilities.h"
 #include "chrome/browser/autofill/android/personal_data_manager_android.h"
@@ -30,6 +33,7 @@
 #include "chrome/browser/invalidation/invalidation_controller_android.h"
 #include "chrome/browser/lifetime/application_lifetime_android.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_settings_android.h"
+#include "chrome/browser/prerender/external_prerender_handler_android.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/search_engines/template_url_service_android.h"
 #include "chrome/browser/signin/android_profile_oauth2_token_service.h"
@@ -39,6 +43,7 @@
 #include "chrome/browser/ui/android/autofill/autofill_dialog_result.h"
 #include "chrome/browser/ui/android/autofill/autofill_popup_view_android.h"
 #include "chrome/browser/ui/android/chrome_http_auth_handler.h"
+#include "chrome/browser/ui/android/context_menu_helper.h"
 #include "chrome/browser/ui/android/infobars/auto_login_infobar_delegate_android.h"
 #include "chrome/browser/ui/android/infobars/confirm_infobar.h"
 #include "chrome/browser/ui/android/infobars/infobar_android.h"
@@ -47,11 +52,14 @@
 #include "chrome/browser/ui/android/javascript_app_modal_dialog_android.h"
 #include "chrome/browser/ui/android/navigation_popup.h"
 #include "chrome/browser/ui/android/ssl_client_certificate_request.h"
-#include "chrome/browser/ui/android/validation_message_bubble_android.h"
 #include "chrome/browser/ui/android/website_settings_popup_android.h"
 #include "components/autofill/core/browser/android/component_jni_registrar.h"
 #include "components/navigation_interception/component_jni_registrar.h"
 #include "components/web_contents_delegate_android/component_jni_registrar.h"
+
+#if defined(ENABLE_PRINTING) && !defined(ENABLE_FULL_PRINTING)
+#include "printing/printing_context_android.h"
+#endif
 
 bool RegisterCertificateViewer(JNIEnv* env);
 
@@ -89,9 +97,13 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     ChromiumApplication::RegisterBindings },
   { "ConfirmInfoBarDelegate", RegisterConfirmInfoBarDelegate },
   { "ContentViewUtil", RegisterContentViewUtil },
+  { "ContextMenuHelper", RegisterContextMenuHelper },
   { "DataReductionProxySettings", DataReductionProxySettingsAndroid::Register },
   { "DevToolsServer", RegisterDevToolsServer },
   { "InvalidationController", invalidation::RegisterInvalidationController },
+  { "ExternalPrerenderRequestHandler",
+      prerender::ExternalPrerenderHandlerAndroid::
+      RegisterExternalPrerenderHandlerAndroid },
   { "FaviconHelper", FaviconHelper::RegisterFaviconHelper },
   { "FieldTrialHelper", RegisterFieldTrialHelper },
   { "ForeignSessionHelper",
@@ -101,10 +113,14 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
   { "IntentHelper", RegisterIntentHelper },
   { "JavascriptAppModalDialog",
     JavascriptAppModalDialogAndroid::RegisterJavascriptAppModalDialog },
-  { "MostVisitedSites", RegisterMostVisitedSites },
+  { "MostVisitedSites", MostVisitedSites::Register },
   { "NativeInfoBar", RegisterNativeInfoBar },
   { "NavigationPopup", NavigationPopup::RegisterNavigationPopup },
+  { "NewTabPagePrefs",
+    NewTabPagePrefs::RegisterNewTabPagePrefs },
   { "OmniboxPrerender", RegisterOmniboxPrerender },
+  { "PasswordUIViewAndroid",
+    PasswordUIViewAndroid::RegisterPasswordUIViewAndroid },
   { "PersonalDataManagerAndroid",
     autofill::PersonalDataManagerAndroid::Register },
   { "ProfileAndroid", ProfileAndroid::RegisterProfileAndroid },
@@ -118,11 +134,14 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
   { "TemplateUrlServiceAndroid", TemplateUrlServiceAndroid::Register },
   { "TranslateInfoBarDelegate", RegisterTranslateInfoBarDelegate },
   { "TtsPlatformImpl", TtsPlatformImplAndroid::Register },
+  { "UmaBridge", RegisterUmaBridge },
   { "UrlUtilities", RegisterUrlUtilities },
-  { "ValidationMessageBubbleAndroid",
-      ValidationMessageBubbleAndroid::Register },
   { "WebsiteSettingsPopupAndroid",
     WebsiteSettingsPopupAndroid::RegisterWebsiteSettingsPopupAndroid },
+#if defined(ENABLE_PRINTING) && !defined(ENABLE_FULL_PRINTING)
+  { "PrintingContext",
+      printing::PrintingContextAndroid::RegisterPrintingContext},
+#endif
 };
 
 bool RegisterJni(JNIEnv* env) {

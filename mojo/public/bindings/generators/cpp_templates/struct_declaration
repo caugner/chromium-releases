@@ -1,6 +1,8 @@
 class $CLASS {
  public:
-  static $CLASS* New(mojo::Buffer* buf);
+  typedef $WRAPPER Wrapper;
+
+  static $CLASS* New(mojo::Buffer* buf, mojo::Buffer::Destructor dtor = NULL);
 
 $SETTERS
 

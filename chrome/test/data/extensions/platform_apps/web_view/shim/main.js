@@ -14,6 +14,9 @@ embedder.closeSocketURL = '';
 embedder.tests = {};
 
 embedder.setUp_ = function(config) {
+  if (!config || !config.testServer) {
+    return;
+  }
   embedder.baseGuestURL = 'http://localhost:' + config.testServer.port;
   embedder.emptyGuestURL = embedder.baseGuestURL +
       '/extensions/platform_apps/web_view/shim/empty_guest.html';
@@ -56,11 +59,11 @@ util.createWebViewTagInDOM = function(partitionName) {
 
 embedder.test = {};
 embedder.test.succeed = function() {
-  chrome.test.sendMessage('DoneShimTest.PASSED');
+  chrome.test.sendMessage('TEST_PASSED');
 };
 
 embedder.test.fail = function() {
-  chrome.test.sendMessage('DoneShimTest.FAILED');
+  chrome.test.sendMessage('TEST_FAILED');
 };
 
 embedder.test.assertEq = function(a, b) {
@@ -350,6 +353,10 @@ function testInvalidChromeExtensionURL() {
 
 function testWebRequestAPIExistence() {
   var apiPropertiesToCheck = [
+    // Declarative WebRequest API.
+    'onMessage',
+    'onRequest',
+    // WebRequest API.
     'onBeforeRequest',
     'onBeforeSendHeaders',
     'onSendHeaders',
@@ -365,13 +372,20 @@ function testWebRequestAPIExistence() {
   webview.addEventListener('loadstop', function(e) {
     for (var i = 0; i < apiPropertiesToCheck.length; ++i) {
       embedder.test.assertEq('object',
-                             typeof webview[apiPropertiesToCheck[i]]);
+                             typeof webview.request[apiPropertiesToCheck[i]]);
       embedder.test.assertEq(
-          'function', typeof webview[apiPropertiesToCheck[i]].addListener);
-      embedder.test.assertEq(webview[apiPropertiesToCheck[i]],
-                             webview.request[apiPropertiesToCheck[i]]);
+          'function',
+          typeof webview.request[apiPropertiesToCheck[i]].addListener);
+      embedder.test.assertEq(
+          'function',
+          typeof webview.request[apiPropertiesToCheck[i]].addRules);
+      embedder.test.assertEq(
+          'function',
+          typeof webview.request[apiPropertiesToCheck[i]].getRules);
+      embedder.test.assertEq(
+          'function',
+          typeof webview.request[apiPropertiesToCheck[i]].removeRules);
     }
-
     embedder.test.succeed();
   });
   webview.setAttribute('src', 'data:text/html,webview check api');
@@ -879,6 +893,45 @@ function testWebRequestAPI() {
   document.body.appendChild(webview);
 }
 
+// This test verifies that the basic use cases of the declarative WebRequest API
+// work as expected. This test demonstrates that rules can be added prior to
+// navigation and attachment.
+// 1. It adds a rule to block URLs that contain guest.
+// 2. It attempts to navigate to a guest.html page.
+// 3. It detects the appropriate loadabort message.
+// 4. It removes the rule blocking the page and reloads.
+// 5. The page loads successfully.
+function testDeclarativeWebRequestAPI() {
+  var step = 1;
+  var webview = new WebView();
+  var rule = {
+    conditions: [
+      new chrome.webViewRequest.RequestMatcher(
+        {
+          url: { urlContains: 'guest' }
+        }
+      )
+    ],
+    actions: [
+      new chrome.webViewRequest.CancelRequest()
+    ]
+  };
+  webview.request.onRequest.addRules([rule]);
+  webview.addEventListener('loadabort', function(e) {
+    embedder.test.assertEq(1, step);
+    embedder.test.assertEq('ERR_BLOCKED_BY_CLIENT', e.reason);
+    step = 2;
+    webview.request.onRequest.removeRules();
+    webview.reload();
+  });
+  webview.addEventListener('loadcommit', function(e) {
+    embedder.test.assertEq(2, step);
+    embedder.test.succeed();
+  });
+  webview.src = embedder.emptyGuestURL;
+  document.body.appendChild(webview);
+}
+
 // This test verifies that the WebRequest API onBeforeRequest event fires on
 // clients*.google.com URLs.
 function testWebRequestAPIGoogleProperty() {
@@ -1103,14 +1156,20 @@ function testNavigationToExternalProtocol() {
 }
 
 function testResizeWebviewResizesContent() {
-  var triggerNavUrl = 'data:text/html,trigger navigation';
   var webview = new WebView();
-  webview.src = triggerNavUrl;
+  webview.src = 'about:blank';
   webview.addEventListener('loadstop', function(e) {
     webview.executeScript(
       {file: 'inject_resize_test.js'},
       function(results) {
-        console.log('Script has been injected into webview.');
+        window.console.log('The resize test has been injected into webview.');
+      }
+    );
+    webview.executeScript(
+      {file: 'inject_comm_channel.js'},
+      function(results) {
+        window.console.log('The guest script for a two-way comm channel has ' +
+            'been injected into webview.');
         // Establish a communication channel with the guest.
         var msg = ['connect'];
         webview.contentWindow.postMessage(JSON.stringify(msg), '*');
@@ -1136,6 +1195,70 @@ function testResizeWebviewResizesContent() {
     console.log('Unexpected message: \'' + data[0]  + '\'');
     embedder.test.fail();
   });
+  document.body.appendChild(webview);
+}
+
+function testPostMessageCommChannel() {
+  var webview = new WebView();
+  webview.src = 'about:blank';
+  webview.addEventListener('loadstop', function(e) {
+    webview.executeScript(
+      {file: 'inject_comm_channel.js'},
+      function(results) {
+        window.console.log('The guest script for a two-way comm channel has ' +
+            'been injected into webview.');
+        // Establish a communication channel with the guest.
+        var msg = ['connect'];
+        webview.contentWindow.postMessage(JSON.stringify(msg), '*');
+      }
+    );
+  });
+  window.addEventListener('message', function(e) {
+    var data = JSON.parse(e.data);
+    if (data[0] == 'connected') {
+      console.log('A communication channel has been established with webview.');
+      embedder.test.succeed();
+      return;
+    }
+    console.log('Unexpected message: \'' + data[0]  + '\'');
+    embedder.test.fail();
+  });
+  document.body.appendChild(webview);
+}
+
+function testScreenshotCapture() {
+  var webview = document.createElement('webview');
+
+  webview.addEventListener('loadstop', function(e) {
+    webview.captureVisibleRegion(null, function(dataUrl) {
+      // 100x100 red box.
+      var expectedUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/' +
+          '2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLE' +
+          'BYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFB' +
+          'QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCABkAGQ' +
+          'DASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAA' +
+          'AgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM' +
+          '2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3' +
+          'R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8j' +
+          'JytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAA' +
+          'AAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBU' +
+          'QdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERU' +
+          'ZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqO' +
+          'kpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3' +
+          '+Pn6/9oADAMBAAIRAxEAPwD50ooor8MP9UwooooAKKKKACiiigAooooAKKKKACiii' +
+          'gAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiig' +
+          'AooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigA' +
+          'ooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAo' +
+          'oooAKKKKACiiigAooooAKKKKACiiigD/2Q==';
+      embedder.test.assertEq(expectedUrl, dataUrl);
+      embedder.test.succeed();
+    });
+  });
+
+  webview.style.width = '100px';
+  webview.style.height = '100px';
+  webview.setAttribute('src',
+      'data:text/html,<body style="background-color: red"></body>');
   document.body.appendChild(webview);
 }
 
@@ -1171,6 +1294,7 @@ embedder.test.testList = {
   'testNewWindowNoPreventDefault': testNewWindowNoPreventDefault,
   'testNewWindowNoReferrerLink': testNewWindowNoReferrerLink,
   'testContentLoadEvent': testContentLoadEvent,
+  'testDeclarativeWebRequestAPI': testDeclarativeWebRequestAPI,
   'testWebRequestAPI': testWebRequestAPI,
   'testWebRequestAPIGoogleProperty': testWebRequestAPIGoogleProperty,
   'testWebRequestListenerSurvivesReparenting':
@@ -1187,7 +1311,9 @@ embedder.test.testList = {
   'testReload': testReload,
   'testRemoveWebviewOnExit': testRemoveWebviewOnExit,
   'testRemoveWebviewAfterNavigation': testRemoveWebviewAfterNavigation,
-  'testResizeWebviewResizesContent': testResizeWebviewResizesContent
+  'testResizeWebviewResizesContent': testResizeWebviewResizesContent,
+  'testPostMessageCommChannel': testPostMessageCommChannel,
+  'testScreenshotCapture' : testScreenshotCapture
 };
 
 onload = function() {

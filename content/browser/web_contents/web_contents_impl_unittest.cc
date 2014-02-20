@@ -7,7 +7,6 @@
 #include "content/browser/frame_host/interstitial_page_impl.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/common/view_messages.h"
@@ -22,11 +21,13 @@
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/common/url_utils.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
+#include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -183,7 +184,7 @@ class TestInterstitialPage : public InterstitialPageImpl {
   virtual RenderViewHost* CreateRenderViewHost() OVERRIDE {
     return new TestRenderViewHost(
         SiteInstance::Create(web_contents()->GetBrowserContext()),
-        this, this, MSG_ROUTING_NONE, MSG_ROUTING_NONE, false);
+        this, this, this, MSG_ROUTING_NONE, MSG_ROUTING_NONE, false);
   }
 
   virtual WebContentsView* CreateWebContentsView() OVERRIDE {
@@ -284,7 +285,7 @@ class TestWebContentsObserver : public WebContentsObserver {
                            const GURL& validated_url,
                            bool is_main_frame,
                            int error_code,
-                           const string16& error_description,
+                           const base::string16& error_description,
                            RenderViewHost* render_view_host) OVERRIDE {
     last_url_ = validated_url;
   }
@@ -312,6 +313,26 @@ TEST_F(WebContentsImplTest, UpdateTitle) {
   contents()->UpdateTitle(rvh(), 0, ASCIIToUTF16("    Lots O' Whitespace\n"),
                           base::i18n::LEFT_TO_RIGHT);
   EXPECT_EQ(ASCIIToUTF16("Lots O' Whitespace"), contents()->GetTitle());
+}
+
+TEST_F(WebContentsImplTest, DontUseTitleFromPendingEntry) {
+  const GURL kGURL("chrome://blah");
+  controller().LoadURL(
+      kGURL, Referrer(), PAGE_TRANSITION_TYPED, std::string());
+  EXPECT_EQ(base::string16(), contents()->GetTitle());
+}
+
+TEST_F(WebContentsImplTest, UseTitleFromPendingEntryIfSet) {
+  const GURL kGURL("chrome://blah");
+  const base::string16 title = ASCIIToUTF16("My Title");
+  controller().LoadURL(
+      kGURL, Referrer(), PAGE_TRANSITION_TYPED, std::string());
+
+  NavigationEntry* entry = controller().GetVisibleEntry();
+  ASSERT_EQ(kGURL, entry->GetURL());
+  entry->SetTitle(title);
+
+  EXPECT_EQ(title, contents()->GetTitle());
 }
 
 // Test view source mode for a webui page.
@@ -396,7 +417,7 @@ TEST_F(WebContentsImplTest, SimpleNavigation) {
 TEST_F(WebContentsImplTest, NavigateToExcessivelyLongURL) {
   // Construct a URL that's kMaxURLChars + 1 long of all 'a's.
   const GURL url(std::string("http://example.org/").append(
-      kMaxURLChars + 1, 'a'));
+      GetMaxURLChars() + 1, 'a'));
 
   controller().LoadURL(
       url, Referrer(), PAGE_TRANSITION_GENERATED, std::string());
@@ -1065,7 +1086,7 @@ TEST_F(WebContentsImplTest, CrossSiteCantPreemptAfterUnload) {
   url_chain.push_back(GURL());
   contents()->GetRenderManagerForTesting()->OnCrossSiteResponse(
       pending_rvh, GlobalRequestID(0, 0), false, url_chain, Referrer(),
-      PAGE_TRANSITION_TYPED, 1);
+      PAGE_TRANSITION_TYPED, 1, false);
 
   // Suppose the original renderer navigates now, while the unload request is in
   // flight.  We should ignore it, wait for the unload ack, and let the pending
@@ -2057,7 +2078,7 @@ TEST_F(WebContentsImplTest, CopyStateFromAndPruneSourceInterstitial) {
       NavigationEntryImpl::FromNavigationEntry(
           other_controller.GetEntryAtIndex(0))->site_instance(), 1,
       other_controller.GetEntryAtIndex(0)->GetPageID());
-  other_controller.CopyStateFromAndPrune(&controller());
+  other_controller.CopyStateFromAndPrune(&controller(), false);
 
   // The merged controller should only have two entries: url1 and url2.
   ASSERT_EQ(2, other_controller.GetEntryCount());
@@ -2101,7 +2122,7 @@ TEST_F(WebContentsImplTest, CopyStateFromAndPruneTargetInterstitial) {
 
   // Ensure that we do not allow calling CopyStateFromAndPrune when an
   // interstitial is showing in the target.
-  EXPECT_FALSE(other_controller.CanPruneAllButVisible());
+  EXPECT_FALSE(other_controller.CanPruneAllButLastCommitted());
 }
 
 // Regression test for http://crbug.com/168611 - the URLs passed by the
@@ -2132,7 +2153,7 @@ TEST_F(WebContentsImplTest, FilterURLs) {
 
   // Check that an IPC with about:whatever is correctly normalized.
   other_contents->TestDidFailLoadWithError(
-      1, url_from_ipc, true, 1, string16());
+      1, url_from_ipc, true, 1, base::string16());
   EXPECT_EQ(url_normalized, other_observer.last_url());
 }
 

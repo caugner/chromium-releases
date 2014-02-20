@@ -2,6 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+chrome.runtime.onStartup.addListener(
+    function() {
+  chrome.alarms.create('hangout_services_fxpre', {'delayInMinutes': 2});
+});
+
+chrome.alarms.onAlarm.addListener(function(alarm) {
+  if (!alarm || alarm.name != 'hangout_services_fxpre')
+    return;
+
+  var e = document.createElement('iframe');
+  e.src = 'https://plus.google.com/hangouts/_/fxpre';
+  document.body.appendChild(e);
+});
+
 chrome.runtime.onMessageExternal.addListener(
     function(message, sender, sendResponse) {
   function doSendResponse(value, error) {
@@ -68,6 +82,13 @@ chrome.runtime.onMessageExternal.addListener(
       return true;
     } else if (method == 'logging.upload') {
       chrome.webrtcLoggingPrivate.upload(sender.tab.id, origin, doSendResponse);
+      return true;
+    } else if (method == 'logging.stopAndUpload') {
+      chrome.webrtcLoggingPrivate.stop(
+          sender.tab.id, origin, function() {
+              chrome.webrtcLoggingPrivate.upload(
+                  sender.tab.id, origin, doSendResponse);
+          });
       return true;
     } else if (method == 'logging.discard') {
       chrome.webrtcLoggingPrivate.discard(

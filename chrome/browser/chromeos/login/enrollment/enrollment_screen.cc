@@ -17,11 +17,11 @@
 #include "chrome/browser/chromeos/policy/auto_enrollment_client.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/cloud/enterprise_metrics.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
+#include "components/policy/core/common/cloud/enterprise_metrics.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
@@ -176,7 +176,7 @@ void EnrollmentScreen::OnConfirmationClosed() {
   if (is_auto_enrollment_ &&
       !enrollment_failed_once_ &&
       !user_.empty() &&
-      LoginUtils::IsWhitelisted(user_)) {
+      LoginUtils::IsWhitelisted(user_, NULL)) {
     actor_->ShowLoginSpinnerScreen();
     get_screen_observer()->OnExit(
         ScreenObserver::ENTERPRISE_AUTO_MAGIC_ENROLLMENT_COMPLETED);
@@ -250,6 +250,9 @@ void EnrollmentScreen::ReportEnrollmentStatus(
           return;
         case policy::DM_STATUS_SERVICE_MISSING_LICENSES:
           UMAFailure(policy::kMetricMissingLicensesError);
+          return;
+        case policy::DM_STATUS_SERVICE_DEPROVISIONED:
+          UMAFailure(policy::kMetricEnrollmentDeprovisioned);
           return;
       }
       break;

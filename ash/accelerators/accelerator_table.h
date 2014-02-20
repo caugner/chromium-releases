@@ -135,6 +135,7 @@ enum AcceleratorAction {
   OPEN_CROSH,
   OPEN_FILE_MANAGER,
   SWITCH_TO_NEXT_USER,
+  SWITCH_TO_PREVIOUS_USER,
 #endif
 };
 
@@ -191,6 +192,10 @@ ASH_EXPORT extern const size_t kNonrepeatableActionsLength;
 // Actions allowed in app mode.
 ASH_EXPORT extern const AcceleratorAction kActionsAllowedInAppMode[];
 ASH_EXPORT extern const size_t kActionsAllowedInAppModeLength;
+
+// Actions that require at least 1 window.
+ASH_EXPORT extern const AcceleratorAction kActionsNeedingWindow[];
+ASH_EXPORT extern const size_t kActionsNeedingWindowLength;
 
 }  // namespace ash
 

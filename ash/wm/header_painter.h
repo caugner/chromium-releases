@@ -6,7 +6,6 @@
 #define ASH_WM_HEADER_PAINTER_H_
 
 #include "ash/ash_export.h"
-#include "ash/wm/window_state_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"  // OVERRIDE
 #include "base/gtest_prod_util.h"
@@ -36,8 +35,7 @@ class FrameCaptionButtonContainerView;
 
 // Helper class for painting the window header.
 class ASH_EXPORT HeaderPainter : public aura::WindowObserver,
-                                 public gfx::AnimationDelegate,
-                                 public wm::WindowStateObserver {
+                                 public gfx::AnimationDelegate {
  public:
   // Opacity values for the window header in various states, from 0 to 255.
   static int kActiveWindowOpacity;
@@ -49,11 +47,6 @@ class ASH_EXPORT HeaderPainter : public aura::WindowObserver,
     INACTIVE
   };
 
-  enum Themed {
-    THEMED_YES,
-    THEMED_NO
-  };
-
   HeaderPainter();
   virtual ~HeaderPainter();
 
@@ -62,13 +55,6 @@ class ASH_EXPORT HeaderPainter : public aura::WindowObserver,
             views::View* header_view,
             views::View* window_icon,
             FrameCaptionButtonContainerView* caption_button_container);
-
-  // Enable/Disable the solo-window transparent header appearance feature.
-  static void SetSoloWindowHeadersEnabled(bool enabled);
-
-  // Updates the solo-window transparent header appearance for all windows
-  // using frame painters in |root_window|.
-  static void UpdateSoloWindowHeader(aura::Window* root_window);
 
   // Returns the bounds of the client view for a window with |header_height|
   // and |window_bounds|. The return value and |window_bounds| are in the
@@ -99,9 +85,6 @@ class ASH_EXPORT HeaderPainter : public aura::WindowObserver,
   // Returns the amount that the theme background should be inset.
   int GetThemeBackgroundXInset() const;
 
-  // Returns true if the header should be painted using a minimalistic style.
-  bool ShouldUseMinimalHeaderStyle(Themed header_themed) const;
-
   // Paints the header.
   // |theme_frame_overlay_id| is 0 if no overlay image should be used.
   void PaintHeader(gfx::Canvas* canvas,
@@ -131,6 +114,11 @@ class ASH_EXPORT HeaderPainter : public aura::WindowObserver,
     header_height_ = header_height;
   }
 
+  // Returns the header height.
+  int header_height() const {
+    return header_height_;
+  }
+
   // Schedule a re-paint of the entire title.
   void SchedulePaintForTitle(const gfx::Font& title_font);
 
@@ -138,36 +126,17 @@ class ASH_EXPORT HeaderPainter : public aura::WindowObserver,
   void OnThemeChanged();
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowVisibilityChanged(aura::Window* window,
-                                         bool visible) OVERRIDE;
   virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
   virtual void OnWindowBoundsChanged(aura::Window* window,
                                      const gfx::Rect& old_bounds,
                                      const gfx::Rect& new_bounds) OVERRIDE;
-  virtual void OnWindowAddedToRootWindow(aura::Window* window) OVERRIDE;
-  virtual void OnWindowRemovingFromRootWindow(aura::Window* window) OVERRIDE;
-
-  // ash::WindowStateObserver override:
-  virtual void OnTrackedByWorkspaceChanged(wm::WindowState* window_state,
-                                           bool old) OVERRIDE;
 
   // Overridden from gfx::AnimationDelegate
   virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, CreateAndDeleteSingleWindow);
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, UseSoloWindowHeader);
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, UseSoloWindowHeaderWithApp);
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, UseSoloWindowHeaderWithPanel);
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, UseSoloWindowHeaderModal);
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, UseSoloWindowHeaderConstrained);
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, UseSoloWindowHeaderNotDrawn);
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, UseSoloWindowHeaderMultiDisplay);
   FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, GetHeaderOpacity);
   FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, TitleIconAlignment);
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest, ChildWindowVisibility);
-  FRIEND_TEST_ALL_PREFIXES(HeaderPainterTest,
-                           NoCrashShutdownWithAlwaysOnTopWindow);
 
   // Returns the header bounds in the coordinates of |header_view_|. The header
   // is assumed to be positioned at the top left corner of |header_view_| and to
@@ -189,24 +158,6 @@ class ASH_EXPORT HeaderPainter : public aura::WindowObserver,
 
   // Returns the radius of the header's top corners.
   int GetHeaderCornerRadius() const;
-
-  // Returns true if |window_->GetRootWindow()| should be drawing transparent
-  // window headers.
-  bool UseSoloWindowHeader() const;
-
-  // Returns true if |root_window| has exactly one visible, normal-type window.
-  // It ignores |ignore_window| while calculating the number of windows.
-  // Pass NULL for |ignore_window| to consider all windows.
-  static bool UseSoloWindowHeaderInRoot(aura::Window* root_window,
-                                        aura::Window* ignore_window);
-
-  // Updates the solo-window transparent header appearance for all windows in
-  // |root_window|. If |ignore_window| is not NULL it is ignored for when
-  // counting visible windows. This is useful for updates when a window is about
-  // to be closed or is moving to another root. If the solo window status
-  // changes it schedules paints as necessary.
-  static void UpdateSoloWindowInRoot(aura::Window* root_window,
-                                     aura::Window* ignore_window);
 
   // Schedules a paint for the header. Used when transitioning from no header to
   // a header (or other way around).

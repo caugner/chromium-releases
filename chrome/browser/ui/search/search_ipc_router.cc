@@ -25,6 +25,16 @@ void SearchIPCRouter::DetermineIfPageSupportsInstant() {
   Send(new ChromeViewMsg_DetermineIfPageSupportsInstant(routing_id()));
 }
 
+void SearchIPCRouter::SendChromeIdentityCheckResult(
+    const base::string16& identity,
+    bool identity_match) {
+  if (!policy_->ShouldProcessChromeIdentityCheck())
+    return;
+
+  Send(new ChromeViewMsg_ChromeIdentityCheckResult(routing_id(), identity,
+                                                   identity_match));
+}
+
 void SearchIPCRouter::SetPromoInformation(bool is_app_launcher_enabled) {
   if (!policy_->ShouldSendSetPromoInformation())
     return;
@@ -40,36 +50,8 @@ void SearchIPCRouter::SetDisplayInstantResults() {
   bool is_search_results_page = !chrome::GetSearchTerms(web_contents()).empty();
   Send(new ChromeViewMsg_SearchBoxSetDisplayInstantResults(
        routing_id(),
-       is_search_results_page && chrome::ShouldPrefetchSearchResultsOnSRP()));
-}
-
-void SearchIPCRouter::SendThemeBackgroundInfo(
-    const ThemeBackgroundInfo& theme_info) {
-  if (!policy_->ShouldSendThemeBackgroundInfo())
-    return;
-
-  Send(new ChromeViewMsg_SearchBoxThemeChanged(routing_id(), theme_info));
-}
-
-void SearchIPCRouter::SendMostVisitedItems(
-    const std::vector<InstantMostVisitedItem>& items) {
-  if (!policy_->ShouldSendMostVisitedItems())
-    return;
-
-  Send(new ChromeViewMsg_SearchBoxMostVisitedItemsChanged(
-      routing_id(), items));
-}
-
-void SearchIPCRouter::SendChromeIdentityCheckResult(
-    const string16& identity,
-    bool identity_match) {
-  if (!policy_->ShouldProcessChromeIdentityCheck())
-    return;
-
-  Send(new ChromeViewMsg_ChromeIdentityCheckResult(
-      routing_id(),
-      identity,
-      identity_match));
+       (is_search_results_page && chrome::ShouldPrefetchSearchResultsOnSRP()) ||
+       chrome::ShouldPrefetchSearchResults()));
 }
 
 void SearchIPCRouter::SetSuggestionToPrefetch(
@@ -81,7 +63,30 @@ void SearchIPCRouter::SetSuggestionToPrefetch(
                                                           suggestion));
 }
 
-void SearchIPCRouter::Submit(const string16& text) {
+void SearchIPCRouter::SendMostVisitedItems(
+    const std::vector<InstantMostVisitedItem>& items) {
+  if (!policy_->ShouldSendMostVisitedItems())
+    return;
+
+  Send(new ChromeViewMsg_SearchBoxMostVisitedItemsChanged(routing_id(), items));
+}
+
+void SearchIPCRouter::SendThemeBackgroundInfo(
+    const ThemeBackgroundInfo& theme_info) {
+  if (!policy_->ShouldSendThemeBackgroundInfo())
+    return;
+
+  Send(new ChromeViewMsg_SearchBoxThemeChanged(routing_id(), theme_info));
+}
+
+void SearchIPCRouter::ToggleVoiceSearch() {
+  if (!policy_->ShouldSendToggleVoiceSearch())
+    return;
+
+  Send(new ChromeViewMsg_SearchBoxToggleVoiceSearch(routing_id()));
+}
+
+void SearchIPCRouter::Submit(const base::string16& text) {
   if (!policy_->ShouldSubmitQuery())
     return;
 
@@ -113,6 +118,7 @@ bool SearchIPCRouter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions,
                         OnUndoAllMostVisitedDeletions);
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_LogEvent, OnLogEvent);
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_LogImpression, OnLogImpression);
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_PasteAndOpenDropdown,
                         OnPasteAndOpenDropDown);
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ChromeIdentityCheck,
@@ -216,8 +222,31 @@ void SearchIPCRouter::OnLogEvent(int page_id, NTPLoggingEventType event) const {
   delegate_->OnLogEvent(event);
 }
 
+void SearchIPCRouter::OnLogImpression(int page_id,
+                                      int position,
+                                      const base::string16& provider) const {
+  if (!web_contents()->IsActiveEntry(page_id))
+    return;
+
+  // Only allow string of 8 alphanumeric characters or less as providers.
+  if (provider.length() > 8)
+    return;
+  for (base::string16::const_iterator it = provider.begin();
+       it != provider.end(); ++it) {
+    if (!IsAsciiAlpha(*it) && !IsAsciiDigit(*it))
+      return;
+  }
+
+  delegate_->OnInstantSupportDetermined(true);
+  // Logging impressions is controlled by the same policy as logging events.
+  if (!policy_->ShouldProcessLogEvent())
+    return;
+
+  delegate_->OnLogImpression(position, provider);
+}
+
 void SearchIPCRouter::OnPasteAndOpenDropDown(int page_id,
-                                             const string16& text) const {
+                                             const base::string16& text) const {
   if (!web_contents()->IsActiveEntry(page_id))
     return;
 
@@ -228,8 +257,9 @@ void SearchIPCRouter::OnPasteAndOpenDropDown(int page_id,
   delegate_->PasteIntoOmnibox(text);
 }
 
-void SearchIPCRouter::OnChromeIdentityCheck(int page_id,
-                                            const string16& identity) const {
+void SearchIPCRouter::OnChromeIdentityCheck(
+    int page_id,
+    const base::string16& identity) const {
   if (!web_contents()->IsActiveEntry(page_id))
     return;
 

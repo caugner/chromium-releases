@@ -83,17 +83,17 @@ class PluginTest : public ContentBrowserTest {
   }
 
   static void LoadAndWaitInWindow(Shell* window, const GURL& url) {
-    string16 expected_title(ASCIIToUTF16("OK"));
+    base::string16 expected_title(ASCIIToUTF16("OK"));
     TitleWatcher title_watcher(window->web_contents(), expected_title);
     title_watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
     title_watcher.AlsoWaitForTitle(ASCIIToUTF16("plugin_not_found"));
     NavigateToURL(window, url);
-    string16 title = title_watcher.WaitAndGetTitle();
+    base::string16 title = title_watcher.WaitAndGetTitle();
     if (title == ASCIIToUTF16("plugin_not_found")) {
       const testing::TestInfo* const test_info =
           testing::UnitTest::GetInstance()->current_test_info();
-      LOG(INFO) << "PluginTest." << test_info->name() <<
-                   " not running because plugin not installed.";
+      VLOG(0) << "PluginTest." << test_info->name()
+              << " not running because plugin not installed.";
     } else {
       EXPECT_EQ(expected_title, title);
     }
@@ -117,8 +117,8 @@ class PluginTest : public ContentBrowserTest {
     if (!base::PathExists(path)) {
       const testing::TestInfo* const test_info =
           testing::UnitTest::GetInstance()->current_test_info();
-      LOG(INFO) << "PluginTest." << test_info->name() <<
-                   " not running because test data wasn't found.";
+      VLOG(0) << "PluginTest." << test_info->name()
+              << " not running because test data wasn't found.";
       return;
     }
 
@@ -170,11 +170,11 @@ IN_PROC_BROWSER_TEST_F(PluginTest,
                        MAYBE(SelfDeletePluginInvokeInSynchronousMouseUp)) {
   NavigateToURL(shell(), GetURL("execute_script_delete_in_mouse_up.html"));
 
-  string16 expected_title(ASCIIToUTF16("OK"));
+  base::string16 expected_title(ASCIIToUTF16("OK"));
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
   title_watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
   SimulateMouseClick(shell()->web_contents(), 0,
-      WebKit::WebMouseEvent::ButtonLeft);
+      blink::WebMouseEvent::ButtonLeft);
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 }
 #endif
@@ -201,7 +201,7 @@ IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE(SelfDeletePluginInvokeAlert)) {
   // race condition where the alert can come up before we start watching for it.
   shell()->LoadURL(GetURL("self_delete_plugin_invoke_alert.html"));
 
-  string16 expected_title(ASCIIToUTF16("OK"));
+  base::string16 expected_title(ASCIIToUTF16("OK"));
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
   title_watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
 
@@ -241,7 +241,7 @@ IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE(GetJavaScriptURL2)) {
 }
 
 // Test is flaky on linux/cros/win builders.  http://crbug.com/71904
-IN_PROC_BROWSER_TEST_F(PluginTest, DISABLED_GetURLRedirectNotification) {
+IN_PROC_BROWSER_TEST_F(PluginTest, GetURLRedirectNotification) {
   LoadAndWait(GetURL("geturl_redirect_notify.html"));
 }
 
@@ -408,7 +408,7 @@ IN_PROC_BROWSER_TEST_F(PluginTest, DISABLED_PluginConvertPointTest) {
 
   NavigateToURL(shell(), GetURL("convert_point.html"));
 
-  string16 expected_title(ASCIIToUTF16("OK"));
+  base::string16 expected_title(ASCIIToUTF16("OK"));
   TitleWatcher title_watcher(shell()->web_contents(), expected_title);
   title_watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
   // TODO(stuartmorgan): When the automation system supports sending clicks,
@@ -451,7 +451,14 @@ IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE(Real)) {
   TestPlugin("real.html");
 }
 
-IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE(FlashOctetStream)) {
+// http://crbug.com/320041
+#if (defined(OS_WIN) && defined(ARCH_CPU_X86_64)) || \
+    (defined(GOOGLE_CHROME_BUILD) && defined(OS_WIN))
+#define MAYBE_FlashOctetStream DISABLED_FlashOctetStream
+#else
+#define MAYBE_FlashOctetStream FlashOctetStream
+#endif
+IN_PROC_BROWSER_TEST_F(PluginTest, MAYBE_FlashOctetStream) {
   TestPlugin("flash-octet-stream.html");
 }
 

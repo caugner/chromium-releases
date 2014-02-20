@@ -34,15 +34,22 @@ class SearchTermsData {
 
   // Returns the value for the Chrome Omnibox rlz.  This implementation returns
   // the empty string.
-  virtual string16 GetRlzParameterValue() const;
+  virtual base::string16 GetRlzParameterValue() const;
 
   // The optional client parameter passed with Google search requests.  This
   // implementation returns the empty string.
   virtual std::string GetSearchClient() const;
 
-  // The client parameter passed with Google suggest requests.  This
-  // implementation returns the empty string.
+  // The suggest client parameter ("client") passed with Google suggest
+  // requests.  See GetSuggestRequestIdentifier() for more details.
+  // This implementation returns the empty string.
   virtual std::string GetSuggestClient() const;
+
+  // The suggest request identifier parameter ("gs_ri") passed with Google
+  // suggest requests.   Along with suggestclient (See GetSuggestClient()),
+  // this parameter controls what suggestion results are returned.
+  // This implementation returns the empty string.
+  virtual std::string GetSuggestRequestIdentifier() const;
 
   // Returns a string that will cause the search results page to update
   // incrementally. Currently, Instant Extended passes a different param to
@@ -81,9 +88,10 @@ class UIThreadSearchTermsData : public SearchTermsData {
 
   virtual std::string GoogleBaseURLValue() const OVERRIDE;
   virtual std::string GetApplicationLocale() const OVERRIDE;
-  virtual string16 GetRlzParameterValue() const OVERRIDE;
+  virtual base::string16 GetRlzParameterValue() const OVERRIDE;
   virtual std::string GetSearchClient() const OVERRIDE;
   virtual std::string GetSuggestClient() const OVERRIDE;
+  virtual std::string GetSuggestRequestIdentifier() const OVERRIDE;
   virtual std::string ForceInstantResultsParam(
       bool for_prerender) const OVERRIDE;
   virtual std::string InstantExtendedEnabledParam() const OVERRIDE;

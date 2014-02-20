@@ -20,15 +20,22 @@
 #include "ash/wm/workspace_controller.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "base/metrics/histogram.h"
+#include "grit/ash_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "third_party/skia/include/core/SkPaint.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/window_tree_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/rect.h"
+#include "ui/views/background.h"
 
 namespace ash {
 namespace internal {
@@ -44,24 +51,90 @@ const int DockedWindowLayoutManager::kMinDockGap = 2;
 const int DockedWindowLayoutManager::kIdealWidth = 250;
 const int kMinimumHeight = 250;
 const int kSlideDurationMs = 120;
-const int kFadeDurationMs = 720;
+const int kFadeDurationMs = 60;
+const int kMinimizeDurationMs = 720;
 
-namespace {
-
-const SkColor kDockBackgroundColor = SkColorSetARGB(0xff, 0x10, 0x10, 0x10);
-const float kDockBackgroundOpacity = 0.5f;
-
-class DockedBackgroundWidget : public views::Widget {
+class DockedBackgroundWidget : public views::Widget,
+                               public internal::BackgroundAnimatorDelegate {
  public:
-  explicit DockedBackgroundWidget(aura::Window* container) {
+  explicit DockedBackgroundWidget(aura::Window* container)
+      : alignment_(DOCKED_ALIGNMENT_NONE),
+        background_animator_(this, 0, kLauncherBackgroundAlpha),
+        alpha_(0),
+        opaque_background_(ui::LAYER_SOLID_COLOR) {
     InitWidget(container);
+  }
+
+  // Sets widget bounds and sizes opaque background layer to fill the widget.
+  void SetBackgroundBounds(const gfx::Rect bounds, DockedAlignment alignment) {
+    SetBounds(bounds);
+    opaque_background_.SetBounds(gfx::Rect(bounds.size()));
+    alignment_ = alignment;
+  }
+
+  // Sets the docked area background type and starts transition animation.
+  void SetPaintsBackground(
+      ShelfBackgroundType background_type,
+      BackgroundAnimatorChangeType change_type) {
+    float target_opacity =
+        (background_type == SHELF_BACKGROUND_MAXIMIZED) ? 1.0f : 0.0f;
+    scoped_ptr<ui::ScopedLayerAnimationSettings> opaque_background_animation;
+    if (change_type != BACKGROUND_CHANGE_IMMEDIATE) {
+      opaque_background_animation.reset(new ui::ScopedLayerAnimationSettings(
+          opaque_background_.GetAnimator()));
+      opaque_background_animation->SetTransitionDuration(
+          base::TimeDelta::FromMilliseconds(kTimeToSwitchBackgroundMs));
+    }
+    opaque_background_.SetOpacity(target_opacity);
+
+    // TODO(varkha): use ui::Layer on both opaque_background and normal
+    // background retire background_animator_ at all. It would be simpler.
+    // See also ShelfWidget::SetPaintsBackground.
+    background_animator_.SetPaintsBackground(
+        background_type != SHELF_BACKGROUND_DEFAULT,
+        change_type);
+    SchedulePaintInRect(gfx::Rect(GetWindowBoundsInScreen().size()));
+  }
+
+  // views::Widget:
+  virtual void OnNativeWidgetPaint(gfx::Canvas* canvas) OVERRIDE {
+    const gfx::ImageSkia& launcher_background(
+        alignment_ == DOCKED_ALIGNMENT_LEFT ?
+            launcher_background_left_ : launcher_background_right_);
+    gfx::Rect rect = gfx::Rect(GetWindowBoundsInScreen().size());
+    SkPaint paint;
+    paint.setAlpha(alpha_);
+    canvas->DrawImageInt(
+        launcher_background,
+        0, 0, launcher_background.width(), launcher_background.height(),
+        alignment_ == DOCKED_ALIGNMENT_LEFT ?
+            rect.width() - launcher_background.width() : 0, 0,
+        launcher_background.width(), rect.height(),
+        false,
+        paint);
+    canvas->DrawImageInt(
+        launcher_background,
+        alignment_ == DOCKED_ALIGNMENT_LEFT ?
+            0 : launcher_background.width() - 1, 0,
+        1, launcher_background.height(),
+        alignment_ == DOCKED_ALIGNMENT_LEFT ?
+            0 : launcher_background.width(), 0,
+        rect.width() - launcher_background.width(), rect.height(),
+        false,
+        paint);
+  }
+
+  // BackgroundAnimatorDelegate:
+  virtual void UpdateBackground(int alpha) OVERRIDE {
+    alpha_ = alpha;
+    SchedulePaintInRect(gfx::Rect(GetWindowBoundsInScreen().size()));
   }
 
  private:
   void InitWidget(aura::Window* parent) {
     views::Widget::InitParams params;
     params.type = views::Widget::InitParams::TYPE_POPUP;
-    params.opacity = views::Widget::InitParams::OPAQUE_WINDOW;
+    params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
     params.can_activate = false;
     params.keep_on_top = false;
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
@@ -70,35 +143,49 @@ class DockedBackgroundWidget : public views::Widget {
     set_focus_on_creation(false);
     Init(params);
     GetNativeWindow()->SetProperty(internal::kStayInSameRootWindowKey, true);
-    DCHECK_EQ(GetNativeView()->GetRootWindow(), parent->GetRootWindow());
-    views::View* content_view = new views::View;
-    content_view->set_background(
-        views::Background::CreateSolidBackground(kDockBackgroundColor));
-    SetContentsView(content_view);
+    opaque_background_.SetColor(SK_ColorBLACK);
+    opaque_background_.SetBounds(gfx::Rect(GetWindowBoundsInScreen().size()));
+    opaque_background_.SetOpacity(0.0f);
+    GetNativeWindow()->layer()->Add(&opaque_background_);
     Hide();
+
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    gfx::ImageSkia launcher_background =
+        *rb.GetImageSkiaNamed(IDR_AURA_LAUNCHER_BACKGROUND);
+    launcher_background_left_ = gfx::ImageSkiaOperations::CreateRotatedImage(
+        launcher_background, SkBitmapOperations::ROTATION_90_CW);
+    launcher_background_right_ = gfx::ImageSkiaOperations::CreateRotatedImage(
+        launcher_background, SkBitmapOperations::ROTATION_270_CW);
   }
+
+  DockedAlignment alignment_;
+
+  // The animator for the background transitions.
+  internal::BackgroundAnimator background_animator_;
+
+  // The alpha to use for drawing image assets covering the docked background.
+  int alpha_;
+
+  // Solid black background that can be made fully opaque.
+  ui::Layer opaque_background_;
+
+  // Backgrounds created from shelf background by 90 or 270 degree rotation.
+  gfx::ImageSkia launcher_background_left_;
+  gfx::ImageSkia launcher_background_right_;
 
   DISALLOW_COPY_AND_ASSIGN(DockedBackgroundWidget);
 };
 
-DockedWindowLayoutManager* GetDockLayoutManager(aura::Window* window,
-                                                const gfx::Point& location) {
-  gfx::Rect near_location(location, gfx::Size());
-  aura::Window* dock = Shell::GetContainer(
-      wm::GetRootWindowMatching(near_location),
-      kShellWindowId_DockedContainer);
-  return static_cast<internal::DockedWindowLayoutManager*>(
-      dock->layout_manager());
-}
+namespace {
 
 // Returns true if a window is a popup or a transient child.
-bool IsPopupOrTransient(aura::Window* window) {
+bool IsPopupOrTransient(const aura::Window* window) {
   return (window->type() == aura::client::WINDOW_TYPE_POPUP ||
           window->transient_parent());
 }
 
 // Certain windows (minimized, hidden or popups) do not matter to docking.
-bool IsUsedByLayout(aura::Window* window) {
+bool IsUsedByLayout(const aura::Window* window) {
   return (window->IsVisible() &&
           !wm::GetWindowState(window)->IsMinimized() &&
           !IsPopupOrTransient(window));
@@ -106,10 +193,10 @@ bool IsUsedByLayout(aura::Window* window) {
 
 void UndockWindow(aura::Window* window) {
   gfx::Rect previous_bounds = window->bounds();
-  aura::Window* previous_parent = window->parent();
+  aura::Window* old_parent = window->parent();
   aura::client::ParentWindowWithContext(window, window, gfx::Rect());
-  if (window->parent() != previous_parent)
-    wm::ReparentTransientChildrenOfChild(window->parent(), window);
+  if (window->parent() != old_parent)
+    wm::ReparentTransientChildrenOfChild(window, old_parent, window->parent());
   // Start maximize or fullscreen (affecting packaged apps) animation from
   // previous window bounds.
   window->layer()->SetBounds(previous_bounds);
@@ -233,7 +320,46 @@ struct CompareWindowPos {
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
-// DockLayoutManager public implementation:
+// A class that observes launcher shelf for bounds changes.
+class DockedWindowLayoutManager::ShelfWindowObserver : public WindowObserver {
+ public:
+  explicit ShelfWindowObserver(
+      DockedWindowLayoutManager* docked_layout_manager)
+      : docked_layout_manager_(docked_layout_manager) {
+    DCHECK(docked_layout_manager_->launcher()->shelf_widget());
+    docked_layout_manager_->launcher()->shelf_widget()->GetNativeView()
+        ->AddObserver(this);
+  }
+
+  virtual ~ShelfWindowObserver() {
+    if (docked_layout_manager_->launcher() &&
+        docked_layout_manager_->launcher()->shelf_widget())
+      docked_layout_manager_->launcher()->shelf_widget()->GetNativeView()
+          ->RemoveObserver(this);
+  }
+
+  // aura::WindowObserver:
+  virtual void OnWindowBoundsChanged(aura::Window* window,
+                                     const gfx::Rect& old_bounds,
+                                     const gfx::Rect& new_bounds) OVERRIDE {
+    shelf_bounds_in_screen_ = ScreenAsh::ConvertRectToScreen(
+        window->parent(), new_bounds);
+    docked_layout_manager_->OnShelfBoundsChanged();
+  }
+
+  const gfx::Rect& shelf_bounds_in_screen() const {
+    return shelf_bounds_in_screen_;
+  }
+
+ private:
+  DockedWindowLayoutManager* docked_layout_manager_;
+  gfx::Rect shelf_bounds_in_screen_;
+
+  DISALLOW_COPY_AND_ASSIGN(ShelfWindowObserver);
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// DockedWindowLayoutManager public implementation:
 DockedWindowLayoutManager::DockedWindowLayoutManager(
     aura::Window* dock_container, WorkspaceController* workspace_controller)
     : dock_container_(dock_container),
@@ -248,6 +374,7 @@ DockedWindowLayoutManager::DockedWindowLayoutManager(
       docked_width_(0),
       alignment_(DOCKED_ALIGNMENT_NONE),
       last_active_window_(NULL),
+      last_action_time_(base::Time::Now()),
       background_widget_(new DockedBackgroundWidget(dock_container_)) {
   DCHECK(dock_container);
   aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
@@ -260,6 +387,12 @@ DockedWindowLayoutManager::~DockedWindowLayoutManager() {
 }
 
 void DockedWindowLayoutManager::Shutdown() {
+  if (launcher_ && launcher_->shelf_widget()) {
+    ShelfLayoutManager* shelf_layout_manager = ShelfLayoutManager::ForLauncher(
+        launcher_->shelf_widget()->GetNativeWindow());
+    shelf_layout_manager->RemoveObserver(this);
+    shelf_observer_.reset();
+  }
   launcher_ = NULL;
   for (size_t i = 0; i < dock_container_->children().size(); ++i) {
     aura::Window* child = dock_container_->children()[i];
@@ -309,7 +442,8 @@ void DockedWindowLayoutManager::UndockDraggedWindow() {
   is_dragged_from_dock_ = false;
 }
 
-void DockedWindowLayoutManager::FinishDragging() {
+void DockedWindowLayoutManager::FinishDragging(DockedAction action,
+                                               DockedActionSource source) {
   DCHECK(dragged_window_);
   DCHECK(!IsPopupOrTransient(dragged_window_));
   if (is_dragged_window_docked_)
@@ -333,11 +467,18 @@ void DockedWindowLayoutManager::FinishDragging() {
   dragged_bounds_ = gfx::Rect();
   Relayout();
   UpdateDockBounds(DockedWindowLayoutManagerObserver::CHILD_CHANGED);
+  RecordUmaAction(action, source);
 }
 
 void DockedWindowLayoutManager::SetLauncher(ash::Launcher* launcher) {
   DCHECK(!launcher_);
   launcher_ = launcher;
+  if (launcher_->shelf_widget()) {
+    ShelfLayoutManager* shelf_layout_manager = ShelfLayoutManager::ForLauncher(
+        launcher_->shelf_widget()->GetNativeWindow());
+    shelf_layout_manager->AddObserver(this);
+    shelf_observer_.reset(new ShelfWindowObserver(this));
+  }
 }
 
 DockedAlignment DockedWindowLayoutManager::GetAlignmentOfWindow(
@@ -379,10 +520,8 @@ DockedAlignment DockedWindowLayoutManager::CalculateAlignment() const {
 
 bool DockedWindowLayoutManager::CanDockWindow(aura::Window* window,
                                               SnapType edge) {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kAshEnableDockedWindows)) {
+  if (!switches::UseDockedWindows())
     return false;
-  }
   // Don't allow interactive docking of windows with transient parents such as
   // modal browser dialogs.
   if (IsPopupOrTransient(window))
@@ -424,8 +563,13 @@ bool DockedWindowLayoutManager::CanDockWindow(aura::Window* window,
   return true;
 }
 
+void DockedWindowLayoutManager::OnShelfBoundsChanged() {
+  Relayout();
+  UpdateDockBounds(DockedWindowLayoutManagerObserver::DISPLAY_INSETS_CHANGED);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
-// DockLayoutManager, aura::LayoutManager implementation:
+// DockedWindowLayoutManager, aura::LayoutManager implementation:
 void DockedWindowLayoutManager::OnWindowResized() {
   MaybeMinimizeChildrenExcept(dragged_window_);
   Relayout();
@@ -464,7 +608,7 @@ void DockedWindowLayoutManager::OnWindowRemovedFromLayout(aura::Window* child) {
   // If this is the last window, set alignment and maximize the workspace.
   if (!IsAnyWindowDocked()) {
     alignment_ = DOCKED_ALIGNMENT_NONE;
-    docked_width_ = 0;
+    UpdateDockedWidth(0);
   }
   if (last_active_window_ == child)
     last_active_window_ = NULL;
@@ -490,10 +634,16 @@ void DockedWindowLayoutManager::SetChildBounds(
     const gfx::Rect& requested_bounds) {
   // Whenever one of our windows is moved or resized enforce layout.
   SetChildBoundsDirect(child, requested_bounds);
+  if (IsPopupOrTransient(child))
+    return;
+  ShelfLayoutManager* shelf_layout = internal::ShelfLayoutManager::ForLauncher(
+      dock_container_);
+  if (shelf_layout)
+    shelf_layout->UpdateVisibilityState();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DockLayoutManager, ash::ShellObserver implementation:
+// DockedWindowLayoutManager, ash::ShellObserver implementation:
 
 void DockedWindowLayoutManager::OnDisplayWorkAreaInsetsChanged() {
   Relayout();
@@ -559,7 +709,15 @@ void DockedWindowLayoutManager::OnShelfAlignmentChanged(
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// DockLayoutManager, WindowStateObserver implementation:
+// DockedWindowLayoutManager, ShelfLayoutManagerObserver implementation:
+void DockedWindowLayoutManager::OnBackgroundUpdated(
+    ShelfBackgroundType background_type,
+    BackgroundAnimatorChangeType change_type) {
+  background_widget_->SetPaintsBackground(background_type, change_type);
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// DockedWindowLayoutManager, WindowStateObserver implementation:
 
 void DockedWindowLayoutManager::OnWindowShowTypeChanged(
     wm::WindowState* window_state,
@@ -573,17 +731,19 @@ void DockedWindowLayoutManager::OnWindowShowTypeChanged(
     return;
   if (window_state->IsMinimized()) {
     MinimizeDockedWindow(window_state);
-  } else if (window_state->IsMaximizedOrFullscreen()) {
-    // Reparenting changes the source bounds for the animation if a window is
-    // visible so hide it here and show later when it is already in the desktop.
-    UndockWindow(window);
+  } else if (window_state->IsMaximizedOrFullscreen() ||
+             window_state->IsSnapped()) {
+    if (window != dragged_window_) {
+      UndockWindow(window);
+      RecordUmaAction(DOCKED_ACTION_MAXIMIZE, DOCKED_ACTION_SOURCE_UNKNOWN);
+    }
   } else if (old_type == wm::SHOW_TYPE_MINIMIZED) {
     RestoreDockedWindow(window_state);
   }
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// DockLayoutManager, WindowObserver implementation:
+// DockedWindowLayoutManager, WindowObserver implementation:
 
 void DockedWindowLayoutManager::OnWindowBoundsChanged(
     aura::Window* window,
@@ -598,28 +758,32 @@ void DockedWindowLayoutManager::OnWindowVisibilityChanging(
     aura::Window* window, bool visible) {
   if (IsPopupOrTransient(window))
     return;
-  int animation_type = WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE;
+  int animation_type = views::corewm::WINDOW_VISIBILITY_ANIMATION_TYPE_DEFAULT;
   if (visible) {
-    animation_type = views::corewm::WINDOW_VISIBILITY_ANIMATION_TYPE_DEFAULT;
+    animation_type = views::corewm::WINDOW_VISIBILITY_ANIMATION_TYPE_DROP;
     views::corewm::SetWindowVisibilityAnimationDuration(
         window, base::TimeDelta::FromMilliseconds(kFadeDurationMs));
+  } else if (wm::GetWindowState(window)->IsMinimized()) {
+    animation_type = WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE;
   }
   views::corewm::SetWindowVisibilityAnimationType(window, animation_type);
 }
 
 void DockedWindowLayoutManager::OnWindowDestroying(aura::Window* window) {
   if (dragged_window_ == window) {
-    FinishDragging();
+    FinishDragging(DOCKED_ACTION_NONE, DOCKED_ACTION_SOURCE_UNKNOWN);
     DCHECK(!dragged_window_);
     DCHECK (!is_dragged_window_docked_);
   }
   if (window == last_active_window_)
     last_active_window_ = NULL;
+  RecordUmaAction(DOCKED_ACTION_CLOSE, DOCKED_ACTION_SOURCE_UNKNOWN);
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
-// DockLayoutManager, aura::client::ActivationChangeObserver implementation:
+// DockedWindowLayoutManager, aura::client::ActivationChangeObserver
+// implementation:
 
 void DockedWindowLayoutManager::OnWindowActivated(aura::Window* gained_active,
                                                   aura::Window* lost_active) {
@@ -639,7 +803,7 @@ void DockedWindowLayoutManager::OnWindowActivated(aura::Window* gained_active,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DockLayoutManager private implementation:
+// DockedWindowLayoutManager private implementation:
 
 void DockedWindowLayoutManager::MaybeMinimizeChildrenExcept(
     aura::Window* child) {
@@ -657,10 +821,17 @@ void DockedWindowLayoutManager::MaybeMinimizeChildrenExcept(
     if (window == child || !IsUsedByLayout(window))
       continue;
     int room_needed = GetWindowHeightCloseTo(window, 0) + kMinDockGap;
-    if (available_room > room_needed)
+    if (available_room > room_needed) {
       available_room -= room_needed;
-    else
+    } else {
+      // Slow down minimizing animations. Lock duration so that it is not
+      // overridden by other ScopedLayerAnimationSettings down the stack.
+      ui::ScopedLayerAnimationSettings settings(window->layer()->GetAnimator());
+      settings.SetTransitionDuration(
+          base::TimeDelta::FromMilliseconds(kMinimizeDurationMs));
+      settings.LockTransitionDuration();
       wm::GetWindowState(window)->Minimize();
+    }
   }
 }
 
@@ -670,13 +841,14 @@ void DockedWindowLayoutManager::MinimizeDockedWindow(
   window_state->window()->Hide();
   if (window_state->IsActive())
     window_state->Deactivate();
+  RecordUmaAction(DOCKED_ACTION_MINIMIZE, DOCKED_ACTION_SOURCE_UNKNOWN);
 }
 
 void DockedWindowLayoutManager::RestoreDockedWindow(
     wm::WindowState* window_state) {
   aura::Window* window = window_state->window();
   DCHECK(!IsPopupOrTransient(window));
-  // Always place restored window at the top shuffling the other windows down.
+  // Always place restored window at the bottom shuffling the other windows up.
   // TODO(varkha): add a separate container for docked windows to keep track
   // of ordering.
   gfx::Display display = Shell::GetScreen()->GetDisplayNearestWindow(
@@ -686,13 +858,64 @@ void DockedWindowLayoutManager::RestoreDockedWindow(
   // Evict the window if it can no longer be docked because of its height.
   if (!CanDockWindow(window, SNAP_NONE)) {
     UndockWindow(window);
+    RecordUmaAction(DOCKED_ACTION_EVICT, DOCKED_ACTION_SOURCE_UNKNOWN);
     return;
   }
   gfx::Rect bounds(window->bounds());
-  bounds.set_y(work_area.y() - bounds.height());
+  bounds.set_y(work_area.bottom());
   window->SetBounds(bounds);
   window->Show();
   MaybeMinimizeChildrenExcept(window);
+  RecordUmaAction(DOCKED_ACTION_RESTORE, DOCKED_ACTION_SOURCE_UNKNOWN);
+}
+
+void DockedWindowLayoutManager::RecordUmaAction(DockedAction action,
+                                                DockedActionSource source) {
+  if (action == DOCKED_ACTION_NONE)
+    return;
+  UMA_HISTOGRAM_ENUMERATION("Ash.Dock.Action", action, DOCKED_ACTION_COUNT);
+  UMA_HISTOGRAM_ENUMERATION("Ash.Dock.ActionSource", source,
+                            DOCKED_ACTION_SOURCE_COUNT);
+  base::Time time_now = base::Time::Now();
+  base::TimeDelta time_between_use = time_now - last_action_time_;
+  UMA_HISTOGRAM_CUSTOM_COUNTS("Ash.Dock.TimeBetweenUse",
+                              time_between_use.InSeconds(),
+                              1,
+                              base::TimeDelta::FromHours(10).InSeconds(),
+                              100);
+  last_action_time_ = time_now;
+  int docked_all_count = 0;
+  int docked_visible_count = 0;
+  int docked_panels_count = 0;
+  int large_windows_count = 0;
+  for (size_t i = 0; i < dock_container_->children().size(); ++i) {
+    const aura::Window* window(dock_container_->children()[i]);
+    if (IsPopupOrTransient(window))
+      continue;
+    docked_all_count++;
+    if (!IsUsedByLayout(window))
+      continue;
+    docked_visible_count++;
+    if (window->type() == aura::client::WINDOW_TYPE_PANEL)
+      docked_panels_count++;
+    const wm::WindowState* window_state = wm::GetWindowState(window);
+    if (window_state->HasRestoreBounds()) {
+      const gfx::Rect restore_bounds = window_state->GetRestoreBoundsInScreen();
+      if (restore_bounds.width() > kMaxDockWidth)
+        large_windows_count++;
+    }
+  }
+  UMA_HISTOGRAM_COUNTS_100("Ash.Dock.ItemsAll", docked_all_count);
+  UMA_HISTOGRAM_COUNTS_100("Ash.Dock.ItemsLarge", large_windows_count);
+  UMA_HISTOGRAM_COUNTS_100("Ash.Dock.ItemsPanels", docked_panels_count);
+  UMA_HISTOGRAM_COUNTS_100("Ash.Dock.ItemsVisible", docked_visible_count);
+}
+
+void DockedWindowLayoutManager::UpdateDockedWidth(int width) {
+  if (docked_width_ == width)
+    return;
+  docked_width_ = width;
+  UMA_HISTOGRAM_COUNTS_10000("Ash.Dock.Width", docked_width_);
 }
 
 void DockedWindowLayoutManager::OnDraggedWindowDocked(aura::Window* window) {
@@ -757,8 +980,10 @@ void DockedWindowLayoutManager::Relayout() {
   }
 
   // Position docked windows as well as the window being dragged.
-  const gfx::Rect work_area =
+  gfx::Rect work_area =
       Shell::GetScreen()->GetDisplayNearestWindow(dock_container_).work_area();
+  if (shelf_observer_)
+    work_area.Subtract(shelf_observer_->shelf_bounds_in_screen());
   int available_room = CalculateWindowHeightsAndRemainingRoom(work_area,
                                                               &visible_windows);
   FanOutChildren(work_area,
@@ -799,38 +1024,30 @@ int DockedWindowLayoutManager::CalculateWindowHeightsAndRemainingRoom(
 
 int DockedWindowLayoutManager::CalculateIdealWidth(
     const std::vector<WindowWithHeight>& visible_windows) {
-  // Calculate ideal width for the docked area adjusting the dragged window
-  // or other windows as necessary.
-  int ideal_docked_width = 0;
+  int smallest_max_width = kMaxDockWidth;
+  int largest_min_width = kMinDockWidth;
+  // Ideal width of the docked area is as close to kIdealWidth as possible
+  // while still respecting the minimum and maximum width restrictions on the
+  // individual docked windows as well as the width that was possibly set by a
+  // user (which needs to be preserved when dragging and rearranging windows).
   for (std::vector<WindowWithHeight>::const_iterator iter =
            visible_windows.begin();
        iter != visible_windows.end(); ++iter) {
     const aura::Window* window = iter->window();
-
-    // Adjust the dragged window to the dock. If that is not possible then
-    // other docked windows area adjusted to the one that is being dragged.
-    int adjusted_docked_width = window->bounds().width();
-    if (window == dragged_window_) {
-      // Adjust the dragged window width to the current dock size or ideal when
-      // there are no other docked windows.
-      adjusted_docked_width = GetWindowWidthCloseTo(
-          window, (docked_width_ > 0) ? docked_width_ : kIdealWidth);
-    } else if (!is_dragged_from_dock_ && is_dragged_window_docked_) {
-      // When a docked window is dragged-in other docked windows' widths are
-      // adjusted to the new width if necessary.
-      // When there is no dragged docked window the docked windows retain their
-      // widths.
-      // When a dragged window is simply being reordered in the docked area the
-      // other windows are not resized (but the dragged window can be).
-      adjusted_docked_width = GetWindowWidthCloseTo(window, 0);
+    int min_window_width = window->bounds().width();
+    int max_window_width = min_window_width;
+    if (!wm::GetWindowState(window)->bounds_changed_by_user()) {
+      min_window_width = GetWindowWidthCloseTo(window, kMinDockWidth);
+      max_window_width = GetWindowWidthCloseTo(window, kMaxDockWidth);
     }
-    ideal_docked_width = std::max(ideal_docked_width, adjusted_docked_width);
-
-    // Restrict docked area width regardless of window restrictions.
-    ideal_docked_width = std::max(std::min(ideal_docked_width, kMaxDockWidth),
-                                  kMinDockWidth);
+    largest_min_width = std::max(largest_min_width, min_window_width);
+    smallest_max_width = std::min(smallest_max_width, max_window_width);
   }
-  return ideal_docked_width;
+  int ideal_width = std::max(largest_min_width,
+                             std::min(smallest_max_width, kIdealWidth));
+  // Restrict docked area width regardless of window restrictions.
+  ideal_width = std::max(std::min(ideal_width, kMaxDockWidth), kMinDockWidth);
+  return ideal_width;
 }
 
 void DockedWindowLayoutManager::FanOutChildren(
@@ -849,31 +1066,31 @@ void DockedWindowLayoutManager::FanOutChildren(
 
   // Docked area is shown only if there is at least one non-dragged visible
   // docked window.
-  docked_width_ = ideal_docked_width;
+  int new_width = ideal_docked_width;
   if (visible_windows->empty() ||
       (visible_windows->size() == 1 &&
           (*visible_windows)[0].window() == dragged_window_)) {
-    docked_width_ = 0;
+    new_width = 0;
   }
-
+  UpdateDockedWidth(new_width);
   // Sort windows by their center positions and fan out overlapping
   // windows.
   std::sort(visible_windows->begin(), visible_windows->end(),
             CompareWindowPos(is_dragged_from_dock_ ? dragged_window_ : NULL,
-                delta));
+                             delta));
   for (std::vector<WindowWithHeight>::iterator iter = visible_windows->begin();
-      iter != visible_windows->end(); ++iter) {
+       iter != visible_windows->end(); ++iter) {
     aura::Window* window = iter->window();
     gfx::Rect bounds = ScreenAsh::ConvertRectToScreen(
         window->parent(), window->GetTargetBounds());
-    // A window is extended or shrunk to be as close as possible to the docked
-    // area width. Windows other than the dragged window are kept at their
-    // existing size when the dragged window is just being reordered.
+    // A window is extended or shrunk to be as close as possible to the ideal
+    // docked area width. Windows that were resized by a user are kept at their
+    // existing size.
     // This also enforces the min / max restrictions on the docked area width.
     bounds.set_width(GetWindowWidthCloseTo(
         window,
-        (!is_dragged_from_dock_ || window == dragged_window_) ?
-            ideal_docked_width : bounds.width()));
+        wm::GetWindowState(window)->bounds_changed_by_user() ?
+            bounds.width() : ideal_docked_width));
     DCHECK_LE(bounds.width(), ideal_docked_width);
 
     DockedAlignment alignment = alignment_;
@@ -943,14 +1160,14 @@ void DockedWindowLayoutManager::UpdateDockBounds(
       observer_list_,
       OnDockBoundsChanging(bounds, reason));
   // Show or hide background for docked area.
-  background_widget_->SetBounds(docked_bounds_);
-  if (docked_width_ > 0) {
+  gfx::Rect background_bounds(docked_bounds_);
+  if (shelf_observer_)
+    background_bounds.Subtract(shelf_observer_->shelf_bounds_in_screen());
+  background_widget_->SetBackgroundBounds(background_bounds, alignment_);
+  if (docked_width_ > 0)
     background_widget_->Show();
-    background_widget_->GetNativeWindow()->layer()->SetOpacity(
-        kDockBackgroundOpacity);
-  } else {
+  else
     background_widget_->Hide();
-  }
 }
 
 void DockedWindowLayoutManager::UpdateStacking(aura::Window* active_window) {

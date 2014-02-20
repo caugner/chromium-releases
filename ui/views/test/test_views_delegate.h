@@ -54,6 +54,8 @@ class TestViewsDelegate : public ViewsDelegate {
   virtual bool IsWindowInMetro(gfx::NativeWindow window) const {
     return false;
   }
+#elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  virtual gfx::ImageSkia* GetDefaultWindowIcon() const OVERRIDE;
 #endif
   virtual NonClientFrameView* CreateDefaultNonClientFrameView(
       Widget* widget) OVERRIDE;

@@ -107,7 +107,7 @@ base::LazyInstance<chrome::ChromeContentBrowserClient>
 #endif
 
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
-base::LazyInstance<chrome::ChromeContentRendererClient>
+base::LazyInstance<ChromeContentRendererClient>
     g_chrome_content_renderer_client = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<chrome::ChromeContentUtilityClient>
     g_chrome_content_utility_client = LAZY_INSTANCE_INITIALIZER;
@@ -288,7 +288,7 @@ void HandleHelpSwitches(const CommandLine& command_line) {
 }
 #endif
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
 void SIGTERMProfilingShutdown(int signal) {
   Profiling::Stop();
   struct sigaction sigact;
@@ -305,7 +305,7 @@ void SetUpProfilingShutdownHandler() {
   sigemptyset(&sigact.sa_mask);
   CHECK(sigaction(SIGTERM, &sigact, NULL) == 0);
 }
-#endif
+#endif  // !defined(OS_MACOSX) && !defined(OS_ANDROID)
 
 #endif  // OS_POSIX
 
@@ -478,7 +478,7 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
   // CommandLine::Init() and chrome::RegisterPathProvider().  Ideally,
   // Breakpad initialization could occur sooner, preferably even before the
   // framework dylib is even loaded, to catch potential early crashes.
-  breakpad::InitCrashReporter();
+  breakpad::InitCrashReporter(process_type);
 
 #if defined(NDEBUG)
   bool is_debug_build = false;
@@ -555,7 +555,7 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
   }
 
   if (breakpad::IsCrashReporterEnabled())
-    breakpad::InitCrashProcessInfo();
+    breakpad::InitCrashProcessInfo(process_type);
 }
 #endif  // defined(OS_MACOSX)
 
@@ -696,8 +696,10 @@ void ChromeMainDelegate::PreSandboxStartup() {
         locale;
 
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
-    if (process_type == switches::kUtilityProcess)
+    if (process_type == switches::kUtilityProcess ||
+        process_type == switches::kZygoteProcess) {
       chrome::ChromeContentUtilityClient::PreSandboxStartup();
+    }
 #endif
   }
 
@@ -706,11 +708,11 @@ void ChromeMainDelegate::PreSandboxStartup() {
   if (process_type != switches::kZygoteProcess) {
 #if defined(OS_ANDROID)
     if (process_type.empty())
-      breakpad::InitCrashReporter();
+      breakpad::InitCrashReporter(process_type);
     else
-      breakpad::InitNonBrowserCrashReporterForAndroid();
+      breakpad::InitNonBrowserCrashReporterForAndroid(process_type);
 #else  // !defined(OS_ANDROID)
-    breakpad::InitCrashReporter();
+    breakpad::InitCrashReporter(process_type);
 #endif  // defined(OS_ANDROID)
   }
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -814,14 +816,15 @@ void ChromeMainDelegate::ZygoteForked() {
     SetUpProfilingShutdownHandler();
   }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain sets
   // this up for the browser process in a different manner.
-  breakpad::InitCrashReporter();
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  std::string process_type =
+      command_line->GetSwitchValueASCII(switches::kProcessType);
+  breakpad::InitCrashReporter(process_type);
 
   // Reset the command line for the newly spawned process.
-  crash_keys::SetSwitchesFromCommandLine(CommandLine::ForCurrentProcess());
-#endif
+  crash_keys::SetSwitchesFromCommandLine(command_line);
 }
 
 #endif  // OS_MACOSX

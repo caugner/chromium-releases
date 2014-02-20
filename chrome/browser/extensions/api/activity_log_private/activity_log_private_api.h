@@ -14,16 +14,11 @@
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
-#include "chrome/browser/extensions/event_router.h"
+#include "extensions/browser/event_router.h"
 
 namespace extensions {
 
 class ActivityLog;
-
-// The ID of the trusted/whitelisted ActivityLog extension.
-extern const char kActivityLogExtensionId[];
-extern const char kActivityLogTestExtensionId[];
-extern const char kActivityLogObsoleteExtensionId[];
 
 // Handles interactions between the Activity Log API and implementation.
 class ActivityLogAPI : public ProfileKeyedAPI,

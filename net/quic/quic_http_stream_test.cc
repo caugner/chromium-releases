@@ -136,7 +136,8 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
         read_buffer_(new IOBufferWithSize(4096)),
         guid_(2),
         framer_(QuicSupportedVersions(), QuicTime::Zero(), false),
-        creator_(guid_, &framer_, &random_, false) {
+        random_generator_(0),
+        creator_(guid_, &framer_, &random_generator_, false) {
     IPAddressNumber ip;
     CHECK(ParseIPLiteralToNumber("192.0.2.33", &ip));
     peer_addr_ = IPEndPoint(ip, 443);
@@ -262,7 +263,7 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
       QuicStreamOffset offset,
       base::StringPiece data) {
     InitializeHeader(sequence_number, should_include_version);
-    QuicStreamFrame frame(3, fin, offset, data);
+    QuicStreamFrame frame(3, fin, offset,  MakeIOVector(data));
     return ConstructPacket(header_, QuicFrame(&frame));
   }
 
@@ -305,7 +306,6 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
   scoped_refptr<TestTaskRunner> runner_;
   scoped_ptr<MockWrite[]> mock_writes_;
   MockClock clock_;
-  MockRandom random_generator_;
   TestQuicConnection* connection_;
   scoped_ptr<QuicConnectionHelper> helper_;
   testing::StrictMock<MockConnectionVisitor> visitor_;
@@ -348,7 +348,7 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<bool> {
   QuicFramer framer_;
   IPEndPoint self_addr_;
   IPEndPoint peer_addr_;
-  MockRandom random_;
+  MockRandom random_generator_;
   MockCryptoClientStreamFactory crypto_client_stream_factory_;
   QuicPacketCreator creator_;
   QuicPacketHeader header_;
@@ -727,6 +727,37 @@ TEST_F(QuicHttpStreamTest, CheckPriorityWithNoDelegate) {
   DCHECK_EQ(static_cast<QuicPriority>(kHighestPriority),
             reliable_stream->EffectivePriority());
   reliable_stream->SetDelegate(delegate);
+}
+
+TEST_F(QuicHttpStreamTest, DontCompressHeadersWhenNotWritable) {
+  SetRequestString("GET", "/", MEDIUM);
+  AddWrite(SYNCHRONOUS, ConstructDataPacket(1, true, kFin, 0, request_data_));
+
+  Initialize();
+  request_.method = "GET";
+  request_.url = GURL("http://www.google.com/");
+
+  EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _, _)).
+      WillRepeatedly(Return(QuicTime::Delta::Infinite()));
+  EXPECT_EQ(OK, stream_->InitializeStream(&request_, MEDIUM,
+                                          net_log_, callback_.callback()));
+  EXPECT_EQ(ERR_IO_PENDING, stream_->SendRequest(headers_, &response_,
+                                                 callback_.callback()));
+
+  // Verify that the headers have not been compressed and buffered in
+  // the stream.
+  QuicReliableClientStream* reliable_stream =
+      QuicHttpStreamPeer::GetQuicReliableClientStream(stream_.get());
+  EXPECT_FALSE(reliable_stream->HasBufferedData());
+  EXPECT_FALSE(AtEof());
+
+  EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _, _)).
+      WillRepeatedly(Return(QuicTime::Delta::Zero()));
+
+  // Data should flush out now.
+  connection_->OnCanWrite();
+  EXPECT_FALSE(reliable_stream->HasBufferedData());
+  EXPECT_TRUE(AtEof());
 }
 
 }  // namespace test

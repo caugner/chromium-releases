@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ash/ash_switches.h"
+#include "ash/metrics/user_metrics_recorder.h"
 #include "ash/multi_profile_uma.h"
 #include "ash/popup_message.h"
 #include "ash/root_window_controller.h"
@@ -40,7 +41,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/font.h"
+#include "ui/gfx/font_list.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/insets.h"
@@ -50,6 +51,7 @@
 #include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/text_elider.h"
+#include "ui/gfx/text_utils.h"
 #include "ui/views/border.h"
 #include "ui/views/bubble/tray_bubble_view.h"
 #include "ui/views/controls/button/button.h"
@@ -480,12 +482,12 @@ PublicAccountUserDetails::PublicAccountUserDetails(SystemTrayItem* owner,
   // user.
   base::string16 display_name =
       Shell::GetInstance()->session_state_delegate()->GetUserDisplayName(0);
-  RemoveChars(display_name, kDisplayNameMark, &display_name);
+  base::RemoveChars(display_name, kDisplayNameMark, &display_name);
   display_name = kDisplayNameMark[0] + display_name + kDisplayNameMark[0];
   // Retrieve the domain managing the device and wrap it with markers.
   base::string16 domain = UTF8ToUTF16(
       Shell::GetInstance()->system_tray_delegate()->GetEnterpriseDomain());
-  RemoveChars(domain, kDisplayNameMark, &domain);
+  base::RemoveChars(domain, kDisplayNameMark, &domain);
   base::i18n::WrapStringWithLTRFormatting(&domain);
   // Retrieve the label text, inserting the display name and domain.
   text_ = l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_PUBLIC_LABEL,
@@ -508,9 +510,9 @@ void PublicAccountUserDetails::Layout() {
     return;
 
   // Word-wrap the label text.
-  const gfx::Font font;
+  const gfx::FontList font_list;
   std::vector<base::string16> lines;
-  gfx::ElideRectangleText(text_, font, contents_area.width(),
+  gfx::ElideRectangleText(text_, font_list, contents_area.width(),
                           contents_area.height(), gfx::ELIDE_LONG_WORDS,
                           &lines);
   // Loop through the lines, creating a renderer for each.
@@ -551,7 +553,7 @@ void PublicAccountUserDetails::Layout() {
   // Position the link after the label text, separated by a space. If it does
   // not fit onto the last line of the text, wrap the link onto its own line.
   const gfx::Size last_line_size = lines_.back()->GetStringSize();
-  const int space_width = font.GetStringWidth(ASCIIToUTF16(" "));
+  const int space_width = gfx::GetStringWidth(ASCIIToUTF16(" "), font_list);
   const gfx::Size link_size = learn_more_->GetPreferredSize();
   if (contents_area.width() - last_line_size.width() >=
       space_width + link_size.width()) {
@@ -588,9 +590,9 @@ void PublicAccountUserDetails::LinkClicked(views::Link* source,
 
 void PublicAccountUserDetails::CalculatePreferredSize(SystemTrayItem* owner,
                                                       int used_width) {
-  const gfx::Font font;
+  const gfx::FontList font_list;
   const gfx::Size link_size = learn_more_->GetPreferredSize();
-  const int space_width = font.GetStringWidth(ASCIIToUTF16(" "));
+  const int space_width = gfx::GetStringWidth(ASCIIToUTF16(" "), font_list);
   const gfx::Insets insets = GetInsets();
   views::TrayBubbleView* bubble_view =
       owner->system_tray()->GetSystemBubble()->bubble_view();
@@ -598,7 +600,7 @@ void PublicAccountUserDetails::CalculatePreferredSize(SystemTrayItem* owner,
       link_size.width(),
       bubble_view->GetPreferredSize().width() - (used_width + insets.width()));
   int max_width = std::min(
-      font.GetStringWidth(text_) + space_width + link_size.width(),
+      gfx::GetStringWidth(text_, font_list) + space_width + link_size.width(),
       bubble_view->GetMaximumSize().width() - (used_width + insets.width()));
   // Do a binary search for the minimum width that ensures no more than three
   // lines are needed. The lower bound is the minimum of the current bubble
@@ -609,14 +611,14 @@ void PublicAccountUserDetails::CalculatePreferredSize(SystemTrayItem* owner,
   while (min_width < max_width) {
     lines.clear();
     const int width = (min_width + max_width) / 2;
-    const bool too_narrow = gfx::ElideRectangleText(
-        text_, font, width, INT_MAX, gfx::TRUNCATE_LONG_WORDS, &lines) != 0;
+    const bool too_narrow =
+        gfx::ElideRectangleText(text_, font_list, width, INT_MAX,
+                                gfx::TRUNCATE_LONG_WORDS, &lines) != 0;
     int line_count = lines.size();
     if (!too_narrow && line_count == 3 &&
-            width - font.GetStringWidth(lines.back()) <=
-            space_width + link_size.width()) {
+        width - gfx::GetStringWidth(lines.back(), font_list) <=
+            space_width + link_size.width())
       ++line_count;
-    }
     if (too_narrow || line_count > 3)
       min_width = width + 1;
     else
@@ -626,13 +628,13 @@ void PublicAccountUserDetails::CalculatePreferredSize(SystemTrayItem* owner,
   // Calculate the corresponding height and set the preferred size.
   lines.clear();
   gfx::ElideRectangleText(
-      text_, font, min_width, INT_MAX, gfx::TRUNCATE_LONG_WORDS, &lines);
+      text_, font_list, min_width, INT_MAX, gfx::TRUNCATE_LONG_WORDS, &lines);
   int line_count = lines.size();
-  if (min_width - font.GetStringWidth(lines.back()) <=
-      space_width + link_size.width()) {
+  if (min_width - gfx::GetStringWidth(lines.back(), font_list) <=
+          space_width + link_size.width()) {
     ++line_count;
   }
-  const int line_height = font.GetHeight();
+  const int line_height = font_list.GetHeight();
   const int link_extra_height = std::max(
       link_size.height() - learn_more_->GetInsets().top() - line_height, 0);
   preferred_size_ = gfx::Size(
@@ -798,6 +800,8 @@ void UserView::Layout() {
 
 void UserView::ButtonPressed(views::Button* sender, const ui::Event& event) {
   if (sender == logout_button_) {
+    Shell::GetInstance()->metrics()->RecordUserMetricsAction(
+        ash::UMA_STATUS_AREA_SIGN_OUT);
     Shell::GetInstance()->system_tray_delegate()->SignOut();
   } else if (sender == user_card_view_ && SupportsMultiProfile()) {
     if (!multiprofile_index_) {
@@ -911,7 +915,8 @@ void UserView::AddUserCard(SystemTrayItem* owner, user::LoginStatus login) {
             UTF8ToUTF16(delegate->GetUserEmail(multiprofile_index_));
     if (!user_email_string.empty()) {
       additional = new views::Label(user_email_string);
-      additional->SetFont(bundle.GetFont(ui::ResourceBundle::SmallFont));
+      additional->SetFontList(
+          bundle.GetFontList(ui::ResourceBundle::SmallFont));
       additional->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     }
   }
@@ -1128,8 +1133,7 @@ TrayUser::TrayUser(SystemTray* system_tray, MultiProfileIndex index)
       user_(NULL),
       layout_view_(NULL),
       avatar_(NULL),
-      label_(NULL),
-      separator_shown_(false) {
+      label_(NULL) {
   Shell::GetInstance()->system_tray_notifier()->AddUserObserver(this);
 }
 
@@ -1138,8 +1142,6 @@ TrayUser::~TrayUser() {
 }
 
 TrayUser::TestState TrayUser::GetStateForTest() const {
-  if (separator_shown_)
-    return SEPARATOR;
   if (!user_)
     return HIDDEN;
   return user_->GetStateForTest();
@@ -1196,15 +1198,6 @@ views::View* TrayUser::CreateDefaultView(user::LoginStatus status) {
 
   int logged_in_users = session_state_delegate->NumberOfLoggedInUsers();
 
-  // If there are multiple users logged in, the users will be separated from the
-  // rest of the menu by a separator.
-  if (multiprofile_index_ ==
-          session_state_delegate->GetMaximumNumberOfLoggedInUsers() &&
-      logged_in_users > 1) {
-    separator_shown_ = true;
-    return new views::View();
-  }
-
   // Do not show more UserView's then there are logged in users.
   if (multiprofile_index_ >= logged_in_users)
     return NULL;
@@ -1221,7 +1214,6 @@ void TrayUser::DestroyTrayView() {
   layout_view_ = NULL;
   avatar_ = NULL;
   label_ = NULL;
-  separator_shown_ = false;
 }
 
 void TrayUser::DestroyDefaultView() {
@@ -1234,6 +1226,8 @@ void TrayUser::DestroyDetailedView() {
 void TrayUser::UpdateAfterLoginStatusChange(user::LoginStatus status) {
   // Only the active user is represented in the tray.
   if (!layout_view_)
+    return;
+  if (GetTrayIndex() > 0 && !ash::switches::UseMultiUserTray())
     return;
   bool need_label = false;
   bool need_avatar = false;
@@ -1407,7 +1401,7 @@ MultiProfileIndex TrayUser::GetTrayIndex() {
   // In case of multi profile we need to mirror the indices since the system
   // tray items are in the reverse order then the menu items.
   return shell->session_state_delegate()->GetMaximumNumberOfLoggedInUsers() -
-             multiprofile_index_;
+             1 - multiprofile_index_;
 }
 
 int TrayUser::GetTrayItemRadius() {

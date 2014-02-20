@@ -77,11 +77,9 @@ class NativeWebContentsModalDialogManagerViews
     widget->GetNativeWindow()->SetProperty(aura::client::kConstrainedWindowKey,
                                            true);
 
-    if (views::DialogDelegate::UseNewStyle()) {
-      views::corewm::SetWindowVisibilityAnimationType(
-          widget->GetNativeWindow(),
-          views::corewm::WINDOW_VISIBILITY_ANIMATION_TYPE_ROTATE);
-    }
+    views::corewm::SetWindowVisibilityAnimationType(
+        widget->GetNativeWindow(),
+        views::corewm::WINDOW_VISIBILITY_ANIMATION_TYPE_ROTATE);
 #endif
 
 #if defined(USE_ASH)
@@ -93,8 +91,6 @@ class NativeWebContentsModalDialogManagerViews
       parent->parent()->SetProperty(aura::client::kAnimationsDisabledKey, true);
     }
 
-    // TODO(wittman): remove once the new visual style is complete
-    widget->GetNativeWindow()->SetProperty(ash::kConstrainedWindowKey, true);
     views::corewm::SetModalParent(
         widget->GetNativeWindow(),
         platform_util::GetParent(widget->GetNativeView()));
@@ -105,8 +101,7 @@ class NativeWebContentsModalDialogManagerViews
     views::Widget* widget = GetWidget(dialog);
 #if defined(USE_AURA)
     scoped_ptr<views::corewm::SuspendChildWindowVisibilityAnimations> suspend;
-    if (views::DialogDelegate::UseNewStyle() &&
-        shown_widgets_.find(widget) != shown_widgets_.end()) {
+    if (shown_widgets_.find(widget) != shown_widgets_.end()) {
       suspend.reset(new views::corewm::SuspendChildWindowVisibilityAnimations(
           widget->GetNativeWindow()->parent()));
     }
@@ -129,10 +124,8 @@ class NativeWebContentsModalDialogManagerViews
     views::Widget* widget = GetWidget(dialog);
 #if defined(USE_AURA)
     scoped_ptr<views::corewm::SuspendChildWindowVisibilityAnimations> suspend;
-    if (views::DialogDelegate::UseNewStyle()) {
-      suspend.reset(new views::corewm::SuspendChildWindowVisibilityAnimations(
-          widget->GetNativeWindow()->parent()));
-    }
+    suspend.reset(new views::corewm::SuspendChildWindowVisibilityAnimations(
+        widget->GetNativeWindow()->parent()));
 #endif
     widget->Hide();
   }
@@ -197,13 +190,10 @@ class NativeWebContentsModalDialogManagerViews
 
     host_ = new_host;
 
-    if (host_)
+    // |host_| may be null during WebContents destruction or Win32 tab dragging.
+    if (host_) {
       host_->AddObserver(this);
 
-    // Old-style dialogs are parented to the web contents view and don't need
-    // reparenting.  The host_ may be null during tab drag under Views/Win32 or
-    // when destroying the WebContents.
-    if (views::DialogDelegate::UseNewStyle() && host_) {
       for (std::set<views::Widget*>::iterator it = observed_widgets_.begin();
            it != observed_widgets_.end();
            ++it) {

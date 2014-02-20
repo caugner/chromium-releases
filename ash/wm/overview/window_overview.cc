@@ -6,9 +6,9 @@
 
 #include <algorithm>
 
+#include "ash/metrics/user_metrics_recorder.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
-#include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/scoped_transform_overview_window.h"
@@ -21,6 +21,7 @@
 #include "ui/aura/window.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/events/event.h"
+#include "ui/views/background.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
@@ -143,7 +144,7 @@ WindowOverview::WindowOverview(WindowSelector* window_selector,
   }
   ash::Shell::GetInstance()->PrependPreTargetHandler(this);
   Shell* shell = Shell::GetInstance();
-  shell->delegate()->RecordUserMetricsAction(UMA_WINDOW_OVERVIEW);
+  shell->metrics()->RecordUserMetricsAction(UMA_WINDOW_OVERVIEW);
   HideAndTrackNonOverviewWindows();
 }
 
@@ -314,8 +315,8 @@ aura::Window* WindowOverview::GetTargetedWindow(aura::Window* window) {
 }
 
 void WindowOverview::HideAndTrackNonOverviewWindows() {
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
-  for (Shell::RootWindowList::const_iterator root_iter = root_windows.begin();
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+  for (aura::Window::Windows::const_iterator root_iter = root_windows.begin();
        root_iter != root_windows.end(); ++root_iter) {
     for (size_t i = 0; i < kSwitchableWindowContainerIdsLength; ++i) {
       aura::Window* container = Shell::GetContainer(*root_iter,
@@ -349,7 +350,7 @@ void WindowOverview::PositionWindows() {
     }
     PositionWindowsOnRoot(single_root_window_, windows);
   } else {
-    Shell::RootWindowList root_window_list = Shell::GetAllRootWindows();
+    aura::Window::Windows root_window_list = Shell::GetAllRootWindows();
     for (size_t i = 0; i < root_window_list.size(); ++i)
       PositionWindowsFromRoot(root_window_list[i]);
   }

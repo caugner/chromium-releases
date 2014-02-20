@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@ import android.view.ScaleGestureDetector;
 class ZoomManager {
     private static final String TAG = "ContentViewZoom";
 
-    private ContentViewCore mContentViewCore;
+    private final ContentViewCore mContentViewCore;
 
     // ScaleGestureDetector previous to 4.2.2 failed to record touch event times (b/7626515),
     // so we record them manually for use when synthesizing pinch gestures.
@@ -98,8 +98,8 @@ class ZoomManager {
         }
     }
 
-    private ScaleGestureDetector mMultiTouchDetector;
-    private ScaleGestureListener mMultiTouchListener;
+    private final ScaleGestureDetector mMultiTouchDetector;
+    private final ScaleGestureListener mMultiTouchListener;
 
     ZoomManager(final Context context, ContentViewCore contentViewCore) {
         mContentViewCore = contentViewCore;
@@ -122,7 +122,7 @@ class ZoomManager {
             mMultiTouchDetector.onTouchEvent(event);
         } catch (Exception e) {
             Log.e(TAG, "ScaleGestureDetector got into a bad state!", e);
-            assert(false);
+            assert false;
         }
     }
 
@@ -143,7 +143,7 @@ class ZoomManager {
             return retVal;
         } catch (Exception e) {
             Log.e(TAG, "ScaleGestureDetector got into a bad state!", e);
-            assert(false);
+            assert false;
         }
         return false;
     }

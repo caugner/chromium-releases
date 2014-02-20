@@ -28,10 +28,10 @@
 #include "media/base/media_switches.h"
 #include "media/base/video_frame.h"
 #include "net/base/mime_util.h"
+#include "third_party/WebKit/public/platform/WebMediaPlayerClient.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebMediaPlayerClient.h"
 #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -47,11 +47,11 @@
 
 static const uint32 kGLTextureExternalOES = 0x8D65;
 
-using WebKit::WebMediaPlayer;
-using WebKit::WebSize;
-using WebKit::WebString;
-using WebKit::WebTimeRanges;
-using WebKit::WebURL;
+using blink::WebMediaPlayer;
+using blink::WebSize;
+using blink::WebString;
+using blink::WebTimeRanges;
+using blink::WebURL;
 using media::MediaPlayerAndroid;
 using media::VideoFrame;
 
@@ -75,8 +75,8 @@ void WebMediaPlayerAndroid::OnReleaseRemotePlaybackTexture(
 }
 
 WebMediaPlayerAndroid::WebMediaPlayerAndroid(
-    WebKit::WebFrame* frame,
-    WebKit::WebMediaPlayerClient* client,
+    blink::WebFrame* frame,
+    blink::WebMediaPlayerClient* client,
     base::WeakPtr<WebMediaPlayerDelegate> delegate,
     RendererMediaPlayerManager* manager,
     StreamTextureFactory* factory,
@@ -139,15 +139,16 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       external_surface_threshold_ = -1;
     }
   }
+#endif  // defined(GOOGLE_TV)
 
+#if defined(VIDEO_HOLE)
   // Defer stream texture creation until we are sure it's necessary.
-  stream_id_ = 0;
   needs_establish_peer_ = false;
   current_frame_ = VideoFrame::CreateBlackFrame(gfx::Size(1, 1));
-#endif
+#endif  // defined(VIDEO_HOLE)
   TryCreateStreamTextureProxyIfNeeded();
 
-  if (WebKit::WebRuntimeFeatures::isPrefixedEncryptedMediaEnabled()) {
+  if (blink::WebRuntimeFeatures::isPrefixedEncryptedMediaEnabled()) {
     // TODO(xhwang): Report an error when there is encrypted stream but EME is
     // not enabled. Currently the player just doesn't start and waits for ever.
     decryptor_.reset(new ProxyDecryptor(
@@ -180,7 +181,7 @@ WebMediaPlayerAndroid::~WebMediaPlayerAndroid() {
     stream_texture_factory_->DestroyStreamTexture(texture_id_);
 
   if (remote_playback_texture_id_) {
-    WebKit::WebGraphicsContext3D* context =
+    blink::WebGraphicsContext3D* context =
         stream_texture_factory_->Context3d();
     if (context->makeContextCurrent())
       context->deleteTexture(remote_playback_texture_id_);
@@ -212,7 +213,7 @@ WebMediaPlayerAndroid::~WebMediaPlayerAndroid() {
 }
 
 void WebMediaPlayerAndroid::load(LoadType load_type,
-                                 const WebKit::WebURL& url,
+                                 const blink::WebURL& url,
                                  CORSMode cors_mode) {
   switch (load_type) {
     case LoadTypeURL:
@@ -294,8 +295,8 @@ void WebMediaPlayerAndroid::load(LoadType load_type,
   manager_->Initialize(
       player_type_, player_id_, url, first_party_url, demuxer_client_id);
 
-  if (manager_->IsInFullscreen(frame_))
-    manager_->EnterFullscreen(player_id_);
+  if (manager_->ShouldEnterFullscreen(frame_))
+    manager_->EnterFullscreen(player_id_, frame_);
 
   UpdateNetworkState(WebMediaPlayer::NetworkStateLoading);
   UpdateReadyState(WebMediaPlayer::ReadyStateHaveNothing);
@@ -324,15 +325,17 @@ void WebMediaPlayerAndroid::DidLoadMediaInfo(
 }
 
 void WebMediaPlayerAndroid::play() {
-#if defined(GOOGLE_TV)
+#if defined(VIDEO_HOLE)
   if (hasVideo() && needs_external_surface_ &&
       !manager_->IsInFullscreen(frame_)) {
     DCHECK(!needs_establish_peer_);
     manager_->RequestExternalSurface(player_id_, last_computed_rect_);
   }
+#endif  // defined(VIDEO_HOLE)
+#if defined(GOOGLE_TV)
   if (audio_renderer_ && paused())
     audio_renderer_->Play();
-#endif
+#endif  // defined(GOOGLE_TV)
 
   TryCreateStreamTextureProxyIfNeeded();
   if (hasVideo() && needs_establish_peer_)
@@ -420,8 +423,8 @@ void WebMediaPlayerAndroid::setVolume(double volume) {
 
 bool WebMediaPlayerAndroid::hasVideo() const {
   // If we have obtained video size information before, use it.
-  if (has_size_info_ && !natural_size_.isEmpty())
-    return true;
+  if (has_size_info_)
+    return !natural_size_.isEmpty();
 
   // TODO(qinmin): need a better method to determine whether the current media
   // content contains video. Android does not provide any function to do
@@ -508,14 +511,14 @@ bool WebMediaPlayerAndroid::didLoadingProgress() const {
   return ret;
 }
 
-void WebMediaPlayerAndroid::paint(WebKit::WebCanvas* canvas,
-                                  const WebKit::WebRect& rect,
+void WebMediaPlayerAndroid::paint(blink::WebCanvas* canvas,
+                                  const blink::WebRect& rect,
                                   unsigned char alpha) {
   NOTIMPLEMENTED();
 }
 
 bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
-    WebKit::WebGraphicsContext3D* web_graphics_context,
+    blink::WebGraphicsContext3D* web_graphics_context,
     unsigned int texture,
     unsigned int level,
     unsigned int internal_format,
@@ -726,11 +729,15 @@ void WebMediaPlayerAndroid::OnVideoSizeChanged(int width, int height) {
   if (natural_size_.width == width && natural_size_.height == height)
     return;
 
+#if defined(VIDEO_HOLE)
+  bool has_surface_size_restriction = false;
 #if defined(GOOGLE_TV)
-  if ((external_surface_threshold_ >= 0 &&
-       external_surface_threshold_ <= width * height) ||
-      // Use H/W surface for MSE as the content is protected.
-      media_source_delegate_) {
+  has_surface_size_restriction = external_surface_threshold_ >= 0 &&
+       external_surface_threshold_ <= width * height;
+#endif  // defined(GOOGLE_TV)
+  // Use H/W surface for MSE as the content might be protected.
+  // TODO(qinmin): Change this so that only EME needs the H/W surface
+  if (media_source_delegate_ || has_surface_size_restriction) {
     needs_external_surface_ = true;
     if (!paused() && !manager_->IsInFullscreen(frame_))
       manager_->RequestExternalSurface(player_id_, last_computed_rect_);
@@ -743,7 +750,15 @@ void WebMediaPlayerAndroid::OnVideoSizeChanged(int width, int height) {
       EstablishSurfaceTexturePeer();
     }
   }
-#endif
+#else
+  // When play() gets called, |natural_size_| may still be empty and
+  // EstablishSurfaceTexturePeer() will not get called. As a result, the video
+  // may play without a surface texture. When we finally get the valid video
+  // size here, we should call EstablishSurfaceTexturePeer() if it has not been
+  // previously called.
+  if (!paused() && needs_establish_peer_)
+    EstablishSurfaceTexturePeer();
+#endif  // defined(VIDEO_HOLE)
 
   natural_size_.width = width;
   natural_size_.height = height;
@@ -790,10 +805,10 @@ void WebMediaPlayerAndroid::OnDidExitFullscreen() {
   if (!paused() && needs_establish_peer_)
     EstablishSurfaceTexturePeer();
 
-#if defined(GOOGLE_TV)
+#if defined(VIDEO_HOLE)
   if (!paused() && needs_external_surface_)
     manager_->RequestExternalSurface(player_id_, last_computed_rect_);
-#endif
+#endif  // defined(VIDEO_HOLE)
 
   frame_->view()->willExitFullScreen();
   frame_->view()->didExitFullScreen();
@@ -809,6 +824,10 @@ void WebMediaPlayerAndroid::OnMediaPlayerPlay() {
 void WebMediaPlayerAndroid::OnMediaPlayerPause() {
   UpdatePlayingState(false);
   client_->playbackStateChanged();
+}
+
+void WebMediaPlayerAndroid::OnRequestFullscreen() {
+  client_->requestFullscreen();
 }
 
 void WebMediaPlayerAndroid::OnDurationChanged(const base::TimeDelta& duration) {
@@ -855,9 +874,9 @@ void WebMediaPlayerAndroid::OnPlayerReleased() {
   if (!needs_external_surface_)
     needs_establish_peer_ = true;
 
-#if defined(GOOGLE_TV)
+#if defined(VIDEO_HOLE)
   last_computed_rect_ = gfx::RectF();
-#endif
+#endif  // defined(VIDEO_HOLE)
 }
 
 void WebMediaPlayerAndroid::ReleaseMediaResources() {
@@ -908,7 +927,7 @@ void WebMediaPlayerAndroid::DrawRemotePlaybackIcon() {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   if (!video_weblayer_)
     return;
-  WebKit::WebGraphicsContext3D* context = stream_texture_factory_->Context3d();
+  blink::WebGraphicsContext3D* context = stream_texture_factory_->Context3d();
   if (!context->makeContextCurrent())
     return;
 
@@ -986,12 +1005,12 @@ void WebMediaPlayerAndroid::DrawRemotePlaybackIcon() {
   unsigned texture_mailbox_sync_point = context->insertSyncPoint();
 
   scoped_refptr<VideoFrame> new_frame = VideoFrame::WrapNativeTexture(
-      new VideoFrame::MailboxHolder(
+      make_scoped_ptr(new VideoFrame::MailboxHolder(
           texture_mailbox,
           texture_mailbox_sync_point,
           base::Bind(&WebMediaPlayerAndroid::OnReleaseRemotePlaybackTexture,
                      main_loop_,
-                     weak_factory_.GetWeakPtr())),
+                     weak_factory_.GetWeakPtr()))),
       texture_target,
       canvas_size /* coded_size */,
       gfx::Rect(canvas_size) /* visible_rect */,
@@ -1004,8 +1023,8 @@ void WebMediaPlayerAndroid::DrawRemotePlaybackIcon() {
 
 void WebMediaPlayerAndroid::ReallocateVideoFrame() {
   if (needs_external_surface_) {
-    // VideoFrame::CreateHoleFrame is only defined under GOOGLE_TV.
-#if defined(GOOGLE_TV)
+    // VideoFrame::CreateHoleFrame is only defined under VIDEO_HOLE.
+#if defined(VIDEO_HOLE)
     if (!natural_size_.isEmpty()) {
       scoped_refptr<VideoFrame> new_frame =
           VideoFrame::CreateHoleFrame(natural_size_);
@@ -1014,16 +1033,19 @@ void WebMediaPlayerAndroid::ReallocateVideoFrame() {
       client_->repaint();
     }
 #else
-    NOTIMPLEMENTED() << "Hole punching not supported outside of Google TV";
-#endif
+    NOTIMPLEMENTED() << "Hole punching not supported without VIDEO_HOLE flag";
+#endif  // defined(VIDEO_HOLE)
   } else if (!is_remote_ && texture_id_) {
     scoped_refptr<VideoFrame> new_frame = VideoFrame::WrapNativeTexture(
-        new VideoFrame::MailboxHolder(
+        make_scoped_ptr(new VideoFrame::MailboxHolder(
             texture_mailbox_,
             texture_mailbox_sync_point_,
-            VideoFrame::MailboxHolder::TextureNoLongerNeededCallback()),
-        kGLTextureExternalOES, natural_size_,
-        gfx::Rect(natural_size_), natural_size_, base::TimeDelta(),
+            VideoFrame::MailboxHolder::TextureNoLongerNeededCallback())),
+        kGLTextureExternalOES,
+        natural_size_,
+        gfx::Rect(natural_size_),
+        natural_size_,
+        base::TimeDelta(),
         VideoFrame::ReadPixelsCB(),
         base::Closure());
     SetCurrentFrameInternal(new_frame);
@@ -1138,7 +1160,7 @@ void WebMediaPlayerAndroid::UpdatePlayingState(bool is_playing) {
     delegate_->DidPause(this);
 }
 
-#if defined(GOOGLE_TV)
+#if defined(VIDEO_HOLE)
 bool WebMediaPlayerAndroid::RetrieveGeometryChange(gfx::RectF* rect) {
   if (!video_weblayer_)
     return false;
@@ -1171,7 +1193,7 @@ bool WebMediaPlayerAndroid::RetrieveGeometryChange(gfx::RectF* rect) {
 // UMA_HISTOGRAM_COUNTS. The reason that we cannot use those macros directly is
 // that UMA_* macros require the names to be constant throughout the process'
 // lifetime.
-static void EmeUMAHistogramEnumeration(const WebKit::WebString& key_system,
+static void EmeUMAHistogramEnumeration(const blink::WebString& key_system,
                                        const std::string& method,
                                        int sample,
                                        int boundary_value) {
@@ -1181,7 +1203,7 @@ static void EmeUMAHistogramEnumeration(const WebKit::WebString& key_system,
       base::Histogram::kUmaTargetedHistogramFlag)->Add(sample);
 }
 
-static void EmeUMAHistogramCounts(const WebKit::WebString& key_system,
+static void EmeUMAHistogramCounts(const blink::WebString& key_system,
                                   const std::string& method,
                                   int sample) {
   // Use the same parameters as UMA_HISTOGRAM_COUNTS.
@@ -1235,6 +1257,12 @@ WebMediaPlayer::MediaKeyException WebMediaPlayerAndroid::generateKeyRequest(
   return e;
 }
 
+bool WebMediaPlayerAndroid::IsKeySystemSupported(const WebString& key_system) {
+  // On Android, EME only works with MSE.
+  return player_type_ == MEDIA_PLAYER_TYPE_MEDIA_SOURCE &&
+         IsConcreteSupportedKeySystem(key_system);
+}
+
 WebMediaPlayer::MediaKeyException
 WebMediaPlayerAndroid::GenerateKeyRequestInternal(
     const WebString& key_system,
@@ -1244,7 +1272,7 @@ WebMediaPlayerAndroid::GenerateKeyRequestInternal(
            << std::string(reinterpret_cast<const char*>(init_data),
                           static_cast<size_t>(init_data_length));
 
-  if (!IsConcreteSupportedKeySystem(key_system))
+  if (!IsKeySystemSupported(key_system))
     return WebMediaPlayer::MediaKeyExceptionKeySystemNotSupported;
 
   // We do not support run-time switching between key systems for now.
@@ -1297,7 +1325,7 @@ WebMediaPlayer::MediaKeyException WebMediaPlayerAndroid::AddKeyInternal(
                           static_cast<size_t>(init_data_length))
            << " [" << session_id.utf8().data() << "]";
 
-  if (!IsConcreteSupportedKeySystem(key_system))
+  if (!IsKeySystemSupported(key_system))
     return WebMediaPlayer::MediaKeyExceptionKeySystemNotSupported;
 
   if (current_key_system_.isEmpty() || key_system != current_key_system_)
@@ -1321,7 +1349,7 @@ WebMediaPlayer::MediaKeyException
 WebMediaPlayerAndroid::CancelKeyRequestInternal(
     const WebString& key_system,
     const WebString& session_id) {
-  if (!IsConcreteSupportedKeySystem(key_system))
+  if (!IsKeySystemSupported(key_system))
     return WebMediaPlayer::MediaKeyExceptionKeySystemNotSupported;
 
   if (current_key_system_.isEmpty() || key_system != current_key_system_)
@@ -1351,7 +1379,7 @@ void WebMediaPlayerAndroid::OnKeyError(const std::string& session_id,
   client_->keyError(
       current_key_system_,
       WebString::fromUTF8(session_id),
-      static_cast<WebKit::WebMediaPlayerClient::MediaKeyErrorCode>(error_code),
+      static_cast<blink::WebMediaPlayerClient::MediaKeyErrorCode>(error_code),
       system_code);
 }
 
@@ -1370,7 +1398,7 @@ void WebMediaPlayerAndroid::OnKeyMessage(const std::string& session_id,
 }
 
 void WebMediaPlayerAndroid::OnMediaSourceOpened(
-    WebKit::WebMediaSource* web_media_source) {
+    blink::WebMediaSource* web_media_source) {
   client_->mediaSourceOpened(web_media_source);
 }
 
@@ -1378,8 +1406,8 @@ void WebMediaPlayerAndroid::OnNeedKey(const std::string& type,
                                       const std::vector<uint8>& init_data) {
   DCHECK(main_loop_->BelongsToCurrentThread());
   // Do not fire NeedKey event if encrypted media is not enabled.
-  if (!WebKit::WebRuntimeFeatures::isEncryptedMediaEnabled() &&
-      !WebKit::WebRuntimeFeatures::isPrefixedEncryptedMediaEnabled()) {
+  if (!blink::WebRuntimeFeatures::isEncryptedMediaEnabled() &&
+      !blink::WebRuntimeFeatures::isPrefixedEncryptedMediaEnabled()) {
     return;
   }
 
@@ -1414,7 +1442,7 @@ void WebMediaPlayerAndroid::DoReleaseRemotePlaybackTexture(uint32 sync_point) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   DCHECK(remote_playback_texture_id_);
 
-  WebKit::WebGraphicsContext3D* context =
+  blink::WebGraphicsContext3D* context =
       stream_texture_factory_->Context3d();
 
   if (sync_point)
@@ -1425,7 +1453,7 @@ void WebMediaPlayerAndroid::DoReleaseRemotePlaybackTexture(uint32 sync_point) {
 
 void WebMediaPlayerAndroid::enterFullscreen() {
   if (manager_->CanEnterFullscreen(frame_)) {
-    manager_->EnterFullscreen(player_id_);
+    manager_->EnterFullscreen(player_id_, frame_);
     SetNeedsEstablishPeer(false);
   }
 }

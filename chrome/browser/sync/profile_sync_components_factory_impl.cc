@@ -6,7 +6,9 @@
 #include "build/build_config.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/extensions/api/storage/settings_frontend.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
@@ -42,6 +44,7 @@
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/shared_change_processor.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/browser/sync/glue/sync_backend_host_impl.h"
 #include "chrome/browser/sync/glue/theme_data_type_controller.h"
 #include "chrome/browser/sync/glue/typed_url_change_processor.h"
 #include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
@@ -50,19 +53,23 @@
 #include "chrome/browser/sync/profile_sync_components_factory_impl.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/sessions2/session_data_type_controller2.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_syncable_service.h"
+#include "chrome/browser/ui/app_list/app_list_syncable_service.h"
+#include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "chrome/browser/webdata/autocomplete_syncable_service.h"
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
+#include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "components/dom_distiller/core/dom_distiller_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/api/syncable_service.h"
 
 #if defined(ENABLE_MANAGED_USERS)
-#include "chrome/browser/managed_mode/managed_user_service.h"
 #include "chrome/browser/managed_mode/managed_user_settings_service.h"
 #include "chrome/browser/managed_mode/managed_user_settings_service_factory.h"
 #include "chrome/browser/managed_mode/managed_user_sync_service.h"
@@ -99,6 +106,7 @@ using browser_sync::ProxyDataTypeController;
 using browser_sync::SearchEngineDataTypeController;
 using browser_sync::SessionChangeProcessor;
 using browser_sync::SessionDataTypeController;
+using browser_sync::SessionDataTypeController2;
 using browser_sync::SessionModelAssociator;
 using browser_sync::SharedChangeProcessor;
 using browser_sync::SyncBackendHost;
@@ -116,7 +124,8 @@ ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
       extension_system_(
           extensions::ExtensionSystemFactory::GetForProfile(profile)),
       web_data_service_(
-          autofill::AutofillWebDataService::FromBrowserContext(profile_)) {
+          WebDataServiceFactory::GetAutofillWebDataForProfile(
+              profile_, Profile::EXPLICIT_ACCESS)) {
 }
 
 ProfileSyncComponentsFactoryImpl::~ProfileSyncComponentsFactoryImpl() {
@@ -171,10 +180,15 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
 
   // Session sync is enabled by default.  Register unless explicitly disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncTabs)) {
-    pss->RegisterDataTypeController(
-        new ProxyDataTypeController(syncer::PROXY_TABS));
-    pss->RegisterDataTypeController(
-        new SessionDataTypeController(this, profile_, pss));
+      pss->RegisterDataTypeController(
+          new ProxyDataTypeController(syncer::PROXY_TABS));
+    if (!command_line_->HasSwitch(switches::kEnableSyncSessionsV2)) {
+      pss->RegisterDataTypeController(
+          new SessionDataTypeController(this, profile_, pss));
+    } else {
+      pss->RegisterDataTypeController(
+          new SessionDataTypeController2(this, profile_, pss));
+    }
   }
 
   // Favicon sync is enabled by default. Register unless explicitly disabled.
@@ -198,10 +212,22 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
         new PasswordDataTypeController(this, profile_, pss));
   }
   // Article sync is disabled by default.  Register only if explicitly enabled.
-  if (command_line_->HasSwitch(switches::kEnableSyncArticles)) {
+  if (IsEnableSyncArticlesSet()) {
     pss->RegisterDataTypeController(
         new UIDataTypeController(syncer::ARTICLES, this, profile_, pss));
   }
+
+#if defined(ENABLE_MANAGED_USERS)
+  if (profile_->IsManaged()) {
+    pss->RegisterDataTypeController(
+        new UIDataTypeController(
+            syncer::MANAGED_USER_SETTINGS, this, profile_, pss));
+  } else {
+    pss->RegisterDataTypeController(
+        new UIDataTypeController(
+            syncer::MANAGED_USERS, this, profile_, pss));
+  }
+#endif
 }
 
 void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
@@ -266,6 +292,14 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
             syncer::APP_SETTINGS, this, profile_, pss));
   }
 
+#if defined(ENABLE_APP_LIST)
+  // App List sync is disabled by default.  Register only if enabled.
+  if (command_line_->HasSwitch(switches::kEnableSyncAppList)) {
+    pss->RegisterDataTypeController(
+        new UIDataTypeController(syncer::APP_LIST, this, profile_, pss));
+  }
+#endif
+
   // Synced Notifications are enabled by default.
   pss->RegisterDataTypeController(
       new UIDataTypeController(
@@ -276,20 +310,6 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
   if (!command_line_->HasSwitch(switches::kDisableSyncDictionary)) {
     pss->RegisterDataTypeController(
         new UIDataTypeController(syncer::DICTIONARY, this, profile_, pss));
-  }
-#endif
-
-#if defined(ENABLE_MANAGED_USERS)
-  if (ManagedUserService::AreManagedUsersEnabled()) {
-    if (profile_->IsManaged()) {
-      pss->RegisterDataTypeController(
-          new UIDataTypeController(
-              syncer::MANAGED_USER_SETTINGS, this, profile_, pss));
-    } else {
-      pss->RegisterDataTypeController(
-          new UIDataTypeController(
-              syncer::MANAGED_USERS, this, profile_, pss));
-    }
   }
 #endif
 }
@@ -308,6 +328,14 @@ DataTypeManager* ProfileSyncComponentsFactoryImpl::CreateDataTypeManager(
                                  backend,
                                  observer,
                                  failed_data_types_handler);
+}
+
+browser_sync::SyncBackendHost*
+    ProfileSyncComponentsFactoryImpl::CreateSyncBackendHost(
+      const std::string& name,
+      Profile* profile,
+      const base::WeakPtr<browser_sync::SyncPrefs>& sync_prefs) {
+  return new browser_sync::SyncBackendHostImpl(name, profile, sync_prefs);
 }
 
 browser_sync::GenericChangeProcessor*
@@ -361,6 +389,11 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
     case syncer::EXTENSION_SETTINGS:
       return extension_system_->extension_service()->settings_frontend()->
           GetBackendForSync(type)->AsWeakPtr();
+#if defined(ENABLE_APP_LIST)
+    case syncer::APP_LIST:
+      return app_list::AppListSyncableServiceFactory::GetForProfile(profile_)->
+          AsWeakPtr();
+#endif
 #if defined(ENABLE_THEMES)
     case syncer::THEMES:
       return ThemeServiceFactory::GetForProfile(profile_)->
@@ -388,12 +421,11 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
 #endif
     case syncer::FAVICON_IMAGES:
     case syncer::FAVICON_TRACKING: {
-      browser_sync::SessionModelAssociator* model_associator =
+      browser_sync::FaviconCache* favicons =
           ProfileSyncServiceFactory::GetForProfile(profile_)->
-              GetSessionModelAssociator();
-      if (!model_associator)
-        return base::WeakPtr<syncer::SyncableService>();
-      return model_associator->GetFaviconCache()->AsWeakPtr();
+              GetFaviconCache();
+      return favicons ? favicons->AsWeakPtr()
+                      : base::WeakPtr<syncer::SyncableService>();
     }
 #if defined(ENABLE_MANAGED_USERS)
     case syncer::MANAGED_USER_SETTINGS:
@@ -403,15 +435,24 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       return ManagedUserSyncServiceFactory::GetForProfile(profile_)->
           AsWeakPtr();
 #endif
-    case syncer::ARTICLES:
-      // TODO(nyquist) Hook up real syncer::SyncableService API here.
+    case syncer::ARTICLES: {
+      dom_distiller::DomDistillerService* service =
+          dom_distiller::DomDistillerServiceFactory::GetForBrowserContext(
+              profile_);
+      if (service)
+        return service->GetSyncableService()->AsWeakPtr();
       return base::WeakPtr<syncer::SyncableService>();
+    }
+    case syncer::SESSIONS: {
+      DCHECK(command_line_->HasSwitch(switches::kEnableSyncSessionsV2));
+      return ProfileSyncServiceFactory::GetForProfile(profile_)->
+          GetSessionsSyncableService()->AsWeakPtr();
+    }
     default:
       // The following datatypes still need to be transitioned to the
       // syncer::SyncableService API:
       // Bookmarks
       // Passwords
-      // Sessions
       // Typed URLs
       NOTREACHED();
       return base::WeakPtr<syncer::SyncableService>();

@@ -41,7 +41,6 @@
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_screensaver.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
-#include "chrome/browser/chromeos/login/default_pinned_apps_field_trial.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
@@ -144,10 +143,8 @@ class StubLogin : public LoginStatusConsumer,
       : profile_prepared_(false) {
     authenticator_ = LoginUtils::Get()->CreateAuthenticator(this);
     authenticator_.get()->AuthenticateToLogin(
-        g_browser_process->profile_manager()->GetDefaultProfile(),
-        UserContext(username,
-                    password,
-                    std::string()));  // auth_code
+        ProfileHelper::GetSigninProfile(),
+        UserContext(username, password, std::string() /* auth_code */));
   }
 
   virtual ~StubLogin() {
@@ -195,7 +192,7 @@ void RunAutoLaunchKioskApp() {
   ShowLoginWizard(chromeos::WizardController::kAppLaunchSplashScreenName);
 
   // Login screen is skipped but 'login-prompt-visible' signal is still needed.
-  LOG(INFO) << "Kiosk app auto launch >> login-prompt-visible";
+  VLOG(1) << "Kiosk app auto launch >> login-prompt-visible";
   DBusThreadManager::Get()->GetSessionManagerClient()->
       EmitLoginPromptVisible();
 }
@@ -369,9 +366,9 @@ void ChromeBrowserMainPartsChromeos::PreEarlyInitialization() {
       singleton_command_line->AppendSwitchASCII(switches::kLoginProfile,
                                                 chrome::kTestUserProfileDir);
     }
-    LOG(INFO) << "Running as stub user with profile dir: "
-              << singleton_command_line->GetSwitchValuePath(
-                  switches::kLoginProfile).value();
+    LOG(WARNING) << "Running as stub user with profile dir: "
+                 << singleton_command_line->GetSwitchValuePath(
+                     switches::kLoginProfile).value();
   }
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -771,10 +768,6 @@ void ChromeBrowserMainPartsChromeos::PostDestroyThreads() {
 
   // Destroy DeviceSettingsService after g_browser_process.
   DeviceSettingsService::Shutdown();
-}
-
-void ChromeBrowserMainPartsChromeos::SetupPlatformFieldTrials() {
-  default_pinned_apps_field_trial::SetupTrial();
 }
 
 }  //  namespace chromeos

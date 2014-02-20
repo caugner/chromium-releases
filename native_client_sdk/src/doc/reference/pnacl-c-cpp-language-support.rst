@@ -19,10 +19,10 @@ For information on using languages other than C/C++, see the :ref:`FAQ
 section on other languages <other_languages>`.
 
 As for the standard libraries, the PNaCl toolchain is currently based on
-``libstdc++`` version 4.6.1, and the ``newlib`` standard C library
-(version is available through the macro ``NEWLIB_VERSION``).
-Experimental ``libc++`` support is also included; see
-:ref:`building_cpp_libraries` for more details.
+``libc++``, and the ``newlib`` standard C library (version is available
+through the macro ``NEWLIB_VERSION``). ``libstdc++`` is also supported
+but its use is discouraged; see :ref:`building_cpp_libraries` for more
+details.
 
 Preprocessor definitions
 ------------------------
@@ -61,6 +61,8 @@ C++11 header ``<atomic>``.
 
 The PNaCl toolchain supports concurrent memory accesses through legacy
 GCC-style ``__sync_*`` builtins, as well as through C11/C++11 atomic
+primitives and the underlying `GCCMM
+<http://gcc.gnu.org/wiki/Atomic/GCCMM>`_ ``__atomic_*``
 primitives. ``volatile`` memory accesses can also be used, though these
 are discouraged. See `Volatile Memory Accesses`_.
 
@@ -158,6 +160,19 @@ in `Memory Model and Atomics`_.
 PNaCl and NaCl support ``setjmp`` and ``longjmp`` without any
 restrictions beyond C's.
 
+C++ Exception Handling
+======================
+
+PNaCl currently supports C++ exception handling through ``setjmp()`` and
+``longjmp()``, which can be enabled with the ``--pnacl-exceptions=sjlj``
+linker flag. Exceptions are disabled by default so that faster and
+smaller code is generated, and ``throw`` statements are replaced with
+calls to ``abort()``. The usual ``-fno-exceptions`` flag is also
+supported. PNaCl will support full zero-cost exception handling in the
+future.
+
+NaCl supports full zero-cost C++ exception handling.
+
 Inline Assembly
 ===============
 
@@ -193,25 +208,34 @@ operations which are lock-free on the current platform (``is_lock_free``
 methods). It will rely on the address-free properly discussed in `Memory
 Model for Concurrent Operations`_.
 
-Signal Handling
----------------
+POSIX-style Signal Handling
+---------------------------
 
-Signal handling from user code currently isn't supported by PNaCl. When
-supported, the impact of ``volatile`` and atomics for same-thread signal
-handling will need to be carefully detailed.
+POSIX-style signal handling really consists of two different features:
 
-NaCl supports signal handling.
+* **Hardware exception handling** (synchronous signals): The ability
+  to catch hardware exceptions (such as memory access faults and
+  division by zero) using a signal handler.
 
-Exception Handling
-------------------
+  PNaCl currently doesn't support hardware exception handling.
 
-PNaCl currently doesn't support exception handling. It supports the
-usual ``-fno-exceptions`` flag, and by default it transforms all
-``throw`` statements into ``abort``. We plan to add exception-handling
-support in the very near future, and zero-cost exception handling soon
-thereafter.
+  NaCl supports hardware exception handling via the
+  ``<nacl/nacl_exception.h>`` interface.
 
-NaCl supports exception handling.
+* **Asynchronous interruption of threads** (asynchronous signals): The
+  ability to asynchronously interrupt the execution of a thread,
+  forcing the thread to run a signal handler.
+
+  A similar feature is **thread suspension**: The ability to
+  asynchronously suspend and resume a thread and inspect or modify its
+  execution state (such as register state).
+
+  Neither PNaCl nor NaCl currently support asynchronous interruption
+  or suspension of threads.
+
+If PNaCl were to support either of these, the interaction of
+``volatile`` and atomics with same-thread signal handling would need
+to be carefully detailed.
 
 Computed ``goto``
 -----------------

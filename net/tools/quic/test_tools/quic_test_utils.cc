@@ -17,51 +17,41 @@ namespace net {
 namespace tools {
 namespace test {
 
-QuicVersion QuicVersionMax() { return QuicSupportedVersions().front(); }
-
-QuicVersion QuicVersionMin() { return QuicSupportedVersions().back(); }
-
-MockConnection::MockConnection(QuicGuid guid,
-                               IPEndPoint address,
-                               int fd,
-                               EpollServer* eps,
-                               bool is_server)
-    : QuicConnection(guid, address,
-                     new QuicEpollConnectionHelper(eps),
-                     new QuicDefaultPacketWriter(fd), is_server,
-                     QuicSupportedVersions()),
-      has_mock_helper_(false),
-      writer_(net::test::QuicConnectionPeer::GetWriter(this)),
-      helper_(helper()) {
-}
-
-MockConnection::MockConnection(QuicGuid guid,
-                               IPEndPoint address,
-                               bool is_server)
-    : QuicConnection(guid, address, new testing::NiceMock<MockHelper>(),
+MockConnection::MockConnection(bool is_server)
+    : QuicConnection(kTestGuid,
+                     IPEndPoint(net::test::Loopback4(), kTestPort),
+                     new testing::NiceMock<MockHelper>(),
                      new testing::NiceMock<MockPacketWriter>(),
                      is_server, QuicSupportedVersions()),
-      has_mock_helper_(true),
+      writer_(net::test::QuicConnectionPeer::GetWriter(this)),
+      helper_(helper()) {
+}
+
+MockConnection::MockConnection(IPEndPoint address,
+                               bool is_server)
+    : QuicConnection(kTestGuid, address,
+                     new testing::NiceMock<MockHelper>(),
+                     new testing::NiceMock<MockPacketWriter>(),
+                     is_server, QuicSupportedVersions()),
       writer_(net::test::QuicConnectionPeer::GetWriter(this)),
       helper_(helper()) {
 }
 
 MockConnection::MockConnection(QuicGuid guid,
-                               IPEndPoint address,
-                               QuicConnectionHelperInterface* helper,
-                               QuicPacketWriter* writer,
                                bool is_server)
-    : QuicConnection(guid, address, helper, writer, is_server,
-                     QuicSupportedVersions()),
-      has_mock_helper_(false) {
+    : QuicConnection(guid,
+                     IPEndPoint(net::test::Loopback4(), kTestPort),
+                     new testing::NiceMock<MockHelper>(),
+                     new testing::NiceMock<MockPacketWriter>(),
+                     is_server, QuicSupportedVersions()),
+      writer_(net::test::QuicConnectionPeer::GetWriter(this)),
+      helper_(helper()) {
 }
 
 MockConnection::~MockConnection() {
 }
 
 void MockConnection::AdvanceTime(QuicTime::Delta delta) {
-  CHECK(has_mock_helper_) << "Cannot advance time unless a MockClock is being"
-                             " used";
   static_cast<MockHelper*>(helper())->AdvanceTime(delta);
 }
 
@@ -71,6 +61,28 @@ uint64 SimpleRandom::RandUint64() {
                       hash);
   memcpy(&seed_, hash, sizeof(seed_));
   return seed_;
+}
+
+TestSession::TestSession(QuicConnection* connection,
+                         const QuicConfig& config)
+    : QuicSession(connection, config),
+      crypto_stream_(NULL) {
+}
+
+TestSession::~TestSession() {}
+
+void TestSession::SetCryptoStream(QuicCryptoStream* stream) {
+  crypto_stream_ = stream;
+}
+
+QuicCryptoStream* TestSession::GetCryptoStream() {
+  return crypto_stream_;
+}
+
+MockPacketWriter::MockPacketWriter() {
+}
+
+MockPacketWriter::~MockPacketWriter() {
 }
 
 MockQuicSessionOwner::MockQuicSessionOwner() {
@@ -88,33 +100,10 @@ void TestDecompressorVisitor::OnDecompressionError() {
   error_ = true;
 }
 
-TestSession::TestSession(QuicConnection* connection,
-                         const QuicConfig& config,
-                         bool is_server)
-    : QuicSession(connection, config, is_server),
-      crypto_stream_(NULL) {
-}
-
-TestSession::~TestSession() {}
-
-void TestSession::SetCryptoStream(QuicCryptoStream* stream) {
-  crypto_stream_ = stream;
-}
-
-QuicCryptoStream* TestSession::GetCryptoStream() {
-  return crypto_stream_;
-}
-
 MockAckNotifierDelegate::MockAckNotifierDelegate() {
 }
 
 MockAckNotifierDelegate::~MockAckNotifierDelegate() {
-}
-
-MockPacketWriter::MockPacketWriter() {
-}
-
-MockPacketWriter::~MockPacketWriter() {
 }
 
 }  // namespace test

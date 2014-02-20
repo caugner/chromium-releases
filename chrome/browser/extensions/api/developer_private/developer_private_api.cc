@@ -28,7 +28,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/extensions/management_policy.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/platform_util.h"
@@ -38,11 +37,8 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/extensions/api/developer_private.h"
-#include "chrome/common/extensions/background_info.h"
-#include "chrome/common/extensions/incognito_handler.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
-#include "chrome/common/extensions/manifest_handlers/offline_enabled_info.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -52,10 +48,14 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/management_policy.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/install_warning.h"
+#include "extensions/common/manifest_handlers/background_info.h"
+#include "extensions/common/manifest_handlers/incognito_info.h"
+#include "extensions/common/manifest_handlers/offline_enabled_info.h"
 #include "extensions/common/switches.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -88,8 +88,7 @@ ExtensionUpdater* GetExtensionUpdater(Profile* profile) {
 
 GURL GetImageURLFromData(std::string contents) {
   std::string contents_base64;
-  if (!base::Base64Encode(contents, &contents_base64))
-    return GURL();
+  base::Base64Encode(contents, &contents_base64);
 
   // TODO(dvh): make use of chrome::kDataScheme. Filed as crbug/297301.
   const char kDataURLPrefix[] = "data:image;base64,";
@@ -123,18 +122,6 @@ GURL ToDataURL(const base::FilePath& path, developer_private::ItemType type) {
     return GetDefaultImageURL(type);
 
   return GetImageURLFromData(contents);
-}
-
-std::vector<base::FilePath> ListFolder(const base::FilePath path) {
-  base::FileEnumerator files(path, false,
-      base::FileEnumerator::DIRECTORIES | base::FileEnumerator::FILES);
-  std::vector<base::FilePath> paths;
-
-  for (base::FilePath current_path = files.Next(); !current_path.empty();
-       current_path = files.Next()) {
-    paths.push_back(current_path);
-  }
-  return paths;
 }
 
 bool ValidateFolderName(const base::FilePath::StringType& name) {
@@ -485,7 +472,7 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
 
   ItemInspectViewList result;
   // Get the extension process's active views.
-  ExtensionProcessManager* process_manager =
+  extensions::ProcessManager* process_manager =
       ExtensionSystem::Get(GetProfile())->process_manager();
   GetInspectablePagesForExtensionProcess(
       extension,
@@ -830,7 +817,7 @@ bool DeveloperPrivateInspectFunction::RunImpl() {
 DeveloperPrivateInspectFunction::~DeveloperPrivateInspectFunction() {}
 
 bool DeveloperPrivateLoadUnpackedFunction::RunImpl() {
-  string16 select_title =
+  base::string16 select_title =
       l10n_util::GetStringUTF16(IDS_EXTENSION_LOAD_FROM_DIRECTORY);
 
   // Balanced in FileSelected / FileSelectionCanceled.
@@ -861,7 +848,7 @@ void DeveloperPrivateLoadUnpackedFunction::FileSelectionCanceled() {
 bool DeveloperPrivateChooseEntryFunction::ShowPicker(
     ui::SelectFileDialog::Type picker_type,
     const base::FilePath& last_directory,
-    const string16& select_title,
+    const base::string16& select_title,
     const ui::SelectFileDialog::FileTypeInfo& info,
     int file_type_index) {
   ShellWindowRegistry* registry = ShellWindowRegistry::Get(GetProfile());
@@ -974,7 +961,7 @@ bool DeveloperPrivateExportSyncfsFolderToLocalfsFunction::RunImpl() {
   base::FilePath::StringType project_name;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &project_name));
   if (!ValidateFolderName(project_name)) {
-    DLOG(INFO) << "Invalid project_name : [" << project_name << "]";
+    DVLOG(0) << "Invalid project_name : [" << project_name << "]";
     return false;
   }
 
@@ -1105,7 +1092,7 @@ void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::SnapshotFileCallback(
 void DeveloperPrivateExportSyncfsFolderToLocalfsFunction::CopyFile(
     const base::FilePath& src_path,
     const base::FilePath& target_path) {
-  if (!file_util::CreateDirectory(target_path.DirName())) {
+  if (!base::CreateDirectory(target_path.DirName())) {
     SetError("Error in copying files from sync filesystem.");
     success_ = false;
   }
@@ -1137,7 +1124,7 @@ bool DeveloperPrivateLoadProjectFunction::RunImpl() {
   base::FilePath::StringType project_name;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &project_name));
   if (!ValidateFolderName(project_name)) {
-    DLOG(INFO) << "Invalid project_name : [" << project_name << "]";
+    DVLOG(0) << "Invalid project_name : [" << project_name << "]";
     return false;
   }
 
@@ -1190,7 +1177,7 @@ bool DeveloperPrivateChoosePathFunction::RunImpl() {
   if (params->select_type == developer::SELECT_TYPE_FILE) {
     type = ui::SelectFileDialog::SELECT_OPEN_FILE;
   }
-  string16 select_title;
+  base::string16 select_title;
 
   int file_type_index = 0;
   if (params->file_type == developer::FILE_TYPE_LOAD)

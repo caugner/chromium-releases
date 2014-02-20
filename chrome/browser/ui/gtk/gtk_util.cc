@@ -644,7 +644,7 @@ GdkPoint MakeBidiGdkPoint(gint x, gint y, gint width, bool ltr) {
   return point;
 }
 
-std::string BuildTooltipTitleFor(string16 title, const GURL& url) {
+std::string BuildTooltipTitleFor(base::string16 title, const GURL& url) {
   const std::string& url_str = url.possibly_invalid_spec();
   const std::string& title_str = UTF16ToUTF8(title);
 
@@ -708,7 +708,7 @@ void DrawTextEntryBackground(GtkWidget* offscreen_entry,
   g_object_unref(our_style);
 }
 
-void SetLayoutText(PangoLayout* layout, const string16& text) {
+void SetLayoutText(PangoLayout* layout, const base::string16& text) {
   // Pango is really easy to overflow and send into a computational death
   // spiral that can corrupt the screen. Assume that we'll never have more than
   // 2000 characters, which should be a safe assumption until we all get robot
@@ -942,12 +942,12 @@ gfx::Rect GetDialogBounds(GtkWidget* dialog) {
   return gfx::Rect(x, y, width, height);
 }
 
-string16 GetStockPreferencesMenuLabel() {
+base::string16 GetStockPreferencesMenuLabel() {
   GtkStockItem stock_item;
-  string16 preferences;
+  base::string16 preferences;
   if (gtk_stock_lookup(GTK_STOCK_PREFERENCES, &stock_item)) {
     const char16 kUnderscore[] = { '_', 0 };
-    RemoveChars(UTF8ToUTF16(stock_item.label), kUnderscore, &preferences);
+    base::RemoveChars(UTF8ToUTF16(stock_item.label), kUnderscore, &preferences);
   }
   return preferences;
 }

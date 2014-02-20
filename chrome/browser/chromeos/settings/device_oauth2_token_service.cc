@@ -14,11 +14,11 @@
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/settings/token_encryptor.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "policy/proto/device_management_backend.pb.h"
 
 namespace {
 const char kServiceScopeGetUserInfo[] =
@@ -38,6 +38,7 @@ class DeviceOAuth2TokenService::ValidatingConsumer
       public gaia::GaiaOAuthClient::Delegate {
  public:
   explicit ValidatingConsumer(DeviceOAuth2TokenService* token_service,
+                              const std::string& account_id,
                               Consumer* consumer);
   virtual ~ValidatingConsumer();
 
@@ -85,8 +86,9 @@ class DeviceOAuth2TokenService::ValidatingConsumer
 
 DeviceOAuth2TokenService::ValidatingConsumer::ValidatingConsumer(
     DeviceOAuth2TokenService* token_service,
+    const std::string& account_id,
     Consumer* consumer)
-        : OAuth2TokenService::RequestImpl(this),
+        : OAuth2TokenService::RequestImpl(account_id, this),
           token_service_(token_service),
           consumer_(consumer),
           token_validation_done_(false),
@@ -137,8 +139,8 @@ void DeviceOAuth2TokenService::ValidatingConsumer::OnGetTokenInfoResponse(
     if (gaia_robot_id.empty()) {
       LOG(WARNING) << "Device service account owner in policy is empty.";
     } else {
-      LOG(INFO) << "Device service account owner in policy does not match "
-                << "refresh token owner \"" << gaia_robot_id << "\".";
+      LOG(WARNING) << "Device service account owner in policy does not match "
+                   << "refresh token owner \"" << gaia_robot_id << "\".";
     }
     RefreshTokenIsValid(false);
   }
@@ -276,13 +278,14 @@ net::URLRequestContextGetter* DeviceOAuth2TokenService::GetRequestContext() {
 
 scoped_ptr<OAuth2TokenService::RequestImpl>
 DeviceOAuth2TokenService::CreateRequest(
+    const std::string& account_id,
     OAuth2TokenService::Consumer* consumer) {
   if (refresh_token_is_valid_)
-    return OAuth2TokenService::CreateRequest(consumer);
+    return OAuth2TokenService::CreateRequest(account_id, consumer);
 
   // Substitute our own consumer to wait for refresh token validation.
   scoped_ptr<ValidatingConsumer> validating_consumer(
-      new ValidatingConsumer(this, consumer));
+      new ValidatingConsumer(this, account_id, consumer));
   validating_consumer->StartValidation();
   return validating_consumer.PassAs<RequestImpl>();
 }

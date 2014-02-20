@@ -2,6 +2,7 @@
   <header>
     <h1 i18n-content="settingsTitle"></h1>
   </header>
+  <include src="reset_profile_settings_banner.html">
 <if expr="not pp_ifdef('chromeos')">
   <include src="sync_section.html">
 </if>
@@ -109,7 +110,7 @@
           class="settings-row" hidden>
       </div>
       <div class="settings-row">
-        <button id="pointer-settings-button">
+        <button id="pointer-settings-button" hidden>
         </button>
         <button id="keyboard-settings-button"
             i18n-content="keyboardSettingsButtonTitle">
@@ -723,6 +724,10 @@
               </span>
             </span>
           </span>
+          <div id="accessibility-settings" hidden>
+            <button id="accessibility-settings-button"
+              i18n-content="accessibilitySettings"></button>
+          </div>
         </div>
       </div>
       <div class="option-name">
@@ -839,7 +844,7 @@
     </div>
   </section>
 </if>
-  <section id="reset-profile-settings-section">
+  <section id="reset-profile-settings-section" hidden>
     <h3 i18n-content="resetProfileSettingsSectionTitle"></h3>
     <div>
       <span class="settings-row" i18n-content="resetProfileSettingsDescription">

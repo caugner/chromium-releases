@@ -10,20 +10,20 @@
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "content/public/common/content_constants.h"
-#include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_frame.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "ui/base/webui/jstemplate_builder.h"
 
-using WebKit::WebFrame;
-using WebKit::WebPlugin;
-using WebKit::WebURLRequest;
+using blink::WebFrame;
+using blink::WebPlugin;
+using blink::WebURLRequest;
 
 const char* const kSlashVSlash = "/v/";
 const char* const kSlashESlash = "/e/";
 
 namespace {
 
-std::string GetYoutubeVideoId(const WebKit::WebPluginParams& params) {
+std::string GetYoutubeVideoId(const blink::WebPluginParams& params) {
   GURL url(params.url);
   std::string video_id = url.path().substr(strlen(kSlashVSlash));
 
@@ -34,7 +34,7 @@ std::string GetYoutubeVideoId(const WebKit::WebPluginParams& params) {
   return video_id;
 }
 
-std::string HtmlData(const WebKit::WebPluginParams& params,
+std::string HtmlData(const blink::WebPluginParams& params,
                      base::StringPiece template_html) {
   base::DictionaryValue values;
   values.SetString("video_id", GetYoutubeVideoId(params));
@@ -70,12 +70,12 @@ bool IsValidYouTubeVideo(const std::string& path) {
 
 namespace plugins {
 
-MobileYouTubePlugin::MobileYouTubePlugin(content::RenderView* render_view,
-                                         WebKit::WebFrame* frame,
-                                         const WebKit::WebPluginParams& params,
+MobileYouTubePlugin::MobileYouTubePlugin(content::RenderFrame* render_frame,
+                                         blink::WebFrame* frame,
+                                         const blink::WebPluginParams& params,
                                          base::StringPiece& template_html,
                                          GURL placeholderDataUrl)
-    : PluginPlaceholder(render_view,
+    : PluginPlaceholder(render_frame,
                         frame,
                         params,
                         HtmlData(params, template_html),
@@ -100,8 +100,8 @@ void MobileYouTubePlugin::OpenYoutubeUrlCallback(
   WebURLRequest request;
   request.initialize();
   request.setURL(url);
-  render_view()->LoadURLExternally(
-      GetFrame(), request, WebKit::WebNavigationPolicyNewForegroundTab);
+  render_frame()->LoadURLExternally(
+      GetFrame(), request, blink::WebNavigationPolicyNewForegroundTab);
 }
 void MobileYouTubePlugin::BindWebFrame(WebFrame* frame) {
   PluginPlaceholder::BindWebFrame(frame);

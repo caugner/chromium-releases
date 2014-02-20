@@ -5,7 +5,7 @@
   -->
 
 <polymer-element name="kb-key-base"
-    on-pointerdown="down" on-pointerup="up" on-pointerout="out"
+    on-pointerdown="{{down}}" on-pointerup="{{up}}" on-pointerout="{{out}}"
     attributes="char invert repeat hintText toKeyset toLayout">
   <script>
     /**
@@ -167,12 +167,24 @@
         return this.invert ? this.hintText : (this.char || this.textContent);
       },
 
-      /* Hint text value associated with the key. Typically, the value is a
+      /**
+       * Hint text value associated with the key. Typically, the value is a
        * single character.
        * @return {string}
        */
       get hintTextValue() {
         return this.invert ? (this.char || this.textContent) : this.hintText;
+      },
+
+      /**
+       * Handles a swipe flick that originated from this key.
+       * @param {detail} The details of the swipe.
+       */
+      onFlick: function(detail) {
+        if (!(detail.direction & SWIPE_DIRECTION.UP) || !this.hintTextValue)
+          return;
+        var typeDetails = {char: this.hintTextValue};
+        this.fire('type-key', typeDetails);
       },
 
       /**

@@ -173,7 +173,7 @@ class HistoryURLProvider : public HistoryProvider {
   // set to true if |text| contains an http prefix.
   // NOTE: This does not set the relevance of the returned match, as different
   //       callers want different behavior. Callers must set this manually.
-  AutocompleteMatch SuggestExactInput(const string16& text,
+  AutocompleteMatch SuggestExactInput(const base::string16& text,
                                       const GURL& destination_url,
                                       bool trim_http);
 
@@ -290,6 +290,12 @@ class HistoryURLProvider : public HistoryProvider {
       const history::HistoryMatch& history_match,
       MatchType match_type,
       int relevance);
+
+  // Returns a set of classifications that highlight all the occurrences
+  // of |input_text| at word breaks in |description|.
+  static ACMatchClassifications ClassifyDescription(
+      const base::string16& input_text,
+      const base::string16& description);
 
   // Params for the current query.  The provider should not free this directly;
   // instead, it is passed as a parameter through the history backend, and the

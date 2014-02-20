@@ -20,6 +20,7 @@
            BECAUSE YOUR RESOURCES ARE FUNCTIONALLY RELATED OR FALL UNDER THE
            SAME CONDITIONALS. -->
       <structure type="chrome_scaled_image" name="IDR_AURA_LAUNCHER_BACKGROUND" file="common/launcher/launcher_background.png" />
+      <structure type="chrome_scaled_image" name="IDR_AURA_LAUNCHER_CORNER" file="common/launcher/launcher_corner.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_LAUNCHER_DIMMING" file="common/launcher/launcher_dimming.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_LAUNCHER_ICON_APPLIST" file="common/launcher/launcher_appmenu.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_LAUNCHER_ICON_APPLIST_ALTERNATE" file="common/alt_launcher/status_app_menu_icon.png" />
@@ -89,7 +90,6 @@
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_CELLULAR_ENABLED" file="cros/network/status_cellular_enabled.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_CELLULAR_ENABLED_HOVER" file="cros/network/status_cellular_enabled_hover.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_DISPLAY" file="cros/status/status_display_dark.png" />
-      <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_DISPLAY_LIGHT" file="cros/status/status_display.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_DRIVE" file="cros/status/status_drive.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_DRIVE_CANCEL" file="cros/status/status_drive_item_cancel.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_DRIVE_CANCEL_HOVER" file="cros/status/status_drive_item_cancel_hover.png" />
@@ -138,6 +138,8 @@
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_POWER_SMALL_DARK" file="cros/status/status_power_small_all_dark.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_POWER_SMALL_CHARGING_UNRELIABLE" file="cros/status/status_power_small_all_fluctuating.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_POWER_SMALL_CHARGING_UNRELIABLE_DARK" file="cros/status/status_power_small_all_dark_fluctuating.png" />
+      <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_SCREENSHARE" file="cros/status/status_screenshare.png" />
+      <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_SCREENSHARE_DARK" file="cros/status/status_screenshare_dark.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_SESSION_LENGTH_LIMIT_TIMER" file="cros/status/status_session_length_limit_timer.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_SETTINGS" file="cros/status/status_settings.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_SHUTDOWN" file="cros/status/status_shutdown.png" />
@@ -204,15 +206,6 @@
 
       <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_BUTTON_SEPARATOR" file="common/window_button_separator.png" />
 
-      <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_FULLSCREEN_CLOSE" file="common/window_close_fullscreen_normal.png" />
-      <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_FULLSCREEN_CLOSE_H" file="common/window_close_fullscreen_hover.png" />
-      <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_FULLSCREEN_CLOSE_P" file="common/window_close_fullscreen_pressed.png" />
-      <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_FULLSCREEN_RESTORE" file="common/window_size_fullscreen_normal.png" />
-      <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_FULLSCREEN_RESTORE_H" file="common/window_size_fullscreen_hover.png" />
-      <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_FULLSCREEN_RESTORE_P" file="common/window_size_fullscreen_pressed.png" />
-
-      <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_FULLSCREEN_SHADOW" file="common/window_fullscreen_shadow.png" />
-      <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_FULLSCREEN_SHADOW_RTL" file="common/window_fullscreen_shadow_rtl.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_HEADER_BASE_ACTIVE" file="common/window_header_base_active.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_HEADER_BASE_INACTIVE" file="common/window_header_base_inactive.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_WINDOW_HEADER_BASE_INCOGNITO_ACTIVE" file="common/window_header_base_incognito_active.png" />

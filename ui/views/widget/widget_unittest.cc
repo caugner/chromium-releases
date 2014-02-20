@@ -12,6 +12,7 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/hit_test.h"
 #include "ui/events/event_utils.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
@@ -951,7 +952,7 @@ TEST_F(WidgetTest, KeyboardInputEvent) {
 TEST_F(WidgetTest, DISABLED_FocusChangesOnBubble) {
   // Create a widget, show and activate it and focus the contents view.
   View* contents_view = new View;
-  contents_view->set_focusable(true);
+  contents_view->SetFocusable(true);
   Widget widget;
   Widget::InitParams init_params =
       CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
@@ -970,7 +971,7 @@ TEST_F(WidgetTest, DISABLED_FocusChangesOnBubble) {
   // Show a bubble.
   BubbleDelegateView* bubble_delegate_view =
       new BubbleDelegateView(contents_view, BubbleBorder::TOP_LEFT);
-  bubble_delegate_view->set_focusable(true);
+  bubble_delegate_view->SetFocusable(true);
   BubbleDelegateView::CreateBubble(bubble_delegate_view)->Show();
   bubble_delegate_view->RequestFocus();
 
@@ -1052,7 +1053,7 @@ class DesktopAuraTestValidPaintWidget : public views::Widget {
 
 TEST_F(WidgetTest, DesktopNativeWidgetAuraNoPaintAfterCloseTest) {
   View* contents_view = new View;
-  contents_view->set_focusable(true);
+  contents_view->SetFocusable(true);
   DesktopAuraTestValidPaintWidget widget;
   Widget::InitParams init_params =
       CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
@@ -1072,7 +1073,7 @@ TEST_F(WidgetTest, DesktopNativeWidgetAuraNoPaintAfterCloseTest) {
 
 TEST_F(WidgetTest, DesktopNativeWidgetAuraNoPaintAfterHideTest) {
   View* contents_view = new View;
-  contents_view->set_focusable(true);
+  contents_view->SetFocusable(true);
   DesktopAuraTestValidPaintWidget widget;
   Widget::InitParams init_params =
       CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
@@ -1179,6 +1180,14 @@ class DesktopAuraTopLevelWindowTest
     }
   }
 
+  aura::Window* owned_window() {
+    return owned_window_;
+  }
+
+  views::Widget* top_level_widget() {
+    return top_level_widget_;
+  }
+
  private:
   views::Widget widget_;
   views::Widget* top_level_widget_;
@@ -1213,14 +1222,34 @@ TEST_F(WidgetTest, DesktopAuraFullscreenWindowOwnerDestroyed) {
   RunPendingMessages();
 }
 
-// TODO(erg): Disabled on desktop linux until http://crbug.com/288988 is fixed.
-#if !defined(OS_LINUX)
 TEST_F(WidgetTest, DesktopAuraTopLevelOwnedPopupTest) {
   ViewsDelegate::views_delegate = NULL;
   DesktopAuraTopLevelWindowTest popup_window;
   ASSERT_NO_FATAL_FAILURE(popup_window.CreateTopLevelWindow(
       gfx::Rect(0, 0, 200, 200), false));
 
+  RunPendingMessages();
+  ASSERT_NO_FATAL_FAILURE(popup_window.DestroyOwnedWindow());
+  RunPendingMessages();
+}
+
+#if defined(OS_WIN)
+// TODO(ananta)
+// Fix this test to work on Linux Aura. Need to implement the
+// views::DesktopRootWindowHostX11::SetSize function
+// This test validates that when a top level owned popup Aura window is
+// resized, the widget is resized as well.
+TEST_F(WidgetTest, DesktopAuraTopLevelOwnedPopupResizeTest) {
+  ViewsDelegate::views_delegate = NULL;
+  DesktopAuraTopLevelWindowTest popup_window;
+  ASSERT_NO_FATAL_FAILURE(popup_window.CreateTopLevelWindow(
+      gfx::Rect(0, 0, 200, 200), false));
+
+  gfx::Rect new_size(0, 0, 400, 400);
+  popup_window.owned_window()->SetBounds(new_size);
+
+  EXPECT_EQ(popup_window.top_level_widget()->GetNativeView()->bounds().size(),
+            new_size.size());
   RunPendingMessages();
   ASSERT_NO_FATAL_FAILURE(popup_window.DestroyOwnedWindow());
   RunPendingMessages();
@@ -1600,6 +1629,63 @@ TEST_F(WidgetTest, SingleWindowClosing) {
   widget->CloseNow();
   EXPECT_EQ(1, delegate->count());
 }
+
+class WidgetWindowTitleTest : public WidgetTest {
+ protected:
+  void RunTest(bool desktop_native_widget) {
+    Widget* widget = new Widget();  // Destroyed by CloseNow() below.
+    Widget::InitParams init_params =
+        CreateParams(Widget::InitParams::TYPE_WINDOW);
+    widget->Init(init_params);
+
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+    if (desktop_native_widget)
+      init_params.native_widget = new DesktopNativeWidgetAura(widget);
+#else
+    DCHECK(!desktop_native_widget)
+        << "DesktopNativeWidget does not exist on non-Aura or on ChromeOS.";
+#endif
+
+    internal::NativeWidgetPrivate* native_widget =
+        widget->native_widget_private();
+
+    string16 empty;
+    string16 s1(UTF8ToUTF16("Title1"));
+    string16 s2(UTF8ToUTF16("Title2"));
+    string16 s3(UTF8ToUTF16("TitleLong"));
+
+    // The widget starts with no title, setting empty should not change
+    // anything.
+    EXPECT_FALSE(native_widget->SetWindowTitle(empty));
+    // Setting the title to something non-empty should cause a change.
+    EXPECT_TRUE(native_widget->SetWindowTitle(s1));
+    // Setting the title to something else with the same length should cause a
+    // change.
+    EXPECT_TRUE(native_widget->SetWindowTitle(s2));
+    // Setting the title to something else with a different length should cause
+    // a change.
+    EXPECT_TRUE(native_widget->SetWindowTitle(s3));
+    // Setting the title to the same thing twice should not cause a change.
+    EXPECT_FALSE(native_widget->SetWindowTitle(s3));
+
+    widget->CloseNow();
+  }
+};
+
+TEST_F(WidgetWindowTitleTest, SetWindowTitleChanged_NativeWidget) {
+  // Use the default NativeWidget.
+  bool desktop_native_widget = false;
+  RunTest(desktop_native_widget);
+}
+
+// DesktopNativeWidget does not exist on non-Aura or on ChromeOS.
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+TEST_F(WidgetWindowTitleTest, SetWindowTitleChanged_DesktopNativeWidget) {
+  // Override to use a DesktopNativeWidget.
+  bool desktop_native_widget = true;
+  RunTest(desktop_native_widget);
+}
+#endif  // USE_AURA && !OS_CHROMEOS
 
 // Used by SetTopLevelCorrectly to track calls to OnBeforeWidgetInit().
 class VerifyTopLevelDelegate : public TestViewsDelegate {
@@ -2184,6 +2270,67 @@ TEST_F(WidgetTest, WindowModalityActivationTest) {
 }
 #endif
 #endif
+
+namespace {
+
+class FullscreenAwareFrame : public views::NonClientFrameView {
+ public:
+  explicit FullscreenAwareFrame(views::Widget* widget)
+      : widget_(widget), fullscreen_layout_called_(false) {}
+  virtual ~FullscreenAwareFrame() {}
+
+  // views::NonClientFrameView overrides:
+  virtual gfx::Rect GetBoundsForClientView() const OVERRIDE {
+    return gfx::Rect();
+  }
+  virtual gfx::Rect GetWindowBoundsForClientBounds(
+      const gfx::Rect& client_bounds) const OVERRIDE {
+    return gfx::Rect();
+  }
+  virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE {
+    return HTNOWHERE;
+  }
+  virtual void GetWindowMask(const gfx::Size& size,
+                             gfx::Path* window_mask) OVERRIDE {}
+  virtual void ResetWindowControls() OVERRIDE {}
+  virtual void UpdateWindowIcon() OVERRIDE {}
+  virtual void UpdateWindowTitle() OVERRIDE {}
+
+  // views::View overrides:
+  virtual void Layout() OVERRIDE {
+    if (widget_->IsFullscreen())
+      fullscreen_layout_called_ = true;
+  }
+
+  bool fullscreen_layout_called() const { return fullscreen_layout_called_; }
+
+ private:
+  views::Widget* widget_;
+  bool fullscreen_layout_called_;
+
+  DISALLOW_COPY_AND_ASSIGN(FullscreenAwareFrame);
+};
+
+}  // namespace
+
+// Tests that frame Layout is called when a widget goes fullscreen without
+// changing its size or title.
+TEST_F(WidgetTest, FullscreenFrameLayout) {
+  Widget* widget = CreateTopLevelPlatformWidget();
+  FullscreenAwareFrame* frame = new FullscreenAwareFrame(widget);
+  widget->non_client_view()->SetFrameView(frame);  // Owns |frame|.
+
+  widget->Maximize();
+  RunPendingMessages();
+
+  EXPECT_FALSE(frame->fullscreen_layout_called());
+  widget->SetFullscreen(true);
+  widget->Show();
+  RunPendingMessages();
+  EXPECT_TRUE(frame->fullscreen_layout_called());
+
+  widget->CloseNow();
+}
 
 }  // namespace test
 }  // namespace views

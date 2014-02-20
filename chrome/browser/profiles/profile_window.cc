@@ -10,6 +10,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
 
@@ -134,8 +135,8 @@ void SwitchToProfile(
                  always_create,
                  false,
                  desktop_type),
-      string16(),
-      string16(),
+      base::string16(),
+      base::string16(),
       std::string());
 }
 
@@ -148,16 +149,16 @@ void SwitchToGuestProfile(chrome::HostDesktopType desktop_type,
                  false,
                  false,
                  desktop_type),
-      string16(),
-      string16(),
+      base::string16(),
+      base::string16(),
       std::string());
 }
 
 void CreateAndSwitchToNewProfile(chrome::HostDesktopType desktop_type,
                                  ProfileSwitchingDoneCallback callback) {
   ProfileManager::CreateMultiProfileAsync(
-      string16(),
-      string16(),
+      base::string16(),
+      base::string16(),
       base::Bind(&OpenBrowserWindowForProfile,
                  callback,
                  true,
@@ -174,6 +175,17 @@ void CloseGuestProfileWindows() {
   if (profile) {
     BrowserList::CloseAllBrowsersWithProfile(profile);
   }
+}
+
+void LockProfile(Profile* profile) {
+  DCHECK(profile);
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+
+  size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+  cache.SetProfileSigninRequiredAtIndex(index, true);
+  chrome::ShowUserManager(profile->GetPath());
+  BrowserList::CloseAllBrowsersWithProfile(profile);
 }
 
 }  // namespace profiles

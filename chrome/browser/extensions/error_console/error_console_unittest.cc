@@ -12,12 +12,12 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_error.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/feature_switch.h"
 #include "extensions/common/id_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -39,7 +39,7 @@ StackTrace GetDefaultStackTrace() {
   return stack_trace;
 }
 
-string16 GetSourceForExtensionId(const std::string& extension_id) {
+base::string16 GetSourceForExtensionId(const std::string& extension_id) {
   return base::UTF8ToUTF16(
       std::string(kExtensionScheme) +
       content::kStandardSchemeSeparator +
@@ -49,7 +49,7 @@ string16 GetSourceForExtensionId(const std::string& extension_id) {
 scoped_ptr<ExtensionError> CreateNewRuntimeError(
     bool from_incognito,
     const std::string& extension_id,
-    const string16& message) {
+    const base::string16& message) {
   return scoped_ptr<ExtensionError>(new RuntimeError(
       extension_id,
       from_incognito,
@@ -117,7 +117,7 @@ TEST_F(ErrorConsoleUnitTest, AddAndRemoveErrors) {
   // Add another error for a different extension id.
   const std::string kSecondId = id_util::GenerateId("id2");
   error_console_->ReportError(
-      CreateNewRuntimeError(false, kSecondId, string16()));
+      CreateNewRuntimeError(false, kSecondId, base::string16()));
 
   // There should be two entries now, one for each id, and there should be one
   // error for the second extension.

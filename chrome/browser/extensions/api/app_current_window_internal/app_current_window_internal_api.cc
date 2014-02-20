@@ -8,7 +8,6 @@
 #include "apps/shell_window_registry.h"
 #include "apps/ui/native_app_window.h"
 #include "base/command_line.h"
-#include "chrome/browser/extensions/api/app_window/app_window_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/app_current_window_internal.h"
 #include "chrome/common/extensions/api/app_window.h"
@@ -26,7 +25,7 @@ namespace SetMinHeight = app_current_window_internal::SetMinHeight;
 namespace SetMaxWidth = app_current_window_internal::SetMaxWidth;
 namespace SetMaxHeight = app_current_window_internal::SetMaxHeight;
 namespace SetIcon = app_current_window_internal::SetIcon;
-namespace SetInputRegion = app_current_window_internal::SetInputRegion;
+namespace SetShape = app_current_window_internal::SetShape;
 namespace SetAlwaysOnTop = app_current_window_internal::SetAlwaysOnTop;
 
 using apps::ShellWindow;
@@ -44,6 +43,12 @@ const char kNoAssociatedShellWindow[] =
 
 const char kDevChannelOnly[] =
     "This function is currently only available in the Dev channel.";
+
+const char kRequiresFramelessWindow[] =
+    "This function requires a frameless window (frame:none).";
+
+const char kAlwaysOnTopPermission[] =
+    "The \"alwaysOnTopWindows\" permission is required.";
 
 const int kUnboundedSize = apps::ShellWindow::SizeConstraints::kUnboundedSize;
 
@@ -109,13 +114,13 @@ bool AppCurrentWindowInternalClearAttentionFunction::RunWithWindow(
 
 bool AppCurrentWindowInternalShowFunction::RunWithWindow(
     ShellWindow* window) {
-  window->GetBaseWindow()->Show();
+  window->Show(ShellWindow::SHOW_ACTIVE);
   return true;
 }
 
 bool AppCurrentWindowInternalHideFunction::RunWithWindow(
     ShellWindow* window) {
-  window->GetBaseWindow()->Hide();
+  window->Hide();
   return true;
 }
 
@@ -224,15 +229,30 @@ bool AppCurrentWindowInternalSetIconFunction::RunWithWindow(
   return true;
 }
 
-bool AppCurrentWindowInternalSetInputRegionFunction::RunWithWindow(
+bool AppCurrentWindowInternalSetShapeFunction::RunWithWindow(
     ShellWindow* window) {
 
+  if (!window->GetBaseWindow()->IsFrameless()) {
+    error_ = kRequiresFramelessWindow;
+    return false;
+  }
+
   const char* whitelist[] = {
+    "0F42756099D914A026DADFA182871C015735DD95",  // http://crbug.com/323773
+    "2D22CDB6583FD0A13758AEBE8B15E45208B4E9A7",
+
     "EBA908206905323CECE6DC4B276A58A0F4AC573F",
     "2775E568AC98F9578791F1EAB65A1BF5F8CEF414",
     "4AA3C5D69A4AECBD236CAD7884502209F0F5C169",
     "E410CDAB2C6E6DD408D731016CECF2444000A912",
-    "9E930B2B5EABA6243AE6C710F126E54688E8FAF6"
+    "9E930B2B5EABA6243AE6C710F126E54688E8FAF6",
+
+    "FAFE8EFDD2D6AE2EEB277AFEB91C870C79064D9E",  // http://crbug.com/327507
+    "3B52D273A271D4E2348233E322426DBAE854B567",
+    "5DF6ADC8708DF59FCFDDBF16AFBFB451380C2059",
+    "1037DEF5F6B06EA46153AD87B6C5C37440E3F2D1",
+    "F5815DAFEB8C53B078DD1853B2059E087C42F139",
+    "6A08EFFF9C16E090D6DCC7EC55A01CADAE840513"
   };
   if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV &&
       !SimpleFeature::IsIdInWhitelist(
@@ -243,9 +263,9 @@ bool AppCurrentWindowInternalSetInputRegionFunction::RunWithWindow(
     return false;
   }
 
-  scoped_ptr<SetInputRegion::Params> params(
-      SetInputRegion::Params::Create(*args_));
-  const Region& inputRegion = params->region;
+  scoped_ptr<SetShape::Params> params(
+      SetShape::Params::Create(*args_));
+  const Region& shape = params->region;
 
   // Build a region from the supplied list of rects.
   // If |rects| is missing, then the input region is removed. This clears the
@@ -253,10 +273,10 @@ bool AppCurrentWindowInternalSetInputRegionFunction::RunWithWindow(
   // To specify an empty input region (so the window ignores all input),
   // |rects| should be an empty list.
   scoped_ptr<SkRegion> region(new SkRegion);
-  if (inputRegion.rects) {
+  if (shape.rects) {
     for (std::vector<linked_ptr<RegionRect> >::const_iterator i =
-             inputRegion.rects->begin();
-         i != inputRegion.rects->end();
+             shape.rects->begin();
+         i != shape.rects->end();
          ++i) {
       const RegionRect& inputRect = **i;
       int32_t x = inputRect.left;
@@ -271,22 +291,23 @@ bool AppCurrentWindowInternalSetInputRegionFunction::RunWithWindow(
     region.reset(NULL);
   }
 
-  window->UpdateInputRegion(region.Pass());
+  window->UpdateShape(region.Pass());
 
   return true;
 }
 
 bool AppCurrentWindowInternalSetAlwaysOnTopFunction::RunWithWindow(
     ShellWindow* window) {
-  if (!AppWindowCreateFunction::AllowAlwaysOnTopWindows(GetExtension()->id())) {
-    error_ = kDevChannelOnly;
+  if (!GetExtension()->HasAPIPermission(
+          extensions::APIPermission::kAlwaysOnTopWindows)) {
+    error_ = kAlwaysOnTopPermission;
     return false;
   }
 
   scoped_ptr<SetAlwaysOnTop::Params> params(
       SetAlwaysOnTop::Params::Create(*args_));
   CHECK(params.get());
-  window->GetBaseWindow()->SetAlwaysOnTop(params->always_on_top);
+  window->SetAlwaysOnTop(params->always_on_top);
   return true;
 }
 

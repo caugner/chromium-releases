@@ -19,13 +19,14 @@
 #include "chrome/browser/signin/about_signin_internals.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
 #include "chrome/browser/signin/local_auth.h"
+#include "chrome/browser/signin/profile_oauth2_token_service.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_account_id_helper.h"
 #include "chrome/browser/signin/signin_global_error.h"
 #include "chrome/browser/signin/signin_internals_util.h"
 #include "chrome/browser/signin/signin_manager_cookie_helper.h"
 #include "chrome/browser/signin/signin_manager_delegate.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/signin/token_service.h"
-#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/common/chrome_switches.h"
@@ -120,10 +121,10 @@ SigninManager::~SigninManager() {
 }
 
 void SigninManager::InitTokenService() {
-  SigninManagerBase::InitTokenService();
-  TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
+  ProfileOAuth2TokenService* token_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
   if (token_service && !GetAuthenticatedUsername().empty())
-    token_service->LoadTokensFromDB();
+    token_service->LoadCredentials();
 }
 
 std::string SigninManager::SigninTypeToString(
@@ -160,7 +161,6 @@ bool SigninManager::PrepareForSignin(SigninType type,
   // need to try again, but take care to leave state around tracking that the
   // user has successfully signed in once before with this username, so that on
   // restart we don't think sync setup has never completed.
-  RevokeOAuthLoginToken();
   ClearTransientSigninData();
   type_ = type;
   possibly_invalid_username_.assign(username);
@@ -323,7 +323,6 @@ void SigninManager::SignOut() {
   }
 
   ClearTransientSigninData();
-  RevokeOAuthLoginToken();
 
   GoogleServiceSignoutDetails details(GetAuthenticatedUsername());
   clear_authenticated_username();
@@ -336,13 +335,15 @@ void SigninManager::SignOut() {
       chrome::NOTIFICATION_GOOGLE_SIGNED_OUT,
       content::Source<Profile>(profile_),
       content::Details<const GoogleServiceSignoutDetails>(&details));
-  TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
-  token_service->ResetCredentialsInMemory();
-  token_service->EraseTokensFromDB();
+  ProfileOAuth2TokenService* token_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
+  token_service->RevokeAllCredentials();
 }
 
 void SigninManager::Initialize(Profile* profile, PrefService* local_state) {
   SigninManagerBase::Initialize(profile, local_state);
+
+  InitTokenService();
 
   // local_state can be null during unit tests.
   if (local_state) {
@@ -363,10 +364,13 @@ void SigninManager::Initialize(Profile* profile, PrefService* local_state) {
     // have changed the policy since the last signin, so sign out the user.
     SignOut();
   }
+
+  account_id_helper_.reset(new SigninAccountIdHelper(profile));
 }
 
 void SigninManager::Shutdown() {
   local_state_pref_registrar_.RemoveAll();
+  account_id_helper_.reset();
   SigninManagerBase::Shutdown();
 }
 
@@ -404,7 +408,7 @@ bool SigninManager::IsUsernameAllowedByPolicy(const std::string& username,
   // are not valid regular expressions - they should instead be ".*@foo.com").
   // For convenience, detect these patterns and insert a "." character at the
   // front.
-  string16 pattern = UTF8ToUTF16(policy);
+  base::string16 pattern = UTF8ToUTF16(policy);
   if (pattern[0] == L'*')
     pattern.insert(pattern.begin(), L'.');
 
@@ -418,7 +422,7 @@ bool SigninManager::IsUsernameAllowedByPolicy(const std::string& username,
     // break signin than to quietly allow users to sign in).
     return false;
   }
-  string16 username16 = UTF8ToUTF16(username);
+  base::string16 username16 = UTF8ToUTF16(username);
   icu::UnicodeString icu_input(username16.data(), username16.length());
   matcher.reset(icu_input);
   status = U_ZERO_ERROR;
@@ -435,22 +439,6 @@ bool SigninManager::IsAllowedUsername(const std::string& username) const {
   std::string pattern = local_state->GetString(
       prefs::kGoogleServicesUsernamePattern);
   return IsUsernameAllowedByPolicy(username, pattern);
-}
-
-void SigninManager::RevokeOAuthLoginToken() {
-  TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
-  if (token_service->HasOAuthLoginToken()) {
-    revoke_token_fetcher_.reset(
-        new GaiaAuthFetcher(this,
-                            GaiaConstants::kChromeSource,
-                            profile_->GetRequestContext()));
-    revoke_token_fetcher_->StartRevokeOAuth2Token(
-        token_service->GetOAuth2LoginRefreshToken());
-  }
-}
-
-void SigninManager::OnOAuth2RevokeTokenCompleted() {
-  revoke_token_fetcher_.reset(NULL);
 }
 
 bool SigninManager::AuthInProgress() const {
@@ -569,21 +557,13 @@ void SigninManager::CompletePendingSignin() {
   DCHECK(!possibly_invalid_username_.empty());
   OnSignedIn(possibly_invalid_username_);
 
-  TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
-  token_service->UpdateCredentials(last_result_);
-  DCHECK(token_service->AreCredentialsValid());
-  token_service->StartFetchingTokens();
-
-  // If we have oauth2 tokens, tell token service about them so it does not
-  // need to fetch them again.  Its important that the authenticated name has
-  // already been set before sending the oauth2 token to the token service.
-  // Some token service listeners will query the authenticated name when they
-  // receive the token available notification.
-  if (!temp_oauth_login_tokens_.refresh_token.empty()) {
-    DCHECK(!GetAuthenticatedUsername().empty());
-    token_service->UpdateCredentialsWithOAuth2(temp_oauth_login_tokens_);
-    temp_oauth_login_tokens_ = ClientOAuthResult();
-  }
+  DCHECK(!temp_oauth_login_tokens_.refresh_token.empty());
+  DCHECK(!GetAuthenticatedUsername().empty());
+  ProfileOAuth2TokenService* token_service =
+    ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
+  token_service->UpdateCredentials(GetAuthenticatedUsername(),
+                                   temp_oauth_login_tokens_.refresh_token);
+  temp_oauth_login_tokens_ = ClientOAuthResult();
 }
 
 void SigninManager::OnExternalSigninCompleted(const std::string& username) {
@@ -603,43 +583,16 @@ void SigninManager::OnSignedIn(const std::string& username) {
       content::Source<Profile>(profile_),
       content::Details<const GoogleServiceSigninSuccessDetails>(&details));
 
+#if !defined(OS_ANDROID)
   // Don't store password hash except for users of new profile features.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kNewProfileManagement)) {
-    std::string auth_username = GetAuthenticatedUsername();
-    chrome::SetLocalAuthCredentials(profile_, auth_username, password_);
+    chrome::SetLocalAuthCredentials(profile_, password_);
   }
+#endif
+
   password_.clear();  // Don't need it anymore.
   DisableOneClickSignIn(profile_);  // Don't ever offer again.
-
-  if (type_ == SIGNIN_TYPE_WITH_OAUTH_CODE &&
-      !temp_oauth_login_tokens_.access_token.empty())
-    // Cookie jar may not be set up properly, need to first get an uber token
-    // and then merge sessions with the token.
-    client_login_->StartTokenFetchForUberAuthExchange(
-        temp_oauth_login_tokens_.access_token);
-}
-
-void SigninManager::OnUberAuthTokenSuccess(const std::string& token) {
-  DVLOG(1) << "SigninManager::OnUberAuthTokenSuccess";
-  NotifyDiagnosticsObservers(UBER_TOKEN_STATUS, "Successful");
-  client_login_->StartMergeSession(token);
-}
-
-void SigninManager::OnMergeSessionSuccess(const std::string& data) {
-  DVLOG(1) << "SigninManager::OnMergeSessionSuccess";
-  NotifyDiagnosticsObservers(MERGE_SESSION_STATUS, "Successful");
-}
-
-void SigninManager::OnMergeSessionFailure(const GoogleServiceAuthError& error) {
-  LOG(ERROR) << "Unable to mereg sessions. Login failed.";
-  NotifyDiagnosticsObservers(MERGE_SESSION_STATUS, error.ToString());
-}
-
-void SigninManager::OnUberAuthTokenFailure(
-    const GoogleServiceAuthError& error) {
-  LOG(ERROR) << "Unable to retreive the uber token. Login failed.";
-  NotifyDiagnosticsObservers(UBER_TOKEN_STATUS, error.ToString());
 }
 
 void SigninManager::OnGetUserInfoFailure(const GoogleServiceAuthError& error) {

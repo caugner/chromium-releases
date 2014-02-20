@@ -66,7 +66,7 @@ GURL GetFileManagerMainPageUrl() {
 
 GURL GetFileManagerMainPageUrlWithParams(
     ui::SelectFileDialog::Type type,
-    const string16& title,
+    const base::string16& title,
     const base::FilePath& default_virtual_path,
     const ui::SelectFileDialog::FileTypeInfo* file_types,
     int file_type_index,
@@ -90,7 +90,7 @@ GURL GetFileManagerMainPageUrlWithParams(
       dict->Set("extensions", extensions_list);
 
       if (i < file_types->extension_description_overrides.size()) {
-        string16 desc = file_types->extension_description_overrides[i];
+        base::string16 desc = file_types->extension_description_overrides[i];
         dict->SetString("description", desc);
       }
 
@@ -116,16 +116,6 @@ GURL GetFileManagerMainPageUrlWithParams(
   std::string url = GetFileManagerMainPageUrl().spec() + '?' +
       net::EscapeUrlEncodedData(json_args,
                                 false);  // Space to %20 instead of +.
-  return GURL(url);
-}
-
-GURL GetActionChoiceUrl(const base::FilePath& virtual_path,
-                        bool advanced_mode) {
-  std::string url = GetFileManagerUrl("/action_choice.html").spec();
-  if (advanced_mode)
-    url += "?advanced-mode";
-  url += "#/" + net::EscapeUrlEncodedData(virtual_path.value(),
-                                          false);  // Space to %20 instead of +.
   return GURL(url);
 }
 

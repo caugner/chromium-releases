@@ -42,7 +42,9 @@
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/text_elider.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/button/image_button.h"
+#include "ui/views/rect_based_targeting_utils.h"
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
@@ -281,21 +283,6 @@ void DrawIconCenter(gfx::Canvas* canvas,
                      icon_height, filter, paint);
 }
 
-// Draws the icon image at the bottom right corner of |bounds|.
-void DrawIconBottomRight(gfx::Canvas* canvas,
-                         const gfx::ImageSkia& image,
-                         int image_offset,
-                         int icon_width,
-                         int icon_height,
-                         const gfx::Rect& bounds,
-                         bool filter,
-                         const SkPaint& paint) {
-  int dst_x = bounds.x() + bounds.width() - icon_width;
-  int dst_y = bounds.y() + bounds.height() - icon_height;
-  DrawIconAtLocation(canvas, image, image_offset, dst_x, dst_y, icon_width,
-                     icon_height, filter, paint);
-}
-
 chrome::HostDesktopType GetHostDesktopType(views::View* view) {
   // Widget is NULL when tabs are detached.
   views::Widget* widget = view->GetWidget();
@@ -355,21 +342,26 @@ class Tab::TabCloseButton : public views::ImageButton {
   virtual ~TabCloseButton() {}
 
   // Overridden from views::View.
-  virtual View* GetEventHandlerForPoint(const gfx::Point& point) OVERRIDE {
-    // Ignore the padding set on the button.
-    gfx::Rect rect = GetContentsBounds();
-    rect.set_x(GetMirroredXForRect(rect));
+  virtual View* GetEventHandlerForRect(const gfx::Rect& rect) OVERRIDE {
+    if (!views::UsePointBasedTargeting(rect))
+      return View::GetEventHandlerForRect(rect);
 
+    // Ignore the padding set on the button.
+    gfx::Rect contents_bounds = GetContentsBounds();
+    contents_bounds.set_x(GetMirroredXForRect(contents_bounds));
+
+    // TODO(tdanderson): Remove this ifdef if rect-based targeting
+    // is turned on by default.
 #if defined(USE_ASH)
     // Include the padding in hit-test for touch events.
     if (aura::Env::GetInstance()->is_touch_down())
-      rect = GetLocalBounds();
+      contents_bounds = GetLocalBounds();
 #elif defined(OS_WIN)
     // TODO(sky): Use local-bounds if a touch-point is active.
     // http://crbug.com/145258
 #endif
 
-    return rect.Contains(point) ? this : parent();
+    return contents_bounds.Intersects(rect) ? this : parent();
   }
 
   // Overridden from views::View.
@@ -430,15 +422,30 @@ class Tab::TabCloseButton : public views::ImageButton {
     views::View::ConvertRectToTarget(tab_, this, &tab_bounds_f);
     gfx::Rect tab_bounds = gfx::ToEnclosingRect(tab_bounds_f);
 
-    // If the button is hidden behind another tab, the hit test mask is empty.
-    // Otherwise set the hit test mask to be the contents bounds.
-    path->reset();
-    if (tab_bounds.Contains(button_bounds)) {
-      // Include the padding in the hit test mask for touch events.
-      if (source == HIT_TEST_SOURCE_TOUCH)
-        button_bounds = GetLocalBounds();
+    // If either the top or bottom of the tab close button is clipped,
+    // do not consider these regions to be part of the button's bounds.
+    int top_overflow = tab_bounds.y() - button_bounds.y();
+    int bottom_overflow = button_bounds.bottom() - tab_bounds.bottom();
+    if (top_overflow > 0)
+      button_bounds.set_y(tab_bounds.y());
+    else if (bottom_overflow > 0)
+      button_bounds.set_height(button_bounds.height() - bottom_overflow);
 
-      path->addRect(RectToSkRect(button_bounds));
+    // If the hit test request is in response to a gesture, |path| should be
+    // empty unless the entire tab close button is visible to the user. Hit
+    // test requests in response to a mouse event should always set |path|
+    // to be the visible portion of the tab close button, even if it is
+    // partially hidden behind another tab.
+    path->reset();
+    gfx::Rect intersection(gfx::IntersectRects(tab_bounds, button_bounds));
+    if (!intersection.IsEmpty()) {
+      // TODO(tdanderson): Consider always returning the intersection if
+      // the non-rectangular shape of the tabs can be accounted for.
+      if (source == HIT_TEST_SOURCE_TOUCH &&
+          !tab_bounds.Contains(button_bounds))
+        return;
+
+      path->addRect(RectToSkRect(intersection));
     }
   }
 
@@ -934,7 +941,7 @@ void Tab::GetHitTestMask(HitTestSource source, gfx::Path* path) const {
   }
 }
 
-bool Tab::GetTooltipText(const gfx::Point& p, string16* tooltip) const {
+bool Tab::GetTooltipText(const gfx::Point& p, base::string16* tooltip) const {
   // TODO(miu): Rectify inconsistent tooltip behavior.  http://crbug.com/310947
 
   if (data_.media_state != TAB_MEDIA_STATE_NONE) {
@@ -1521,7 +1528,7 @@ void Tab::PaintMediaIndicator(gfx::Canvas* canvas) {
 
 void Tab::PaintTitle(gfx::Canvas* canvas, SkColor title_color) {
   // Paint the Title.
-  string16 title = data().title;
+  base::string16 title = data().title;
   if (title.empty()) {
     title = data().loading ?
         l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE) :

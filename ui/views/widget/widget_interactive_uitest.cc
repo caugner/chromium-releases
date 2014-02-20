@@ -15,6 +15,7 @@
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
+#include "ui/aura/window.h"
 #endif
 
 #if defined(USE_AURA) && !defined(OS_CHROMEOS)
@@ -161,7 +162,7 @@ class NestedLoopCaptureView : public View {
 TEST_F(WidgetTest, DesktopNativeWidgetAuraActivationAndFocusTest) {
   // Create widget 1 and expect the active window to be its window.
   View* contents_view1 = new View;
-  contents_view1->set_focusable(true);
+  contents_view1->SetFocusable(true);
   Widget widget1;
   Widget::InitParams init_params =
       CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
@@ -193,7 +194,8 @@ TEST_F(WidgetTest, DesktopNativeWidgetAuraActivationAndFocusTest) {
   widget2.Show();
   aura::Window* root_window2 = widget2.GetNativeView()->GetRootWindow();
   contents_view2->RequestFocus();
-  ::SetActiveWindow(root_window2->GetDispatcher()->GetAcceleratedWidget());
+  ::SetActiveWindow(
+      root_window2->GetDispatcher()->host()->GetAcceleratedWidget());
 
   aura::client::ActivationClient* activation_client2 =
       aura::client::GetActivationClient(root_window2);
@@ -205,7 +207,8 @@ TEST_F(WidgetTest, DesktopNativeWidgetAuraActivationAndFocusTest) {
   // Now set focus back to widget 1 and expect the active window to be its
   // window.
   contents_view1->RequestFocus();
-  ::SetActiveWindow(root_window1->GetDispatcher()->GetAcceleratedWidget());
+  ::SetActiveWindow(
+      root_window1->GetDispatcher()->host()->GetAcceleratedWidget());
   EXPECT_EQ(activation_client2->GetActiveWindow(),
             reinterpret_cast<aura::Window*>(NULL));
   EXPECT_EQ(activation_client1->GetActiveWindow(), widget1.GetNativeView());
@@ -698,7 +701,7 @@ TEST_F(WidgetCaptureTest, Capture) {
   TestCapture(false);
 }
 
-#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+#if defined(USE_AURA) && !defined(OS_LINUX)
 // See description in TestCapture(). Creates DesktopNativeWidget.
 TEST_F(WidgetCaptureTest, CaptureDesktopNativeWidget) {
   TestCapture(true);

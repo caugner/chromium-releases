@@ -228,7 +228,7 @@ RenderWidgetHostView* WebContentsViewWin::CreateViewForPopupWidget(
   return RenderWidgetHostViewPort::CreateViewForWidget(render_widget_host);
 }
 
-void WebContentsViewWin::SetPageTitle(const string16& title) {
+void WebContentsViewWin::SetPageTitle(const base::string16& title) {
   // It's possible to get this after the hwnd has been destroyed.
   if (GetNativeView())
     ::SetWindowText(GetNativeView(), title.c_str());
@@ -261,7 +261,7 @@ void WebContentsViewWin::ShowPopupMenu(const gfx::Rect& bounds,
 }
 
 void WebContentsViewWin::StartDragging(const DropData& drop_data,
-                                       WebKit::WebDragOperationsMask operations,
+                                       blink::WebDragOperationsMask operations,
                                        const gfx::ImageSkia& image,
                                        const gfx::Vector2d& image_offset,
                                        const DragEventSourceInfo& event_info) {
@@ -273,7 +273,7 @@ void WebContentsViewWin::StartDragging(const DropData& drop_data,
   drag_handler_->StartDragging(drop_data, operations, image, image_offset);
 }
 
-void WebContentsViewWin::UpdateDragCursor(WebKit::WebDragOperation operation) {
+void WebContentsViewWin::UpdateDragCursor(blink::WebDragOperation operation) {
   drag_dest_->set_drag_cursor(operation);
 }
 

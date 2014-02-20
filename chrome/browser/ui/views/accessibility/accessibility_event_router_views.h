@@ -49,8 +49,8 @@ class AccessibilityEventRouterViews : public content::NotificationObserver {
 
   // Handle a menu item being focused (separate because a menu item is
   // not necessarily its own view).
-  void HandleMenuItemFocused(const string16& menu_name,
-                             const string16& menu_item_name,
+  void HandleMenuItemFocused(const base::string16& menu_name,
+                             const base::string16& menu_item_name,
                              int item_index,
                              int item_count,
                              bool has_submenu);
@@ -65,6 +65,8 @@ class AccessibilityEventRouterViews : public content::NotificationObserver {
 
   FRIEND_TEST_ALL_PREFIXES(AccessibilityEventRouterViewsTest,
                            TestFocusNotification);
+  FRIEND_TEST_ALL_PREFIXES(AccessibilityEventRouterViewsTest,
+                           MenuIndexAndCountForInvisibleMenu);
 
   AccessibilityEventRouterViews();
   virtual ~AccessibilityEventRouterViews();
@@ -98,6 +100,14 @@ class AccessibilityEventRouterViews : public content::NotificationObserver {
       views::View* view,
       ui::AccessibilityTypes::Event event,
       Profile* profile);
+  static void SendTreeNotification(
+      views::View* view,
+      ui::AccessibilityTypes::Event event,
+      Profile* profile);
+  static void SendTreeItemNotification(
+      views::View* view,
+      ui::AccessibilityTypes::Event event,
+      Profile* profile);
   static void SendTextfieldNotification(
       views::View* view,
       ui::AccessibilityTypes::Event event,
@@ -115,6 +125,10 @@ class AccessibilityEventRouterViews : public content::NotificationObserver {
       ui::AccessibilityTypes::Event event,
       Profile* profile);
   static void SendSliderNotification(
+      views::View* view,
+      ui::AccessibilityTypes::Event event,
+      Profile* profile);
+  static void SendAlertControlNotification(
       views::View* view,
       ui::AccessibilityTypes::Event event,
       Profile* profile);

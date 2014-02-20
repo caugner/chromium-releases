@@ -27,19 +27,18 @@ class Extension;
 struct AppLaunchParams {
   AppLaunchParams(Profile* profile,
                   const extensions::Extension* extension,
-                  extension_misc::LaunchContainer container,
+                  extensions::LaunchContainer container,
                   WindowOpenDisposition disposition);
 
-  // Helper to create AppLaunchParams using ExtensionPrefs::GetLaunchContainer
-  // with ExtensionPrefs::LAUNCH_REGULAR to check for a user-configured
-  // container.
+  // Helper to create AppLaunchParams using extensions::GetLaunchContainer with
+  // LAUNCH_TYPE_REGULAR to check for a user-configured container.
   AppLaunchParams(Profile* profile,
                   const extensions::Extension* extension,
                   WindowOpenDisposition disposition);
 
   // Helper to create AppLaunchParams using event flags that allows user to
   // override the user-configured container using modifier keys, falling back to
-  // ExtensionPrefs::GetLaunchContainer() with no modifiers. |desktop_type|
+  // extensions::GetLaunchContainer() with no modifiers. |desktop_type|
   // indicates the desktop upon which to launch (Ash or Native).
   AppLaunchParams(Profile* profile,
                   const extensions::Extension* extension,
@@ -53,7 +52,7 @@ struct AppLaunchParams {
   const extensions::Extension* extension;
 
   // The container type to launch the application in.
-  extension_misc::LaunchContainer container;
+  extensions::LaunchContainer container;
 
   // If container is TAB, this field controls how the tab is opened.
   WindowOpenDisposition disposition;

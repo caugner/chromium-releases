@@ -24,8 +24,7 @@ using base::android::ConvertUTF8ToJavaString;
 namespace {
 
 Profile* GetOriginalProfile() {
-  return g_browser_process->profile_manager()->GetDefaultProfile()->
-      GetOriginalProfile();
+  return ProfileManager::GetActiveUserProfile()->GetOriginalProfile();
 }
 
 }  // namespace
@@ -143,7 +142,7 @@ TemplateUrlServiceAndroid::GetUrlForSearchQuery(JNIEnv* env,
   const TemplateURL* default_provider =
       template_url_service_->GetDefaultSearchProvider();
 
-  string16 query(ConvertJavaStringToUTF16(env, jquery));
+  base::string16 query(ConvertJavaStringToUTF16(env, jquery));
 
   std::string url;
   if (default_provider &&
@@ -163,7 +162,7 @@ TemplateUrlServiceAndroid::ReplaceSearchTermsInUrl(JNIEnv* env,
   TemplateURL* default_provider =
       template_url_service_->GetDefaultSearchProvider();
 
-  string16 query(ConvertJavaStringToUTF16(env, jquery));
+  base::string16 query(ConvertJavaStringToUTF16(env, jquery));
   GURL current_url(ConvertJavaStringToUTF16(env, jcurrent_url));
   GURL destination_url(current_url);
   if (default_provider && !query.empty()) {
@@ -175,10 +174,10 @@ TemplateUrlServiceAndroid::ReplaceSearchTermsInUrl(JNIEnv* env,
   return base::android::ScopedJavaLocalRef<jstring>(env, NULL);
 }
 
-static jint Init(JNIEnv* env, jobject obj) {
+static jlong Init(JNIEnv* env, jobject obj) {
   TemplateUrlServiceAndroid* template_url_service_android =
       new TemplateUrlServiceAndroid(env, obj);
-  return reinterpret_cast<jint>(template_url_service_android);
+  return reinterpret_cast<intptr_t>(template_url_service_android);
 }
 
 // static

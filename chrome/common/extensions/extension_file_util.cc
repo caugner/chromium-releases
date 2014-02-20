@@ -20,21 +20,20 @@
 #include "base/threading/thread_restrictions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_messages.h"
-#include "chrome/common/extensions/manifest_handler.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/extensions/manifest_handlers/theme_handler.h"
 #include "chrome/common/extensions/message_bundle.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/install_warning.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handler.h"
 #include "grit/generated_resources.h"
-#include "net/base/escape.h"
 #include "net/base/file_stream.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -72,7 +71,7 @@ base::FilePath InstallExtension(const base::FilePath& unpacked_source_dir,
 
   // Create the extension directory if it doesn't exist already.
   if (!base::PathExists(extension_dir)) {
-    if (!file_util::CreateDirectory(extension_dir))
+    if (!base::CreateDirectory(extension_dir))
       return base::FilePath();
   }
 
@@ -229,7 +228,7 @@ std::vector<base::FilePath> FindPrivateKeyFiles(
 bool ValidateFilePath(const base::FilePath& path) {
   int64 size = 0;
   if (!base::PathExists(path) ||
-      !file_util::GetFileSize(path, &size) ||
+      !base::GetFileSize(path, &size) ||
       size == 0) {
     return false;
   }
@@ -493,49 +492,6 @@ bool CheckForIllegalFilenames(const base::FilePath& extension_path,
   return true;
 }
 
-base::FilePath ExtensionURLToRelativeFilePath(const GURL& url) {
-  std::string url_path = url.path();
-  if (url_path.empty() || url_path[0] != '/')
-    return base::FilePath();
-
-  // Drop the leading slashes and convert %-encoded UTF8 to regular UTF8.
-  std::string file_path = net::UnescapeURLComponent(url_path,
-      net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS);
-  size_t skip = file_path.find_first_not_of("/\\");
-  if (skip != file_path.npos)
-    file_path = file_path.substr(skip);
-
-  base::FilePath path = base::FilePath::FromUTF8Unsafe(file_path);
-
-  // It's still possible for someone to construct an annoying URL whose path
-  // would still wind up not being considered relative at this point.
-  // For example: chrome-extension://id/c:////foo.html
-  if (path.IsAbsolute())
-    return base::FilePath();
-
-  return path;
-}
-
-base::FilePath ExtensionResourceURLToFilePath(const GURL& url,
-                                              const base::FilePath& root) {
-  std::string host = net::UnescapeURLComponent(url.host(),
-      net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS);
-  if (host.empty())
-    return base::FilePath();
-
-  base::FilePath relative_path = ExtensionURLToRelativeFilePath(url);
-  if (relative_path.empty())
-    return base::FilePath();
-
-  base::FilePath path = root.AppendASCII(host).Append(relative_path);
-  if (!base::PathExists(path))
-    return base::FilePath();
-  path = base::MakeAbsoluteFilePath(path);
-  if (path.empty() || !root.IsParent(path))
-    return base::FilePath();
-  return path;
-}
-
 base::FilePath GetInstallTempDir(const base::FilePath& extensions_dir) {
   // We do file IO in this function, but only when the current profile's
   // Temp directory has never been used before, or in a rare error case.
@@ -561,7 +517,7 @@ base::FilePath GetInstallTempDir(const base::FilePath& extensions_dir) {
   }
 
   // Directory doesn't exist, so create it.
-  if (!file_util::CreateDirectory(temp_path)) {
+  if (!base::CreateDirectory(temp_path)) {
     DLOG(WARNING) << "Couldn't create directory: " << temp_path.value();
     return base::FilePath();
   }

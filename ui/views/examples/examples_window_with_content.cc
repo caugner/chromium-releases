@@ -11,6 +11,7 @@
 #include "content/public/browser/browser_context.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/views/background.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/examples/bubble_example.h"
@@ -124,9 +125,9 @@ class ExamplesWindowContents : public WidgetDelegateView,
     example_shown_->RemoveAllChildViews(false);
     example_shown_->AddChildView(combobox_model_.GetItemViewAt(
         combobox->selected_index()));
-    example_shown_->RequestFocus();
     SetStatus(std::string());
     Layout();
+    SchedulePaint();
   }
 
   // Creates the layout within the examples window.

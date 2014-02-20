@@ -32,7 +32,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_registrar.h"
@@ -41,6 +40,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/common/extension.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_switches.h"
@@ -300,7 +300,7 @@ class PerformanceMonitorUncleanExitBrowserTest
 
     base::FilePath first_profile =
         user_data_directory.AppendASCII(first_profile_name_);
-    CHECK(file_util::CreateDirectory(first_profile));
+    CHECK(base::CreateDirectory(first_profile));
 
     base::FilePath stock_prefs_file;
     PathService::Get(chrome::DIR_TEST_DATA, &stock_prefs_file);
@@ -319,7 +319,7 @@ class PerformanceMonitorUncleanExitBrowserTest
 
     base::FilePath second_profile =
         user_data_directory.AppendASCII(second_profile_name_);
-    CHECK(file_util::CreateDirectory(second_profile));
+    CHECK(base::CreateDirectory(second_profile));
 
     base::FilePath second_profile_prefs_file =
         second_profile.Append(chrome::kPreferencesFilename);
@@ -758,12 +758,12 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, NetworkBytesRead) {
   PathService::Get(chrome::DIR_TEST_DATA, &test_dir);
 
   int64 page1_size = 0;
-  ASSERT_TRUE(file_util::GetFileSize(test_dir.AppendASCII("title1.html"),
-                                     &page1_size));
+  ASSERT_TRUE(base::GetFileSize(test_dir.AppendASCII("title1.html"),
+                                &page1_size));
 
   int64 page2_size = 0;
-  ASSERT_TRUE(file_util::GetFileSize(test_dir.AppendASCII("title2.html"),
-                                     &page2_size));
+  ASSERT_TRUE(base::GetFileSize(test_dir.AppendASCII("title2.html"),
+                                &page2_size));
 
   ASSERT_TRUE(test_server()->Start());
 

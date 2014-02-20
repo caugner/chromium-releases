@@ -18,6 +18,7 @@
 #include <iterator>
 #include <string>
 
+#include "nacl_io/fuse_mount_factory.h"
 #include "nacl_io/host_resolver.h"
 #include "nacl_io/kernel_handle.h"
 #include "nacl_io/kernel_wrap_real.h"
@@ -50,9 +51,9 @@ namespace nacl_io {
 
 
 KernelProxy::KernelProxy() : dev_(0), ppapi_(NULL),
-                             sigwinch_handler_(SIG_IGN),
                              signal_emitter_(new EventEmitter) {
-
+   memset(&sigwinch_handler_, 0, sizeof(sigwinch_handler_));
+   sigwinch_handler_.sa_handler = SIG_DFL;
 }
 
 KernelProxy::~KernelProxy() {
@@ -111,15 +112,37 @@ Error KernelProxy::Init(PepperInterface* ppapi) {
   host_resolver_.Init(ppapi_);
 #endif
 
-  StringMap_t args;
+  MountInitArgs args;
+  args.dev = dev_++;
+  args.ppapi = ppapi_;
   stream_mount_.reset(new MountStream());
-  result = stream_mount_->Init(0, args, ppapi);
+  result = stream_mount_->Init(args);
   if (result != 0) {
     assert(false);
     rtn = result;
   }
 
   return rtn;
+}
+
+bool KernelProxy::RegisterMountType(const char* mount_type,
+                                    fuse_operations* fuse_ops) {
+  MountFactoryMap_t::iterator iter = factories_.find(mount_type);
+  if (iter != factories_.end())
+    return false;
+
+  factories_[mount_type] = new FuseMountFactory(fuse_ops);
+  return true;
+}
+
+bool KernelProxy::UnregisterMountType(const char* mount_type) {
+  MountFactoryMap_t::iterator iter = factories_.find(mount_type);
+  if (iter == factories_.end())
+    return false;
+
+  delete iter->second;
+  factories_.erase(iter);
+  return true;
 }
 
 int KernelProxy::open_resource(const char* path) {
@@ -177,12 +200,12 @@ int KernelProxy::pipe(int pipefds[2]) {
   MountNodePipe* pipe = new MountNodePipe(stream_mount_.get());
   ScopedMountNode node(pipe);
 
-  if (pipe->Init(S_IREAD | S_IWRITE) == 0) {
+  if (pipe->Init(O_RDWR) == 0) {
     ScopedKernelHandle handle0(new KernelHandle(stream_mount_, node));
     ScopedKernelHandle handle1(new KernelHandle(stream_mount_, node));
 
     // Should never fail, but...
-    if (handle0->Init(S_IREAD) || handle1->Init(S_IWRITE)) {
+    if (handle0->Init(O_RDONLY) || handle1->Init(O_WRONLY)) {
       errno = EACCES;
       return -1;
     }
@@ -392,8 +415,13 @@ int KernelProxy::mount(const char* source,
     }
   }
 
+  MountInitArgs args;
+  args.dev = dev_++;
+  args.string_map = smap;
+  args.ppapi = ppapi_;
+
   ScopedMount mnt;
-  Error error = factory->second->CreateMount(dev_++, smap, ppapi_, &mnt);
+  Error error = factory->second->CreateMount(args, &mnt);
   if (error) {
     errno = error;
     return -1;
@@ -612,8 +640,39 @@ int KernelProxy::lstat(const char* path, struct stat* buf) {
 }
 
 int KernelProxy::rename(const char* path, const char* newpath) {
-  errno = ENOSYS;
-  return -1;
+  ScopedMount mnt;
+  Path rel;
+  Error error = AcquireMountAndRelPath(path, &mnt, &rel);
+  if (error) {
+    errno = error;
+    return -1;
+  }
+
+  ScopedMount newmnt;
+  Path newrel;
+  error = AcquireMountAndRelPath(newpath, &newmnt, &newrel);
+  if (error) {
+    errno = error;
+    return -1;
+  }
+
+  if (newmnt.get() != mnt.get()) {
+    // Renaming accross mountpoints is not allowed
+    errno = EXDEV;
+    return -1;
+  }
+
+  // They already point to the same path
+  if (rel == newrel)
+    return 0;
+
+  error = mnt->Rename(rel, newrel);
+  if (error) {
+    errno = error;
+    return -1;
+  }
+
+  return 0;
 }
 
 int KernelProxy::remove(const char* path) {
@@ -859,8 +918,10 @@ int KernelProxy::kill(pid_t pid, int sig) {
   signal_emitter_->RaiseEvents_Locked(POLLERR);
   switch (sig) {
     case SIGWINCH:
-      if (sigwinch_handler_ != SIG_IGN)
-        sigwinch_handler_(SIGWINCH);
+      if (sigwinch_handler_.sa_handler != SIG_IGN &&
+          sigwinch_handler_.sa_handler != SIG_DFL) {
+        sigwinch_handler_.sa_handler(SIGWINCH);
+      }
       break;
 
     case SIGUSR1:
@@ -874,21 +935,28 @@ int KernelProxy::kill(pid_t pid, int sig) {
   return 0;
 }
 
-sighandler_t KernelProxy::sigset(int signum, sighandler_t handler) {
+int KernelProxy::sigaction(int signum, const struct sigaction* action,
+                           struct sigaction* oaction) {
+  if (action && action->sa_flags & SA_SIGINFO) {
+    // We don't support SA_SIGINFO (sa_sigaction field) yet
+    errno = EINVAL;
+    return -1;
+  }
+
   switch (signum) {
     // Handled signals.
     case SIGWINCH: {
-      sighandler_t old_value = sigwinch_handler_;
-      if (handler == SIG_DFL)
-        handler = SIG_IGN;
-      sigwinch_handler_ = handler;
-      return old_value;
+      if (oaction)
+        *oaction = sigwinch_handler_;
+      if (action) {
+        sigwinch_handler_ = *action;
+      }
+      return 0;
     }
 
     // Known signals
     case SIGHUP:
     case SIGINT:
-    case SIGKILL:
     case SIGPIPE:
     case SIGPOLL:
     case SIGPROF:
@@ -900,13 +968,29 @@ sighandler_t KernelProxy::sigset(int signum, sighandler_t handler) {
     case SIGQUIT:
     case SIGSEGV:
     case SIGTRAP:
-      if (handler == SIG_DFL)
-        return SIG_DFL;
-      break;
+      if (action && action->sa_handler != SIG_DFL) {
+        // Trying to set this action to anything other than SIG_DFL
+        // is not yet supported.
+        errno = EINVAL;
+        return -1;
+      }
+
+      if (oaction) {
+        memset(oaction, 0, sizeof(*oaction));
+        oaction->sa_handler = SIG_DFL;
+      }
+      return 0;
+
+    // KILL and STOP cannot be handled
+    case SIGKILL:
+    case SIGSTOP:
+      errno = EINVAL;
+      return -1;
   }
 
+  // Unknown signum
   errno = EINVAL;
-  return SIG_ERR;
+  return -1;
 }
 
 #ifdef PROVIDES_SOCKET_API
@@ -1105,7 +1189,7 @@ int KernelProxy::accept(int fd, struct sockaddr* addr, socklen_t* len) {
   // The MountNodeSocket now holds a reference to the new socket
   // so we release ours.
   ppapi_->ReleaseResource(new_sock);
-  error = sock->Init(S_IREAD | S_IWRITE);
+  error = sock->Init(O_RDWR);
   if (error != 0) {
     errno = error;
     return -1;
@@ -1113,7 +1197,7 @@ int KernelProxy::accept(int fd, struct sockaddr* addr, socklen_t* len) {
 
   ScopedMountNode node(sock);
   ScopedKernelHandle new_handle(new KernelHandle(stream_mount_, node));
-  error = sock->Init(O_RDWR);
+  error = new_handle->Init(O_RDWR);
   if (error != 0) {
     errno = error;
     return -1;
@@ -1428,6 +1512,23 @@ int KernelProxy::socket(int domain, int type, int protocol) {
     return -1;
   }
 
+  int open_flags = O_RDWR;
+
+  if (type & SOCK_CLOEXEC) {
+#ifdef O_CLOEXEC
+    // The NaCl newlib version of fcntl.h doesn't currently define
+    // O_CLOEXEC.
+    // TODO(sbc): remove this guard once it gets added.
+    open_flags |= O_CLOEXEC;
+#endif
+    type &= ~SOCK_CLOEXEC;
+  }
+
+  if (type & SOCK_NONBLOCK) {
+    open_flags |= O_NONBLOCK;
+    type &= ~SOCK_NONBLOCK;
+  }
+
   MountNodeSocket* sock = NULL;
   switch (type) {
     case SOCK_DGRAM:
@@ -1438,20 +1539,26 @@ int KernelProxy::socket(int domain, int type, int protocol) {
       sock = new MountNodeTCP(stream_mount_.get());
       break;
 
-    default:
+    case SOCK_SEQPACKET:
+    case SOCK_RDM:
+    case SOCK_RAW:
       errno = EPROTONOSUPPORT;
+      return -1;
+
+    default:
+      errno = EINVAL;
       return -1;
   }
 
   ScopedMountNode node(sock);
-  Error rtn = sock->Init(S_IREAD | S_IWRITE);
+  Error rtn = sock->Init(O_RDWR);
   if (rtn != 0) {
     errno = rtn;
     return -1;
   }
 
   ScopedKernelHandle handle(new KernelHandle(stream_mount_, node));
-  rtn = handle->Init(O_RDWR);
+  rtn = handle->Init(open_flags);
   if (rtn != 0) {
     errno = rtn;
     return -1;

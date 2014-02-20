@@ -37,14 +37,12 @@ namespace {
 
 const int kSessionStartupPrefValueMax = SessionStartupPref::kPrefValueMax;
 
-#if defined(OS_ANDROID)
 // An unregistered preference to fill in indices in kTrackedPrefs below for
 // preferences that aren't defined on every platform. This is fine as the code
 // below (e.g. CheckTrackedPreferences()) skips unregistered preferences and
 // should thus never report any data about that index on the platforms where
 // that preference is unimplemented.
 const char kUnregisteredPreference[] = "_";
-#endif
 
 // These preferences must be kept in sync with the TrackedPreference enum in
 // tools/metrics/histograms/histograms.xml. To add a new preference, append it
@@ -67,6 +65,7 @@ const char* kTrackedPrefs[] = {
   kUnregisteredPreference,
 #endif
   prefs::kExtensionKnownDisabled,
+  prefs::kProfileResetPromptMemento,
 };
 
 const size_t kSHA256DigestSize = 32;
@@ -91,8 +90,6 @@ PrefMetricsService::PrefMetricsService(Profile* profile)
   synced_pref_change_registrar_.reset(new SyncedPrefChangeRegistrar(prefs));
 
   RegisterSyncedPrefObservers();
-
-  MarkNeedsEmptyValueForTrackedPreferences();
 
   // The following code might cause callbacks into this instance before we exit
   // the constructor. This instance should be initialized at this point.
@@ -122,7 +119,6 @@ PrefMetricsService::PrefMetricsService(Profile* profile,
       tracked_pref_path_count_(tracked_pref_path_count),
       checked_tracked_prefs_(false),
       weak_factory_(this) {
-  MarkNeedsEmptyValueForTrackedPreferences();
   CheckTrackedPreferences();
 }
 
@@ -262,38 +258,15 @@ void PrefMetricsService::LogIntegerPrefChange(int boundary_value,
   histogram->Add(integer_value);
 }
 
-void PrefMetricsService::LogListPrefChange(
-    const LogHistogramValueCallback& item_callback,
-    const std::string& histogram_name,
-    const Value* value) {
-  const ListValue* items = NULL;
-  if (!value->GetAsList(&items))
-    return;
-  for (size_t i = 0; i < items->GetSize(); ++i) {
-    const Value *item_value = NULL;
-    if (items->Get(i, &item_value))
-      item_callback.Run(histogram_name, item_value);
-  }
-}
-
 void PrefMetricsService::GetDeviceIdCallback(const std::string& device_id) {
+#if !defined(OS_WIN) || defined(ENABLE_RLZ)
+  // A device_id is expected in all scenarios except when RLZ is disabled on
+  // Windows.
+  DCHECK(!device_id.empty());
+#endif
+
   device_id_ = device_id;
-  // On Aura, this seems to be called twice.
-  if (!checked_tracked_prefs_)
-    CheckTrackedPreferences();
-}
-
-void PrefMetricsService::MarkNeedsEmptyValueForTrackedPreferences() {
-  for (int i = 0; i < tracked_pref_path_count_; ++i) {
-    // Skip prefs that haven't been registered.
-    if (!prefs_->FindPreference(tracked_pref_paths_[i]))
-      continue;
-
-    // Make sure tracked prefs are saved to disk even if empty.
-    // TODO(gab): Guarantee this for all prefs at a lower level and remove this
-    // hack.
-    prefs_->MarkUserStoreNeedsEmptyValue(tracked_pref_paths_[i]);
-  }
+  CheckTrackedPreferences();
 }
 
 // To detect changes to Preferences that happen outside of Chrome, we hash
@@ -303,7 +276,9 @@ void PrefMetricsService::MarkNeedsEmptyValueForTrackedPreferences() {
 // profile. To make the system more resistant to spoofing, pref values are
 // hashed with the pref path and the device id.
 void PrefMetricsService::CheckTrackedPreferences() {
+  // Make sure this is only called once per instance of this service.
   DCHECK(!checked_tracked_prefs_);
+  checked_tracked_prefs_ = true;
 
   const base::DictionaryValue* pref_hash_dicts =
       local_state_->GetDictionary(prefs::kProfilePreferenceHashes);
@@ -313,9 +288,11 @@ void PrefMetricsService::CheckTrackedPreferences() {
   pref_hash_dicts->GetDictionaryWithoutPathExpansion(profile_name_,
                                                      &hashed_prefs);
   for (int i = 0; i < tracked_pref_path_count_; ++i) {
-    // Skip prefs that haven't been registered.
-    if (!prefs_->FindPreference(tracked_pref_paths_[i]))
+    if (!prefs_->FindPreference(tracked_pref_paths_[i])) {
+      // All tracked preferences need to have been registered already.
+      DCHECK_EQ(kUnregisteredPreference, tracked_pref_paths_[i]);
       continue;
+    }
 
     const base::Value* value = prefs_->GetUserPrefValue(tracked_pref_paths_[i]);
     std::string last_hash;
@@ -361,8 +338,6 @@ void PrefMetricsService::CheckTrackedPreferences() {
       UpdateTrackedPreference(tracked_pref_paths_[i]);
     }
   }
-
-  checked_tracked_prefs_ = true;
 
   // Now that we've checked the incoming preferences, register for change
   // notifications, unless this is test code.
@@ -436,9 +411,11 @@ std::string PrefMetricsService::GetHashedPrefValue(
 void PrefMetricsService::InitializePrefObservers() {
   pref_registrar_.Init(prefs_);
   for (int i = 0; i < tracked_pref_path_count_; ++i) {
-    // Skip prefs that haven't been registered.
-    if (!prefs_->FindPreference(tracked_pref_paths_[i]))
+    if (!prefs_->FindPreference(tracked_pref_paths_[i])) {
+      // All tracked preferences need to have been registered already.
+      DCHECK_EQ(kUnregisteredPreference, tracked_pref_paths_[i]);
       continue;
+    }
 
     pref_registrar_.Add(
         tracked_pref_paths_[i],

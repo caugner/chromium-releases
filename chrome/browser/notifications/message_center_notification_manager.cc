@@ -8,7 +8,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
@@ -25,6 +24,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
+#include "extensions/browser/info_map.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/message_center_tray.h"
@@ -33,6 +33,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/notifications/login_state_notification_blocker_chromeos.h"
+#include "chrome/browser/notifications/multi_user_notification_blocker_chromeos.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #endif
 
 #if defined(OS_WIN)
@@ -64,6 +66,7 @@ MessageCenterNotificationManager::MessageCenterNotificationManager(
 #if defined(OS_CHROMEOS)
   blockers_.push_back(
       new LoginStateNotificationBlockerChromeOS(message_center));
+  blockers_.push_back(new MultiUserNotificationBlockerChromeOS(message_center));
 #else
   blockers_.push_back(new ScreenLockNotificationBlocker(message_center));
 #endif
@@ -101,7 +104,7 @@ void MessageCenterNotificationManager::Add(const Notification& notification,
 
 bool MessageCenterNotificationManager::Update(const Notification& notification,
                                               Profile* profile) {
-  const string16& replace_id = notification.replace_id();
+  const base::string16& replace_id = notification.replace_id();
   if (replace_id.empty())
     return false;
 
@@ -404,6 +407,9 @@ MessageCenterNotificationManager::ProfileNotification::ProfileNotification(
       notification_(notification),
       downloads_(new ImageDownloads(message_center, this)) {
   DCHECK(profile);
+#if defined(OS_CHROMEOS)
+  notification_.set_profile_id(multi_user_util::GetUserIDFromProfile(profile));
+#endif
 }
 
 MessageCenterNotificationManager::ProfileNotification::~ProfileNotification() {
@@ -420,7 +426,7 @@ MessageCenterNotificationManager::ProfileNotification::OnDownloadsCompleted() {
 
 std::string
     MessageCenterNotificationManager::ProfileNotification::GetExtensionId() {
-  ExtensionInfoMap* extension_info_map =
+  extensions::InfoMap* extension_info_map =
       extensions::ExtensionSystem::Get(profile())->info_map();
   ExtensionSet extensions;
   extension_info_map->GetExtensionsWithAPIPermissionForSecurityOrigin(

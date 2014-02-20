@@ -11,9 +11,9 @@
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/logging.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
-#include "chrome/browser/chromeos/file_manager/file_manager_installer.h"
+#include "chrome/browser/chromeos/file_manager/app_installer.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/google_apis/auth_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service.h"
@@ -22,6 +22,7 @@
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/page_zoom.h"
+#include "google_apis/drive/auth_service.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "url/gurl.h"
 
@@ -31,13 +32,21 @@ namespace {
 const char kCWSScope[] = "https://www.googleapis.com/auth/chromewebstore";
 }
 
-bool FileBrowserPrivateLogoutUserFunction::RunImpl() {
+bool FileBrowserPrivateLogoutUserForReauthenticationFunction::RunImpl() {
+  chromeos::User* user =
+      chromeos::UserManager::Get()->GetUserByProfile(GetProfile());
+  if (user) {
+    chromeos::UserManager::Get()->SaveUserOAuthStatus(
+        user->email(),
+        chromeos::User::OAUTH2_TOKEN_STATUS_INVALID);
+  }
+
   chrome::AttemptUserExit();
   return true;
 }
 
 bool FileBrowserPrivateGetPreferencesFunction::RunImpl() {
-  api::file_browser_private::GetPreferences::Results::Result result;
+  api::file_browser_private::Preferences result;
   const PrefService* const service = GetProfile()->GetPrefs();
 
   result.drive_enabled = drive::util::IsDriveEnabledForProfile(GetProfile());
@@ -158,13 +167,13 @@ bool FileBrowserPrivateZoomFunction::RunImpl() {
   content::RenderViewHost* const view_host = render_view_host();
   content::PageZoom zoom_type;
   switch (params->operation) {
-    case Params::OPERATION_IN:
+    case api::file_browser_private::ZOOM_OPERATION_TYPE_IN:
       zoom_type = content::PAGE_ZOOM_IN;
       break;
-    case Params::OPERATION_OUT:
+    case api::file_browser_private::ZOOM_OPERATION_TYPE_OUT:
       zoom_type = content::PAGE_ZOOM_OUT;
       break;
-    case Params::OPERATION_RESET:
+    case api::file_browser_private::ZOOM_OPERATION_TYPE_RESET:
       zoom_type = content::PAGE_ZOOM_RESET;
       break;
     default:
@@ -188,8 +197,8 @@ bool FileBrowserPrivateInstallWebstoreItemFunction::RunImpl() {
           &FileBrowserPrivateInstallWebstoreItemFunction::OnInstallComplete,
           this);
 
-  scoped_refptr<file_manager::FileManagerInstaller> installer(
-      new file_manager::FileManagerInstaller(
+  scoped_refptr<file_manager::AppInstaller> installer(
+      new file_manager::AppInstaller(
           GetAssociatedWebContents(),  // web_contents(),
           params->item_id,
           GetProfile(),

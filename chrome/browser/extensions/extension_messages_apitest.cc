@@ -14,7 +14,6 @@
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/messaging/incognito_connectability.h"
-#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -29,6 +28,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/event_router.h"
 #include "net/cert/asn1_util.h"
 #include "net/cert/jwk_serializer.h"
 #include "net/dns/mock_host_resolver.h"
@@ -64,7 +64,7 @@ class MessageSender : public content::NotificationObserver {
                                       Profile* profile,
                                       GURL event_url) {
     scoped_ptr<Event> event(new Event("test.onMessage", event_args.Pass()));
-    event->restrict_to_profile = profile;
+    event->restrict_to_browser_context = profile;
     event->event_url = event_url;
     return event.Pass();
   }
@@ -226,7 +226,8 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
         "onMessage",
         "onMessageExternal",
         "onRestartRequired",
-        "id",
+        // Note: no "id" here because this test method is used for hosted apps,
+        // which do have access to runtime.id.
     };
 
     // Turn the array into a JS array, which effectively gets eval()ed.
@@ -313,6 +314,25 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
                                 connectable_with_tls_channel_id_manifest());
   }
 
+  const Extension* LoadChromiumHostedApp() {
+    const Extension* hosted_app =
+        LoadExtensionIntoDir(&hosted_app_dir_, base::StringPrintf(
+            "{"
+            "  \"name\": \"chromium_hosted_app\","
+            "  \"version\": \"1.0\","
+            "  \"manifest_version\": 2,"
+            "  \"app\": {"
+            "    \"urls\": [\"%s\"],"
+            "    \"launch\": {"
+            "      \"web_url\": \"%s\""
+            "    }\n"
+            "  }\n"
+            "}", chromium_org_url().spec().c_str(),
+                 chromium_org_url().spec().c_str()));
+    CHECK(hosted_app);
+    return hosted_app;
+  }
+
   void InitializeTestServer() {
     base::FilePath test_data;
     EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data));
@@ -392,6 +412,7 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
   TestExtensionDir web_connectable_dir_;
   TestExtensionDir not_connectable_dir_;
   TestExtensionDir tls_channel_id_connectable_dir_;
+  TestExtensionDir hosted_app_dir_;
 };
 
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, NotInstalled) {
@@ -532,10 +553,18 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   EXPECT_EQ(std::string(), tls_channel_id);
 }
 
+// Flaky on Linux. http://crbug.com/315264
+#if defined(OS_LINUX)
+#define MAYBE_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage \
+    DISABLED_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage
+#else
+#define MAYBE_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage \
+    WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage
+#endif
 // Tests a web connectable extension that receives TLS channel id, but
 // immediately closes its background page upon receipt of a message.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
-    WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage) {
+    MAYBE_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage) {
   InitializeTestServer();
 
   const Extension* chromium_connectable =
@@ -895,5 +924,42 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingUserGesture) {
           "});", receiver->id().c_str())));
 }
 
+// Tests that a hosted app on a connectable site doesn't interfere with the
+// connectability of that site.
+IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, HostedAppOnWebsite) {
+  InitializeTestServer();
+
+  LoadChromiumHostedApp();
+
+  // The presence of the hosted app shouldn't give the ability to send messages.
+  ui_test_utils::NavigateToURL(browser(), chromium_org_url());
+  EXPECT_EQ(NAMESPACE_NOT_DEFINED, CanConnectAndSendMessages(""));
+  EXPECT_FALSE(AreAnyNonWebApisDefined());
+
+  // Once a connectable extension is installed, it should.
+  const Extension* extension = LoadChromiumConnectableExtension();
+  EXPECT_EQ(OK, CanConnectAndSendMessages(extension->id()));
+  EXPECT_FALSE(AreAnyNonWebApisDefined());
+}
+
+// Tests that an invalid extension ID specified in a hosted app does not crash
+// the hosted app's renderer.
+//
+// This is a regression test for http://crbug.com/326250#c12.
+IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
+                       InvalidExtensionIDFromHostedApp) {
+  InitializeTestServer();
+
+  // The presence of the chromium hosted app triggers this bug. The chromium
+  // connectable extension needs to be installed to set up the runtime bindings.
+  LoadChromiumHostedApp();
+  LoadChromiumConnectableExtension();
+
+  ui_test_utils::NavigateToURL(browser(), chromium_org_url());
+  EXPECT_EQ(COULD_NOT_ESTABLISH_CONNECTION_ERROR ,
+            CanConnectAndSendMessages("invalid"));
+}
+
 }  // namespace
+
 };  // namespace extensions

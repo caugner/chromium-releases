@@ -13,6 +13,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "content/public/common/content_switches.h"
 #include "content/shell/browser/shell_browser_context.h"
+#include "ui/base/ime/input_method_initializer.h"
 #include "ui/views/examples/examples_window_with_content.h"
 #include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/test/desktop_test_views_delegate.h"
@@ -28,7 +29,8 @@
 #if defined(OS_CHROMEOS)
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/test_screen.h"
-#include "ui/shell/minimal_shell.h"
+#include "ui/aura/window.h"
+#include "ui/wm/test/wm_test_helper.h"
 #endif
 
 namespace views {
@@ -42,6 +44,7 @@ ExamplesBrowserMainParts::~ExamplesBrowserMainParts() {
 }
 
 void ExamplesBrowserMainParts::PreMainMessageLoopRun() {
+  ui::InitializeInputMethodForTesting();
   browser_context_.reset(new content::ShellBrowserContext(false, NULL));
 
   gfx::NativeView window_context = NULL;
@@ -49,12 +52,13 @@ void ExamplesBrowserMainParts::PreMainMessageLoopRun() {
   gfx::Screen::SetScreenInstance(
       gfx::SCREEN_TYPE_NATIVE, aura::TestScreen::Create());
   // Set up basic pieces of views::corewm.
-  minimal_shell_.reset(new shell::MinimalShell(gfx::Size(800, 600)));
+  wm_test_helper_.reset(new wm::WMTestHelper(gfx::Size(800, 600)));
   // Ensure the X window gets mapped.
-  minimal_shell_->root_window()->ShowRootWindow();
+  wm_test_helper_->root_window()->host()->Show();
   // Ensure Aura knows where to open new windows.
-  window_context = minimal_shell_->root_window();
+  window_context = wm_test_helper_->root_window()->window();
 #elif defined(USE_AURA)
+  aura::Env::CreateInstance();
   gfx::Screen::SetScreenInstance(
       gfx::SCREEN_TYPE_NATIVE, CreateDesktopScreen());
 #endif
@@ -67,7 +71,7 @@ void ExamplesBrowserMainParts::PreMainMessageLoopRun() {
 void ExamplesBrowserMainParts::PostMainMessageLoopRun() {
   browser_context_.reset();
 #if defined(OS_CHROMEOS)
-  minimal_shell_.reset();
+  wm_test_helper_.reset();
 #endif
   views_delegate_.reset();
 #if defined(USE_AURA)

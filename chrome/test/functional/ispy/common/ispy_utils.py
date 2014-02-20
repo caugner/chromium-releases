@@ -13,6 +13,13 @@ import sys
 import image_tools
 
 
+_INVALID_EXPECTATION_CHARS = ['/', '\\', ' ', '"', '\'']
+
+
+def IsValidExpectationName(expectation_name):
+  return not any(c in _INVALID_EXPECTATION_CHARS for c in expectation_name)
+
+
 def GetExpectationPath(expectation, file_name=''):
   """Get the path to a test file in the given test run and expectation.
 
@@ -86,7 +93,7 @@ class ISpyUtils(object):
     self.cloud_bucket.UpdateFile(full_path, image_tools.EncodePNG(image))
 
 
-  def UploadExpectation(self, expectation, images):
+  def GenerateExpectation(self, expectation, images):
     """Creates and uploads an expectation to GS from a set of images and name.
 
     This method generates a mask from the uploaded images, then
@@ -96,13 +103,20 @@ class ISpyUtils(object):
       expectation: name for this expectation, any existing expectation with the
         name will be replaced.
       images: a list of RGB encoded PIL.Images
+
+    Raises:
+      ValueError: if the expectation name is invalid.
     """
+    if not IsValidExpectationName(expectation):
+      raise ValueError("Expectation name contains an illegal character: %s." %
+                       str(_INVALID_EXPECTATION_CHARS))
+
     mask = image_tools.InflateMask(image_tools.CreateMask(images), 7)
     self.UploadImage(
         GetExpectationPath(expectation, 'expected.png'), images[0])
     self.UploadImage(GetExpectationPath(expectation, 'mask.png'), mask)
 
-  def RunTest(self, test_run, expectation, actual):
+  def PerformComparison(self, test_run, expectation, actual):
     """Runs an image comparison, and uploads discrepancies to GS.
 
     Args:
@@ -112,7 +126,12 @@ class ISpyUtils(object):
 
     Raises:
       cloud_bucket.NotFoundError: if the given expectation is not found.
+      ValueError: if the expectation name is invalid.
     """
+    if not IsValidExpectationName(expectation):
+      raise ValueError("Expectation name contains an illegal character: %s." %
+                       str(_INVALID_EXPECTATION_CHARS))
+
     expectation_tuple = self.GetExpectation(expectation)
     if not image_tools.SameImage(
         actual, expectation_tuple.expected, mask=expectation_tuple.mask):
@@ -190,7 +209,7 @@ class ISpyUtils(object):
     for path in test_paths:
       self.cloud_bucket.RemoveFile(path)
 
-  def UploadExpectationPinkOut(self, expectation, images, pint_out, rgb):
+  def GenerateExpectationPinkOut(self, expectation, images, pint_out, rgb):
     """Uploads an ispy-test to GS with the pink_out workaround.
 
     Args:
@@ -198,7 +217,14 @@ class ISpyUtils(object):
       images: a json encoded list of base64 encoded png images.
       pink_out: an image.
       RGB: a json list representing the RGB values of a color to mask out.
+
+    Raises:
+      ValueError: if expectation name is invalid.
     """
+    if not IsValidExpectationName(expectation):
+      raise ValueError("Expectation name contains an illegal character: %s." %
+                       str(_INVALID_EXPECTATION_CHARS))
+
     # convert the pink_out into a mask
     black = (0, 0, 0, 255)
     white = (255, 255, 255, 255)

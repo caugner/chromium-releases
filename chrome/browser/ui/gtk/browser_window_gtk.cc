@@ -738,7 +738,7 @@ StatusBubble* BrowserWindowGtk::GetStatusBubble() {
 
 void BrowserWindowGtk::UpdateTitleBar() {
   TRACE_EVENT0("ui::gtk", "BrowserWindowGtk::UpdateTitleBar");
-  string16 title = browser_->GetWindowTitleForCurrentTab();
+  base::string16 title = browser_->GetWindowTitleForCurrentTab();
   gtk_window_set_title(window_, UTF16ToUTF8(title).c_str());
   if (ShouldShowWindowIcon())
     titlebar_->UpdateTitleAndIcon();
@@ -792,6 +792,10 @@ void BrowserWindowGtk::LoadingAnimationCallback() {
 
 void BrowserWindowGtk::SetStarredState(bool is_starred) {
   toolbar_->GetLocationBarView()->SetStarred(is_starred);
+}
+
+void BrowserWindowGtk::SetTranslateIconToggled(bool is_lit) {
+  NOTIMPLEMENTED();
 }
 
 void BrowserWindowGtk::OnActiveTabChanged(WebContents* old_contents,
@@ -1031,14 +1035,16 @@ void BrowserWindowGtk::ShowBookmarkBubble(const GURL& url,
 
 void BrowserWindowGtk::ShowTranslateBubble(
     content::WebContents* contents,
-    TranslateBubbleModel::ViewState view_state) {
+    TranslateBubbleModel::ViewState view_state,
+    TranslateErrors::Type error_type) {
+  NOTIMPLEMENTED();
 }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
 void BrowserWindowGtk::ShowOneClickSigninBubble(
     OneClickSigninBubbleType type,
-    const string16& email,
-    const string16& error_message,
+    const base::string16& email,
+    const base::string16& error_message,
     const StartSyncCallback& start_sync_callback) {
 
   new OneClickSigninBubbleGtk(this, type, email,
@@ -1093,7 +1099,7 @@ bool BrowserWindowGtk::PreHandleKeyboardEvent(
     const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
   GdkEventKey* os_event = &event.os_event->key;
 
-  if (!os_event || event.type != WebKit::WebInputEvent::RawKeyDown)
+  if (!os_event || event.type != blink::WebInputEvent::RawKeyDown)
     return false;
 
   if (ExtensionKeybindingRegistryGtk::shortcut_handling_suspended())
@@ -1161,7 +1167,7 @@ void BrowserWindowGtk::HandleKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
   GdkEventKey* os_event = &event.os_event->key;
 
-  if (!os_event || event.type != WebKit::WebInputEvent::RawKeyDown)
+  if (!os_event || event.type != blink::WebInputEvent::RawKeyDown)
     return;
 
   // Handles a key event in following sequence:
@@ -1339,7 +1345,7 @@ gboolean BrowserWindowGtk::OnConfigure(GtkWidget* widget,
   if (bounds == configure_bounds_)
     return FALSE;
 
-  GetLocationBar()->GetLocationEntry()->CloseOmniboxPopup();
+  GetLocationBar()->GetOmniboxView()->CloseOmniboxPopup();
 
   WebContents* tab = GetDisplayedTab();
   if (tab)
@@ -2417,4 +2423,10 @@ BrowserWindow* BrowserWindow::CreateBrowserWindow(Browser* browser) {
   BrowserWindowGtk* browser_window_gtk = new BrowserWindowGtk(browser);
   browser_window_gtk->Init();
   return browser_window_gtk;
+}
+
+// static
+chrome::HostDesktopType BrowserWindow::AdjustHostDesktopType(
+    chrome::HostDesktopType desktop_type) {
+  return desktop_type;
 }

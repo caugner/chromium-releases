@@ -22,8 +22,6 @@
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/activity_log_private/activity_log_private_api.h"
 #include "chrome/browser/extensions/api/messaging/message_service.h"
-#include "chrome/browser/extensions/event_router.h"
-#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
@@ -39,6 +37,8 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
+#include "extensions/browser/event_router.h"
+#include "extensions/browser/process_manager.h"
 #include "extensions/common/constants.h"
 
 #if defined(USE_TCMALLOC)
@@ -47,7 +47,7 @@
 
 using content::BrowserThread;
 using extensions::APIPermission;
-using WebKit::WebCache;
+using blink::WebCache;
 
 namespace {
 
@@ -87,6 +87,7 @@ ChromeRenderMessageFilter::ChromeRenderMessageFilter(
     : render_process_id_(render_process_id),
       profile_(profile),
       off_the_record_(profile_->IsOffTheRecord()),
+      predictor_(profile_->GetNetworkPredictor()),
       request_context_(request_context),
       extension_info_map_(
           extensions::ExtensionSystem::Get(profile)->info_map()),
@@ -156,22 +157,6 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
-#if defined(ENABLE_AUTOMATION)
-  if ((message.type() == ChromeViewHostMsg_GetCookies::ID ||
-       message.type() == ChromeViewHostMsg_SetCookie::ID) &&
-    AutomationResourceMessageFilter::ShouldFilterCookieMessages(
-        render_process_id_, message.routing_id())) {
-    // ChromeFrame then we need to get/set cookies from the external host.
-    IPC_BEGIN_MESSAGE_MAP_EX(ChromeRenderMessageFilter, message,
-                             *message_was_ok)
-      IPC_MESSAGE_HANDLER_DELAY_REPLY(ChromeViewHostMsg_GetCookies,
-                                      OnGetCookies)
-      IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SetCookie, OnSetCookie)
-    IPC_END_MESSAGE_MAP()
-    handled = true;
-  }
-#endif
-
   return handled;
 }
 
@@ -202,13 +187,13 @@ net::HostResolver* ChromeRenderMessageFilter::GetHostResolver() {
 
 void ChromeRenderMessageFilter::OnDnsPrefetch(
     const std::vector<std::string>& hostnames) {
-  if (profile_->GetNetworkPredictor())
-    profile_->GetNetworkPredictor()->DnsPrefetchList(hostnames);
+  if (predictor_)
+    predictor_->DnsPrefetchList(hostnames);
 }
 
 void ChromeRenderMessageFilter::OnPreconnect(const GURL& url) {
-  if (profile_->GetNetworkPredictor())
-    profile_->GetNetworkPredictor()->PreconnectUrl(
+  if (predictor_)
+    predictor_->PreconnectUrl(
         url, GURL(), chrome_browser_net::UrlInfo::MOUSE_OVER_MOTIVATED, 1);
 }
 
@@ -560,12 +545,13 @@ void ChromeRenderMessageFilter::OnAddEventToExtensionActivityLog(
   AddActionToExtensionActivityLog(profile_, action);
 }
 
-void ChromeRenderMessageFilter::OnAllowDatabase(int render_view_id,
-                                                const GURL& origin_url,
-                                                const GURL& top_origin_url,
-                                                const string16& name,
-                                                const string16& display_name,
-                                                bool* allowed) {
+void ChromeRenderMessageFilter::OnAllowDatabase(
+    int render_view_id,
+    const GURL& origin_url,
+    const GURL& top_origin_url,
+    const base::string16& name,
+    const base::string16& display_name,
+    bool* allowed) {
   *allowed =
       cookie_settings_->IsSettingCookieAllowed(origin_url, top_origin_url);
   BrowserThread::PostTask(
@@ -606,7 +592,7 @@ void ChromeRenderMessageFilter::OnAllowFileSystem(int render_view_id,
 void ChromeRenderMessageFilter::OnAllowIndexedDB(int render_view_id,
                                                  const GURL& origin_url,
                                                  const GURL& top_origin_url,
-                                                 const string16& name,
+                                                 const base::string16& name,
                                                  bool* allowed) {
   *allowed =
       cookie_settings_->IsSettingCookieAllowed(origin_url, top_origin_url);
@@ -652,25 +638,4 @@ void ChromeRenderMessageFilter::OnIsWebGLDebugRendererInfoAllowed(
   *allowed = (base::FieldTrialList::FindFullName(
       kWebGLDebugRendererInfoFieldTrialName) ==
       kWebGLDebugRendererInfoFieldTrialEnabledName);
-}
-
-void ChromeRenderMessageFilter::OnGetCookies(
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    IPC::Message* reply_msg) {
-#if defined(ENABLE_AUTOMATION)
-  AutomationResourceMessageFilter::GetCookiesForUrl(
-      this, request_context_->GetURLRequestContext(), render_process_id_,
-      reply_msg, url);
-#endif
-}
-
-void ChromeRenderMessageFilter::OnSetCookie(const IPC::Message& message,
-                                            const GURL& url,
-                                            const GURL& first_party_for_cookies,
-                                            const std::string& cookie) {
-#if defined(ENABLE_AUTOMATION)
-  AutomationResourceMessageFilter::SetCookiesForUrl(
-      render_process_id_, message.routing_id(), url, cookie);
-#endif
 }

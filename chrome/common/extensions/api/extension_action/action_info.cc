@@ -7,10 +7,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/extensions/api/commands/commands_handler.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_handler_helpers.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 
 namespace extensions {
@@ -55,7 +55,7 @@ ActionInfo::~ActionInfo() {
 // static
 scoped_ptr<ActionInfo> ActionInfo::Load(const Extension* extension,
                                         const base::DictionaryValue* dict,
-                                        string16* error) {
+                                        base::string16* error) {
   scoped_ptr<ActionInfo> result(new ActionInfo());
 
   if (extension->manifest_version() == 1) {

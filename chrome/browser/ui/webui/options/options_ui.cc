@@ -23,6 +23,7 @@
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/options/autofill_options_handler.h"
 #include "chrome/browser/ui/webui/options/browser_options_handler.h"
 #include "chrome/browser/ui/webui/options/clear_browser_data_handler.h"
@@ -206,7 +207,7 @@ void OptionsPageUIHandler::RegisterStrings(
     const OptionsStringResource* resources,
     size_t length) {
   for (size_t i = 0; i < length; ++i) {
-    string16 value;
+    base::string16 value;
     if (resources[i].substitution_id == 0) {
       value = l10n_util::GetStringUTF16(resources[i].id);
     } else {
@@ -319,6 +320,8 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
   AddOptionsPageUIHandler(localized_strings, new CertificateManagerHandler());
 #endif
   AddOptionsPageUIHandler(localized_strings, new HandlerOptionsHandler());
+
+  web_ui->AddMessageHandler(new MetricsHandler());
 
   // |localized_strings| ownership is taken over by this constructor.
   OptionsUIHTMLSource* html_source =

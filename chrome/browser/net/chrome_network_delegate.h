@@ -13,11 +13,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "chrome/browser/net/chrome_network_data_saving_metrics.h"
 #include "net/base/network_delegate.h"
 
 class ClientHints;
 class CookieSettings;
-class ExtensionInfoMap;
 class PrefService;
 template<class T> class PrefMember;
 
@@ -35,6 +35,7 @@ class Predictor;
 
 namespace extensions {
 class EventRouterForwarder;
+class InfoMap;
 }
 
 namespace net {
@@ -58,7 +59,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
 
   // Not inlined because we assign a scoped_refptr, which requires us to include
   // the header file.
-  void set_extension_info_map(ExtensionInfoMap* extension_info_map);
+  void set_extension_info_map(extensions::InfoMap* extension_info_map);
 
   void set_url_blacklist_manager(
       const policy::URLBlacklistManager* url_blacklist_manager) {
@@ -155,7 +156,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   virtual void OnCompleted(net::URLRequest* request, bool started) OVERRIDE;
   virtual void OnURLRequestDestroyed(net::URLRequest* request) OVERRIDE;
   virtual void OnPACScriptError(int line_number,
-                                const string16& error) OVERRIDE;
+                                const base::string16& error) OVERRIDE;
   virtual net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
       net::URLRequest* request,
       const net::AuthChallengeInfo& auth_info,
@@ -180,15 +181,17 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
                                         RequestWaitState state) OVERRIDE;
 
   void AccumulateContentLength(
-      int64 received_payload_byte_count, int64 original_payload_byte_count,
-      bool data_reduction_proxy_was_used);
+      int64 received_payload_byte_count,
+      int64 original_payload_byte_count,
+      chrome_browser_net::DataReductionRequestType data_reduction_type,
+      void* profile);
 
   scoped_refptr<extensions::EventRouterForwarder> event_router_;
   void* profile_;
   base::FilePath profile_path_;
   scoped_refptr<CookieSettings> cookie_settings_;
 
-  scoped_refptr<ExtensionInfoMap> extension_info_map_;
+  scoped_refptr<extensions::InfoMap> extension_info_map_;
 
   scoped_ptr<chrome_browser_net::ConnectInterceptor> connect_interceptor_;
 

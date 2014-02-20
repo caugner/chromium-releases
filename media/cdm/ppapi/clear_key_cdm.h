@@ -28,9 +28,9 @@ class DecoderBuffer;
 class FFmpegCdmAudioDecoder;
 
 // Clear key implementation of the cdm::ContentDecryptionModule interface.
-class ClearKeyCdm : public CdmInterface {
+class ClearKeyCdm : public ClearKeyCdmInterface {
  public:
-  explicit ClearKeyCdm(Host* host);
+  explicit ClearKeyCdm(Host* host, bool is_decrypt_only);
   virtual ~ClearKeyCdm();
 
   // ContentDecryptionModule implementation.
@@ -71,36 +71,47 @@ class ClearKeyCdm : public CdmInterface {
   // this Client class as well. Investigate this possibility.
   class Client {
    public:
+    // TODO(jrummell): Remove bitmask and rename kNone to kInvalid once CDM
+    // interface supports session_id passing completely.
     enum Status {
-      kKeyAdded,
-      kKeyError,
-      kKeyMessage
+      kNone = 0,
+      kCreated = 1 << 0,
+      kMessage = 1 << 1,
+      kReady = 1 << 2,
+      kClosed = 1 << 3,
+      kError = 1 << 4
     };
 
     Client();
     virtual ~Client();
 
     Status status() { return status_; }
-    const std::string& session_id() { return session_id_; }
-    const std::vector<uint8>& key_message() { return key_message_; }
-    const std::string& default_url() { return default_url_; }
+    const std::string& web_session_id() { return web_session_id_; }
+    const std::vector<uint8>& message() { return message_; }
+    const std::string& destination_url() { return destination_url_; }
+    MediaKeys::KeyError error_code() { return error_code_; }
+    int system_code() { return system_code_; }
 
     // Resets the Client to a clean state.
     void Reset();
 
-    void KeyAdded(const std::string& session_id);
-    void KeyError(const std::string& session_id,
-                  MediaKeys::KeyError error_code,
-                  int system_code);
-    void KeyMessage(const std::string& session_id,
-                    const std::vector<uint8>& message,
-                    const std::string& default_url);
+    void OnSessionCreated(uint32 session_id, const std::string& web_session_id);
+    void OnSessionMessage(uint32 session_id,
+                          const std::vector<uint8>& message,
+                          const std::string& destination_url);
+    void OnSessionReady(uint32 session_id);
+    void OnSessionClosed(uint32 session_id);
+    void OnSessionError(uint32 session_id,
+                        MediaKeys::KeyError error_code,
+                        int system_code);
 
    private:
     Status status_;
-    std::string session_id_;
-    std::vector<uint8> key_message_;
-    std::string default_url_;
+    std::string web_session_id_;
+    std::vector<uint8> message_;
+    std::string destination_url_;
+    MediaKeys::KeyError error_code_;
+    int system_code_;
   };
 
   // Prepares next heartbeat message and sets a timer for it.
@@ -139,7 +150,9 @@ class ClearKeyCdm : public CdmInterface {
   // simultaneously.
   base::Lock client_lock_;
 
-  CdmHost* host_;
+  ClearKeyCdmHost* host_;
+
+  const bool is_decrypt_only_;
 
   std::string heartbeat_session_id_;
   std::string next_heartbeat_message_;

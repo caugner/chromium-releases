@@ -32,9 +32,9 @@
 #include "chrome/browser/sync_file_system/sync_file_system.pb.h"
 #include "chrome/browser/sync_file_system/sync_file_type.h"
 #include "chrome/browser/sync_file_system/syncable_file_system_util.h"
-#include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 #include "webkit/common/blob/scoped_file.h"
 #include "webkit/common/fileapi/file_system_util.h"
@@ -97,6 +97,14 @@ scoped_ptr<DriveFileSyncService> DriveFileSyncService::Create(
   return service.Pass();
 }
 
+void DriveFileSyncService::AppendDependsOnFactories(
+    std::set<BrowserContextKeyedServiceFactory*>* factories) {
+  DCHECK(factories);
+  factories->insert(drive::DriveNotificationManagerFactory::GetInstance());
+  factories->insert(ProfileOAuth2TokenServiceFactory::GetInstance());
+  factories->insert(extensions::ExtensionSystemFactory::GetInstance());
+}
+
 scoped_ptr<DriveFileSyncService> DriveFileSyncService::CreateForTesting(
     Profile* profile,
     const base::FilePath& base_dir,
@@ -113,12 +121,6 @@ scoped_ptr<DriveFileSyncService> DriveFileSyncService::CreateForTesting(
                                 metadata_store.Pass(),
                                 callback);
   return service.Pass();
-}
-
-scoped_ptr<drive_backend::APIUtilInterface>
-DriveFileSyncService::DestroyAndPassAPIUtilForTesting(
-    scoped_ptr<DriveFileSyncService> sync_service) {
-  return sync_service->api_util_.Pass();
 }
 
 void DriveFileSyncService::AddServiceObserver(Observer* observer) {
@@ -240,6 +242,11 @@ void DriveFileSyncService::GetOriginStatusMap(OriginStatusMap* status_map) {
 scoped_ptr<base::ListValue> DriveFileSyncService::DumpFiles(
     const GURL& origin) {
   return metadata_store_->DumpFiles(origin);
+}
+
+scoped_ptr<base::ListValue> DriveFileSyncService::DumpDatabase() {
+  // Not implemented (yet).
+  return scoped_ptr<base::ListValue>();
 }
 
 void DriveFileSyncService::SetSyncEnabled(bool enabled) {
@@ -570,7 +577,10 @@ void DriveFileSyncService::DoUninstallOrigin(
   //    origin directory on the remote drive was created.
   // 2) origin or sync root folder is deleted on Drive.
   if (resource_id.empty()) {
-    callback.Run(SYNC_STATUS_UNKNOWN_ORIGIN);
+    if (metadata_store_->IsKnownOrigin(origin))
+      DidUninstallOrigin(origin, callback, google_apis::HTTP_SUCCESS);
+    else
+      callback.Run(SYNC_STATUS_UNKNOWN_ORIGIN);
     return;
   }
 
@@ -1148,7 +1158,8 @@ void DriveFileSyncService::MaybeStartFetchChanges() {
   if (!pending_batch_sync_origins_.empty()) {
     if (GetCurrentState() == REMOTE_SERVICE_OK || may_have_unfetched_changes_) {
       task_manager_->ScheduleTaskIfIdle(
-          base::Bind(&DriveFileSyncService::StartBatchSync, AsWeakPtr()));
+          base::Bind(&DriveFileSyncService::StartBatchSync, AsWeakPtr()),
+          SyncStatusCallback());
     }
     return;
   }
@@ -1157,7 +1168,8 @@ void DriveFileSyncService::MaybeStartFetchChanges() {
       !metadata_store_->incremental_sync_origins().empty()) {
     task_manager_->ScheduleTaskIfIdle(
         base::Bind(&DriveFileSyncService::FetchChangesForIncrementalSync,
-                   AsWeakPtr()));
+                   AsWeakPtr()),
+        SyncStatusCallback());
   }
 }
 
@@ -1189,7 +1201,8 @@ void DriveFileSyncService::MaybeScheduleNextTask() {
 }
 
 void DriveFileSyncService::NotifyLastOperationStatus(
-    SyncStatusCode sync_status) {
+    SyncStatusCode sync_status,
+    bool used_network) {
   UpdateServiceStateFromLastOperationStatus(sync_status, last_gdata_error_);
 }
 

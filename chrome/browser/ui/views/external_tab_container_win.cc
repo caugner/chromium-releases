@@ -77,6 +77,7 @@
 
 #if defined(USE_AURA)
 #include "ui/aura/root_window.h"
+#include "ui/aura/window.h"
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #include "ui/views/widget/desktop_aura/desktop_root_window_host_win.h"
 #endif
@@ -90,7 +91,6 @@ using content::OpenURLParams;
 using content::RenderViewHost;
 using content::SSLStatus;
 using content::WebContents;
-using WebKit::WebReferrerPolicy;
 
 namespace {
 
@@ -104,21 +104,18 @@ void ShowNativeView(gfx::NativeView view) {
 #endif
 }
 
-scoped_ptr<content::NativeWebKeyboardEvent> CreateKeyboardEvent(
-    const MSG& msg) {
+scoped_ptr<NativeWebKeyboardEvent> CreateKeyboardEvent(const MSG& msg) {
 #if defined(USE_AURA)
   // TODO(grt): confirm that this is a translated character event.
   ui::KeyEvent key_event(msg, true);
-  return scoped_ptr<content::NativeWebKeyboardEvent>(
-      new content::NativeWebKeyboardEvent(&key_event));
+  return scoped_ptr<NativeWebKeyboardEvent>(
+      new NativeWebKeyboardEvent(&key_event));
 #else
-  return scoped_ptr<content::NativeWebKeyboardEvent>(
-      new content::NativeWebKeyboardEvent(msg));
+  return scoped_ptr<NativeWebKeyboardEvent>(new NativeWebKeyboardEvent(msg));
 #endif
 }
 
-const MSG& MessageFromKeyboardEvent(
-    const content::NativeWebKeyboardEvent& event) {
+const MSG& MessageFromKeyboardEvent(const NativeWebKeyboardEvent& event) {
 #if defined(USE_AURA)
   DCHECK(event.os_event);
   return event.os_event->native_event();
@@ -167,18 +164,18 @@ bool ShouldHideReferrer(const GURL& url, const GURL& referrer) {
   return !url.SchemeIsSecure();
 }
 
-GURL GenerateReferrer(WebKit::WebReferrerPolicy policy,
+GURL GenerateReferrer(blink::WebReferrerPolicy policy,
                       const GURL& url,
                       const GURL& referrer) {
   if (referrer.is_empty())
     return GURL();
 
   switch (policy) {
-    case WebKit::WebReferrerPolicyNever:
+    case blink::WebReferrerPolicyNever:
       return GURL();
-    case WebKit::WebReferrerPolicyAlways:
+    case blink::WebReferrerPolicyAlways:
       return referrer;
-    case WebKit::WebReferrerPolicyOrigin:
+    case blink::WebReferrerPolicyOrigin:
       return referrer.GetOrigin();
     default:
       break;
@@ -572,28 +569,6 @@ bool ExternalTabContainerWin::ExecuteContextMenuCommand(int command) {
 }
 
 void ExternalTabContainerWin::RunUnloadHandlers(IPC::Message* reply_message) {
-  if (!automation_) {
-    delete reply_message;
-    return;
-  }
-
-  // If we have a pending unload message, then just respond back to this
-  // request and continue processing the previous unload message.
-  if (unload_reply_message_) {
-     AutomationMsg_RunUnloadHandlers::WriteReplyParams(reply_message, true);
-     automation_->Send(reply_message);
-     return;
-  }
-
-  unload_reply_message_ = reply_message;
-  bool wait_for_unload_handlers =
-      web_contents_.get() &&
-      Browser::RunUnloadEventsHelper(web_contents_.get());
-  if (!wait_for_unload_handlers) {
-    AutomationMsg_RunUnloadHandlers::WriteReplyParams(reply_message, true);
-    automation_->Send(reply_message);
-    unload_reply_message_ = NULL;
-  }
 }
 
 void ExternalTabContainerWin::ProcessUnhandledAccelerator(const MSG& msg) {
@@ -747,7 +722,7 @@ void ExternalTabContainerWin::AddNewContents(WebContents* source,
     attach_params_.dimensions = initial_pos;
     attach_params_.user_gesture = user_gesture;
     attach_params_.disposition = disposition;
-    attach_params_.profile_name = WideToUTF8(
+    attach_params_.profile_name = base::WideToUTF8(
         profile->GetPath().DirName().BaseName().value());
     automation_->Send(new AutomationMsg_AttachExternalTab(
         tab_handle_, attach_params_));
@@ -756,11 +731,12 @@ void ExternalTabContainerWin::AddNewContents(WebContents* source,
   }
 }
 
-void ExternalTabContainerWin::WebContentsCreated(WebContents* source_contents,
-                                                 int64 source_frame_id,
-                                                 const string16& frame_name,
-                                                 const GURL& target_url,
-                                                 WebContents* new_contents) {
+void ExternalTabContainerWin::WebContentsCreated(
+    WebContents* source_contents,
+    int64 source_frame_id,
+    const base::string16& frame_name,
+    const GURL& target_url,
+    WebContents* new_contents) {
   if (!load_requests_via_automation_)
     return;
 
@@ -805,7 +781,7 @@ void ExternalTabContainerWin::UpdateTargetURL(WebContents* source,
                                               int32 page_id,
                                               const GURL& url) {
   if (automation_) {
-    string16 url_string = base::UTF8ToUTF16(url.spec());
+    base::string16 url_string = base::UTF8ToUTF16(url.spec());
     automation_->Send(
         new AutomationMsg_UpdateTargetUrl(tab_handle_, url_string));
   }
@@ -998,7 +974,9 @@ void ExternalTabContainerWin::ShowRepostFormWarningDialog(WebContents* source) {
 }
 
 content::ColorChooser* ExternalTabContainerWin::OpenColorChooser(
-    WebContents* web_contents, SkColor initial_color) {
+      WebContents* web_contents,
+      SkColor initial_color,
+      const std::vector<content::ColorSuggestion>& suggestions) {
   return chrome::ShowColorChooser(web_contents, initial_color);
 }
 
@@ -1012,30 +990,6 @@ void ExternalTabContainerWin::EnumerateDirectory(WebContents* tab,
                                                  int request_id,
                                                  const base::FilePath& path) {
   FileSelectHelper::EnumerateDirectory(tab, request_id, path);
-}
-
-void ExternalTabContainerWin::JSOutOfMemory(WebContents* tab) {
-  Browser::JSOutOfMemoryHelper(tab);
-}
-
-void ExternalTabContainerWin::RegisterProtocolHandler(
-    WebContents* tab,
-    const std::string& protocol,
-    const GURL& url,
-    const string16& title,
-    bool user_gesture) {
-  Browser::RegisterProtocolHandlerHelper(tab, protocol, url, title,
-                                         user_gesture, NULL);
-}
-
-void ExternalTabContainerWin::FindReply(WebContents* tab,
-                                        int request_id,
-                                        int number_of_matches,
-                                        const gfx::Rect& selection_rect,
-                                        int active_match_ordinal,
-                                        bool final_update) {
-  Browser::FindReplyHelper(tab, request_id, number_of_matches, selection_rect,
-                           active_match_ordinal, final_update);
 }
 
 void ExternalTabContainerWin::RequestMediaAccessPermission(
@@ -1072,11 +1026,11 @@ bool ExternalTabContainerWin::OnMessageReceived(const IPC::Message& message) {
 
 void ExternalTabContainerWin::DidFailProvisionalLoad(
     int64 frame_id,
-    const string16& frame_unique_name,
+    const base::string16& frame_unique_name,
     bool is_main_frame,
     const GURL& validated_url,
     int error_code,
-    const string16& error_description,
+    const base::string16& error_description,
     content::RenderViewHost* render_view_host) {
   if (automation_) {
     automation_->Send(new AutomationMsg_NavigationFailed(
@@ -1225,9 +1179,9 @@ bool ExternalTabContainerWin::InitNavigationInfo(
       web_contents_->GetController().GetCurrentEntryIndex();
   nav_info->url = entry->GetURL();
   nav_info->referrer = entry->GetReferrer().url;
-  nav_info->title = UTF16ToWideHack(entry->GetTitle());
+  nav_info->title = entry->GetTitle();
   if (nav_info->title.empty())
-    nav_info->title = UTF8ToWide(nav_info->url.spec());
+    nav_info->title = base::UTF8ToWide(nav_info->url.spec());
 
   nav_info->security_style = entry->GetSSL().security_style;
   int content_status = entry->GetSSL().content_status;
@@ -1315,7 +1269,7 @@ void ExternalTabContainerWin::Navigate(const GURL& url, const GURL& referrer) {
   TRACE_EVENT_BEGIN_ETW("ExternalTabContainerWin::Navigate", 0, url.spec());
 
   web_contents_->GetController().LoadURL(
-      url, content::Referrer(referrer, WebKit::WebReferrerPolicyDefault),
+      url, content::Referrer(referrer, blink::WebReferrerPolicyDefault),
       content::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
 }
 

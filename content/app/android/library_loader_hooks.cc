@@ -5,6 +5,7 @@
 #include "content/public/app/android_library_loader_hooks.h"
 
 #include "base/android/base_jni_registrar.h"
+#include "base/android/command_line_android.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "base/android/jni_string.h"
@@ -20,14 +21,13 @@
 #include "content/app/android/app_jni_registrar.h"
 #include "content/browser/android/browser_jni_registrar.h"
 #include "content/child/android/child_jni_registrar.h"
-#include "content/common/android/command_line.h"
 #include "content/common/android/common_jni_registrar.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "jni/LibraryLoader_jni.h"
 #include "media/base/android/media_jni_registrar.h"
 #include "net/android/net_jni_registrar.h"
-#include "ui/base/android/ui_jni_registrar.h"
+#include "ui/base/android/ui_base_jni_registrar.h"
 #include "ui/gfx/android/gfx_jni_registrar.h"
 #include "ui/gl/android/gl_jni_registrar.h"
 #include "ui/shell_dialogs/android/shell_dialogs_jni_registrar.h"
@@ -36,6 +36,7 @@ namespace content {
 
 namespace {
 base::AtExitManager* g_at_exit_manager = NULL;
+const char* g_library_version_number = "";
 }
 
 bool EnsureJniRegistered(JNIEnv* env) {
@@ -83,7 +84,7 @@ bool EnsureJniRegistered(JNIEnv* env) {
 
 static jint LibraryLoaded(JNIEnv* env, jclass clazz,
                           jobjectArray init_command_line) {
-  InitNativeCommandLineFromJavaArray(env, init_command_line);
+  base::android::InitNativeCommandLineFromJavaArray(env, init_command_line);
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
 
@@ -144,6 +145,14 @@ bool RegisterLibraryLoaderEntryHook(JNIEnv* env) {
   g_at_exit_manager = new base::AtExitManager();
 
   return RegisterNativesImpl(env);
+}
+
+void SetVersionNumber(const char* version_number) {
+  g_library_version_number = strdup(version_number);
+}
+
+jstring GetVersionNumber(JNIEnv* env, jclass clazz) {
+  return env->NewStringUTF(g_library_version_number);
 }
 
 }  // namespace content

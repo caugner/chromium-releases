@@ -9,14 +9,12 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/scoped_user_pref_update.h"
 #include "base/rand_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/managed_mode/managed_user_refresh_token_fetcher.h"
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/managed_mode/managed_user_sync_service.h"
 #include "chrome/browser/managed_mode/managed_user_sync_service_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/sync/glue/device_info.h"
@@ -87,7 +85,6 @@ class ManagedUserRegistrationUtilityImpl
   // callback or reporting an error.
   void CancelPendingRegistration();
 
-  base::WeakPtrFactory<ManagedUserRegistrationUtilityImpl> weak_ptr_factory_;
   PrefService* prefs_;
   scoped_ptr<ManagedUserRefreshTokenFetcher> token_fetcher_;
 
@@ -101,13 +98,16 @@ class ManagedUserRegistrationUtilityImpl
   bool avatar_updated_;
   RegistrationCallback callback_;
 
+  base::WeakPtrFactory<ManagedUserRegistrationUtilityImpl> weak_ptr_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(ManagedUserRegistrationUtilityImpl);
 };
 
 } // namespace
 
-ManagedUserRegistrationInfo::ManagedUserRegistrationInfo(const string16& name,
-                                                         int avatar_index)
+ManagedUserRegistrationInfo::ManagedUserRegistrationInfo(
+    const base::string16& name,
+    int avatar_index)
     : avatar_index(avatar_index),
       name(name) {
 }
@@ -150,9 +150,7 @@ ManagedUserRegistrationUtility::Create(Profile* profile) {
 // static
 std::string ManagedUserRegistrationUtility::GenerateNewManagedUserId() {
   std::string new_managed_user_id;
-  bool success = base::Base64Encode(base::RandBytesAsString(8),
-                                    &new_managed_user_id);
-  DCHECK(success);
+  base::Base64Encode(base::RandBytesAsString(8), &new_managed_user_id);
   return new_managed_user_id;
 }
 
@@ -180,13 +178,13 @@ ManagedUserRegistrationUtilityImpl::ManagedUserRegistrationUtilityImpl(
     PrefService* prefs,
     scoped_ptr<ManagedUserRefreshTokenFetcher> token_fetcher,
     ManagedUserSyncService* service)
-    : weak_ptr_factory_(this),
-      prefs_(prefs),
+    : prefs_(prefs),
       token_fetcher_(token_fetcher.Pass()),
       managed_user_sync_service_(service),
       pending_managed_user_acknowledged_(false),
       is_existing_managed_user_(false),
-      avatar_updated_(false) {
+      avatar_updated_(false),
+      weak_ptr_factory_(this) {
   managed_user_sync_service_->AddObserver(this);
 }
 

@@ -11,13 +11,15 @@ import android.util.Pair;
 
 import junit.framework.Assert;
 
+import static org.chromium.base.test.util.ScalableTimeout.ScaleTimeout;
+
+import org.chromium.base.CommandLine;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.test.util.TestHttpServerClient;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.common.CommandLine;
 import org.chromium.sync.signin.AccountManagerHelper;
 import org.chromium.sync.signin.ChromeSigninController;
 import org.chromium.sync.test.util.AccountHolder;
@@ -44,17 +46,17 @@ public final class SyncTestUtil {
             "oauth2:https://www.google.com/accounts/OAuthLogin";
     private static final String TAG = "SyncTestUtil";
 
-    public static final int UI_TIMEOUT_MS = 20000;
+    public static final long UI_TIMEOUT_MS = ScaleTimeout(20000);
     public static final int CHECK_INTERVAL_MS = 250;
 
-    private static final int SYNC_WAIT_TIMEOUT_MS = 30 * 1000;
+    private static final long SYNC_WAIT_TIMEOUT_MS = ScaleTimeout(30 * 1000);
     private static final int SYNC_CHECK_INTERVAL_MS = 250;
 
     public static final Pair<String, String> SYNC_SUMMARY_STATUS =
             newPair("Summary", "Summary");
     protected static final String UNINITIALIZED = "Uninitialized";
     protected static final Pair<String, String> USERNAME_STAT =
-            newPair("Credentials", "Username");
+            newPair("Identity", "Username");
 
     // Override the default server used for profile sync.
     // Native switch - chrome_switches::kSyncServiceURL

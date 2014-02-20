@@ -42,7 +42,7 @@ class PatchedFileSystem(FileSystem):
     self._base_file_system = base_file_system
     self._patcher = patcher
 
-  def Read(self, paths, binary=False):
+  def Read(self, paths):
     patched_files = set()
     added, deleted, modified = self._patcher.GetPatchedFiles()
     if set(paths) & set(deleted):
@@ -55,21 +55,24 @@ class PatchedFileSystem(FileSystem):
     patched_paths = file_paths & patched_files
     unpatched_paths = file_paths - patched_files
     return Future(delegate=_AsyncFetchFuture(
-        self._base_file_system.Read(unpatched_paths, binary),
-        self._patcher.Apply(patched_paths, self._base_file_system, binary),
-        self._TryReadDirectory(dir_paths, binary),
+        self._base_file_system.Read(unpatched_paths),
+        self._patcher.Apply(patched_paths, self._base_file_system),
+        self._TryReadDirectory(dir_paths),
         self))
+
+  def Refresh(self):
+    return self._base_file_system.Refresh()
 
   ''' Given the list of patched files, it's not possible to determine whether
   a directory to read exists in self._base_file_system. So try reading each one
   and handle FileNotFoundError.
   '''
-  def _TryReadDirectory(self, paths, binary):
+  def _TryReadDirectory(self, paths):
     value = {}
     for path in paths:
       assert path.endswith('/')
       try:
-        value[path] = self._base_file_system.ReadSingle(path, binary).Get()
+        value[path] = self._base_file_system.ReadSingle(path).Get()
       except FileNotFoundError:
         value[path] = None
     return value

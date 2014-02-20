@@ -61,10 +61,24 @@ int GetOverviewDelayOnCycleMilliseconds() {
   return value;
 }
 
-// A comparator for locating a given target window.
+// A comparator for locating a given selectable window.
 struct WindowSelectorItemComparator
     : public std::unary_function<WindowSelectorItem*, bool> {
-  explicit WindowSelectorItemComparator(const aura::Window* target_window)
+  explicit WindowSelectorItemComparator(const aura::Window* window)
+      : window_(window) {
+  }
+
+  bool operator()(WindowSelectorItem* window) const {
+    return window->HasSelectableWindow(window_);
+  }
+
+  const aura::Window* window_;
+};
+
+// A comparator for locating a selectable window given a targeted window.
+struct WindowSelectorItemTargetComparator
+    : public std::unary_function<WindowSelectorItem*, bool> {
+  explicit WindowSelectorItemTargetComparator(const aura::Window* target_window)
       : target(target_window) {
   }
 
@@ -256,6 +270,7 @@ WindowSelector::WindowSelector(const WindowList& windows,
 
   std::vector<WindowSelectorPanels*> panels_items;
   for (size_t i = 0; i < windows.size(); ++i) {
+    WindowSelectorItem* item = NULL;
     if (windows[i] != restore_focus_window_)
       windows[i]->AddObserver(this);
     observed_windows_.insert(windows[i]);
@@ -276,25 +291,32 @@ WindowSelector::WindowSelector(const WindowList& windows,
         panels_item = *iter;
       }
       panels_item->AddWindow(windows[i]);
+      item = panels_item;
     } else {
-      windows_.push_back(new WindowSelectorWindow(windows[i]));
+      item = new WindowSelectorWindow(windows[i]);
+      windows_.push_back(item);
     }
+    // Verify that the window has been added to an item in overview.
+    CHECK(item->TargetedWindow(windows[i]));
   }
   UMA_HISTOGRAM_COUNTS_100("Ash.WindowSelector.Items", windows_.size());
 
   // Observe window activations and switchable containers on all root windows
   // for newly created windows during overview.
   Shell::GetInstance()->activation_client()->AddObserver(this);
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
-  for (Shell::RootWindowList::const_iterator iter = root_windows.begin();
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+  for (aura::Window::Windows::const_iterator iter = root_windows.begin();
        iter != root_windows.end(); ++iter) {
     for (size_t i = 0; i < kSwitchableWindowContainerIdsLength; ++i) {
-      Shell::GetContainer(*iter,
-                          kSwitchableWindowContainerIds[i])->AddObserver(this);
+      aura::Window* container = Shell::GetContainer(*iter,
+          kSwitchableWindowContainerIds[i]);
+      container->AddObserver(this);
+      observed_windows_.insert(container);
     }
   }
 
   if (mode == WindowSelector::CYCLE) {
+    cycle_start_time_ = base::Time::Now();
     event_handler_.reset(new WindowSelectorEventFilter(this));
     if (timer_enabled_)
       start_overview_timer_.Reset();
@@ -310,18 +332,16 @@ WindowSelector::~WindowSelector() {
     (*iter)->RemoveObserver(this);
   }
   Shell::GetInstance()->activation_client()->RemoveObserver(this);
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
-  for (Shell::RootWindowList::const_iterator iter = root_windows.begin();
-       iter != root_windows.end(); ++iter) {
-    for (size_t i = 0; i < kSwitchableWindowContainerIdsLength; ++i) {
-      Shell::GetContainer(*iter,
-          kSwitchableWindowContainerIds[i])->RemoveObserver(this);
-    }
-  }
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   window_overview_.reset();
   // Clearing the window list resets the ignored_by_shelf flag on the windows.
   windows_.clear();
   UpdateShelfVisibility();
+
+  if (!cycle_start_time_.is_null()) {
+    UMA_HISTOGRAM_MEDIUM_TIMES("Ash.WindowSelector.CycleTime",
+        base::Time::Now() - cycle_start_time_);
+  }
 }
 
 void WindowSelector::Step(WindowSelector::Direction direction) {
@@ -351,16 +371,16 @@ void WindowSelector::Step(WindowSelector::Direction direction) {
 }
 
 void WindowSelector::SelectWindow() {
-  ResetFocusRestoreWindow(false);
   SelectWindow(windows_[selected_window_]->SelectionWindow());
 }
 
 void WindowSelector::SelectWindow(aura::Window* window) {
+  ResetFocusRestoreWindow(false);
   if (showing_window_ && showing_window_->window() == window)
     showing_window_->CancelRestore();
   ScopedVector<WindowSelectorItem>::iterator iter =
       std::find_if(windows_.begin(), windows_.end(),
-                   WindowSelectorItemComparator(window));
+                   WindowSelectorItemTargetComparator(window));
   DCHECK(iter != windows_.end());
   // The selected window should not be minimized when window selection is
   // ended.
@@ -389,17 +409,18 @@ void WindowSelector::OnWindowAdded(aura::Window* new_window) {
 }
 
 void WindowSelector::OnWindowDestroying(aura::Window* window) {
+  // window is one of a container, the restore_focus_window and/or
+  // one of the selectable windows in overview.
   ScopedVector<WindowSelectorItem>::iterator iter =
       std::find_if(windows_.begin(), windows_.end(),
                    WindowSelectorItemComparator(window));
-  DCHECK(window == restore_focus_window_ || iter != windows_.end());
   window->RemoveObserver(this);
+  observed_windows_.erase(window);
   if (window == restore_focus_window_)
     restore_focus_window_ = NULL;
   if (iter == windows_.end())
     return;
 
-  observed_windows_.erase(window);
   (*iter)->RemoveWindow(window);
   // If there are still windows in this selector entry then the overview is
   // still active and the active selection remains the same.
@@ -431,7 +452,7 @@ void WindowSelector::OnWindowBoundsChanged(aura::Window* window,
 
   ScopedVector<WindowSelectorItem>::iterator iter =
       std::find_if(windows_.begin(), windows_.end(),
-                   WindowSelectorItemComparator(window));
+                   WindowSelectorItemTargetComparator(window));
   DCHECK(window == restore_focus_window_ || iter != windows_.end());
   if (iter == windows_.end())
     return;

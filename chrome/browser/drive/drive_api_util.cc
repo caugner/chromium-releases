@@ -7,16 +7,19 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/files/scoped_platform_file_closer.h"
 #include "base/logging.h"
+#include "base/md5.h"
+#include "base/platform_file.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/drive/drive_switches.h"
-#include "chrome/browser/google_apis/drive_api_parser.h"
-#include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "content/public/browser/browser_thread.h"
+#include "google_apis/drive/drive_api_parser.h"
+#include "google_apis/drive/gdata_wapi_parser.h"
 #include "net/base/escape.h"
 #include "third_party/re2/re2/re2.h"
 #include "url/gurl.h"
@@ -159,12 +162,12 @@ std::string TranslateQuery(const std::string& original_query) {
   // In order to handle non-ascii white spaces correctly, convert to UTF16.
   base::string16 query = UTF8ToUTF16(original_query);
   const base::string16 kDelimiter(
-      kWhitespaceUTF16 + base::string16(1, static_cast<char16>('"')));
+      base::kWhitespaceUTF16 + base::string16(1, static_cast<char16>('"')));
 
   std::string result;
-  for (size_t index = query.find_first_not_of(kWhitespaceUTF16);
+  for (size_t index = query.find_first_not_of(base::kWhitespaceUTF16);
        index != base::string16::npos;
-       index = query.find_first_not_of(kWhitespaceUTF16, index)) {
+       index = query.find_first_not_of(base::kWhitespaceUTF16, index)) {
     bool is_exclusion = (query[index] == '-');
     if (is_exclusion)
       ++index;
@@ -309,11 +312,14 @@ scoped_ptr<google_apis::FileResource> ConvertResourceEntryToFileResource(
   file->set_created_date(entry.published_time());
 
   if (std::find(entry.labels().begin(), entry.labels().end(),
-                "shared-with-me") == entry.labels().end()) {
+                "shared-with-me") != entry.labels().end()) {
     // Set current time to mark the file is shared_with_me, since ResourceEntry
     // doesn't have |shared_with_me_date| equivalent.
     file->set_shared_with_me_date(base::Time::Now());
   }
+
+  file->set_shared(std::find(entry.labels().begin(), entry.labels().end(),
+                             "shared") != entry.labels().end());
 
   file->set_download_url(entry.download_url());
   if (entry.is_folder())
@@ -408,12 +414,13 @@ ConvertFileResourceToResourceEntry(
   entry->set_kind(GetKind(file_resource));
   entry->set_title(file_resource.title());
   entry->set_published_time(file_resource.created_date());
-  // TODO(kochi): entry->labels_
-  if (!file_resource.shared_with_me_date().is_null()) {
-    std::vector<std::string> labels;
+
+  std::vector<std::string> labels;
+  if (!file_resource.shared_with_me_date().is_null())
     labels.push_back("shared-with-me");
-    entry->set_labels(labels);
-  }
+  if (file_resource.shared())
+    labels.push_back("shared");
+  entry->set_labels(labels);
 
   // This should be the url to download the file_resource.
   {
@@ -445,10 +452,10 @@ ConvertFileResourceToResourceEntry(
   // entry->authors_
   // entry->links_.
   ScopedVector<google_apis::Link> links;
-  if (!file_resource.parents().empty()) {
+  for (size_t i = 0; i < file_resource.parents().size(); ++i) {
     google_apis::Link* link = new google_apis::Link;
     link->set_type(google_apis::Link::LINK_PARENT);
-    link->set_href(file_resource.parents()[0]->parent_link());
+    link->set_href(file_resource.parents()[i]->parent_link());
     links.push_back(link);
   }
   if (!file_resource.self_link().is_empty()) {
@@ -548,6 +555,46 @@ ConvertChangeListToResourceList(const google_apis::ChangeList& change_list) {
   feed->set_links(links.Pass());
 
   return feed.Pass();
+}
+
+std::string GetMd5Digest(const base::FilePath& file_path) {
+  const int kBufferSize = 512 * 1024;  // 512kB.
+
+  base::PlatformFile file = base::CreatePlatformFile(
+      file_path, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ,
+      NULL, NULL);
+  if (file == base::kInvalidPlatformFileValue)
+    return std::string();
+  base::ScopedPlatformFileCloser file_closer(&file);
+
+  base::MD5Context context;
+  base::MD5Init(&context);
+
+  int64 offset = 0;
+  scoped_ptr<char[]> buffer(new char[kBufferSize]);
+  while (true) {
+    // Avoid using ReadPlatformFileCurPosNoBestEffort for now.
+    // http://crbug.com/145873
+    int result = base::ReadPlatformFileNoBestEffort(
+        file, offset, buffer.get(), kBufferSize);
+
+    if (result < 0) {
+      // Found an error.
+      return std::string();
+    }
+
+    if (result == 0) {
+      // End of file.
+      break;
+    }
+
+    offset += result;
+    base::MD5Update(&context, base::StringPiece(buffer.get(), result));
+  }
+
+  base::MD5Digest digest;
+  base::MD5Final(&digest, &context);
+  return MD5DigestToBase16(digest);
 }
 
 const char kWapiRootDirectoryResourceId[] = "folder:root";

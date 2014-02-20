@@ -169,15 +169,16 @@ bool FillCreditCardTypeSelectControl(const base::string16& value,
                                      FormFieldData* field) {
   // Try stripping off spaces.
   base::string16 value_stripped;
-  RemoveChars(StringToLowerASCII(value), kWhitespaceUTF16, &value_stripped);
+  base::RemoveChars(StringToLowerASCII(value), base::kWhitespaceUTF16,
+                    &value_stripped);
 
   for (size_t i = 0; i < field->option_values.size(); ++i) {
     base::string16 option_value_lowercase;
-    RemoveChars(StringToLowerASCII(field->option_values[i]), kWhitespaceUTF16,
-                &option_value_lowercase);
+    base::RemoveChars(StringToLowerASCII(field->option_values[i]),
+                      base::kWhitespaceUTF16, &option_value_lowercase);
     base::string16 option_contents_lowercase;
-    RemoveChars(StringToLowerASCII(field->option_contents[i]), kWhitespaceUTF16,
-                &option_contents_lowercase);
+    base::RemoveChars(StringToLowerASCII(field->option_contents[i]),
+                      base::kWhitespaceUTF16, &option_contents_lowercase);
 
     // Perform a case-insensitive comparison; but fill the form with the
     // original text, not the lowercased version.
@@ -276,6 +277,23 @@ bool FillMonthControl(const base::string16& value, FormFieldData* field) {
 
   field->value = year + ASCIIToUTF16("-") + month;
   return true;
+}
+
+// Fills |field| with the street address in |value|.  Translates newlines into
+// equivalent separators when necessary, i.e. when filling a single-line field.
+void FillStreetAddress(const base::string16& value,
+                       FormFieldData* field) {
+  if (field->form_control_type == "textarea") {
+    field->value = value;
+    return;
+  }
+
+  base::string16 one_line_value;
+  const char16 kNewline[] = { '\n', 0 };
+  const base::string16 separator =
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_LINE_SEPARATOR);
+  base::ReplaceChars(value, kNewline, separator, &one_line_value);
+  field->value = one_line_value;
 }
 
 std::string Hash32Bit(const std::string& str) {
@@ -382,6 +400,8 @@ void AutofillField::FillFormField(const AutofillField& field,
     FillSelectControl(type, value, app_locale, field_data);
   else if (field_data->form_control_type == "month")
     FillMonthControl(value, field_data);
+  else if (type.GetStorableType() == ADDRESS_HOME_STREET_ADDRESS)
+    FillStreetAddress(value, field_data);
   else
     field_data->value = value;
 }

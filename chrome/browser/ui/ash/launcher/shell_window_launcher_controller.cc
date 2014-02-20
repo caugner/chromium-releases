@@ -5,19 +5,18 @@
 #include "chrome/browser/ui/ash/launcher/shell_window_launcher_controller.h"
 
 #include "apps/shell_window.h"
+#include "ash/shelf/shelf_util.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/shell_window_launcher_item_controller.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "extensions/common/extension.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/root_window.h"
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/ui/ash/multi_user_window_manager.h"
-#endif
 
 using apps::ShellWindow;
 
@@ -70,7 +69,6 @@ ShellWindowLauncherController::~ShellWindowLauncherController() {
 
 void ShellWindowLauncherController::AdditionalUserAddedToSession(
     Profile* profile) {
-#if defined(OS_CHROMEOS)
   // TODO(skuhne): This was added for the legacy side by side mode in M32. If
   // this mode gets no longer pursued this special case can be removed.
   if (chrome::MultiUserWindowManager::GetMultiProfileMode() !=
@@ -83,7 +81,6 @@ void ShellWindowLauncherController::AdditionalUserAddedToSession(
 
   registry->AddObserver(this);
   registry_.insert(registry);
-#endif
 }
 
 void ShellWindowLauncherController::OnShellWindowAdded(
@@ -181,6 +178,7 @@ void ShellWindowLauncherController::RegisterApp(ShellWindow* shell_window) {
     app_controller_map_[app_launcher_id] = controller;
   }
   owner_->SetItemStatus(launcher_id, status);
+  ash::SetLauncherIDForWindow(launcher_id, window);
 }
 
 void ShellWindowLauncherController::UnregisterApp(aura::Window* window) {

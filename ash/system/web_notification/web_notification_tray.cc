@@ -416,6 +416,9 @@ bool WebNotificationTray::ShowPopups() {
 }
 
 void WebNotificationTray::HidePopups() {
+  DCHECK(popup_collection_.get());
+
+  popup_collection_->MarkAllPopupsShown();
   popup_collection_.reset();
   work_area_observer_->StopObserving();
 }
@@ -444,6 +447,11 @@ bool WebNotificationTray::IsMouseInNotificationBubble() const {
 void WebNotificationTray::ShowMessageCenterBubble() {
   if (!IsMessageCenterBubbleVisible())
     message_center_tray_->ShowMessageCenterBubble();
+}
+
+void WebNotificationTray::UpdateAfterLoginStatusChange(
+    user::LoginStatus login_status) {
+  OnMessageCenterTrayChanged();
 }
 
 void WebNotificationTray::SetShelfAlignment(ShelfAlignment alignment) {

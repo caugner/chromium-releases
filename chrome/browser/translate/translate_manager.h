@@ -86,6 +86,14 @@ class TranslateManager : public content::NotificationObserver {
   // If no language is found then an empty string is returned.
   static std::string GetTargetLanguage(PrefService* prefs);
 
+  // Returns the language to automatically translate to. |original_language| is
+  // the webpage's original language.
+  static std::string GetAutoTargetLanguage(const std::string& original_language,
+                                           PrefService* prefs);
+
+  // Returns true if the new translate bubble is enabled.
+  static bool IsTranslateBubbleEnabled();
+
   // Let the caller decide if and when we should fetch the language list from
   // the translate server. This is a NOOP if switches::kDisableTranslate is set
   // or if prefs::kEnableTranslate is set to false.
@@ -194,7 +202,8 @@ class TranslateManager : public content::NotificationObserver {
 
   // Shows the translate bubble.
   void ShowBubble(content::WebContents* web_contents,
-                  TranslateBubbleModel::ViewState view_state);
+                  TranslateBubbleModel::ViewState view_state,
+                  TranslateErrors::Type error_type);
 
   // Returns the different parameters used to decide whether extra shortcuts
   // are needed.

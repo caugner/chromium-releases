@@ -37,18 +37,15 @@ class ExtensionAppModelBuilder : public extensions::InstallObserver,
                            AppListControllerDelegate* controller);
   virtual ~ExtensionAppModelBuilder();
 
-  // Rebuilds the model with the given profile.
-  void SwitchProfile(Profile* profile);
-
  private:
   typedef std::vector<ExtensionAppItem*> ExtensionAppList;
 
+  // Builds the model with the current profile.
+  void BuildModel();
+
   // extensions::InstallObserver
-  virtual void OnBeginExtensionInstall(const std::string& extension_id,
-                                       const std::string& extension_name,
-                                       const gfx::ImageSkia& installing_icon,
-                                       bool is_app,
-                                       bool is_platform_app) OVERRIDE;
+  virtual void OnBeginExtensionInstall(
+      const ExtensionInstallParams& params) OVERRIDE;
   virtual void OnDownloadProgress(const std::string& extension_id,
                                   int percent_downloaded) OVERRIDE;
   virtual void OnInstallFailure(const std::string& extension_id) OVERRIDE;
@@ -97,7 +94,7 @@ class ExtensionAppModelBuilder : public extensions::InstallObserver,
 
   Profile* profile_;
 
-  // Unowned pointer to the app list controller (passed to created items).
+  // Unowned pointer to the app list controller.
   AppListControllerDelegate* controller_;
 
   // Unowned pointer to the app list model.

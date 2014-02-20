@@ -15,9 +15,6 @@
 #include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
-class TokenService;
-
-
 // A specialization of ProfileOAuth2TokenService that will be returned by
 // ProfileOAuth2TokenServiceFactory for OS_ANDROID.  This instance uses
 // native Android features to lookup OAuth2 tokens.
@@ -49,6 +46,11 @@ class AndroidProfileOAuth2TokenService : public ProfileOAuth2TokenService {
                         jobject obj,
                         jobjectArray accounts,
                         jstring current_account);
+
+  // Takes a the signed in sync account as well as all the other
+  // android account ids and check the token status of each.
+  void ValidateAccounts(const std::string& signed_in_account,
+                        const std::vector<std::string>& account_ids);
 
   // Triggers a notification to all observers of the OAuth2TokenService that a
   // refresh token is now available. This may cause observers to retry

@@ -113,7 +113,7 @@ void FillOutputForSection(
 bool IsSectionInputUsedInFormStructure(DialogSection section,
                                        ServerFieldType input_type,
                                        const FormStructure& form_structure) {
-  const DetailInput input = { 0, input_type };
+  const DetailInput input = { DetailInput::LONG, input_type };
   for (size_t i = 0; i < form_structure.field_count(); ++i) {
     const AutofillField* field = form_structure.field(i);
     if (field && common::DetailInputMatchesField(section, input, *field))
@@ -192,9 +192,9 @@ void AutofillDialogControllerAndroid::Show() {
   JNIEnv* env = base::android::AttachCurrentThread();
   dialog_shown_timestamp_ = base::Time::Now();
 
-  content::NavigationEntry* entry = contents_->GetController().GetActiveEntry();
-  const GURL& active_url = entry ? entry->GetURL() : contents_->GetURL();
-  invoked_from_same_origin_ = active_url.GetOrigin() == source_url_.GetOrigin();
+  const GURL& current_url = contents_->GetLastCommittedURL();
+  invoked_from_same_origin_ =
+      current_url.GetOrigin() == source_url_.GetOrigin();
 
   // Determine what field types should be included in the dialog.
   bool has_types = false;
@@ -307,7 +307,7 @@ void AutofillDialogControllerAndroid::Show() {
           env, source_url_.GetOrigin().spec());
   java_object_.Reset(Java_AutofillDialogControllerAndroid_create(
       env,
-      reinterpret_cast<jint>(this),
+      reinterpret_cast<intptr_t>(this),
       WindowAndroidHelper::FromWebContents(contents_)->
           GetWindowAndroid()->GetJavaObject().obj(),
       request_full_billing_address, request_shipping_address,
@@ -319,8 +319,7 @@ void AutofillDialogControllerAndroid::Show() {
 }
 
 void AutofillDialogControllerAndroid::Hide() {
-  // TODO(aruslan): http://crbug.com/177373 Autocheckout.
-  NOTIMPLEMENTED();
+  delete this;
 }
 
 void AutofillDialogControllerAndroid::TabActivated() {}
@@ -346,11 +345,12 @@ void AutofillDialogControllerAndroid::DialogContinue(
     jstring jlast_used_billing,
     jstring jlast_used_shipping,
     jstring jlast_used_card) {
-  const string16 email = AutofillDialogResult::GetWalletEmail(env, wallet);
+  const base::string16 email =
+      AutofillDialogResult::GetWalletEmail(env, wallet);
   const std::string google_transaction_id =
       AutofillDialogResult::GetWalletGoogleTransactionId(env, wallet);
 
-  const string16 last_used_account_name =
+  const base::string16 last_used_account_name =
       base::android::ConvertJavaStringToUTF16(env, jlast_used_account_name);
   const std::string last_used_billing =
       base::android::ConvertJavaStringToUTF8(env, jlast_used_billing);

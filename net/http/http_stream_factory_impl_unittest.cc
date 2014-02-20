@@ -101,6 +101,7 @@ class MockWebSocketHandshakeStream : public WebSocketHandshakeStreamBase {
   virtual bool IsConnectionReused() const OVERRIDE { return false; }
   virtual void SetConnectionReused() OVERRIDE {}
   virtual bool IsConnectionReusable() const OVERRIDE { return false; }
+  virtual int64 GetTotalReceivedBytes() const OVERRIDE { return 0; }
   virtual bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const
       OVERRIDE {
     return false;
@@ -258,9 +259,10 @@ class WebSocketSpdyHandshakeStream : public MockWebSocketHandshakeStream {
 
 class WebSocketBasicHandshakeStream : public MockWebSocketHandshakeStream {
  public:
-  explicit WebSocketBasicHandshakeStream(ClientSocketHandle* connection)
+  explicit WebSocketBasicHandshakeStream(
+      scoped_ptr<ClientSocketHandle> connection)
       : MockWebSocketHandshakeStream(kStreamTypeBasic),
-        connection_(connection) {}
+        connection_(connection.Pass()) {}
 
   virtual ~WebSocketBasicHandshakeStream() {
     connection_->socket()->Disconnect();
@@ -272,14 +274,15 @@ class WebSocketBasicHandshakeStream : public MockWebSocketHandshakeStream {
   scoped_ptr<ClientSocketHandle> connection_;
 };
 
-class WebSocketStreamFactory : public WebSocketHandshakeStreamBase::Factory {
+class WebSocketStreamCreateHelper
+    : public WebSocketHandshakeStreamBase::CreateHelper {
  public:
-  virtual ~WebSocketStreamFactory() {}
+  virtual ~WebSocketStreamCreateHelper() {}
 
   virtual WebSocketHandshakeStreamBase* CreateBasicStream(
-      ClientSocketHandle* connection,
+      scoped_ptr<ClientSocketHandle> connection,
       bool using_proxy) OVERRIDE {
-    return new WebSocketBasicHandshakeStream(connection);
+    return new WebSocketBasicHandshakeStream(connection.Pass());
   }
 
   virtual WebSocketHandshakeStreamBase* CreateSpdyStream(
@@ -307,7 +310,7 @@ void PreconnectHelperForURL(int num_streams,
   HttpNetworkSessionPeer peer(session);
   MockHttpStreamFactoryImplForPreconnect* mock_factory =
       new MockHttpStreamFactoryImplForPreconnect(session, false);
-  peer.SetHttpStreamFactory(mock_factory);
+  peer.SetHttpStreamFactory(scoped_ptr<HttpStreamFactory>(mock_factory));
   SSLConfig ssl_config;
   session->ssl_config_service()->GetSSLConfig(&ssl_config);
 
@@ -422,6 +425,7 @@ CapturePreconnectsSSLSocketPool::CapturePreconnectsSocketPool(
                           cert_verifier,
                           NULL,
                           NULL,
+                          NULL,
                           std::string(),
                           NULL,
                           NULL,
@@ -457,11 +461,12 @@ TEST_P(HttpStreamFactoryTest, PreconnectDirect) {
         new CapturePreconnectsSSLSocketPool(
             session_deps.host_resolver.get(),
             session_deps.cert_verifier.get());
-    MockClientSocketPoolManager* mock_pool_manager =
-        new MockClientSocketPoolManager;
+    scoped_ptr<MockClientSocketPoolManager> mock_pool_manager(
+        new MockClientSocketPoolManager);
     mock_pool_manager->SetTransportSocketPool(transport_conn_pool);
     mock_pool_manager->SetSSLSocketPool(ssl_conn_pool);
-    peer.SetClientSocketPoolManager(mock_pool_manager);
+    peer.SetClientSocketPoolManager(
+        mock_pool_manager.PassAs<ClientSocketPoolManager>());
     PreconnectHelper(kTests[i], session.get());
     if (kTests[i].ssl)
       EXPECT_EQ(kTests[i].num_streams, ssl_conn_pool->last_num_streams());
@@ -486,11 +491,12 @@ TEST_P(HttpStreamFactoryTest, PreconnectHttpProxy) {
         new CapturePreconnectsSSLSocketPool(
             session_deps.host_resolver.get(),
             session_deps.cert_verifier.get());
-    MockClientSocketPoolManager* mock_pool_manager =
-        new MockClientSocketPoolManager;
+    scoped_ptr<MockClientSocketPoolManager> mock_pool_manager(
+        new MockClientSocketPoolManager);
     mock_pool_manager->SetSocketPoolForHTTPProxy(proxy_host, http_proxy_pool);
     mock_pool_manager->SetSocketPoolForSSLWithProxy(proxy_host, ssl_conn_pool);
-    peer.SetClientSocketPoolManager(mock_pool_manager);
+    peer.SetClientSocketPoolManager(
+        mock_pool_manager.PassAs<ClientSocketPoolManager>());
     PreconnectHelper(kTests[i], session.get());
     if (kTests[i].ssl)
       EXPECT_EQ(kTests[i].num_streams, ssl_conn_pool->last_num_streams());
@@ -515,11 +521,12 @@ TEST_P(HttpStreamFactoryTest, PreconnectSocksProxy) {
         new CapturePreconnectsSSLSocketPool(
             session_deps.host_resolver.get(),
             session_deps.cert_verifier.get());
-    MockClientSocketPoolManager* mock_pool_manager =
-        new MockClientSocketPoolManager;
+    scoped_ptr<MockClientSocketPoolManager> mock_pool_manager(
+        new MockClientSocketPoolManager);
     mock_pool_manager->SetSocketPoolForSOCKSProxy(proxy_host, socks_proxy_pool);
     mock_pool_manager->SetSocketPoolForSSLWithProxy(proxy_host, ssl_conn_pool);
-    peer.SetClientSocketPoolManager(mock_pool_manager);
+    peer.SetClientSocketPoolManager(
+        mock_pool_manager.PassAs<ClientSocketPoolManager>());
     PreconnectHelper(kTests[i], session.get());
     if (kTests[i].ssl)
       EXPECT_EQ(kTests[i].num_streams, ssl_conn_pool->last_num_streams());
@@ -550,11 +557,12 @@ TEST_P(HttpStreamFactoryTest, PreconnectDirectWithExistingSpdySession) {
         new CapturePreconnectsSSLSocketPool(
             session_deps.host_resolver.get(),
             session_deps.cert_verifier.get());
-    MockClientSocketPoolManager* mock_pool_manager =
-        new MockClientSocketPoolManager;
+    scoped_ptr<MockClientSocketPoolManager> mock_pool_manager(
+        new MockClientSocketPoolManager);
     mock_pool_manager->SetTransportSocketPool(transport_conn_pool);
     mock_pool_manager->SetSSLSocketPool(ssl_conn_pool);
-    peer.SetClientSocketPoolManager(mock_pool_manager);
+    peer.SetClientSocketPoolManager(
+        mock_pool_manager.PassAs<ClientSocketPoolManager>());
     PreconnectHelper(kTests[i], session.get());
     // We shouldn't be preconnecting if we have an existing session, which is
     // the case for https://www.google.com.
@@ -581,10 +589,11 @@ TEST_P(HttpStreamFactoryTest, PreconnectUnsafePort) {
       new CapturePreconnectsTransportSocketPool(
           session_deps.host_resolver.get(),
           session_deps.cert_verifier.get());
-  MockClientSocketPoolManager* mock_pool_manager =
-      new MockClientSocketPoolManager;
+  scoped_ptr<MockClientSocketPoolManager> mock_pool_manager(
+      new MockClientSocketPoolManager);
   mock_pool_manager->SetTransportSocketPool(transport_conn_pool);
-  peer.SetClientSocketPoolManager(mock_pool_manager);
+  peer.SetClientSocketPoolManager(
+      mock_pool_manager.PassAs<ClientSocketPoolManager>());
 
   PreconnectHelperForURL(1, GURL("http://www.google.com:7"), session.get());
 
@@ -930,15 +939,15 @@ TEST_P(HttpStreamFactoryTest, RequestWebSocketBasicHandshakeStream) {
 
   SSLConfig ssl_config;
   StreamRequestWaiter waiter;
-  WebSocketStreamFactory factory;
+  WebSocketStreamCreateHelper create_helper;
   scoped_ptr<HttpStreamRequest> request(
-      session->websocket_handshake_stream_factory()
+      session->http_stream_factory_for_websocket()
           ->RequestWebSocketHandshakeStream(request_info,
                                             DEFAULT_PRIORITY,
                                             ssl_config,
                                             ssl_config,
                                             &waiter,
-                                            &factory,
+                                            &create_helper,
                                             BoundNetLog()));
   waiter.WaitForStream();
   EXPECT_TRUE(waiter.stream_done());
@@ -981,15 +990,15 @@ TEST_P(HttpStreamFactoryTest, RequestWebSocketBasicHandshakeStreamOverSSL) {
 
   SSLConfig ssl_config;
   StreamRequestWaiter waiter;
-  WebSocketStreamFactory factory;
+  WebSocketStreamCreateHelper create_helper;
   scoped_ptr<HttpStreamRequest> request(
-      session->websocket_handshake_stream_factory()
+      session->http_stream_factory_for_websocket()
           ->RequestWebSocketHandshakeStream(request_info,
                                             DEFAULT_PRIORITY,
                                             ssl_config,
                                             ssl_config,
                                             &waiter,
-                                            &factory,
+                                            &create_helper,
                                             BoundNetLog()));
   waiter.WaitForStream();
   EXPECT_TRUE(waiter.stream_done());
@@ -1029,15 +1038,15 @@ TEST_P(HttpStreamFactoryTest, RequestWebSocketBasicHandshakeStreamOverProxy) {
 
   SSLConfig ssl_config;
   StreamRequestWaiter waiter;
-  WebSocketStreamFactory factory;
+  WebSocketStreamCreateHelper create_helper;
   scoped_ptr<HttpStreamRequest> request(
-      session->websocket_handshake_stream_factory()
+      session->http_stream_factory_for_websocket()
           ->RequestWebSocketHandshakeStream(request_info,
                                             DEFAULT_PRIORITY,
                                             ssl_config,
                                             ssl_config,
                                             &waiter,
-                                            &factory,
+                                            &create_helper,
                                             BoundNetLog()));
   waiter.WaitForStream();
   EXPECT_TRUE(waiter.stream_done());
@@ -1143,15 +1152,15 @@ TEST_P(HttpStreamFactoryTest, RequestWebSocketSpdyHandshakeStream) {
 
   SSLConfig ssl_config;
   StreamRequestWaiter waiter1;
-  WebSocketStreamFactory factory;
+  WebSocketStreamCreateHelper create_helper;
   scoped_ptr<HttpStreamRequest> request1(
-      session->websocket_handshake_stream_factory()
+      session->http_stream_factory_for_websocket()
           ->RequestWebSocketHandshakeStream(request_info,
                                             DEFAULT_PRIORITY,
                                             ssl_config,
                                             ssl_config,
                                             &waiter1,
-                                            &factory,
+                                            &create_helper,
                                             BoundNetLog()));
   waiter1.WaitForStream();
   EXPECT_TRUE(waiter1.stream_done());
@@ -1162,13 +1171,13 @@ TEST_P(HttpStreamFactoryTest, RequestWebSocketSpdyHandshakeStream) {
 
   StreamRequestWaiter waiter2;
   scoped_ptr<HttpStreamRequest> request2(
-      session->websocket_handshake_stream_factory()
+      session->http_stream_factory_for_websocket()
           ->RequestWebSocketHandshakeStream(request_info,
                                             DEFAULT_PRIORITY,
                                             ssl_config,
                                             ssl_config,
                                             &waiter2,
-                                            &factory,
+                                            &create_helper,
                                             BoundNetLog()));
   waiter2.WaitForStream();
   EXPECT_TRUE(waiter2.stream_done());
@@ -1233,15 +1242,15 @@ TEST_P(HttpStreamFactoryTest, OrphanedWebSocketStream) {
 
   SSLConfig ssl_config;
   StreamRequestWaiter waiter;
-  WebSocketStreamFactory factory;
+  WebSocketStreamCreateHelper create_helper;
   scoped_ptr<HttpStreamRequest> request(
-      session->websocket_handshake_stream_factory()
+      session->http_stream_factory_for_websocket()
           ->RequestWebSocketHandshakeStream(request_info,
                                             DEFAULT_PRIORITY,
                                             ssl_config,
                                             ssl_config,
                                             &waiter,
-                                            &factory,
+                                            &create_helper,
                                             BoundNetLog()));
   waiter.WaitForStream();
   EXPECT_TRUE(waiter.stream_done());
@@ -1265,7 +1274,7 @@ TEST_P(HttpStreamFactoryTest, OrphanedWebSocketStream) {
 
   // Make sure there is no orphaned job. it is already canceled.
   ASSERT_EQ(0u, static_cast<HttpStreamFactoryImpl*>(
-      session->websocket_handshake_stream_factory())->num_orphaned_jobs());
+      session->http_stream_factory_for_websocket())->num_orphaned_jobs());
 }
 
 }  // namespace

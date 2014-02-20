@@ -10,11 +10,13 @@
  *
  * @param {string} path Path.
  * @param {DirectoryEntry} entry Entry. Can be null.
+ * @param {string} label Label.
  * @constructor
  */
-function NavigationModelItem(path, entry) {
+function NavigationModelItem(path, entry, label) {
   this.path_ = path;
   this.entry_ = entry;
+  this.label_ = label;
   this.resolvingQueue_ = new AsyncUtil.Queue();
 
   Object.seal(this);
@@ -22,6 +24,7 @@ function NavigationModelItem(path, entry) {
 
 NavigationModelItem.prototype = {
   get path() { return this.path_; },
+  get label() { return this.label_; }
 };
 
 /**
@@ -36,21 +39,23 @@ NavigationModelItem.prototype.getCachedEntry = function() {
 };
 
 /**
+ * TODO(mtomasz): Use Entry instead of path.
  * @param {VolumeManagerWrapper} volumeManager VolumeManagerWrapper instance.
  * @param {string} path Path.
  * @param {DirectoryEntry} entry Entry. Can be null.
+ * @param {string} label Label.
  * @param {function(FileError)} errorCallback Called when the resolving is
  *     failed with the error.
  * @return {NavigationModelItem} Created NavigationModelItem.
  */
 NavigationModelItem.create = function(
-    volumeManager, path, entry, errorCallback) {
-  var item = new NavigationModelItem(path, entry);
+    volumeManager, path, entry, label, errorCallback) {
+  var item = new NavigationModelItem(path, entry, label);
 
   // If the given entry is null, try to resolve path to get an entry.
   if (!entry) {
     item.resolvingQueue_.run(function(continueCallback) {
-      volumeManager.resolvePath(
+      volumeManager.resolveAbsolutePath(
           path,
           function(entry) {
             if (entry.isDirectory)
@@ -110,12 +115,14 @@ function NavigationListModel(volumeManager, shortcutListModel) {
           this.volumeManager_,
           volumeInfo.mountPath + '/root',
           null,
+          volumeInfo.getLabel(),
           function() {});
     } else {
       return NavigationModelItem.create(
           this.volumeManager_,
           volumeInfo.mountPath,
           volumeInfo.root,
+          volumeInfo.getLabel(),
           function() {});
     }
   }.bind(this);
@@ -125,6 +132,7 @@ function NavigationListModel(volumeManager, shortcutListModel) {
         this.volumeManager_,
         path,
         null,  // Entry will be resolved.
+        PathUtil.getFolderLabel(path),
         function(error) {
           if (error.code == FileError.NOT_FOUND_ERR)
             this.onItemNotFoundError(item);
@@ -150,10 +158,7 @@ function NavigationListModel(volumeManager, shortcutListModel) {
   this.shortcutList_ = [];
   for (var i = 0; i < this.shortcutListModel_.length; i++) {
     var shortcutPath = this.shortcutListModel_.item(i);
-    var mountPath = PathUtil.isDriveBasedPath(shortcutPath) ?
-        RootDirectory.DRIVE :
-        PathUtil.getRootPath(shortcutPath);
-    var volumeInfo = this.volumeManager_.getVolumeInfo(mountPath);
+    var volumeInfo = this.volumeManager_.getVolumeInfo(shortcutPath);
     var isMounted = volumeInfo && !volumeInfo.error;
     if (isMounted)
       this.shortcutList_.push(pathToModelItem(shortcutPath));
@@ -216,10 +221,7 @@ function NavigationListModel(volumeManager, shortcutListModel) {
       }
 
       // Check if the volume where the shortcutPath is is mounted or not.
-      var mountPath = PathUtil.isDriveBasedPath(shortcutPath) ?
-          RootDirectory.DRIVE :
-          PathUtil.getRootPath(shortcutPath);
-      var volumeInfo = this.volumeManager_.getVolumeInfo(mountPath);
+      var volumeInfo = this.volumeManager_.getVolumeInfo(shortcutPath);
       var isMounted = volumeInfo && !volumeInfo.error;
       if (cmp == 0) {
         // There exists an old NavigationModelItem instance.
@@ -242,10 +244,7 @@ function NavigationListModel(volumeManager, shortcutListModel) {
     // Add remaining (new) shortcuts if necessary.
     for (; modelIndex < this.shortcutListModel_.length; modelIndex++) {
       var shortcutPath = this.shortcutListModel_.item(modelIndex);
-      var mountPath = PathUtil.isDriveBasedPath(shortcutPath) ?
-          RootDirectory.DRIVE :
-          PathUtil.getRootPath(shortcutPath);
-      var volumeInfo = this.volumeManager_.getVolumeInfo(mountPath);
+      var volumeInfo = this.volumeManager_.getVolumeInfo(shortcutPath);
       var isMounted = volumeInfo && !volumeInfo.error;
       if (isMounted)
         newList.push(pathToModelItem(shortcutPath));
@@ -345,5 +344,7 @@ NavigationListModel.prototype.onItemNotFoundError = function(modelItem) {
  * @return {boolean} True if the drive is mounted, false otherwise.
  */
 NavigationListModel.prototype.isDriveMounted = function() {
-  return !!this.volumeManager_.getVolumeInfo(RootDirectory.DRIVE);
+  var volumeInfo =
+      this.volumeManager_.getCurrentProfileVolumeInfo(RootType.DRIVE);
+  return !!volumeInfo && volumeInfo.root;
 };

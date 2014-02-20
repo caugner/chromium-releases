@@ -17,13 +17,13 @@
 #include "chrome/browser/managed_mode/managed_user_sync_service.h"
 #include "chrome/browser/managed_mode/managed_user_sync_service_observer.h"
 #include "chrome/browser/managed_mode/managed_users.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 
 class GoogleServiceAuthError;
 class ManagedUserRefreshTokenFetcher;
 class ManagedUserRegistrationUtilityTest;
 class PrefService;
+class Profile;
 
 namespace browser_sync {
 class DeviceInfo;
@@ -31,9 +31,9 @@ class DeviceInfo;
 
 // Structure to store registration information.
 struct ManagedUserRegistrationInfo {
-  ManagedUserRegistrationInfo(const string16& name, int avatar_index);
+  ManagedUserRegistrationInfo(const base::string16& name, int avatar_index);
   int avatar_index;
-  string16 name;
+  base::string16 name;
   std::string master_key;
 };
 

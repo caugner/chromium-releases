@@ -22,24 +22,6 @@ sys.path.insert(0, os.path.join(chrome_paths.GetSrc(), 'build', 'android'))
 from pylib import constants
 
 
-def _AppendEnvironmentPath(env_name, path):
-  if env_name in os.environ:
-    lib_path = os.environ[env_name]
-    if path not in lib_path:
-      os.environ[env_name] += os.pathsep + path
-  else:
-    os.environ[env_name] = path
-
-
-def _AddToolsToSystemPathForWindows():
-  path_cfg_file = 'C:\\tools\\bots_path.cfg'
-  if not os.path.exists(path_cfg_file):
-    print 'Failed to find file', path_cfg_file
-  with open(path_cfg_file, 'r') as cfg:
-    paths = cfg.read().split('\n')
-  os.environ['PATH'] = os.pathsep.join(paths) + os.pathsep + os.environ['PATH']
-
-
 def _GenerateTestCommand(script,
                          chromedriver,
                          ref_chromedriver=None,
@@ -162,14 +144,6 @@ def main():
       'reference_builds',
       'chromedriver_%s%s' % (platform_name, exe_postfix))
 
-  if util.IsLinux():
-    # Set LD_LIBRARY_PATH to enable successful loading of shared object files,
-    # when chromedriver2.so is not a static build.
-    _AppendEnvironmentPath('LD_LIBRARY_PATH', os.path.join(build_dir, 'lib'))
-  elif util.IsWindows():
-    # For Windows bots: add ant, java(jre) and the like to system path.
-    _AddToolsToSystemPathForWindows()
-
   if options.android_packages:
     os.environ['PATH'] += os.pathsep + os.path.join(
         _THIS_DIR, os.pardir, 'chrome')
@@ -189,9 +163,9 @@ def main():
     latest_snapshot_revision = archive.GetLatestRevision(archive.Site.SNAPSHOT)
     versions = [
         ['HEAD', latest_snapshot_revision],
+        ['32', archive.CHROME_32_REVISION],
         ['31', archive.CHROME_31_REVISION],
-        ['30', archive.CHROME_30_REVISION],
-        ['29', archive.CHROME_29_REVISION]
+        ['30', archive.CHROME_30_REVISION]
     ]
     code = 0
     for version in versions:

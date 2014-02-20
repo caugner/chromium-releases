@@ -10,9 +10,9 @@
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/common/chrome_version_info.h"  // TODO(finnur): Remove.
-#include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/feature_switch.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_constants.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -47,7 +47,7 @@ ui::Accelerator ParseImpl(const std::string& accelerator,
                           const std::string& platform_key,
                           int index,
                           bool should_parse_media_keys,
-                          string16* error) {
+                          base::string16* error) {
   error->clear();
   if (platform_key != values::kKeybindingPlatformWin &&
       platform_key != values::kKeybindingPlatformMac &&
@@ -255,13 +255,13 @@ std::string NormalizeShortcutSuggestion(const std::string& suggestion,
 Command::Command() : global_(false) {}
 
 Command::Command(const std::string& command_name,
-                 const string16& description,
+                 const base::string16& description,
                  const std::string& accelerator,
                  bool global)
     : command_name_(command_name),
       description_(description),
       global_(global) {
-  string16 error;
+  base::string16 error;
   accelerator_ = ParseImpl(accelerator, CommandPlatform(), 0,
                            IsNamedCommand(command_name), &error);
 }
@@ -286,7 +286,7 @@ std::string Command::CommandPlatform() {
 // static
 ui::Accelerator Command::StringToAccelerator(const std::string& accelerator,
                                              const std::string& command_name) {
-  string16 error;
+  base::string16 error;
   ui::Accelerator parsed =
       ParseImpl(accelerator, Command::CommandPlatform(), 0,
                 IsNamedCommand(command_name), &error);
@@ -384,10 +384,10 @@ std::string Command::AcceleratorToString(const ui::Accelerator& accelerator) {
 bool Command::Parse(const base::DictionaryValue* command,
                     const std::string& command_name,
                     int index,
-                    string16* error) {
+                    base::string16* error) {
   DCHECK(!command_name.empty());
 
-  string16 description;
+  base::string16 description;
   if (IsNamedCommand(command_name)) {
     if (!command->GetString(keys::kDescription, &description) ||
         description.empty()) {
@@ -438,7 +438,9 @@ bool Command::Parse(const base::DictionaryValue* command,
 
   // Check if this is a global or a regular shortcut.
   bool global = false;
-  command->GetBoolean(keys::kGlobal, &global);
+  if (FeatureSwitch::global_commands()->IsEnabled() &&
+      chrome::VersionInfo::GetChannel() <= chrome::VersionInfo::CHANNEL_DEV)
+    command->GetBoolean(keys::kGlobal, &global);
 
   // Normalize the suggestions.
   for (SuggestionMap::iterator iter = suggestions.begin();
@@ -512,7 +514,7 @@ base::DictionaryValue* Command::ToValue(const Extension* extension,
                                         bool active) const {
   base::DictionaryValue* extension_data = new base::DictionaryValue();
 
-  string16 command_description;
+  base::string16 command_description;
   bool extension_action = false;
   if (command_name() == values::kBrowserActionCommandEvent ||
       command_name() == values::kPageActionCommandEvent ||

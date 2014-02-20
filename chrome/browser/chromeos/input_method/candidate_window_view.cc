@@ -13,6 +13,8 @@
 #include "chromeos/ime/candidate_window.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/views/background.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
@@ -70,7 +72,7 @@ views::View* WrapWithPadding(views::View* view, const gfx::Insets& insets) {
 }
 
 // Creates shortcut text from the given index and the orientation.
-string16 CreateShortcutText(size_t index,
+base::string16 CreateShortcutText(size_t index,
                             const CandidateWindow& candidate_window) {
   if (index >= candidate_window.candidates().size())
     return UTF8ToUTF16("");
@@ -450,15 +452,15 @@ void CandidateView::Init(int shortcut_column_width,
   UpdateLabelBackgroundColors();
 }
 
-void CandidateView::SetCandidateText(const string16& text) {
+void CandidateView::SetCandidateText(const base::string16& text) {
   candidate_label_->SetText(text);
 }
 
-void CandidateView::SetShortcutText(const string16& text) {
+void CandidateView::SetShortcutText(const base::string16& text) {
   shortcut_label_->SetText(text);
 }
 
-void CandidateView::SetAnnotationText(const string16& text) {
+void CandidateView::SetAnnotationText(const base::string16& text) {
   annotation_label_->SetText(text);
 }
 
@@ -729,7 +731,7 @@ void CandidateWindowView::UpdateCandidates(
       CandidateView* candidate_view = candidate_views_[index_in_page];
       // Set the shortcut text.
       if (no_shortcut_mode) {
-        candidate_view->SetShortcutText(string16());
+        candidate_view->SetShortcutText(base::string16());
       } else {
         // At this moment, we don't use labels sent from engines for UX
         // reasons. First, we want to show shortcut labels in empty rows
@@ -749,8 +751,8 @@ void CandidateWindowView::UpdateCandidates(
          candidate_view->SetInfolistIcon(!entry.description_title.empty());
       } else {
         // Disable the empty row.
-        candidate_view->SetCandidateText(string16());
-        candidate_view->SetAnnotationText(string16());
+        candidate_view->SetCandidateText(base::string16());
+        candidate_view->SetAnnotationText(base::string16());
         candidate_view->SetRowEnabled(false);
         candidate_view->SetInfolistIcon(false);
       }
@@ -955,32 +957,27 @@ void CandidateWindowView::CommitCandidate() {
     return;  // Out of range, do nothing.
   }
 
-  // For now, we don't distinguish left and right clicks.
-  const int button = 1;  // Left button.
-  const int key_modifilers = 0;
   FOR_EACH_OBSERVER(Observer, observers_,
-                    OnCandidateCommitted(selected_candidate_index_in_page_,
-                                         button,
-                                         key_modifilers));
+                    OnCandidateCommitted(selected_candidate_index_in_page_));
 }
 
 void CandidateWindowView::ResizeAndMoveParentFrame() {
-  // If rendering operation comes from mozc-engine, uses mozc specific location,
+  // If rendering operation comes from mozc-engine, uses mozc specific bounds,
   // otherwise candidate window is shown under the cursor.
   const int x = should_show_at_composition_head_?
-      composition_head_location_.x() : cursor_location_.x();
+      composition_head_bounds_.x() : cursor_bounds_.x();
   // To avoid candidate-window overlapping, uses maximum y-position of mozc
-  // specific location and cursor location, because mozc-engine does not
+  // specific bounds and cursor bounds, because mozc-engine does not
   // consider about multi-line composition.
   const int y = should_show_at_composition_head_?
-      std::max(composition_head_location_.y(), cursor_location_.y()) :
-      cursor_location_.y();
-  const int height = cursor_location_.height();
+      std::max(composition_head_bounds_.y(), cursor_bounds_.y()) :
+      cursor_bounds_.y();
+  const int height = cursor_bounds_.height();
   const int horizontal_offset = GetHorizontalOffset();
 
   gfx::Rect old_bounds = parent_frame_->GetClientAreaBoundsInScreen();
   gfx::Rect screen_bounds = ash::Shell::GetScreen()->GetDisplayMatching(
-      cursor_location_).work_area();
+      cursor_bounds_).work_area();
   // The size.
   gfx::Rect frame_bounds = old_bounds;
   frame_bounds.set_size(GetPreferredSize());
@@ -1011,7 +1008,7 @@ void CandidateWindowView::ResizeAndMoveParentFrame() {
 
   // TODO(nona): check top_overflow here.
 
-  // Move the window per the cursor location.
+  // Move the window per the cursor bounds.
   // SetBounds() is not cheap. Only call this when it is really changed.
   if (frame_bounds != old_bounds)
     parent_frame_->SetBounds(frame_bounds);

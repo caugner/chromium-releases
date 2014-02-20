@@ -86,6 +86,9 @@ _REVISION_NEGATIVE_FILTER['HEAD'] = [
     'WindowTest.*',
     # Flaky: https://code.google.com/p/chromedriver/issues/detail?id=528
     'PageLoadingTest.testShouldDoNothingIfThereIsNothingToGoBackTo',
+    # Flaky: https://code.google.com/p/chromedriver/issues/detail?id=653
+    'PageLoadingTest.testShouldBeAbleToNavigateBackInTheBrowserHistoryInPresenceOfIframes',
+    'PageLoadingTest.testShouldBeAbleToNavigateBackInTheBrowserHistory',
 ]
 _REVISION_NEGATIVE_FILTER['31'] = _REVISION_NEGATIVE_FILTER['HEAD'] + [
     'I18nTest.*',  # This was fixed in a later version of 31 than we use.
@@ -103,7 +106,7 @@ _OS_NEGATIVE_FILTER['win'] = [
     'RenderedWebElementTest.testHoverPersists',
     'RenderedWebElementTest.canClickOnASuckerFishStyleMenu',
     # Flaky: https://code.google.com/p/chromedriver/issues/detail?id=416
-    'TakesScreenshotTest.testShouldCaptureScreenshotAtIFramePageAfterSwitching',
+    'TakesScreenshotTest.testShouldCaptureScreenshotAtFramePageAfterSwitching',
     'TakesScreenshotTest.testShouldCaptureScreenshotAtFramePage',
 ]
 _OS_NEGATIVE_FILTER['linux'] = []
@@ -117,7 +120,7 @@ _OS_NEGATIVE_FILTER['mac'] = [
     # Flaky: https://code.google.com/p/chromedriver/issues/detail?id=375
     'PageLoadingTest.testShouldBeAbleToNavigateBackInTheBrowserHistoryInPresenceOfIframes',
 ]
-_OS_NEGATIVE_FILTER['android'] = [
+_OS_NEGATIVE_FILTER['android:chrome'] = [
     'ChromeOptionsFunctionalTest.canStartChromeWithCustomOptions',
     'ClickScrollingTest.testShouldBeAbleToClickElementThatIsOutOfViewInANestedFrame',
     'ClickScrollingTest.testShouldBeAbleToClickElementThatIsOutOfViewInANestedFrameThatIsOutOfView',
@@ -185,6 +188,25 @@ _OS_NEGATIVE_FILTER['android'] = [
     # https://code.google.com/p/chromedriver/issues/detail?id=604
     'I18nTest.*',
 ]
+_OS_NEGATIVE_FILTER['android:chrome_stable'] = (
+    _OS_NEGATIVE_FILTER['android:chrome'])
+_OS_NEGATIVE_FILTER['android:chrome_beta'] = (
+    _OS_NEGATIVE_FILTER['android:chrome'])
+_OS_NEGATIVE_FILTER['android:chromium_test_shell'] = (
+    _OS_NEGATIVE_FILTER['android:chrome'])
+_OS_NEGATIVE_FILTER['android:chromedriver_webview_shell'] = (
+    _OS_NEGATIVE_FILTER['android:chrome'] + [
+         # https://code.google.com/p/chromedriver/issues/detail?id=645
+        'ClickScrollingTest.testShouldBeAbleToClickElementInAFrameThatIsOutOfView',
+        'ClickScrollingTest.testShouldBeAbleToClickElementThatIsOutOfViewInAFrameThatIsOutOfView',
+        'FormHandlingTest.handleFormWithJavascriptAction',
+        'TypingTest.testShouldReportKeyCodeOfArrowKeysUpDownEvents',
+        'TypingTest.testShouldReportKeyCodeOfArrowKeys',
+        'CombinedInputActionsTest.testCanClickOnLinks',
+        'CombinedInputActionsTest.testCanClickOnLinksWithAnOffset',
+        'CombinedInputActionsTest.testMouseMovementWorksWhenNavigatingToAnotherPage',
+    ]
+)
 
 
 def _GetRevisionNegativeFilter(chrome_version):

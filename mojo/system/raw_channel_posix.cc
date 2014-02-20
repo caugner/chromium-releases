@@ -28,6 +28,8 @@
 namespace mojo {
 namespace system {
 
+namespace {
+
 const size_t kReadSize = 4096;
 
 class RawChannelPosix : public RawChannel,
@@ -39,7 +41,7 @@ class RawChannelPosix : public RawChannel,
   virtual ~RawChannelPosix();
 
   // |RawChannel| implementation:
-  virtual void Init() OVERRIDE;
+  virtual bool Init() OVERRIDE;
   virtual void Shutdown() OVERRIDE;
   virtual bool WriteMessage(MessageInTransit* message) OVERRIDE;
 
@@ -122,7 +124,7 @@ RawChannelPosix::~RawChannelPosix() {
   DCHECK(!write_watcher_.get());
 }
 
-void RawChannelPosix::Init() {
+bool RawChannelPosix::Init() {
   DCHECK_EQ(base::MessageLoop::current(), message_loop());
 
   DCHECK(!read_watcher_.get());
@@ -133,9 +135,17 @@ void RawChannelPosix::Init() {
   // No need to take the lock. No one should be using us yet.
   DCHECK(write_message_queue_.empty());
 
-  bool result = message_loop_for_io()->WatchFileDescriptor(
-      fd_, true, base::MessageLoopForIO::WATCH_READ, read_watcher_.get(), this);
-  DCHECK(result);
+  if (!message_loop_for_io()->WatchFileDescriptor(fd_, true,
+          base::MessageLoopForIO::WATCH_READ, read_watcher_.get(), this)) {
+    // TODO(vtl): I'm not sure |WatchFileDescriptor()| actually fails cleanly
+    // (in the sense of returning the message loop's state to what it was before
+    // it was called).
+    read_watcher_.reset();
+    write_watcher_.reset();
+    return false;
+  }
+
+  return true;
 }
 
 void RawChannelPosix::Shutdown() {
@@ -383,6 +393,8 @@ void RawChannelPosix::CancelPendingWritesNoLock() {
   }
   write_message_queue_.clear();
 }
+
+}  // namespace
 
 // -----------------------------------------------------------------------------
 

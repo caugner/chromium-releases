@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@ package org.chromium.content.browser;
 
 import android.content.res.Configuration;
 import android.graphics.Canvas;
+import android.os.SystemClock;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -122,7 +123,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
         runTestOnUiThread(new Runnable() {
             @Override
             public void run() {
-                getContentView().fling(System.currentTimeMillis(), 0, 0, vx, vy);
+                getContentView().fling(SystemClock.uptimeMillis(), 0, 0, vx, vy);
             }
         });
     }

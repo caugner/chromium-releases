@@ -85,7 +85,7 @@ class WebstoreProviderTest : public InProcessBrowserTest {
         switches::kAppsGalleryURL, test_server_->base_url().spec());
 
     webstore_provider_.reset(new WebstoreProvider(
-        ProfileManager::GetDefaultProfile(), NULL));
+        ProfileManager::GetActiveUserProfileOrOffTheRecord(), NULL));
     webstore_provider_->set_webstore_search_fetched_callback(
         base::Bind(&WebstoreProviderTest::OnSearchResultsFetched,
                    base::Unretained(this)));
@@ -166,7 +166,8 @@ class WebstoreProviderTest : public InProcessBrowserTest {
 };
 
 // Flaky on CrOS and Windows: http://crbug.com/246136.
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
+// TODO(erg): linux_aura bringup: http://crbug.com/163931
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_Basic DISABLED_Basic
 #else
 #define MAYBE_Basic Basic

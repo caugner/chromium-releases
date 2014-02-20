@@ -24,12 +24,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/webui/options/font_settings_utils.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/font_list_async.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
+#include "extensions/common/extension.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -196,7 +196,7 @@ void FontSettingsHandler::FontsListHasLoaded(
     ListValue* font;
     bool has_font = list->GetList(i, &font);
     DCHECK(has_font);
-    string16 value;
+    base::string16 value;
     bool has_value = font->GetString(1, &value);
     DCHECK(has_value);
     bool has_rtl_chars = base::i18n::StringContainsStrongRTLChars(value);
@@ -220,7 +220,7 @@ void FontSettingsHandler::FontsListHasLoaded(
       int cmd_id = it->encoding_id;
       std::string encoding =
       CharacterEncoding::GetCanonicalEncodingNameByCommandId(cmd_id);
-      string16 name = it->encoding_display_name;
+      base::string16 name = it->encoding_display_name;
       bool has_rtl_chars = base::i18n::StringContainsStrongRTLChars(name);
       option->Append(new base::StringValue(encoding));
       option->Append(new base::StringValue(name));
@@ -304,7 +304,7 @@ void FontSettingsHandler::HandleOpenAdvancedFontSettingsOptions(
   const extensions::Extension* extension = GetAdvancedFontSettingsExtension();
   if (!extension)
     return;
-  ExtensionTabUtil::OpenOptionsPage(extension,
+  extensions::ExtensionTabUtil::OpenOptionsPage(extension,
       chrome::FindBrowserWithWebContents(web_ui()->GetWebContents()));
 }
 

@@ -33,6 +33,7 @@ _ISOLATE_FILE_PATHS = {
     'components_unittests': 'components/components_unittests.isolate',
     'content_browsertests': 'content/content_browsertests.isolate',
     'content_unittests': 'content/content_unittests.isolate',
+    'media_perftests': 'media/media_perftests.isolate',
     'media_unittests': 'media/media_unittests.isolate',
     'net_unittests': 'net/net_unittests.isolate',
     'ui_unittests': 'ui/ui_unittests.isolate',
@@ -113,8 +114,8 @@ def _GenerateDepsDirUsingIsolate(suite_name):
       'remap',
       '--isolate', isolate_abs_path,
       '--isolated', isolated_abs_path,
-      '-V', 'PRODUCT_DIR=%s' % constants.GetOutDirectory(),
-      '-V', 'OS=android',
+      '--path-variable', 'PRODUCT_DIR', constants.GetOutDirectory(),
+      '--config-variable', 'OS', 'android',
       '--outdir', constants.ISOLATE_DEPS_DIR,
   ]
   assert not cmd_helper.RunCmd(isolate_cmd)
@@ -277,10 +278,6 @@ def Setup(test_options, devices):
   Returns:
     A tuple of (TestRunnerFactory, tests).
   """
-
-  if not ports.ResetTestServerPortAllocation():
-    raise Exception('Failed to reset test server port.')
-
   test_package = test_package_apk.TestPackageApk(test_options.suite_name)
   if not os.path.exists(test_package.suite_path):
     test_package = test_package_exe.TestPackageExecutable(

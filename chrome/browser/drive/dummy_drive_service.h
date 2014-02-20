@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_DRIVE_DUMMY_DRIVE_SERVICE_H_
 
 #include "chrome/browser/drive/drive_service_interface.h"
-#include "chrome/browser/google_apis/auth_service_interface.h"
+#include "google_apis/drive/auth_service_interface.h"
 
 namespace drive {
 
@@ -66,6 +66,9 @@ class DummyDriveService : public DriveServiceInterface {
       const std::string& resource_id,
       const std::string& etag,
       const google_apis::EntryActionCallback& callback) OVERRIDE;
+  virtual google_apis::CancelCallback TrashResource(
+      const std::string& resource_id,
+      const google_apis::EntryActionCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback DownloadFile(
       const base::FilePath& local_cache_path,
       const std::string& resource_id,
@@ -78,25 +81,17 @@ class DummyDriveService : public DriveServiceInterface {
       const std::string& new_title,
       const base::Time& last_modified,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
-  virtual google_apis::CancelCallback CopyHostedDocument(
-      const std::string& resource_id,
-      const std::string& new_title,
-      const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
-  virtual google_apis::CancelCallback MoveResource(
+  virtual google_apis::CancelCallback UpdateResource(
       const std::string& resource_id,
       const std::string& parent_resource_id,
       const std::string& new_title,
       const base::Time& last_modified,
+      const base::Time& last_viewed_by_me,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback RenameResource(
       const std::string& resource_id,
       const std::string& new_title,
       const google_apis::EntryActionCallback& callback) OVERRIDE;
-  virtual google_apis::CancelCallback TouchResource(
-      const std::string& resource_id,
-      const base::Time& modified_date,
-      const base::Time& last_viewed_by_me_date,
-      const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback AddResourceToDirectory(
       const std::string& parent_resource_id,
       const std::string& resource_id,

@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Disable everything on windows only. http://crbug.com/306144
+#ifndef OS_WIN
+
 #include <algorithm>
 
 #include "base/file_util.h"
@@ -52,8 +55,6 @@
 #include "webkit/browser/fileapi/file_system_operation_runner.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 
-// Disable everything due to issue 306144
-#if 0
 using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
@@ -642,6 +643,8 @@ class MockIconExtractorImpl : public DownloadFileIconExtractor {
  private:
   void RunCallback() {
     callback_.Run(response_);
+    // Drop the reference on extension function to avoid memory leaks.
+    callback_ = IconURLCallback();
   }
 
   base::FilePath             expected_path_;
@@ -704,7 +707,7 @@ class HTML5FileWriter {
                                    int length) {
     // Create a temp file.
     base::FilePath temp_file;
-    if (!file_util::CreateTemporaryFile(&temp_file) ||
+    if (!base::CreateTemporaryFile(&temp_file) ||
         file_util::WriteFile(temp_file, data, length) != length) {
       return false;
     }
@@ -838,12 +841,19 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                        DownloadExtensionTest_PauseResumeCancelErase) {
   DownloadItem* download_item = CreateSlowTestDownload();
   ASSERT_TRUE(download_item);
+  std::string error;
 
   // Call pause().  It should succeed and the download should be paused on
   // return.
   EXPECT_TRUE(RunFunction(new DownloadsPauseFunction(),
                           DownloadItemIdAsArgList(download_item)));
   EXPECT_TRUE(download_item->IsPaused());
+
+  // Calling removeFile on a non-active download yields kNotComplete
+  // and should not crash. http://crbug.com/319984
+  error = RunFunctionAndReturnError(new DownloadsRemoveFileFunction(),
+                                    DownloadItemIdAsArgList(download_item));
+  EXPECT_STREQ(errors::kNotComplete, error.c_str());
 
   // Calling pause() twice shouldn't be an error.
   EXPECT_TRUE(RunFunction(new DownloadsPauseFunction(),
@@ -875,17 +885,17 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                           DownloadItemIdAsArgList(download_item)));
   EXPECT_EQ(DownloadItem::CANCELLED, download_item->GetState());
 
-  // Calling paused on a non-active download yields kInvalidId.
-  std::string error = RunFunctionAndReturnError(
+  // Calling paused on a non-active download yields kNotInProgress.
+  error = RunFunctionAndReturnError(
       new DownloadsPauseFunction(), DownloadItemIdAsArgList(download_item));
   EXPECT_STREQ(errors::kNotInProgress, error.c_str());
 
-  // Calling resume on a non-active download yields kInvalidId
+  // Calling resume on a non-active download yields kNotResumable
   error = RunFunctionAndReturnError(
       new DownloadsResumeFunction(), DownloadItemIdAsArgList(download_item));
   EXPECT_STREQ(errors::kNotResumable, error.c_str());
 
-  // Calling paused on a non-existent download yields kInvalidId.
+  // Calling pause on a non-existent download yields kInvalidId.
   error = RunFunctionAndReturnError(
       new DownloadsPauseFunction(), "[-42]");
   EXPECT_STREQ(errors::kInvalidId, error.c_str());
@@ -893,6 +903,11 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   // Calling resume on a non-existent download yields kInvalidId
   error = RunFunctionAndReturnError(
       new DownloadsResumeFunction(), "[-42]");
+  EXPECT_STREQ(errors::kInvalidId, error.c_str());
+
+  // Calling removeFile on a non-existent download yields kInvalidId.
+  error = RunFunctionAndReturnError(
+      new DownloadsRemoveFileFunction(), "[-42]");
   EXPECT_STREQ(errors::kInvalidId, error.c_str());
 
   int id = download_item->GetId();
@@ -3484,8 +3499,15 @@ void OnDangerPromptCreated(DownloadDangerPrompt* prompt) {
   prompt->InvokeActionForTesting(DownloadDangerPrompt::ACCEPT);
 }
 
+#if defined(OS_MACOSX)
+// Flakily triggers and assert on Mac.
+// http://crbug.com/180759
+#define MAYBE_DownloadExtensionTest_AcceptDanger DownloadExtensionTest_AcceptDanger
+#else
+#define MAYBE_DownloadExtensionTest_AcceptDanger DISABLED_DownloadExtensionTest_AcceptDanger
+#endif
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-                       DownloadExtensionTest_AcceptDanger) {
+                       MAYBE_DownloadExtensionTest_AcceptDanger) {
   // Download a file that will be marked dangerous; click the browser action
   // button; the browser action poup will call acceptDanger(); when the
   // DownloadDangerPrompt is created, pretend that the user clicks the Accept
@@ -3614,4 +3636,5 @@ TEST(ExtensionDetermineDownloadFilenameInternal,
             warnings.begin()->warning_type());
   EXPECT_EQ("incumbent", warnings.begin()->extension_id());
 }
-#endif // Issue 306144
+
+#endif  // http://crbug.com/3061144

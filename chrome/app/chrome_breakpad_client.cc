@@ -160,8 +160,8 @@ bool ChromeBreakpadClient::ShouldShowRestartDialog(base::string16* title,
   if (dlg_strings.size() < 3)
     return false;
 
-  *title = base::ASCIIToUTF16(dlg_strings[0]);
-  *message = base::ASCIIToUTF16(dlg_strings[1]);
+  *title = base::UTF8ToUTF16(dlg_strings[0]);
+  *message = base::UTF8ToUTF16(dlg_strings[1]);
   *is_rtl_locale = dlg_strings[2] == env_vars::kRtlLocale;
   return true;
 }
@@ -379,5 +379,14 @@ int ChromeBreakpadClient::GetAndroidMinidumpDescriptor() {
   return kAndroidMinidumpDescriptor;
 }
 #endif
+
+bool ChromeBreakpadClient::EnableBreakpadForProcess(
+    const std::string& process_type) {
+  return process_type == switches::kRendererProcess ||
+         process_type == switches::kPluginProcess ||
+         process_type == switches::kPpapiPluginProcess ||
+         process_type == switches::kZygoteProcess ||
+         process_type == switches::kGpuProcess;
+}
 
 }  // namespace chrome

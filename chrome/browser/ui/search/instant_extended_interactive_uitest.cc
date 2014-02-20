@@ -79,6 +79,7 @@
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_impl.h"
+#include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -86,15 +87,6 @@
 using testing::HasSubstr;
 
 namespace {
-
-// Creates a bitmap of the specified color. Caller takes ownership.
-gfx::Image CreateBitmap(SkColor color) {
-  SkBitmap thumbnail;
-  thumbnail.setConfig(SkBitmap::kARGB_8888_Config, 4, 4);
-  thumbnail.allocPixels();
-  thumbnail.eraseColor(color);
-  return gfx::Image::CreateFrom1xBitmap(thumbnail);  // adds ref.
-}
 
 // Task used to make sure history has finished processing a request. Intended
 // for use with BlockUntilHistoryProcessesPendingRequests.
@@ -156,7 +148,7 @@ class InstantExtendedTest : public InProcessBrowserTest,
   }
  protected:
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    chrome::EnableInstantExtendedAPIForTesting();
+    chrome::EnableQueryExtractionForTesting();
     ASSERT_TRUE(https_test_server().Start());
     GURL instant_url = https_test_server().GetURL(
         "files/instant_extended.html?strk=1&");
@@ -227,7 +219,7 @@ class InstantExtendedTest : public InProcessBrowserTest,
     return NULL;
   }
 
-  bool AddSearchToHistory(string16 term, int visit_count) {
+  bool AddSearchToHistory(base::string16 term, int visit_count) {
     TemplateURL* template_url = GetDefaultSearchProviderTemplateURL();
     if (!template_url)
       return false;
@@ -237,7 +229,7 @@ class InstantExtendedTest : public InProcessBrowserTest,
     GURL search(template_url->url_ref().ReplaceSearchTerms(
         TemplateURLRef::SearchTermsArgs(term)));
     history->AddPageWithDetails(
-        search, string16(), visit_count, visit_count,
+        search, base::string16(), visit_count, visit_count,
         base::Time::Now(), false, history::SOURCE_BROWSED);
     history->SetKeywordSearchTermsForURL(
         search, template_url->id(), term);
@@ -282,11 +274,17 @@ class InstantExtendedPrefetchTest : public InstantExtendedTest {
   }
 
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    chrome::EnableInstantExtendedAPIForTesting();
+    chrome::EnableQueryExtractionForTesting();
     ASSERT_TRUE(https_test_server().Start());
     GURL instant_url = https_test_server().GetURL(
         "files/instant_extended.html?strk=1&");
     InstantTestBase::Init(instant_url, true);
+  }
+
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitchASCII(
+        switches::kForceFieldTrials,
+        "EmbeddedSearch/Group11 prefetch_results_srp:1 use_cacheable_ntp:0/");
   }
 
   net::FakeURLFetcherFactory* fake_factory() { return fake_factory_.get(); }
@@ -333,7 +331,6 @@ class InstantPolicyTest : public ExtensionBrowserTest, public InstantTestBase {
 
  protected:
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    chrome::EnableInstantExtendedAPIForTesting();
     ASSERT_TRUE(https_test_server().Start());
     GURL instant_url = https_test_server().GetURL(
         "files/instant_extended.html?strk=1&");
@@ -916,6 +913,20 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, SetPrefetchQuery) {
   omnibox()->model()->autocomplete_controller()->search_provider()->
       kMinimumTimeBetweenSuggestQueriesMs = 0;
 
+  // Set the fake response for search query.
+  fake_factory()->SetFakeResponse(instant_url().Resolve("#q=flowers"),
+                                  "",
+                                  net::HTTP_OK,
+                                  net::URLRequestStatus::SUCCESS);
+
+  // Navigate to a search results page.
+  content::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_INSTANT_TAB_SUPPORT_DETERMINED,
+      content::NotificationService::AllSources());
+  SetOmniboxText("flowers");
+  PressEnterAndWaitForNavigation();
+  observer.Wait();
+
   // Set the fake response for suggest request. Response has prefetch details.
   // Ensure that the page received the prefetch query.
   fake_factory()->SetFakeResponse(
@@ -924,7 +935,8 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, SetPrefetchQuery) {
       "{\"google:clientdata\":{\"phi\": 0},"
           "\"google:suggesttype\":[\"QUERY\", \"QUERY\"],"
           "\"google:suggestrelevance\":[1400, 9]}]",
-      net::HTTP_OK);
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
 
   SetOmniboxText("pupp");
   while (!omnibox()->model()->autocomplete_controller()->done()) {
@@ -961,6 +973,20 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, ClearPrefetchedResults) {
   omnibox()->model()->autocomplete_controller()->search_provider()->
       kMinimumTimeBetweenSuggestQueriesMs = 0;
 
+  // Set the fake response for search query.
+  fake_factory()->SetFakeResponse(instant_url().Resolve("#q=flowers"),
+                                  "",
+                                  net::HTTP_OK,
+                                  net::URLRequestStatus::SUCCESS);
+
+  // Navigate to a search results page.
+  content::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_INSTANT_TAB_SUPPORT_DETERMINED,
+      content::NotificationService::AllSources());
+  SetOmniboxText("flowers");
+  PressEnterAndWaitForNavigation();
+  observer.Wait();
+
   // Set the fake response for suggest request. Response has no prefetch
   // details. Ensure that the page received a blank query to clear the
   // prefetched results.
@@ -969,7 +995,8 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, ClearPrefetchedResults) {
       "[\"dogs\",[\"https://dogs.com\"],[],[],"
           "{\"google:suggesttype\":[\"NAVIGATION\"],"
           "\"google:suggestrelevance\":[2]}]",
-      net::HTTP_OK);
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
 
   SetOmniboxText("dogs");
   while (!omnibox()->model()->autocomplete_controller()->done()) {

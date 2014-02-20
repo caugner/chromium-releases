@@ -54,10 +54,14 @@ cr.define('cr.login', function() {
    */
   var SUPPORTED_PARAMS = [
     'gaiaUrl',       // Gaia url to use;
+    'gaiaPath',      // Gaia path to use without a leading slash;
     'hl',            // Language code for the user interface;
     'email',         // Pre-fill the email field in Gaia UI;
     'service',       // Name of Gaia service;
-    'continueUrl'    // Continue url to use;
+    'continueUrl',   // Continue url to use;
+    'partitionId',   // Partition ID for the embedded Gaia webview;
+    'frameUrl',      // Initial frame URL to use. If empty defaults to gaiaUrl.
+    'constrained'    // Whether the extension is loaded in a constrained window;
   ];
 
   /**
@@ -224,7 +228,7 @@ cr.define('cr.login', function() {
           break;
         case AuthMode.INLINE:
           url = INLINE_AUTH_URL;
-          params.push('inlineMode=true');
+          params.push('inlineMode=1');
           break;
         default:
           url = AUTH_URL;
@@ -337,11 +341,19 @@ cr.define('cr.login', function() {
       }
 
       if (msg.method == 'reportState') {
+        var newUrl = setQueryParam(location, 'frameUrl', msg.src);
         if (history.state) {
-          history.state.src == msg.src || history.pushState({src: msg.src});
+          if (history.state.src != msg.src) {
+            history.pushState({src: msg.src}, '', newUrl);
+          }
         } else {
-          history.replaceState({src: msg.src});
+          history.replaceState({src: msg.src}, '', newUrl);
         }
+        return;
+      }
+
+      if (msg.method == 'switchToFullTab') {
+        chrome.send('switchToFullTab', [msg.url]);
         return;
       }
 

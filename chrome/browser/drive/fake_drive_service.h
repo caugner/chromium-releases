@@ -8,7 +8,7 @@
 #include "base/files/file_path.h"
 #include "base/values.h"
 #include "chrome/browser/drive/drive_service_interface.h"
-#include "chrome/browser/google_apis/auth_service_interface.h"
+#include "google_apis/drive/auth_service_interface.h"
 
 namespace drive {
 
@@ -153,6 +153,9 @@ class FakeDriveService : public DriveServiceInterface {
       const std::string& resource_id,
       const std::string& etag,
       const google_apis::EntryActionCallback& callback) OVERRIDE;
+  virtual google_apis::CancelCallback TrashResource(
+      const std::string& resource_id,
+      const google_apis::EntryActionCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback DownloadFile(
       const base::FilePath& local_cache_path,
       const std::string& resource_id,
@@ -165,27 +168,17 @@ class FakeDriveService : public DriveServiceInterface {
       const std::string& new_title,
       const base::Time& last_modified,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
-  // The new resource ID for the copied document will look like
-  // |resource_id| + "_copied".
-  virtual google_apis::CancelCallback CopyHostedDocument(
-      const std::string& resource_id,
-      const std::string& new_title,
-      const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
-  virtual google_apis::CancelCallback MoveResource(
+  virtual google_apis::CancelCallback UpdateResource(
       const std::string& resource_id,
       const std::string& parent_resource_id,
       const std::string& new_title,
       const base::Time& last_modified,
+      const base::Time& last_viewed_by_me,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback RenameResource(
       const std::string& resource_id,
       const std::string& new_title,
       const google_apis::EntryActionCallback& callback) OVERRIDE;
-  virtual google_apis::CancelCallback TouchResource(
-      const std::string& resource_id,
-      const base::Time& modified_date,
-      const base::Time& last_viewed_by_me_date,
-      const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback AddResourceToDirectory(
       const std::string& parent_resource_id,
       const std::string& resource_id,
@@ -267,9 +260,11 @@ class FakeDriveService : public DriveServiceInterface {
   // <num> is a monotonically increasing number starting from 1.
   std::string GetNewResourceId();
 
-  // Increments |largest_changestamp_| and adds the new changestamp and ETag to
-  // |entry|.
-  void AddNewChangestampAndETag(base::DictionaryValue* entry);
+  // Increments |largest_changestamp_| and adds the new changestamp.
+  void AddNewChangestamp(base::DictionaryValue* entry);
+
+  // Update ETag of |entry| based on |largest_changestamp_|.
+  void UpdateETag(base::DictionaryValue* entry);
 
   // Adds a new entry based on the given parameters. |entry_kind| should be
   // "file" or "folder". Returns a pointer to the newly added entry, or NULL

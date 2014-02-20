@@ -78,7 +78,7 @@ class ExistingUserController : public LoginDisplay::Delegate,
   virtual void CancelPasswordChangedFlow() OVERRIDE;
   virtual void CreateAccount() OVERRIDE;
   virtual void CompleteLogin(const UserContext& user_context) OVERRIDE;
-  virtual string16 GetConnectedNetworkName() OVERRIDE;
+  virtual base::string16 GetConnectedNetworkName() OVERRIDE;
   virtual bool IsSigninInProgress() const OVERRIDE;
   virtual void Login(const UserContext& user_context) OVERRIDE;
   virtual void MigrateUserData(const std::string& old_password) OVERRIDE;
@@ -211,6 +211,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Updates the |login_display_| attached to this controller.
   void UpdateLoginDisplay(const UserList& users);
+
+  // Sends an accessibility alert event to extension listeners.
+  void SendAccessibilityAlert(const std::string& alert_text);
 
   // Public session auto-login timer.
   scoped_ptr<base::OneShotTimer<ExistingUserController> > auto_login_timer_;

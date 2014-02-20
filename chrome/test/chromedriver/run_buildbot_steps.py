@@ -195,10 +195,19 @@ def _ArchiveGoodBuild(platform, revision):
   zip_path = util.Zip(os.path.join(chrome_paths.GetBuildDir([server_name]),
                                    server_name))
 
-  build_url = '%s/chromedriver_%s_%s.%s.zip' % (
-      GS_CONTINUOUS_URL, platform, _GetVersion(), revision)
+  build_name = 'chromedriver_%s_%s.%s.zip' % (
+      platform, _GetVersion(), revision)
+  build_url = '%s/%s' % (GS_CONTINUOUS_URL, build_name)
   if slave_utils.GSUtilCopy(zip_path, build_url):
     util.MarkBuildStepError()
+
+  (latest_fd, latest_file) = tempfile.mkstemp()
+  os.write(latest_fd, build_name)
+  os.close(latest_fd)
+  latest_url = '%s/latest_%s' % (GS_CONTINUOUS_URL, platform)
+  if slave_utils.GSUtilCopy(latest_file, latest_url, mimetype='text/plain'):
+    util.MarkBuildStepError()
+  os.remove(latest_file)
 
 
 def _MaybeRelease(platform):
@@ -223,12 +232,15 @@ def _MaybeRelease(platform):
       [])
   assert result == 0 and output, 'No release candidates found'
   candidates = [b.split('/')[-1] for b in output.strip().split('\n')]
+  candidate_pattern = re.compile('chromedriver_%s_%s\.\d+\.zip'
+      % (platform, _GetVersion()))
 
   # Release the first candidate build that passed Android, if any.
   for candidate in candidates:
-    if not candidate.startswith('chromedriver_%s' % platform):
+    if not candidate_pattern.match(candidate):
+      print 'Ignored candidate "%s"' % candidate
       continue
-    revision = candidate.split('.')[2]
+    revision = candidate.split('.')[-2]
     android_result = _RevisionState(android_test_results, int(revision))
     if android_result == 'failed':
       print 'Android tests did not pass at revision', revision
@@ -334,6 +346,35 @@ def _WaitForLatestSnapshot(revision):
   util.PrintAndFlush('Got snapshot revision %s' % snapshot_revision)
 
 
+def _AddToolsToPath(platform_name):
+  """Add some tools like Ant and Java to PATH for testing steps to use."""
+  paths = []
+  error_message = ''
+  if platform_name == 'win32':
+    paths = [
+        # Path to Ant and Java, required for the java acceptance tests.
+        'C:\\Program Files (x86)\\Java\\ant\\bin',
+        'C:\\Program Files (x86)\\Java\\jre\\bin',
+    ]
+    error_message = ('Java test steps will fail as expected and '
+                     'they can be ignored.\n'
+                     'Ant, Java or others might not be installed on bot.\n'
+                     'Please refer to page "WATERFALL" on site '
+                     'go/chromedriver.')
+  if paths:
+    util.MarkBuildStepStart('Add tools to PATH')
+    path_missing = False
+    for path in paths:
+      if not os.path.isdir(path) or not os.listdir(path):
+        print 'Directory "%s" is not found or empty.' % path
+        path_missing = True
+    if path_missing:
+      print error_message
+      util.MarkBuildStepError()
+      return
+    os.environ['PATH'] += os.pathsep + os.pathsep.join(paths)
+
+
 def main():
   parser = optparse.OptionParser()
   parser.add_option(
@@ -367,6 +408,8 @@ def main():
     if platform == 'linux64':
       _ArchivePrebuilts(options.revision)
     _WaitForLatestSnapshot(options.revision)
+
+  _AddToolsToPath(platform)
 
   cmd = [
       sys.executable,

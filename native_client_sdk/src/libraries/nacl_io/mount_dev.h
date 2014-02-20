@@ -22,11 +22,12 @@ class MountDev : public Mount {
   virtual Error Mkdir(const Path& path, int permissions);
   virtual Error Rmdir(const Path& path);
   virtual Error Remove(const Path& path);
+  virtual Error Rename(const Path& path, const Path& newpath);
 
  protected:
   MountDev();
 
-  virtual Error Init(int dev, StringMap_t& args, PepperInterface* ppapi);
+  virtual Error Init(const MountInitArgs& args);
 
  private:
   ScopedMountNode root_;

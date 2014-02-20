@@ -80,8 +80,8 @@
           },
           'dependencies': [
             '<@(chromium_browser_dependencies)',
+            '../components/components.gyp:policy',
             '../content/content.gyp:content_app_browser',
-            'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'conditions': [
             ['use_aura==1', {
@@ -110,7 +110,6 @@
                 'chrome_version_resources',
                 '../chrome/chrome_resources.gyp:chrome_unscaled_resources',
                 '../crypto/crypto.gyp:crypto',
-                '../printing/printing.gyp:printing',
                 '../net/net.gyp:net_resources',
                 '../ui/views/views.gyp:views',
                 '../webkit/webkit_resources.gyp:webkit_resources',
@@ -214,6 +213,11 @@
                     '<(allocator_target)',
                   ],
                 }],
+                ['enable_printing!=0', {
+                  'dependencies': [
+                    '../printing/printing.gyp:printing',
+                  ],
+                }],
               ]
             }],
             ['chrome_multiple_dll==1', {
@@ -285,7 +289,7 @@
                   'dependencies': [
                     '../breakpad/breakpad.gyp:breakpad',
                     '../components/components.gyp:breakpad_component',
-                    'app/policy/cloud_policy_codegen.gyp:policy',
+                    '../components/components.gyp:policy',
                   ],
                   'sources': [
                     'app/chrome_breakpad_client.cc',

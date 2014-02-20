@@ -21,6 +21,8 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
+#include "chrome/browser/history/in_memory_url_index_types.h"
+#include "chrome/browser/history/scored_history_match.h"
 #include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
@@ -84,7 +86,7 @@ bool CreateOrPromoteMatch(const history::URLRow& info,
 // URL to just a host.  If this host still matches the user input, return it.
 // Returns the empty string on failure.
 GURL ConvertToHostOnly(const history::HistoryMatch& match,
-                       const string16& input) {
+                       const base::string16& input) {
   // See if we should try to do host-only suggestions for this URL. Nonstandard
   // schemes means there's no authority section, so suggesting the host name
   // is useless. File URLs are standard, but host suggestion is not useful for
@@ -99,7 +101,7 @@ GURL ConvertToHostOnly(const history::HistoryMatch& match,
   if ((host.spec().length() < (match.input_location + input.length())))
     return GURL();  // User typing is longer than this host suggestion.
 
-  const string16 spec = UTF8ToUTF16(host.spec());
+  const base::string16 spec = UTF8ToUTF16(host.spec());
   if (spec.compare(match.input_location, input.length(), input))
     return GURL();  // User typing is no longer a prefix.
 
@@ -202,7 +204,7 @@ class SearchTermsDataSnapshot : public SearchTermsData {
 
   virtual std::string GoogleBaseURLValue() const OVERRIDE;
   virtual std::string GetApplicationLocale() const OVERRIDE;
-  virtual string16 GetRlzParameterValue() const OVERRIDE;
+  virtual base::string16 GetRlzParameterValue() const OVERRIDE;
   virtual std::string GetSearchClient() const OVERRIDE;
   virtual std::string ForceInstantResultsParam(
       bool for_prerender) const OVERRIDE;
@@ -212,7 +214,7 @@ class SearchTermsDataSnapshot : public SearchTermsData {
  private:
   std::string google_base_url_value_;
   std::string application_locale_;
-  string16 rlz_parameter_value_;
+  base::string16 rlz_parameter_value_;
   std::string search_client_;
   std::string force_instant_results_param_;
   std::string instant_extended_enabled_param_;
@@ -244,7 +246,7 @@ std::string SearchTermsDataSnapshot::GetApplicationLocale() const {
   return application_locale_;
 }
 
-string16 SearchTermsDataSnapshot::GetRlzParameterValue() const {
+base::string16 SearchTermsDataSnapshot::GetRlzParameterValue() const {
   return rlz_parameter_value_;
 }
 
@@ -397,7 +399,7 @@ void HistoryURLProvider::Stop(bool clear_cached_results) {
 }
 
 AutocompleteMatch HistoryURLProvider::SuggestExactInput(
-    const string16& text,
+    const base::string16& text,
     const GURL& destination_url,
     bool trim_http) {
   AutocompleteMatch match(this, 0, false,
@@ -413,7 +415,8 @@ AutocompleteMatch HistoryURLProvider::SuggestExactInput(
     // slightly different behavior as well (the latter will strip even without
     // two slashes after the scheme).
     DCHECK(!trim_http || !AutocompleteInput::HasHTTPScheme(text));
-    string16 display_string(StringForURLDisplay(destination_url, false, false));
+    base::string16 display_string(
+        StringForURLDisplay(destination_url, false, false));
     const size_t offset = trim_http ? TrimHttpPrefix(&display_string) : 0;
     match.fill_into_edit =
         AutocompleteInput::FormattedStringWithEquivalentMeaning(destination_url,
@@ -525,7 +528,8 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
       for (history::URLRows::const_iterator j(url_matches.begin());
            j != url_matches.end(); ++j) {
         const URLPrefix* best_prefix =
-            URLPrefix::BestURLPrefix(UTF8ToUTF16(j->url().spec()), string16());
+            URLPrefix::BestURLPrefix(UTF8ToUTF16(j->url().spec()),
+                                     base::string16());
         DCHECK(best_prefix != NULL);
         history_matches.push_back(history::HistoryMatch(*j, i->prefix.length(),
             i->num_components == 0,
@@ -771,10 +775,8 @@ bool HistoryURLProvider::FixupExactSuggestion(
       match->deletable = true;
       match->description = classifier.url_row().title();
       RecordAdditionalInfoFromUrlRow(classifier.url_row(), match);
-      AutocompleteMatch::ClassifyMatchInString(
-          input.text(),
-          classifier.url_row().title(),
-          ACMatchClassification::NONE, &match->description_class);
+      match->description_class =
+          ClassifyDescription(input.text(), match->description);
       if (!classifier.url_row().typed_count()) {
         // If we reach here, we must be in the second pass, and we must not have
         // this row's data available during the first pass.  That means we
@@ -825,8 +827,8 @@ bool HistoryURLProvider::FixupExactSuggestion(
     return false;
 
   // Put it on the front of the HistoryMatches for redirect culling.
-  CreateOrPromoteMatch(classifier.url_row(), string16::npos, false, matches,
-                       true, true);
+  CreateOrPromoteMatch(classifier.url_row(), base::string16::npos, false,
+                       matches, true, true);
   return true;
 }
 
@@ -1060,7 +1062,7 @@ AutocompleteMatch HistoryURLProvider::HistoryMatchToACMatch(
                          net::UnescapeRule::SPACES, NULL, NULL,
                          &inline_autocomplete_offset));
   if (!params.prevent_inline_autocomplete &&
-      (inline_autocomplete_offset != string16::npos)) {
+      (inline_autocomplete_offset != base::string16::npos)) {
     DCHECK(inline_autocomplete_offset <= match.fill_into_edit.length());
     match.inline_autocompletion =
         match.fill_into_edit.substr(inline_autocomplete_offset);
@@ -1068,29 +1070,44 @@ AutocompleteMatch HistoryURLProvider::HistoryMatchToACMatch(
   // The latter part of the test effectively asks "is the inline completion
   // empty?" (i.e., is this match effectively the what-you-typed match?).
   match.allowed_to_be_default_match = !params.prevent_inline_autocomplete ||
-      ((inline_autocomplete_offset != string16::npos) &&
+      ((inline_autocomplete_offset != base::string16::npos) &&
        (inline_autocomplete_offset >= match.fill_into_edit.length()));
 
   size_t match_start = history_match.input_location;
   match.contents = net::FormatUrl(info.url(), languages,
       format_types, net::UnescapeRule::SPACES, NULL, NULL, &match_start);
-  if ((match_start != string16::npos) &&
-      (inline_autocomplete_offset != string16::npos) &&
+  if ((match_start != base::string16::npos) &&
+      (inline_autocomplete_offset != base::string16::npos) &&
       (inline_autocomplete_offset != match_start)) {
     DCHECK(inline_autocomplete_offset > match_start);
     AutocompleteMatch::ClassifyLocationInString(match_start,
         inline_autocomplete_offset - match_start, match.contents.length(),
         ACMatchClassification::URL, &match.contents_class);
   } else {
-    AutocompleteMatch::ClassifyLocationInString(string16::npos, 0,
+    AutocompleteMatch::ClassifyLocationInString(base::string16::npos, 0,
         match.contents.length(), ACMatchClassification::URL,
         &match.contents_class);
   }
   match.description = info.title();
-  AutocompleteMatch::ClassifyMatchInString(params.input.text(),
-                                           info.title(),
-                                           ACMatchClassification::NONE,
-                                           &match.description_class);
+  match.description_class =
+      ClassifyDescription(params.input.text(), match.description);
   RecordAdditionalInfoFromUrlRow(info, &match);
   return match;
+}
+
+// static
+ACMatchClassifications HistoryURLProvider::ClassifyDescription(
+    const base::string16& input_text,
+    const base::string16& description) {
+  base::string16 clean_description = history::CleanUpTitleForMatching(description);
+  history::TermMatches description_matches(SortAndDeoverlapMatches(
+      history::MatchTermInString(input_text, clean_description, 0)));
+  history::WordStarts description_word_starts;
+  history::String16VectorFromString16(
+      clean_description, false, &description_word_starts);
+  description_matches =
+      history::ScoredHistoryMatch::FilterTermMatchesByWordStarts(
+          description_matches, description_word_starts, 0u, std::string::npos);
+  return SpansFromTermMatch(
+      description_matches, clean_description.length(), false);
 }

@@ -6,6 +6,7 @@
 
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_content_browser_client.h"
+#include "android_webview/browser/aw_form_database_service.h"
 #include "android_webview/browser/aw_pref_store.h"
 #include "android_webview/native/aw_contents.h"
 #include "base/android/jni_android.h"
@@ -14,8 +15,9 @@
 #include "base/logging.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/pref_service_builder.h"
+#include "base/prefs/pref_service_factory.h"
 #include "components/autofill/core/browser/autofill_popup_delegate.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/web_contents.h"
@@ -41,7 +43,8 @@ AwAutofillManagerDelegate::AwAutofillManagerDelegate(WebContents* contents)
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> delegate;
   delegate.Reset(
-      Java_AwAutofillManagerDelegate_create(env, reinterpret_cast<jint>(this)));
+      Java_AwAutofillManagerDelegate_create(
+          env, reinterpret_cast<intptr_t>(this)));
 
   AwContents* aw_contents = AwContents::FromWebContents(web_contents_);
   aw_contents->SetAwAutofillManagerDelegate(delegate.obj());
@@ -68,6 +71,14 @@ PrefService* AwAutofillManagerDelegate::GetPrefs() {
 autofill::PersonalDataManager*
 AwAutofillManagerDelegate::GetPersonalDataManager() {
   return NULL;
+}
+
+scoped_refptr<autofill::AutofillWebDataService>
+AwAutofillManagerDelegate::GetDatabase() {
+  android_webview::AwFormDatabaseService* service =
+      static_cast<android_webview::AwBrowserContext*>(
+          web_contents_->GetBrowserContext())->GetFormDatabaseService();
+  return service->get_autofill_webdata_service();
 }
 
 void AwAutofillManagerDelegate::ShowAutofillPopup(
@@ -173,7 +184,6 @@ void AwAutofillManagerDelegate::ShowAutofillSettings() {
 
 void AwAutofillManagerDelegate::ConfirmSaveCreditCard(
     const autofill::AutofillMetrics& metric_logger,
-    const autofill::CreditCard& credit_card,
     const base::Closure& save_card_callback) {
   NOTIMPLEMENTED();
 }

@@ -56,7 +56,7 @@ GlobalErrorBubble::GlobalErrorBubble(
   GtkWidget* title_label = theme_service->BuildLabel(
       UTF16ToUTF8(error_->GetBubbleViewTitle()),
       ui::kGdkBlack);
-  std::vector<string16> messages = error_->GetBubbleViewMessages();
+  std::vector<base::string16> messages = error_->GetBubbleViewMessages();
   for (size_t i = 0; i < messages.size(); ++i) {
     message_labels_.push_back(theme_service->BuildLabel(
         UTF16ToUTF8(messages[i]),
@@ -67,7 +67,7 @@ GlobalErrorBubble::GlobalErrorBubble(
   // to know the width of the title and the width of the buttons group.
   GtkWidget* accept_button = gtk_button_new_with_label(
       UTF16ToUTF8(error_->GetBubbleViewAcceptButtonLabel()).c_str());
-  string16 cancel_string = error_->GetBubbleViewCancelButtonLabel();
+  base::string16 cancel_string = error_->GetBubbleViewCancelButtonLabel();
   GtkWidget* cancel_button = NULL;
   if (!cancel_string.empty()) {
     cancel_button =

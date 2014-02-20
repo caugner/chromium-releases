@@ -175,11 +175,11 @@ class ConfirmEmailDialogDelegate : public TabModalConfirmDialogDelegate {
   virtual ~ConfirmEmailDialogDelegate();
 
   // TabModalConfirmDialogDelegate:
-  virtual string16 GetTitle() OVERRIDE;
-  virtual string16 GetMessage() OVERRIDE;
-  virtual string16 GetAcceptButtonTitle() OVERRIDE;
-  virtual string16 GetCancelButtonTitle() OVERRIDE;
-  virtual string16 GetLinkText() const OVERRIDE;
+  virtual base::string16 GetTitle() OVERRIDE;
+  virtual base::string16 GetMessage() OVERRIDE;
+  virtual base::string16 GetAcceptButtonTitle() OVERRIDE;
+  virtual base::string16 GetCancelButtonTitle() OVERRIDE;
+  virtual base::string16 GetLinkText() const OVERRIDE;
   virtual void OnAccepted() OVERRIDE;
   virtual void OnCanceled() OVERRIDE;
   virtual void OnClosed() OVERRIDE;
@@ -221,28 +221,28 @@ ConfirmEmailDialogDelegate::ConfirmEmailDialogDelegate(
 ConfirmEmailDialogDelegate::~ConfirmEmailDialogDelegate() {
 }
 
-string16 ConfirmEmailDialogDelegate::GetTitle() {
+base::string16 ConfirmEmailDialogDelegate::GetTitle() {
   return l10n_util::GetStringUTF16(
       IDS_ONE_CLICK_SIGNIN_CONFIRM_EMAIL_DIALOG_TITLE);
 }
 
-string16 ConfirmEmailDialogDelegate::GetMessage() {
+base::string16 ConfirmEmailDialogDelegate::GetMessage() {
   return l10n_util::GetStringFUTF16(
       IDS_ONE_CLICK_SIGNIN_CONFIRM_EMAIL_DIALOG_MESSAGE,
       UTF8ToUTF16(last_email_), UTF8ToUTF16(email_));
 }
 
-string16 ConfirmEmailDialogDelegate::GetAcceptButtonTitle() {
+base::string16 ConfirmEmailDialogDelegate::GetAcceptButtonTitle() {
   return l10n_util::GetStringUTF16(
       IDS_ONE_CLICK_SIGNIN_CONFIRM_EMAIL_DIALOG_OK_BUTTON);
 }
 
-string16 ConfirmEmailDialogDelegate::GetCancelButtonTitle() {
+base::string16 ConfirmEmailDialogDelegate::GetCancelButtonTitle() {
   return l10n_util::GetStringUTF16(
       IDS_ONE_CLICK_SIGNIN_CONFIRM_EMAIL_DIALOG_CANCEL_BUTTON);
 }
 
-string16 ConfirmEmailDialogDelegate::GetLinkText() const {
+base::string16 ConfirmEmailDialogDelegate::GetLinkText() const {
   return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
 }
 
@@ -365,16 +365,6 @@ void RedirectToNtpOrAppsPageWithIds(int child_id,
   RedirectToNtpOrAppsPage(web_contents, source);
 }
 
-// If the |source| is not settings page/webstore, redirects to
-// the NTP/Apps page.
-void RedirectToNtpOrAppsPageIfNecessary(content::WebContents* contents,
-                                        signin::Source source) {
-  if (source != signin::SOURCE_SETTINGS &&
-      source != signin::SOURCE_WEBSTORE_INSTALL) {
-    RedirectToNtpOrAppsPage(contents, source);
-  }
-}
-
 // Start syncing with the given user information.
 void StartSync(const StartSyncArgs& args,
                OneClickSigninSyncStarter::StartSyncMode start_mode) {
@@ -419,7 +409,8 @@ void StartExplicitSync(const StartSyncArgs& args,
                        ConfirmEmailDialogDelegate::Action action) {
   if (action == ConfirmEmailDialogDelegate::START_SYNC) {
     StartSync(args, start_mode);
-    RedirectToNtpOrAppsPageIfNecessary(contents, args.source);
+    OneClickSigninHelper::RedirectToNtpOrAppsPageIfNecessary(
+        contents, args.source);
   } else {
     // Perform a redirection to the NTP/Apps page to hide the blank page when
     // the action is CLOSE or CREATE_NEW_USER. The redirection is useful when
@@ -552,7 +543,7 @@ class CurrentHistoryCleaner : public content::WebContentsObserver {
   virtual void WebContentsDestroyed(content::WebContents* contents) OVERRIDE;
   virtual void DidCommitProvisionalLoadForFrame(
       int64 frame_id,
-      const string16& frame_unique_name,
+      const base::string16& frame_unique_name,
       bool is_main_frame,
       const GURL& url,
       content::PageTransition transition_type,
@@ -576,7 +567,7 @@ CurrentHistoryCleaner::~CurrentHistoryCleaner() {
 
 void CurrentHistoryCleaner::DidCommitProvisionalLoadForFrame(
     int64 frame_id,
-    const string16& frame_unique_name,
+    const base::string16& frame_unique_name,
     bool is_main_frame,
     const GURL& url,
     content::PageTransition transition_type,
@@ -705,23 +696,6 @@ bool OneClickSigninHelper::CanOffer(content::WebContents* web_contents,
     if (!manager)
       return false;
 
-    // If the signin manager already has an authenticated name, then this is a
-    // re-auth scenario.  Make sure the email just signed in corresponds to the
-    // the one sign in manager expects.
-    std::string current_email = manager->GetAuthenticatedUsername();
-    const bool same_email = gaia::AreEmailsSame(current_email, email);
-    if (!current_email.empty() && !same_email) {
-      UMA_HISTOGRAM_ENUMERATION("Signin.Reauth",
-                                signin::HISTOGRAM_ACCOUNT_MISSMATCH,
-                                signin::HISTOGRAM_MAX);
-      if (error_message) {
-        error_message->assign(
-            l10n_util::GetStringFUTF8(IDS_SYNC_WRONG_EMAIL,
-                                      UTF8ToUTF16(current_email)));
-      }
-      return false;
-    }
-
     // Make sure this username is not prohibited by policy.
     if (!manager->IsAllowedUsername(email)) {
       if (error_message) {
@@ -731,21 +705,40 @@ bool OneClickSigninHelper::CanOffer(content::WebContents* web_contents,
       return false;
     }
 
-    // If some profile, not just the current one, is already connected to this
-    // account, don't show the infobar.
-    if (g_browser_process && !same_email) {
-      ProfileManager* manager = g_browser_process->profile_manager();
-      if (manager) {
-        string16 email16 = UTF8ToUTF16(email);
-        ProfileInfoCache& cache = manager->GetProfileInfoCache();
+    if (can_offer_for != CAN_OFFER_FOR_SECONDARY_ACCOUNT) {
+      // If the signin manager already has an authenticated name, then this is a
+      // re-auth scenario.  Make sure the email just signed in corresponds to
+      // the one sign in manager expects.
+      std::string current_email = manager->GetAuthenticatedUsername();
+      const bool same_email = gaia::AreEmailsSame(current_email, email);
+      if (!current_email.empty() && !same_email) {
+        UMA_HISTOGRAM_ENUMERATION("Signin.Reauth",
+                                  signin::HISTOGRAM_ACCOUNT_MISSMATCH,
+                                  signin::HISTOGRAM_MAX);
+        if (error_message) {
+          error_message->assign(
+              l10n_util::GetStringFUTF8(IDS_SYNC_WRONG_EMAIL,
+                                        UTF8ToUTF16(current_email)));
+        }
+        return false;
+      }
 
-        for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
-          if (email16 == cache.GetUserNameOfProfileAtIndex(i)) {
-            if (error_message) {
-              error_message->assign(
-                  l10n_util::GetStringUTF8(IDS_SYNC_USER_NAME_IN_USE_ERROR));
+      // If some profile, not just the current one, is already connected to this
+      // account, don't show the infobar.
+      if (g_browser_process && !same_email) {
+        ProfileManager* manager = g_browser_process->profile_manager();
+        if (manager) {
+          base::string16 email16 = UTF8ToUTF16(email);
+          ProfileInfoCache& cache = manager->GetProfileInfoCache();
+
+          for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
+            if (email16 == cache.GetUserNameOfProfileAtIndex(i)) {
+              if (error_message) {
+                error_message->assign(
+                    l10n_util::GetStringUTF8(IDS_SYNC_USER_NAME_IN_USE_ERROR));
+              }
+              return false;
             }
-            return false;
           }
         }
       }
@@ -869,7 +862,7 @@ void OneClickSigninHelper::ShowInfoBarIfPossible(net::URLRequest* request,
     const std::string& key = pair.first;
     const std::string& value = pair.second;
     if (key == "email") {
-      TrimString(value, "\"", &email);
+      base::TrimString(value, "\"", &email);
     } else if (key == "sessionindex") {
       session_index = value;
     }
@@ -1028,18 +1021,28 @@ void OneClickSigninHelper::RemoveSigninRedirectURLHistoryItem(
   }
 }
 
+// static
 void OneClickSigninHelper::ShowSigninErrorBubble(Browser* browser,
                                                  const std::string& error) {
   DCHECK(!error.empty());
 
   browser->window()->ShowOneClickSigninBubble(
       BrowserWindow::ONE_CLICK_SIGNIN_BUBBLE_TYPE_BUBBLE,
-      string16(), /* no SAML email */
+      base::string16(), /* no SAML email */
       UTF8ToUTF16(error),
       // This callback is never invoked.
       // TODO(rogerta): Separate out the bubble API so we don't have to pass
       // ignored |email| and |callback| params.
       BrowserWindow::StartSyncCallback());
+}
+
+// static
+void OneClickSigninHelper::RedirectToNtpOrAppsPageIfNecessary(
+    content::WebContents* contents, signin::Source source) {
+  if (source != signin::SOURCE_SETTINGS &&
+      source != signin::SOURCE_WEBSTORE_INSTALL) {
+    RedirectToNtpOrAppsPage(contents, source);
+  }
 }
 
 void OneClickSigninHelper::RedirectToSignin() {
@@ -1099,10 +1102,11 @@ void OneClickSigninHelper::set_do_not_start_sync_for_testing() {
   do_not_start_sync_for_testing_ = true;
 }
 
-void OneClickSigninHelper::NavigateToPendingEntry(
+void OneClickSigninHelper::DidStartNavigationToPendingEntry(
     const GURL& url,
     content::NavigationController::ReloadType reload_type) {
-  VLOG(1) << "OneClickSigninHelper::NavigateToPendingEntry: url=" << url.spec();
+  VLOG(1) << "OneClickSigninHelper::DidStartNavigationToPendingEntry: url=" <<
+      url.spec();
   // If the tab navigates to a new page, and this page is not a valid Gaia
   // sign in redirect or reponse, or the expected continue URL, make sure to
   // clear the internal state.  This is needed to detect navigations in the
@@ -1194,6 +1198,10 @@ void OneClickSigninHelper::DidStopLoading(
       continue_url_.is_valid() &&
       url.ReplaceComponents(replacements) ==
         continue_url_.ReplaceComponents(replacements));
+  const bool original_continue_url_match = (
+      original_continue_url_.is_valid() &&
+      url.ReplaceComponents(replacements) ==
+        original_continue_url_.ReplaceComponents(replacements));
 
   if (continue_url_match)
     RemoveSigninRedirectURLHistoryItem(contents);
@@ -1203,7 +1211,12 @@ void OneClickSigninHelper::DidStopLoading(
   // sync.
   if (email_.empty()) {
     VLOG(1) << "OneClickSigninHelper::DidStopLoading: nothing to do";
-    if (continue_url_match) {
+    // Original-url check done because some user actions cans get us to a page
+    // via a POST instead of a GET (and thus to immediate "cuntinue url") but
+    // we still want redirects from the "blank.html" landing page to work for
+    // non-security related redirects like NTP.
+    // https://code.google.com/p/chromium/issues/detail?id=321938
+    if (original_continue_url_match) {
       if (auto_accept_ == AUTO_ACCEPT_EXPLICIT)
         RedirectToSignin();
       std::string unused_value;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ public class ChromeWebContentsDelegateAndroid extends WebContentsDelegateAndroid
     }
 
     @CalledByNative
-    public boolean addNewContents(int nativeSourceWebContents, int nativeWebContents,
+    public boolean addNewContents(long nativeSourceWebContents, long nativeWebContents,
             int disposition, Rect initialPosition, boolean userGesture) {
         return false;
     }

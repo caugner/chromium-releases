@@ -14,6 +14,9 @@ namespace {
 class ContextProviderCommandBufferBrowserTest : public ContentBrowserTest {
  public:
   virtual void SetUpOnMainThread() OVERRIDE {
+    if (!BrowserGpuChannelHostFactory::CanUseForTesting())
+      return;
+
     if (!GetFactory())
       BrowserGpuChannelHostFactory::Initialize(true);
 
@@ -33,13 +36,17 @@ class ContextProviderCommandBufferBrowserTest : public ContentBrowserTest {
     scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context(
         WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
             gpu_channel_host.get(),
-            WebKit::WebGraphicsContext3D::Attributes(),
-            GURL("chrome://gpu/ContextProviderCommandBufferTest")));
+            blink::WebGraphicsContext3D::Attributes(),
+            GURL("chrome://gpu/ContextProviderCommandBufferTest"),
+            WebGraphicsContext3DCommandBufferImpl::SharedMemoryLimits()));
     return context.Pass();
   }
 };
 
 IN_PROC_BROWSER_TEST_F(ContextProviderCommandBufferBrowserTest, LeakOnDestroy) {
+  if (!BrowserGpuChannelHostFactory::CanUseForTesting())
+    return;
+
   scoped_refptr<ContextProviderCommandBuffer> provider =
       ContextProviderCommandBuffer::Create(CreateContext3d(), "TestContext");
   provider->set_leak_on_destroy();

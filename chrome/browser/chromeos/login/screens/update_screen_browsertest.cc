@@ -44,11 +44,13 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     FakeDBusThreadManager* fake_dbus_thread_manager =
         new FakeDBusThreadManager;
-    DBusThreadManager::InitializeForTesting(fake_dbus_thread_manager);
-    WizardInProcessBrowserTest::SetUpInProcessBrowserTestFixture();
+    fake_dbus_thread_manager->SetFakeClients();
+    fake_update_engine_client_ = new FakeUpdateEngineClient;
+    fake_dbus_thread_manager->SetUpdateEngineClient(
+        scoped_ptr<UpdateEngineClient>(fake_update_engine_client_));
 
-    fake_update_engine_client_
-        = fake_dbus_thread_manager->fake_update_engine_client();
+    DBusThreadManager::SetInstanceForTesting(fake_dbus_thread_manager);
+    WizardInProcessBrowserTest::SetUpInProcessBrowserTestFixture();
 
     // Setup network portal detector to return online state for both
     // ethernet and wifi networks. Ethernet is an active network by
@@ -88,7 +90,6 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
   virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
     NetworkPortalDetector::Shutdown();
     WizardInProcessBrowserTest::TearDownInProcessBrowserTestFixture();
-    DBusThreadManager::Shutdown();
   }
 
   void SetDefaultNetworkPath(const std::string& service_path) {

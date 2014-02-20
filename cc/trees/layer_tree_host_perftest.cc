@@ -70,12 +70,11 @@ class LayerTreeHostPerfTest : public LayerTreeTest {
   }
 
   virtual void DrawLayersOnThread(LayerTreeHostImpl* impl) OVERRIDE {
-    if (TestEnded()) {
+    if (TestEnded() || CleanUpStarted())
       return;
-    }
     draw_timer_.NextLap();
     if (draw_timer_.HasTimeLimitExpired()) {
-      EndTest();
+      CleanUpAndEndTest(impl);
       return;
     }
     if (!animation_driven_drawing_)
@@ -84,17 +83,17 @@ class LayerTreeHostPerfTest : public LayerTreeTest {
       impl->SetFullRootLayerDamage();
   }
 
+  virtual void CleanUpAndEndTest(LayerTreeHostImpl* host_impl) { EndTest(); }
+
+  virtual bool CleanUpStarted() { return false; }
+
   virtual void BuildTree() {}
 
   virtual void AfterTest() OVERRIDE {
     CHECK(!test_name_.empty()) << "Must SetTestName() before AfterTest().";
-    perf_test::PrintResult("layer_tree_host_frame_count", "", test_name_,
-                           draw_timer_.NumLaps(), "frame_count", true);
     perf_test::PrintResult("layer_tree_host_frame_time", "", test_name_,
                            1000 * draw_timer_.MsPerLap(), "us", true);
     if (measure_commit_cost_) {
-      perf_test::PrintResult("layer_tree_host_commit_count", "", test_name_,
-                             commit_timer_.NumLaps(), "commit_count", true);
       perf_test::PrintResult("layer_tree_host_commit_time", "", test_name_,
                              1000 * commit_timer_.MsPerLap(), "us", true);
     }
@@ -125,7 +124,7 @@ class LayerTreeHostPerfTestJsonReader : public LayerTreeHostPerfTest {
 
   void ReadTestFile(const std::string& name) {
     base::FilePath test_data_dir;
-    ASSERT_TRUE(PathService::Get(cc::DIR_TEST_DATA, &test_data_dir));
+    ASSERT_TRUE(PathService::Get(CCPaths::DIR_TEST_DATA, &test_data_dir));
     base::FilePath json_file = test_data_dir.AppendASCII(name + ".json");
     ASSERT_TRUE(base::ReadFileToString(json_file, &json_));
   }
@@ -254,8 +253,7 @@ class BrowserCompositorInvalidateLayerTreePerfTest
     : public LayerTreeHostPerfTestJsonReader {
  public:
   BrowserCompositorInvalidateLayerTreePerfTest()
-      : next_sync_point_(1) {
-  }
+      : next_sync_point_(1), clean_up_started_(false) {}
 
   virtual void BuildTree() OVERRIDE {
     LayerTreeHostPerfTestJsonReader::BuildTree();
@@ -268,12 +266,12 @@ class BrowserCompositorInvalidateLayerTreePerfTest
     ASSERT_TRUE(tab_contents_.get());
   }
 
-  virtual void Layout() OVERRIDE {
+  virtual void WillCommit() OVERRIDE {
     gpu::Mailbox gpu_mailbox;
     std::ostringstream name_stream;
     name_stream << "name" << next_sync_point_;
-    const char* name = name_stream.str().c_str();
-    memcpy(gpu_mailbox.name, name, strlen(name) + 1);
+    gpu_mailbox.SetName(
+        reinterpret_cast<const int8*>(name_stream.str().c_str()));
     scoped_ptr<SingleReleaseCallback> callback = SingleReleaseCallback::Create(
         base::Bind(&EmptyReleaseCallback));
     TextureMailbox mailbox(gpu_mailbox, next_sync_point_);
@@ -282,9 +280,37 @@ class BrowserCompositorInvalidateLayerTreePerfTest
     tab_contents_->SetTextureMailbox(mailbox, callback.Pass());
   }
 
+  virtual void DidCommit() OVERRIDE {
+    if (CleanUpStarted())
+      return;
+    layer_tree_host()->SetNeedsCommit();
+  }
+
+  virtual void DidCommitAndDrawFrame() OVERRIDE {
+    if (CleanUpStarted())
+      EndTest();
+  }
+
+  virtual void CleanUpAndEndTest(LayerTreeHostImpl* host_impl) OVERRIDE {
+    clean_up_started_ = true;
+    MainThreadTaskRunner()->PostTask(
+        FROM_HERE,
+        base::Bind(&BrowserCompositorInvalidateLayerTreePerfTest::
+                        CleanUpAndEndTestOnMainThread,
+                   base::Unretained(this)));
+  }
+
+  void CleanUpAndEndTestOnMainThread() {
+    tab_contents_->SetTextureMailbox(TextureMailbox(),
+                                     scoped_ptr<SingleReleaseCallback>());
+  }
+
+  virtual bool CleanUpStarted() OVERRIDE { return clean_up_started_; }
+
  private:
   scoped_refptr<TextureLayer> tab_contents_;
   unsigned next_sync_point_;
+  bool clean_up_started_;
 };
 
 TEST_F(BrowserCompositorInvalidateLayerTreePerfTest, DenseBrowserUI) {

@@ -22,10 +22,10 @@
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/common/extension.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -169,7 +169,7 @@ bool ExtensionInstalledBubbleGtk::MaybeShowNow() {
 
   // Heading label.
   GtkWidget* heading_label = gtk_label_new(NULL);
-  string16 extension_name = UTF8ToUTF16(bubble_.extension()->name());
+  base::string16 extension_name = UTF8ToUTF16(bubble_.extension()->name());
   base::i18n::AdjustStringForLocaleDirection(&extension_name);
   std::string heading_text = l10n_util::GetStringFUTF8(
       IDS_EXTENSION_INSTALLED_HEADING, extension_name);

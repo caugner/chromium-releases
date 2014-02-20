@@ -37,6 +37,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/cookie_crypto_delegate.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/notification_service.h"
 #include "net/cookies/cookie_monster.h"
@@ -142,7 +143,7 @@ class SafeBrowsingServiceFactoryImpl : public SafeBrowsingServiceFactory {
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingServiceFactoryImpl);
 };
 
-static base::LazyInstance<SafeBrowsingServiceFactoryImpl>
+static base::LazyInstance<SafeBrowsingServiceFactoryImpl>::Leaky
     g_safe_browsing_service_factory_impl = LAZY_INSTANCE_INITIALIZER;
 
 // static
@@ -309,7 +310,8 @@ void SafeBrowsingService::InitURLRequestContextOnIOThread(
           CookieFilePath(),
           false,
           NULL,
-          NULL));
+          NULL,
+          scoped_ptr<content::CookieCryptoDelegate>()));
 
   url_request_context_.reset(new net::URLRequestContext);
   // |system_url_request_context_getter| may be NULL during tests.

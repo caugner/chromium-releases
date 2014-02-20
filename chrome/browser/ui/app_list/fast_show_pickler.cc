@@ -18,7 +18,6 @@ using app_list::AppListModel;
 // should be incremented.
 enum ImageFormat {
   NONE,
-  A1,
   A8,
   INDEX_8,
   RGB_565,
@@ -30,9 +29,6 @@ bool FormatToConfig(ImageFormat format, SkBitmap::Config* out) {
   switch (format) {
     case NONE:
       *out = SkBitmap::kNo_Config;
-      break;
-    case A1:
-      *out = SkBitmap::kA1_Config;
       break;
     case A8:
       *out = SkBitmap::kA8_Config;
@@ -58,9 +54,6 @@ bool ConfigToFormat(SkBitmap::Config config, ImageFormat* out) {
   switch (config) {
     case SkBitmap::kNo_Config:
       *out = NONE;
-      break;
-    case SkBitmap::kA1_Config:
-      *out = A1;
       break;
     case SkBitmap::kA8_Config:
       *out = A8;
@@ -198,14 +191,12 @@ void CopyOverItem(AppListItemModel* src_item, AppListItemModel* dest_item) {
 
 // The version of the pickle format defined here. This needs to be incremented
 // whenever this format is changed so new clients can invalidate old versions.
-const int FastShowPickler::kVersion = 1;
+const int FastShowPickler::kVersion = 3;
 
 scoped_ptr<Pickle> FastShowPickler::PickleAppListModelForFastShow(
     AppListModel* model) {
   scoped_ptr<Pickle> result(new Pickle);
   if (!result->WriteInt(kVersion))
-    return scoped_ptr<Pickle>();
-  if (!result->WriteBool(model->signed_in()))
     return scoped_ptr<Pickle>();
   if (!result->WriteInt((int) model->item_list()->item_count()))
     return scoped_ptr<Pickle>();
@@ -218,7 +209,6 @@ scoped_ptr<Pickle> FastShowPickler::PickleAppListModelForFastShow(
 
 void FastShowPickler::CopyOver(AppListModel* src, AppListModel* dest) {
   dest->item_list()->DeleteItemsByType(NULL /* all items */);
-  dest->SetSignedIn(src->signed_in());
   for (size_t i = 0; i < src->item_list()->item_count(); i++) {
     AppListItemModel* src_item = src->item_list()->item_at(i);
     AppListItemModel* dest_item = new AppListItemModel(src_item->id());
@@ -236,14 +226,10 @@ FastShowPickler::UnpickleAppListModelForFastShow(Pickle* pickle) {
   if (read_version != kVersion)
     return scoped_ptr<AppListModel>();
   int app_count = 0;
-  bool signed_in = false;
-  if (!it.ReadBool(&signed_in))
-    return scoped_ptr<AppListModel>();
   if (!it.ReadInt(&app_count))
     return scoped_ptr<AppListModel>();
 
   scoped_ptr<AppListModel> model(new AppListModel);
-  model->SetSignedIn(signed_in);
   for (int i = 0; i < app_count; ++i) {
     scoped_ptr<AppListItemModel> item(UnpickleAppListItemModel(&it).Pass());
     if (!item)

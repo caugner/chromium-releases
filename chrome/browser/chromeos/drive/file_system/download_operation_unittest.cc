@@ -11,8 +11,9 @@
 #include "chrome/browser/chromeos/drive/file_system/operation_test_base.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/google_apis/test_util.h"
+#include "google_apis/drive/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/cros_system_api/constants/cryptohome.h"
 
 namespace drive {
 namespace file_system {
@@ -39,7 +40,7 @@ TEST_F(DownloadOperationTest,
 
   // Pretend we have enough space.
   fake_free_disk_space_getter()->set_default_value(
-      file_size + internal::kMinFreeSpace);
+      file_size + cryptohome::kMinFreeSpaceInBytes);
 
   FileError error = FILE_ERROR_FAILED;
   base::FilePath file_path;
@@ -64,11 +65,11 @@ TEST_F(DownloadOperationTest,
 
   // Verify that readable permission is set.
   int permission = 0;
-  EXPECT_TRUE(file_util::GetPosixFilePermissions(file_path, &permission));
-  EXPECT_EQ(file_util::FILE_PERMISSION_READ_BY_USER |
-            file_util::FILE_PERMISSION_WRITE_BY_USER |
-            file_util::FILE_PERMISSION_READ_BY_GROUP |
-            file_util::FILE_PERMISSION_READ_BY_OTHERS, permission);
+  EXPECT_TRUE(base::GetPosixFilePermissions(file_path, &permission));
+  EXPECT_EQ(base::FILE_PERMISSION_READ_BY_USER |
+            base::FILE_PERMISSION_WRITE_BY_USER |
+            base::FILE_PERMISSION_READ_BY_GROUP |
+            base::FILE_PERMISSION_READ_BY_OTHERS, permission);
 }
 
 TEST_F(DownloadOperationTest,
@@ -104,10 +105,10 @@ TEST_F(DownloadOperationTest,
   // but then start reporting we have space. This is to emulate that
   // the disk space was freed up by removing temporary files.
   fake_free_disk_space_getter()->PushFakeValue(
-      file_size + internal::kMinFreeSpace);
+      file_size + cryptohome::kMinFreeSpaceInBytes);
   fake_free_disk_space_getter()->PushFakeValue(0);
   fake_free_disk_space_getter()->set_default_value(
-      file_size + internal::kMinFreeSpace);
+      file_size + cryptohome::kMinFreeSpaceInBytes);
 
   // Store something of the file size in the temporary cache directory.
   const std::string content(file_size, 'x');
@@ -176,9 +177,9 @@ TEST_F(DownloadOperationTest,
   // the disk space becomes full after the file is downloaded for some reason
   // (ex. the actual file was larger than the expected size).
   fake_free_disk_space_getter()->PushFakeValue(
-      file_size + internal::kMinFreeSpace);
+      file_size + cryptohome::kMinFreeSpaceInBytes);
   fake_free_disk_space_getter()->set_default_value(
-      internal::kMinFreeSpace - 1);
+      cryptohome::kMinFreeSpaceInBytes - 1);
 
   FileError error = FILE_ERROR_OK;
   base::FilePath file_path;
@@ -197,7 +198,7 @@ TEST_F(DownloadOperationTest,
 
 TEST_F(DownloadOperationTest, EnsureFileDownloadedByPath_FromCache) {
   base::FilePath temp_file;
-  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir(), &temp_file));
+  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir(), &temp_file));
 
   base::FilePath file_in_root(FILE_PATH_LITERAL("drive/root/File 1.txt"));
   ResourceEntry src_entry;
@@ -356,7 +357,7 @@ TEST_F(DownloadOperationTest,
     // The content is available from the cache file.
     EXPECT_TRUE(get_content_callback.data().empty());
     int64 local_file_size = 0;
-    file_util::GetFileSize(local_path, &local_file_size);
+    base::GetFileSize(local_path, &local_file_size);
     EXPECT_EQ(entry->file_info().size(), local_file_size);
     EXPECT_EQ(FILE_ERROR_OK, completion_error);
   }
@@ -364,7 +365,7 @@ TEST_F(DownloadOperationTest,
 
 TEST_F(DownloadOperationTest, EnsureFileDownloadedByLocalId_FromCache) {
   base::FilePath temp_file;
-  ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir(), &temp_file));
+  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir(), &temp_file));
 
   base::FilePath file_in_root(FILE_PATH_LITERAL("drive/root/File 1.txt"));
   ResourceEntry src_entry;

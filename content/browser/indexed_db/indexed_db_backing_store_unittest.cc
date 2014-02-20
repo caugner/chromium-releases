@@ -26,7 +26,7 @@ class IndexedDBBackingStoreTest : public testing::Test {
     m_value1 = "value1";
     m_value2 = "value2";
     m_value3 = "value3";
-    m_key1 = IndexedDBKey(99, WebKit::WebIDBKeyTypeNumber);
+    m_key1 = IndexedDBKey(99, blink::WebIDBKeyTypeNumber);
     m_key2 = IndexedDBKey(ASCIIToUTF16("key2"));
     m_key3 = IndexedDBKey(ASCIIToUTF16("key3"));
   }
@@ -236,19 +236,19 @@ TEST_F(IndexedDBBackingStoreTest, InvalidIds) {
 }
 
 TEST_F(IndexedDBBackingStoreTest, CreateDatabase) {
-  const string16 database_name(ASCIIToUTF16("db1"));
+  const base::string16 database_name(ASCIIToUTF16("db1"));
   int64 database_id;
-  const string16 version(ASCIIToUTF16("old_string_version"));
+  const base::string16 version(ASCIIToUTF16("old_string_version"));
   const int64 int_version = 9;
 
   const int64 object_store_id = 99;
-  const string16 object_store_name(ASCIIToUTF16("object_store1"));
+  const base::string16 object_store_name(ASCIIToUTF16("object_store1"));
   const bool auto_increment = true;
   const IndexedDBKeyPath object_store_key_path(
       ASCIIToUTF16("object_store_key"));
 
   const int64 index_id = 999;
-  const string16 index_name(ASCIIToUTF16("index1"));
+  const base::string16 index_name(ASCIIToUTF16("index1"));
   const bool unique = true;
   const bool multi_entry = true;
   const IndexedDBKeyPath index_key_path(ASCIIToUTF16("index_key"));

@@ -74,9 +74,9 @@ class ZeroSuggestProvider : public AutocompleteProvider,
   // |page_classification|. |permanent_text| is the omnibox text
   // for the current page.
   void StartZeroSuggest(
-      const GURL& url,
+      const GURL& curent_page_url,
       AutocompleteInput::PageClassification page_classification,
-      const string16& permanent_text);
+      const base::string16& permanent_text);
 
   bool field_trial_triggered_in_session() const {
     return field_trial_triggered_in_session_;
@@ -87,16 +87,6 @@ class ZeroSuggestProvider : public AutocompleteProvider,
                       Profile* profile);
 
   virtual ~ZeroSuggestProvider();
-
-  bool ShouldRunZeroSuggest(
-      const GURL& url,
-      AutocompleteInput::PageClassification page_classification) const;
-
-  // Whether the URL can get Zero Suggest.  For example, don't send the URL of
-  // non-Google HTTPS requests because it may contain sensitive information.
-  bool ShouldSendURL(
-      const GURL& url,
-      AutocompleteInput::PageClassification page_classification) const;
 
   // The 4 functions below (that take classes defined in SearchProvider as
   // arguments) were copied and trimmed from SearchProvider.
@@ -127,7 +117,7 @@ class ZeroSuggestProvider : public AutocompleteProvider,
   void AddMatchToMap(int relevance,
                      AutocompleteMatch::Type type,
                      const TemplateURL* template_url,
-                     const string16& query_string,
+                     const base::string16& query_string,
                      int accepted_suggestion,
                      SearchProvider::MatchMap* map);
 
@@ -135,8 +125,8 @@ class ZeroSuggestProvider : public AutocompleteProvider,
   AutocompleteMatch NavigationToMatch(
       const SearchProvider::NavigationResult& navigation);
 
-  // Fetches zero-suggest suggestions for |current_query_|.
-  void Run();
+  // Fetches zero-suggest suggestions by sending a request using |suggest_url|.
+  void Run(const GURL& suggest_url);
 
   // Parses results from the zero-suggest server and updates results.
   void ParseSuggestResults(const base::Value& root_val);
@@ -167,7 +157,7 @@ class ZeroSuggestProvider : public AutocompleteProvider,
   AutocompleteInput::PageClassification current_page_classification_;
 
   // Copy of OmniboxEditModel::permanent_text_.
-  string16 permanent_text_;
+  base::string16 permanent_text_;
 
   // Fetcher used to retrieve results.
   scoped_ptr<net::URLFetcher> fetcher_;

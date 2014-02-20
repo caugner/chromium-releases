@@ -1,6 +1,7 @@
 <html>
 <head>
   <script type="text/javascript" src="webrtc_test_utilities.js"></script>
+  <script type="text/javascript" src="webrtc_test_audio.js"></script>
   <script type="text/javascript">
   $ = function(id) {
     return document.getElementById(id);
@@ -9,7 +10,6 @@
   var gFirstConnection = null;
   var gSecondConnection = null;
   var gTestWithoutMsid = false;
-
   var gLocalStream = null;
   var gSentTones = '';
 
@@ -19,6 +19,7 @@
   var transformSdp = function(sdp) { return sdp; };
   var transformRemoteSdp = function(sdp) { return sdp; };
   var transformCandidate = function(candidate) { return candidate; };
+  var onLocalDescriptionError = function(error) { };
 
   // When using external SDES, the crypto key is chosen by javascript.
   var EXTERNAL_SDES_LINES = {
@@ -102,8 +103,8 @@
     }
 
     // Do the forwarding after we have received video.
-    detectVideoIn('remote-view-1', onRemoteStream1);
-    detectVideoIn('remote-view-2', onRemoteStream2);
+    detectVideoPlaying('remote-view-1', onRemoteStream1);
+    detectVideoPlaying('remote-view-2', onRemoteStream2);
   }
 
   // Test that we can setup call with an audio and video track and
@@ -114,9 +115,41 @@
     transformRemoteSdp = removeMsid;
     gTestWithoutMsid = true;
     navigator.webkitGetUserMedia({audio: true, video: true},
-      addStreamToBothConnectionsAndNegotiate, printGetUserMediaError);
+        addStreamToBothConnectionsAndNegotiate, printGetUserMediaError);
     waitForVideo('remote-view-1');
     waitForVideo('remote-view-2');
+  }
+
+  // Test that we can't setup a call with an unsupported video codec
+  function negotiateUnsupportedVideoCodec() {
+    createConnections(null);
+    transformSdp = removeVideoCodec;
+    navigator.webkitGetUserMedia({audio: true, video: true},
+        addStreamToBothConnectionsAndNegotiate, printGetUserMediaError);
+    onLocalDescriptionError = function(error) {
+      var expectedMsg = 'SetLocalDescription failed: Failed to' +
+          ' update session state: ERROR_CONTENT';
+      expectEquals(expectedMsg, error);
+
+      // Got the right message, test succeeded.
+      document.title = 'OK';
+    };
+  }
+
+  // Test that we can't setup a call if one peer does not support encryption
+  function negotiateNonCryptoCall() {
+    createConnections(null);
+    transformSdp = removeCrypto;
+    navigator.webkitGetUserMedia({audio: true, video: true},
+        addStreamToBothConnectionsAndNegotiate, printGetUserMediaError);
+    onLocalDescriptionError = function(error) {
+      var expectedMsg = 'SetLocalDescription failed: Called with a SDP without'
+                         + ' crypto enabled.';
+      expectEquals(expectedMsg, error);
+
+      // Got the right message, test succeeded.
+      document.title = 'OK';
+    };
   }
 
   // Test that we can setup call with legacy settings.
@@ -212,7 +245,57 @@
     }
 
     // Do the DTMF test after we have received video.
-    detectVideoIn('remote-view-2', onCallEstablished);
+    detectVideoPlaying('remote-view-2', onCallEstablished);
+  }
+
+  //TODO(phoglund): do this for all tests on android if this works on bots.
+  /** @private */
+  function forceIsac16k_(sdp) {
+    // Remove all other codecs (not the video codecs though).
+    sdp = sdp.replace(/m=audio (\d+) RTP\/SAVPF.*\r\n/g,
+                      'm=audio $1 RTP/SAVPF 103\r\n');
+    sdp = sdp.replace('a=fmtp:111 minptime=10', 'a=fmtp:103 minptime=10');
+    sdp = sdp.replace(/a=rtpmap:(?!103)\d{1,3} (?!VP8|red|ulpfec).*\r\n/g, '');
+    return sdp;
+  }
+
+  function callAndEnsureAudioIsPlaying(force_isac_16k) {
+    if (force_isac_16k)
+      transformSdp = forceIsac16k_;
+    createConnections(null);
+    navigator.webkitGetUserMedia({audio: true, video: true},
+      addStreamToBothConnectionsAndNegotiate, printGetUserMediaError);
+
+    // Wait until we have gathered samples and can conclude if audio is playing.
+    addExpectedEvent();
+    var onCallEstablished = function() {
+      gatherAudioLevelSamples(gSecondConnection, 300, 100,
+                              function(samples) {
+        verifyAudioIsPlaying(samples);
+        eventOccured();
+      });
+    };
+
+    detectVideoPlaying('remote-view-2', onCallEstablished);
+  }
+
+  function callAndEnsureAudioMutingWorks() {
+    callAndEnsureAudioIsPlaying();
+    setAllEventsOccuredHandler(function() {
+      var audioTrack =
+        gSecondConnection.getRemoteStreams()[0].getAudioTracks()[0];
+
+      // Call is up, now mute the track and check everything goes silent (give
+      // it a small delay though, we don't expect it to happen instantly).
+      audioTrack.enabled = false;
+
+      setTimeout(function() {
+        gatherAudioLevelSamples(gSecondConnection, 200, 100, function(samples) {
+          verifyIsSilent(samples);
+          document.title = 'OK';
+        });
+      }, 500);
+    });
   }
 
   // Test call with a new Video MediaStream that has been created based on a
@@ -363,7 +446,9 @@
     // Event handler for when |gSecondConnection| receive a new dataChannel.
     gSecondConnection.ondatachannel = function (event) {
       var secondDataChannel = event.channel;
-      secondDataChannel.send(sendDataString);
+      secondDataChannel.onopen = function() {
+        secondDataChannel.send(sendDataString);
+      }
 
       // When |secondDataChannel| receive a message, close the channel and
       // initiate a new offer/answer exchange to complete the closure.
@@ -421,7 +506,12 @@
 
   // Called if getUserMedia fails.
   function printGetUserMediaError(error) {
-    document.title = 'getUserMedia request failed with code ' + error.code;
+    document.title = 'getUserMedia request failed:';
+    if (error.constraintName)
+      document.title += ' could not satisfy constraint ' + error.constraintName;
+    else
+      document.title += ' devices not working/user denied access.';
+    console.log(document.title);
   }
 
   // Called if getUserMedia succeeds and we want to send from both connections.
@@ -448,9 +538,14 @@
   // from one peer connection.
   function CloneStreamAndAddTwoStreamstoOneConnection(localStream) {
     displayAndRemember(localStream);
-    var clonedStream = new webkitMediaStream();
-    clonedStream.addTrack(localStream.getVideoTracks()[0]);
-    clonedStream.addTrack(localStream.getAudioTracks()[0]);
+
+    var clonedStream = null;
+    if (typeof localStream.clone === "function") {
+      clonedStream = localStream.clone();
+    } else {
+      clonedStream = new webkitMediaStream(localStream);
+    }
+
     gFirstConnection.addStream(localStream);
     gFirstConnection.addStream(clonedStream);
 
@@ -510,9 +605,10 @@
 
   function onOfferCreated(offer, caller, callee) {
     offer.sdp = transformSdp(offer.sdp);
-    caller.setLocalDescription(offer);
-    expectEquals('have-local-offer', caller.signalingState);
-    receiveOffer(offer.sdp, caller, callee);
+    caller.setLocalDescription(offer, function() {
+      expectEquals('have-local-offer', caller.signalingState);
+      receiveOffer(offer.sdp, caller, callee);
+    }, onLocalDescriptionError);
   }
 
   function receiveOffer(offerSdp, caller, callee) {
@@ -532,6 +628,18 @@
     offerSdp = offerSdp.replace('a=mid:audio\r\n', '');
     offerSdp = offerSdp.replace('a=mid:video\r\n', '');
     offerSdp = offerSdp.replace(/a=ssrc.*\r\n/g, '');
+    return offerSdp;
+  }
+
+  function removeVideoCodec(offerSdp) {
+    offerSdp = offerSdp.replace('a=rtpmap:100 VP8/90000\r\n',
+                                'a=rtpmap:100 XVP8/90000\r\n');
+    return offerSdp;
+  }
+
+  function removeCrypto(offerSdp) {
+    offerSdp = offerSdp.replace(/a=crypto.*\r\n/g, 'a=Xcrypto\r\n');
+    offerSdp = offerSdp.replace(/a=fingerprint.*\r\n/g, '');
     return offerSdp;
   }
 

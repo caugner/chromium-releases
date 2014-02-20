@@ -539,7 +539,9 @@ def GypNinjaBuild(arch, gyp_py_script, gyp_file, targets,
     if arch == 'arm':
       gyp_defines += ['armv7=1', 'arm_thumb=0', 'arm_neon=1']
       if force_arm_gcc:
-        gyp_defines += ['nacl_enable_arm_gcc=1']
+        gyp_defines.append('nacl_enable_arm_gcc=1')
+  if getos.GetPlatform() == 'mac':
+    gyp_defines.append('clang=1')
 
   gyp_env['GYP_DEFINES'] = ' '.join(gyp_defines)
   for key in ['GYP_GENERATORS', 'GYP_DEFINES']:
@@ -547,13 +549,11 @@ def GypNinjaBuild(arch, gyp_py_script, gyp_file, targets,
     print '%s="%s"' % (key, value)
   gyp_generator_flags = ['-G', 'output_dir=%s' % (out_dir,)]
   gyp_depth = '--depth=.'
-  cmd = [sys.executable, gyp_py_script, gyp_file, gyp_depth]
-  # Hack added to fix M32 branch windows_sdk_multirel bot, without having to
-  # branch the native_client repo.
-  # TODO(binji): remove after I drover the change to 1700 branch.
-  cmd.append('--no-parallel')
-  cmd.extend(gyp_generator_flags)
-  buildbot_common.Run(cmd, cwd=SRC_DIR, env=gyp_env)
+  buildbot_common.Run(
+      [sys.executable, gyp_py_script, gyp_file, gyp_depth] + \
+          gyp_generator_flags,
+      cwd=SRC_DIR,
+      env=gyp_env)
   NinjaBuild(targets, out_dir)
 
 
@@ -867,6 +867,7 @@ def BuildStepBuildAppEngine(pepperdir, chrome_revision):
   cmd = ['make', 'upload', 'REVISION=%s' % chrome_revision]
   env = dict(os.environ)
   env['NACL_SDK_ROOT'] = pepperdir
+  env['NACLPORTS_NO_ANNOTATE'] = "1"
   buildbot_common.Run(cmd, env=env, cwd=GONACL_APPENGINE_SRC_DIR)
 
 
@@ -904,6 +905,8 @@ def main(args):
 
   global options
   options, args = parser.parse_args(args[1:])
+  if args:
+    parser.error("Unexpected arguments: %s" % str(args))
 
   generate_make.use_gyp = options.gyp
   if buildbot_common.IsSDKBuilder():

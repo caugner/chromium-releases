@@ -76,8 +76,8 @@ BrowserAccessibilityManagerAndroid::~BrowserAccessibilityManagerAndroid() {
 AccessibilityNodeData BrowserAccessibilityManagerAndroid::GetEmptyDocument() {
   AccessibilityNodeData empty_document;
   empty_document.id = 0;
-  empty_document.role = WebKit::WebAXRoleRootWebArea;
-  empty_document.state = 1 << WebKit::WebAXStateReadonly;
+  empty_document.role = blink::WebAXRoleRootWebArea;
+  empty_document.state = 1 << blink::WebAXStateReadonly;
   return empty_document;
 }
 
@@ -89,15 +89,19 @@ void BrowserAccessibilityManagerAndroid::SetContentViewCore(
   JNIEnv* env = AttachCurrentThread();
   java_ref_ = JavaObjectWeakGlobalRef(
       env, Java_BrowserAccessibilityManager_create(
-          env, reinterpret_cast<jint>(this), content_view_core.obj()).obj());
+          env, reinterpret_cast<intptr_t>(this),
+          content_view_core.obj()).obj());
 }
 
 void BrowserAccessibilityManagerAndroid::NotifyAccessibilityEvent(
-    WebKit::WebAXEvent event_type,
+    blink::WebAXEvent event_type,
     BrowserAccessibility* node) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
+    return;
+
+  if (event_type == blink::WebAXEventHide)
     return;
 
   // Always send AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED to notify
@@ -107,26 +111,26 @@ void BrowserAccessibilityManagerAndroid::NotifyAccessibilityEvent(
       env, obj.obj(), node->renderer_id());
 
   switch (event_type) {
-    case WebKit::WebAXEventLoadComplete:
+    case blink::WebAXEventLoadComplete:
       Java_BrowserAccessibilityManager_handlePageLoaded(
           env, obj.obj(), focus_->renderer_id());
       break;
-    case WebKit::WebAXEventFocus:
+    case blink::WebAXEventFocus:
       Java_BrowserAccessibilityManager_handleFocusChanged(
           env, obj.obj(), node->renderer_id());
       break;
-    case WebKit::WebAXEventCheckedStateChanged:
+    case blink::WebAXEventCheckedStateChanged:
       Java_BrowserAccessibilityManager_handleCheckStateChanged(
           env, obj.obj(), node->renderer_id());
       break;
-    case WebKit::WebAXEventScrolledToAnchor:
+    case blink::WebAXEventScrolledToAnchor:
       Java_BrowserAccessibilityManager_handleScrolledToAnchor(
           env, obj.obj(), node->renderer_id());
       break;
-    case WebKit::WebAXEventAlert:
+    case blink::WebAXEventAlert:
       // An alert is a special case of live region. Fall through to the
       // next case to handle it.
-    case WebKit::WebAXEventShow: {
+    case blink::WebAXEventShow: {
       // This event is fired when an object appears in a live region.
       // Speak its text.
       BrowserAccessibilityAndroid* android_node =
@@ -137,13 +141,13 @@ void BrowserAccessibilityManagerAndroid::NotifyAccessibilityEvent(
               env, android_node->GetText()).obj());
       break;
     }
-    case WebKit::WebAXEventSelectedTextChanged:
+    case blink::WebAXEventSelectedTextChanged:
       Java_BrowserAccessibilityManager_handleTextSelectionChanged(
           env, obj.obj(), node->renderer_id());
       break;
-    case WebKit::WebAXEventChildrenChanged:
-    case WebKit::WebAXEventTextChanged:
-    case WebKit::WebAXEventValueChanged:
+    case blink::WebAXEventChildrenChanged:
+    case blink::WebAXEventTextChanged:
+    case blink::WebAXEventValueChanged:
       if (node->IsEditableText()) {
         Java_BrowserAccessibilityManager_handleEditableTextChanged(
             env, obj.obj(), node->renderer_id());
@@ -158,6 +162,11 @@ void BrowserAccessibilityManagerAndroid::NotifyAccessibilityEvent(
 
 jint BrowserAccessibilityManagerAndroid::GetRootId(JNIEnv* env, jobject obj) {
   return static_cast<jint>(root_->renderer_id());
+}
+
+jboolean BrowserAccessibilityManagerAndroid::IsNodeValid(
+    JNIEnv* env, jobject obj, jint id) {
+  return GetFromRendererID(id) != NULL;
 }
 
 jint BrowserAccessibilityManagerAndroid::HitTest(
@@ -192,11 +201,9 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityNodeInfo(
     Java_BrowserAccessibilityManager_setAccessibilityNodeInfoParent(
         env, obj, info, node->parent()->renderer_id());
   }
-  if (!node->IsLeaf()) {
-    for (unsigned i = 0; i < node->child_count(); ++i) {
-      Java_BrowserAccessibilityManager_addAccessibilityNodeInfoChild(
-          env, obj, info, node->children()[i]->renderer_id());
-    }
+  for (unsigned i = 0; i < node->PlatformChildCount(); ++i) {
+    Java_BrowserAccessibilityManager_addAccessibilityNodeInfoChild(
+        env, obj, info, node->children()[i]->renderer_id());
   }
   Java_BrowserAccessibilityManager_setAccessibilityNodeInfoBooleanAttributes(
       env, obj, info,
@@ -229,6 +236,40 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityNodeInfo(
       parent_relative_rect.x(), parent_relative_rect.y(),
       absolute_rect.width(), absolute_rect.height(),
       is_root);
+
+  // New KitKat APIs
+  Java_BrowserAccessibilityManager_setAccessibilityNodeInfoKitKatAttributes(
+      env, obj, info,
+      node->CanOpenPopup(),
+      node->IsContentInvalid(),
+      node->IsDismissable(),
+      node->IsMultiLine(),
+      node->AndroidInputType(),
+      node->AndroidLiveRegionType());
+  if (node->IsCollection()) {
+    Java_BrowserAccessibilityManager_setAccessibilityNodeInfoCollectionInfo(
+        env, obj, info,
+        node->RowCount(),
+        node->ColumnCount(),
+        node->IsHierarchical());
+  }
+  if (node->IsCollectionItem() || node->IsHeading()) {
+    Java_BrowserAccessibilityManager_setAccessibilityNodeInfoCollectionItemInfo(
+        env, obj, info,
+        node->RowIndex(),
+        node->RowSpan(),
+        node->ColumnIndex(),
+        node->ColumnSpan(),
+        node->IsHeading());
+  }
+  if (node->IsRangeType()) {
+    Java_BrowserAccessibilityManager_setAccessibilityNodeInfoRangeInfo(
+        env, obj, info,
+        node->AndroidRangeType(),
+        node->RangeMin(),
+        node->RangeMax(),
+        node->RangeCurrentValue());
+  }
 
   return true;
 }
@@ -281,6 +322,40 @@ jboolean BrowserAccessibilityManagerAndroid::PopulateAccessibilityEvent(
       break;
     default:
       break;
+  }
+
+  // Backwards-compatible fallback for new KitKat APIs.
+  Java_BrowserAccessibilityManager_setAccessibilityEventKitKatAttributes(
+      env, obj, event,
+      node->CanOpenPopup(),
+      node->IsContentInvalid(),
+      node->IsDismissable(),
+      node->IsMultiLine(),
+      node->AndroidInputType(),
+      node->AndroidLiveRegionType());
+  if (node->IsCollection()) {
+    Java_BrowserAccessibilityManager_setAccessibilityEventCollectionInfo(
+        env, obj, event,
+        node->RowCount(),
+        node->ColumnCount(),
+        node->IsHierarchical());
+  }
+  if (node->IsCollectionItem() || node->IsHeading()) {
+    Java_BrowserAccessibilityManager_setAccessibilityEventCollectionItemInfo(
+        env, obj, event,
+        node->RowIndex(),
+        node->RowSpan(),
+        node->ColumnIndex(),
+        node->ColumnSpan(),
+        node->IsHeading());
+  }
+  if (node->IsRangeType()) {
+    Java_BrowserAccessibilityManager_setAccessibilityEventRangeInfo(
+        env, obj, event,
+        node->AndroidRangeType(),
+        node->RangeMin(),
+        node->RangeMax(),
+        node->RangeCurrentValue());
   }
 
   return true;
@@ -338,11 +413,9 @@ void BrowserAccessibilityManagerAndroid::FuzzyHitTestImpl(
     return;
   }
 
-  if (!node->IsLeaf()) {
-    for (uint32 i = 0; i < node->child_count(); i++) {
-      BrowserAccessibility* child = node->GetChild(i);
-      FuzzyHitTestImpl(x, y, child, nearest_candidate, nearest_distance);
-    }
+  for (uint32 i = 0; i < node->PlatformChildCount(); i++) {
+    BrowserAccessibility* child = node->PlatformGetChild(i);
+    FuzzyHitTestImpl(x, y, child, nearest_candidate, nearest_distance);
   }
 }
 

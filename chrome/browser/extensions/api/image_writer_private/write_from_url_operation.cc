@@ -67,13 +67,13 @@ void WriteFromUrlOperation::CreateTempFile() {
 
   tmp_file_.reset(new base::FilePath());
 
-  if (file_util::CreateTemporaryFile(tmp_file_.get())) {
+  if (base::CreateTemporaryFile(tmp_file_.get())) {
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
         base::Bind(&WriteFromUrlOperation::DownloadStart, this));
   } else {
-    Error(error::kTempFile);
+    Error(error::kTempFileError);
   }
 }
 
@@ -231,7 +231,7 @@ void WriteFromUrlOperation::VerifyDownloadCompare(
     scoped_ptr<std::string> download_hash) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (*download_hash != hash_) {
-    Error(error::kDownloadHash);
+    Error(error::kDownloadHashError);
     return;
   }
 

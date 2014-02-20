@@ -43,7 +43,7 @@ TextInputTestHelper::~TextInputTestHelper() {
   GetInputMethod()->RemoveObserver(this);
 }
 
-string16 TextInputTestHelper::GetSurroundingText() const {
+base::string16 TextInputTestHelper::GetSurroundingText() const {
   return surrounding_text_;
 }
 
@@ -94,10 +94,6 @@ void TextInputTestHelper::OnBlur() {
     base::MessageLoop::current()->Quit();
 }
 
-void TextInputTestHelper::OnUntranslatedIMEMessage(
-  const base::NativeEvent& event) {
-}
-
 void TextInputTestHelper::OnCaretBoundsChanged(
     const ui::TextInputClient* client) {
   gfx::Range text_range;
@@ -107,9 +103,6 @@ void TextInputTestHelper::OnCaretBoundsChanged(
       return;
   if (waiting_type_ == WAIT_ON_CARET_BOUNDS_CHANGED)
     base::MessageLoop::current()->Quit();
-}
-
-void TextInputTestHelper::OnInputLocaleChanged() {
 }
 
 void TextInputTestHelper::OnTextInputStateChanged(
@@ -152,7 +145,7 @@ void TextInputTestHelper::WaitForCaretBoundsChanged(
 }
 
 void TextInputTestHelper::WaitForSurroundingTextChanged(
-    const string16& expected_text,
+    const base::string16& expected_text,
     const gfx::Range& expected_selection) {
   waiting_type_ = WAIT_ON_CARET_BOUNDS_CHANGED;
   while (expected_text != surrounding_text_ ||
@@ -194,15 +187,15 @@ bool TextInputTestHelper::ClickElement(const std::string& id,
   if (!ConvertRectFromString(coordinate, &rect))
     return false;
 
-  WebKit::WebMouseEvent mouse_event;
-  mouse_event.type = WebKit::WebInputEvent::MouseDown;
-  mouse_event.button = WebKit::WebMouseEvent::ButtonLeft;
+  blink::WebMouseEvent mouse_event;
+  mouse_event.type = blink::WebInputEvent::MouseDown;
+  mouse_event.button = blink::WebMouseEvent::ButtonLeft;
   mouse_event.x = rect.CenterPoint().x();
   mouse_event.y = rect.CenterPoint().y();
   mouse_event.clickCount = 1;
   tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
 
-  mouse_event.type = WebKit::WebInputEvent::MouseUp;
+  mouse_event.type = blink::WebInputEvent::MouseUp;
   tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
   return true;
 }

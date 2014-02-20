@@ -101,3 +101,4 @@ TEST_F(AccountReconcilorTest, ProfileAlreadyConnected) {
   ASSERT_TRUE(NULL != reconcilor);
   ASSERT_TRUE(reconcilor->IsPeriodicReconciliationRunning());
 }
+

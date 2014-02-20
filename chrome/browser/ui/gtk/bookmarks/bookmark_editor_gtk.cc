@@ -516,7 +516,7 @@ GURL BookmarkEditorGtk::GetInputURL() const {
                                  std::string());
 }
 
-string16 BookmarkEditorGtk::GetInputTitle() const {
+base::string16 BookmarkEditorGtk::GetInputTitle() const {
   return UTF8ToUTF16(gtk_entry_get_text(GTK_ENTRY(name_entry_)));
 }
 
@@ -542,7 +542,7 @@ void BookmarkEditorGtk::ApplyEdits(GtkTreeIter* selected_parent) {
   bb_model_->RemoveObserver(this);
 
   GURL new_url(GetInputURL());
-  string16 new_title(GetInputTitle());
+  base::string16 new_title(GetInputTitle());
 
   if (!show_tree_ || !selected_parent) {
     // TODO: this is wrong. Just because there is no selection doesn't mean new

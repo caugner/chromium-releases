@@ -8,11 +8,13 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/remove_user_delegate.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 
@@ -42,7 +44,7 @@ class LoginDisplay : public RemoveUserDelegate {
     virtual void CompleteLogin(const UserContext& user_context) = 0;
 
     // Returns name of the currently connected network.
-    virtual string16 GetConnectedNetworkName() = 0;
+    virtual base::string16 GetConnectedNetworkName() = 0;
 
     // Returns true if sign in is in progress.
     virtual bool IsSigninInProgress() const = 0;
@@ -142,6 +144,14 @@ class LoginDisplay : public RemoveUserDelegate {
   // Selects user entry with specified |index|.
   // Does nothing if current user is already selected.
   virtual void SelectPod(int index) = 0;
+
+  // Displays a banner on the login screen containing |message|.
+  virtual void ShowBannerMessage(const std::string& message) = 0;
+
+  // Shows a button with an icon inside the user pod of |username|.
+  virtual void ShowUserPodButton(const std::string& username,
+                                 const std::string& iconURL,
+                                 const base::Closure& click_callback) = 0;
 
   // Displays simple error bubble with |error_msg_id| specified.
   // |login_attempts| shows number of login attempts made by current user.

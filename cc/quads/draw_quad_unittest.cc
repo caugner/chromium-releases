@@ -36,6 +36,7 @@ TEST(DrawQuadTest, CopySharedQuadState) {
   gfx::Rect clip_rect(19, 21, 23, 25);
   bool is_clipped = true;
   float opacity = 0.25f;
+  SkXfermode::Mode blend_mode = SkXfermode::kMultiply_Mode;
 
   scoped_ptr<SharedQuadState> state(SharedQuadState::Create());
   state->SetAll(quad_transform,
@@ -43,7 +44,8 @@ TEST(DrawQuadTest, CopySharedQuadState) {
                 visible_content_rect,
                 clip_rect,
                 is_clipped,
-                opacity);
+                opacity,
+                blend_mode);
 
   scoped_ptr<SharedQuadState> copy(state->Copy());
   EXPECT_EQ(quad_transform, copy->content_to_target_transform);
@@ -51,6 +53,7 @@ TEST(DrawQuadTest, CopySharedQuadState) {
   EXPECT_EQ(opacity, copy->opacity);
   EXPECT_RECT_EQ(clip_rect, copy->clip_rect);
   EXPECT_EQ(is_clipped, copy->is_clipped);
+  EXPECT_EQ(blend_mode, copy->blend_mode);
 }
 
 scoped_ptr<SharedQuadState> CreateSharedQuadState() {
@@ -60,6 +63,7 @@ scoped_ptr<SharedQuadState> CreateSharedQuadState() {
   gfx::Rect clip_rect(19, 21, 23, 25);
   bool is_clipped = false;
   float opacity = 1.f;
+  SkXfermode::Mode blend_mode = SkXfermode::kSrcOver_Mode;
 
   scoped_ptr<SharedQuadState> state(SharedQuadState::Create());
   state->SetAll(quad_transform,
@@ -67,7 +71,8 @@ scoped_ptr<SharedQuadState> CreateSharedQuadState() {
                 visible_content_rect,
                 clip_rect,
                 is_clipped,
-                opacity);
+                opacity,
+                blend_mode);
   return state.Pass();
 }
 
@@ -584,18 +589,16 @@ TEST(DrawQuadTest, CopyPictureDrawQuad) {
   ResourceFormat texture_format = RGBA_8888;
   gfx::Rect content_rect(30, 40, 20, 30);
   float contents_scale = 3.141592f;
-  bool can_draw_direct_to_backbuffer = true;
   scoped_refptr<PicturePileImpl> picture_pile = PicturePileImpl::Create();
   CREATE_SHARED_STATE();
 
-  CREATE_QUAD_8_NEW(PictureDrawQuad,
+  CREATE_QUAD_7_NEW(PictureDrawQuad,
                     opaque_rect,
                     tex_coord_rect,
                     texture_size,
                     texture_format,
                     content_rect,
                     contents_scale,
-                    can_draw_direct_to_backbuffer,
                     picture_pile);
   EXPECT_EQ(DrawQuad::PICTURE_CONTENT, copy_quad->material);
   EXPECT_RECT_EQ(opaque_rect, copy_quad->opaque_rect);
@@ -604,17 +607,14 @@ TEST(DrawQuadTest, CopyPictureDrawQuad) {
   EXPECT_EQ(texture_format, copy_quad->texture_format);
   EXPECT_RECT_EQ(content_rect, copy_quad->content_rect);
   EXPECT_EQ(contents_scale, copy_quad->contents_scale);
-  EXPECT_EQ(can_draw_direct_to_backbuffer,
-            copy_quad->can_draw_direct_to_backbuffer);
   EXPECT_EQ(picture_pile, copy_quad->picture_pile);
 
-  CREATE_QUAD_7_ALL(PictureDrawQuad,
+  CREATE_QUAD_6_ALL(PictureDrawQuad,
                     tex_coord_rect,
                     texture_size,
                     texture_format,
                     content_rect,
                     contents_scale,
-                    can_draw_direct_to_backbuffer,
                     picture_pile);
   EXPECT_EQ(DrawQuad::PICTURE_CONTENT, copy_quad->material);
   EXPECT_EQ(tex_coord_rect, copy_quad->tex_coord_rect);
@@ -622,8 +622,6 @@ TEST(DrawQuadTest, CopyPictureDrawQuad) {
   EXPECT_EQ(texture_format, copy_quad->texture_format);
   EXPECT_RECT_EQ(content_rect, copy_quad->content_rect);
   EXPECT_EQ(contents_scale, copy_quad->contents_scale);
-  EXPECT_EQ(can_draw_direct_to_backbuffer,
-            copy_quad->can_draw_direct_to_backbuffer);
   EXPECT_EQ(picture_pile, copy_quad->picture_pile);
 }
 
@@ -809,18 +807,16 @@ TEST_F(DrawQuadIteratorTest, DISABLED_PictureDrawQuad) {
   ResourceFormat texture_format = RGBA_8888;
   gfx::Rect content_rect(30, 40, 20, 30);
   float contents_scale = 3.141592f;
-  bool can_draw_direct_to_backbuffer = true;
   scoped_refptr<PicturePileImpl> picture_pile = PicturePileImpl::Create();
 
   CREATE_SHARED_STATE();
-  CREATE_QUAD_8_NEW(PictureDrawQuad,
+  CREATE_QUAD_7_NEW(PictureDrawQuad,
                     opaque_rect,
                     tex_coord_rect,
                     texture_size,
                     texture_format,
                     content_rect,
                     contents_scale,
-                    can_draw_direct_to_backbuffer,
                     picture_pile);
   EXPECT_EQ(0, IterateAndCount(quad_new.get()));
 }

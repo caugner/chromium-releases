@@ -17,6 +17,7 @@
 #include "third_party/icu/source/i18n/unicode/dtptngen.h"
 #include "third_party/icu/source/i18n/unicode/smpdtfmt.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/grid_layout.h"
@@ -126,7 +127,10 @@ void BaseDateTimeView::OnLocaleChanged() {
   UpdateText();
 }
 
-DateView::DateView() : actionable_(false) {
+DateView::DateView()
+    : hour_type_(ash::Shell::GetInstance()->system_tray_delegate()->
+                 GetHourClockType()),
+      actionable_(false) {
   SetLayoutManager(
       new views::BoxLayout(
           views::BoxLayout::kVertical, 0, 0, 0));
@@ -134,7 +138,7 @@ DateView::DateView() : actionable_(false) {
   date_label_->SetEnabledColor(kHeaderTextColorNormal);
   UpdateTextInternal(base::Time::Now());
   AddChildView(date_label_);
-  set_focusable(actionable_);
+  SetFocusable(actionable_);
 }
 
 DateView::~DateView() {
@@ -142,15 +146,21 @@ DateView::~DateView() {
 
 void DateView::SetActionable(bool actionable) {
   actionable_ = actionable;
-  set_focusable(actionable_);
+  SetFocusable(actionable_);
+}
+
+void DateView::UpdateTimeFormat() {
+  hour_type_ =
+      ash::Shell::GetInstance()->system_tray_delegate()->GetHourClockType();
+  UpdateText();
 }
 
 void DateView::UpdateTextInternal(const base::Time& now) {
   SetAccessibleName(
       base::TimeFormatFriendlyDate(now) +
-      ASCIIToUTF16(",") +
+      ASCIIToUTF16(", ") +
       base::TimeFormatTimeOfDayWithHourClockType(
-          now, base::k12HourClock, base:: kKeepAmPm));
+          now, hour_type_, base::kKeepAmPm));
   date_label_->SetText(
       l10n_util::GetStringFUTF16(
           IDS_ASH_STATUS_TRAY_DATE, FormatDayOfWeek(now), FormatDate(now)));
@@ -186,7 +196,7 @@ TimeView::TimeView(TrayDate::ClockLayout clock_layout)
   SetupLabels();
   UpdateTextInternal(base::Time::Now());
   UpdateClockLayout(clock_layout);
-  set_focusable(false);
+  SetFocusable(false);
 }
 
 TimeView::~TimeView() {

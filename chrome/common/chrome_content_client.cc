@@ -62,8 +62,10 @@ namespace {
 const char kPDFPluginMimeType[] = "application/pdf";
 const char kPDFPluginExtension[] = "pdf";
 const char kPDFPluginDescription[] = "Portable Document Format";
-const char kPDFPluginPrintPreviewMimeType
-   [] = "application/x-google-chrome-print-preview-pdf";
+const char kPDFPluginPrintPreviewMimeType[] =
+   "application/x-google-chrome-print-preview-pdf";
+const char kPDFPluginOutOfProcessMimeType[] =
+   "application/x-google-chrome-pdf";
 const uint32 kPDFPluginPermissions = ppapi::PERMISSION_PRIVATE |
                                      ppapi::PERMISSION_DEV;
 
@@ -76,13 +78,6 @@ const uint32 kNaClPluginPermissions = ppapi::PERMISSION_PRIVATE |
 const char kPnaclPluginMimeType[] = "application/x-pnacl";
 const char kPnaclPluginExtension[] = "";
 const char kPnaclPluginDescription[] = "Portable Native Client Executable";
-
-const char kO3DPluginName[] = "Google Talk Plugin Video Accelerator";
-const char kO3DPluginMimeType[] ="application/vnd.o3d.auto";
-const char kO3DPluginExtension[] = "";
-const char kO3DPluginDescription[] = "O3D MIME";
-const uint32 kO3DPluginPermissions = ppapi::PERMISSION_PRIVATE |
-                                     ppapi::PERMISSION_DEV;
 
 const char kO1DPluginName[] = "Google Talk Plugin Video Renderer";
 const char kO1DPluginMimeType[] ="application/o1d";
@@ -148,16 +143,26 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
     if (skip_pdf_file_check || base::PathExists(path)) {
       content::PepperPluginInfo pdf;
       pdf.path = path;
-      pdf.name = chrome::ChromeContentClient::kPDFPluginName;
-      content::WebPluginMimeType pdf_mime_type(kPDFPluginMimeType,
-                                               kPDFPluginExtension,
-                                               kPDFPluginDescription);
-      content::WebPluginMimeType print_preview_pdf_mime_type(
-          kPDFPluginPrintPreviewMimeType,
-          kPDFPluginExtension,
-          kPDFPluginDescription);
-      pdf.mime_types.push_back(pdf_mime_type);
-      pdf.mime_types.push_back(print_preview_pdf_mime_type);
+      pdf.name = ChromeContentClient::kPDFPluginName;
+      if (CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kOutOfProcessPdf)) {
+        pdf.is_out_of_process = true;
+        content::WebPluginMimeType pdf_mime_type(kPDFPluginOutOfProcessMimeType,
+                                                 kPDFPluginExtension,
+                                                 kPDFPluginDescription);
+        pdf.mime_types.push_back(pdf_mime_type);
+        // TODO(raymes): Make print preview work with out of process PDF.
+      } else {
+        content::WebPluginMimeType pdf_mime_type(kPDFPluginMimeType,
+                                                 kPDFPluginExtension,
+                                                 kPDFPluginDescription);
+        content::WebPluginMimeType print_preview_pdf_mime_type(
+            kPDFPluginPrintPreviewMimeType,
+            kPDFPluginExtension,
+            kPDFPluginDescription);
+        pdf.mime_types.push_back(pdf_mime_type);
+        pdf.mime_types.push_back(print_preview_pdf_mime_type);
+      }
       pdf.permissions = kPDFPluginPermissions;
       plugins->push_back(pdf);
 
@@ -176,7 +181,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
     if (skip_nacl_file_check || base::PathExists(path)) {
       content::PepperPluginInfo nacl;
       nacl.path = path;
-      nacl.name = chrome::ChromeContentClient::kNaClPluginName;
+      nacl.name = ChromeContentClient::kNaClPluginName;
       content::WebPluginMimeType nacl_mime_type(kNaClPluginMimeType,
                                                 kNaClPluginExtension,
                                                 kNaClPluginDescription);
@@ -192,27 +197,6 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       plugins->push_back(nacl);
 
       skip_nacl_file_check = true;
-    }
-  }
-
-  // TODO(jhorwich|noahric): Remove o3d ppapi code once o3d is replaced
-  // entirely with o1d.
-  static bool skip_o3d_file_check = false;
-  if (PathService::Get(chrome::FILE_O3D_PLUGIN, &path)) {
-    if (skip_o3d_file_check || base::PathExists(path)) {
-      content::PepperPluginInfo o3d;
-      o3d.path = path;
-      o3d.name = kO3DPluginName;
-      o3d.is_out_of_process = true;
-      o3d.is_sandboxed = false;
-      o3d.permissions = kO3DPluginPermissions;
-      content::WebPluginMimeType o3d_mime_type(kO3DPluginMimeType,
-                                               kO3DPluginExtension,
-                                               kO3DPluginDescription);
-      o3d.mime_types.push_back(o3d_mime_type);
-      plugins->push_back(o3d);
-
-      skip_o3d_file_check = true;
     }
   }
 
@@ -330,7 +314,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
   info.name = kRemotingViewerPluginName;
   info.description = kRemotingViewerPluginDescription;
   info.path = base::FilePath::FromUTF8Unsafe(
-      chrome::ChromeContentClient::kRemotingViewerPluginPath);
+      ChromeContentClient::kRemotingViewerPluginPath);
   content::WebPluginMimeType remoting_mime_type(
       kRemotingViewerPluginMimeType,
       kRemotingViewerPluginMimeExtension,
@@ -438,8 +422,6 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin) {
 
 }  // namespace
 
-namespace chrome {
-
 void ChromeContentClient::SetActiveURL(const GURL& url) {
   base::debug::SetCrashKeyValue(crash_keys::kActiveURL,
                                 url.possibly_invalid_spec());
@@ -481,12 +463,12 @@ void ChromeContentClient::AddAdditionalSchemes(
     std::vector<std::string>* savable_schemes) {
   standard_schemes->push_back(extensions::kExtensionScheme);
   savable_schemes->push_back(extensions::kExtensionScheme);
-  standard_schemes->push_back(kExtensionResourceScheme);
-  savable_schemes->push_back(kExtensionResourceScheme);
+  standard_schemes->push_back(chrome::kExtensionResourceScheme);
+  savable_schemes->push_back(chrome::kExtensionResourceScheme);
   standard_schemes->push_back(chrome::kChromeSearchScheme);
   savable_schemes->push_back(chrome::kChromeSearchScheme);
 #if defined(OS_CHROMEOS)
-  standard_schemes->push_back(kCrosScheme);
+  standard_schemes->push_back(chrome::kCrosScheme);
 #endif
 }
 
@@ -514,7 +496,7 @@ std::string ChromeContentClient::GetUserAgent() const {
   return webkit_glue::BuildUserAgentFromProduct(product);
 }
 
-string16 ChromeContentClient::GetLocalizedString(int message_id) const {
+base::string16 ChromeContentClient::GetLocalizedString(int message_id) const {
   return l10n_util::GetStringUTF16(message_id);
 }
 
@@ -562,5 +544,3 @@ std::string ChromeContentClient::GetCarbonInterposePath() const {
   return std::string(kInterposeLibraryPath);
 }
 #endif
-
-}  // namespace chrome

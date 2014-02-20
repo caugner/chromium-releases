@@ -40,8 +40,11 @@ namespace {
 
 class MountHtml5FsForTesting : public MountHtml5Fs {
  public:
-  MountHtml5FsForTesting(StringMap_t& args, PepperInterface* ppapi) {
-    Error error = Init(1, args, ppapi);
+  MountHtml5FsForTesting(StringMap_t& string_map, PepperInterface* ppapi) {
+    MountInitArgs args;
+    args.string_map = string_map;
+    args.ppapi = ppapi;
+    Error error = Init(args);
     EXPECT_EQ(0, error);
   }
 };
@@ -452,7 +455,7 @@ TEST_F(MountHtml5FsTest, GetDents) {
     EXPECT_EQ(sizeof(dirent) * num_dirents, bytes_read);
 
     std::multiset<std::string> dirnames;
-    for (int i = 0; i < num_dirents; ++i) {
+    for (size_t i = 0; i < num_dirents; ++i) {
       EXPECT_EQ(sizeof(dirent), dirents[i].d_off);
       EXPECT_EQ(sizeof(dirent), dirents[i].d_reclen);
       dirnames.insert(dirents[i].d_name);
@@ -476,7 +479,7 @@ TEST_F(MountHtml5FsTest, GetDents) {
     EXPECT_EQ(sizeof(dirent) * num_dirents, bytes_read);
 
     std::multiset<std::string> dirnames;
-    for (int i = 0; i < num_dirents; ++i) {
+    for (size_t i = 0; i < num_dirents; ++i) {
       EXPECT_EQ(sizeof(dirent), dirents[i].d_off);
       EXPECT_EQ(sizeof(dirent), dirents[i].d_reclen);
       dirnames.insert(dirents[i].d_name);

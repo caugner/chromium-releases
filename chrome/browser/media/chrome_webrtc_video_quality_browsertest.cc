@@ -26,6 +26,7 @@
 #include "chrome/test/ui/ui_test.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/browser_test_utils.h"
+#include "media/base/media_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/python_utils.h"
 #include "testing/perf/perf_test.h"
@@ -100,6 +101,7 @@ class WebrtcVideoQualityBrowserTest : public WebRtcTestBase {
 
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     PeerConnectionServerRunner::KillAllPeerConnectionServersOnCurrentSystem();
+    DetectErrorsInJavaScript();  // Look for errors in our rather complex js.
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
@@ -159,22 +161,13 @@ class WebrtcVideoQualityBrowserTest : public WebRtcTestBase {
     pywebsocket_command.AppendArg("-d");
     pywebsocket_command.AppendArgPath(path_to_data_handler);
 
-    LOG(INFO) << "Running " << pywebsocket_command.GetCommandLineString();
+    VLOG(0) << "Running " << pywebsocket_command.GetCommandLineString();
     return base::LaunchProcess(pywebsocket_command, base::LaunchOptions(),
                                &pywebsocket_server_);
   }
 
   bool ShutdownPyWebSocketServer() {
     return base::KillProcess(pywebsocket_server_, 0, false);
-  }
-
-  // Ensures we didn't get any errors asynchronously (e.g. while no javascript
-  // call from this test was outstanding).
-  // TODO(phoglund): this becomes obsolete when we switch to communicating with
-  // the DOM message queue.
-  void AssertNoAsynchronousErrors(content::WebContents* tab_contents) {
-    EXPECT_EQ("ok-no-errors",
-              ExecuteJavascript("getAnyTestFailures()", tab_contents));
   }
 
   void EstablishCall(content::WebContents* from_tab,
@@ -229,10 +222,10 @@ class WebrtcVideoQualityBrowserTest : public WebRtcTestBase {
 
     // We produce an output file that will later be used as an input to the
     // barcode decoder and frame analyzer tools.
-    LOG(INFO) << "Running " << converter_command.GetCommandLineString();
+    VLOG(0) << "Running " << converter_command.GetCommandLineString();
     std::string result;
     bool ok = base::GetAppOutput(converter_command, &result);
-    LOG(INFO) << "Output was:\n\n" << result;
+    VLOG(0) << "Output was:\n\n" << result;
     return ok;
   }
 
@@ -287,7 +280,7 @@ class WebrtcVideoQualityBrowserTest : public WebRtcTestBase {
     compare_command.AppendArg("--stats_file");
     compare_command.AppendArgPath(stats_file);
 
-    LOG(INFO) << "Running " << compare_command.GetCommandLineString();
+    VLOG(0) << "Running " << compare_command.GetCommandLineString();
     std::string output;
     bool ok = base::GetAppOutput(compare_command, &output);
     // Print to stdout to ensure the perf numbers are parsed properly by the
@@ -325,31 +318,26 @@ class WebrtcVideoQualityBrowserTest : public WebRtcTestBase {
 
 IN_PROC_BROWSER_TEST_F(WebrtcVideoQualityBrowserTest,
                        MANUAL_TestVGAVideoQuality) {
+  ASSERT_GE(TestTimeouts::action_max_timeout().InSeconds(), 150) <<
+      "This is a long-running test; you must specify "
+      "--ui-test-action-max-timeout to have a value of at least 150000.";
+
   ASSERT_TRUE(HasAllRequiredResources());
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   ASSERT_TRUE(StartPyWebSocketServer());
   ASSERT_TRUE(peerconnection_server_.Start());
 
-  ui_test_utils::NavigateToURL(
-      browser(), embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   content::WebContents* left_tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  GetUserMediaAndAccept(left_tab);
-
-  chrome::AddBlankTabAt(browser(), -1, true);
+      OpenPageAndGetUserMediaInNewTab(
+          embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   content::WebContents* right_tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  ui_test_utils::NavigateToURL(
-      browser(), embedded_test_server()->GetURL(kCapturingWebrtcHtmlPage));
-  GetUserMediaAndAccept(right_tab);
+      OpenPageAndGetUserMediaInNewTab(
+          embedded_test_server()->GetURL(kCapturingWebrtcHtmlPage));
 
   ConnectToPeerConnectionServer("peer 1", left_tab);
   ConnectToPeerConnectionServer("peer 2", right_tab);
 
   EstablishCall(left_tab, right_tab);
-
-  AssertNoAsynchronousErrors(left_tab);
-  AssertNoAsynchronousErrors(right_tab);
 
   // Poll slower here to avoid flooding the log with messages: capturing and
   // sending frames take quite a bit of time.
@@ -363,12 +351,18 @@ IN_PROC_BROWSER_TEST_F(WebrtcVideoQualityBrowserTest,
   WaitUntilHangupVerified(left_tab);
   WaitUntilHangupVerified(right_tab);
 
-  AssertNoAsynchronousErrors(left_tab);
-  AssertNoAsynchronousErrors(right_tab);
-
   EXPECT_TRUE(PollingWaitUntil(
       "haveMoreFramesToSend()", "no-more-frames", right_tab,
       polling_interval_msec));
+
+  // Shut everything down to avoid having the javascript race with the analysis
+  // tools. For instance, dont have console log printouts interleave with the
+  // RESULT lines from the analysis tools (crbug.com/323200).
+  ASSERT_TRUE(peerconnection_server_.Stop());
+  ASSERT_TRUE(ShutdownPyWebSocketServer());
+
+  chrome::CloseWebContents(browser(), left_tab, false);
+  chrome::CloseWebContents(browser(), right_tab, false);
 
   RunARGBtoI420Converter(
       kVgaWidth, kVgaHeight, GetWorkingDir().Append(kCapturedYuvFileName));
@@ -378,7 +372,4 @@ IN_PROC_BROWSER_TEST_F(WebrtcVideoQualityBrowserTest,
                                   GetWorkingDir().Append(kCapturedYuvFileName),
                                   GetWorkingDir().Append(kReferenceYuvFileName),
                                   GetWorkingDir().Append(kStatsFileName)));
-
-  ASSERT_TRUE(peerconnection_server_.Stop());
-  ASSERT_TRUE(ShutdownPyWebSocketServer());
 }

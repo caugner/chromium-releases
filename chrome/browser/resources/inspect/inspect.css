@@ -74,6 +74,10 @@ img {
   padding-bottom: 10px;
 }
 
+#devices-help {
+  margin-top: 10px;
+}
+
 .device-header {
   -webkit-box-align: baseline;
   -webkit-box-orient: horizontal;
@@ -197,20 +201,21 @@ img {
   margin-top: 5px;
 }
 
-a {
+.action {
   color: rgb(17, 85, 204);
+  cursor: pointer;
   margin-right: 15px;
 }
 
-a:not(:hover) {
-  text-decoration: none;
+.action:hover {
+  text-decoration: underline;
 }
 
 .list:not(.pages) .subrow {
   height: 19px;
 }
 
-a.disabled {
+.action.disabled {
   opacity: 0.5;
   pointer-events: none;
 }

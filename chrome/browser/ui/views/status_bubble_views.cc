@@ -34,6 +34,10 @@
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
 
+#if defined(USE_AURA)
+#include "ui/aura/window.h"
+#endif
+
 #if defined(USE_ASH)
 #include "ash/wm/window_state.h"
 #endif
@@ -121,7 +125,7 @@ class StatusBubbleViews::StatusView : public views::Label,
   // Set the bubble text to a certain value, hides the bubble if text is
   // an empty string.  Trigger animation sequence to display if
   // |should_animate_open|.
-  void SetText(const string16& text, bool should_animate_open);
+  void SetText(const base::string16& text, bool should_animate_open);
 
   BubbleStage GetState() const { return stage_; }
 
@@ -173,7 +177,7 @@ class StatusBubbleViews::StatusView : public views::Label,
   views::Widget* popup_;
 
   // The currently-displayed text.
-  string16 text_;
+  base::string16 text_;
 
   // Start and end opacities for the current transition - note that as a
   // fade-in can easily turn into a fade out, opacity_start_ is sometimes
@@ -185,19 +189,20 @@ class StatusBubbleViews::StatusView : public views::Label,
   ui::ThemeProvider* theme_service_;
 };
 
-void StatusBubbleViews::StatusView::SetText(const string16& text,
+void StatusBubbleViews::StatusView::SetText(const base::string16& text,
                                             bool should_animate_open) {
   if (text.empty()) {
     // The string was empty.
     StartHiding();
   } else {
     // We want to show the string.
-    text_ = text;
+    if (text != text_) {
+      text_ = text;
+      SchedulePaint();
+    }
     if (should_animate_open)
       StartShowing();
   }
-
-  SchedulePaint();
 }
 
 void StatusBubbleViews::StatusView::Show() {
@@ -444,14 +449,7 @@ void StatusBubbleViews::StatusView::OnPaint(gfx::Canvas* canvas) {
                         std::max(0, text_height));
   body_bounds.set_x(GetMirroredXForRect(body_bounds));
   SkColor text_color =
-      theme_service_->GetColor(ThemeProperties::COLOR_TAB_TEXT);
-
-  // DrawStringInt doesn't handle alpha, so we'll do the blending ourselves.
-  text_color = SkColorSetARGB(
-      SkColorGetA(text_color),
-      (SkColorGetR(text_color) + SkColorGetR(toolbar_color)) / 2,
-      (SkColorGetG(text_color) + SkColorGetR(toolbar_color)) / 2,
-      (SkColorGetB(text_color) + SkColorGetR(toolbar_color)) / 2);
+      theme_service_->GetColor(ThemeProperties::COLOR_STATUS_BAR_TEXT);
   canvas->DrawStringInt(text_,
                         views::Label::font(),
                         text_color,
@@ -478,7 +476,7 @@ class StatusBubbleViews::StatusViewExpander : public gfx::LinearAnimation,
   }
 
   // Manage the expansion of the bubble.
-  void StartExpansion(const string16& expanded_text,
+  void StartExpansion(const base::string16& expanded_text,
                       int current_width,
                       int expansion_end);
 
@@ -499,7 +497,7 @@ class StatusBubbleViews::StatusViewExpander : public gfx::LinearAnimation,
   StatusView* status_view_;
 
   // Text elided (if needed) to fit maximum status bar width.
-  string16 expanded_text_;
+  base::string16 expanded_text_;
 
   // Widths at expansion start and end.
   int expansion_start_;
@@ -517,7 +515,7 @@ void StatusBubbleViews::StatusViewExpander::AnimationEnded(
 }
 
 void StatusBubbleViews::StatusViewExpander::StartExpansion(
-    const string16& expanded_text,
+    const base::string16& expanded_text,
     int expansion_start,
     int expansion_end) {
   expanded_text_ = expanded_text;
@@ -578,6 +576,9 @@ void StatusBubbleViews::Init() {
     params.parent = frame->GetNativeView();
     params.context = frame->GetNativeView();
     popup_->Init(params);
+#if defined(USE_AURA)
+    popup_->GetNativeView()->SetName("StatusBubbleViews");
+#endif
     // We do our own animation and don't want any from the system.
     popup_->SetVisibilityChangedAnimationsEnabled(false);
     popup_->SetOpacity(0x00);
@@ -615,7 +616,7 @@ void StatusBubbleViews::SetBounds(int x, int y, int w, int h) {
     AvoidMouse(last_mouse_moved_location_);
 }
 
-void StatusBubbleViews::SetStatus(const string16& status_text) {
+void StatusBubbleViews::SetStatus(const base::string16& status_text) {
   if (size_.IsEmpty())
     return;  // We have no bounds, don't attempt to show the popup.
 
@@ -633,7 +634,7 @@ void StatusBubbleViews::SetStatus(const string16& status_text) {
   } else if (!url_text_.empty()) {
     view_->SetText(url_text_, true);
   } else {
-    view_->SetText(string16(), true);
+    view_->SetText(base::string16(), true);
   }
 }
 
@@ -648,7 +649,7 @@ void StatusBubbleViews::SetURL(const GURL& url, const std::string& languages) {
   // If we want to clear a displayed URL but there is a status still to
   // display, display that status instead.
   if (url.is_empty() && !status_text_.empty()) {
-    url_text_ = string16();
+    url_text_ = base::string16();
     if (IsFrameVisible())
       view_->SetText(status_text_, true);
     return;
@@ -664,7 +665,8 @@ void StatusBubbleViews::SetURL(const GURL& url, const std::string& languages) {
   gfx::Rect popup_bounds = popup_->GetWindowBoundsInScreen();
   int text_width = static_cast<int>(popup_bounds.width() -
       (kShadowThickness * 2) - kTextPositionX - kTextHorizPadding - 1);
-  url_text_ = gfx::ElideUrl(url, view_->Label::font(), text_width, languages);
+  url_text_ = gfx::ElideUrl(url, view_->Label::font_list(), text_width,
+                            languages);
 
   // An URL is always treated as a left-to-right string. On right-to-left UIs
   // we need to explicitly mark the URL as LTR to make sure it is displayed
@@ -691,8 +693,8 @@ void StatusBubbleViews::SetURL(const GURL& url, const std::string& languages) {
 }
 
 void StatusBubbleViews::Hide() {
-  status_text_ = string16();
-  url_text_ = string16();
+  status_text_ = base::string16();
+  url_text_ = base::string16();
   if (view_)
     view_->Hide();
 }
@@ -821,8 +823,8 @@ void StatusBubbleViews::ExpandBubble() {
   // still be too long to fit) before expanding bubble.
   gfx::Rect popup_bounds = popup_->GetWindowBoundsInScreen();
   int max_status_bubble_width = GetMaxStatusBubbleWidth();
-  url_text_ = gfx::ElideUrl(url_, view_->Label::font(),
-      max_status_bubble_width, languages_);
+  url_text_ = gfx::ElideUrl(url_, view_->Label::font_list(),
+                            max_status_bubble_width, languages_);
   int expanded_bubble_width =std::max(GetStandardStatusBubbleWidth(),
       std::min(view_->Label::font().GetStringWidth(url_text_) +
                    (kShadowThickness * 2) + kTextPositionX +

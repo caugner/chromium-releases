@@ -6,8 +6,9 @@
 
 #include <vector>
 
-#include "ash/launcher/launcher_button_host.h"
+#include "ash/ash_constants.h"
 #include "ash/launcher/launcher_types.h"
+#include "ash/shelf/shelf_button_host.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -17,6 +18,7 @@
 #include "ui/compositor/layer_animation_element.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/views/painter.h"
 
 namespace ash {
 namespace internal {
@@ -25,7 +27,7 @@ const int kAnimationDurationInMs = 600;
 const float kAnimationOpacity[] = { 1.0f, 0.4f, 1.0f };
 
 AppListButton::AppListButton(views::ButtonListener* listener,
-                             LauncherButtonHost* host)
+                             ShelfButtonHost* host)
     : views::ImageButton(listener),
       host_(host) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -43,6 +45,8 @@ AppListButton::AppListButton(views::ButtonListener* listener,
   SetAccessibleName(l10n_util::GetStringUTF16(IDS_AURA_APP_LIST_TITLE));
   SetSize(gfx::Size(kLauncherPreferredSize, kLauncherPreferredSize));
   SetImageAlignment(ImageButton::ALIGN_CENTER, ImageButton::ALIGN_TOP);
+  SetFocusPainter(views::Painter::CreateSolidFocusPainter(
+                      kFocusBorderColor, gfx::Insets(1, 1, 1, 1)));
 }
 
 AppListButton::~AppListButton() {
@@ -86,23 +90,23 @@ void AppListButton::StopLoadingAnimation() {
 
 bool AppListButton::OnMousePressed(const ui::MouseEvent& event) {
   ImageButton::OnMousePressed(event);
-  host_->PointerPressedOnButton(this, LauncherButtonHost::MOUSE, event);
+  host_->PointerPressedOnButton(this, ShelfButtonHost::MOUSE, event);
   return true;
 }
 
 void AppListButton::OnMouseReleased(const ui::MouseEvent& event) {
   ImageButton::OnMouseReleased(event);
-  host_->PointerReleasedOnButton(this, LauncherButtonHost::MOUSE, false);
+  host_->PointerReleasedOnButton(this, ShelfButtonHost::MOUSE, false);
 }
 
 void AppListButton::OnMouseCaptureLost() {
-  host_->PointerReleasedOnButton(this, LauncherButtonHost::MOUSE, true);
+  host_->PointerReleasedOnButton(this, ShelfButtonHost::MOUSE, true);
   ImageButton::OnMouseCaptureLost();
 }
 
 bool AppListButton::OnMouseDragged(const ui::MouseEvent& event) {
   ImageButton::OnMouseDragged(event);
-  host_->PointerDraggedOnButton(this, LauncherButtonHost::MOUSE, event);
+  host_->PointerDraggedOnButton(this, ShelfButtonHost::MOUSE, event);
   return true;
 }
 

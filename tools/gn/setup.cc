@@ -6,11 +6,16 @@
 
 #include <stdlib.h>
 
+#include <algorithm>
+
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
+#include "base/process/launch.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "tools/gn/filesystem_utils.h"
 #include "tools/gn/input_file.h"
@@ -99,56 +104,17 @@ base::FilePath FindDotFile(const base::FilePath& current_dir) {
   return FindDotFile(up_one_dir);
 }
 
-// Searches the list of strings, and returns the FilePat corresponding to the
-// one ending in the given substring, or the empty path if none match.
-base::FilePath GetPathEndingIn(
-    const std::vector<base::FilePath::StringType>& list,
-    const base::FilePath::StringType ending_in) {
-  for (size_t i = 0; i < list.size(); i++) {
-    if (EndsWith(list[i], ending_in, true))
-      return base::FilePath(list[i]);
-  }
-  return base::FilePath();
+// Called on any thread. Post the item to the builder on the main thread.
+void ItemDefinedCallback(base::MessageLoop* main_loop,
+                         scoped_refptr<Builder> builder,
+                         scoped_ptr<Item> item) {
+  DCHECK(item);
+  main_loop->PostTask(FROM_HERE, base::Bind(&Builder::ItemDefined, builder,
+                                            base::Passed(&item)));
 }
 
-// Fins the depot tools directory in the path environment variable and returns
-// its value. Returns an empty file path if not found.
-//
-// We detect the depot_tools path by looking for a directory with depot_tools
-// at the end (optionally followed by a separator).
-base::FilePath ExtractDepotToolsFromPath() {
-#if defined(OS_WIN)
-  static const wchar_t kPathVarName[] = L"Path";
-  DWORD env_buf_size = GetEnvironmentVariable(kPathVarName, NULL, 0);
-  if (env_buf_size == 0)
-    return base::FilePath();
-  base::string16 path;
-  path.resize(env_buf_size);
-  GetEnvironmentVariable(kPathVarName, &path[0],
-                         static_cast<DWORD>(path.size()));
-  path.resize(path.size() - 1);  // Trim off null.
-
-  std::vector<base::string16> components;
-  base::SplitString(path, ';', &components);
-
-  base::string16 ending_in1 = L"depot_tools\\";
-#else
-  static const char kPathVarName[] = "PATH";
-  const char* path = getenv(kPathVarName);
-  if (!path)
-    return base::FilePath();
-
-  std::vector<std::string> components;
-  base::SplitString(path, ':', &components);
-
-  std::string ending_in1 = "depot_tools/";
-#endif
-  base::FilePath::StringType ending_in2 = FILE_PATH_LITERAL("depot_tools");
-
-  base::FilePath found = GetPathEndingIn(components, ending_in1);
-  if (!found.empty())
-    return found;
-  return GetPathEndingIn(components, ending_in2);
+void DecrementWorkCount() {
+  g_scheduler->DecrementWorkCount();
 }
 
 }  // namespace
@@ -156,12 +122,19 @@ base::FilePath ExtractDepotToolsFromPath() {
 // CommonSetup -----------------------------------------------------------------
 
 CommonSetup::CommonSetup()
-    : check_for_bad_items_(true) {
+    : build_settings_(),
+      loader_(new LoaderImpl(&build_settings_)),
+      builder_(new Builder(loader_.get())),
+      check_for_bad_items_(true) {
+  loader_->set_complete_callback(base::Bind(&DecrementWorkCount));
 }
 
 CommonSetup::CommonSetup(const CommonSetup& other)
     : build_settings_(other.build_settings_),
+      loader_(new LoaderImpl(&build_settings_)),
+      builder_(new Builder(loader_.get())),
       check_for_bad_items_(other.check_for_bad_items_) {
+  loader_->set_complete_callback(base::Bind(&DecrementWorkCount));
 }
 
 CommonSetup::~CommonSetup() {
@@ -169,15 +142,16 @@ CommonSetup::~CommonSetup() {
 
 void CommonSetup::RunPreMessageLoop() {
   // Load the root build file.
-  build_settings_.toolchain_manager().StartLoadingUnlocked(
-      SourceFile("//BUILD.gn"));
+  loader_->Load(SourceFile("//BUILD.gn"), Label());
+
+  // Will be decremented with the loader is drained.
+  g_scheduler->IncrementWorkCount();
 }
 
 bool CommonSetup::RunPostMessageLoop() {
   Err err;
   if (check_for_bad_items_) {
-    err = build_settings_.item_tree().CheckForBadItems();
-    if (err.has_error()) {
+    if (!builder_->CheckForBadItems(&err)) {
       err.PrintToStdout();
       return false;
     }
@@ -205,6 +179,12 @@ Setup::Setup()
       empty_settings_(&empty_build_settings_, std::string()),
       dotfile_scope_(&empty_settings_) {
   empty_settings_.set_toolchain_label(Label());
+  build_settings_.set_item_defined_callback(
+      base::Bind(&ItemDefinedCallback, scheduler_.main_loop(), builder_));
+
+  // The scheduler's main loop wasn't created when the Loader was created, so
+  // we need to set it now.
+  loader_->set_main_loop(scheduler_.main_loop());
 }
 
 Setup::~Setup() {
@@ -235,6 +215,10 @@ bool Setup::DoSetup() {
     std::string build_path_8 = FilePathToUTF8(build_path);
     if (build_path_8.compare(0, 2, "//") != 0)
       build_path_8.insert(0, "//");
+#if defined(OS_WIN)
+    // Canonicalize to forward slashes on Windows.
+    std::replace(build_path_8.begin(), build_path_8.end(), '\\', '/');
+#endif
     build_settings_.SetBuildDir(SourceDir(build_path_8));
   } else {
     // Default output dir.
@@ -249,6 +233,10 @@ bool Setup::Run() {
   if (!scheduler_.Run())
     return false;
   return RunPostMessageLoop();
+}
+
+Scheduler* Setup::GetScheduler() {
+  return &scheduler_;
 }
 
 bool Setup::FillArguments(const CommandLine& cmdline) {
@@ -319,29 +307,23 @@ bool Setup::FillSourceDir(const CommandLine& cmdline) {
 
 void Setup::FillPythonPath() {
 #if defined(OS_WIN)
-  // We use python from the depot tools which should be on the path. If we
-  // converted the python_path to a python_command_line then we could
-  // potentially use "cmd.exe /c python.exe" and remove this.
-  static const wchar_t kPythonName[] = L"python.exe";
-  base::FilePath depot_tools = ExtractDepotToolsFromPath();
-  if (!depot_tools.empty()) {
-    base::FilePath python =
-        depot_tools.Append(L"python_bin").Append(kPythonName);
+  // Find Python on the path so we can use the absolute path in the build.
+  const base::char16 kGetPython[] =
+      L"cmd.exe /c python -c \"import sys; print sys.executable\"";
+  std::string python_path;
+  if (base::GetAppOutput(kGetPython, &python_path)) {
+    TrimWhitespaceASCII(python_path, TRIM_ALL, &python_path);
     if (scheduler_.verbose_logging())
-      scheduler_.Log("Using python", FilePathToUTF8(python));
-    build_settings_.set_python_path(python);
-    return;
+      scheduler_.Log("Found python", python_path);
+  } else {
+    scheduler_.Log("WARNING", "Could not find python on path, using "
+        "just \"python.exe\"");
+    python_path = "python.exe";
   }
-
-  if (scheduler_.verbose_logging()) {
-    scheduler_.Log("WARNING", "Could not find depot_tools on path, using "
-        "just " + FilePathToUTF8(kPythonName));
-  }
+  build_settings_.set_python_path(base::FilePath(UTF8ToUTF16(python_path)));
 #else
-  static const char kPythonName[] = "python";
+  build_settings_.set_python_path(base::FilePath("python"));
 #endif
-
-  build_settings_.set_python_path(base::FilePath(kPythonName));
 }
 
 bool Setup::RunConfigFile() {
@@ -421,11 +403,25 @@ bool Setup::FillOtherConfig(const CommandLine& cmdline) {
 
 // DependentSetup --------------------------------------------------------------
 
-DependentSetup::DependentSetup(const Setup& main_setup)
-    : CommonSetup(main_setup) {
+DependentSetup::DependentSetup(Setup* derive_from)
+    : CommonSetup(*derive_from),
+      scheduler_(derive_from->GetScheduler()) {
+  build_settings_.set_item_defined_callback(
+      base::Bind(&ItemDefinedCallback, scheduler_->main_loop(), builder_));
+}
+
+DependentSetup::DependentSetup(DependentSetup* derive_from)
+    : CommonSetup(*derive_from),
+      scheduler_(derive_from->GetScheduler()) {
+  build_settings_.set_item_defined_callback(
+      base::Bind(&ItemDefinedCallback, scheduler_->main_loop(), builder_));
 }
 
 DependentSetup::~DependentSetup() {
+}
+
+Scheduler* DependentSetup::GetScheduler() {
+  return scheduler_;
 }
 
 void DependentSetup::RunPreMessageLoop() {

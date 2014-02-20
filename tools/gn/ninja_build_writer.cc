@@ -111,7 +111,7 @@ bool NinjaBuildWriter::RunAndWriteFile(
 
   base::FilePath ninja_file(build_settings->GetFullPath(
       SourceFile(build_settings->build_dir().value() + "build.ninja")));
-  file_util::CreateDirectory(ninja_file.DirName());
+  base::CreateDirectory(ninja_file.DirName());
 
   std::ofstream file;
   file.open(FilePathToUTF8(ninja_file).c_str(),
@@ -136,8 +136,26 @@ void NinjaBuildWriter::WriteNinjaRules() {
   out_ << "  command = " << GetSelfInvocationCommand(build_settings_) << "\n";
   out_ << "  description = Regenerating ninja files\n\n";
 
+  // This rule will regenerate the ninja files when any input file has changed.
   out_ << "build build.ninja: gn\n"
        << "  depfile = build.ninja.d\n";
+
+  // Provide a way to force regenerating ninja files if the user is suspicious
+  // something is out-of-date. This will be "ninja refresh".
+  out_ << "\nbuild refresh: gn\n";
+
+  // Provide a way to see what flags are associated with this build:
+  // This will be "ninja show".
+  const CommandLine& our_cmdline = *CommandLine::ForCurrentProcess();
+  std::string args = our_cmdline.GetSwitchValueASCII("args");
+  out_ << "rule echo\n";
+  out_ << "  command = echo $text\n";
+  out_ << "  description = ECHO $desc\n";
+  out_ << "build show: echo\n";
+  out_ << "  desc = build arguments:\n";
+  out_ << "  text = "
+       << (args.empty() ? std::string("No build args, using defaults.") : args)
+       << "\n";
 
   // Input build files. These go in the ".d" file. If we write them as
   // dependencies in the .ninja file itself, ninja will expect the files to

@@ -117,7 +117,7 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   virtual void ContentsZoomChange(bool zoom_in) OVERRIDE;
   virtual void WebContentsCreated(content::WebContents* source_contents,
                                   int64 source_frame_id,
-                                  const string16& frame_name,
+                                  const base::string16& frame_name,
                                   const GURL& target_url,
                                   content::WebContents* new_contents) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
@@ -144,25 +144,15 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   virtual void ShowRepostFormWarningDialog(
       content::WebContents* source) OVERRIDE;
   virtual content::ColorChooser* OpenColorChooser(
-      content::WebContents* web_contents, SkColor color) OVERRIDE;
+      content::WebContents* web_contents,
+      SkColor color,
+      const std::vector<content::ColorSuggestion>& suggestions) OVERRIDE;
   virtual void RunFileChooser(
       content::WebContents* tab,
       const content::FileChooserParams& params) OVERRIDE;
   virtual void EnumerateDirectory(content::WebContents* tab,
                                   int request_id,
                                   const base::FilePath& path) OVERRIDE;
-  virtual void JSOutOfMemory(content::WebContents* tab);
-  virtual void RegisterProtocolHandler(content::WebContents* tab,
-                                       const std::string& protocol,
-                                       const GURL& url,
-                                       const string16& title,
-                                       bool user_gesture) OVERRIDE;
-  virtual void FindReply(content::WebContents* tab,
-                         int request_id,
-                         int number_of_matches,
-                         const gfx::Rect& selection_rect,
-                         int active_match_ordinal,
-                         bool final_update) OVERRIDE;
   virtual void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
@@ -182,11 +172,11 @@ class ExternalTabContainerWin : public ExternalTabContainer,
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidFailProvisionalLoad(
       int64 frame_id,
-      const string16& frame_unique_name,
+      const base::string16& frame_unique_name,
       bool is_main_frame,
       const GURL& validated_url,
       int error_code,
-      const string16& error_description,
+      const base::string16& error_description,
       content::RenderViewHost* render_view_host) OVERRIDE;
 
   // Message handlers

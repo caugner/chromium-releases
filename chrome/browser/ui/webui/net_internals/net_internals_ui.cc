@@ -95,6 +95,7 @@
 using base::PassPlatformFile;
 using base::PlatformFile;
 using base::PlatformFileError;
+using base::StringValue;
 using content::BrowserThread;
 using content::WebContents;
 using content::WebUIMessageHandler;
@@ -130,7 +131,7 @@ bool Base64StringToHashes(const std::string& hashes_str,
 
   for (size_t i = 0; i != vector_hash_str.size(); ++i) {
     std::string hash_str;
-    RemoveChars(vector_hash_str[i], " \t\r\n", &hash_str);
+    base::RemoveChars(vector_hash_str[i], " \t\r\n", &hash_str);
     net::HashValue hash;
     // Skip past unrecognized hash algos
     // But return false on malformatted input
@@ -149,52 +150,9 @@ bool Base64StringToHashes(const std::string& hashes_str,
 
 // Returns a Value representing the state of a pre-existing URLRequest when
 // net-internals was opened.
-Value* RequestStateToValue(const net::URLRequest* request,
-                           net::NetLog::LogLevel log_level) {
-  DictionaryValue* dict = new DictionaryValue();
-  dict->SetString("url", request->original_url().possibly_invalid_spec());
-
-  const std::vector<GURL>& url_chain = request->url_chain();
-  if (url_chain.size() > 1) {
-    ListValue* list = new ListValue();
-    for (std::vector<GURL>::const_iterator url = url_chain.begin();
-         url != url_chain.end(); ++url) {
-      list->AppendString(url->spec());
-    }
-    dict->Set("url_chain", list);
-  }
-
-  dict->SetInteger("load_flags", request->load_flags());
-
-  net::LoadStateWithParam load_state = request->GetLoadState();
-  dict->SetInteger("load_state", load_state.state);
-  if (!load_state.param.empty())
-    dict->SetString("load_state_param", load_state.param);
-
-  dict->SetString("method", request->method());
-  dict->SetBoolean("has_upload", request->has_upload());
-  dict->SetBoolean("is_pending", request->is_pending());
-
-  // Add the status of the request.  The status should always be IO_PENDING, and
-  // the error should always be OK, unless something is holding onto a request
-  // that has finished or a request was leaked.  Neither of these should happen.
-  switch (request->status().status()) {
-    case net::URLRequestStatus::SUCCESS:
-      dict->SetString("status", "SUCCESS");
-      break;
-    case net::URLRequestStatus::IO_PENDING:
-      dict->SetString("status", "IO_PENDING");
-      break;
-    case net::URLRequestStatus::CANCELED:
-      dict->SetString("status", "CANCELED");
-      break;
-    case net::URLRequestStatus::FAILED:
-      dict->SetString("status", "FAILED");
-      break;
-  }
-  if (request->status().error() != net::OK)
-    dict->SetInteger("net_error", request->status().error());
-  return dict;
+Value* GetRequestStateAsValue(const net::URLRequest* request,
+                              net::NetLog::LogLevel log_level) {
+  return request->GetStateAsValue();
 }
 
 // Returns true if |request1| was created before |request2|.
@@ -373,14 +331,14 @@ void WriteDebugLogToFile(const StoreDebugLogsCallback& callback,
           callback, PassPlatformFile(&platform_file), file_path));
 }
 
-// Stores debug logs in the .tgz archive on the fileshelf. The file is
-// created on the worker pool, then writing to it is triggered from
+// Stores debug logs in the .tgz archive on the |fileshelf|. The file
+// is created on the worker pool, then writing to it is triggered from
 // the UI thread, and finally it is closed (on success) or deleted (on
 // failure) on the worker pool, prior to calling |callback|.
-void StoreDebugLogs(const StoreDebugLogsCallback& callback) {
+void StoreDebugLogs(const base::FilePath& fileshelf,
+                    const StoreDebugLogsCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
-  const base::FilePath fileshelf = DownloadPrefs::GetDefaultDownloadDirectory();
   DebugLogFileHelper* helper = new DebugLogFileHelper();
   bool posted = base::WorkerPool::PostTaskAndReply(FROM_HERE,
       base::Bind(&DebugLogFileHelper::DoWork,
@@ -838,7 +796,7 @@ void NetInternalsMessageHandler::RegisterMessages() {
 void NetInternalsMessageHandler::SendJavascriptCommand(
     const std::string& command,
     Value* arg) {
-  scoped_ptr<Value> command_value(Value::CreateStringValue(command));
+  scoped_ptr<Value> command_value(new StringValue(command));
   scoped_ptr<Value> value(arg);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (value.get()) {
@@ -1229,7 +1187,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnEnableIPv6(
 void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTests(
     const ListValue* list) {
   // |value| should be: [<URL to test>].
-  string16 url_str;
+  base::string16 url_str;
   CHECK(list->GetString(0, &url_str));
 
   // Try to fix-up the user provided URL into something valid.
@@ -1576,13 +1534,17 @@ void NetInternalsMessageHandler::OnImportONCFile(const ListValue* list) {
   }
 
   LOG_IF(ERROR, !error.empty()) << error;
-  SendJavascriptCommand("receivedONCFileParse",
-                        Value::CreateStringValue(error));
+  SendJavascriptCommand("receivedONCFileParse", new StringValue(error));
 }
 
 void NetInternalsMessageHandler::OnStoreDebugLogs(const ListValue* list) {
   DCHECK(list);
-  StoreDebugLogs(
+
+  SendJavascriptCommand("receivedStoreDebugLogs",
+                        new StringValue("Creating log file..."));
+  const DownloadPrefs* const prefs =
+      DownloadPrefs::FromBrowserContext(Profile::FromWebUI(web_ui()));
+  StoreDebugLogs(prefs->DownloadPath(),
       base::Bind(&NetInternalsMessageHandler::OnStoreDebugLogsCompleted,
                  AsWeakPtr()));
 }
@@ -1594,8 +1556,7 @@ void NetInternalsMessageHandler::OnStoreDebugLogsCompleted(
     status = "Created log file: " + log_path.BaseName().AsUTF8Unsafe();
   else
     status = "Failed to create log file";
-  SendJavascriptCommand("receivedStoreDebugLogs",
-                        Value::CreateStringValue(status));
+  SendJavascriptCommand("receivedStoreDebugLogs", new StringValue(status));
 }
 
 void NetInternalsMessageHandler::OnSetNetworkDebugMode(const ListValue* list) {
@@ -1619,8 +1580,7 @@ void NetInternalsMessageHandler::OnSetNetworkDebugModeCompleted(
     status = "Debug mode is changed to " + subsystem;
   else
     status = "Failed to change debug mode to " + subsystem;
-  SendJavascriptCommand("receivedSetNetworkDebugMode",
-                        Value::CreateStringValue(status));
+  SendJavascriptCommand("receivedSetNetworkDebugMode", new StringValue(status));
 }
 #endif  // defined(OS_CHROMEOS)
 
@@ -1813,7 +1773,7 @@ void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
        request_it != requests.end(); ++request_it) {
     const net::URLRequest* request = *request_it;
     net::NetLog::ParametersCallback callback =
-        base::Bind(&RequestStateToValue, base::Unretained(request));
+        base::Bind(&GetRequestStateAsValue, base::Unretained(request));
 
     // Create and add the entry directly, to avoid sending it to any other
     // NetLog observers.

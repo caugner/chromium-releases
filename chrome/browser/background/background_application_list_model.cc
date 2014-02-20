@@ -22,14 +22,14 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/extensions/background_info.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/extension_resource.h"
+#include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "ui/base/l10n/l10n_util_collator.h"
 #include "ui/gfx/image/image.h"
@@ -59,7 +59,7 @@ ExtensionNameComparator::ExtensionNameComparator(icu::Collator* collator)
 bool ExtensionNameComparator::operator()(
     const scoped_refptr<const Extension>& x,
     const scoped_refptr<const Extension>& y) {
-  return l10n_util::StringComparator<string16>(collator_)(
+  return l10n_util::StringComparator<base::string16>(collator_)(
       UTF8ToUTF16(x->name()), UTF8ToUTF16(y->name()));
 }
 
@@ -316,7 +316,7 @@ bool BackgroundApplicationListModel::IsBackgroundApp(
 
   BackgroundContentsService* service =
       BackgroundContentsServiceFactory::GetForProfile(profile);
-  string16 app_id = ASCIIToUTF16(extension.id());
+  base::string16 app_id = ASCIIToUTF16(extension.id());
   // If we have an active or registered background contents for this app, then
   // it's a background app. This covers the cases where the app has created its
   // background contents, but it hasn't navigated yet, or the background
