@@ -125,6 +125,7 @@ void FilterUntrustedPolicy(PolicyMap* policy) {
   const PolicyMap::Entry* map_entry =
       policy->Get(policy::key::kExtensionInstallForcelist);
   if (map_entry && map_entry->value) {
+    int invalid_policies = 0;
     const base::ListValue* policy_list_value = NULL;
     if (!map_entry->value->GetAsList(&policy_list_value))
       return;
@@ -139,8 +140,10 @@ void FilterUntrustedPolicy(PolicyMap* policy) {
       if (pos == std::string::npos)
         continue;
       // Only allow custom update urls in enterprise environments.
-      if (!LowerCaseEqualsASCII(entry.substr(pos), kExpectedWebStoreUrl))
+      if (!LowerCaseEqualsASCII(entry.substr(pos), kExpectedWebStoreUrl)) {
         entry = kBlockedExtensionPrefix + entry;
+        invalid_policies++;
+      }
 
       filtered_values->AppendString(entry);
     }
@@ -148,6 +151,8 @@ void FilterUntrustedPolicy(PolicyMap* policy) {
                 map_entry->level, map_entry->scope,
                 filtered_values.release(),
                 map_entry->external_data_fetcher);
+    UMA_HISTOGRAM_COUNTS("EnterpriseCheck.InvalidPoliciesDetected",
+                         invalid_policies);
   }
 }
 
@@ -328,7 +333,7 @@ const base::FilePath::CharType PolicyLoaderWin::kPRegFileName[] =
 
 PolicyLoaderWin::PolicyLoaderWin(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
-    const string16& chrome_policy_key,
+    const base::string16& chrome_policy_key,
     AppliedGPOListProvider* gpo_provider)
     : AsyncPolicyLoader(task_runner),
       is_initialized_(false),
@@ -362,7 +367,7 @@ PolicyLoaderWin::~PolicyLoaderWin() {
 // static
 scoped_ptr<PolicyLoaderWin> PolicyLoaderWin::Create(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
-    const string16& chrome_policy_key) {
+    const base::string16& chrome_policy_key) {
   return make_scoped_ptr(
       new PolicyLoaderWin(task_runner,
                           chrome_policy_key,

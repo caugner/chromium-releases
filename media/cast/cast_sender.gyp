@@ -14,8 +14,6 @@
       'type': 'static_library',
       'include_dirs': [
         '<(DEPTH)/',
-        '<(DEPTH)/third_party/',
-        '<(DEPTH)/third_party/webrtc/',
       ],
       'sources': [
         'cast_sender.h',
@@ -23,11 +21,9 @@
         'cast_sender_impl.h',
       ], # source
       'dependencies': [
-        '<(DEPTH)/crypto/crypto.gyp:crypto',
+        '<(DEPTH)/media/cast/transport/cast_transport.gyp:cast_transport',
         'audio_sender',
         'congestion_control',
-        'net/pacing/paced_sender.gyp:cast_paced_sender',
-        'net/rtp_sender/rtp_sender.gyp:cast_rtp_sender',
         'rtcp/rtcp.gyp:cast_rtcp',
         'video_sender',
       ], # dependencies

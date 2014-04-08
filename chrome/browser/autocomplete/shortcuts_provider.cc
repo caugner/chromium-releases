@@ -19,6 +19,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/autocomplete/history_provider.h"
@@ -56,7 +57,8 @@ class DestinationURLEqualsURL {
 const URLPrefix* BestURLPrefixWithWWWCase(
     const base::string16& text,
     const base::string16& prefix_suffix) {
-  CR_DEFINE_STATIC_LOCAL(URLPrefix, www_prefix, (ASCIIToUTF16("www."), 1));
+  CR_DEFINE_STATIC_LOCAL(URLPrefix, www_prefix,
+                         (base::ASCIIToUTF16("www."), 1));
   const URLPrefix* best_prefix = URLPrefix::BestURLPrefix(text, prefix_suffix);
   if ((best_prefix == NULL) ||
       (best_prefix->num_components < www_prefix.num_components)) {
@@ -176,8 +178,16 @@ void ShortcutsProvider::GetMatches(const AutocompleteInput& input) {
       matches_.push_back(ShortcutToACMatch(
           it->second, relevance, term_string, fixed_up_term_string,
           input.prevent_inline_autocomplete()));
+      matches_.back().ComputeStrippedDestinationURL(profile_);
     }
   }
+  // Remove duplicates.
+  std::sort(matches_.begin(), matches_.end(),
+            &AutocompleteMatch::DestinationSortFunc);
+  matches_.erase(std::unique(matches_.begin(), matches_.end(),
+                             &AutocompleteMatch::DestinationsEqual),
+                 matches_.end());
+  // Find best matches.
   std::partial_sort(matches_.begin(),
       matches_.begin() +
           std::min(AutocompleteProvider::kMaxMatches, matches_.size()),
@@ -220,7 +230,8 @@ AutocompleteMatch ShortcutsProvider::ShortcutToACMatch(
   DCHECK(match.destination_url.is_valid());
   match.RecordAdditionalInfo("number of hits", shortcut.number_of_hits);
   match.RecordAdditionalInfo("last access time", shortcut.last_access_time);
-  match.RecordAdditionalInfo("original input text", UTF16ToUTF8(shortcut.text));
+  match.RecordAdditionalInfo("original input text",
+                             base::UTF16ToUTF8(shortcut.text));
 
   // Set |inline_autocompletion| and |allowed_to_be_default_match| if possible.
   // If the match is a search query this is easy: simply check whether the

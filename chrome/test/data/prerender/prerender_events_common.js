@@ -12,6 +12,7 @@ var hadPrerenderEventErrors = false;
 
 var receivedPrerenderStartEvents = [];
 var receivedPrerenderLoadEvents = [];
+var receivedPrerenderDomContentLoadedEvents = [];
 var receivedPrerenderStopEvents = [];
 
 function PrerenderStartHandler(index) {
@@ -35,6 +36,17 @@ function PrerenderLoadHandler(index) {
   receivedPrerenderLoadEvents[index]++;
 }
 
+function PrerenderDomContentLoadedHandler(index) {
+  if (!receivedPrerenderStartEvents[index] ||
+      receivedPrerenderStopEvents[index]) {
+    hadPrerenderEventErrors = true;
+    return;
+  }
+  if (!receivedPrerenderDomContentLoadedEvents[index])
+    receivedPrerenderDomContentLoadedEvents[index] = 0;
+  receivedPrerenderDomContentLoadedEvents[index]++;
+}
+
 function PrerenderStopHandler(index) {
   if (!receivedPrerenderStartEvents[index] ||
       receivedPrerenderStopEvents[index]) {
@@ -49,6 +61,113 @@ function AddEventHandlersToLinkElement(link, index) {
                         PrerenderStartHandler.bind(null, index), false);
   link.addEventListener('webkitprerenderload',
                         PrerenderLoadHandler.bind(null, index), false);
+  link.addEventListener('webkitprerenderdomcontentloaded',
+                        PrerenderDomContentLoadedHandler.bind(null, index),
+                        false);
   link.addEventListener('webkitprerenderstop',
                         PrerenderStopHandler.bind(null, index), false);
+}
+
+function AddPrerender(url, index) {
+  var link = document.createElement('link');
+  link.rel = 'prerender';
+  link.href = url;
+  AddEventHandlersToLinkElement(link, index);
+  document.body.appendChild(link);
+  return link;
+}
+
+function AddAnchor(href, target) {
+  var a = document.createElement('a');
+  a.href = href;
+  if (target)
+    a.target = target;
+  document.body.appendChild(a);
+  return a;
+}
+
+function Click(url) {
+  AddAnchor(url).dispatchEvent(new MouseEvent('click', {
+    view: window,
+    bubbles: true,
+    cancelable: true,
+    detail: 1
+  }));
+}
+
+function ClickTarget(url) {
+  var eventObject = new MouseEvent('click', {
+    view: window,
+    bubbles: true,
+    cancelable: true,
+    detail: 1
+  });
+  AddAnchor(url, '_blank').dispatchEvent(eventObject);
+}
+
+function ClickPing(url, pingUrl) {
+  var a = AddAnchor(url);
+  a.ping = pingUrl;
+  a.dispatchEvent(new MouseEvent('click', {
+    view: window,
+    bubbles: true,
+    cancelable: true,
+    detail: 1
+  }));
+}
+
+function ShiftClick(url) {
+  AddAnchor(url).dispatchEvent(new MouseEvent('click', {
+    view: window,
+    bubbles: true,
+    cancelable: true,
+    detail: 1,
+    shiftKey: true
+  }));
+}
+
+function CtrlClick(url) {
+  AddAnchor(url).dispatchEvent(new MouseEvent('click', {
+    view: window,
+    bubbles: true,
+    cancelable: true,
+    detail: 1,
+    ctrlKey: true
+  }));
+}
+
+function CtrlShiftClick(url) {
+  AddAnchor(url).dispatchEvent(new MouseEvent('click', {
+    view: window,
+    bubbles: true,
+    cancelable: true,
+    detail: 1,
+    ctrlKey: true,
+    shiftKey: true
+  }));
+}
+
+function MetaClick(url) {
+  AddAnchor(url).dispatchEvent(new MouseEvent('click', {
+    view: window,
+    bubbles: true,
+    cancelable: true,
+    detail: 1,
+    metaKey: true
+  }));
+}
+
+function MetaShiftClick(url) {
+  AddAnchor(url).dispatchEvent(new MouseEvent('click', {
+    view: window,
+    bubbles: true,
+    cancelable: true,
+    detail: 1,
+    metaKey: true,
+    shiftKey: true
+  }));
+}
+
+function WindowOpen(url) {
+  window.open(url);
 }

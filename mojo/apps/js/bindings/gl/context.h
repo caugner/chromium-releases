@@ -7,42 +7,67 @@
 
 #include <GLES2/gl2.h>
 
+#include "base/memory/weak_ptr.h"
 #include "gin/handle.h"
 #include "gin/public/wrapper_info.h"
+#include "gin/runner.h"
 #include "gin/wrappable.h"
-#include "mojo/apps/js/bindings/gl/opaque.h"
+#include "mojo/apps/js/bindings/handle.h"
+#include "mojo/public/gles2/gles2.h"
 #include "v8/include/v8.h"
 
 namespace gin {
 class Arguments;
+class ArrayBufferView;
 }
 
 namespace mojo {
 namespace js {
 namespace gl {
 
-typedef Opaque Shader;
-
 // Context implements WebGLRenderingContext.
 class Context : public gin::Wrappable<Context> {
  public:
   static gin::WrapperInfo kWrapperInfo;
 
-  static gin::Handle<Context> Create(v8::Isolate* isolate, uint64_t encoded,
-                                     int width, int height);
-  static v8::Handle<v8::ObjectTemplate> GetObjectTemplate(v8::Isolate* isolate);
+  // TODO(piman): draw animation frame callback.
+  static gin::Handle<Context> Create(
+      v8::Isolate* isolate,
+      mojo::Handle handle,
+      v8::Handle<v8::Function> context_lost_callback);
 
-  static gin::Handle<Shader> CreateShader(const gin::Arguments& arguments,
-                                          GLenum type);
-  static void ShaderSource(gin::Handle<Shader> shader,
-                           const std::string& source);
-  static void CompileShader(const gin::Arguments& arguments,
-                            gin::Handle<Shader> shader);
+  static void BufferData(GLenum target, const gin::ArrayBufferView& buffer,
+                         GLenum usage);
+  static void CompileShader(const gin::Arguments& args, GLuint shader);
+  static GLuint CreateBuffer();
+  static void DrawElements(GLenum mode, GLsizei count, GLenum type,
+                           uint64_t indices);
+  static GLint GetAttribLocation(GLuint program, const std::string& name);
+  static std::string GetProgramInfoLog(GLuint program);
+  static std::string GetShaderInfoLog(GLuint shader);
+  static GLint GetUniformLocation(GLuint program, const std::string& name);
+  static void ShaderSource(GLuint shader, const std::string& source);
+  static void UniformMatrix4fv(GLint location, GLboolean transpose,
+                               const gin::ArrayBufferView& buffer);
+  static void VertexAttribPointer(GLuint index, GLint size, GLenum type,
+                                  GLboolean normalized, GLsizei stride,
+                                  uint64_t offset);
 
  private:
-  Context(uint64_t encoded, int width, int height);
+  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) OVERRIDE;
 
-  uint64_t encoded_;
+  explicit Context(v8::Isolate* isolate,
+                   mojo::Handle handle,
+                   v8::Handle<v8::Function> context_lost_callback);
+  virtual ~Context();
+
+  void ContextLost();
+  static void ContextLostThunk(void* closure);
+
+  base::WeakPtr<gin::Runner> runner_;
+  v8::Persistent<v8::Function> context_lost_callback_;
+  MojoGLES2Context context_;
 };
 
 }  // namespace gl

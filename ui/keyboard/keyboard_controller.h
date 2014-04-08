@@ -27,6 +27,7 @@ class TextInputClient;
 
 namespace keyboard {
 
+class CallbackAnimationObserver;
 class KeyboardControllerObserver;
 class KeyboardControllerProxy;
 class KeyboardLayoutManager;
@@ -51,6 +52,11 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   // Returns the container for the keyboard, which is owned by
   // KeyboardController.
   aura::Window* GetContainerWindow();
+
+  // Whether the container window for the keyboard has been initialized.
+  bool keyboard_container_initialized() const {
+    return container_.get() != NULL;
+  }
 
   // Sets the override content url. This is used by for input view for extension
   // IMEs.
@@ -92,12 +98,25 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
       const ui::TextInputClient* client) OVERRIDE;
   virtual void OnInputMethodDestroyed(
       const ui::InputMethod* input_method) OVERRIDE;
+  virtual void OnShowImeIfNeeded() OVERRIDE;
+
+  // Show virtual keyboard immediately with animation.
+  void ShowKeyboard();
 
   // Returns true if keyboard is scheduled to hide.
   bool WillHideKeyboard() const;
 
+  // Called when show and hide animation finished successfully. If the animation
+  // is aborted, it won't be called.
+  void ShowAnimationFinished();
+  void HideAnimationFinished();
+
   scoped_ptr<KeyboardControllerProxy> proxy_;
   scoped_ptr<aura::Window> container_;
+  // CallbackAnimationObserver should destructed before container_ because it
+  // uses container_'s animator.
+  scoped_ptr<CallbackAnimationObserver> animation_observer_;
+
   ui::InputMethod* input_method_;
   bool keyboard_visible_;
   bool lock_keyboard_;

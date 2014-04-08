@@ -10,6 +10,7 @@
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -115,16 +116,12 @@ class KioskProfileLoader::CryptohomedChecker
 ////////////////////////////////////////////////////////////////////////////////
 // KioskProfileLoader
 
-KioskProfileLoader::KioskProfileLoader(KioskAppManager* kiosk_app_manager,
-                                       const std::string& app_id,
+KioskProfileLoader::KioskProfileLoader(const std::string& app_user_id,
+                                       bool force_ephemeral,
                                        Delegate* delegate)
-    : kiosk_app_manager_(kiosk_app_manager),
-      app_id_(app_id),
-      delegate_(delegate) {
-  KioskAppManager::App app;
-  CHECK(kiosk_app_manager_->GetApp(app_id_, &app));
-  user_id_ = app.user_id;
-}
+    : user_id_(app_user_id),
+      force_ephemeral_(force_ephemeral),
+      delegate_(delegate) {}
 
 KioskProfileLoader::~KioskProfileLoader() {}
 
@@ -137,7 +134,7 @@ void KioskProfileLoader::Start() {
 
 void KioskProfileLoader::LoginAsKioskAccount() {
   login_performer_.reset(new LoginPerformer(this));
-  login_performer_->LoginAsKioskAccount(user_id_);
+  login_performer_->LoginAsKioskAccount(user_id_, force_ephemeral_);
 }
 
 void KioskProfileLoader::ReportLaunchResult(KioskAppLaunchError::Error error) {
@@ -153,7 +150,15 @@ void KioskProfileLoader::OnLoginSuccess(const UserContext& user_context)  {
   login_performer_->set_delegate(NULL);
   ignore_result(login_performer_.release());
 
-  LoginUtils::Get()->PrepareProfile(user_context,
+  // If we are launching a demo session, we need to start MountGuest with the
+  // guest username; this is because there are several places in the cros code
+  // which rely on the username sent to cryptohome to be $guest. Back in Chrome
+  // we switch this back to the demo user name to correctly identify this
+  // user as a demo user.
+  UserContext context = user_context;
+  if (context.username == UserManager::kGuestUserName)
+    context.username = DemoAppLauncher::kDemoUserName;
+  LoginUtils::Get()->PrepareProfile(context,
                                     std::string(),  // display email
                                     false,  // has_cookies
                                     false,  // has_active_session

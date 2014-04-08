@@ -287,11 +287,11 @@ void WebUILoginDisplay::MigrateUserData(const std::string& old_password) {
 }
 
 void WebUILoginDisplay::LoadWallpaper(const std::string& username) {
-  WallpaperManager::Get()->SetUserWallpaper(username);
+  WallpaperManager::Get()->SetUserWallpaperDelayed(username);
 }
 
 void WebUILoginDisplay::LoadSigninWallpaper() {
-  WallpaperManager::Get()->SetDefaultWallpaper();
+  WallpaperManager::Get()->SetDefaultWallpaperDelayed(UserManager::kSignInUser);
 }
 
 void WebUILoginDisplay::OnSigninScreenReady() {
@@ -379,8 +379,9 @@ void WebUILoginDisplay::Signout() {
   delegate_->Signout();
 }
 
-void WebUILoginDisplay::LoginAsKioskApp(const std::string& app_id) {
-  delegate_->LoginAsKioskApp(app_id);
+void WebUILoginDisplay::LoginAsKioskApp(const std::string& app_id,
+                                        bool diagnostic_mode) {
+  delegate_->LoginAsKioskApp(app_id, diagnostic_mode);
 }
 
 void WebUILoginDisplay::OnUserActivity(const ui::Event* event) {

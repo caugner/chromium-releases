@@ -12,11 +12,13 @@ namespace mojo {
 // Implementors of the core APIs can use this interface to install their
 // implementation into the mojo_system dynamic library. Mojo clients should not
 // call these functions directly.
-class MOJO_SYSTEM_EXPORT CorePrivate {
+class MOJO_SYSTEM_EXPORT Core {
  public:
-  virtual ~CorePrivate();
+  virtual ~Core();
 
-  static void Init(CorePrivate* core);
+  static void Init(Core* core);
+  static Core* Get();
+  static void Reset();
 
   virtual MojoTimeTicks GetTimeTicksNow() = 0;
   virtual MojoResult Close(MojoHandle handle) = 0;
@@ -27,8 +29,8 @@ class MOJO_SYSTEM_EXPORT CorePrivate {
                               const MojoWaitFlags* flags,
                               uint32_t num_handles,
                               MojoDeadline deadline) = 0;
-  virtual MojoResult CreateMessagePipe(MojoHandle* message_pipe_handle_0,
-                                       MojoHandle* message_pipe_handle_1) = 0;
+  virtual MojoResult CreateMessagePipe(MojoHandle* message_pipe_handle0,
+                                       MojoHandle* message_pipe_handle1) = 0;
   virtual MojoResult WriteMessage(MojoHandle message_pipe_handle,
                                   const void* bytes,
                                   uint32_t num_bytes,
@@ -64,6 +66,20 @@ class MOJO_SYSTEM_EXPORT CorePrivate {
                                    MojoReadDataFlags flags) = 0;
   virtual MojoResult EndReadData(MojoHandle data_pipe_consumer_handle,
                                  uint32_t num_elements_read) = 0;
+  virtual MojoResult CreateSharedBuffer(
+      const MojoCreateSharedBufferOptions* options,
+      uint64_t* num_bytes,
+      MojoHandle* shared_buffer_handle) = 0;
+  virtual MojoResult DuplicateBufferHandle(
+      MojoHandle buffer_handle,
+      const MojoDuplicateBufferHandleOptions* options,
+      MojoHandle* new_buffer_handle) = 0;
+  virtual MojoResult MapBuffer(MojoHandle buffer_handle,
+                               uint64_t offset,
+                               uint64_t num_bytes,
+                               void** buffer,
+                               MojoMapBufferFlags flags) = 0;
+  virtual MojoResult UnmapBuffer(void* buffer) = 0;
 };
 
 }  // namespace mojo

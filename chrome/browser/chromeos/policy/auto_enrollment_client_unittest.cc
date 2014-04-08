@@ -34,6 +34,7 @@ const char* kSerialHash =
     "\x6f\x02\x4a\xd7\xeb\x92\x45\xfc\xd4\xe4\x37\xa1\x55\x2b\x13\x8a";
 
 using ::testing::InSequence;
+using ::testing::Mock;
 using ::testing::SaveArg;
 using ::testing::_;
 
@@ -118,10 +119,10 @@ class AutoEnrollmentClientTest : public testing::Test {
   void VerifyCachedResult(bool should_enroll, int power_limit) {
     base::FundamentalValue value_should_enroll(should_enroll);
     base::FundamentalValue value_power_limit(power_limit);
-    EXPECT_TRUE(Value::Equals(
+    EXPECT_TRUE(base::Value::Equals(
         &value_should_enroll,
         local_state_->GetUserPref(prefs::kShouldAutoEnroll)));
-    EXPECT_TRUE(Value::Equals(
+    EXPECT_TRUE(base::Value::Equals(
         &value_power_limit,
         local_state_->GetUserPref(prefs::kAutoEnrollmentPowerLimit)));
   }
@@ -322,9 +323,9 @@ TEST_F(AutoEnrollmentClientTest, MoreThan32BitsUploaded) {
 TEST_F(AutoEnrollmentClientTest, ReuseCachedDecision) {
   EXPECT_CALL(*service_, CreateJob(_, _)).Times(0);
   local_state_->SetUserPref(prefs::kShouldAutoEnroll,
-                            Value::CreateBooleanValue(true));
+                            base::Value::CreateBooleanValue(true));
   local_state_->SetUserPref(prefs::kAutoEnrollmentPowerLimit,
-                            Value::CreateIntegerValue(8));
+                            base::Value::CreateIntegerValue(8));
   client_->Start();
   EXPECT_TRUE(client_->should_auto_enroll());
   EXPECT_EQ(1, completion_callback_count_);
@@ -336,9 +337,9 @@ TEST_F(AutoEnrollmentClientTest, ReuseCachedDecision) {
 
 TEST_F(AutoEnrollmentClientTest, RetryIfPowerLargerThanCached) {
   local_state_->SetUserPref(prefs::kShouldAutoEnroll,
-                            Value::CreateBooleanValue(false));
+                            base::Value::CreateBooleanValue(false));
   local_state_->SetUserPref(prefs::kAutoEnrollmentPowerLimit,
-                            Value::CreateIntegerValue(8));
+                            base::Value::CreateIntegerValue(8));
   CreateClient(kSerial, 5, 10);
   ServerWillReply(-1, true, true);
   client_->Start();
@@ -450,6 +451,35 @@ TEST_F(AutoEnrollmentClientTest, CancelAndDeleteSoonAfterNetworkFailure) {
   EXPECT_TRUE(base::MessageLoop::current()->IsIdleForTesting());
   client_.release()->CancelAndDeleteSoon();
   EXPECT_TRUE(base::MessageLoop::current()->IsIdleForTesting());
+}
+
+TEST_F(AutoEnrollmentClientTest, NetworkFailureThenRequireUpdatedModulus) {
+  // This test verifies that if the first request fails due to a network
+  // problem then the second request will correctly handle an updated
+  // modulus request from the server.
+
+  ServerWillFail(DM_STATUS_REQUEST_FAILED);
+  client_->Start();
+  EXPECT_FALSE(client_->should_auto_enroll());
+  // Don't invoke the callback if there was a network failure.
+  EXPECT_EQ(0, completion_callback_count_);
+  EXPECT_FALSE(HasCachedDecision());
+  Mock::VerifyAndClearExpectations(service_.get());
+
+  InSequence sequence;
+  // The default client uploads 4 bits. Make the server ask for 5.
+  ServerWillReply(1 << 5, false, false);
+  EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _, _));
+  // Then reply with a valid response and include the hash.
+  ServerWillReply(-1, true, true);
+  EXPECT_CALL(*service_, StartJob(_, _, _, _, _, _, _));
+
+  // Trigger a network change event.
+  client_->OnNetworkChanged(net::NetworkChangeNotifier::CONNECTION_ETHERNET);
+  EXPECT_TRUE(client_->should_auto_enroll());
+  EXPECT_EQ(1, completion_callback_count_);
+  EXPECT_TRUE(HasCachedDecision());
+  Mock::VerifyAndClearExpectations(service_.get());
 }
 
 }  // namespace

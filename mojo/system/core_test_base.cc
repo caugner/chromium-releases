@@ -30,6 +30,10 @@ class MockDispatcher : public Dispatcher {
     info_->IncrementCtorCallCount();
   }
 
+  virtual Type GetType() const OVERRIDE {
+    return kTypeUnknown;
+  }
+
  private:
   friend class base::RefCountedThreadSafe<MockDispatcher>;
   virtual ~MockDispatcher() {
@@ -37,16 +41,15 @@ class MockDispatcher : public Dispatcher {
   }
 
   // |Dispatcher| implementation/overrides:
-  virtual MojoResult CloseImplNoLock() OVERRIDE {
+  virtual void CloseImplNoLock() OVERRIDE {
     info_->IncrementCloseCallCount();
     lock().AssertAcquired();
-    return MOJO_RESULT_OK;
   }
 
   virtual MojoResult WriteMessageImplNoLock(
       const void* bytes,
       uint32_t num_bytes,
-      const std::vector<Dispatcher*>* dispatchers,
+      std::vector<DispatcherTransport>* transports,
       MojoWriteMessageFlags /*flags*/) OVERRIDE {
     info_->IncrementWriteMessageCallCount();
     lock().AssertAcquired();
@@ -56,7 +59,7 @@ class MockDispatcher : public Dispatcher {
     if (num_bytes > kMaxMessageNumBytes)
       return MOJO_RESULT_RESOURCE_EXHAUSTED;
 
-    if (dispatchers)
+    if (transports)
       return MOJO_RESULT_UNIMPLEMENTED;
 
     return MOJO_RESULT_OK;
@@ -79,7 +82,7 @@ class MockDispatcher : public Dispatcher {
 
   virtual MojoResult WriteDataImplNoLock(
       const void* /*elements*/,
-      uint32_t* /*num_elements*/,
+      uint32_t* /*num_bytes*/,
       MojoWriteDataFlags /*flags*/) OVERRIDE {
     info_->IncrementWriteDataCallCount();
     lock().AssertAcquired();
@@ -88,7 +91,7 @@ class MockDispatcher : public Dispatcher {
 
   virtual MojoResult BeginWriteDataImplNoLock(
       void** /*buffer*/,
-      uint32_t* /*buffer_num_elements*/,
+      uint32_t* /*buffer_num_bytes*/,
       MojoWriteDataFlags /*flags*/) OVERRIDE {
     info_->IncrementBeginWriteDataCallCount();
     lock().AssertAcquired();
@@ -96,14 +99,14 @@ class MockDispatcher : public Dispatcher {
   }
 
   virtual MojoResult EndWriteDataImplNoLock(
-      uint32_t /*num_elements_written*/) OVERRIDE {
+      uint32_t /*num_bytes_written*/) OVERRIDE {
     info_->IncrementEndWriteDataCallCount();
     lock().AssertAcquired();
     return MOJO_RESULT_UNIMPLEMENTED;
   }
 
   virtual MojoResult ReadDataImplNoLock(void* /*elements*/,
-                                        uint32_t* /*num_elements*/,
+                                        uint32_t* /*num_bytes*/,
                                         MojoReadDataFlags /*flags*/) OVERRIDE {
     info_->IncrementReadDataCallCount();
     lock().AssertAcquired();
@@ -112,7 +115,7 @@ class MockDispatcher : public Dispatcher {
 
   virtual MojoResult BeginReadDataImplNoLock(
       const void** /*buffer*/,
-      uint32_t* /*buffer_num_elements*/,
+      uint32_t* /*buffer_num_bytes*/,
       MojoReadDataFlags /*flags*/) OVERRIDE {
     info_->IncrementBeginReadDataCallCount();
     lock().AssertAcquired();
@@ -120,7 +123,7 @@ class MockDispatcher : public Dispatcher {
   }
 
   virtual MojoResult EndReadDataImplNoLock(
-      uint32_t /*num_elements_read*/) OVERRIDE {
+      uint32_t /*num_bytes_read*/) OVERRIDE {
     info_->IncrementEndReadDataCallCount();
     lock().AssertAcquired();
     return MOJO_RESULT_UNIMPLEMENTED;
@@ -176,8 +179,7 @@ void CoreTestBase::TearDown() {
 MojoHandle CoreTestBase::CreateMockHandle(CoreTestBase::MockHandleInfo* info) {
   CHECK(core_);
   scoped_refptr<MockDispatcher> dispatcher(new MockDispatcher(info));
-  base::AutoLock locker(core_->handle_table_lock_);
-  return core_->AddDispatcherNoLock(dispatcher);
+  return core_->AddDispatcher(dispatcher);
 }
 
 // CoreTestBase_MockHandleInfo -------------------------------------------------

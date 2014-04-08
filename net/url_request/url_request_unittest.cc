@@ -83,6 +83,7 @@
 #include "base/win/windows_version.h"
 #endif
 
+using base::ASCIIToUTF16;
 using base::Time;
 
 namespace net {
@@ -239,14 +240,6 @@ UploadDataStream* CreateSimpleUploadData(const char* data) {
 
 // Verify that the SSLInfo of a successful SSL connection has valid values.
 void CheckSSLInfo(const SSLInfo& ssl_info) {
-  // Allow ChromeFrame fake SSLInfo to get through.
-  if (ssl_info.cert.get() &&
-      ssl_info.cert.get()->issuer().GetDisplayName() == "Chrome Internal") {
-    // -1 means unknown.
-    EXPECT_EQ(ssl_info.security_bits, -1);
-    return;
-  }
-
   // -1 means unknown.  0 means no encryption.
   EXPECT_GT(ssl_info.security_bits, 0);
 
@@ -1008,7 +1001,7 @@ TEST_F(URLRequestTest, FileDirOutputSanity) {
 
   // Generate entry for the sentinel file.
   base::FilePath sentinel_path = path.AppendASCII(sentinel_name);
-  base::PlatformFileInfo info;
+  base::File::Info info;
   EXPECT_TRUE(base::GetFileInfo(sentinel_path, &info));
   EXPECT_GT(info.size, 0);
   std::string sentinel_output = GetDirectoryListingEntry(
@@ -1964,6 +1957,7 @@ TEST_F(URLRequestTest, PriorityIgnoreLimits) {
 // A subclass of SpawnedTestServer that uses a statically-configured hostname.
 // This is to work around mysterious failures in chrome_frame_net_tests. See:
 // http://crbug.com/114369
+// TODO(erikwright): remove or update as needed; see http://crbug.com/334634.
 class LocalHttpTestServer : public SpawnedTestServer {
  public:
   explicit LocalHttpTestServer(const base::FilePath& document_root)
@@ -2689,10 +2683,7 @@ class URLRequestTestHTTP : public URLRequestTest {
     bool is_success = r.status().is_success();
 
     if (!is_success) {
-      // Requests handled by ChromeFrame send a less precise error message,
-      // ERR_CONNECTION_ABORTED.
-      EXPECT_TRUE(r.status().error() == ERR_RESPONSE_HEADERS_TOO_BIG ||
-                  r.status().error() == ERR_CONNECTION_ABORTED);
+      EXPECT_TRUE(r.status().error() == ERR_RESPONSE_HEADERS_TOO_BIG);
       // The test server appears to be unable to handle subsequent requests
       // after this error is triggered. Force it to restart.
       EXPECT_TRUE(test_server_.Stop());
@@ -3826,6 +3817,22 @@ class AsyncDelegateLogger : public base::RefCounted<AsyncDelegateLogger> {
     return log_position + 1;
   }
 
+  // Find delegate request begin and end messages for OnBeforeNetworkStart.
+  // Returns the position of the end message.
+  static size_t ExpectBeforeNetworkEvents(
+      const CapturingNetLog::CapturedEntryList& entries,
+      size_t log_position) {
+    log_position =
+        ExpectLogContainsSomewhereAfter(entries,
+                                        log_position,
+                                        NetLog::TYPE_URL_REQUEST_DELEGATE,
+                                        NetLog::PHASE_BEGIN);
+    EXPECT_EQ(NetLog::TYPE_URL_REQUEST_DELEGATE,
+              entries[log_position + 1].type);
+    EXPECT_EQ(NetLog::PHASE_END, entries[log_position + 1].phase);
+    return log_position + 1;
+  }
+
  private:
   friend class base::RefCounted<AsyncDelegateLogger>;
 
@@ -3872,7 +3879,7 @@ class AsyncDelegateLogger : public base::RefCounted<AsyncDelegateLogger> {
     LoadStateWithParam load_state = url_request_->GetLoadState();
     EXPECT_EQ(expected_third_load_state_, load_state.state);
     if (expected_second_load_state_ == LOAD_STATE_WAITING_FOR_DELEGATE)
-      EXPECT_EQ(string16(), load_state.param);
+      EXPECT_EQ(base::string16(), load_state.param);
     callback_.Run();
   }
 
@@ -4064,7 +4071,7 @@ TEST_F(URLRequestTestHTTP, DelegateInfoBeforeStart) {
                  &context);
     LoadStateWithParam load_state = r.GetLoadState();
     EXPECT_EQ(LOAD_STATE_IDLE, load_state.state);
-    EXPECT_EQ(string16(), load_state.param);
+    EXPECT_EQ(base::string16(), load_state.param);
 
     AsyncDelegateLogger::Run(
         &r,
@@ -4112,7 +4119,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateInfo) {
                  &context);
     LoadStateWithParam load_state = r.GetLoadState();
     EXPECT_EQ(LOAD_STATE_IDLE, load_state.state);
-    EXPECT_EQ(string16(), load_state.param);
+    EXPECT_EQ(base::string16(), load_state.param);
 
     r.Start();
     base::RunLoop().Run();
@@ -4140,6 +4147,11 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateInfo) {
     ASSERT_LT(log_position, entries.size());
     EXPECT_EQ(NetLog::TYPE_URL_REQUEST_DELEGATE, entries[log_position].type);
     EXPECT_EQ(NetLog::PHASE_END, entries[log_position].phase);
+
+    if (i == 1) {
+      log_position = AsyncDelegateLogger::ExpectBeforeNetworkEvents(
+          entries, log_position + 1);
+    }
   }
 
   EXPECT_FALSE(LogContainsEntryWithTypeAfter(
@@ -4165,7 +4177,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateInfoRedirect) {
                  &context);
     LoadStateWithParam load_state = r.GetLoadState();
     EXPECT_EQ(LOAD_STATE_IDLE, load_state.state);
-    EXPECT_EQ(string16(), load_state.param);
+    EXPECT_EQ(base::string16(), load_state.param);
 
     r.Start();
     base::RunLoop().Run();
@@ -4195,6 +4207,11 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateInfoRedirect) {
     ASSERT_LT(log_position, entries.size());
     EXPECT_EQ(NetLog::TYPE_URL_REQUEST_DELEGATE, entries[log_position].type);
     EXPECT_EQ(NetLog::PHASE_END, entries[log_position].phase);
+
+    if (i == 1) {
+      log_position = AsyncDelegateLogger::ExpectBeforeNetworkEvents(
+          entries, log_position + 1);
+    }
   }
 
   // The URLRequest::Delegate then gets informed about the redirect.
@@ -4243,7 +4260,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateInfoAuth) {
                  &context);
     LoadStateWithParam load_state = r.GetLoadState();
     EXPECT_EQ(LOAD_STATE_IDLE, load_state.state);
-    EXPECT_EQ(string16(), load_state.param);
+    EXPECT_EQ(base::string16(), load_state.param);
 
     r.Start();
     base::RunLoop().Run();
@@ -4274,6 +4291,11 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateInfoAuth) {
     ASSERT_LT(log_position, entries.size());
     EXPECT_EQ(NetLog::TYPE_URL_REQUEST_DELEGATE, entries[log_position].type);
     EXPECT_EQ(NetLog::PHASE_END, entries[log_position].phase);
+
+    if (i == 1) {
+      log_position = AsyncDelegateLogger::ExpectBeforeNetworkEvents(
+          entries, log_position + 1);
+    }
   }
 
   EXPECT_FALSE(LogContainsEntryWithTypeAfter(
@@ -4295,7 +4317,7 @@ TEST_F(URLRequestTestHTTP, URLRequestDelegateInfo) {
     // A chunked response with delays between chunks is used to make sure that
     // attempts by the URLRequest delegate to log information while reading the
     // body are ignored.  Since they are ignored, this test is robust against
-    // the possability of multiple reads being combined in the unlikely event
+    // the possibility of multiple reads being combined in the unlikely event
     // that it occurs.
     URLRequest r(test_server_.GetURL("chunked?waitBetweenChunks=20"),
                  DEFAULT_PRIORITY,
@@ -4312,14 +4334,18 @@ TEST_F(URLRequestTestHTTP, URLRequestDelegateInfo) {
   CapturingNetLog::CapturedEntryList entries;
   net_log_.GetEntries(&entries);
 
+  size_t log_position = 0;
+
+  log_position = AsyncDelegateLogger::ExpectBeforeNetworkEvents(
+      entries, log_position);
+
   // The delegate info should only have been logged on header complete.  Other
   // times it should silently be ignored.
-
-  size_t log_position = ExpectLogContainsSomewhereAfter(
-          entries,
-          0,
-          NetLog::TYPE_URL_REQUEST_DELEGATE,
-          NetLog::PHASE_BEGIN);
+  log_position =
+      ExpectLogContainsSomewhereAfter(entries,
+                                      log_position + 1,
+                                      NetLog::TYPE_URL_REQUEST_DELEGATE,
+                                      NetLog::PHASE_BEGIN);
 
   log_position = AsyncDelegateLogger::CheckDelegateInfo(entries,
                                                         log_position + 1);
@@ -4366,6 +4392,11 @@ TEST_F(URLRequestTestHTTP, URLRequestDelegateInfoOnRedirect) {
   // OnResponseStarted.
   size_t log_position = 0;
   for (int i = 0; i < 2; ++i) {
+    if (i == 0) {
+      log_position = AsyncDelegateLogger::ExpectBeforeNetworkEvents(
+                         entries, log_position) + 1;
+    }
+
     log_position = ExpectLogContainsSomewhereAfter(
             entries,
             log_position,
@@ -4426,6 +4457,11 @@ TEST_F(URLRequestTestHTTP, URLRequestDelegateOnRedirectCancelled) {
     // still currently supported in that call.
     size_t log_position = 0;
     for (int i = 0; i < 2; ++i) {
+      if (i == 0) {
+        log_position = AsyncDelegateLogger::ExpectBeforeNetworkEvents(
+                           entries, log_position) + 1;
+      }
+
       log_position = ExpectLogContainsSomewhereAfter(
               entries,
               log_position,
@@ -4766,21 +4802,11 @@ TEST_F(URLRequestTestHTTP, PostUnreadableFileTest) {
 
     base::RunLoop().Run();
 
-    // TODO(tzik): Remove this #if after we stop supporting Chrome Frame.
-    // http://crbug.com/317432
-#if defined(CHROME_FRAME_NET_TESTS)
-    EXPECT_FALSE(d.request_failed());
-    EXPECT_FALSE(d.received_data_before_response());
-    EXPECT_EQ(0, d.bytes_received());
-    EXPECT_EQ(URLRequestStatus::SUCCESS, r.status().status());
-    EXPECT_EQ(OK, r.status().error());
-#else
     EXPECT_TRUE(d.request_failed());
     EXPECT_FALSE(d.received_data_before_response());
     EXPECT_EQ(0, d.bytes_received());
     EXPECT_EQ(URLRequestStatus::FAILED, r.status().status());
     EXPECT_EQ(ERR_FILE_NOT_FOUND, r.status().error());
-#endif  // defined(CHROME_FRAME_NET_TESTS)
   }
 }
 
@@ -5181,6 +5207,95 @@ TEST_F(URLRequestTestHTTP, EmptyReferrerAfterValidReferrer) {
   base::RunLoop().Run();
 
   EXPECT_EQ(std::string("None"), d.data_received());
+}
+
+// Defer network start and then resume, checking that the request was a success
+// and bytes were received.
+TEST_F(URLRequestTestHTTP, DeferredBeforeNetworkStart) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  {
+    d.set_quit_on_network_start(true);
+    GURL test_url(test_server_.GetURL("echo"));
+    URLRequest req(test_url, DEFAULT_PRIORITY, &d, &default_context_);
+
+    req.Start();
+    base::RunLoop().Run();
+
+    EXPECT_EQ(1, d.received_before_network_start_count());
+    EXPECT_EQ(0, d.response_started_count());
+
+    req.ResumeNetworkStart();
+    base::RunLoop().Run();
+
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_NE(0, d.bytes_received());
+    EXPECT_EQ(URLRequestStatus::SUCCESS, req.status().status());
+  }
+}
+
+// Check that OnBeforeNetworkStart is only called once even if there is a
+// redirect.
+TEST_F(URLRequestTestHTTP, BeforeNetworkStartCalledOnce) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  {
+    d.set_quit_on_redirect(true);
+    d.set_quit_on_network_start(true);
+    URLRequest req(test_server_.GetURL("server-redirect?echo"),
+                   DEFAULT_PRIORITY,
+                   &d,
+                   &default_context_);
+
+    req.Start();
+    base::RunLoop().Run();
+
+    EXPECT_EQ(1, d.received_before_network_start_count());
+    EXPECT_EQ(0, d.response_started_count());
+    EXPECT_EQ(0, d.received_redirect_count());
+
+    req.ResumeNetworkStart();
+    base::RunLoop().Run();
+
+    EXPECT_EQ(1, d.received_redirect_count());
+    req.FollowDeferredRedirect();
+    base::RunLoop().Run();
+
+    // Check that the redirect's new network transaction does not get propagated
+    // to a second OnBeforeNetworkStart() notification.
+    EXPECT_EQ(1, d.received_before_network_start_count());
+
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_NE(0, d.bytes_received());
+    EXPECT_EQ(URLRequestStatus::SUCCESS, req.status().status());
+  }
+}
+
+// Cancel the request after learning that the request would use the network.
+TEST_F(URLRequestTestHTTP, CancelOnBeforeNetworkStart) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  {
+    d.set_quit_on_network_start(true);
+    GURL test_url(test_server_.GetURL("echo"));
+    URLRequest req(test_url, DEFAULT_PRIORITY, &d, &default_context_);
+
+    req.Start();
+    base::RunLoop().Run();
+
+    EXPECT_EQ(1, d.received_before_network_start_count());
+    EXPECT_EQ(0, d.response_started_count());
+
+    req.Cancel();
+    base::RunLoop().Run();
+
+    EXPECT_EQ(1, d.response_started_count());
+    EXPECT_EQ(0, d.bytes_received());
+    EXPECT_EQ(URLRequestStatus::CANCELED, req.status().status());
+  }
 }
 
 TEST_F(URLRequestTestHTTP, CancelRedirect) {
@@ -5808,7 +5923,8 @@ TEST_F(URLRequestTestHTTP, DefaultUserAgent) {
                  &default_context_);
   req.Start();
   base::RunLoop().Run();
-  EXPECT_EQ(req.context()->GetUserAgent(req.url()), d.data_received());
+  EXPECT_EQ(req.context()->http_user_agent_settings()->GetUserAgent(req.url()),
+            d.data_received());
 }
 
 // Check that if request overrides the User-Agent header,
@@ -5826,10 +5942,7 @@ TEST_F(URLRequestTestHTTP, OverrideUserAgent) {
   req.SetExtraRequestHeaders(headers);
   req.Start();
   base::RunLoop().Run();
-  // If the net tests are being run with ChromeFrame then we need to allow for
-  // the 'chromeframe' suffix which is added to the user agent before the
-  // closing parentheses.
-  EXPECT_TRUE(StartsWithASCII(d.data_received(), "Lynx (textmode", true));
+  EXPECT_EQ(std::string("Lynx (textmode)"), d.data_received());
 }
 
 // Check that a NULL HttpUserAgentSettings causes the corresponding empty
@@ -5893,6 +6006,80 @@ TEST_F(URLRequestTestHTTP, SetSubsequentJobPriority) {
   // Should trigger |job| to be started.
   base::RunLoop().Run();
   EXPECT_EQ(LOW, job->priority());
+}
+
+// Check that creating a network request while entering/exiting suspend mode
+// fails as it should.  This is the only case where an HttpTransactionFactory
+// does not return an HttpTransaction.
+TEST_F(URLRequestTestHTTP, NetworkSuspendTest) {
+  // Create a new HttpNetworkLayer that thinks it's suspended.
+  HttpNetworkSession::Params params;
+  params.host_resolver = default_context_.host_resolver();
+  params.cert_verifier = default_context_.cert_verifier();
+  params.transport_security_state = default_context_.transport_security_state();
+  params.proxy_service = default_context_.proxy_service();
+  params.ssl_config_service = default_context_.ssl_config_service();
+  params.http_auth_handler_factory =
+      default_context_.http_auth_handler_factory();
+  params.network_delegate = &default_network_delegate_;
+  params.http_server_properties = default_context_.http_server_properties();
+  scoped_ptr<HttpNetworkLayer> network_layer(
+      new HttpNetworkLayer(new HttpNetworkSession(params)));
+  network_layer->OnSuspend();
+
+  HttpCache http_cache(network_layer.release(), default_context_.net_log(),
+                       HttpCache::DefaultBackend::InMemory(0));
+
+  TestURLRequestContext context(true);
+  context.set_http_transaction_factory(&http_cache);
+  context.Init();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://127.0.0.1/"),
+                 DEFAULT_PRIORITY,
+                 &d,
+                 &context);
+  req.Start();
+  base::RunLoop().Run();
+
+  EXPECT_TRUE(d.request_failed());
+  EXPECT_EQ(URLRequestStatus::FAILED, req.status().status());
+  EXPECT_EQ(ERR_NETWORK_IO_SUSPENDED, req.status().error());
+}
+
+// Check that creating a network request while entering/exiting suspend mode
+// fails as it should in the case there is no cache.  This is the only case
+// where an HttpTransactionFactory does not return an HttpTransaction.
+TEST_F(URLRequestTestHTTP, NetworkSuspendTestNoCache) {
+  // Create a new HttpNetworkLayer that thinks it's suspended.
+  HttpNetworkSession::Params params;
+  params.host_resolver = default_context_.host_resolver();
+  params.cert_verifier = default_context_.cert_verifier();
+  params.transport_security_state = default_context_.transport_security_state();
+  params.proxy_service = default_context_.proxy_service();
+  params.ssl_config_service = default_context_.ssl_config_service();
+  params.http_auth_handler_factory =
+      default_context_.http_auth_handler_factory();
+  params.network_delegate = &default_network_delegate_;
+  params.http_server_properties = default_context_.http_server_properties();
+  HttpNetworkLayer network_layer(new HttpNetworkSession(params));
+  network_layer.OnSuspend();
+
+  TestURLRequestContext context(true);
+  context.set_http_transaction_factory(&network_layer);
+  context.Init();
+
+  TestDelegate d;
+  URLRequest req(GURL("http://127.0.0.1/"),
+                 DEFAULT_PRIORITY,
+                 &d,
+                 &context);
+  req.Start();
+  base::RunLoop().Run();
+
+  EXPECT_TRUE(d.request_failed());
+  EXPECT_EQ(URLRequestStatus::FAILED, req.status().status());
+  EXPECT_EQ(ERR_NETWORK_IO_SUSPENDED, req.status().error());
 }
 
 class HTTPSRequestTest : public testing::Test {

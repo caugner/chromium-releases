@@ -100,22 +100,20 @@ void InstantSearchPrerenderer::Prerender(const InstantSuggestion& suggestion) {
       SetSuggestionToPrefetch(suggestion);
 }
 
-void InstantSearchPrerenderer::Commit(const string16& query) {
+void InstantSearchPrerenderer::Commit(const base::string16& query) {
   DCHECK(prerender_handle_);
   DCHECK(prerender_contents());
   SearchTabHelper::FromWebContents(prerender_contents())->Submit(query);
 }
 
-bool InstantSearchPrerenderer::CanCommitQuery(content::WebContents* source,
-                                              const string16& query) const {
-  if (!source || query.empty())
+bool InstantSearchPrerenderer::CanCommitQuery(
+    content::WebContents* source,
+    const base::string16& query) const {
+  if (!source || query.empty() || !prerender_handle_ ||
+      !prerender_handle_->IsFinishedLoading() ||
+      !prerender_contents() || !QueryMatchesPrefetch(query)) {
     return false;
-
-  if (last_instant_suggestion_.text != query)
-    return false;
-
-  if (!prerender_handle_ || !prerender_contents())
-    return false;
+  }
 
   // InstantSearchPrerenderer can commit query to the prerendered page only if
   // the underlying |source| page doesn't support Instant search.
@@ -125,14 +123,13 @@ bool InstantSearchPrerenderer::CanCommitQuery(content::WebContents* source,
 bool InstantSearchPrerenderer::UsePrerenderedPage(
     const GURL& url,
     chrome::NavigateParams* params) {
-  string16 search_terms = chrome::GetSearchTermsFromURL(profile_, url);
+  base::string16 search_terms =
+      chrome::ExtractSearchTermsFromURL(profile_, url);
   prerender::PrerenderManager* prerender_manager =
       prerender::PrerenderManagerFactory::GetForProfile(profile_);
-  if (search_terms.empty() ||
-      !params->target_contents ||
-      last_instant_suggestion_.text != search_terms ||
-      !prerender_contents() ||
-      !prerender_manager) {
+  if (search_terms.empty() || !params->target_contents ||
+      !prerender_contents() || !prerender_manager ||
+      !QueryMatchesPrefetch(search_terms)) {
     Cancel();
     return false;
   }
@@ -152,4 +149,11 @@ bool InstantSearchPrerenderer::IsAllowed(const AutocompleteMatch& match,
 content::WebContents* InstantSearchPrerenderer::prerender_contents() const {
   return (prerender_handle_ && prerender_handle_->contents()) ?
       prerender_handle_->contents()->prerender_contents() : NULL;
+}
+
+bool InstantSearchPrerenderer::QueryMatchesPrefetch(
+    const base::string16& query) const {
+  if (chrome::ShouldReuseInstantSearchBasePage())
+    return true;
+  return last_instant_suggestion_.text == query;
 }

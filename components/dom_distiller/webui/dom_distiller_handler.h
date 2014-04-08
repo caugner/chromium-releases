@@ -29,26 +29,29 @@ class DomDistillerHandler : public content::WebUIMessageHandler {
   // Callback from JavaScript for the "requestEntries" message. This
   // requests the list of entries and returns it to the front end by calling
   // "onReceivedEntries". There are no JavaScript arguments to this method.
-  void HandleRequestEntries(const ListValue* args);
+  void HandleRequestEntries(const base::ListValue* args);
 
   // Callback from JavaScript for when an article should be added. The first
   // element in |args| should be a string representing the URL to be added.
-  void HandleAddArticle(const ListValue* args);
+  void HandleAddArticle(const base::ListValue* args);
 
   // Callback from JavaScript for when an article is selected. The first element
   // in |args| should be a string representing the ID of the entry to be
   // selected.
-  void HandleSelectArticle(const ListValue* args);
+  void HandleSelectArticle(const base::ListValue* args);
 
  private:
-  // Factory for the creating refs in callbacks.
-  base::WeakPtrFactory<DomDistillerHandler> weak_ptr_factory_;
+  // Callback from DomDistillerService when an article is available.
+  void OnArticleAdded(bool article_available);
 
   // The DomDistillerService.
   DomDistillerService* service_;
 
   // The scheme for DOM distiller articles.
   std::string article_scheme_;
+
+  // Factory for the creating refs in callbacks.
+  base::WeakPtrFactory<DomDistillerHandler> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DomDistillerHandler);
 };

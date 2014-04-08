@@ -4,10 +4,10 @@
 
 #include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
 
+#include "base/debug/dump_without_crashing.h"
 #include "base/rand_util.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/dump_without_crashing.h"
 
 namespace browser_sync {
 
@@ -20,14 +20,14 @@ void ChromeReportUnrecoverableError() {
   }
 
   // We only want to upload |kErrorUploadRatio| ratio of errors.
-  const double kErrorUploadRatio = 0.0;
+  const double kErrorUploadRatio = 0.15;
   if (kErrorUploadRatio <= 0.0)
     return; // We are not allowed to upload errors.
   double random_number = base::RandDouble();
   if (random_number > kErrorUploadRatio)
     return;
 
-  logging::DumpWithoutCrashing();
+  base::debug::DumpWithoutCrashing();
 }
 
 }  // namespace browser_sync

@@ -36,7 +36,6 @@
 #include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "net/base/escape.h"
@@ -147,9 +146,10 @@ void HistoryQuickProvider::DoAutocomplete() {
       // provider completions compete with the URL-what-you-typed
       // match as normal.
       if (url_db) {
-        const std::string host(UTF16ToUTF8(autocomplete_input_.text().substr(
-            autocomplete_input_.parts().host.begin,
-            autocomplete_input_.parts().host.len)));
+        const std::string host(base::UTF16ToUTF8(
+            autocomplete_input_.text().substr(
+                autocomplete_input_.parts().host.begin,
+                autocomplete_input_.parts().host.len)));
         // We want to put the URL-what-you-typed match first if either
         // * the user visited the URL before (intranet or internet).
         // * it's a URL on a host that user visited before and this
@@ -277,9 +277,7 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
   match.contents_class =
       SpansFromTermMatch(new_matches, match.contents.length(), true);
 
-  match.allowed_to_be_default_match = history_match.can_inline() &&
-      !PreventInlineAutocomplete(autocomplete_input_);
-  if (match.allowed_to_be_default_match) {
+  if (history_match.can_inline()) {
     DCHECK(!new_matches.empty());
     size_t inline_autocomplete_offset = new_matches[0].offset +
         new_matches[0].length;
@@ -291,6 +289,8 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
       match.inline_autocompletion =
           match.fill_into_edit.substr(inline_autocomplete_offset);
     }
+    match.allowed_to_be_default_match = match.inline_autocompletion.empty() ||
+        !PreventInlineAutocomplete(autocomplete_input_);
   }
 
   // Format the description autocomplete presentation.

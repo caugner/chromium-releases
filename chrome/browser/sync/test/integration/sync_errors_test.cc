@@ -8,6 +8,7 @@
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 #include "chrome/browser/sync/test/integration/passwords_helper.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
+#include "chrome/browser/sync/test/integration/status_change_checker.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/common/pref_names.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -15,6 +16,8 @@
 
 using bookmarks_helper::AddFolder;
 using bookmarks_helper::SetTitle;
+
+namespace {
 
 class SyncErrorTest : public SyncTest {
  public:
@@ -25,13 +28,39 @@ class SyncErrorTest : public SyncTest {
   DISALLOW_COPY_AND_ASSIGN(SyncErrorTest);
 };
 
+// Helper class that waits until the sync engine has hit an actionable error.
+class ActionableErrorChecker : public StatusChangeChecker {
+ public:
+  explicit ActionableErrorChecker(ProfileSyncService* service)
+      : StatusChangeChecker("ActionableErrorChecker"),
+        service_(service) {}
+
+  virtual ~ActionableErrorChecker() {}
+
+  // Checks if an actionable error has been hit. Called repeatedly each time PSS
+  // notifies observers of a state change.
+  virtual bool IsExitConditionSatisfied() OVERRIDE {
+    DCHECK(service_);
+    ProfileSyncService::Status status;
+    service_->QueryDetailedSyncStatus(&status);
+    return (status.sync_protocol_error.action != syncer::UNKNOWN_ACTION &&
+            service_->HasUnrecoverableError());
+  }
+
+ private:
+  // The PSS instance that will eventually hit an actionable error.
+  ProfileSyncService* service_;
+
+  DISALLOW_COPY_AND_ASSIGN(ActionableErrorChecker);
+};
+
 IN_PROC_BROWSER_TEST_F(SyncErrorTest, BirthdayErrorTest) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Add an item, wait for sync, and trigger a birthday error on the server.
   const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
   SetTitle(0, node1, L"new_title1");
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion());
+  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
   TriggerBirthdayError();
 
   // Now make one more change so we will do another sync.
@@ -40,28 +69,12 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, BirthdayErrorTest) {
   ASSERT_TRUE(GetClient(0)->AwaitSyncDisabled());
 }
 
-IN_PROC_BROWSER_TEST_F(SyncErrorTest, TransientErrorTest) {
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-
-  // Add an item, wait for sync, and trigger a transient error on the server.
-  const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
-  SetTitle(0, node1, L"new_title1");
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion());
-  TriggerTransientError();
-
-  // Now make one more change so we will do another sync.
-  const BookmarkNode* node2 = AddFolder(0, 0, L"title2");
-  SetTitle(0, node2, L"new_title2");
-  ASSERT_TRUE(
-      GetClient(0)->AwaitExponentialBackoffVerification());
-}
-
 IN_PROC_BROWSER_TEST_F(SyncErrorTest, ActionableErrorTest) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
   SetTitle(0, node1, L"new_title1");
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion());
+  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
 
   syncer::SyncProtocolError protocol_error;
   protocol_error.error_type = syncer::TRANSIENT_ERROR;
@@ -73,8 +86,12 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, ActionableErrorTest) {
   // Now make one more change so we will do another sync.
   const BookmarkNode* node2 = AddFolder(0, 0, L"title2");
   SetTitle(0, node2, L"new_title2");
-  ASSERT_TRUE(
-      GetClient(0)->AwaitActionableError());
+
+  // Wait until an actionable error is encountered.
+  ActionableErrorChecker actionable_error_checker(GetClient(0)->service());
+  ASSERT_TRUE(GetClient(0)->AwaitStatusChange(&actionable_error_checker,
+                                              "Awaiting actionable error"));
+
   ProfileSyncService::Status status = GetClient(0)->GetStatus();
   ASSERT_EQ(status.sync_protocol_error.error_type, protocol_error.error_type);
   ASSERT_EQ(status.sync_protocol_error.action, protocol_error.action);
@@ -113,14 +130,13 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, ErrorWhileSettingUp) {
   }
 }
 
-
 IN_PROC_BROWSER_TEST_F(SyncErrorTest,
     BirthdayErrorUsingActionableErrorTest) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
   SetTitle(0, node1, L"new_title1");
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion());
+  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
 
   syncer::SyncProtocolError protocol_error;
   protocol_error.error_type = syncer::NOT_MY_BIRTHDAY;
@@ -155,7 +171,8 @@ IN_PROC_BROWSER_TEST_F(SyncErrorTest, DISABLED_DisableDatatypeWhileRunning) {
 
   const BookmarkNode* node1 = AddFolder(0, 0, L"title1");
   SetTitle(0, node1, L"new_title1");
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion());
+  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
   // TODO(lipalani)" Verify initial sync ended for typed url is false.
 }
 
+}  // namespace

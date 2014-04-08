@@ -16,6 +16,7 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_origin.h"
+#include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
@@ -32,6 +33,8 @@
 #include "ipc/ipc_test_sink.h"
 #include "ui/gfx/size.h"
 
+using base::ASCIIToUTF16;
+
 namespace {
 
 using content::Referrer;
@@ -40,6 +43,7 @@ using prerender::PrerenderContents;
 using prerender::PrerenderHandle;
 using prerender::PrerenderManager;
 using prerender::PrerenderManagerFactory;
+using prerender::PrerenderTabHelper;
 
 class DummyPrerenderContents : public PrerenderContents {
  public:
@@ -115,11 +119,12 @@ void DummyPrerenderContents::StartPrerendering(
   prerender_contents_.reset(content::WebContents::CreateWithSessionStorage(
       content::WebContents::CreateParams(profile_),
       session_storage_namespace_map_));
+  PrerenderTabHelper::CreateForWebContentsWithPasswordManager(
+      prerender_contents_.get(), NULL);
   content::NavigationController::LoadURLParams params(url_);
   prerender_contents_->GetController().LoadURLWithParams(params);
   SearchTabHelper::CreateForWebContents(prerender_contents_.get());
 
-  AddObserver(prerender_manager()->prerender_tracker());
   prerendering_has_started_ = true;
   DCHECK(session_storage_namespace);
   session_storage_namespace_id_ = session_storage_namespace->id();
@@ -160,8 +165,7 @@ class InstantSearchPrerendererTest : public InstantUnitTestBase {
  protected:
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-        "EmbeddedSearch",
-        "Group1 strk:20 use_cacheable_ntp:1 prefetch_results:1"));
+        "EmbeddedSearch", "Group1 strk:20 prefetch_results:1"));
     InstantUnitTestBase::SetUp();
   }
 
@@ -193,7 +197,7 @@ class InstantSearchPrerendererTest : public InstantUnitTestBase {
     return GetInstantSearchPrerenderer()->prerender_url_;
   }
 
-  void SetLastQuery(const string16& query) {
+  void SetLastQuery(const base::string16& query) {
     GetInstantSearchPrerenderer()->last_instant_suggestion_ =
         InstantSuggestion(query, std::string());
   }
@@ -217,7 +221,7 @@ class InstantSearchPrerendererTest : public InstantUnitTestBase {
     return GetInstantSearchPrerenderer()->prerender_handle_.get();
   }
 
-  void PrerenderSearchQuery(const string16& query) {
+  void PrerenderSearchQuery(const base::string16& query) {
     Init(true, true);
     InstantSearchPrerenderer* prerenderer = GetInstantSearchPrerenderer();
     prerenderer->Prerender(InstantSuggestion(query, std::string()));
@@ -234,14 +238,14 @@ TEST_F(InstantSearchPrerendererTest, GetSearchTermsFromPrerenderedPage) {
   EXPECT_EQ(GURL("https://www.google.com/instant?ion=1&foo=foo#foo=foo&strk"),
             url);
   EXPECT_EQ(UTF16ToASCII(prerenderer->get_last_query()),
-            UTF16ToASCII(chrome::GetSearchTermsFromURL(profile(), url)));
+            UTF16ToASCII(chrome::ExtractSearchTermsFromURL(profile(), url)));
 
   // Assume the prerendered page prefetched search results for the query
   // "flowers".
   SetLastQuery(ASCIIToUTF16("flowers"));
   EXPECT_EQ("flowers", UTF16ToASCII(prerenderer->get_last_query()));
   EXPECT_EQ(UTF16ToASCII(prerenderer->get_last_query()),
-            UTF16ToASCII(chrome::GetSearchTermsFromURL(profile(), url)));
+            UTF16ToASCII(chrome::ExtractSearchTermsFromURL(profile(), url)));
 }
 
 TEST_F(InstantSearchPrerendererTest, PrefetchSearchResults) {
@@ -270,7 +274,7 @@ TEST_F(InstantSearchPrerendererTest, DoNotPrefetchSearchResults) {
 TEST_F(InstantSearchPrerendererTest, CanCommitQuery) {
   Init(true, true);
   InstantSearchPrerenderer* prerenderer = GetInstantSearchPrerenderer();
-  string16 query = ASCIIToUTF16("flowers");
+  base::string16 query = ASCIIToUTF16("flowers");
   prerenderer->Prerender(InstantSuggestion(query, std::string()));
   EXPECT_TRUE(prerenderer->CanCommitQuery(GetActiveWebContents(), query));
 
@@ -278,11 +282,12 @@ TEST_F(InstantSearchPrerendererTest, CanCommitQuery) {
   // invalid search queries.
   EXPECT_FALSE(prerenderer->CanCommitQuery(GetActiveWebContents(),
                                            ASCIIToUTF16("joy")));
-  EXPECT_FALSE(prerenderer->CanCommitQuery(GetActiveWebContents(), string16()));
+  EXPECT_FALSE(prerenderer->CanCommitQuery(GetActiveWebContents(),
+                                           base::string16()));
 }
 
 TEST_F(InstantSearchPrerendererTest, CommitQuery) {
-  string16 query = ASCIIToUTF16("flowers");
+  base::string16 query = ASCIIToUTF16("flowers");
   PrerenderSearchQuery(query);
   InstantSearchPrerenderer* prerenderer = GetInstantSearchPrerenderer();
   prerenderer->Commit(query);
@@ -331,8 +336,8 @@ TEST_F(InstantSearchPrerendererTest, PrerenderingAllowed) {
   // used only when the underlying page doesn't support Instant.
   NavigateAndCommitActiveTab(GURL("https://www.google.com/alt#quux=foo&strk"));
   active_tab = GetActiveWebContents();
-  EXPECT_FALSE(chrome::GetSearchTermsFromURL(profile(), active_tab->GetURL())
-      .empty());
+  EXPECT_FALSE(chrome::ExtractSearchTermsFromURL(profile(),
+                                                 active_tab->GetURL()).empty());
   EXPECT_FALSE(chrome::ShouldPrefetchSearchResultsOnSRP());
   EXPECT_FALSE(prerenderer->IsAllowed(search_type_match, active_tab));
 }
@@ -399,3 +404,75 @@ TEST_F(InstantSearchPrerendererTest,
   EXPECT_EQ(url, GetActiveWebContents()->GetURL());
   EXPECT_EQ(static_cast<PrerenderHandle*>(NULL), prerender_handle());
 }
+
+class ReuseInstantSearchBasePageTest : public InstantSearchPrerendererTest {
+  public:
+   ReuseInstantSearchBasePageTest() {}
+
+  protected:
+   virtual void SetUp() OVERRIDE {
+    ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+        "EmbeddedSearch",
+        "Group1 strk:20 prefetch_results:1 reuse_instant_search_base_page:1"));
+    InstantUnitTestBase::SetUp();
+   }
+};
+
+TEST_F(ReuseInstantSearchBasePageTest, CanCommitQuery) {
+  Init(true, true);
+  InstantSearchPrerenderer* prerenderer = GetInstantSearchPrerenderer();
+  base::string16 query = ASCIIToUTF16("flowers");
+  prerenderer->Prerender(InstantSuggestion(query, std::string()));
+  EXPECT_TRUE(prerenderer->CanCommitQuery(GetActiveWebContents(), query));
+
+  // When the Instant search base page has finished loading,
+  // InstantSearchPrerenderer can commit any search query to the prerendered
+  // page (even if it doesn't match the last known suggestion query).
+  EXPECT_TRUE(prerenderer->CanCommitQuery(GetActiveWebContents(),
+                                           ASCIIToUTF16("joy")));
+  // Invalid search query committed.
+  EXPECT_FALSE(prerenderer->CanCommitQuery(GetActiveWebContents(),
+                                           base::string16()));
+}
+
+TEST_F(ReuseInstantSearchBasePageTest,
+       CanCommitQuery_InstantSearchBasePageLoadInProgress) {
+  Init(true, false);
+  InstantSearchPrerenderer* prerenderer = GetInstantSearchPrerenderer();
+  base::string16 query = ASCIIToUTF16("flowers");
+  prerenderer->Prerender(InstantSuggestion(query, std::string()));
+
+  // When the Instant search base page hasn't finished loading,
+  // InstantSearchPrerenderer cannot commit any search query to the base page.
+  EXPECT_FALSE(prerenderer->CanCommitQuery(GetActiveWebContents(), query));
+  EXPECT_FALSE(prerenderer->CanCommitQuery(GetActiveWebContents(),
+                                           ASCIIToUTF16("joy")));
+}
+
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+class TestUsePrerenderPage : public InstantSearchPrerendererTest {
+ protected:
+  virtual void SetUp() OVERRIDE {
+    // Disable query extraction flag in field trials.
+    ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+        "EmbeddedSearch",
+        "Group1 strk:20 query_extraction:0 prefetch_results:1"));
+    InstantUnitTestBase::SetUpWithoutQueryExtraction();
+  }
+};
+
+TEST_F(TestUsePrerenderPage, ExtractSearchTermsAndUsePrerenderPage) {
+  PrerenderSearchQuery(ASCIIToUTF16("foo"));
+
+  // Open a search results page. Query extraction flag is disabled in field
+  // trials. Search results page URL does not contain search terms replacement
+  // key. Make sure UsePrerenderedPage() extracts the search terms from the URL
+  // and uses the prerendered page contents.
+  GURL url("https://www.google.com/alt#quux=foo");
+  browser()->OpenURL(content::OpenURLParams(url, Referrer(), CURRENT_TAB,
+                                            content::PAGE_TRANSITION_TYPED,
+                                            false));
+  EXPECT_EQ(GetPrerenderURL(), GetActiveWebContents()->GetURL());
+  EXPECT_EQ(static_cast<PrerenderHandle*>(NULL), prerender_handle());
+}
+#endif

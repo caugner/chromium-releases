@@ -17,7 +17,6 @@
 // are somewhat arbitrary as the EME specification doesn't specify any limits.
 static const size_t kEmeWebSessionIdMaximum = 512;
 static const size_t kEmeMessageMaximum = 10240;  // 10 KB
-static const size_t kEmeDestinationUrlMaximum = 2048;  // 2 KB
 
 namespace content {
 
@@ -105,6 +104,10 @@ void RendererMediaPlayerManager::Seek(
 
 void RendererMediaPlayerManager::SetVolume(int player_id, double volume) {
   Send(new MediaPlayerHostMsg_SetVolume(routing_id(), player_id, volume));
+}
+
+void RendererMediaPlayerManager::SetPoster(int player_id, const GURL& poster) {
+  Send(new MediaPlayerHostMsg_SetPoster(routing_id(), player_id, poster));
 }
 
 void RendererMediaPlayerManager::ReleaseResources(int player_id) {
@@ -247,7 +250,7 @@ void RendererMediaPlayerManager::InitializeCDM(int media_keys_id,
 void RendererMediaPlayerManager::CreateSession(
     int media_keys_id,
     uint32 session_id,
-    const std::string& type,
+    MediaKeysHostMsg_CreateSession_Type type,
     const std::vector<uint8>& init_data) {
   Send(new MediaKeysHostMsg_CreateSession(
       routing_id(), media_keys_id, session_id, type, init_data));
@@ -265,6 +268,10 @@ void RendererMediaPlayerManager::ReleaseSession(int media_keys_id,
                                                 uint32 session_id) {
   Send(new MediaKeysHostMsg_ReleaseSession(
       routing_id(), media_keys_id, session_id));
+}
+
+void RendererMediaPlayerManager::DestroyCdm(int media_keys_id) {
+  Send(new MediaKeysHostMsg_DestroyCdm(routing_id(), media_keys_id));
 }
 
 void RendererMediaPlayerManager::OnSessionCreated(
@@ -286,13 +293,8 @@ void RendererMediaPlayerManager::OnSessionMessage(
     int media_keys_id,
     uint32 session_id,
     const std::vector<uint8>& message,
-    const std::string& destination_url) {
+    const GURL& destination_url) {
   if (message.size() > kEmeMessageMaximum) {
-    OnSessionError(
-        media_keys_id, session_id, media::MediaKeys::kUnknownError, 0);
-    return;
-  }
-  if (destination_url.length() > kEmeDestinationUrlMaximum) {
     OnSessionError(
         media_keys_id, session_id, media::MediaKeys::kUnknownError, 0);
     return;
@@ -300,7 +302,7 @@ void RendererMediaPlayerManager::OnSessionMessage(
 
   ProxyMediaKeys* media_keys = GetMediaKeys(media_keys_id);
   if (media_keys)
-    media_keys->OnSessionMessage(session_id, message, destination_url);
+    media_keys->OnSessionMessage(session_id, message, destination_url.spec());
 }
 
 void RendererMediaPlayerManager::OnSessionReady(int media_keys_id,
@@ -429,10 +431,8 @@ void RendererMediaPlayerManager::RetrieveGeometryChanges(
     WebMediaPlayerAndroid* player = player_it->second;
 
     if (player && player->hasVideo()) {
-      gfx::RectF rect;
-      if (player->RetrieveGeometryChange(&rect)) {
-        (*changes)[player_it->first] = rect;
-      }
+      if (player->UpdateBoundaryRectangle())
+        (*changes)[player_it->first] = player->GetBoundaryRectangle();
     }
   }
 }

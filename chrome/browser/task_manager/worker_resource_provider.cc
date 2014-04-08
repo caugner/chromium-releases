@@ -83,9 +83,9 @@ SharedWorkerResource::SharedWorkerResource(
     : process_id_(process_id),
       routing_id_(routing_id),
       handle_(process_handle) {
-  title_ = UTF8ToUTF16(url.spec());
+  title_ = base::UTF8ToUTF16(url.spec());
   if (!name.empty())
-    title_ += ASCIIToUTF16(" (") + name + ASCIIToUTF16(")");
+    title_ += base::ASCIIToUTF16(" (") + name + base::ASCIIToUTF16(")");
 }
 
 SharedWorkerResource::~SharedWorkerResource() {
@@ -185,8 +185,8 @@ WorkerResourceProvider::~WorkerResourceProvider() {
 
 Resource* WorkerResourceProvider::GetResource(
     int origin_pid,
-    int render_process_host_id,
-    int routing_id) {
+    int child_id,
+    int route_id) {
   return NULL;
 }
 

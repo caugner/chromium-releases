@@ -155,10 +155,14 @@ void DateView::UpdateTimeFormat() {
   UpdateText();
 }
 
+base::HourClockType DateView::GetHourTypeForTesting() const {
+  return hour_type_;
+}
+
 void DateView::UpdateTextInternal(const base::Time& now) {
   SetAccessibleName(
       base::TimeFormatFriendlyDate(now) +
-      ASCIIToUTF16(", ") +
+      base::ASCIIToUTF16(", ") +
       base::TimeFormatTimeOfDayWithHourClockType(
           now, hour_type_, base::kKeepAmPm));
   date_label_->SetText(
@@ -208,6 +212,10 @@ void TimeView::UpdateTimeFormat() {
   UpdateText();
 }
 
+base::HourClockType TimeView::GetHourTypeForTesting() const {
+  return hour_type_;
+}
+
 void TimeView::UpdateTextInternal(const base::Time& now) {
   // Just in case |now| is null, do NOT update time; otherwise, it will
   // crash icu code by calling into base::TimeFormatTimeOfDayWithHourClockType,
@@ -223,7 +231,7 @@ void TimeView::UpdateTextInternal(const base::Time& now) {
   horizontal_label_->SetTooltipText(base::TimeFormatFriendlyDate(now));
 
   // Calculate vertical clock layout labels.
-  size_t colon_pos = current_time.find(ASCIIToUTF16(":"));
+  size_t colon_pos = current_time.find(base::ASCIIToUTF16(":"));
   base::string16 hour = current_time.substr(0, colon_pos);
   base::string16 minute = current_time.substr(colon_pos + 1);
 
@@ -231,7 +239,7 @@ void TimeView::UpdateTextInternal(const base::Time& now) {
   if (hour.length() == 1 &&
       hour_type_ == base::k24HourClock &&
       !base::i18n::IsRTL())
-    hour = ASCIIToUTF16("0") + hour;
+    hour = base::ASCIIToUTF16("0") + hour;
 
   vertical_label_hours_->SetText(hour);
   vertical_label_minutes_->SetText(minute);
@@ -248,7 +256,7 @@ bool TimeView::OnMousePressed(const ui::MouseEvent& event) {
 }
 
 void TimeView::UpdateClockLayout(TrayDate::ClockLayout clock_layout){
-  SetBorder(clock_layout);
+  SetBorderFromLayout(clock_layout);
   if (clock_layout == TrayDate::HORIZONTAL_CLOCK) {
     RemoveChildView(vertical_label_hours_.get());
     RemoveChildView(vertical_label_minutes_.get());
@@ -274,13 +282,15 @@ void TimeView::UpdateClockLayout(TrayDate::ClockLayout clock_layout){
   Layout();
 }
 
-void TimeView::SetBorder(TrayDate::ClockLayout clock_layout) {
+void TimeView::SetBorderFromLayout(TrayDate::ClockLayout clock_layout) {
   if (clock_layout == TrayDate::HORIZONTAL_CLOCK)
-    set_border(views::Border::CreateEmptyBorder(
-        0, kTrayLabelItemHorizontalPaddingBottomAlignment,
-        0, kTrayLabelItemHorizontalPaddingBottomAlignment));
+    SetBorder(views::Border::CreateEmptyBorder(
+        0,
+        kTrayLabelItemHorizontalPaddingBottomAlignment,
+        0,
+        kTrayLabelItemHorizontalPaddingBottomAlignment));
   else
-    set_border(NULL);
+    SetBorder(views::Border::NullBorder());
 }
 
 void TimeView::SetupLabels() {
@@ -292,16 +302,15 @@ void TimeView::SetupLabels() {
   SetupLabel(vertical_label_minutes_.get());
   vertical_label_minutes_->SetEnabledColor(kVerticalClockMinuteColor);
   // Pull the minutes up closer to the hours by using a negative top border.
-  vertical_label_minutes_->set_border(
-      views::Border::CreateEmptyBorder(
-          kVerticalClockMinutesTopOffset, 0, 0, 0));
+  vertical_label_minutes_->SetBorder(views::Border::CreateEmptyBorder(
+      kVerticalClockMinutesTopOffset, 0, 0, 0));
 }
 
 void TimeView::SetupLabel(views::Label* label) {
   label->set_owned_by_client();
   SetupLabelForTray(label);
-  gfx::Font font = label->font();
-  label->SetFont(font.DeriveFont(0, font.GetStyle() & ~gfx::Font::BOLD));
+  label->SetFontList(label->font_list().DeriveWithStyle(
+      label->font_list().GetFontStyle() & ~gfx::Font::BOLD));
 }
 
 }  // namespace tray

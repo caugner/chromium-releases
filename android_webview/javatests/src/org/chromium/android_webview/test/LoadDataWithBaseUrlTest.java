@@ -13,14 +13,13 @@ import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.HistoryUtils;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.net.test.util.TestWebServer;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.util.concurrent.Callable;
 
 /**
  * Tests for the {@link android.webkit.WebView#loadDataWithBaseURL(String, String, String, String,
@@ -285,15 +284,11 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
 
         loadDataWithBaseUrlSync(data, "text/html", false, baseUrl, null);
 
-        CriteriaHelper.pollForCriteria(new Criteria() {
+        poll(new Callable<Boolean>() {
             @Override
-            public boolean isSatisfied() {
-                try {
-                    String title = getTitleOnUiThread(mAwContents);
-                    return IMAGE_LOADED.equals(title) || IMAGE_NOT_LOADED.equals(title);
-                } catch (Throwable t) {
-                    return false;
-                }
+            public Boolean call() throws Exception {
+                String title = getTitleOnUiThread(mAwContents);
+                return IMAGE_LOADED.equals(title) || IMAGE_NOT_LOADED.equals(title);
             }
         });
 

@@ -186,7 +186,6 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/metrics/compression_utils.h"
@@ -199,7 +198,6 @@
 #include "chrome/browser/net/http_pipelining_compatibility_client.h"
 #include "chrome/browser/net/network_stats.h"
 #include "chrome/browser/omnibox/omnibox_log.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
@@ -484,6 +482,10 @@ void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterInt64Pref(prefs::kUninstallMetricsUptimeSec, 0);
   registry->RegisterInt64Pref(prefs::kUninstallLastLaunchTimeSec, 0);
   registry->RegisterInt64Pref(prefs::kUninstallLastObservedRunTimeSec, 0);
+
+#if defined(OS_ANDROID)
+  RegisterPrefsAndroid(registry);
+#endif  // defined(OS_ANDROID)
 }
 
 // static
@@ -512,6 +514,10 @@ void MetricsService::DiscardOldStabilityStats(PrefService* local_state) {
 
   local_state->ClearPref(prefs::kMetricsInitialLogs);
   local_state->ClearPref(prefs::kMetricsOngoingLogs);
+
+#if defined(OS_ANDROID)
+  DiscardOldStabilityStatsAndroid(local_state);
+#endif  // defined(OS_ANDROID)
 }
 
 MetricsService::MetricsService()
@@ -653,10 +659,10 @@ void MetricsService::EnableRecording() {
     OpenNewLog();
 
   SetUpNotifications(&registrar_, this);
-  content::RemoveActionCallback(action_callback_);
+  base::RemoveActionCallback(action_callback_);
   action_callback_ = base::Bind(&MetricsService::OnUserAction,
                                 base::Unretained(this));
-  content::AddActionCallback(action_callback_);
+  base::AddActionCallback(action_callback_);
 }
 
 void MetricsService::DisableRecording() {
@@ -666,7 +672,7 @@ void MetricsService::DisableRecording() {
     return;
   recording_active_ = false;
 
-  content::RemoveActionCallback(action_callback_);
+  base::RemoveActionCallback(action_callback_);
   registrar_.RemoveAll();
   PushPendingLogsToPersistentStorage();
   DCHECK(!log_manager_.has_staged_log());
@@ -947,6 +953,10 @@ void MetricsService::InitializeMetricsState(ReportingState reporting_state) {
   }
 
   session_id_ = pref->GetInteger(prefs::kMetricsSessionID);
+
+#if defined(OS_ANDROID)
+  LogAndroidStabilityToPrefs(pref);
+#endif  // defined(OS_ANDROID)
 
   if (!pref->GetBoolean(prefs::kStabilityExitedCleanly)) {
     IncrementPrefValue(prefs::kStabilityCrashCount);
@@ -1536,6 +1546,10 @@ void MetricsService::PrepareInitialStabilityLog() {
   log_manager_.PauseCurrentLog();
   log_manager_.BeginLoggingWithLog(initial_stability_log.release(),
                                    MetricsLog::INITIAL_LOG);
+#if defined(OS_ANDROID)
+  ConvertAndroidStabilityPrefsToHistograms(pref);
+  RecordCurrentStabilityHistograms();
+#endif  // defined(OS_ANDROID)
   log_manager_.FinishCurrentLog();
   log_manager_.ResumePausedLog();
 
@@ -1562,6 +1576,9 @@ void MetricsService::PrepareInitialMetricsLog(MetricsLog::LogType log_type) {
   // before writing them.
   log_manager_.PauseCurrentLog();
   log_manager_.BeginLoggingWithLog(initial_metrics_log_.release(), log_type);
+#if defined(OS_ANDROID)
+  ConvertAndroidStabilityPrefsToHistograms(pref);
+#endif  // defined(OS_ANDROID)
   RecordCurrentHistograms();
   log_manager_.FinishCurrentLog();
   log_manager_.ResumePausedLog();
@@ -1749,7 +1766,7 @@ void MetricsService::IncrementLongPrefsValue(const char* path) {
 }
 
 void MetricsService::LogLoadStarted(content::WebContents* web_contents) {
-  content::RecordAction(content::UserMetricsAction("PageLoad"));
+  content::RecordAction(base::UserMetricsAction("PageLoad"));
   HISTOGRAM_ENUMERATION("Chrome.UmaPageloadCounter", 1, 2);
   IncrementPrefValue(prefs::kStabilityPageLoadCount);
   IncrementLongPrefsValue(prefs::kUninstallMetricsPageLoadCount);
@@ -1760,10 +1777,9 @@ void MetricsService::LogLoadStarted(content::WebContents* web_contents) {
 void MetricsService::LogRendererCrash(content::RenderProcessHost* host,
                                       base::TerminationStatus status,
                                       int exit_code) {
-  Profile* profile = Profile::FromBrowserContext(host->GetBrowserContext());
-  ExtensionService* service = profile->GetExtensionService();
   bool was_extension_process =
-      service && service->process_map()->Contains(host->GetID());
+      extensions::ProcessMap::Get(host->GetBrowserContext())
+          ->Contains(host->GetID());
   if (status == base::TERMINATION_STATUS_PROCESS_CRASHED ||
       status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION) {
     if (was_extension_process) {
@@ -1888,17 +1904,18 @@ MetricsService::ChildProcessStats& MetricsService::GetChildProcessStats(
 
 void MetricsService::RecordPluginChanges(PrefService* pref) {
   ListPrefUpdate update(pref, prefs::kStabilityPluginStats);
-  ListValue* plugins = update.Get();
+  base::ListValue* plugins = update.Get();
   DCHECK(plugins);
 
-  for (ListValue::iterator value_iter = plugins->begin();
+  for (base::ListValue::iterator value_iter = plugins->begin();
        value_iter != plugins->end(); ++value_iter) {
-    if (!(*value_iter)->IsType(Value::TYPE_DICTIONARY)) {
+    if (!(*value_iter)->IsType(base::Value::TYPE_DICTIONARY)) {
       NOTREACHED();
       continue;
     }
 
-    DictionaryValue* plugin_dict = static_cast<DictionaryValue*>(*value_iter);
+    base::DictionaryValue* plugin_dict =
+        static_cast<base::DictionaryValue*>(*value_iter);
     std::string plugin_name;
     plugin_dict->GetString(prefs::kStabilityPluginName, &plugin_name);
     if (plugin_name.empty()) {
@@ -1907,7 +1924,7 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
     }
 
     // TODO(viettrungluu): remove conversions
-    base::string16 name16 = UTF8ToUTF16(plugin_name);
+    base::string16 name16 = base::UTF8ToUTF16(plugin_name);
     if (child_process_stats_buffer_.find(name16) ==
         child_process_stats_buffer_.end()) {
       continue;
@@ -1956,9 +1973,9 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
       continue;
 
     // TODO(viettrungluu): remove conversion
-    std::string plugin_name = UTF16ToUTF8(cache_iter->first);
+    std::string plugin_name = base::UTF16ToUTF8(cache_iter->first);
 
-    DictionaryValue* plugin_dict = new DictionaryValue;
+    base::DictionaryValue* plugin_dict = new base::DictionaryValue;
 
     plugin_dict->SetString(prefs::kStabilityPluginName, plugin_name);
     plugin_dict->SetInteger(prefs::kStabilityPluginLaunches,

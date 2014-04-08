@@ -24,6 +24,8 @@
 #include "sync/protocol/favicon_image_specifics.pb.h"
 #include "sync/protocol/favicon_tracking_specifics.pb.h"
 #include "sync/protocol/managed_user_setting_specifics.pb.h"
+#include "sync/protocol/managed_user_shared_setting_specifics.pb.h"
+#include "sync/protocol/managed_user_specifics.pb.h"
 #include "sync/protocol/nigori_specifics.pb.h"
 #include "sync/protocol/password_specifics.pb.h"
 #include "sync/protocol/preference_specifics.pb.h"
@@ -53,7 +55,7 @@ TEST_F(ProtoValueConversionsTest, ProtoChangeCheck) {
   // If this number changes, that means we added or removed a data
   // type.  Don't forget to add a unit test for {New
   // type}SpecificsToValue below.
-  EXPECT_EQ(30, MODEL_TYPE_COUNT);
+  EXPECT_EQ(32, MODEL_TYPE_COUNT);
 
   // We'd also like to check if we changed any field in our messages.
   // However, that's hard to do: sizeof could work, but it's
@@ -210,6 +212,10 @@ TEST_F(ProtoValueConversionsTest, ManagedUserSpecificsToValue) {
   TestSpecificsToValue(ManagedUserSpecificsToValue);
 }
 
+TEST_F(ProtoValueConversionsTest, ManagedUserSharedSettingSpecificsToValue) {
+  TestSpecificsToValue(ManagedUserSharedSettingSpecificsToValue);
+}
+
 TEST_F(ProtoValueConversionsTest, NigoriSpecificsToValue) {
   TestSpecificsToValue(NigoriSpecificsToValue);
 }
@@ -228,6 +234,10 @@ TEST_F(ProtoValueConversionsTest, SearchEngineSpecificsToValue) {
 
 TEST_F(ProtoValueConversionsTest, SessionSpecificsToValue) {
   TestSpecificsToValue(SessionSpecificsToValue);
+}
+
+TEST_F(ProtoValueConversionsTest, SyncedNotificationAppInfoSpecificsToValue) {
+  TestSpecificsToValue(SyncedNotificationAppInfoSpecificsToValue);
 }
 
 TEST_F(ProtoValueConversionsTest, SyncedNotificationSpecificsToValue) {
@@ -275,6 +285,7 @@ TEST_F(ProtoValueConversionsTest, EntitySpecificsToValue) {
   SET_FIELD(favicon_tracking);
   SET_FIELD(history_delete_directive);
   SET_FIELD(managed_user_setting);
+  SET_FIELD(managed_user_shared_setting);
   SET_FIELD(managed_user);
   SET_FIELD(nigori);
   SET_FIELD(password);
@@ -283,6 +294,7 @@ TEST_F(ProtoValueConversionsTest, EntitySpecificsToValue) {
   SET_FIELD(search_engine);
   SET_FIELD(session);
   SET_FIELD(synced_notification);
+  SET_FIELD(synced_notification_app_info);
   SET_FIELD(theme);
   SET_FIELD(typed_url);
 
@@ -354,6 +366,10 @@ TEST_F(ProtoValueConversionsTest, ClientToServerResponseToValue) {
   EXPECT_FALSE(value_without_specifics->empty());
   EXPECT_FALSE(ValueHasSpecifics(*(value_without_specifics.get()),
                                  "get_updates.entries"));
+}
+
+TEST_F(ProtoValueConversionsTest, AttachmentIdToValue) {
+  TestSpecificsToValue(AttachmentIdToValue);
 }
 
 }  // namespace

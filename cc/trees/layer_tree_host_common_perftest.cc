@@ -131,7 +131,7 @@ class CalcDrawPropsImplTest : public LayerTreeHostCommonPerfTest {
           host_impl->DrawTransform(),
           active_tree->device_scale_factor(),
           active_tree->total_page_scale_factor(),
-          active_tree->RootContainerLayer(),
+          active_tree->InnerViewportContainerLayer(),
           max_texture_size,
           host_impl->settings().can_use_lcd_text,
           can_render_to_separate_surface,
@@ -147,25 +147,25 @@ class CalcDrawPropsImplTest : public LayerTreeHostCommonPerfTest {
 };
 
 TEST_F(CalcDrawPropsMainTest, TenTen) {
-  SetTestName("10_10");
+  SetTestName("10_10_main_thread");
   ReadTestFile("10_10_layer_tree");
   RunCalcDrawProps();
 }
 
 TEST_F(CalcDrawPropsMainTest, HeavyPage) {
-  SetTestName("heavy_page");
+  SetTestName("heavy_page_main_thread");
   ReadTestFile("heavy_layer_tree");
   RunCalcDrawProps();
 }
 
 TEST_F(CalcDrawPropsMainTest, TouchRegionLight) {
-  SetTestName("touch_region_light");
+  SetTestName("touch_region_light_main_thread");
   ReadTestFile("touch_region_light");
   RunCalcDrawProps();
 }
 
 TEST_F(CalcDrawPropsMainTest, TouchRegionHeavy) {
-  SetTestName("touch_region_heavy");
+  SetTestName("touch_region_heavy_main_thread");
   ReadTestFile("touch_region_heavy");
   RunCalcDrawProps();
 }

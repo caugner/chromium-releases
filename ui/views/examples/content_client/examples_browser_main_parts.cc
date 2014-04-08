@@ -15,13 +15,13 @@
 #include "content/shell/browser/shell_browser_context.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/views/examples/examples_window_with_content.h"
-#include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/test/desktop_test_views_delegate.h"
 #include "url/gurl.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/env.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/corewm/wm_state.h"
 #include "ui/views/widget/desktop_aura/desktop_screen.h"
 #include "ui/views/widget/native_widget_aura.h"
 #endif
@@ -41,6 +41,12 @@ ExamplesBrowserMainParts::ExamplesBrowserMainParts(
 }
 
 ExamplesBrowserMainParts::~ExamplesBrowserMainParts() {
+}
+
+void ExamplesBrowserMainParts::ToolkitInitialized() {
+#if defined(USE_AURA)
+  wm_state_.reset(new views::corewm::WMState);
+#endif
 }
 
 void ExamplesBrowserMainParts::PreMainMessageLoopRun() {
@@ -80,13 +86,7 @@ void ExamplesBrowserMainParts::PostMainMessageLoopRun() {
 }
 
 bool ExamplesBrowserMainParts::MainMessageLoopRun(int* result_code) {
-  // xxx: Hax here because this kills event handling.
-#if !defined(USE_AURA)
-  AcceleratorHandler accelerator_handler;
-  base::RunLoop run_loop(&accelerator_handler);
-#else
   base::RunLoop run_loop;
-#endif
   run_loop.Run();
   return true;
 }

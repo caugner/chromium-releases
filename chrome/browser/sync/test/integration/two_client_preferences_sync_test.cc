@@ -6,8 +6,10 @@
 #include "chrome/browser/sync/test/integration/preferences_helper.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "chrome/browser/translate/translate_prefs.h"
+#include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/common/pref_names.h"
+#include "components/translate/core/browser/translate_prefs.h"
+#include "components/translate/core/common/translate_pref_names.h"
 
 using preferences_helper::AppendStringPref;
 using preferences_helper::BooleanPrefMatches;
@@ -89,7 +91,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, DisablePreferences) {
 
   GetClient(1)->DisableSyncForDatatype(syncer::PREFERENCES);
   ChangeBooleanPref(0, prefs::kPasswordManagerEnabled);
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion());
+  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
   ASSERT_FALSE(BooleanPrefMatches(prefs::kPasswordManagerEnabled));
 
   GetClient(1)->EnableSyncForDatatype(syncer::PREFERENCES);
@@ -108,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, DisableSync) {
 
   GetClient(1)->DisableSyncForAllDatatypes();
   ChangeBooleanPref(0, prefs::kPasswordManagerEnabled);
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion());
+  ASSERT_TRUE(GetClient(0)->AwaitCommitActivityCompletion());
   ASSERT_FALSE(BooleanPrefMatches(prefs::kPasswordManagerEnabled));
 
   ChangeBooleanPref(1, prefs::kShowHomeButton);
@@ -226,9 +228,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(IntegerPrefMatches(prefs::kRestoreOnStartup));
 
-  ListValue urls;
-  urls.Append(Value::CreateStringValue("http://www.google.com/"));
-  urls.Append(Value::CreateStringValue("http://www.flickr.com/"));
+  base::ListValue urls;
+  urls.Append(base::Value::CreateStringValue("http://www.google.com/"));
+  urls.Append(base::Value::CreateStringValue("http://www.flickr.com/"));
   ChangeIntegerPref(0, prefs::kRestoreOnStartup, 4);
   ChangeListPref(0, prefs::kURLsToRestoreOnStartup, urls);
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
@@ -389,20 +391,22 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(BooleanPrefMatches(prefs::kEnableTranslate));
 
-  TranslatePrefs translate_client0_prefs(GetPrefs(0));
-  TranslatePrefs translate_client1_prefs(GetPrefs(1));
-  ASSERT_FALSE(translate_client0_prefs.IsBlockedLanguage("fr"));
-  translate_client0_prefs.BlockLanguage("fr");
-  ASSERT_TRUE(translate_client0_prefs.IsBlockedLanguage("fr"));
+  scoped_ptr<TranslatePrefs> translate_client0_prefs(
+      TranslateTabHelper::CreateTranslatePrefs(GetPrefs(0)));
+  scoped_ptr<TranslatePrefs> translate_client1_prefs(
+      TranslateTabHelper::CreateTranslatePrefs(GetPrefs(1)));
+  ASSERT_FALSE(translate_client0_prefs->IsBlockedLanguage("fr"));
+  translate_client0_prefs->BlockLanguage("fr");
+  ASSERT_TRUE(translate_client0_prefs->IsBlockedLanguage("fr"));
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_TRUE(translate_client1_prefs.IsBlockedLanguage("fr"));
+  ASSERT_TRUE(translate_client1_prefs->IsBlockedLanguage("fr"));
 
-  translate_client0_prefs.UnblockLanguage("fr");
-  ASSERT_FALSE(translate_client0_prefs.IsBlockedLanguage("fr"));
+  translate_client0_prefs->UnblockLanguage("fr");
+  ASSERT_FALSE(translate_client0_prefs->IsBlockedLanguage("fr"));
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_FALSE(translate_client1_prefs.IsBlockedLanguage("fr"));
+  ASSERT_FALSE(translate_client1_prefs->IsBlockedLanguage("fr"));
 }
 
 // TCM ID - 7307195.
@@ -411,20 +415,22 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(BooleanPrefMatches(prefs::kEnableTranslate));
 
-  TranslatePrefs translate_client0_prefs(GetPrefs(0));
-  TranslatePrefs translate_client1_prefs(GetPrefs(1));
-  ASSERT_FALSE(translate_client0_prefs.IsLanguagePairWhitelisted("en", "bg"));
-  translate_client0_prefs.WhitelistLanguagePair("en", "bg");
-  ASSERT_TRUE(translate_client0_prefs.IsLanguagePairWhitelisted("en", "bg"));
+  scoped_ptr<TranslatePrefs> translate_client0_prefs(
+      TranslateTabHelper::CreateTranslatePrefs(GetPrefs(0)));
+  scoped_ptr<TranslatePrefs> translate_client1_prefs(
+      TranslateTabHelper::CreateTranslatePrefs(GetPrefs(1)));
+  ASSERT_FALSE(translate_client0_prefs->IsLanguagePairWhitelisted("en", "bg"));
+  translate_client0_prefs->WhitelistLanguagePair("en", "bg");
+  ASSERT_TRUE(translate_client0_prefs->IsLanguagePairWhitelisted("en", "bg"));
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_TRUE(translate_client1_prefs.IsLanguagePairWhitelisted("en", "bg"));
+  ASSERT_TRUE(translate_client1_prefs->IsLanguagePairWhitelisted("en", "bg"));
 
-  translate_client0_prefs.RemoveLanguagePairFromWhitelist("en", "bg");
-  ASSERT_FALSE(translate_client0_prefs.IsLanguagePairWhitelisted("en", "bg"));
+  translate_client0_prefs->RemoveLanguagePairFromWhitelist("en", "bg");
+  ASSERT_FALSE(translate_client0_prefs->IsLanguagePairWhitelisted("en", "bg"));
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_FALSE(translate_client1_prefs.IsLanguagePairWhitelisted("en", "bg"));
+  ASSERT_FALSE(translate_client1_prefs->IsLanguagePairWhitelisted("en", "bg"));
 }
 
 // TCM ID - 3625298.
@@ -435,20 +441,22 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
 
   GURL url("http://www.google.com");
   std::string host(url.host());
-  TranslatePrefs translate_client0_prefs(GetPrefs(0));
-  TranslatePrefs translate_client1_prefs(GetPrefs(1));
-  ASSERT_FALSE(translate_client0_prefs.IsSiteBlacklisted(host));
-  translate_client0_prefs.BlacklistSite(host);
-  ASSERT_TRUE(translate_client0_prefs.IsSiteBlacklisted(host));
+  scoped_ptr<TranslatePrefs> translate_client0_prefs(
+      TranslateTabHelper::CreateTranslatePrefs(GetPrefs(0)));
+  scoped_ptr<TranslatePrefs> translate_client1_prefs(
+      TranslateTabHelper::CreateTranslatePrefs(GetPrefs(1)));
+  ASSERT_FALSE(translate_client0_prefs->IsSiteBlacklisted(host));
+  translate_client0_prefs->BlacklistSite(host);
+  ASSERT_TRUE(translate_client0_prefs->IsSiteBlacklisted(host));
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_TRUE(translate_client1_prefs.IsSiteBlacklisted(host));
+  ASSERT_TRUE(translate_client1_prefs->IsSiteBlacklisted(host));
 
-  translate_client0_prefs.RemoveSiteFromBlacklist(host);
-  ASSERT_FALSE(translate_client0_prefs.IsSiteBlacklisted(host));
+  translate_client0_prefs->RemoveSiteFromBlacklist(host);
+  ASSERT_FALSE(translate_client0_prefs->IsSiteBlacklisted(host));
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_FALSE(translate_client1_prefs.IsSiteBlacklisted(host));
+  ASSERT_FALSE(translate_client1_prefs->IsSiteBlacklisted(host));
 }
 
 // TCM ID - 6515252.
@@ -512,17 +520,17 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kTapToClickEnabled) {
 
 // TCM ID - 6458824.
 #if defined(OS_CHROMEOS)
-IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kEnableScreenLock) {
+IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kEnableAutoScreenLock) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  ASSERT_TRUE(BooleanPrefMatches(prefs::kEnableScreenLock));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kEnableAutoScreenLock));
 
-  ChangeBooleanPref(0, prefs::kEnableScreenLock);
+  ChangeBooleanPref(0, prefs::kEnableAutoScreenLock);
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_TRUE(BooleanPrefMatches(prefs::kEnableScreenLock));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kEnableAutoScreenLock));
 
-  ChangeBooleanPref(1, prefs::kEnableScreenLock);
+  ChangeBooleanPref(1, prefs::kEnableAutoScreenLock);
   ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
-  ASSERT_TRUE(BooleanPrefMatches(prefs::kEnableScreenLock));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kEnableAutoScreenLock));
 }
 #endif  // OS_CHROMEOS
 

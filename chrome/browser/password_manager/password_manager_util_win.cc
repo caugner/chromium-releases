@@ -17,7 +17,6 @@
 
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/safe_numerics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
@@ -151,10 +150,10 @@ bool AuthenticateUser(gfx::NativeWindow window) {
   WCHAR password[CREDUI_MAX_PASSWORD_LENGTH+1] = {};
   DWORD username_length = CREDUI_MAX_USERNAME_LENGTH;
   std::wstring product_name =
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+      base::UTF16ToWide(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
   std::wstring password_prompt =
-      UTF16ToWide(l10n_util::GetStringUTF16(
-                  IDS_PASSWORDS_PAGE_AUTHENTICATION_PROMPT));
+      base::UTF16ToWide(l10n_util::GetStringUTF16(
+                            IDS_PASSWORDS_PAGE_AUTHENTICATION_PROMPT));
   HANDLE handle = INVALID_HANDLE_VALUE;
   int tries = 0;
   bool use_displayname = false;

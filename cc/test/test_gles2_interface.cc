@@ -363,4 +363,14 @@ void TestGLES2Interface::ConsumeTextureCHROMIUM(GLenum target,
   test_context_->consumeTextureCHROMIUM(target, mailbox);
 }
 
+void TestGLES2Interface::ResizeCHROMIUM(GLuint width,
+                                        GLuint height,
+                                        float device_scale) {
+  test_context_->reshapeWithScaleFactor(width, height, device_scale);
+}
+
+void TestGLES2Interface::LoseContextCHROMIUM(GLenum current, GLenum other) {
+  test_context_->loseContextCHROMIUM(current, other);
+}
+
 }  // namespace cc

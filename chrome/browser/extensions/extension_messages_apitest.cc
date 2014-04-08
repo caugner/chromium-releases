@@ -15,8 +15,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/messaging/incognito_connectability.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/extension_prefs.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/test_extension_dir.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -29,6 +27,8 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_system.h"
 #include "net/cert/asn1_util.h"
 #include "net/cert/jwk_serializer.h"
 #include "net/dns/mock_host_resolver.h"
@@ -52,7 +52,7 @@ class MessageSender : public content::NotificationObserver {
   static scoped_ptr<base::ListValue> BuildEventArguments(
       const bool last_message,
       const std::string& data) {
-    DictionaryValue* event = new DictionaryValue();
+    base::DictionaryValue* event = new base::DictionaryValue();
     event->SetBoolean("lastMessage", last_message);
     event->SetString("data", data);
     scoped_ptr<base::ListValue> arguments(new base::ListValue());
@@ -553,18 +553,11 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   EXPECT_EQ(std::string(), tls_channel_id);
 }
 
-// Flaky on Linux. http://crbug.com/315264
-#if defined(OS_LINUX)
-#define MAYBE_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage \
-    DISABLED_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage
-#else
-#define MAYBE_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage \
-    WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage
-#endif
+// Flaky on Linux and Windows. http://crbug.com/315264
 // Tests a web connectable extension that receives TLS channel id, but
 // immediately closes its background page upon receipt of a message.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
-    MAYBE_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage) {
+    DISABLED_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage) {
   InitializeTestServer();
 
   const Extension* chromium_connectable =

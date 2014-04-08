@@ -58,7 +58,7 @@ const char kRTLHtmlTextDirection[] = "rtl";
 // Converts a V8 value to a string16.
 base::string16 V8ValueToUTF16(v8::Handle<v8::Value> v) {
   v8::String::Value s(v);
-  return base::string16(reinterpret_cast<const char16*>(*s), s.length());
+  return base::string16(reinterpret_cast<const base::char16*>(*s), s.length());
 }
 
 // Converts string16 to V8 String.
@@ -120,9 +120,9 @@ v8::Handle<v8::Object> GenerateMostVisitedItem(
 
   base::string16 title = mv_item.title;
   if (title.empty())
-    title = UTF8ToUTF16(mv_item.url.spec());
+    title = base::UTF8ToUTF16(mv_item.url.spec());
 
-  v8::Handle<v8::Object> obj = v8::Object::New();
+  v8::Handle<v8::Object> obj = v8::Object::New(isolate);
   obj->Set(v8::String::NewFromUtf8(isolate, "renderViewId"),
            v8::Int32::New(isolate, render_view_id));
   obj->Set(v8::String::NewFromUtf8(isolate, "rid"),
@@ -464,7 +464,7 @@ void SearchBoxExtension::DispatchChromeIdentityCheckResult(
     const base::string16& identity,
     bool identity_match) {
   std::string escaped_identity = base::GetQuotedJSONString(identity);
-  blink::WebString script(UTF8ToUTF16(base::StringPrintf(
+  blink::WebString script(base::UTF8ToUTF16(base::StringPrintf(
       kDispatchChromeIdentityCheckResult,
       escaped_identity.c_str(),
       identity_match ? "true" : "false")));
@@ -723,7 +723,7 @@ void SearchBoxExtensionWrapper::GetSuggestionToPrefetch(
   const InstantSuggestion& suggestion =
       SearchBox::Get(render_view)->suggestion();
   v8::Isolate* isolate = args.GetIsolate();
-  v8::Handle<v8::Object> data = v8::Object::New();
+  v8::Handle<v8::Object> data = v8::Object::New(isolate);
   data->Set(v8::String::NewFromUtf8(isolate, "text"),
             UTF16ToV8String(isolate, suggestion.text));
   data->Set(v8::String::NewFromUtf8(isolate, "metadata"),
@@ -741,7 +741,7 @@ void SearchBoxExtensionWrapper::GetThemeBackgroundInfo(
   const ThemeBackgroundInfo& theme_info =
       SearchBox::Get(render_view)->GetThemeBackgroundInfo();
   v8::Isolate* isolate = args.GetIsolate();
-  v8::Handle<v8::Object> info = v8::Object::New();
+  v8::Handle<v8::Object> info = v8::Object::New(isolate);
 
   info->Set(v8::String::NewFromUtf8(isolate, "usingDefaultTheme"),
             v8::Boolean::New(isolate, theme_info.using_default_theme));

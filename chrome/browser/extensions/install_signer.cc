@@ -48,6 +48,13 @@ const char kInvalidIdsKey[] = "invalid_ids";
 const char kProtocolVersionKey[] = "protocol_version";
 const char kSaltKey[] = "salt";
 const char kSignatureKey[] = "signature";
+const char kSignatureFormatVersionKey[] = "signature_format_version";
+const char kTimestampKey[] = "timestamp";
+
+// This allows us to version the format of what we write into the prefs,
+// allowing for forward migration, as well as detecting forwards/backwards
+// incompatabilities, etc.
+const int kSignatureFormatVersion = 2;
 
 const size_t kSaltBytes = 32;
 
@@ -108,6 +115,39 @@ bool ValidateExpireDateFormat(const std::string& input) {
   return true;
 }
 
+// Sets the value of |key| in |dictionary| to be a list with the contents of
+// |ids|.
+void SetExtensionIdSet(base::DictionaryValue* dictionary,
+                       const char* key,
+                       const ExtensionIdSet& ids) {
+  base::ListValue* id_list = new base::ListValue();
+  for (ExtensionIdSet::const_iterator i = ids.begin(); i != ids.end(); ++i)
+    id_list->AppendString(*i);
+  dictionary->Set(key, id_list);
+}
+
+// Tries to fetch a list of strings from |dictionay| for |key|, and inserts
+// them into |ids|. The return value indicates success/failure. Note: on
+// failure, |ids| might contain partial results, for instance if some of the
+// members of the list were not strings.
+bool GetExtensionIdSet(const base::DictionaryValue& dictionary,
+                       const char* key,
+                       ExtensionIdSet* ids) {
+  const base::ListValue* id_list = NULL;
+  if (!dictionary.GetList(key, &id_list))
+    return false;
+  for (base::ListValue::const_iterator i = id_list->begin();
+       i != id_list->end();
+       ++i) {
+    std::string id;
+    if (!(*i)->GetAsString(&id)) {
+      return false;
+    }
+    ids->insert(id);
+  }
+  return true;
+}
+
 }  // namespace
 
 namespace extensions {
@@ -120,12 +160,9 @@ InstallSignature::~InstallSignature() {
 void InstallSignature::ToValue(base::DictionaryValue* value) const {
   CHECK(value);
 
-  base::ListValue* id_list = new base::ListValue();
-  for (ExtensionIdSet::const_iterator i = ids.begin(); i != ids.end();
-       ++i)
-    id_list->AppendString(*i);
-
-  value->Set(kIdsKey, id_list);
+  value->SetInteger(kSignatureFormatVersionKey, kSignatureFormatVersion);
+  SetExtensionIdSet(value, kIdsKey, ids);
+  SetExtensionIdSet(value, kInvalidIdsKey, invalid_ids);
   value->SetString(kExpireDateKey, expire_date);
   std::string salt_base64;
   std::string signature_base64;
@@ -133,6 +170,8 @@ void InstallSignature::ToValue(base::DictionaryValue* value) const {
   base::Base64Encode(signature, &signature_base64);
   value->SetString(kSaltKey, salt_base64);
   value->SetString(kSignatureKey, signature_base64);
+  value->SetString(kTimestampKey,
+                   base::Int64ToString(timestamp.ToInternalValue()));
 }
 
 // static
@@ -140,6 +179,15 @@ scoped_ptr<InstallSignature> InstallSignature::FromValue(
     const base::DictionaryValue& value) {
 
   scoped_ptr<InstallSignature> result(new InstallSignature);
+
+  // For now we don't want to support any backwards compability, but in the
+  // future if we do, we would want to put the migration code here.
+  int format_version = 0;
+  if (!value.GetInteger(kSignatureFormatVersionKey, &format_version) ||
+      format_version != kSignatureFormatVersion) {
+    result.reset();
+    return result.Pass();
+  }
 
   std::string salt_base64;
   std::string signature_base64;
@@ -152,19 +200,23 @@ scoped_ptr<InstallSignature> InstallSignature::FromValue(
     return result.Pass();
   }
 
-  const base::ListValue* ids = NULL;
-  if (!value.GetList(kIdsKey, &ids)) {
-    result.reset();
-    return result.Pass();
-  }
-
-  for (ListValue::const_iterator i = ids->begin(); i != ids->end(); ++i) {
-    std::string id;
-    if (!(*i)->GetAsString(&id)) {
+  // Note: earlier versions of the code did not write out a timestamp value
+  // so older entries will not necessarily have this.
+  if (value.HasKey(kTimestampKey)) {
+    std::string timestamp;
+    int64 timestamp_value = 0;
+    if (!value.GetString(kTimestampKey, &timestamp) ||
+        !base::StringToInt64(timestamp, &timestamp_value)) {
       result.reset();
       return result.Pass();
     }
-    result->ids.insert(id);
+    result->timestamp = base::Time::FromInternalValue(timestamp_value);
+  }
+
+  if (!GetExtensionIdSet(value, kIdsKey, &result->ids) ||
+      !GetExtensionIdSet(value, kInvalidIdsKey, &result->invalid_ids)) {
+    result.reset();
+    return result.Pass();
   }
 
   return result.Pass();
@@ -330,7 +382,7 @@ void InstallSigner::GetSignature(const SignatureCallback& callback) {
   base::DictionaryValue dictionary;
   dictionary.SetInteger(kProtocolVersionKey, 1);
   dictionary.SetString(kHashKey, hash_base64);
-  scoped_ptr<ListValue> id_list(new ListValue);
+  scoped_ptr<base::ListValue> id_list(new base::ListValue);
   for (ExtensionIdSet::const_iterator i = ids_.begin(); i != ids_.end(); ++i) {
     id_list->AppendString(*i);
   }
@@ -343,6 +395,8 @@ void InstallSigner::GetSignature(const SignatureCallback& callback) {
   }
   url_fetcher_->SetUploadData("application/json", json);
   LogRequestStartHistograms();
+  request_start_time_ = base::Time::Now();
+  VLOG(1) << "Sending request: " << json;
   url_fetcher_->Start();
 }
 
@@ -367,6 +421,7 @@ void InstallSigner::ParseFetchResponse() {
     ReportErrorViaCallback();
     return;
   }
+  VLOG(1) << "Got response: " << response;
 
   // The response is JSON of the form:
   // {
@@ -434,15 +489,17 @@ void InstallSigner::HandleSignatureResult(const std::string& signature,
   if (!signature.empty()) {
     result.reset(new InstallSignature);
     result->ids = valid_ids;
+    result->invalid_ids = invalid_ids;
     result->salt = salt_;
     result->signature = signature;
     result->expire_date = expire_date;
+    result->timestamp = request_start_time_;
     bool verified = VerifySignature(*result);
     UMA_HISTOGRAM_BOOLEAN("ExtensionInstallSigner.ResultWasValid", verified);
-    if (!verified)
-      result.reset();
     UMA_HISTOGRAM_COUNTS_100("ExtensionInstallSigner.InvalidCount",
                              invalid_ids.size());
+    if (!verified)
+      result.reset();
   }
 
   if (!callback_.is_null())

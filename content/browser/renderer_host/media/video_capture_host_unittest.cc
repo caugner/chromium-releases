@@ -119,7 +119,9 @@ class MockVideoCaptureHost : public VideoCaptureHost {
   MOCK_METHOD2(OnBufferFreed,
                void(int device_id, int buffer_id));
   MOCK_METHOD4(OnBufferFilled,
-               void(int device_id, int buffer_id, base::Time timestamp,
+               void(int device_id,
+                    int buffer_id,
+                    base::TimeTicks timestamp,
                     const media::VideoCaptureFormat& format));
   MOCK_METHOD2(OnStateChanged, void(int device_id, VideoCaptureState state));
 
@@ -203,7 +205,7 @@ class MockVideoCaptureHost : public VideoCaptureHost {
 
   void OnBufferFilledDispatch(int device_id,
                               int buffer_id,
-                              base::Time timestamp,
+                              base::TimeTicks timestamp,
                               const media::VideoCaptureFormat& frame_format) {
     base::SharedMemory* dib = filled_dib_[buffer_id];
     ASSERT_TRUE(dib != NULL);
@@ -300,7 +302,7 @@ class VideoCaptureHostTest : public testing::Test {
           &stream_requester_,
           render_process_id,
           render_view_id,
-          browser_context_.GetResourceContext(),
+          browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
           page_request_id,
           MEDIA_DEVICE_VIDEO_CAPTURE,
           security_origin);
@@ -326,7 +328,7 @@ class VideoCaptureHostTest : public testing::Test {
           &stream_requester_,
           render_process_id,
           render_view_id,
-          browser_context_.GetResourceContext(),
+          browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
           page_request_id,
           devices[0].device.id,
           MEDIA_DEVICE_VIDEO_CAPTURE,

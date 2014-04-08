@@ -10,7 +10,6 @@
 #include "base/memory/singleton.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
@@ -19,6 +18,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/javascript_message_type.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/browser/process_manager.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
@@ -35,7 +35,7 @@ namespace {
 extensions::ProcessManager* GetExtensionsProcessManager(
     WebContents* web_contents) {
 #if defined(ENABLE_EXTENSIONS)
-  return extensions::ExtensionSystem::GetForBrowserContext(
+  return extensions::ExtensionSystem::Get(
       web_contents->GetBrowserContext())->process_manager();
 #else
   return NULL;
@@ -209,7 +209,8 @@ void ChromeJavaScriptDialogManager::RunBeforeUnloadDialog(
   const base::string16 footer = l10n_util::GetStringUTF16(is_reload ?
       IDS_BEFORERELOAD_MESSAGEBOX_FOOTER : IDS_BEFOREUNLOAD_MESSAGEBOX_FOOTER);
 
-  base::string16 full_message = message_text + ASCIIToUTF16("\n\n") + footer;
+  base::string16 full_message =
+      message_text + base::ASCIIToUTF16("\n\n") + footer;
 
   const Extension* extension = GetExtensionForWebContents(web_contents);
   if (extension)
@@ -271,7 +272,7 @@ base::string16 ChromeJavaScriptDialogManager::GetTitle(
 
   const Extension* extension = GetExtensionForWebContents(web_contents);
   if (extension)
-    return UTF8ToUTF16(extension->name());
+    return base::UTF8ToUTF16(extension->name());
 
   // Otherwise, return the formatted URL.
   // In this case, force URL to have LTR directionality.

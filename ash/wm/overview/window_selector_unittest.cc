@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/launcher/launcher.h"
+#include "ash/drag_drop/drag_drop_controller.h"
 #include "ash/root_window_controller.h"
-#include "ash/screen_ash.h"
+#include "ash/screen_util.h"
+#include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/launcher_test_api.h"
+#include "ash/test/shelf_test_api.h"
 #include "ash/test/shelf_view_test_api.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/test/test_shelf_delegate.h"
@@ -21,6 +22,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_vector.h"
 #include "base/run_loop.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/aura/client/activation_delegate.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
@@ -33,6 +35,7 @@
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/transform.h"
+#include "ui/views/corewm/window_util.h"
 
 namespace ash {
 namespace internal {
@@ -96,6 +99,13 @@ aura::Window* GetCopyWindow(aura::Window* window) {
   return copy_window;
 }
 
+void CancelDrag(DragDropController* controller, bool* canceled) {
+  if (controller->IsDragDropInProgress()) {
+    *canceled = true;
+    controller->DragCancel();
+  }
+}
+
 }  // namespace
 
 class WindowSelectorTest : public test::AshTestBase {
@@ -108,7 +118,7 @@ class WindowSelectorTest : public test::AshTestBase {
     ASSERT_TRUE(test::TestShelfDelegate::instance());
 
     shelf_view_test_.reset(new test::ShelfViewTestAPI(
-        test::LauncherTestAPI(Launcher::ForPrimaryDisplay()).shelf_view()));
+        test::ShelfTestAPI(Shelf::ForPrimaryDisplay()).shelf_view()));
     shelf_view_test_->SetAnimationDuration(1);
   }
 
@@ -126,8 +136,8 @@ class WindowSelectorTest : public test::AshTestBase {
 
   aura::Window* CreatePanelWindow(const gfx::Rect& bounds) {
     aura::Window* window = CreateTestWindowInShellWithDelegateAndType(
-        NULL, aura::client::WINDOW_TYPE_PANEL, 0, bounds);
-    test::TestShelfDelegate::instance()->AddLauncherItem(window);
+        NULL, ui::wm::WINDOW_TYPE_PANEL, 0, bounds);
+    test::TestShelfDelegate::instance()->AddShelfItem(window);
     shelf_view_test()->RunMessageLoopUntilAnimationsDone();
     return window;
   }
@@ -171,7 +181,7 @@ class WindowSelectorTest : public test::AshTestBase {
   }
 
   gfx::RectF GetTransformedBounds(aura::Window* window) {
-    gfx::RectF bounds(ash::ScreenAsh::ConvertRectToScreen(
+    gfx::RectF bounds(ScreenUtil::ConvertRectToScreen(
         window->parent(), window->layer()->bounds()));
     gfx::Transform transform(GetTransformRelativeTo(bounds.origin(),
         window->layer()->transform()));
@@ -180,10 +190,24 @@ class WindowSelectorTest : public test::AshTestBase {
   }
 
   gfx::RectF GetTransformedTargetBounds(aura::Window* window) {
-    gfx::RectF bounds(ash::ScreenAsh::ConvertRectToScreen(
+    gfx::RectF bounds(ScreenUtil::ConvertRectToScreen(
         window->parent(), window->layer()->GetTargetBounds()));
     gfx::Transform transform(GetTransformRelativeTo(bounds.origin(),
         window->layer()->GetTargetTransform()));
+    transform.TransformRect(&bounds);
+    return bounds;
+  }
+
+  gfx::RectF GetTransformedBoundsInRootWindow(aura::Window* window) {
+    gfx::RectF bounds = gfx::Rect(window->bounds().size());
+    aura::Window* root = window->GetRootWindow();
+    CHECK(window->layer());
+    CHECK(root->layer());
+    gfx::Transform transform;
+    if (!window->layer()->GetTargetTransformRelativeTo(root->layer(),
+                                                       &transform)) {
+      return gfx::RectF();
+    }
     transform.TransformRect(&bounds);
     return bounds;
   }
@@ -245,7 +269,7 @@ TEST_F(WindowSelectorTest, Basic) {
 
   // The cursor should be visible and locked as a pointer
   EXPECT_EQ(ui::kCursorPointer,
-            root_window->GetDispatcher()->last_cursor().native_type());
+            root_window->GetDispatcher()->host()->last_cursor().native_type());
   EXPECT_TRUE(aura::client::GetCursorClient(root_window)->IsCursorLocked());
   EXPECT_TRUE(aura::client::GetCursorClient(root_window)->IsCursorVisible());
 
@@ -692,7 +716,7 @@ TEST_F(WindowSelectorTest, ModalChild) {
   scoped_ptr<aura::Window> window1(CreateWindow(bounds));
   scoped_ptr<aura::Window> child1(CreateWindow(bounds));
   child1->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_WINDOW);
-  window1->AddTransientChild(child1.get());
+  views::corewm::AddTransientChild(window1.get(), child1.get());
   EXPECT_EQ(window1->parent(), child1->parent());
   ToggleOverview();
   EXPECT_TRUE(window1->IsVisible());
@@ -708,7 +732,7 @@ TEST_F(WindowSelectorTest, ClickModalWindowParent) {
   scoped_ptr<aura::Window> window1(CreateWindow(gfx::Rect(0, 0, 180, 180)));
   scoped_ptr<aura::Window> child1(CreateWindow(gfx::Rect(200, 0, 180, 180)));
   child1->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_WINDOW);
-  window1->AddTransientChild(child1.get());
+  views::corewm::AddTransientChild(window1.get(), child1.get());
   EXPECT_FALSE(WindowsOverlapping(window1.get(), child1.get()));
   EXPECT_EQ(window1->parent(), child1->parent());
   ToggleOverview();
@@ -829,7 +853,7 @@ TEST_F(WindowSelectorTest, CycleMultipleDisplaysCopiesWindows) {
   unmoved2->SetName("unmoved2");
   moved1->SetName("moved1");
   moved1->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_WINDOW);
-  moved1_trans_parent->AddTransientChild(moved1.get());
+  views::corewm::AddTransientChild(moved1_trans_parent.get(), moved1.get());
   moved1_trans_parent->SetName("moved1_trans_parent");
 
   EXPECT_EQ(root_windows[0], moved1->GetRootWindow());
@@ -992,6 +1016,64 @@ TEST_F(WindowSelectorTest, RemoveDisplay) {
   EXPECT_TRUE(IsSelecting());
   UpdateDisplay("400x400");
   EXPECT_FALSE(IsSelecting());
+}
+
+// Tests starting overview during a drag and drop tracking operation.
+// TODO(flackr): Fix memory corruption crash when running locally (not failing
+// on bots). See http://crbug.com/342528.
+TEST_F(WindowSelectorTest, DISABLED_DragDropInProgress) {
+  bool drag_canceled_by_test = false;
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window(CreateWindow(bounds));
+  test::ShellTestApi shell_test_api(Shell::GetInstance());
+  ash::internal::DragDropController* drag_drop_controller =
+      shell_test_api.drag_drop_controller();
+  ui::OSExchangeData data;
+  base::MessageLoopForUI::current()->PostTask(FROM_HERE,
+      base::Bind(&WindowSelectorTest::ToggleOverview,
+                 base::Unretained(this)));
+  base::MessageLoopForUI::current()->PostTask(FROM_HERE,
+      base::Bind(&CancelDrag, drag_drop_controller, &drag_canceled_by_test));
+  data.SetString(base::UTF8ToUTF16("I am being dragged"));
+  drag_drop_controller->StartDragAndDrop(data, window->GetRootWindow(),
+      window.get(), gfx::Point(5, 5), ui::DragDropTypes::DRAG_MOVE,
+      ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
+  RunAllPendingInMessageLoop();
+  EXPECT_FALSE(drag_canceled_by_test);
+  ASSERT_TRUE(IsSelecting());
+  RunAllPendingInMessageLoop();
+}
+
+TEST_F(WindowSelectorTest, HitTestingInOverview) {
+  gfx::Rect window_bounds(20, 10, 200, 300);
+  aura::Window* root_window = Shell::GetPrimaryRootWindow();
+  scoped_ptr<aura::Window> window1(CreateWindow(window_bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(window_bounds));
+
+  ToggleOverview();
+  gfx::RectF bounds1 = GetTransformedBoundsInRootWindow(window1.get());
+  gfx::RectF bounds2 = GetTransformedBoundsInRootWindow(window2.get());
+  EXPECT_NE(bounds1.ToString(), bounds2.ToString());
+
+  ui::EventTarget* root_target = root_window;
+  ui::EventTargeter* targeter = root_target->GetEventTargeter();
+  aura::Window* windows[] = { window1.get(), window2.get() };
+  for (size_t w = 0; w < arraysize(windows); ++w) {
+    gfx::RectF bounds = GetTransformedBoundsInRootWindow(windows[w]);
+    gfx::Point points[] = {
+      gfx::Point(bounds.x(), bounds.y()),
+      gfx::Point(bounds.right() - 1, bounds.y()),
+      gfx::Point(bounds.x(), bounds.bottom() - 1),
+      gfx::Point(bounds.right() - 1, bounds.bottom() - 1),
+    };
+
+    for (size_t p = 0; p < arraysize(points); ++p) {
+      ui::MouseEvent event(ui::ET_MOUSE_MOVED, points[p], points[p],
+                           ui::EF_NONE, ui::EF_NONE);
+      EXPECT_EQ(windows[w],
+                targeter->FindTargetForEvent(root_target, &event));
+    }
+  }
 }
 
 }  // namespace internal

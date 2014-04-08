@@ -152,7 +152,6 @@ class TranslateBubbleViewTest : public views::ViewsTestBase {
     bubble_ = new TranslateBubbleView(anchor_widget_->GetContentsView(),
                                       model.Pass(),
                                       TranslateErrors::NONE,
-                                      NULL,
                                       NULL);
     views::BubbleDelegateView::CreateBubble(bubble_)->Show();
   }
@@ -259,10 +258,10 @@ TEST_F(TranslateBubbleViewTest, DoneButton) {
   // are applied.
   EXPECT_FALSE(mock_model_->translate_called_);
   bubble_->source_language_combobox_->SetSelectedIndex(10);
-  bubble_->HandleComboboxSelectedIndexChanged(
+  bubble_->HandleComboboxPerformAction(
       TranslateBubbleView::COMBOBOX_ID_SOURCE_LANGUAGE);
   bubble_->target_language_combobox_->SetSelectedIndex(20);
-  bubble_->HandleComboboxSelectedIndexChanged(
+  bubble_->HandleComboboxPerformAction(
       TranslateBubbleView::COMBOBOX_ID_TARGET_LANGUAGE);
   bubble_->HandleButtonPressed(TranslateBubbleView::BUTTON_ID_DONE);
   EXPECT_TRUE(mock_model_->translate_called_);

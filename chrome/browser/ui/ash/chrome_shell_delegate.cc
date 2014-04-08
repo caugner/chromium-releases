@@ -4,9 +4,10 @@
 
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 
-#include "apps/shell_window.h"
-#include "apps/shell_window_registry.h"
-#include "ash/host/root_window_host_factory.h"
+#include "apps/app_window.h"
+#include "apps/app_window_registry.h"
+#include "ash/content_support/gpu_support_impl.h"
+#include "ash/host/window_tree_host_factory.h"
 #include "ash/magnifier/magnifier_constants.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
@@ -29,6 +30,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
+#include "chrome/browser/chromeos/display/display_configuration_observer.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #endif
 
@@ -97,7 +99,7 @@ content::BrowserContext* ChromeShellDelegate::GetActiveBrowserContext() {
 #if defined(OS_CHROMEOS)
   DCHECK(chromeos::UserManager::Get()->GetLoggedInUsers().size());
 #endif
-  return ProfileManager::GetActiveUserProfileOrOffTheRecord();
+  return ProfileManager::GetActiveUserProfile();
 }
 
 app_list::AppListViewDelegate*
@@ -113,7 +115,6 @@ ChromeShellDelegate::CreateAppListViewDelegate() {
 
 ash::ShelfDelegate* ChromeShellDelegate::CreateShelfDelegate(
     ash::ShelfModel* model) {
-  DCHECK(ProfileManager::IsGetDefaultProfileAllowed());
   // TODO(oshima): This is currently broken with multiple launchers.
   // Refactor so that there is just one launcher delegate in the
   // shell.
@@ -128,17 +129,28 @@ aura::client::UserActionClient* ChromeShellDelegate::CreateUserActionClient() {
   return new UserActionHandler;
 }
 
-ui::MenuModel* ChromeShellDelegate::CreateContextMenu(aura::Window* root) {
+ui::MenuModel* ChromeShellDelegate::CreateContextMenu(
+    aura::Window* root,
+    ash::ShelfItemDelegate* item_delegate,
+    ash::ShelfItem* item) {
   DCHECK(shelf_delegate_);
   // Don't show context menu for exclusive app runtime mode.
   if (chrome::IsRunningInAppMode())
     return NULL;
 
+  if (item_delegate && item)
+    return new LauncherContextMenu(shelf_delegate_, item_delegate, item, root);
+
   return new LauncherContextMenu(shelf_delegate_, root);
 }
 
-ash::RootWindowHostFactory* ChromeShellDelegate::CreateRootWindowHostFactory() {
-  return ash::RootWindowHostFactory::Create();
+ash::WindowTreeHostFactory* ChromeShellDelegate::CreateWindowTreeHostFactory() {
+  return ash::WindowTreeHostFactory::Create();
+}
+
+ash::GPUSupport* ChromeShellDelegate::CreateGPUSupport() {
+  // Chrome uses real GPU support.
+  return new ash::GPUSupportImpl;
 }
 
 base::string16 ChromeShellDelegate::GetProductName() const {

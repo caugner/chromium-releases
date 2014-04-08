@@ -143,7 +143,7 @@ bool ShowAutolaunchPrompt(Browser* browser) {
   // Only supported on the main profile for now.
   Profile* profile = browser->profile();
   if (profile->GetPath().BaseName() !=
-      base::FilePath(ASCIIToUTF16(chrome::kInitialProfile))) {
+      base::FilePath(base::ASCIIToUTF16(chrome::kInitialProfile))) {
     return false;
   }
 
@@ -154,9 +154,6 @@ bool ShowAutolaunchPrompt(Browser* browser) {
     return false;
 
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kChromeFrame))
-    return false;
-
   if (!command_line.HasSwitch(switches::kAutoLaunchAtStartup) &&
       !first_run::IsChromeFirstRun()) {
     return false;

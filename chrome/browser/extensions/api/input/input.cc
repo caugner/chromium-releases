@@ -133,8 +133,21 @@ bool VirtualKeyboardPrivateKeyboardLoadedFunction::RunImpl() {
 #if defined(USE_ASH)
   keyboard::MarkKeyboardLoadFinished();
 
-  content::UserMetricsAction("VirtualKeyboardLoaded");
+  base::UserMetricsAction("VirtualKeyboardLoaded");
 
+  return true;
+#endif
+  error_ = kNotYetImplementedError;
+  return false;
+}
+
+bool VirtualKeyboardPrivateGetKeyboardConfigFunction::RunImpl() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+#if defined(USE_ASH)
+  base::DictionaryValue* results = new base::DictionaryValue();
+  results->SetString("layout", keyboard::GetKeyboardLayout());
+  results->SetBoolean("a11ymode", keyboard::GetAccessibilityKeyboardEnabled());
+  SetResult(results);
   return true;
 #endif
   error_ = kNotYetImplementedError;
@@ -152,7 +165,7 @@ g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 ProfileKeyedAPIFactory<InputAPI>* InputAPI::GetFactoryInstance() {
-  return &g_factory.Get();
+  return g_factory.Pointer();
 }
 
 }  // namespace extensions

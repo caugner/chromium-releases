@@ -18,10 +18,10 @@
 #include "base/json/json_writer.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/invalidation/p2p_invalidation_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -29,11 +29,12 @@
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_base.h"
 #include "chrome/browser/sync/about_sync_util.h"
-#include "chrome/browser/sync/glue/data_type_controller.h"
+#include "chrome/browser/sync/backend_migrator.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/status_change_checker.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/sync_driver/data_type_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "sync/internal_api/public/base/progress_marker_map.h"
@@ -48,66 +49,37 @@ using syncer::sessions::SyncSessionSnapshot;
 using invalidation::P2PInvalidationService;
 
 // The amount of time for which we wait for a sync operation to complete.
+// TODO(sync): This timeout must eventually be made less than the default 45
+// second timeout for integration tests so that in case a sync operation times
+// out, it is able to log a useful failure message before the test is killed.
 static const int kSyncOperationTimeoutMs = 45000;
 
-// Simple class to implement a timeout using PostDelayedTask.  If it is not
-// aborted before picked up by a message queue, then it asserts.  This class is
-// not thread safe.
-class StateChangeTimeoutEvent
-    : public base::RefCountedThreadSafe<StateChangeTimeoutEvent> {
+namespace {
+
+// Checks if a desired change in the state of the sync engine has taken place by
+// running the callback passed to it.
+class CallbackStatusChecker : public StatusChangeChecker {
  public:
-  explicit StateChangeTimeoutEvent(ProfileSyncServiceHarness* caller);
+  CallbackStatusChecker(base::Callback<bool()> callback,
+                        const std::string& source)
+      : StatusChangeChecker(source),
+        callback_(callback) {
+  }
 
-  // The entry point to the class from PostDelayedTask.
-  void Callback();
+  virtual ~CallbackStatusChecker() {
+  }
 
-  // Cancels the actions of the callback.  Returns true if success, false
-  // if the callback has already timed out.
-  bool Abort();
+  virtual bool IsExitConditionSatisfied() OVERRIDE {
+    return callback_.Run();
+  }
 
  private:
-  friend class base::RefCountedThreadSafe<StateChangeTimeoutEvent>;
+  // Callback that evaluates whether the condition we are waiting on has been
+  // satisfied.
+  base::Callback<bool()> callback_;
 
-  ~StateChangeTimeoutEvent();
-
-  bool aborted_;
-  bool did_timeout_;
-
-  // Due to synchronization of the IO loop, the caller will always be alive
-  // if the class is not aborted.
-  ProfileSyncServiceHarness* caller_;
-
-  DISALLOW_COPY_AND_ASSIGN(StateChangeTimeoutEvent);
+  DISALLOW_COPY_AND_ASSIGN(CallbackStatusChecker);
 };
-
-StateChangeTimeoutEvent::StateChangeTimeoutEvent(
-    ProfileSyncServiceHarness* caller)
-    : aborted_(false), did_timeout_(false), caller_(caller) {
-}
-
-StateChangeTimeoutEvent::~StateChangeTimeoutEvent() {
-}
-
-void StateChangeTimeoutEvent::Callback() {
-  if (!aborted_) {
-    DCHECK(caller_->status_change_checker_);
-    // TODO(rsimha): Simply return false on timeout instead of repeating the
-    // exit condition check.
-    if (!caller_->status_change_checker_->IsExitConditionSatisfied()) {
-      did_timeout_ = true;
-      DCHECK(!aborted_);
-      caller_->SignalStateComplete();
-    }
-  }
-}
-
-bool StateChangeTimeoutEvent::Abort() {
-  aborted_ = true;
-  caller_ = NULL;
-  return !did_timeout_;
-}
-
-namespace {
 
 // Helper function which returns true if the sync backend has been initialized,
 // or if backend initialization was blocked for some reason.
@@ -127,39 +99,22 @@ bool DoneWaitingForBackendInitialization(
   return false;
 }
 
-// Helper function which returns true if initial sync is complete, or if the
-// initial sync is blocked for some reason.
-bool DoneWaitingForInitialSync(const ProfileSyncServiceHarness* harness) {
+// Helper function which returns true if sync setup is complete, or in case
+// it is blocked for some reason.
+bool DoneWaitingForSyncSetup(const ProfileSyncServiceHarness* harness) {
   DCHECK(harness);
-  // Initial sync is complete.
-  if (harness->IsFullySynced())
+  // Sync setup is complete, and the client is ready to sync new changes.
+  if (harness->ServiceIsPushingChanges())
     return true;
-  // Initial sync is blocked because custom passphrase is required.
+  // Sync is blocked because a custom passphrase is required.
   if (harness->service()->passphrase_required_reason() ==
       syncer::REASON_DECRYPTION) {
     return true;
   }
-  // Initial sync is blocked by an auth error.
-  if (harness->HasAuthError())
-    return true;
-  // Still waiting on initial sync.
-  return false;
-}
-
-// Helper function which returns true if the sync client is fully synced, or if
-// sync is blocked for some reason.
-bool DoneWaitingForFullSync(const ProfileSyncServiceHarness* harness) {
-  DCHECK(harness);
-  // Sync is complete.
-  if (harness->IsFullySynced())
-    return true;
   // Sync is blocked by an auth error.
   if (harness->HasAuthError())
     return true;
-  // Sync is blocked by a failure to fetch Oauth2 tokens.
-  if (harness->service()->IsRetryingAccessTokenFetchForTest())
-    return true;
-  // Still waiting on sync.
+  // Still waiting on sync setup.
   return false;
 }
 
@@ -176,22 +131,6 @@ bool IsPassphraseAccepted(const ProfileSyncServiceHarness* harness) {
   DCHECK(harness);
   return (!harness->service()->IsPassphraseRequired() &&
           harness->service()->IsUsingSecondaryPassphrase());
-}
-
-// Helper function which returns true if the sync client no longer has a pending
-// backend migration.
-bool NoPendingBackendMigration(const ProfileSyncServiceHarness* harness) {
-  DCHECK(harness);
-  return !harness->HasPendingBackendMigration();
-}
-
-// Helper function which returns true if the client has detected an actionable
-// error.
-bool HasActionableError(const ProfileSyncServiceHarness* harness) {
-  DCHECK(harness);
-  ProfileSyncService::Status status = harness->GetStatus();
-  return (status.sync_protocol_error.action != syncer::UNKNOWN_ACTION &&
-          harness->service()->HasUnrecoverableError() == true);
 }
 
 }  // namespace
@@ -321,13 +260,6 @@ bool ProfileSyncServiceHarness::SetupSync(
   // Notify ProfileSyncService that we are done with configuration.
   FinishSyncSetup();
 
-  // Subscribe sync client to notifications from the backend migrator
-  // (possible only after choosing data types).
-  if (!TryListeningToMigrationEvents()) {
-    NOTREACHED();
-    return false;
-  }
-
   // Set an implicit passphrase for encryption if an explicit one hasn't already
   // been set. If an explicit passphrase has been set, immediately return false,
   // since a decryption passphrase is required.
@@ -341,10 +273,7 @@ bool ProfileSyncServiceHarness::SetupSync(
 
   // Wait for initial sync cycle to be completed.
   DCHECK(service()->sync_initialized());
-  StatusChangeChecker initial_sync_checker(
-      base::Bind(&DoneWaitingForInitialSync, base::Unretained(this)),
-      "DoneWaitingForInitialSync");
-  if (!AwaitStatusChange(&initial_sync_checker, "SetupSync")) {
+  if (!AwaitSyncSetupCompletion()) {
     LOG(ERROR) << "Initial sync cycle did not complete after "
                << kSyncOperationTimeoutMs / 1000
                << " seconds.";
@@ -368,17 +297,7 @@ bool ProfileSyncServiceHarness::SetupSync(
   return true;
 }
 
-bool ProfileSyncServiceHarness::TryListeningToMigrationEvents() {
-  browser_sync::BackendMigrator* migrator =
-      service()->GetBackendMigratorForTest();
-  if (migrator && !migrator->HasMigrationObserver(this)) {
-    migrator->AddMigrationObserver(this);
-    return true;
-  }
-  return false;
-}
-
-void ProfileSyncServiceHarness::SignalStateComplete() {
+void ProfileSyncServiceHarness::QuitMessageLoop() {
   base::MessageLoop::current()->QuitWhenIdle();
 }
 
@@ -386,9 +305,9 @@ void ProfileSyncServiceHarness::OnStateChanged() {
   if (!status_change_checker_)
     return;
 
-  DVLOG(1) << GetClientInfoString(status_change_checker_->callback_name());
+  DVLOG(1) << GetClientInfoString(status_change_checker_->source());
   if (status_change_checker_->IsExitConditionSatisfied())
-    base::MessageLoop::current()->QuitWhenIdle();
+    QuitMessageLoop();
 }
 
 void ProfileSyncServiceHarness::OnSyncCycleCompleted() {
@@ -405,40 +324,9 @@ void ProfileSyncServiceHarness::OnSyncCycleCompleted() {
   OnStateChanged();
 }
 
-void ProfileSyncServiceHarness::OnMigrationStateChange() {
-  // Update migration state.
-  if (HasPendingBackendMigration()) {
-    // Merge current pending migration types into
-    // |pending_migration_types_|.
-    pending_migration_types_.PutAll(
-        service()->GetBackendMigratorForTest()->
-            GetPendingMigrationTypesForTest());
-    DVLOG(1) << profile_debug_name_ << ": new pending migration types "
-             << syncer::ModelTypeSetToString(pending_migration_types_);
-  } else {
-    // Merge just-finished pending migration types into
-    // |migration_types_|.
-    migrated_types_.PutAll(pending_migration_types_);
-    pending_migration_types_.Clear();
-    DVLOG(1) << profile_debug_name_ << ": new migrated types "
-             << syncer::ModelTypeSetToString(migrated_types_);
-  }
-  OnStateChanged();
-}
-
 bool ProfileSyncServiceHarness::AwaitPassphraseRequired() {
   DVLOG(1) << GetClientInfoString("AwaitPassphraseRequired");
-  if (IsSyncDisabled()) {
-    LOG(ERROR) << "Sync disabled for " << profile_debug_name_ << ".";
-    return false;
-  }
-
-  if (service()->IsPassphraseRequired()) {
-    // It's already true that a passphrase is required; don't wait.
-    return true;
-  }
-
-  StatusChangeChecker passphrase_required_checker(
+  CallbackStatusChecker passphrase_required_checker(
       base::Bind(&::IsPassphraseRequired, base::Unretained(this)),
       "IsPassphraseRequired");
   return AwaitStatusChange(&passphrase_required_checker,
@@ -446,20 +334,7 @@ bool ProfileSyncServiceHarness::AwaitPassphraseRequired() {
 }
 
 bool ProfileSyncServiceHarness::AwaitPassphraseAccepted() {
-  DVLOG(1) << GetClientInfoString("AwaitPassphraseAccepted");
-  if (IsSyncDisabled()) {
-    LOG(ERROR) << "Sync disabled for " << profile_debug_name_ << ".";
-    return false;
-  }
-
-  if (!service()->IsPassphraseRequired() &&
-      service()->IsUsingSecondaryPassphrase()) {
-    // Passphrase is already accepted; don't wait.
-    FinishSyncSetup();
-    return true;
-  }
-
-  StatusChangeChecker passphrase_accepted_checker(
+  CallbackStatusChecker passphrase_accepted_checker(
       base::Bind(&::IsPassphraseAccepted, base::Unretained(this)),
       "IsPassphraseAccepted");
   bool return_value = AwaitStatusChange(&passphrase_accepted_checker,
@@ -471,12 +346,7 @@ bool ProfileSyncServiceHarness::AwaitPassphraseAccepted() {
 
 bool ProfileSyncServiceHarness::AwaitBackendInitialized() {
   DVLOG(1) << GetClientInfoString("AwaitBackendInitialized");
-  if (service()->sync_initialized()) {
-    // The sync backend host has already been initialized; don't wait.
-    return true;
-  }
-
-  StatusChangeChecker backend_initialized_checker(
+  CallbackStatusChecker backend_initialized_checker(
       base::Bind(&DoneWaitingForBackendInitialization,
                  base::Unretained(this)),
       "DoneWaitingForBackendInitialization");
@@ -484,129 +354,43 @@ bool ProfileSyncServiceHarness::AwaitBackendInitialized() {
   return service()->sync_initialized();
 }
 
-bool ProfileSyncServiceHarness::AwaitDataSyncCompletion() {
-  DVLOG(1) << GetClientInfoString("AwaitDataSyncCompletion");
-
-  DCHECK(service()->sync_initialized());
-  DCHECK(!IsSyncDisabled());
-
-  if (IsDataSynced()) {
-    // Client is already synced; don't wait.
-    return true;
-  }
-
-  StatusChangeChecker data_synced_checker(
-      base::Bind(&ProfileSyncServiceHarness::IsDataSynced,
+// TODO(sync): As of today, we wait for a client to finish its commit activity
+// by checking if its progress markers are up to date. In future, once we have
+// an in-process C++ server, this function can be reimplemented without relying
+// on progress markers.
+bool ProfileSyncServiceHarness::AwaitCommitActivityCompletion() {
+  DVLOG(1) << GetClientInfoString("AwaitCommitActivityCompletion");
+  CallbackStatusChecker latest_progress_markers_checker(
+      base::Bind(&ProfileSyncServiceHarness::HasLatestProgressMarkers,
                  base::Unretained(this)),
-      "IsDataSynced");
-  return AwaitStatusChange(&data_synced_checker, "AwaitDataSyncCompletion");
-}
-
-bool ProfileSyncServiceHarness::AwaitFullSyncCompletion() {
-  DVLOG(1) << GetClientInfoString("AwaitFullSyncCompletion");
-  if (IsSyncDisabled()) {
-    LOG(ERROR) << "Sync disabled for " << profile_debug_name_ << ".";
-    return false;
-  }
-
-  if (IsFullySynced()) {
-    // Client is already synced; don't wait.
-    return true;
-  }
-
-  DCHECK(service()->sync_initialized());
-  StatusChangeChecker fully_synced_checker(
-      base::Bind(&DoneWaitingForFullSync, base::Unretained(this)),
-      "DoneWaitingForFullSync");
-  AwaitStatusChange(&fully_synced_checker, "AwaitFullSyncCompletion");
-  return IsFullySynced();
+      "HasLatestProgressMarkers");
+  AwaitStatusChange(&latest_progress_markers_checker,
+                    "AwaitCommitActivityCompletion");
+  return HasLatestProgressMarkers();
 }
 
 bool ProfileSyncServiceHarness::AwaitSyncDisabled() {
   DCHECK(service()->HasSyncSetupCompleted());
   DCHECK(!IsSyncDisabled());
-  StatusChangeChecker sync_disabled_checker(
+  CallbackStatusChecker sync_disabled_checker(
       base::Bind(&ProfileSyncServiceHarness::IsSyncDisabled,
                  base::Unretained(this)),
       "IsSyncDisabled");
   return AwaitStatusChange(&sync_disabled_checker, "AwaitSyncDisabled");
 }
 
-// TODO(rsimha): Move this method from PSSHarness to the class that uses it.
-bool ProfileSyncServiceHarness::AwaitExponentialBackoffVerification() {
-  const SyncSessionSnapshot& snap = GetLastSessionSnapshot();
-  retry_verifier_.reset(new RetryVerifier());
-  retry_verifier_->Initialize(snap);
-  StatusChangeChecker exponential_backoff_checker(
-      base::Bind(&ProfileSyncServiceHarness::IsExponentialBackoffDone,
-                 base::Unretained(this)),
-      "IsExponentialBackoffDone");
-  AwaitStatusChange(&exponential_backoff_checker,
-                    "AwaitExponentialBackoffVerification");
-  return retry_verifier_->Succeeded();
-}
-
-bool ProfileSyncServiceHarness::AwaitActionableError() {
-  ProfileSyncService::Status status = GetStatus();
-  CHECK(status.sync_protocol_error.action == syncer::UNKNOWN_ACTION);
-  StatusChangeChecker actionable_error_checker(
-      base::Bind(&HasActionableError, base::Unretained(this)),
-      "HasActionableError");
-  return AwaitStatusChange(&actionable_error_checker, "AwaitActionableError");
-}
-
-bool ProfileSyncServiceHarness::AwaitMigration(
-    syncer::ModelTypeSet expected_migrated_types) {
-  DVLOG(1) << GetClientInfoString("AwaitMigration");
-  DVLOG(1) << profile_debug_name_ << ": waiting until migration is done for "
-          << syncer::ModelTypeSetToString(expected_migrated_types);
-  while (true) {
-    bool migration_finished = migrated_types_.HasAll(expected_migrated_types);
-    DVLOG(1) << "Migrated types "
-             << syncer::ModelTypeSetToString(migrated_types_)
-             << (migration_finished ? " contains " : " does not contain ")
-             << syncer::ModelTypeSetToString(expected_migrated_types);
-    if (migration_finished) {
-      return true;
-    }
-
-    if (!HasPendingBackendMigration()) {
-      StatusChangeChecker pending_migration_checker(
-          base::Bind(&ProfileSyncServiceHarness::HasPendingBackendMigration,
-                     base::Unretained(this)),
-          "HasPendingBackendMigration");
-      if (!AwaitStatusChange(&pending_migration_checker,
-                             "AwaitMigration Start")) {
-        DVLOG(1) << profile_debug_name_ << ": Migration did not start";
-        return false;
-      }
-    }
-
-    StatusChangeChecker migration_finished_checker(
-        base::Bind(&::NoPendingBackendMigration, base::Unretained(this)),
-        "NoPendingBackendMigration");
-    if (!AwaitStatusChange(&migration_finished_checker,
-                           "AwaitMigration Finish")) {
-      DVLOG(1) << profile_debug_name_ << ": Migration did not finish";
-      return false;
-    }
-
-    // We must use AwaitDataSyncCompletion rather than the more common
-    // AwaitFullSyncCompletion.  As long as crbug.com/97780 is open, we will
-    // rely on self-notifications to ensure that progress markers are updated,
-    // which allows AwaitFullSyncCompletion to return.  However, in some
-    // migration tests these notifications are completely disabled, so the
-    // progress markers do not get updated.  This is why we must use the less
-    // strict condition, AwaitDataSyncCompletion.
-    if (!AwaitDataSyncCompletion())
-      return false;
-  }
+bool ProfileSyncServiceHarness::AwaitSyncSetupCompletion() {
+  CallbackStatusChecker sync_setup_complete_checker(
+      base::Bind(&DoneWaitingForSyncSetup, base::Unretained(this)),
+      "DoneWaitingForSyncSetup");
+  return AwaitStatusChange(&sync_setup_complete_checker,
+                           "AwaitSyncSetupCompletion");
 }
 
 bool ProfileSyncServiceHarness::AwaitMutualSyncCycleCompletion(
     ProfileSyncServiceHarness* partner) {
   DVLOG(1) << GetClientInfoString("AwaitMutualSyncCycleCompletion");
-  if (!AwaitFullSyncCompletion())
+  if (!AwaitCommitActivityCompletion())
     return false;
   return partner->WaitUntilProgressMarkersMatch(this);
 }
@@ -614,7 +398,7 @@ bool ProfileSyncServiceHarness::AwaitMutualSyncCycleCompletion(
 bool ProfileSyncServiceHarness::AwaitGroupSyncCycleCompletion(
     std::vector<ProfileSyncServiceHarness*>& partners) {
   DVLOG(1) << GetClientInfoString("AwaitGroupSyncCycleCompletion");
-  if (!AwaitFullSyncCompletion())
+  if (!AwaitCommitActivityCompletion())
     return false;
   bool return_value = true;
   for (std::vector<ProfileSyncServiceHarness*>::iterator it =
@@ -645,10 +429,6 @@ bool ProfileSyncServiceHarness::AwaitQuiescence(
 bool ProfileSyncServiceHarness::WaitUntilProgressMarkersMatch(
     ProfileSyncServiceHarness* partner) {
   DVLOG(1) << GetClientInfoString("WaitUntilProgressMarkersMatch");
-  if (IsSyncDisabled()) {
-    LOG(ERROR) << "Sync disabled for " << profile_debug_name_ << ".";
-    return false;
-  }
 
   // TODO(rsimha): Replace the mechanism of matching up progress markers with
   // one that doesn't require every client to have the same progress markers.
@@ -660,7 +440,7 @@ bool ProfileSyncServiceHarness::WaitUntilProgressMarkersMatch(
     return_value = true;
   } else {
     partner->service()->AddObserver(this);
-    StatusChangeChecker matches_other_client_checker(
+    CallbackStatusChecker matches_other_client_checker(
         base::Bind(&ProfileSyncServiceHarness::MatchesPartnerClient,
                    base::Unretained(this)),
         "MatchesPartnerClient");
@@ -681,30 +461,36 @@ bool ProfileSyncServiceHarness::AwaitStatusChange(
     return false;
   }
 
+  DCHECK(checker);
+  if (checker->IsExitConditionSatisfied()) {
+    DVLOG(1) << GetClientInfoString("AwaitStatusChange exiting early because "
+                                    "condition is already satisfied");
+    return true;
+  }
+
   DCHECK(status_change_checker_ == NULL);
   status_change_checker_ = checker;
 
-  scoped_refptr<StateChangeTimeoutEvent> timeout_signal(
-      new StateChangeTimeoutEvent(this));
+  base::OneShotTimer<ProfileSyncServiceHarness> timer;
+  timer.Start(FROM_HERE,
+              base::TimeDelta::FromMilliseconds(kSyncOperationTimeoutMs),
+              base::Bind(&ProfileSyncServiceHarness::QuitMessageLoop,
+                         base::Unretained(this)));
   {
     base::MessageLoop* loop = base::MessageLoop::current();
     base::MessageLoop::ScopedNestableTaskAllower allow(loop);
-    loop->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&StateChangeTimeoutEvent::Callback,
-                   timeout_signal.get()),
-        base::TimeDelta::FromMilliseconds(kSyncOperationTimeoutMs));
     loop->Run();
   }
 
   status_change_checker_ = NULL;
 
-  if (timeout_signal->Abort()) {
+  if (timer.IsRunning()) {
     DVLOG(1) << GetClientInfoString("AwaitStatusChange succeeded");
     return true;
   } else {
-    DVLOG(0) << GetClientInfoString(base::StringPrintf(
+    LOG(ERROR) << GetClientInfoString(base::StringPrintf(
         "AwaitStatusChange called from %s timed out", source.c_str()));
+    CHECK(false) << "Ending test because of timeout.";
     return false;
   }
 }
@@ -721,12 +507,6 @@ ProfileSyncService::Status ProfileSyncServiceHarness::GetStatus() const {
   return result;
 }
 
-bool ProfileSyncServiceHarness::IsExponentialBackoffDone() const {
-  const SyncSessionSnapshot& snap = GetLastSessionSnapshot();
-  retry_verifier_->VerifyRetryInterval(snap);
-  return (retry_verifier_->done());
-}
-
 bool ProfileSyncServiceHarness::IsSyncDisabled() const {
   return !service()->setup_in_progress() &&
          !service()->HasSyncSetupCompleted();
@@ -741,43 +521,12 @@ bool ProfileSyncServiceHarness::HasAuthError() const {
              GoogleServiceAuthError::REQUEST_CANCELED;
 }
 
-// We use this function to share code between IsFullySynced and IsDataSynced.
-bool ProfileSyncServiceHarness::IsDataSyncedImpl() const {
-  return ServiceIsPushingChanges() &&
-         GetStatus().notifications_enabled &&
-         !service()->HasUnsyncedItems() &&
-         !HasPendingBackendMigration();
-}
-
-bool ProfileSyncServiceHarness::IsDataSynced() const {
-  if (service() == NULL) {
-    DVLOG(1) << GetClientInfoString("IsDataSynced(): false");
-    return false;
-  }
-
-  bool is_data_synced = IsDataSyncedImpl();
-
-  DVLOG(1) << GetClientInfoString(
-      is_data_synced ? "IsDataSynced: true" : "IsDataSynced: false");
-  return is_data_synced;
-}
-
-bool ProfileSyncServiceHarness::IsFullySynced() const {
-  if (service() == NULL) {
-    DVLOG(1) << GetClientInfoString("IsFullySynced: false");
-    return false;
-  }
-  // If we didn't try to commit anything in the previous cycle, there's a
-  // good chance that we're now fully up to date.
+// TODO(sync): Remove this method once we stop relying on self notifications and
+// comparing progress markers.
+bool ProfileSyncServiceHarness::HasLatestProgressMarkers() const {
   const SyncSessionSnapshot& snap = GetLastSessionSnapshot();
-  bool is_fully_synced =
-      snap.model_neutral_state().num_successful_commits == 0
-      && snap.model_neutral_state().commit_result == syncer::SYNCER_OK
-      && IsDataSyncedImpl();
-
-  DVLOG(1) << GetClientInfoString(
-      is_fully_synced ? "IsFullySynced: true" : "IsFullySynced: false");
-  return is_fully_synced;
+  return snap.model_neutral_state().num_successful_commits == 0 &&
+         !service()->HasUnsyncedItems();
 }
 
 void ProfileSyncServiceHarness::FinishSyncSetup() {
@@ -785,24 +534,12 @@ void ProfileSyncServiceHarness::FinishSyncSetup() {
   service()->SetSyncSetupCompleted();
 }
 
-bool ProfileSyncServiceHarness::HasPendingBackendMigration() const {
-  browser_sync::BackendMigrator* migrator =
-      service()->GetBackendMigratorForTest();
-  return migrator && migrator->state() != browser_sync::BackendMigrator::IDLE;
-}
-
 bool ProfileSyncServiceHarness::AutoStartEnabled() {
   return service()->auto_start_enabled();
 }
 
 bool ProfileSyncServiceHarness::MatchesPartnerClient() const {
-  // TODO(akalin): Shouldn't this belong with the intersection check?
-  // Otherwise, this function isn't symmetric.
   DCHECK(progress_marker_partner_);
-  if (!IsFullySynced()) {
-    DVLOG(2) << profile_debug_name_ << ": not synced, assuming doesn't match";
-    return false;
-  }
 
   // Only look for a match if we have at least one enabled datatype in
   // common with the partner client.
@@ -814,13 +551,6 @@ bool ProfileSyncServiceHarness::MatchesPartnerClient() const {
            << progress_marker_partner_->profile_debug_name_
            << ": common types are "
            << syncer::ModelTypeSetToString(common_types);
-
-  if (!common_types.Empty() && !progress_marker_partner_->IsFullySynced()) {
-    DVLOG(2) << "non-empty common types and "
-             << progress_marker_partner_->profile_debug_name_
-             << " isn't synced";
-    return false;
-  }
 
   for (syncer::ModelTypeSet::Iterator i = common_types.First();
        i.Good(); i.Inc()) {
@@ -877,7 +607,7 @@ bool ProfileSyncServiceHarness::EnableSyncForDatatype(
 
   synced_datatypes.Put(syncer::ModelTypeFromInt(datatype));
   service()->OnUserChoseDatatypes(false, synced_datatypes);
-  if (AwaitDataSyncCompletion()) {
+  if (AwaitSyncSetupCompletion()) {
     DVLOG(1) << "EnableSyncForDatatype(): Enabled sync for datatype "
              << syncer::ModelTypeToString(datatype)
              << " on " << profile_debug_name_ << ".";
@@ -910,7 +640,7 @@ bool ProfileSyncServiceHarness::DisableSyncForDatatype(
   synced_datatypes.RetainAll(syncer::UserSelectableTypes());
   synced_datatypes.Remove(datatype);
   service()->OnUserChoseDatatypes(false, synced_datatypes);
-  if (AwaitFullSyncCompletion()) {
+  if (AwaitSyncSetupCompletion()) {
     DVLOG(1) << "DisableSyncForDatatype(): Disabled sync for datatype "
              << syncer::ModelTypeToString(datatype)
              << " on " << profile_debug_name_ << ".";
@@ -933,7 +663,7 @@ bool ProfileSyncServiceHarness::EnableSyncForAllDatatypes() {
   }
 
   service()->OnUserChoseDatatypes(true, syncer::ModelTypeSet::All());
-  if (AwaitFullSyncCompletion()) {
+  if (AwaitSyncSetupCompletion()) {
     DVLOG(1) << "EnableSyncForAllDatatypes(): Enabled sync for all datatypes "
              << "on " << profile_debug_name_ << ".";
     return true;
@@ -969,6 +699,8 @@ std::string ProfileSyncServiceHarness::GetSerializedProgressMarker(
   return (it != markers_map.end()) ? it->second : std::string();
 }
 
+// TODO(sync): Clean up this method in a separate CL. Remove all snapshot fields
+// and log shorter, more meaningful messages.
 std::string ProfileSyncServiceHarness::GetClientInfoString(
     const std::string& message) const {
   std::stringstream os;
@@ -977,8 +709,6 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
     const SyncSessionSnapshot& snap = GetLastSessionSnapshot();
     const ProfileSyncService::Status& status = GetStatus();
     // Capture select info from the sync session snapshot and syncer status.
-    // TODO(rsimha): Audit the list of fields below, and eventually eliminate
-    // the use of the sync session snapshot. See crbug.com/323380.
     os << ", has_unsynced_items: "
        << (service()->sync_initialized() ? service()->HasUnsyncedItems() : 0)
        << ", did_commit: "
@@ -998,9 +728,7 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
        << ", notifications_enabled: "
        << status.notifications_enabled
        << ", service_is_pushing_changes: "
-       << ServiceIsPushingChanges()
-       << ", has_pending_backend_migration: "
-       << HasPendingBackendMigration();
+       << ServiceIsPushingChanges();
   } else {
     os << "Sync service not available";
   }
@@ -1030,7 +758,7 @@ bool ProfileSyncServiceHarness::WaitForEncryption() {
     return true;
   }
 
-  StatusChangeChecker encryption_complete_checker(
+  CallbackStatusChecker encryption_complete_checker(
       base::Bind(&ProfileSyncServiceHarness::IsEncryptionComplete,
                  base::Unretained(this)),
       "IsEncryptionComplete");
@@ -1069,7 +797,7 @@ size_t ProfileSyncServiceHarness::GetNumDatatypes() const {
 }
 
 std::string ProfileSyncServiceHarness::GetServiceStatus() {
-  scoped_ptr<DictionaryValue> value(
+  scoped_ptr<base::DictionaryValue> value(
       sync_ui_util::ConstructAboutInformation(service()));
   std::string service_status;
   base::JSONWriter::WriteWithOptions(value.get(),

@@ -46,13 +46,14 @@ class AccessibilityDelegate;
 class CapsLockDelegate;
 class MediaDelegate;
 class NewWindowDelegate;
-class RootWindowHostFactory;
+class WindowTreeHostFactory;
 class SessionStateDelegate;
 class ShelfDelegate;
+class ShelfItemDelegate;
 class ShelfModel;
 class SystemTrayDelegate;
 class UserWallpaperDelegate;
-struct LauncherItem;
+struct ShelfItem;
 
 // Delegate of the Shell.
 class ASH_EXPORT ShellDelegate {
@@ -126,11 +127,19 @@ class ASH_EXPORT ShellDelegate {
   virtual aura::client::UserActionClient* CreateUserActionClient() = 0;
 
   // Creates a menu model of the context for the |root_window|.
-  virtual ui::MenuModel* CreateContextMenu(aura::Window* root_window) = 0;
+  // When a ContextMenu is used for an item created by ShelfWindowWatcher,
+  // passes its ShelfItemDelegate and ShelfItem.
+  virtual ui::MenuModel* CreateContextMenu(
+      aura::Window* root_window,
+      ash::ShelfItemDelegate* item_delegate,
+      ash::ShelfItem* item) = 0;
 
   // Creates a root window host factory. Shell takes ownership of the returned
   // value.
-  virtual RootWindowHostFactory* CreateRootWindowHostFactory() = 0;
+  virtual WindowTreeHostFactory* CreateWindowTreeHostFactory() = 0;
+
+  // Creates a GPU support object. Shell takes ownership of the object.
+  virtual GPUSupport* CreateGPUSupport() = 0;
 
   // Get the product name.
   virtual base::string16 GetProductName() const = 0;

@@ -44,10 +44,10 @@ class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
                                       public TestContentBrowserClient {
  public:
   MockMediaStreamDispatcherHost(
-      ResourceContext* resource_context,
+      const ResourceContext::SaltCallback salt_callback,
       const scoped_refptr<base::MessageLoopProxy>& message_loop,
       MediaStreamManager* manager)
-      : MediaStreamDispatcherHost(kProcessId, resource_context, manager),
+      : MediaStreamDispatcherHost(kProcessId, salt_callback, manager),
         message_loop_(message_loop) {}
 
   // A list of mock methods.
@@ -214,7 +214,7 @@ class MediaStreamDispatcherHostTest : public testing::Test {
     media_stream_manager_->UseFakeDevice();
 
     host_ = new MockMediaStreamDispatcherHost(
-        browser_context_.GetResourceContext(),
+        browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
         base::MessageLoopProxy::current(),
         media_stream_manager_.get());
 
@@ -332,10 +332,10 @@ class MediaStreamDispatcherHostTest : public testing::Test {
           physical_audio_devices_.begin();
       for (; audio_it != physical_audio_devices_.end(); ++audio_it) {
         if (content::DoesMediaDeviceIDMatchHMAC(
-            browser_context_.GetResourceContext(),
-            origin,
-            devices[i].device.id,
-            audio_it->unique_id)) {
+                browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
+                origin,
+                devices[i].device.id,
+                audio_it->unique_id)) {
           EXPECT_FALSE(found_match);
           found_match = true;
         }
@@ -344,10 +344,10 @@ class MediaStreamDispatcherHostTest : public testing::Test {
           physical_video_devices_.begin();
       for (; video_it != physical_video_devices_.end(); ++video_it) {
         if (content::DoesMediaDeviceIDMatchHMAC(
-            browser_context_.GetResourceContext(),
-            origin,
-            devices[i].device.id,
-            video_it->id())) {
+                browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
+                origin,
+                devices[i].device.id,
+                video_it->id())) {
           EXPECT_FALSE(found_match);
           found_match = true;
         }
@@ -537,7 +537,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStreamsWithMandatorySourceId) {
       physical_audio_devices_.begin();
   for (; audio_it != physical_audio_devices_.end(); ++audio_it) {
     std::string source_id = content::GetHMACForMediaDeviceID(
-        browser_context_.GetResourceContext(),
+        browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
         origin_,
         audio_it->unique_id);
     ASSERT_FALSE(source_id.empty());
@@ -553,7 +553,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStreamsWithMandatorySourceId) {
       physical_video_devices_.begin();
   for (; video_it != physical_video_devices_.end(); ++video_it) {
     std::string source_id = content::GetHMACForMediaDeviceID(
-        browser_context_.GetResourceContext(),
+        browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
         origin_,
         video_it->id());
     ASSERT_FALSE(source_id.empty());
@@ -576,7 +576,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStreamsWithOptionalSourceId) {
       physical_audio_devices_.begin();
   for (; audio_it != physical_audio_devices_.end(); ++audio_it) {
     std::string source_id = content::GetHMACForMediaDeviceID(
-        browser_context_.GetResourceContext(),
+        browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
         origin_,
         audio_it->unique_id);
     ASSERT_FALSE(source_id.empty());
@@ -592,7 +592,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStreamsWithOptionalSourceId) {
       physical_video_devices_.begin();
   for (; video_it != physical_video_devices_.end(); ++video_it) {
     std::string source_id = content::GetHMACForMediaDeviceID(
-        browser_context_.GetResourceContext(),
+        browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
         origin_,
         video_it->id());
     ASSERT_FALSE(source_id.empty());
@@ -719,6 +719,30 @@ TEST_F(MediaStreamDispatcherHostTest, StopDeviceInStreamAndRestart) {
                                         request2_devices[0]) ||
               StreamDeviceInfo::IsEqual(request1_devices[0],
                                         request2_devices[1]));
+}
+
+TEST_F(MediaStreamDispatcherHostTest,
+       GenerateTwoStreamsAndStopDeviceWhileWaitingForSecondStream) {
+  StreamOptions options(false, true);
+
+  SetupFakeUI(true);
+  GenerateStreamAndWaitForResult(kRenderId, kPageRequestId, options);
+  EXPECT_EQ(host_->video_devices_.size(), 1u);
+
+  // Generate a second stream.
+  EXPECT_CALL(*host_.get(),
+              OnStreamGenerated(kRenderId, kPageRequestId + 1, 0, 1));
+
+  base::RunLoop run_loop1;
+  host_->OnGenerateStream(kRenderId, kPageRequestId + 1, options, origin_,
+                          run_loop1.QuitClosure());
+
+  // Stop the video stream device from stream 1 while waiting for the
+  // second stream to be generated.
+  host_->OnStopStreamDevice(kRenderId, host_->video_devices_[0].device.id);
+  run_loop1.Run();
+
+  EXPECT_EQ(host_->video_devices_.size(), 1u);
 }
 
 TEST_F(MediaStreamDispatcherHostTest, CancelPendingStreamsOnChannelClosing) {

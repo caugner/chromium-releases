@@ -27,103 +27,163 @@ class WaiterList;
 class MOJO_SYSTEM_IMPL_EXPORT DataPipe :
     public base::RefCountedThreadSafe<DataPipe> {
  public:
+  // Validates and/or sets default options. If non-null, |in_options| must point
+  // to a struct of at least |in_options->struct_size| bytes. |out_options| must
+  // point to a (current) |MojoCreateDataPipeOptions| and will be entirely
+  // overwritten on success (it may be partly overwritten on failure).
+  static MojoResult ValidateOptions(const MojoCreateDataPipeOptions* in_options,
+                                    MojoCreateDataPipeOptions* out_options);
+
   // These are called by the producer dispatcher to implement its methods of
   // corresponding names.
   void ProducerCancelAllWaiters();
   void ProducerClose();
-  // This does not validate its arguments.
+  // This does not validate its arguments, except to check that |*num_bytes| is
+  // a multiple of |element_num_bytes_|.
   MojoResult ProducerWriteData(const void* elements,
-                               uint32_t* num_elements,
-                               MojoWriteDataFlags flags);
+                               uint32_t* num_bytes,
+                               bool all_or_none);
   // This does not validate its arguments.
   MojoResult ProducerBeginWriteData(void** buffer,
-                                    uint32_t* buffer_num_elements,
-                                    MojoWriteDataFlags flags);
-  MojoResult ProducerEndWriteData(uint32_t num_elements_written);
+                                    uint32_t* buffer_num_bytes,
+                                    bool all_or_none);
+  MojoResult ProducerEndWriteData(uint32_t num_bytes_written);
   MojoResult ProducerAddWaiter(Waiter* waiter,
                                MojoWaitFlags flags,
                                MojoResult wake_result);
   void ProducerRemoveWaiter(Waiter* waiter);
+  bool ProducerIsBusy() const;
 
   // These are called by the consumer dispatcher to implement its methods of
   // corresponding names.
   void ConsumerCancelAllWaiters();
   void ConsumerClose();
-  // This does not validate its arguments.
+  // This does not validate its arguments, except to check that |*num_bytes| is
+  // a multiple of |element_num_bytes_|.
   MojoResult ConsumerReadData(void* elements,
-                              uint32_t* num_elements,
-                              MojoReadDataFlags flags);
+                              uint32_t* num_bytes,
+                              bool all_or_none);
+  MojoResult ConsumerDiscardData(uint32_t* num_bytes,
+                                 bool all_or_none);
+  MojoResult ConsumerQueryData(uint32_t* num_bytes);
   // This does not validate its arguments.
   MojoResult ConsumerBeginReadData(const void** buffer,
-                                   uint32_t* buffer_num_elements,
-                                   MojoReadDataFlags flags);
-  MojoResult ConsumerEndReadData(uint32_t num_elements_read);
+                                   uint32_t* buffer_num_bytes,
+                                   bool all_or_none);
+  MojoResult ConsumerEndReadData(uint32_t num_bytes_read);
   MojoResult ConsumerAddWaiter(Waiter* waiter,
                                MojoWaitFlags flags,
                                MojoResult wake_result);
   void ConsumerRemoveWaiter(Waiter* waiter);
-
-  // Thread-safe and fast (they don't take the lock):
-  bool may_discard() const { return may_discard_; }
-  size_t element_size() const { return element_size_; }
-  size_t capacity_num_elements() const { return capacity_num_elements_; }
+  bool ConsumerIsBusy() const;
 
  protected:
-  DataPipe(bool has_local_producer, bool has_local_consumer);
+  DataPipe(bool has_local_producer,
+           bool has_local_consumer,
+           const MojoCreateDataPipeOptions& validated_options);
 
   friend class base::RefCountedThreadSafe<DataPipe>;
   virtual ~DataPipe();
 
-  // Not thread-safe; must be called before any other methods are called. This
-  // object is only usable on success.
-  MojoResult Init(bool may_discard,
-                  size_t element_size,
-                  size_t capacity_num_elements);
-
-  void AwakeProducerWaitersForStateChangeNoLock();
-  void AwakeConsumerWaitersForStateChangeNoLock();
-
   virtual void ProducerCloseImplNoLock() = 0;
+  // |*num_bytes| will be a nonzero multiple of |element_num_bytes_|.
+  virtual MojoResult ProducerWriteDataImplNoLock(const void* elements,
+                                                 uint32_t* num_bytes,
+                                                 bool all_or_none) = 0;
   virtual MojoResult ProducerBeginWriteDataImplNoLock(
       void** buffer,
-      uint32_t* buffer_num_elements,
-      MojoWriteDataFlags flags) = 0;
+      uint32_t* buffer_num_bytes,
+      bool all_or_none) = 0;
   virtual MojoResult ProducerEndWriteDataImplNoLock(
-      uint32_t num_elements_written) = 0;
+      uint32_t num_bytes_written) = 0;
+  // Note: A producer should not be writable during a two-phase write.
   virtual MojoWaitFlags ProducerSatisfiedFlagsNoLock() = 0;
   virtual MojoWaitFlags ProducerSatisfiableFlagsNoLock() = 0;
 
   virtual void ConsumerCloseImplNoLock() = 0;
-  virtual MojoResult ConsumerDiscardDataNoLock(uint32_t* num_elements,
-                                               bool all_or_none) = 0;
-  virtual MojoResult ConsumerQueryDataNoLock(uint32_t* num_elements) = 0;
-  virtual MojoResult ConsumerBeginReadDataImplNoLock(
-      const void** buffer,
-      uint32_t* buffer_num_elements,
-      MojoReadDataFlags flags) = 0;
-  virtual MojoResult ConsumerEndReadDataImplNoLock(
-      uint32_t num_elements_read) = 0;
+  // |*num_bytes| will be a nonzero multiple of |element_num_bytes_|.
+  virtual MojoResult ConsumerReadDataImplNoLock(void* elements,
+                                                uint32_t* num_bytes,
+                                                bool all_or_none) = 0;
+  virtual MojoResult ConsumerDiscardDataImplNoLock(uint32_t* num_bytes,
+                                                   bool all_or_none) = 0;
+  // |*num_bytes| will be a nonzero multiple of |element_num_bytes_|.
+  virtual MojoResult ConsumerQueryDataImplNoLock(uint32_t* num_bytes) = 0;
+  virtual MojoResult ConsumerBeginReadDataImplNoLock(const void** buffer,
+                                                     uint32_t* buffer_num_bytes,
+                                                     bool all_or_none) = 0;
+  virtual MojoResult ConsumerEndReadDataImplNoLock(uint32_t num_bytes_read) = 0;
+  // Note: A consumer should not be writable during a two-phase read.
   virtual MojoWaitFlags ConsumerSatisfiedFlagsNoLock() = 0;
   virtual MojoWaitFlags ConsumerSatisfiableFlagsNoLock() = 0;
 
+  // Thread-safe and fast (they don't take the lock):
+  bool may_discard() const { return may_discard_; }
+  size_t element_num_bytes() const { return element_num_bytes_; }
+  size_t capacity_num_bytes() const { return capacity_num_bytes_; }
+
+  // Must be called under lock.
+  bool producer_open_no_lock() const {
+    lock_.AssertAcquired();
+    return producer_open_;
+  }
+  bool consumer_open_no_lock() const {
+    lock_.AssertAcquired();
+    return consumer_open_;
+  }
+  uint32_t producer_two_phase_max_num_bytes_written_no_lock() const {
+    lock_.AssertAcquired();
+    return producer_two_phase_max_num_bytes_written_;
+  }
+  uint32_t consumer_two_phase_max_num_bytes_read_no_lock() const {
+    lock_.AssertAcquired();
+    return consumer_two_phase_max_num_bytes_read_;
+  }
+  void set_producer_two_phase_max_num_bytes_written_no_lock(
+      uint32_t num_bytes) {
+    lock_.AssertAcquired();
+    producer_two_phase_max_num_bytes_written_ = num_bytes;
+  }
+  void set_consumer_two_phase_max_num_bytes_read_no_lock(uint32_t num_bytes) {
+    lock_.AssertAcquired();
+    consumer_two_phase_max_num_bytes_read_ = num_bytes;
+  }
+  bool producer_in_two_phase_write_no_lock() const {
+    lock_.AssertAcquired();
+    return producer_two_phase_max_num_bytes_written_ > 0;
+  }
+  bool consumer_in_two_phase_read_no_lock() const {
+    lock_.AssertAcquired();
+    return consumer_two_phase_max_num_bytes_read_ > 0;
+  }
+
  private:
+  void AwakeProducerWaitersForStateChangeNoLock();
+  void AwakeConsumerWaitersForStateChangeNoLock();
+
   bool has_local_producer_no_lock() const {
+    lock_.AssertAcquired();
     return !!producer_waiter_list_.get();
   }
   bool has_local_consumer_no_lock() const {
+    lock_.AssertAcquired();
     return !!consumer_waiter_list_.get();
   }
 
-  // Set by |Init()| and never changed afterwards:
-  bool may_discard_;
-  size_t element_size_;
-  size_t capacity_num_elements_;
+  const bool may_discard_;
+  const size_t element_num_bytes_;
+  const size_t capacity_num_bytes_;
 
-  base::Lock lock_;  // Protects the following members.
+  mutable base::Lock lock_;  // Protects the following members.
+  // *Known* state of producer or consumer.
+  bool producer_open_;
+  bool consumer_open_;
+  // Non-null only if the producer or consumer, respectively, is local.
   scoped_ptr<WaiterList> producer_waiter_list_;
   scoped_ptr<WaiterList> consumer_waiter_list_;
-  bool producer_in_two_phase_write_;
-  bool consumer_in_two_phase_read_;
+  // These are nonzero if and only if a two-phase write/read is in progress.
+  uint32_t producer_two_phase_max_num_bytes_written_;
+  uint32_t consumer_two_phase_max_num_bytes_read_;
 
   DISALLOW_COPY_AND_ASSIGN(DataPipe);
 };

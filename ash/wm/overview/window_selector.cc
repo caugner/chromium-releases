@@ -27,6 +27,7 @@
 #include "ui/aura/window_observer.h"
 #include "ui/events/event.h"
 #include "ui/events/event_handler.h"
+#include "ui/views/corewm/window_util.h"
 
 namespace ash {
 
@@ -275,7 +276,7 @@ WindowSelector::WindowSelector(const WindowList& windows,
       windows[i]->AddObserver(this);
     observed_windows_.insert(windows[i]);
 
-    if (windows[i]->type() == aura::client::WINDOW_TYPE_PANEL &&
+    if (windows[i]->type() == ui::wm::WINDOW_TYPE_PANEL &&
         wm::GetWindowState(windows[i])->panel_attached()) {
       // Attached panel windows are grouped into a single overview item per
       // root window (display).
@@ -393,14 +394,14 @@ void WindowSelector::CancelSelection() {
 }
 
 void WindowSelector::OnWindowAdded(aura::Window* new_window) {
-  if (new_window->type() != aura::client::WINDOW_TYPE_NORMAL &&
-      new_window->type() != aura::client::WINDOW_TYPE_PANEL) {
+  if (new_window->type() != ui::wm::WINDOW_TYPE_NORMAL &&
+      new_window->type() != ui::wm::WINDOW_TYPE_PANEL) {
     return;
   }
 
   for (size_t i = 0; i < kSwitchableWindowContainerIdsLength; ++i) {
     if (new_window->parent()->id() == kSwitchableWindowContainerIds[i] &&
-        !new_window->transient_parent()) {
+        !views::corewm::GetTransientParent(new_window)) {
       // The new window is in one of the switchable containers, abort overview.
       CancelSelection();
       return;

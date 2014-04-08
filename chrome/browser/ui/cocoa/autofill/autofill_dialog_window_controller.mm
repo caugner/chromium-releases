@@ -282,7 +282,7 @@ const CGFloat kMinimumContentsHeight = 101;
       size = [signInContainer_ preferredSize];
 
     // Always make room for the header.
-    CGFloat headerHeight = [header_ heightForWidth:size.width];
+    CGFloat headerHeight = [header_ preferredSize].height;
     size.height += headerHeight;
 
     // For the minimum height, account for both the header and the footer. Even
@@ -306,7 +306,7 @@ const CGFloat kMinimumContentsHeight = 101;
   NSRect contentRect = NSZeroRect;
   contentRect.size = [self preferredSize];
 
-  CGFloat headerHeight = [header_ heightForWidth:NSWidth(contentRect)];
+  CGFloat headerHeight = [header_ preferredSize].height;
   NSRect headerRect, mainRect;
   NSDivideRect(contentRect, &headerRect, &mainRect, headerHeight, NSMinYEdge);
 
@@ -398,8 +398,8 @@ const CGFloat kMinimumContentsHeight = 101;
 }
 
 - (void)fillSection:(autofill::DialogSection)section
-           forInput:(const autofill::DetailInput&)input {
-  [[mainContainer_ sectionForId:section] fillForInput:input];
+            forType:(autofill::ServerFieldType)type {
+  [[mainContainer_ sectionForId:section] fillForType:type];
   [mainContainer_ updateSaveInChrome];
 }
 
@@ -460,38 +460,8 @@ const CGFloat kMinimumContentsHeight = 101;
   [self requestRelayout];
 }
 
-@end
-
-
-@implementation AutofillDialogWindowController (TestableAutofillDialogView)
-
-- (void)setTextContents:(NSString*)text
-               forInput:(const autofill::DetailInput&)input {
-  for (size_t i = autofill::SECTION_MIN; i <= autofill::SECTION_MAX; ++i) {
-    autofill::DialogSection section = static_cast<autofill::DialogSection>(i);
-    // TODO(groby): Need to find the section for an input directly - wasteful.
-    [[mainContainer_ sectionForId:section] setFieldValue:text forInput:input];
-  }
-}
-
-- (void)setTextContents:(NSString*)text
- ofSuggestionForSection:(autofill::DialogSection)section {
-  [[mainContainer_ sectionForId:section] setSuggestionFieldValue:text];
-}
-
-- (void)activateFieldForInput:(const autofill::DetailInput&)input {
-  for (size_t i = autofill::SECTION_MIN; i <= autofill::SECTION_MAX; ++i) {
-    autofill::DialogSection section = static_cast<autofill::DialogSection>(i);
-    [[mainContainer_ sectionForId:section] activateFieldForInput:input];
-  }
-}
-
-- (content::WebContents*)getSignInWebContents {
-  return [signInContainer_ webContents];
-}
-
-- (BOOL)isShowingOverlay {
-  return ![[overlayController_ view] isHidden];
+- (void)validateSection:(autofill::DialogSection)section {
+  [[mainContainer_ sectionForId:section] validateFor:autofill::VALIDATE_EDIT];
 }
 
 @end

@@ -11,6 +11,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
+#include "chrome/browser/sync/sessions2/sessions_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -89,6 +90,8 @@ void NotificationServiceSessionsRouter::Observe(
         return;
       if (handler_)
         handler_->OnLocalTabModified(tab);
+      if (!sessions_util::ShouldSyncTab(*tab))
+        return;
       break;
     }
     // Source<NavigationController>.
@@ -102,6 +105,8 @@ void NotificationServiceSessionsRouter::Observe(
         return;
       if (handler_)
         handler_->OnLocalTabModified(tab);
+      if (!sessions_util::ShouldSyncTab(*tab))
+        return;
       break;
     }
     case chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
@@ -114,6 +119,8 @@ void NotificationServiceSessionsRouter::Observe(
       if (extension_tab_helper->extension_app()) {
         SyncedTabDelegate* tab = SyncedTabDelegate::ImplFromWebContents(
             extension_tab_helper->web_contents());
+        if (!tab || tab->profile() != profile_)
+          return;
         if (handler_)
           handler_->OnLocalTabModified(tab);
         break;
@@ -135,7 +142,7 @@ void NotificationServiceSessionsRouter::OnNavigationBlocked(
     content::WebContents* web_contents) {
   SyncedTabDelegate* tab =
       SyncedTabDelegate::ImplFromWebContents(web_contents);
-  if (!tab)
+  if (!tab || !handler_)
     return;
 
   DCHECK(tab->profile() == profile_);
@@ -150,7 +157,6 @@ void NotificationServiceSessionsRouter::StartRoutingTo(
 
 void NotificationServiceSessionsRouter::Stop() {
   weak_ptr_factory_.InvalidateWeakPtrs();
-  registrar_.RemoveAll();
   handler_ = NULL;
 }
 

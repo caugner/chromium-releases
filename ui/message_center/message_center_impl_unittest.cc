@@ -16,6 +16,8 @@
 #include "ui/message_center/notification_blocker.h"
 #include "ui/message_center/notification_types.h"
 
+using base::UTF8ToUTF16;
+
 namespace message_center {
 namespace {
 
@@ -27,7 +29,7 @@ class MessageCenterImplTest : public testing::Test,
   virtual void SetUp() OVERRIDE {
     MessageCenter::Initialize();
     message_center_ = MessageCenter::Get();
-    loop_.reset(new base::MessageLoop(base::MessageLoop::TYPE_DEFAULT));
+    loop_.reset(new base::MessageLoop);
     run_loop_.reset(new base::RunLoop());
     closure_ = run_loop_->QuitClosure();
   }

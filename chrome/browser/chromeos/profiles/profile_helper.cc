@@ -9,6 +9,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/chromeos/login/oauth2_login_manager_factory.h"
+#include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -115,6 +116,17 @@ bool ProfileHelper::IsSigninProfile(Profile* profile) {
   return profile->GetPath().BaseName().value() == chrome::kInitialProfile;
 }
 
+// static
+bool ProfileHelper::IsOwnerProfile(Profile* profile) {
+  if (!profile)
+    return false;
+  chromeos::UserManager* manager = chromeos::UserManager::Get();
+  chromeos::User* user = manager->GetUserByProfile(profile);
+  if (!user)
+    return false;
+  return user->email() == manager->GetOwnerEmail();
+}
+
 void ProfileHelper::ProfileStartup(Profile* profile, bool process_startup) {
   // Initialize Chrome OS preferences like touch pad sensitivity. For the
   // preferences to work in the guest mode, the initialization has to be
@@ -197,7 +209,7 @@ void ProfileHelper::OnSessionRestoreStateChanged(
 void ProfileHelper::ActiveUserHashChanged(const std::string& hash) {
   active_user_id_hash_ = hash;
   base::FilePath profile_path = GetProfilePathByUserIdHash(hash);
-  LOG(WARNING) << "Switching to profile path: " << profile_path.value();
+  VLOG(1) << "Switching to profile path: " << profile_path.value();
 }
 
 }  // namespace chromeos

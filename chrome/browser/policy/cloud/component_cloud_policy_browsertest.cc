@@ -15,14 +15,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
-#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/policy/test/local_policy_test_server.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/policy_service.h"
@@ -119,7 +118,7 @@ class ComponentCloudPolicyTest : public ExtensionBrowserTest {
 
     std::string url = test_server_.GetServiceURL().spec();
     CommandLine* command_line = CommandLine::ForCurrentProcess();
-    command_line->AppendSwitchASCII(::switches::kDeviceManagementUrl, url);
+    command_line->AppendSwitchASCII(switches::kDeviceManagementUrl, url);
     command_line->AppendSwitch(switches::kEnableComponentCloudPolicy);
 
     ExtensionBrowserTest::SetUpInProcessBrowserTestFixture();

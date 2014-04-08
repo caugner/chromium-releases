@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -579,8 +579,6 @@ void GLES2InterfaceStub::GetProgramInfoCHROMIUM(
 }
 GLuint GLES2InterfaceStub::CreateStreamTextureCHROMIUM(GLuint /* texture */) {
   return 0;
-}
-void GLES2InterfaceStub::DestroyStreamTextureCHROMIUM(GLuint /* texture */) {
 }
 GLuint GLES2InterfaceStub::CreateImageCHROMIUM(
     GLsizei /* width */, GLsizei /* height */, GLenum /* internalformat */) {

@@ -5,12 +5,12 @@
 #include "chrome/browser/extensions/dev_mode_bubble_controller.h"
 
 #include "base/bind.h"
+#include "base/lazy_instance.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_message_bubble.h"
-#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -18,6 +18,8 @@
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
+#include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/common/feature_switch.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -25,9 +27,87 @@
 
 namespace {
 
-static base::LazyInstance<extensions::ProfileKeyedAPIFactory<
-    extensions::DevModeBubbleController> >
-g_factory = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<std::set<Profile*> > g_shown_for_profiles =
+    LAZY_INSTANCE_INITIALIZER;
+
+////////////////////////////////////////////////////////////////////////////////
+// DevModeBubbleDelegate
+
+DevModeBubbleDelegate::DevModeBubbleDelegate(ExtensionService* service)
+    : service_(service) {
+}
+
+DevModeBubbleDelegate::~DevModeBubbleDelegate() {
+}
+
+bool DevModeBubbleDelegate::ShouldIncludeExtension(
+    const std::string& extension_id) {
+  const extensions::Extension* extension =
+      service_->GetExtensionById(extension_id, false);
+  if (!extension)
+    return false;
+  return extensions::DevModeBubbleController::IsDevModeExtension(extension);
+}
+
+void DevModeBubbleDelegate::AcknowledgeExtension(
+    const std::string& extension_id,
+    ExtensionMessageBubbleController::BubbleAction user_action) {
+}
+
+void DevModeBubbleDelegate::PerformAction(
+    const extensions::ExtensionIdList& list) {
+  for (size_t i = 0; i < list.size(); ++i) {
+    service_->DisableExtension(
+        list[i], extensions::Extension::DISABLE_USER_ACTION);
+  }
+}
+
+base::string16 DevModeBubbleDelegate::GetTitle() const {
+  return l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLE_DEVELOPER_MODE_TITLE);
+}
+
+base::string16 DevModeBubbleDelegate::GetMessageBody() const {
+  return l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLE_DEVELOPER_MODE_BODY);
+}
+
+base::string16 DevModeBubbleDelegate::GetOverflowText(
+    const base::string16& overflow_count) const {
+  return l10n_util::GetStringFUTF16(
+            IDS_EXTENSIONS_SUSPICIOUS_DISABLED_AND_N_MORE,
+            overflow_count);
+}
+
+base::string16 DevModeBubbleDelegate::GetLearnMoreLabel() const {
+  return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
+}
+
+GURL DevModeBubbleDelegate::GetLearnMoreUrl() const {
+  return GURL(chrome::kChromeUIExtensionsURL);
+}
+
+base::string16 DevModeBubbleDelegate::GetActionButtonLabel() const {
+  return l10n_util::GetStringUTF16(IDS_DISABLE);
+}
+
+base::string16 DevModeBubbleDelegate::GetDismissButtonLabel() const {
+  return l10n_util::GetStringUTF16(IDS_CANCEL);
+}
+
+bool DevModeBubbleDelegate::ShouldShowExtensionList() const {
+  return false;
+}
+
+void DevModeBubbleDelegate::LogExtensionCount(size_t count) {
+  UMA_HISTOGRAM_COUNTS_100(
+      "DevModeExtensionBubble.ExtensionsInDevModeCount", count);
+}
+
+void DevModeBubbleDelegate::LogAction(
+    ExtensionMessageBubbleController::BubbleAction action) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "DevModeExtensionBubble.UserSelection",
+      action, ExtensionMessageBubbleController::ACTION_BOUNDARY);
+}
 
 }  // namespace
 
@@ -36,32 +116,15 @@ namespace extensions {
 ////////////////////////////////////////////////////////////////////////////////
 // DevModeBubbleController
 
-DevModeBubbleController::DevModeBubbleController(
-    Profile* profile)
-    : ExtensionMessageBubbleController(this, profile),
-      service_(extensions::ExtensionSystem::Get(profile)->extension_service()),
-      profile_(profile) {
-}
-
-DevModeBubbleController::~DevModeBubbleController() {
+// static
+void DevModeBubbleController::ClearProfileListForTesting() {
+  g_shown_for_profiles.Get().clear();
 }
 
 // static
-ProfileKeyedAPIFactory<DevModeBubbleController>*
-DevModeBubbleController::GetFactoryInstance() {
-  return &g_factory.Get();
-}
-
-// static
-DevModeBubbleController* DevModeBubbleController::Get(
-    Profile* profile) {
-  return ProfileKeyedAPIFactory<
-      DevModeBubbleController>::GetForProfile(profile);
-}
-
 bool DevModeBubbleController::IsDevModeExtension(
-    const Extension* extension) const {
-  if (!extensions::FeatureSwitch::force_dev_mode_highlighting()->IsEnabled()) {
+    const Extension* extension) {
+  if (!FeatureSwitch::force_dev_mode_highlighting()->IsEnabled()) {
     if (chrome::VersionInfo::GetChannel() <
             chrome::VersionInfo::CHANNEL_BETA)
       return false;
@@ -70,80 +133,24 @@ bool DevModeBubbleController::IsDevModeExtension(
          extension->location() == Manifest::COMMAND_LINE;
 }
 
-bool DevModeBubbleController::ShouldIncludeExtension(
-    const std::string& extension_id) {
-  const Extension* extension = service_->GetExtensionById(extension_id, false);
-  if (!extension)
-    return false;
-  return IsDevModeExtension(extension);
+DevModeBubbleController::DevModeBubbleController(Profile* profile)
+    : ExtensionMessageBubbleController(
+          new DevModeBubbleDelegate(
+              ExtensionSystem::Get(profile)->extension_service()),
+          profile),
+      profile_(profile) {}
+
+DevModeBubbleController::~DevModeBubbleController() {
 }
 
-void DevModeBubbleController::AcknowledgeExtension(
-    const std::string& extension_id,
-    ExtensionMessageBubbleController::BubbleAction user_action) {
+bool DevModeBubbleController::ShouldShow() {
+  return !g_shown_for_profiles.Get().count(profile_) &&
+      !GetExtensionList().empty();
 }
 
-void DevModeBubbleController::PerformAction(
-    const ExtensionIdList& list) {
-  for (size_t i = 0; i < list.size(); ++i)
-    service_->DisableExtension(list[i], Extension::DISABLE_USER_ACTION);
-}
-
-string16 DevModeBubbleController::GetTitle() const {
-  return l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLE_DEVELOPER_MODE_TITLE);
-}
-
-string16 DevModeBubbleController::GetMessageBody() const {
-  return l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLE_DEVELOPER_MODE_BODY);
-}
-
-string16 DevModeBubbleController::GetOverflowText(
-    const string16& overflow_count) const {
-  return l10n_util::GetStringFUTF16(
-            IDS_EXTENSIONS_SUSPICIOUS_DISABLED_AND_N_MORE,
-            overflow_count);
-}
-
-string16 DevModeBubbleController::GetLearnMoreLabel() const {
-  return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
-}
-
-GURL DevModeBubbleController::GetLearnMoreUrl() const {
-  return GURL(chrome::kChromeUIExtensionsURL);
-}
-
-string16 DevModeBubbleController::GetActionButtonLabel() const {
-  return l10n_util::GetStringUTF16(IDS_DISABLE);
-}
-
-string16 DevModeBubbleController::GetDismissButtonLabel() const {
-  return l10n_util::GetStringUTF16(IDS_CANCEL);
-}
-
-bool DevModeBubbleController::ShouldShowExtensionList() const {
-  return false;
-}
-
-std::vector<string16> DevModeBubbleController::GetExtensions() {
-  return GetExtensionList();
-}
-
-void DevModeBubbleController::LogExtensionCount(size_t count) {
-  UMA_HISTOGRAM_COUNTS_100(
-      "DevModeExtensionBubble.ExtensionsInDevModeCount", count);
-}
-
-void DevModeBubbleController::LogAction(
-    ExtensionMessageBubbleController::BubbleAction action) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "DevModeExtensionBubble.UserSelection",
-      action, ExtensionMessageBubbleController::ACTION_BOUNDARY);
-}
-
-template <>
-void ProfileKeyedAPIFactory<
-    DevModeBubbleController>::DeclareFactoryDependencies() {
-  DependsOn(extensions::ExtensionSystemFactory::GetInstance());
+void DevModeBubbleController::Show(ExtensionMessageBubble* bubble) {
+  g_shown_for_profiles.Get().insert(profile_);
+  ExtensionMessageBubbleController::Show(bubble);
 }
 
 }  // namespace extensions

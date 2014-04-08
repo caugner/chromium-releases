@@ -508,7 +508,6 @@ bool HostNPScriptObject::Disconnect(const NPVariant* args,
   if (it2me_host_.get()) {
     it2me_host_->Disconnect();
     it2me_host_ = NULL;
-    host_context_.reset();
   }
 
   return true;
@@ -939,7 +938,7 @@ void HostNPScriptObject::LocalizeStrings(NPObject* localize_func) {
 #if !defined(OS_WIN)
   base::string16 ui_locale;
   LocalizeString(localize_func, "@@ui_locale", &ui_locale);
-  remoting::LoadResources(UTF16ToUTF8(ui_locale));
+  remoting::LoadResources(base::UTF16ToUTF8(ui_locale));
 #endif  // !defined(OS_WIN)
 }
 
@@ -973,7 +972,7 @@ bool HostNPScriptObject::LocalizeStringWithSubstitution(
     LOG(ERROR) << "Missing translation for " << tag;
     return false;
   }
-  *result = UTF8ToUTF16(translation);
+  *result = base::UTF8ToUTF16(translation);
   return true;
 }
 

@@ -72,6 +72,9 @@ class TestingToolbarModelDelegate : public ToolbarModelDelegate {
   virtual content::WebContents* GetActiveWebContents() const OVERRIDE {
     return NULL;
   }
+  virtual bool InTabbedBrowser() const OVERRIDE {
+    return true;
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestingToolbarModelDelegate);
@@ -159,11 +162,11 @@ TEST_F(OmniboxViewMacTest, SetGrayTextAutocompletion) {
   MockOmniboxPopupView popup_view;
   OmniboxPopupModel popup_model(&popup_view, model);
 
-  view.SetUserText(ASCIIToUTF16("Alfred"));
-  EXPECT_EQ("Alfred", UTF16ToUTF8(view.GetText()));
-  view.SetGrayTextAutocompletion(ASCIIToUTF16(" Hitchcock"));
-  EXPECT_EQ("Alfred", UTF16ToUTF8(view.GetText()));
-  EXPECT_EQ(" Hitchcock", UTF16ToUTF8(view.GetGrayTextAutocompletion()));
+  view.SetUserText(base::ASCIIToUTF16("Alfred"));
+  EXPECT_EQ("Alfred", base::UTF16ToUTF8(view.GetText()));
+  view.SetGrayTextAutocompletion(base::ASCIIToUTF16(" Hitchcock"));
+  EXPECT_EQ("Alfred", base::UTF16ToUTF8(view.GetText()));
+  EXPECT_EQ(" Hitchcock", base::UTF16ToUTF8(view.GetGrayTextAutocompletion()));
 
   view.SetUserText(base::string16());
   EXPECT_EQ(base::string16(), view.GetText());

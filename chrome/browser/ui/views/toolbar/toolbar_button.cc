@@ -36,19 +36,6 @@ void ToolbarButton::Init() {
   SetFocusable(false);
   SetAccessibilityFocusable(true);
   image()->EnableCanvasFlippingForRTLUI(true);
-
-  // Provides the hover/pressed style used by buttons in the toolbar.
-  views::LabelButtonBorder* border =
-      new views::LabelButtonBorder(views::Button::STYLE_TEXTBUTTON);
-  const int kHoverImages[] = IMAGE_GRID(IDR_TOOLBAR_BUTTON_HOVER);
-  border->SetPainter(false, views::Button::STATE_HOVERED,
-                     views::Painter::CreateImageGridPainter(
-                         kHoverImages));
-  const int kPressedImages[] = IMAGE_GRID(IDR_TOOLBAR_BUTTON_PRESSED);
-  border->SetPainter(false, views::Button::STATE_PRESSED,
-                     views::Painter::CreateImageGridPainter(
-                         kPressedImages));
-  set_border(border);
 }
 
 void ToolbarButton::ClearPendingMenu() {
@@ -190,8 +177,13 @@ void ToolbarButton::ShowDropDownMenu(ui::MenuSourceType source_type) {
       view)->GetDisplayNearestWindow(view);
   int left_bound = display.bounds().x();
 #else
-  int left_bound = 0;
-  NOTIMPLEMENTED();
+  // The window might be positioned over the edge between two screens. We'll
+  // want to position the dropdown on the screen the mouse cursor is on.
+  gfx::NativeView view = GetWidget()->GetNativeView();
+  gfx::Screen* screen = gfx::Screen::GetScreenFor(view);
+  gfx::Display display = screen->GetDisplayNearestPoint(
+      screen->GetCursorScreenPoint());
+  int left_bound = display.bounds().x();
 #endif
   if (menu_position.x() < left_bound)
     menu_position.set_x(left_bound);

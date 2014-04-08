@@ -17,7 +17,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 
@@ -73,6 +72,17 @@ void SyncPrefs::RegisterProfilePrefs(
   // Treat bookmarks specially.
   RegisterDataTypePreferredPref(registry, syncer::BOOKMARKS, true);
   user_types.Remove(syncer::BOOKMARKS);
+
+  // These two prefs are set from sync experiment to enable enhanced bookmarks.
+  registry->RegisterBooleanPref(
+      prefs::kEnhancedBookmarksExperimentEnabled,
+      false,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+
+  registry->RegisterStringPref(
+      prefs::kEnhancedBookmarksExtensionId,
+      std::string(),
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   // All types are set to off by default, which forces a configuration to
   // explicitly enable them. GetPreferredTypes() will ensure that any new
@@ -325,6 +335,8 @@ const char* SyncPrefs::GetPrefNameForDataType(syncer::ModelType data_type) {
       return prefs::kSyncHistoryDeleteDirectives;
     case syncer::SYNCED_NOTIFICATIONS:
       return prefs::kSyncSyncedNotifications;
+    case syncer::SYNCED_NOTIFICATION_APP_INFO:
+      return prefs::kSyncSyncedNotificationAppInfo;
     case syncer::DICTIONARY:
       return prefs::kSyncDictionary;
     case syncer::FAVICON_IMAGES:
@@ -341,6 +353,8 @@ const char* SyncPrefs::GetPrefNameForDataType(syncer::ModelType data_type) {
       return prefs::kSyncManagedUsers;
     case syncer::ARTICLES:
       return prefs::kSyncArticles;
+    case syncer::MANAGED_USER_SHARED_SETTINGS:
+      return prefs::kSyncManagedUserSharedSettings;
     default:
       break;
   }
@@ -369,7 +383,7 @@ void SyncPrefs::AcknowledgeSyncedTypes(syncer::ModelTypeSet types) {
             syncer::ModelTypeSetFromValue(
                 *pref_service_->GetList(prefs::kSyncAcknowledgedSyncTypes)));
 
-  scoped_ptr<ListValue> value(
+  scoped_ptr<base::ListValue> value(
       syncer::ModelTypeSetToValue(acknowledged_types));
   pref_service_->Set(prefs::kSyncAcknowledgedSyncTypes, *value);
 }

@@ -33,21 +33,6 @@ namespace content {
 class WebContents;
 }
 
-#if defined(TOOLKIT_VIEWS)
-// TODO(beng): Move all views-related code to a views-specific sub-interface.
-namespace gfx {
-class Font;
-}
-
-namespace views {
-class View;
-}
-
-namespace ui {
-class DropTargetEvent;
-}
-#endif
-
 class OmniboxView {
  public:
   virtual ~OmniboxView();
@@ -69,11 +54,13 @@ class OmniboxView {
   // Called when any relevant state changes other than changing tabs.
   virtual void Update() = 0;
 
-  // Asks the browser to load the specified match's |destination_url|, which
-  // is assumed to be one of the popup entries, using the supplied disposition
-  // and transition type. |alternate_nav_url|, if non-empty, contains the
+  // Asks the browser to load the specified match, using the supplied
+  // disposition. |alternate_nav_url|, if non-empty, contains the
   // alternate navigation URL for for this match. See comments on
   // AutocompleteResult::GetAlternateNavURL().
+  //
+  // |pasted_text| should only be set if this call is due to a
+  // Paste-And-Go/Search action.
   //
   // |selected_line| is passed to SendOpenNotification(); see comments there.
   //
@@ -81,6 +68,7 @@ class OmniboxView {
   virtual void OpenMatch(const AutocompleteMatch& match,
                          WindowOpenDisposition disposition,
                          const GURL& alternate_nav_url,
+                         const base::string16& pasted_text,
                          size_t selected_line);
 
   // Returns the current text of the edit control, which could be the
@@ -94,6 +82,10 @@ class OmniboxView {
 
   // Returns the resource ID of the icon to show for the current text.
   int GetIcon() const;
+
+  // Returns the hint text that can be displayed when there is no text in the
+  // omnibox.
+  base::string16 GetHintText() const;
 
   // The user text is the text the user has manually keyed in.  When present,
   // this is shown in preference to the permanent text; hitting escape will
@@ -224,17 +216,15 @@ class OmniboxView {
   // which may overlap the omnibox's popup window.
   virtual bool IsImeShowingPopup() const;
 
+  // Display a virtual keybaord or alternate input view if enabled.
+  virtual void ShowImeIfNeeded();
+
   // Returns true if the view is displaying UI that indicates that query
   // refinement will take place when the user selects the current match.  For
   // search matches, this will cause the omnibox to search over the existing
   // corpus (e.g. Images) rather than start a new Web search.  This method will
   // only ever return true on mobile ports.
   virtual bool IsIndicatingQueryRefinement() const;
-
-#if defined(TOOLKIT_VIEWS)
-  // Performs the drop of a drag and drop operation on the view.
-  virtual int OnPerformDrop(const ui::DropTargetEvent& event) = 0;
-#endif
 
   // Returns |text| with any leading javascript schemas stripped.
   static base::string16 StripJavascriptSchemas(const base::string16& text);

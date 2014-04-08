@@ -34,8 +34,9 @@ class PrefRegistrySyncable;
 
 namespace gcm {
 
+class GCMClientFactory;
 class GCMEventRouter;
-class GCMProfileServiceTest;
+class GCMProfileServiceTestConsumer;
 
 // Acts as a bridge between GCM API and GCMClient layer. It is profile based.
 class GCMProfileService : public BrowserContextKeyedService,
@@ -46,25 +47,36 @@ class GCMProfileService : public BrowserContextKeyedService,
   typedef base::Callback<void(const std::string& message_id,
                               GCMClient::Result result)> SendCallback;
 
+  enum GCMEnabledState {
+    // GCM is always enabled. GCMClient will always load and connect with GCM.
+    ALWAYS_ENABLED,
+    // GCM is only enabled for apps. GCMClient will start to load and connect
+    // with GCM only when GCM API is used.
+    ENABLED_FOR_APPS,
+    // GCM is always disabled. GCMClient will never load and connect with GCM.
+    ALWAYS_DISABLED
+  };
+
   // For testing purpose.
   class TestingDelegate {
    public:
     virtual GCMEventRouter* GetEventRouter() const = 0;
-    virtual void CheckInFinished(const GCMClient::CheckInInfo& checkin_info,
-                                 GCMClient::Result result) = 0;
-    virtual void LoadingFromPersistentStoreFinished() = 0;
   };
 
-  // Returns true if the GCM support is enabled.
-  static bool IsGCMEnabled();
+  // Returns the GCM enabled state.
+  static GCMEnabledState GetGCMEnabledState(Profile* profile);
 
   // Register profile-specific prefs for GCM.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   explicit GCMProfileService(Profile* profile);
-  // Constructor for testing purpose.
-  GCMProfileService(Profile* profile, TestingDelegate* testing_delegate);
   virtual ~GCMProfileService();
+
+  void Initialize(scoped_ptr<GCMClientFactory> gcm_client_factory);
+
+  void Start();
+
+  void Stop();
 
   // Registers |sender_id| for an app. A registration ID will be returned by
   // the GCM server.
@@ -89,23 +101,23 @@ class GCMProfileService : public BrowserContextKeyedService,
                     const GCMClient::OutgoingMessage& message,
                     SendCallback callback);
 
- protected:
-  // Flag that could be set by the testing code to enable GCM. Otherwise,
-  // tests from official build will fail.
-  static bool enable_gcm_for_testing_;
+  // For testing purpose.
+  GCMClient* GetGCMClientForTesting() const;
+
+  void set_testing_delegate(TestingDelegate* testing_delegate) {
+    testing_delegate_ = testing_delegate;
+  }
 
  private:
-  friend class GCMProfileServiceTest;
-  friend class GCMProfileServiceRegisterTest;
-  FRIEND_TEST_ALL_PREFIXES(GCMProfileServiceTest, CheckInFromPrefsStore);
-  FRIEND_TEST_ALL_PREFIXES(GCMProfileServiceTest, CheckOut);
-  FRIEND_TEST_ALL_PREFIXES(GCMProfileServiceRegisterTest, Unregister);
+  friend class GCMProfileServiceTestConsumer;
 
+  class DelayedTaskController;
   class IOWorker;
 
   struct RegistrationInfo {
     RegistrationInfo();
     ~RegistrationInfo();
+    bool IsValid() const;
 
     std::vector<std::string> sender_ids;
     std::string registration_id;
@@ -116,43 +128,62 @@ class GCMProfileService : public BrowserContextKeyedService,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  void Init();
+  // Ensures that the GCMClient is loaded and the GCM check-in is done when
+  // the profile was signed in.
+  void EnsureLoaded();
 
-  // Allows a signed-in user to use the GCM. If the check-in info can be found
-  // in the prefs store, use it directly. Otherwise, a check-in communication
-  // will be made with the GCM.
-  void AddUser();
+  // Remove cached or persisted data when GCM service is stopped.
+  void RemoveCachedData();
+  void RemovePersistedData();
 
-  // Stops the user from using the GCM after the user signs out. This simply
-  // removes the cached and persisted check-in info.
-  void RemoveUser();
+  // Checks out of GCM when the profile has been signed out. This will erase
+  // all the cached and persisted data.
+  void CheckOut();
+
+  // Resets the GCMClient instance. This is called when the profile is being
+  // destroyed.
+  void ResetGCMClient();
+
+  // Ensures that the app is ready for GCM functions and events.
+  void EnsureAppReady(const std::string& app_id);
 
   // Unregisters an app from using the GCM after it has been uninstalled.
   void Unregister(const std::string& app_id);
 
-  void CheckInFinished(GCMClient::CheckInInfo checkin_info,
-                       GCMClient::Result result);
-  void RegisterFinished(std::string app_id,
-                        std::string registration_id,
+  void DoRegister(const std::string& app_id,
+                  const std::vector<std::string>& sender_ids,
+                  const std::string& cert);
+  void DoSend(const std::string& app_id,
+              const std::string& receiver_id,
+              const GCMClient::OutgoingMessage& message);
+
+  // Callbacks posted from IO thread to UI thread.
+  void RegisterFinished(const std::string& app_id,
+                        const std::string& registration_id,
                         GCMClient::Result result);
-  void SendFinished(std::string app_id,
-                    std::string message_id,
+  void SendFinished(const std::string& app_id,
+                    const std::string& message_id,
                     GCMClient::Result result);
-  void MessageReceived(std::string app_id,
+  void MessageReceived(const std::string& app_id,
                        GCMClient::IncomingMessage message);
-  void MessagesDeleted(std::string app_id);
-  void MessageSendError(std::string app_id,
-                        std::string message_id,
+  void MessagesDeleted(const std::string& app_id);
+  void MessageSendError(const std::string& app_id,
+                        const std::string& message_id,
                         GCMClient::Result result);
+  void GCMClientReady();
 
   // Returns the event router to fire the event for the given app.
-  GCMEventRouter* GetEventRouter(const std::string& app_id);
+  GCMEventRouter* GetEventRouter(const std::string& app_id) const;
+
+  // Used to persist the IDs of registered apps.
+  void ReadRegisteredAppIDs();
+  void WriteRegisteredAppIDs();
 
   // Used to persist registration info into the app's state store.
   void DeleteRegistrationInfo(const std::string& app_id);
   void WriteRegistrationInfo(const std::string& app_id);
   void ReadRegistrationInfo(const std::string& app_id);
-  void ReadRegistrationInfoFinished(std::string app_id,
+  void ReadRegistrationInfoFinished(const std::string& app_id,
                                     scoped_ptr<base::Value> value);
   bool ParsePersistedRegistrationInfo(scoped_ptr<base::Value> value,
                                       RegistrationInfo* registration_info);
@@ -164,10 +195,15 @@ class GCMProfileService : public BrowserContextKeyedService,
   // The profile which owns this object.
   Profile* profile_;
 
+  // Flag to indicate if GCMClient is ready.
+  bool gcm_client_ready_;
+
   // The username of the signed-in profile.
   std::string username_;
 
   content::NotificationRegistrar registrar_;
+
+  scoped_ptr<DelayedTaskController> delayed_task_controller_;
 
   // For all the work occured in IO thread.
   scoped_refptr<IOWorker> io_worker_;
@@ -183,7 +219,9 @@ class GCMProfileService : public BrowserContextKeyedService,
   RegistrationInfoMap registration_info_map_;
 
   // Event router to talk with JS API.
+#if !defined(OS_ANDROID)
   scoped_ptr<GCMEventRouter> js_event_router_;
+#endif
 
   // For testing purpose.
   TestingDelegate* testing_delegate_;

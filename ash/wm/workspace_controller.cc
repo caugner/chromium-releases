@@ -8,7 +8,6 @@
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
-#include "ash/wm/base_layout_manager.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
@@ -42,21 +41,18 @@ bool IsDockedAreaVisible(const ShelfLayoutManager* shelf) {
 WorkspaceController::WorkspaceController(aura::Window* viewport)
     : viewport_(viewport),
       shelf_(NULL),
-      event_handler_(new WorkspaceEventHandler(viewport_)) {
+      event_handler_(new WorkspaceEventHandler),
+      layout_manager_(new WorkspaceLayoutManager(viewport)) {
   SetWindowVisibilityAnimationTransition(
       viewport_, views::corewm::ANIMATE_NONE);
 
-  // The layout-manager cannot be created in the initializer list since it
-  // depends on the window to have been initialized.
-  layout_manager_ = new WorkspaceLayoutManager(viewport_);
   viewport_->SetLayoutManager(layout_manager_);
-
-  viewport_->Show();
+  viewport_->AddPreTargetHandler(event_handler_.get());
+  viewport_->AddPostTargetHandler(event_handler_.get());
 }
 
 WorkspaceController::~WorkspaceController() {
   viewport_->SetLayoutManager(NULL);
-  viewport_->SetEventFilter(NULL);
   viewport_->RemovePreTargetHandler(event_handler_.get());
   viewport_->RemovePostTargetHandler(event_handler_.get());
 }
@@ -127,12 +123,10 @@ void WorkspaceController::DoInitialAnimation() {
     settings.SetPreemptionStrategy(ui::LayerAnimator::ENQUEUE_NEW_ANIMATION);
     viewport_->layer()->GetAnimator()->SchedulePauseForProperties(
         base::TimeDelta::FromMilliseconds(kInitialPauseTimeMS),
-        ui::LayerAnimationElement::TRANSFORM,
-        ui::LayerAnimationElement::OPACITY,
-        ui::LayerAnimationElement::BRIGHTNESS,
-        ui::LayerAnimationElement::VISIBILITY,
-        -1);
-
+        ui::LayerAnimationElement::TRANSFORM |
+            ui::LayerAnimationElement::OPACITY |
+            ui::LayerAnimationElement::BRIGHTNESS |
+            ui::LayerAnimationElement::VISIBILITY);
     settings.SetTweenType(gfx::Tween::EASE_OUT);
     settings.SetTransitionDuration(
         base::TimeDelta::FromMilliseconds(kCrossFadeDurationMS));

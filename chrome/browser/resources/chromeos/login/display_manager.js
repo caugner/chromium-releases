@@ -22,7 +22,7 @@
     'managed-user-creation';
 /** @const */ var SCREEN_APP_LAUNCH_SPLASH = 'app-launch-splash';
 /** @const */ var SCREEN_CONFIRM_PASSWORD = 'confirm-password';
-/** @const */ var SCREEN_MESSAGE_BOX = 'message-box';
+/** @const */ var SCREEN_FATAL_ERROR = 'fatal-error';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
@@ -44,6 +44,7 @@
   ACCOUNT_PICKER: 2,
   WRONG_HWID_WARNING: 3,
   MANAGED_USER_CREATION_FLOW: 4,
+  SAML_PASSWORD_CONFIRM: 5,
 };
 
 /* Possible UI states of the error screen. */
@@ -138,6 +139,10 @@ cr.define('cr.ui.login', function() {
       document.documentElement.setAttribute('screen', displayType);
     },
 
+    get newKioskUI() {
+      return loadTimeData.getString('newKioskUI') == 'on';
+    },
+
     /**
      * Returns dimensions of screen exluding header bar.
      * @type {Object}
@@ -159,6 +164,10 @@ cr.define('cr.ui.login', function() {
      * Hides/shows header (Shutdown/Add User/Cancel buttons).
      * @param {boolean} hidden Whether header is hidden.
      */
+    get headerHidden() {
+      return $('login-header-bar').hidden;
+    },
+
     set headerHidden(hidden) {
       $('login-header-bar').hidden = hidden;
     },
@@ -587,7 +596,7 @@ cr.define('cr.ui.login', function() {
      */
     onConfirmDeviceRequisitionPrompt_: function(value) {
       this.deviceRequisition_ = value;
-      chrome.send('setDeviceRequisition', [value]);
+      chrome.send('setDeviceRequisition', [value == '' ? 'none' : value]);
     },
 
     /**
@@ -622,11 +631,13 @@ cr.define('cr.ui.login', function() {
         this.deviceRequisitionRemoraDialog_.setCancelLabel(
             loadTimeData.getString('deviceRequisitionRemoraPromptCancel'));
       }
-      this.deviceRequisitionRemoraDialog_.showWithTitle(
-          loadTimeData.getString('deviceRequisitionRemoraPromptTitle'),
+      this.deviceRequisitionRemoraDialog_.show(
           loadTimeData.getString('deviceRequisitionRemoraPromptText'),
-          function() {
+          function() {  // onShow
             chrome.send('setDeviceRequisition', ['remora']);
+          },
+          function() {  // onCancel
+             chrome.send('setDeviceRequisition', ['none']);
           });
     },
 

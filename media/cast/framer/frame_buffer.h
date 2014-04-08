@@ -25,11 +25,9 @@ class FrameBuffer {
                     const RtpCastHeader& rtp_header);
   bool Complete() const;
 
-  bool GetEncodedAudioFrame(EncodedAudioFrame* audio_frame,
-                            uint32* rtp_timestamp) const;
+  bool GetEncodedAudioFrame(transport::EncodedAudioFrame* audio_frame) const;
 
-  bool GetEncodedVideoFrame(EncodedVideoFrame* video_frame,
-                            uint32* rtp_timestamp) const;
+  bool GetEncodedVideoFrame(transport::EncodedVideoFrame* video_frame) const;
 
   bool is_key_frame() const { return is_key_frame_; }
 

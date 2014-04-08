@@ -19,7 +19,6 @@
 
 // TODO(vadimt): Decide what to do in incognito mode.
 // TODO(vadimt): Figure out the final values of the constants.
-// TODO(vadimt): Remove 'console' calls.
 
 /**
  * Standard response code for successful HTTP requests. This is the only success
@@ -85,9 +84,9 @@ var DEFAULT_OPTIN_CHECK_PERIOD_SECONDS = 60 * 60 * 24 * 7; // 1 week
 var SETTINGS_URL = 'https://support.google.com/chrome/?p=ib_google_now_welcome';
 
 /**
- * Number of location cards that need an explanatory link.
+ * Number of cards that need an explanatory link.
  */
-var LOCATION_CARDS_LINK_THRESHOLD = 10;
+var EXPLANATORY_CARDS_LINK_THRESHOLD = 4;
 
 /**
  * Names for tasks that can be created by the extension.
@@ -442,33 +441,31 @@ function combineAndShowNotificationCards(
 }
 
 /**
- * Parses JSON response from the notification server, shows notifications and
+ * Based on a response from the notification server, shows notifications and
  * schedules next update.
- * @param {string} response Server response.
+ * @param {ServerResponse} response Server response.
  * @param {function(ReceivedNotification)=} onCardShown Optional parameter
  *     called when each card is shown.
  */
-function parseAndShowNotificationCards(response, onCardShown) {
-  console.log('parseAndShowNotificationCards ' + response);
-  /** @type {ServerResponse} */
-  var parsedResponse = JSON.parse(response);
+function processServerResponse(response, onCardShown) {
+  console.log('processServerResponse ' + JSON.stringify(response));
 
-  if (parsedResponse.googleNowDisabled) {
+  if (response.googleNowDisabled) {
     chrome.storage.local.set({googleNowEnabled: false});
     // TODO(vadimt): Remove the line below once the server stops sending groups
     // with 'googleNowDisabled' responses.
-    parsedResponse.groups = {};
+    response.groups = {};
     // Google Now was enabled; now it's disabled. This is a state change.
     onStateChange();
   }
 
-  var receivedGroups = parsedResponse.groups;
+  var receivedGroups = response.groups;
 
   instrumented.storage.local.get(
       ['notificationGroups', 'recentDismissals'],
       function(items) {
         console.log(
-            'parseAndShowNotificationCards-get ' + JSON.stringify(items));
+            'processServerResponse-get ' + JSON.stringify(items));
         items = items || {};
         /** @type {Object.<string, StoredNotificationGroup>} */
         items.notificationGroups = items.notificationGroups || {};
@@ -489,10 +486,10 @@ function parseAndShowNotificationCards(response, onCardShown) {
         }
 
         // Populate groups with corresponding cards.
-        if (parsedResponse.notifications) {
-          for (var i = 0; i < parsedResponse.notifications.length; ++i) {
+        if (response.notifications) {
+          for (var i = 0; i < response.notifications.length; ++i) {
             /** @type {ReceivedNotification} */
-            var card = parsedResponse.notifications[i];
+            var card = response.notifications[i];
             if (!(card.notificationId in updatedRecentDismissals)) {
               var group = receivedGroups[card.groupName];
               group.cards = group.cards || [];
@@ -539,7 +536,7 @@ function parseAndShowNotificationCards(response, onCardShown) {
           updatedGroups[groupName] = storedGroup;
         }
 
-        scheduleNextPoll(updatedGroups, !parsedResponse.googleNowDisabled);
+        scheduleNextPoll(updatedGroups, !response.googleNowDisabled);
         combineAndShowNotificationCards(
             updatedGroups,
             function() {
@@ -554,14 +551,10 @@ function parseAndShowNotificationCards(response, onCardShown) {
 }
 
 /**
- * Update Location Cards Shown Count.
- * @param {ReceivedNotification} receivedNotification Notification as it was
- *     received from the server.
+ * Update the Explanatory Total Cards Shown Count.
  */
-function countLocationCard(receivedNotification) {
-  if (receivedNotification.locationBased) {
-    localStorage['locationCardsShown']++;
-  }
+function countExplanatoryCard() {
+  localStorage['explanatoryCardsShown']++;
 }
 
 /**
@@ -578,14 +571,18 @@ function requestNotificationGroups(groupNames) {
     (-new Date().getTimezoneOffset() * MS_IN_MINUTE);
 
   var cardShownCallback = undefined;
-  if (localStorage['locationCardsShown'] < LOCATION_CARDS_LINK_THRESHOLD) {
-    requestParameters += '&locationExplanation=true';
-    cardShownCallback = countLocationCard;
+  var belowExplanatoryThreshold =
+      localStorage['explanatoryCardsShown'] < EXPLANATORY_CARDS_LINK_THRESHOLD;
+  if (belowExplanatoryThreshold) {
+    requestParameters += '&cardExplanation=true';
+    cardShownCallback = countExplanatoryCard;
   }
 
   groupNames.forEach(function(groupName) {
     requestParameters += ('&requestTypes=' + groupName);
   });
+
+  requestParameters += '&uiLocale=' + navigator.language;
 
   console.log('requestNotificationGroups: request=' + requestParameters);
 
@@ -595,7 +592,8 @@ function requestNotificationGroups(groupNames) {
     console.log('requestNotificationGroups-onloadend ' + request.status);
     if (request.status == HTTP_OK) {
       recordEvent(GoogleNowEvent.REQUEST_FOR_CARDS_SUCCESS);
-      parseAndShowNotificationCards(request.responseText, cardShownCallback);
+      processServerResponse(
+          JSON.parse(request.responseText), cardShownCallback);
     }
   };
 
@@ -1091,34 +1089,80 @@ function updateRunningState(
  */
 function onStateChange() {
   tasks.add(STATE_CHANGED_TASK_NAME, function() {
+    Promise.all([
+        isSignedIn(),
+        isGeolocationEnabled(),
+        canEnableBackground(),
+        isNotificationsEnabled(),
+        isGoogleNowEnabled()])
+        .then(function(results) {
+          updateRunningState.apply(null, results);
+        });
+  });
+}
+
+/**
+ * Determines if the user is signed in.
+ * @return {Promise} A promise to evaluate the signed in state.
+ */
+function isSignedIn() {
+  return new Promise(function(resolve) {
     authenticationManager.isSignedIn(function(signedIn) {
-      instrumented.metricsPrivate.getVariationParams(
-          'GoogleNow',
-          function(response) {
-            var canEnableBackground =
-                (!response || (response.canEnableBackground != 'false'));
-            instrumented.notifications.getPermissionLevel(function(level) {
-              var notificationEnabled = (level == 'granted');
-              instrumented.
-                preferencesPrivate.
-                googleGeolocationAccessEnabled.
-                get({}, function(prefValue) {
-                  var geolocationEnabled = !!prefValue.value;
-                  instrumented.storage.local.get(
-                      'googleNowEnabled',
-                      function(items) {
-                        var googleNowEnabled =
-                            items && !!items.googleNowEnabled;
-                        updateRunningState(
-                            signedIn,
-                            geolocationEnabled,
-                            canEnableBackground,
-                            notificationEnabled,
-                            googleNowEnabled);
-                      });
-                });
-            });
-          });
+      resolve(signedIn);
+    });
+  });
+}
+
+/**
+ * Gets the geolocation enabled preference.
+ * @return {Promise} A promise to get the geolocation enabled preference.
+ */
+function isGeolocationEnabled() {
+  return new Promise(function(resolve) {
+    instrumented.preferencesPrivate.googleGeolocationAccessEnabled.get(
+        {},
+        function(prefValue) {
+          resolve(!!prefValue.value);
+        });
+  });
+}
+
+/**
+ * Determines if background mode should be requested.
+ * @return {Promise} A promise to determine if background can be enabled.
+ */
+function canEnableBackground() {
+  return new Promise(function(resolve) {
+    instrumented.metricsPrivate.getVariationParams(
+        'GoogleNow',
+        function(response) {
+          resolve(!response || (response.canEnableBackground != 'false'));
+        });
+  });
+}
+
+/**
+ * Checks if Google Now is enabled in the notifications center.
+ * @return {Promise} A promise to determine if Google Now is enabled
+ *     in the notifications center.
+ */
+function isNotificationsEnabled() {
+  return new Promise(function(resolve) {
+    instrumented.notifications.getPermissionLevel(function(level) {
+      resolve(level == 'granted');
+    });
+  });
+}
+
+/**
+ * Gets the previous Google Now opt-in state.
+ * @return {Promise} A promise to determine the previous Google Now
+ *     opt-in state.
+ */
+function isGoogleNowEnabled() {
+  return new Promise(function(resolve) {
+    instrumented.storage.local.get('googleNowEnabled', function(items) {
+      resolve(items && !!items.googleNowEnabled);
     });
   });
 }

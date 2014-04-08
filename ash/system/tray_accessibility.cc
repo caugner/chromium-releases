@@ -38,6 +38,7 @@ enum AccessibilityState {
   A11Y_SCREEN_MAGNIFIER = 1 << 2,
   A11Y_LARGE_CURSOR     = 1 << 3,
   A11Y_AUTOCLICK        = 1 << 4,
+  A11Y_VIRTUAL_KEYBOARD = 1 << 5,
 };
 
 uint32 GetAccessibilityState() {
@@ -54,6 +55,8 @@ uint32 GetAccessibilityState() {
     state |= A11Y_LARGE_CURSOR;
   if (delegate->IsAutoclickEnabled())
     state |= A11Y_AUTOCLICK;
+  if (delegate->IsVirtualKeyboardEnabled())
+    state |= A11Y_VIRTUAL_KEYBOARD;
   return state;
 }
 
@@ -118,11 +121,13 @@ AccessibilityDetailedView::AccessibilityDetailedView(
         help_view_(NULL),
         settings_view_(NULL),
         autoclick_view_(NULL),
+        virtual_keyboard_view_(NULL),
         spoken_feedback_enabled_(false),
         high_contrast_enabled_(false),
         screen_magnifier_enabled_(false),
         large_cursor_enabled_(false),
         autoclick_enabled_(false),
+        virtual_keyboard_enabled_(false),
         login_(login) {
 
   Reset();
@@ -179,6 +184,13 @@ void AccessibilityDetailedView::AppendAccessibilityList() {
         autoclick_enabled_ ? gfx::Font::BOLD : gfx::Font::NORMAL,
         autoclick_enabled_);
   }
+
+  virtual_keyboard_enabled_ = delegate->IsVirtualKeyboardEnabled();
+  virtual_keyboard_view_ =  AddScrollListItem(
+      bundle.GetLocalizedString(
+          IDS_ASH_STATUS_TRAY_ACCESSIBILITY_VIRTUAL_KEYBOARD),
+      virtual_keyboard_enabled_ ? gfx::Font::BOLD : gfx::Font::NORMAL,
+      virtual_keyboard_enabled_);
 }
 
 void AccessibilityDetailedView::AppendHelpEntries() {
@@ -261,6 +273,12 @@ void AccessibilityDetailedView::OnViewClicked(views::View* sender) {
             ash::UMA_STATUS_AREA_DISABLE_AUTO_CLICK :
             ash::UMA_STATUS_AREA_ENABLE_AUTO_CLICK);
     delegate->SetAutoclickEnabled(!delegate->IsAutoclickEnabled());
+  } else if (virtual_keyboard_view_ && sender == virtual_keyboard_view_) {
+    Shell::GetInstance()->metrics()->RecordUserMetricsAction(
+        delegate->IsVirtualKeyboardEnabled() ?
+            ash::UMA_STATUS_AREA_DISABLE_VIRTUAL_KEYBOARD :
+            ash::UMA_STATUS_AREA_ENABLE_VIRTUAL_KEYBOARD);
+    delegate->SetVirtualKeyboardEnabled(!delegate->IsVirtualKeyboardEnabled());
   }
 }
 

@@ -13,6 +13,7 @@
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
@@ -22,12 +23,15 @@
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/download/drag_download_item.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/download_feedback_service.h"
 #include "chrome/browser/safe_browsing/download_protection_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/ui/views/download/download_feedback_dialog_view.h"
 #include "chrome/browser/ui/views/download/download_shelf_context_menu_view.h"
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "content/public/browser/download_danger_type.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -42,6 +46,7 @@
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/text_elider.h"
+#include "ui/gfx/text_utils.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/mouse_constants.h"
@@ -469,6 +474,7 @@ bool DownloadItemView::OnKeyPressed(const ui::KeyEvent& event) {
 
   if (event.key_code() == ui::VKEY_SPACE ||
       event.key_code() == ui::VKEY_RETURN) {
+    // OpenDownload may delete this, so don't add any code after this line.
     OpenDownload();
     return true;
   }
@@ -549,9 +555,25 @@ void DownloadItemView::ButtonPressed(views::Button* sender,
     shelf_->RemoveDownloadView(this);
     return;
   }
-  if (model_.ShouldAllowDownloadFeedback() && BeginDownloadFeedback())
-    return;
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.discard_download", warning_duration);
+  if (model_.ShouldAllowDownloadFeedback() &&
+      !shelf_->browser()->profile()->IsOffTheRecord()) {
+    if (!shelf_->browser()->profile()->GetPrefs()->HasPrefPath(
+        prefs::kSafeBrowsingDownloadFeedbackEnabled)) {
+      // Show dialog, because the dialog hasn't been shown before.
+      DownloadFeedbackDialogView::Show(
+          shelf_->get_parent()->GetNativeWindow(),
+          shelf_->browser()->profile(),
+          base::Bind(
+              &DownloadItemView::PossiblySubmitDownloadToFeedbackService,
+              weak_ptr_factory_.GetWeakPtr()));
+    } else {
+      PossiblySubmitDownloadToFeedbackService(
+          shelf_->browser()->profile()->GetPrefs()->GetBoolean(
+               prefs::kSafeBrowsingDownloadFeedbackEnabled));
+    }
+    return;
+  }
   download()->Remove();
 }
 
@@ -771,7 +793,7 @@ void DownloadItemView::OnPaintBackground(gfx::Canvas* canvas) {
       base::string16 status_string =
           l10n_util::GetStringFUTF16(IDS_DOWNLOAD_STATUS_OPENING,
                                      base::string16());
-      int status_string_width = font_list_.GetStringWidth(status_string);
+      int status_string_width = gfx::GetStringWidth(status_string, font_list_);
       // Then, elide the file name.
       base::string16 filename_string =
           gfx::ElideFilename(download()->GetFileNameToReportUser(), font_list_,
@@ -885,11 +907,15 @@ void DownloadItemView::OpenDownload() {
   // open downloads super quickly, we should be concerned about clickjacking.
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.open_download",
                            base::Time::Now() - creation_time_);
-  download()->OpenDownload();
+
   UpdateAccessibleName();
+
+  // Calling download()->OpenDownload may delete this, so this must be
+  // the last thing we do.
+  download()->OpenDownload();
 }
 
-bool DownloadItemView::BeginDownloadFeedback() {
+bool DownloadItemView::SubmitDownloadToFeedbackService() {
 #if defined(FULL_SAFE_BROWSING)
   SafeBrowsingService* sb_service = g_browser_process->safe_browsing_service();
   if (!sb_service)
@@ -898,11 +924,6 @@ bool DownloadItemView::BeginDownloadFeedback() {
       sb_service->download_protection_service();
   if (!download_protection_service)
     return false;
-  base::TimeDelta warning_duration = base::TimeDelta();
-  if (!time_download_warning_shown_.is_null())
-    warning_duration = base::Time::Now() - time_download_warning_shown_;
-  UMA_HISTOGRAM_LONG_TIMES("clickjacking.report_and_discard_download",
-                           warning_duration);
   download_protection_service->feedback_service()->BeginFeedbackForDownload(
       download());
   // WARNING: we are deleted at this point.  Don't access 'this'.
@@ -911,6 +932,12 @@ bool DownloadItemView::BeginDownloadFeedback() {
   NOTREACHED();
   return false;
 #endif
+}
+
+void DownloadItemView::PossiblySubmitDownloadToFeedbackService(bool enabled) {
+  if (!enabled || !SubmitDownloadToFeedbackService())
+    download()->Remove();
+  // WARNING: 'this' is deleted at this point. Don't access 'this'.
 }
 
 void DownloadItemView::LoadIcon() {
@@ -1022,13 +1049,16 @@ void DownloadItemView::HandleClickEvent(const ui::LocatedEvent& event,
   if (mode_ == DANGEROUS_MODE)
     return;
 
-  if (active_event &&
-      !InDropDownButtonXCoordinateRange(event.x()) &&
-      !IsShowingWarningDialog()) {
-    OpenDownload();
+  SetState(NORMAL, NORMAL);
+
+  if (!active_event ||
+      InDropDownButtonXCoordinateRange(event.x()) ||
+      IsShowingWarningDialog()) {
+    return;
   }
 
-  SetState(NORMAL, NORMAL);
+  // OpenDownload may delete this, so don't add any code after this line.
+  OpenDownload();
 }
 
 // Load an icon for the file type we're downloading, and animate any in progress
@@ -1135,16 +1165,14 @@ void DownloadItemView::ShowWarningDialog() {
   if (mode_ == DANGEROUS_MODE) {
     save_button_ = new views::LabelButton(
         this, model_.GetWarningConfirmButtonText());
-    save_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+    save_button_->SetStyle(views::Button::STYLE_BUTTON);
     AddChildView(save_button_);
   }
   int discard_button_message = model_.IsMalicious() ?
       IDS_DISMISS_DOWNLOAD : IDS_DISCARD_DOWNLOAD;
-  if (!model_.IsMalicious() && model_.ShouldAllowDownloadFeedback())
-    discard_button_message = IDS_REPORT_AND_DISCARD_DOWNLOAD;
   discard_button_ = new views::LabelButton(
       this, l10n_util::GetStringUTF16(discard_button_message));
-  discard_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+  discard_button_->SetStyle(views::Button::STYLE_BUTTON);
   AddChildView(discard_button_);
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
@@ -1246,11 +1274,11 @@ void DownloadItemView::SizeLabelToMinWidth() {
     // This can be a low surrogate codepoint, but u_isUWhiteSpace will
     // return false and inserting a new line after a surrogate pair
     // is perfectly ok.
-    char16 line_end_char = current_text[pos - 1];
+    base::char16 line_end_char = current_text[pos - 1];
     if (u_isUWhiteSpace(line_end_char))
-      current_text.replace(pos - 1, 1, 1, char16('\n'));
+      current_text.replace(pos - 1, 1, 1, base::char16('\n'));
     else
-      current_text.insert(pos, 1, char16('\n'));
+      current_text.insert(pos, 1, base::char16('\n'));
     dangerous_download_label_->SetText(current_text);
     size = dangerous_download_label_->GetPreferredSize();
 
@@ -1289,7 +1317,7 @@ void DownloadItemView::UpdateAccessibleName() {
   if (IsShowingWarningDialog()) {
     new_name = dangerous_download_label_->text();
   } else {
-    new_name = status_text_ + char16(' ') +
+    new_name = status_text_ + base::char16(' ') +
         download()->GetFileNameToReportUser().LossyDisplayName();
   }
 

@@ -10,10 +10,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/sync/backend_migrator.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
-#include "chrome/browser/sync/test/integration/retry_verifier.h"
 #include "sync/internal_api/public/base/model_type.h"
 
 class Profile;
@@ -35,8 +33,7 @@ class SyncSessionSnapshot;
 // and authentication. It provides ways to "wait" adequate periods of time for
 // several clients to get to the same state.
 class ProfileSyncServiceHarness
-    : public ProfileSyncServiceObserver,
-      public browser_sync::MigrationObserver {
+    : public ProfileSyncServiceObserver {
  public:
   static ProfileSyncServiceHarness* Create(
       Profile* profile,
@@ -53,9 +50,6 @@ class ProfileSyncServiceHarness
 
   // Sets the GAIA credentials with which to sign in to sync.
   void SetCredentials(const std::string& username, const std::string& password);
-
-  // Returns true if exponential backoff is complete.
-  bool IsExponentialBackoffDone() const;
 
   // Returns true if sync is disabled for this client.
   bool IsSyncDisabled() const;
@@ -77,40 +71,21 @@ class ProfileSyncServiceHarness
   virtual void OnStateChanged() OVERRIDE;
   virtual void OnSyncCycleCompleted() OVERRIDE;
 
-  // MigrationObserver implementation.
-  virtual void OnMigrationStateChange() OVERRIDE;
-
   // Blocks the caller until the sync backend host associated with this harness
   // has been initialized.  Returns true if the wait was successful.
   bool AwaitBackendInitialized();
 
-  // Blocks the caller until this harness has completed a single sync cycle
-  // since the previous one.  Returns true if a sync cycle has completed.
-  bool AwaitDataSyncCompletion();
-
-  // Blocks the caller until this harness has completed as many sync cycles as
-  // are required to ensure its progress marker matches the latest available on
-  // the server.
-  //
-  // Note: When other clients are committing changes this will not be reliable.
-  // If your test involves changes to multiple clients, you should use one of
-  // the other Await* functions, such as AwaitMutualSyncCycleComplete.  Refer to
-  // the documentation of those functions for more details.
-  bool AwaitFullSyncCompletion();
+  // Blocks the caller until the client has nothing left to commit and its
+  // progress markers are up to date. Returns true if successful.
+  bool AwaitCommitActivityCompletion();
 
   // Blocks the caller until sync has been disabled for this client. Returns
   // true if sync is disabled.
   bool AwaitSyncDisabled();
 
-  // Blocks the caller until exponential backoff has been verified to happen.
-  bool AwaitExponentialBackoffVerification();
-
-  // Blocks the caller until the syncer receives an actionable error.
-  // Returns true if the sync client received an actionable error.
-  bool AwaitActionableError();
-
-  // Blocks until the given set of data types are migrated.
-  bool AwaitMigration(syncer::ModelTypeSet expected_migrated_types);
+  // Blocks the caller until sync setup is complete for this client. Returns
+  // true if sync setup is complete.
+  bool AwaitSyncSetupCompletion();
 
   // Blocks the caller until this harness has observed that the sync engine
   // has downloaded all the changes seen by the |partner| harness's client.
@@ -148,6 +123,9 @@ class ProfileSyncServiceHarness
 
   // Returns the ProfileSyncService member of the sync client.
   ProfileSyncService* service() const { return service_; }
+
+  // Returns the debug name for this profile. Used for logging.
+  const std::string& profile_debug_name() const { return profile_debug_name_; }
 
   // Returns the status of the ProfileSyncService member of the sync client.
   ProfileSyncService::Status GetStatus() const;
@@ -189,18 +167,6 @@ class ProfileSyncServiceHarness
   // Check if |type| is being synced.
   bool IsTypePreferred(syncer::ModelType type);
 
-  // Returns true if the sync client has no unsynced items.
-  bool IsDataSynced() const;
-
-  // Returns true if the sync client has no unsynced items and its progress
-  // markers are believed to be up to date.
-  //
-  // Although we can't detect when commits from other clients invalidate our
-  // local progress markers, we do know when our own commits have invalidated
-  // our timestmaps.  This check returns true when this client has, to the best
-  // of its knowledge, downloaded the latest progress markers.
-  bool IsFullySynced() const;
-
   // Get the number of sync entries this client has. This includes all top
   // level or permanent items, and can include recently deleted entries.
   size_t GetNumEntries() const;
@@ -233,28 +199,16 @@ class ProfileSyncServiceHarness
   // other client has.
   bool MatchesPartnerClient() const;
 
-  // Returns true if there is a backend migration in progress.
-  bool HasPendingBackendMigration() const;
-
  private:
-  friend class StateChangeTimeoutEvent;
-
   ProfileSyncServiceHarness(
       Profile* profile,
       const std::string& username,
       const std::string& password,
       invalidation::P2PInvalidationService* invalidation_service);
 
-  // Listen to migration events if the migrator has been initialized
-  // and we're not already listening.  Returns true if we started
-  // listening.
-  bool TryListeningToMigrationEvents();
-
-  // Indicates that the operation being waited on is complete.
-  void SignalStateComplete();
-
-  // A helper for implementing IsDataSynced() and IsFullySynced().
-  bool IsDataSyncedImpl() const;
+  // Quits the current message loop. Called when the status change being waited
+  // on has occurred, or in the event of a timeout.
+  void QuitMessageLoop();
 
   // Signals that sync setup is complete, and that PSS may begin syncing.
   void FinishSyncSetup();
@@ -263,6 +217,10 @@ class ProfileSyncServiceHarness
   // particular datatype. Returns an empty string if the progress marker isn't
   // found.
   std::string GetSerializedProgressMarker(syncer::ModelType model_type) const;
+
+  // Returns true if a client has nothing left to commit and its progress
+  // markers are up to date.
+  bool HasLatestProgressMarkers() const;
 
   // Gets detailed status from |service_| in pretty-printable form.
   std::string GetServiceStatus();
@@ -288,24 +246,12 @@ class ProfileSyncServiceHarness
   // all refresh tokens used in the tests are different.
   int oauth2_refesh_token_number_;
 
-  // The current set of data types pending migration.  Used by
-  // AwaitMigration().
-  syncer::ModelTypeSet pending_migration_types_;
-
-  // The set of data types that have undergone migration.  Used by
-  // AwaitMigration().
-  syncer::ModelTypeSet migrated_types_;
-
   // Used for logging.
   const std::string profile_debug_name_;
 
   // Keeps track of the state change on which we are waiting. PSSHarness can
   // wait on only one status change at a time.
   StatusChangeChecker* status_change_checker_;
-
-  // Keeps track of the number of attempts at exponential backoff and its
-  // related bookkeeping information for verification.
-  scoped_ptr<RetryVerifier> retry_verifier_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncServiceHarness);
 };

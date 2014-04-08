@@ -4,29 +4,27 @@
 
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
 
+#include <string>
+
 #include "base/files/file_path.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
+#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
+#include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
-#include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/file_browser_private.h"
-#include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/storage_partition.h"
-#include "content/public/browser/web_contents.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 #include "webkit/browser/fileapi/file_system_context.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 
-using content::BrowserThread;
 namespace file_browser_private = extensions::api::file_browser_private;
 
 namespace file_manager {
@@ -94,7 +92,7 @@ void GetSelectedFileInfoInternal(Profile* profile,
                          base::Passed(&params)));
           return;  // Remaining work is done in ContinueGetSelectedFileInfo.
       }
-   }
+    }
   }
   params->callback.Run(params->selected_files);
 }
@@ -166,6 +164,10 @@ void VolumeInfoToVolumeMetadata(
     case VOLUME_TYPE_MOUNTED_ARCHIVE_FILE:
       volume_metadata->volume_type = file_browser_private::VOLUME_TYPE_ARCHIVE;
       break;
+    case VOLUME_TYPE_CLOUD_DEVICE:
+      volume_metadata->volume_type =
+          file_browser_private::VOLUME_TYPE_CLOUD_DEVICE;
+      break;
   }
 
   // Fill device_type iff the volume is removable partition.
@@ -190,6 +192,12 @@ void VolumeInfoToVolumeMetadata(
         volume_metadata->device_type = file_browser_private::DEVICE_TYPE_MOBILE;
         break;
     }
+    volume_metadata->device_path.reset(
+        new std::string(volume_info.system_path_prefix.AsUTF8Unsafe()));
+    volume_metadata->device_label.reset(
+        new std::string(volume_info.drive_label));
+    volume_metadata->is_parent_device.reset(
+        new bool(volume_info.is_parent));
   } else {
     volume_metadata->device_type =
         file_browser_private::DEVICE_TYPE_NONE;
@@ -213,34 +221,14 @@ void VolumeInfoToVolumeMetadata(
   }
 }
 
-content::WebContents* GetWebContents(ExtensionFunctionDispatcher* dispatcher) {
-  if (!dispatcher) {
-    LOG(WARNING) << "No dispatcher";
-    return NULL;
-  }
-  if (!dispatcher->delegate()) {
-    LOG(WARNING) << "No delegate";
-    return NULL;
-  }
-  content::WebContents* web_contents =
-      dispatcher->delegate()->GetAssociatedWebContents();
-  if (!web_contents) {
-    LOG(WARNING) << "No associated tab contents";
-    return NULL;
-  }
-  return web_contents;
-}
-
-base::FilePath GetLocalPathFromURL(
-    content::RenderViewHost* render_view_host,
-    Profile* profile,
-    const GURL& url) {
+base::FilePath GetLocalPathFromURL(content::RenderViewHost* render_view_host,
+                                   Profile* profile,
+                                   const GURL& url) {
   DCHECK(render_view_host);
   DCHECK(profile);
 
   scoped_refptr<fileapi::FileSystemContext> file_system_context =
-      util::GetFileSystemContextForRenderViewHost(
-          profile, render_view_host);
+      util::GetFileSystemContextForRenderViewHost(profile, render_view_host);
 
   const fileapi::FileSystemURL filesystem_url(
       file_system_context->CrackURL(url));
@@ -272,11 +260,28 @@ void GetSelectedFileInfo(content::RenderViewHost* render_view_host,
     }
   }
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&GetSelectedFileInfoInternal,
-                 profile,
-                 base::Passed(&params)));
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&GetSelectedFileInfoInternal, profile, base::Passed(&params)));
+}
+
+void SetupProfileFileAccessPermissions(int render_view_process_id,
+                                       Profile* profile) {
+  const base::FilePath paths[] = {
+    drive::util::GetDriveMountPointPath(profile),
+    util::GetDownloadsFolderForProfile(profile),
+  };
+  for (size_t i = 0; i < arraysize(paths); ++i) {
+    content::ChildProcessSecurityPolicy::GetInstance(
+        )->GrantCreateReadWriteFile(render_view_process_id, paths[i]);
+  }
+}
+
+drive::EventLogger* GetLogger(Profile* profile) {
+  drive::DriveIntegrationService* service =
+      drive::DriveIntegrationServiceFactory::FindForProfileRegardlessOfStates(
+          profile);
+  return service ? service->event_logger() : NULL;
 }
 
 }  // namespace util

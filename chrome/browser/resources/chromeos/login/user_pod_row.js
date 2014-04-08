@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-<include src="wallpaper_loader.js"></include>
-
 /**
  * @fileoverview User pod row implementation.
  */
@@ -32,11 +30,19 @@ cr.define('login', function() {
   var MAX_NUMBER_OF_COLUMNS = 6;
 
   /**
-   * Variables used for pod placement processing.
-   * Width and height should be synced with computed CSS sizes of pods.
+   * Maximal number of rows if sign-in banner is displayed alonside.
+   * @type {number}
+   * @const
+   */
+  var MAX_NUMBER_OF_ROWS_UNDER_SIGNIN_BANNER = 2;
+
+  /**
+   * Variables used for pod placement processing. Width and height should be
+   * synced with computed CSS sizes of pods.
    */
   var POD_WIDTH = 180;
-  var POD_HEIGHT = 217;
+  var CROS_POD_HEIGHT = 213;
+  var DESKTOP_POD_HEIGHT = 216;
   var POD_ROW_PADDING = 10;
 
   /**
@@ -62,19 +68,6 @@ cr.define('login', function() {
   var HELP_TOPIC_PUBLIC_SESSION = 3041033;
 
   /**
-   * Oauth token status. These must match UserManager::OAuthTokenStatus.
-   * @enum {number}
-   * @const
-   */
-  var OAuthTokenStatus = {
-    UNKNOWN: 0,
-    INVALID_OLD: 1,
-    VALID_OLD: 2,
-    INVALID_NEW: 3,
-    VALID_NEW: 4
-  };
-
-  /**
    * Tab order for user pods. Update these when adding new controls.
    * @enum {number}
    * @const
@@ -90,7 +83,7 @@ cr.define('login', function() {
   //
   // (1) all user pods have tab index 1 so they are traversed first;
   // (2) when a user pod is activated, its tab index is set to -1 and its
-  //     main input field gets focus and tab index 1;
+  // main input field gets focus and tab index 1;
   // (3) buttons on the header bar have tab index 2 so they follow user pods;
   // (4) Action box buttons have tab index 3 and follow header bar buttons;
   // (5) lastly, focus jumps to the Status Area and back to user pods.
@@ -145,10 +138,8 @@ cr.define('login', function() {
       this.customButton.tabIndex = UserPodTabOrder.POD_INPUT;
       this.actionBoxAreaElement.tabIndex = UserPodTabOrder.ACTION_BOX;
 
-      // Mousedown has to be used instead of click to be able to prevent 'focus'
-      // event later.
-      this.addEventListener('mousedown',
-          this.handleMouseDown_.bind(this));
+      this.addEventListener('click',
+          this.handleClickOnPod_.bind(this));
 
       this.signinButtonElement.addEventListener('click',
           this.activate.bind(this));
@@ -268,11 +259,19 @@ cr.define('login', function() {
     },
 
     /**
-     * Gets user signin button.
-     * @type {!HTMLInputElement}
+     * Gets user sign in button.
+     * @type {!HTMLButtonElement}
      */
     get signinButtonElement() {
       return this.querySelector('.signin-button');
+    },
+
+    /**
+     * Gets launch app button.
+     * @type {!HTMLButtonElement}
+     */
+    get launchAppButtonElement() {
+      return this.querySelector('.launch-app-button');
     },
 
     /**
@@ -285,10 +284,18 @@ cr.define('login', function() {
 
     /**
      * Gets user type icon area.
-     * @type {!HTMLInputElement}
+     * @type {!HTMLDivElement}
      */
     get userTypeIconAreaElement() {
       return this.querySelector('.user-type-icon-area');
+    },
+
+    /**
+     * Gets user type icon.
+     * @type {!HTMLDivElement}
+     */
+    get userTypeIconElement() {
+      return this.querySelector('.user-type-icon-image');
     },
 
     /**
@@ -365,8 +372,8 @@ cr.define('login', function() {
     },
 
     /**
-     * Gets the custom button. This button is normally hidden, but can be
-     * shown using the chrome.screenlockPrivate API.
+     * Gets the custom button. This button is normally hidden, but can be shown
+     * using the chrome.screenlockPrivate API.
      * @type {!HTMLInputElement}
      */
     get customButton() {
@@ -383,15 +390,25 @@ cr.define('login', function() {
       this.nameElement.textContent = this.user_.displayName;
       this.signedInIndicatorElement.hidden = !this.user_.signedIn;
 
-      var needSignin = this.needSignin;
-      this.passwordElement.hidden = needSignin;
-      this.signinButtonElement.hidden = !needSignin;
+      var forceOnlineSignin = this.forceOnlineSignin;
+      this.passwordElement.hidden = forceOnlineSignin;
+      this.signinButtonElement.hidden = !forceOnlineSignin;
 
       this.updateActionBoxArea();
+
+      this.passwordElement.setAttribute('aria-label', loadTimeData.getStringF(
+        'passwordFieldAccessibleName', this.user_.emailAddress));
+
+      this.customizeUserPodPerUserType();
     },
 
     updateActionBoxArea: function() {
-      this.actionBoxAreaElement.hidden = this.user_.publicAccount;
+      if (this.user_.publicAccount || this.user_.isApp) {
+        this.actionBoxAreaElement.hidden = true;
+        return;
+      }
+
+      this.actionBoxAreaElement.hidden = false;
       this.actionBoxMenuRemoveElement.hidden = !this.user_.canRemove;
 
       this.actionBoxAreaElement.setAttribute(
@@ -409,9 +426,33 @@ cr.define('login', function() {
 
       this.actionBoxMenuCommandElement.textContent =
           loadTimeData.getString('removeUser');
-      this.passwordElement.setAttribute('aria-label', loadTimeData.getStringF(
-          'passwordFieldAccessibleName', this.user_.emailAddress));
-      this.userTypeIconAreaElement.hidden = !this.user_.locallyManagedUser;
+    },
+
+    customizeUserPodPerUserType: function() {
+      var isMultiProfilesUI =
+          (Oobe.getInstance().displayType == DISPLAY_TYPE.USER_ADDING);
+
+      if (this.user_.locallyManagedUser) {
+        this.setUserPodIconType('supervised');
+      } else if (isMultiProfilesUI && !this.user_.isMultiProfilesAllowed) {
+        // Mark user pod as not focusable which in addition to the grayed out
+        // filter makes it look in disabled state.
+        this.classList.add('not-focusable');
+        this.setUserPodIconType('policy');
+
+        this.querySelector('.mp-policy-title').hidden = false;
+        if (this.user.multiProfilesPolicy == 'primary-only')
+          this.querySelector('.mp-policy-primary-only-msg').hidden = false;
+        else
+          this.querySelector('.mp-policy-not-allowed-msg').hidden = false;
+      } else if (this.user_.isApp) {
+        this.setUserPodIconType('app');
+      }
+    },
+
+    setUserPodIconType: function(userTypeClass) {
+      this.userTypeIconAreaElement.classList.add(userTypeClass);
+      this.userTypeIconAreaElement.hidden = false;
     },
 
     /**
@@ -428,14 +469,10 @@ cr.define('login', function() {
     },
 
     /**
-     * Whether signin is required for this user.
+     * Whether this user must authenticate against GAIA.
      */
-    get needSignin() {
-      // Signin is performed if the user has an invalid oauth token and is
-      // not currently signed in (i.e. not the lock screen).
-      return this.user.oauthTokenStatus != OAuthTokenStatus.VALID_OLD &&
-          this.user.oauthTokenStatus != OAuthTokenStatus.VALID_NEW &&
-          !this.user.signedIn;
+    get forceOnlineSignin() {
+      return this.user.forceOnlineSignin && !this.user.signedIn;
     },
 
     /**
@@ -508,9 +545,9 @@ cr.define('login', function() {
      * Focuses on input element.
      */
     focusInput: function() {
-      var needSignin = this.needSignin;
-      this.signinButtonElement.hidden = !needSignin;
-      this.passwordElement.hidden = needSignin;
+      var forceOnlineSignin = this.forceOnlineSignin;
+      this.signinButtonElement.hidden = !forceOnlineSignin;
+      this.passwordElement.hidden = forceOnlineSignin;
 
       // Move tabIndex from the whole pod to the main input.
       this.tabIndex = -1;
@@ -520,10 +557,11 @@ cr.define('login', function() {
 
     /**
      * Activates the pod.
+     * @param {Event} e Event object.
      * @return {boolean} True if activated successfully.
      */
-    activate: function() {
-      if (!this.signinButtonElement.hidden) {
+    activate: function(e) {
+      if (this.forceOnlineSignin) {
         this.showSigninUI();
       } else if (!this.passwordElement.value) {
         return false;
@@ -693,14 +731,14 @@ cr.define('login', function() {
     },
 
     /**
-     * Handles mousedown event on a user pod.
-     * @param {Event} e Mousedown event.
+     * Handles click event on a user pod.
+     * @param {Event} e Click event.
      */
-    handleMouseDown_: function(e) {
+    handleClickOnPod_: function(e) {
       if (this.parentNode.disabled)
         return;
 
-      if (!this.signinButtonElement.hidden && !this.isActionBoxMenuActive) {
+      if (this.forceOnlineSignin && !this.isActionBoxMenuActive) {
         this.showSigninUI();
         // Prevent default so that we don't trigger 'focus' event.
         e.preventDefault();
@@ -775,7 +813,7 @@ cr.define('login', function() {
     },
 
     /** @override */
-    get needSignin() {
+    get forceOnlineSignin() {
       return false;
     },
 
@@ -796,7 +834,7 @@ cr.define('login', function() {
 
       this.nameElement.addEventListener('keydown', (function(e) {
         if (e.keyIdentifier == 'Enter') {
-          this.parentNode.activatedPod = this;
+          this.parentNode.setActivatedPod(this, e);
           // Stop this keydown event from bubbling up to PodRow handler.
           e.stopPropagation();
           // Prevent default so that we don't trigger a 'click' event on the
@@ -849,27 +887,26 @@ cr.define('login', function() {
     },
 
     /** @override */
-    activate: function() {
+    activate: function(e) {
       this.expanded = true;
       this.focusInput();
       return true;
     },
 
     /** @override */
-    handleMouseDown_: function(e) {
+    handleClickOnPod_: function(e) {
       if (this.parentNode.disabled)
         return;
 
       this.parentNode.focusPod(this);
-      this.parentNode.activatedPod = this;
+      this.parentNode.setActivatedPod(this, e);
       // Prevent default so that we don't trigger 'focus' event.
       e.preventDefault();
     },
 
     /**
-     * Handle mouse and keyboard events for the learn more button.
-     * Triggering the button causes information about public sessions to be
-     * shown.
+     * Handle mouse and keyboard events for the learn more button. Triggering
+     * the button causes information about public sessions to be shown.
      * @param {Event} event Mouse or keyboard event.
      */
     handleLearnMoreEvent: function(event) {
@@ -967,7 +1004,7 @@ cr.define('login', function() {
     },
 
     /** @override */
-    activate: function() {
+    activate: function(e) {
       if (this.passwordElement.hidden) {
         Oobe.launchUser(this.user.emailAddress, this.user.displayName);
       } else if (!this.passwordElement.value) {
@@ -983,7 +1020,7 @@ cr.define('login', function() {
     },
 
     /** @override */
-    handleMouseDown_: function(e) {
+    handleClickOnPod_: function(e) {
       if (this.parentNode.disabled)
         return;
 
@@ -993,12 +1030,121 @@ cr.define('login', function() {
       // If this is an unlocked pod, then open a browser window. Otherwise
       // just activate the pod and show the password field.
       if (!this.user.needsSignin && !this.isActionBoxMenuActive)
-        this.activate();
+        this.activate(e);
     },
 
     /** @override */
     handleRemoveUserConfirmationClick_: function(e) {
       chrome.send('removeUser', [this.user.profilePath]);
+    },
+  };
+
+  /**
+   * Creates a user pod that represents kiosk app.
+   * @constructor
+   * @extends {UserPod}
+   */
+  var KioskAppPod = cr.ui.define(function() {
+    var node = UserPod();
+    return node;
+  });
+
+  KioskAppPod.prototype = {
+    __proto__: UserPod.prototype,
+
+    /** @override */
+    decorate: function() {
+      UserPod.prototype.decorate.call(this);
+      this.launchAppButtonElement.addEventListener('click',
+                                                   this.activate.bind(this));
+    },
+
+    /** @override */
+    update: function() {
+      this.imageElement.src = this.user.iconUrl;
+      if (this.user.iconHeight && this.user.iconWidth) {
+        this.imageElement.style.height = this.user.iconHeight;
+        this.imageElement.style.width = this.user.iconWidth;
+      }
+      this.imageElement.alt = this.user.label;
+      this.imageElement.title = this.user.label;
+      this.passwordElement.hidden = true;
+      this.signinButtonElement.hidden = true;
+      this.launchAppButtonElement.hidden = false;
+      this.signedInIndicatorElement.hidden = true;
+      this.nameElement.textContent = this.user.label;
+
+      UserPod.prototype.updateActionBoxArea.call(this);
+      UserPod.prototype.customizeUserPodPerUserType.call(this);
+    },
+
+    /** @override */
+    get mainInput() {
+      return this.launchAppButtonElement;
+    },
+
+    /** @override */
+    focusInput: function() {
+      this.signinButtonElement.hidden = true;
+      this.launchAppButtonElement.hidden = false;
+      this.passwordElement.hidden = true;
+
+      // Move tabIndex from the whole pod to the main input.
+      this.tabIndex = -1;
+      this.mainInput.tabIndex = UserPodTabOrder.POD_INPUT;
+      this.mainInput.focus();
+    },
+
+    /** @override */
+    get forceOnlineSignin() {
+      return false;
+    },
+
+    /** @override */
+    activate: function(e) {
+      var diagnosticMode = e && e.ctrlKey;
+      this.launchApp_(this.user, diagnosticMode);
+      return true;
+    },
+
+    /** @override */
+    handleClickOnPod_: function(e) {
+      if (this.parentNode.disabled)
+        return;
+
+      Oobe.clearErrors();
+      this.parentNode.lastFocusedPod_ = this;
+      this.activate(e);
+    },
+
+    /**
+     * Launch the app. If |diagnosticMode| is true, ask user to confirm.
+     * @param {Object} app App data.
+     * @param {boolean} diagnosticMode Whether to run the app in diagnostic
+     *     mode.
+     */
+    launchApp_: function(app, diagnosticMode) {
+      if (!diagnosticMode) {
+        chrome.send('launchKioskApp', [app.id, false]);
+        return;
+      }
+
+      var oobe = $('oobe');
+      if (!oobe.confirmDiagnosticMode_) {
+        oobe.confirmDiagnosticMode_ =
+            new cr.ui.dialogs.ConfirmDialog(document.body);
+        oobe.confirmDiagnosticMode_.setOkLabel(
+            loadTimeData.getString('confirmKioskAppDiagnosticModeYes'));
+        oobe.confirmDiagnosticMode_.setCancelLabel(
+            loadTimeData.getString('confirmKioskAppDiagnosticModeNo'));
+      }
+
+      oobe.confirmDiagnosticMode_.show(
+          loadTimeData.getStringF('confirmKioskAppDiagnosticModeFormat',
+                                  app.label),
+          function() {
+            chrome.send('launchKioskApp', [app.id, true]);
+          });
     },
   };
 
@@ -1027,11 +1173,27 @@ cr.define('login', function() {
     // Pod that was most recently focused, if any.
     lastFocusedPod_: undefined,
 
-    // Note: created only in decorate() !
-    wallpaperLoader_: undefined,
-
     // Pods whose initial images haven't been loaded yet.
     podsWithPendingImages_: [],
+
+    // Whether pod creation is animated.
+    userAddIsAnimated_: false,
+
+    // Whether pod placement has been postponed.
+    podPlacementPostponed_: false,
+
+    // Standard user pod height/width.
+    userPodHeight_: 0,
+    userPodWidth_: 0,
+
+    // Array of apps that are shown in addition to other user pods.
+    apps_: [],
+
+    // True to show app pods along with user pods.
+    shouldShowApps_: true,
+
+    // Array of users that are shown (public/supervised/regular).
+    users_: [],
 
     /** @override */
     decorate: function() {
@@ -1043,7 +1205,13 @@ cr.define('login', function() {
         mousemove: [this.handleMouseMove_.bind(this), false],
         keydown: [this.handleKeyDown.bind(this), false]
       };
-      this.wallpaperLoader_ = new login.WallpaperLoader();
+
+      var isDesktopUserManager = Oobe.getInstance().displayType ==
+          DISPLAY_TYPE.DESKTOP_USER_MANAGER;
+      this.userPodHeight_ = isDesktopUserManager ? DESKTOP_POD_HEIGHT :
+                                                   CROS_POD_HEIGHT;
+      // Same for Chrome OS and desktop.
+      this.userPodWidth_ = POD_WIDTH;
     },
 
     /**
@@ -1063,10 +1231,24 @@ cr.define('login', function() {
     },
 
     /**
+     * Returns pod with the given app id.
+     * @param {!string} app_id Application id to be matched.
+     * @return {Object} Pod with the given app id. null if pod hasn't been
+     *     found.
+     */
+    getPodWithAppId_: function(app_id) {
+      for (var i = 0, pod; pod = this.pods[i]; ++i) {
+        if (pod.user.isApp && pod.user.id == app_id)
+          return pod;
+      }
+      return null;
+    },
+
+    /**
      * Returns pod with the given username (null if there is no such pod).
      * @param {string} username Username to be matched.
      * @return {Object} Pod with the given username. null if pod hasn't been
-     *                  found.
+     *     found.
      */
     getPodWithUsername_: function(username) {
       for (var i = 0, pod; pod = this.pods[i]; ++i) {
@@ -1094,7 +1276,7 @@ cr.define('login', function() {
 
     /**
      * Creates a user pod from given email.
-     * @param {string} email User's email.
+     * @param {!Object} user User info dictionary.
      */
     createUserPod: function(user) {
       var userPod;
@@ -1102,6 +1284,8 @@ cr.define('login', function() {
         userPod = new DesktopUserPod({user: user});
       else if (user.publicAccount)
         userPod = new PublicAccountUserPod({user: user});
+      else if (user.isApp)
+        userPod = new KioskAppPod({user: user});
       else
         userPod = new UserPod({user: user});
 
@@ -1123,6 +1307,23 @@ cr.define('login', function() {
 
       this.appendChild(userPod);
       userPod.initialize();
+    },
+
+    /**
+     * Runs app with a given id from the list of loaded apps.
+     * @param {!string} app_id of an app to run.
+     * @param {boolean=} opt_diagnostic_mode Whether to run the app in
+     *     diagnostic mode. Default is false.
+     */
+    findAndRunAppForTesting: function(app_id, opt_diagnostic_mode) {
+      var app = this.getPodWithAppId_(app_id);
+      if (app) {
+        var activationEvent = cr.doc.createEvent('MouseEvents');
+        var ctrlKey = opt_diagnostic_mode;
+        activationEvent.initMouseEvent('click', true, true, null,
+            0, 0, 0, 0, 0, ctrlKey, false, false, false, 0, null);
+        app.dispatchEvent(activationEvent);
+      }
     },
 
     /**
@@ -1188,6 +1389,19 @@ cr.define('login', function() {
      * @param {boolean} animated Whether to use init animation.
      */
     loadPods: function(users, animated) {
+      this.users_ = users;
+      this.userAddIsAnimated_ = animated;
+
+      this.rebuildPods();
+    },
+
+    /**
+     * Rebuilds pod row using users_ and apps_ that were previously set or
+     * updated.
+     */
+    rebuildPods: function() {
+      var emptyPodRow = this.pods.length == 0;
+
       // Clear existing pods.
       this.innerHTML = '';
       this.focusedPod_ = undefined;
@@ -1198,26 +1412,79 @@ cr.define('login', function() {
       Oobe.getInstance().toggleClass('flying-pods', false);
 
       // Populate the pod row.
-      for (var i = 0; i < users.length; ++i) {
-        this.addUserPod(users[i], animated);
-      }
-      for (var i = 0, pod; pod = this.pods[i]; ++i) {
+      for (var i = 0; i < this.users_.length; ++i)
+        this.addUserPod(this.users_[i], this.userAddIsAnimated_);
+
+      for (var i = 0, pod; pod = this.pods[i]; ++i)
         this.podsWithPendingImages_.push(pod);
+
+      // TODO(nkostylev): Edge case handling when kiosk apps are not fitting.
+      if (this.shouldShowApps_) {
+        for (var i = 0; i < this.apps_.length; ++i)
+          this.addUserPod(this.apps_[i], this.userAddIsAnimated_);
       }
+
       // Make sure we eventually show the pod row, even if some image is stuck.
       setTimeout(function() {
         $('pod-row').classList.remove('images-loading');
       }, POD_ROW_IMAGES_LOAD_TIMEOUT_MS);
 
-      this.placePods_();
+      var isCrosAccountPicker = $('login-header-bar').signinUIState ==
+          SIGNIN_UI_STATE.ACCOUNT_PICKER;
+      var isDesktopUserManager = Oobe.getInstance().displayType ==
+          DISPLAY_TYPE.DESKTOP_USER_MANAGER;
 
-      // Without timeout changes in pods positions will be animated even though
-      // it happened when 'flying-pods' class was disabled.
-      setTimeout(function() {
-        Oobe.getInstance().toggleClass('flying-pods', true);
-      }, 0);
+      // Chrome OS: immediately recalculate pods layout only when current UI
+      //            is account picker. Otherwise postpone it.
+      // Desktop: recalculate pods layout right away.
+      if (isDesktopUserManager || isCrosAccountPicker) {
+        this.placePods_();
 
-      this.focusPod(this.preselectedPod);
+        // Without timeout changes in pods positions will be animated even
+        // though it happened when 'flying-pods' class was disabled.
+        setTimeout(function() {
+          Oobe.getInstance().toggleClass('flying-pods', true);
+        }, 0);
+
+        this.focusPod(this.preselectedPod);
+      } else {
+        this.podPlacementPostponed_ = true;
+
+        // Update [Cancel] button state.
+        if ($('login-header-bar').signinUIState ==
+                SIGNIN_UI_STATE.GAIA_SIGNIN &&
+            emptyPodRow &&
+            this.pods.length > 0) {
+          login.GaiaSigninScreen.updateCancelButtonState();
+        }
+      }
+    },
+
+    /**
+     * Adds given apps to the pod row.
+     * @param {array} apps Array of apps.
+     */
+    setApps: function(apps) {
+      this.apps_ = apps;
+      this.rebuildPods();
+      chrome.send('kioskAppsLoaded');
+
+      // Check whether there's a pending kiosk app error.
+      window.setTimeout(function() {
+        chrome.send('checkKioskAppLaunchError');
+      }, 500);
+    },
+
+    /**
+     * Sets whether should show app pods.
+     * @param {boolean} shouldShowApps Whether app pods should be shown.
+     */
+    setShouldShowApps: function(shouldShowApps) {
+      if (this.shouldShowApps_ == shouldShowApps)
+        return;
+
+      this.shouldShowApps_ = shouldShowApps;
+      this.rebuildPods();
     },
 
     /**
@@ -1255,7 +1522,8 @@ cr.define('login', function() {
      */
     columnsToWidth_: function(columns) {
       var margin = MARGIN_BY_COLUMNS[columns];
-      return 2 * POD_ROW_PADDING + columns * POD_WIDTH + (columns - 1) * margin;
+      return 2 * POD_ROW_PADDING + columns *
+          this.userPodWidth_ + (columns - 1) * margin;
     },
 
     /**
@@ -1263,7 +1531,7 @@ cr.define('login', function() {
      * @private
      */
     rowsToHeight_: function(rows) {
-      return 2 * POD_ROW_PADDING + rows * POD_HEIGHT;
+      return 2 * POD_ROW_PADDING + rows * this.userPodHeight_;
     },
 
     /**
@@ -1280,6 +1548,10 @@ cr.define('login', function() {
       while (maxWidth < this.columnsToWidth_(columns) && columns > 1)
         --columns;
       var rows = Math.floor((this.pods.length - 1) / columns) + 1;
+      if (getComputedStyle(
+          $('signin-banner'), null).getPropertyValue('display') != 'none') {
+        rows = Math.min(rows, MAX_NUMBER_OF_ROWS_UNDER_SIGNIN_BANNER);
+      }
       var maxHeigth = Oobe.getInstance().clientAreaSize.height;
       while (maxHeigth < this.rowsToHeight_(rows) && rows > 1)
         --rows;
@@ -1304,11 +1576,17 @@ cr.define('login', function() {
       var margin = MARGIN_BY_COLUMNS[columns];
       this.parentNode.setPreferredSize(
           this.columnsToWidth_(columns), this.rowsToHeight_(rows));
+      var height = this.userPodHeight_;
+      var width = this.userPodWidth_;
       this.pods.forEach(function(pod, index) {
-        if (pod.offsetHeight != POD_HEIGHT)
-          console.error('Pod offsetHeight and POD_HEIGHT are not equal.');
-        if (pod.offsetWidth != POD_WIDTH)
-          console.error('Pod offsetWidht and POD_WIDTH are not equal.');
+        if (pod.offsetHeight != height) {
+          console.error('Pod offsetHeight (' + pod.offsetHeight +
+              ') and POD_HEIGHT (' + height + ') are not equal.');
+        }
+        if (pod.offsetWidth != width) {
+          console.error('Pod offsetWidth (' + pod.offsetWidth +
+              ') and POD_WIDTH (' + width + ') are not equal.');
+        }
         if (index >= maxPodsNumber) {
            pod.hidden = true;
            return;
@@ -1316,8 +1594,8 @@ cr.define('login', function() {
         pod.hidden = false;
         var column = index % columns;
         var row = Math.floor(index / columns);
-        pod.left = POD_ROW_PADDING + column * (POD_WIDTH + margin);
-        pod.top = POD_ROW_PADDING + row * POD_HEIGHT;
+        pod.left = POD_ROW_PADDING + column * (width + margin);
+        pod.top = POD_ROW_PADDING + row * height;
       });
       Oobe.getInstance().updateScreenSize(this.parentNode);
     },
@@ -1359,10 +1637,18 @@ cr.define('login', function() {
      * Focuses a given user pod or clear focus when given null.
      * @param {UserPod=} podToFocus User pod to focus (undefined clears focus).
      * @param {boolean=} opt_force If true, forces focus update even when
-     *                             podToFocus is already focused.
+     *     podToFocus is already focused.
      */
     focusPod: function(podToFocus, opt_force) {
       if (this.isFocused(podToFocus) && !opt_force) {
+        this.keyboardActivated_ = false;
+        return;
+      }
+
+      // Make sure that we don't focus pods that are not allowed to be focused.
+      // TODO(nkostylev): Fix various keyboard focus related issues caused
+      // by this approach. http://crbug.com/339042
+      if (podToFocus && podToFocus.classList.contains('not-focusable')) {
         this.keyboardActivated_ = false;
         return;
       }
@@ -1374,7 +1660,6 @@ cr.define('login', function() {
       }
       this.insideFocusPod_ = true;
 
-      this.wallpaperLoader_.reset();
       for (var i = 0, pod; pod = this.pods[i]; ++i) {
         if (!this.isSinglePod) {
           pod.isActionBoxMenuActive = false;
@@ -1397,9 +1682,9 @@ cr.define('login', function() {
         podToFocus.classList.remove('faded');
         podToFocus.classList.add('focused');
         podToFocus.reset(true);  // Reset and give focus.
-        chrome.send('focusPod', [podToFocus.user.username]);
-
-        this.wallpaperLoader_.scheduleLoad(podToFocus.user.username, opt_force);
+        // focusPod() automatically loads wallpaper
+        if (!podToFocus.user.isApp)
+          chrome.send('focusPod', [podToFocus.user.username]);
         this.firstShown_ = false;
         this.lastFocusedPod_ = podToFocus;
       }
@@ -1411,7 +1696,7 @@ cr.define('login', function() {
      * Focuses a given user pod by index or clear focus when given null.
      * @param {int=} podToFocus index of User pod to focus.
      * @param {boolean=} opt_force If true, forces focus update even when
-     *                             podToFocus is already focused.
+     *     podToFocus is already focused.
      */
     focusPodByIndex: function(podToFocus, opt_force) {
       if (podToFocus < this.pods.length)
@@ -1422,17 +1707,8 @@ cr.define('login', function() {
      * Resets wallpaper to the last active user's wallpaper, if any.
      */
     loadLastWallpaper: function() {
-      if (this.lastFocusedPod_)
-        this.wallpaperLoader_.scheduleLoad(this.lastFocusedPod_.user.username,
-                                           true /* force */);
-    },
-
-    /**
-     * Handles 'onWallpaperLoaded' event. Recalculates statistics and
-     * [re]schedules next wallpaper load.
-     */
-    onWallpaperLoaded: function(username) {
-      this.wallpaperLoader_.onWallpaperLoaded(username);
+      if (this.lastFocusedPod_ && !this.lastFocusedPod_.user.isApp)
+        chrome.send('loadWallpaper', [this.lastFocusedPod_.user.username]);
     },
 
     /**
@@ -1442,8 +1718,14 @@ cr.define('login', function() {
     get activatedPod() {
       return this.activatedPod_;
     },
-    set activatedPod(pod) {
-      if (pod && pod.activate())
+
+    /**
+     * Sets currently activated pod.
+     * @param {UserPod} pod Pod to check for focus.
+     * @param {Event} e Event object.
+     */
+    setActivatedPod: function(pod, e) {
+      if (pod && pod.activate(e))
         this.activatedPod_ = pod;
     },
 
@@ -1520,16 +1802,17 @@ cr.define('login', function() {
     },
 
     /**
-     * Resets OAuth token status (invalidates it).
-     * @param {string} username User for which to reset the status.
+     * Indicates that the given user must authenticate against GAIA during the
+     * next sign-in.
+     * @param {string} username User for whom to enforce GAIA sign-in.
      */
-    resetUserOAuthTokenStatus: function(username) {
+    forceOnlineSigninForUser: function(username) {
       var pod = this.getPodWithUsername_(username);
       if (pod) {
-        pod.user.oauthTokenStatus = OAuthTokenStatus.INVALID_OLD;
+        pod.user.forceOnlineSignin = true;
         pod.update();
       } else {
-        console.log('Failed to update Gaia state for: ' + username);
+        console.log('Failed to update GAIA state for: ' + username);
       }
     },
 
@@ -1565,10 +1848,6 @@ cr.define('login', function() {
         if (!pod)
           this.focusedPod_.isActionBoxMenuHovered = false;
       }
-
-      // Also stop event propagation.
-      if (pod && e.target == pod.imageElement)
-        e.stopPropagation();
     },
 
     /**
@@ -1670,7 +1949,7 @@ cr.define('login', function() {
           break;
         case 'Enter':
           if (this.focusedPod_) {
-            this.activatedPod = this.focusedPod_;
+            this.setActivatedPod(this.focusedPod_, e);
             e.stopPropagation();
           }
           break;
@@ -1696,14 +1975,12 @@ cr.define('login', function() {
         var screen = this.parentNode;
         var self = this;
         focusedPod.addEventListener('webkitTransitionEnd', function f(e) {
-          if (e.target == focusedPod) {
-            focusedPod.removeEventListener('webkitTransitionEnd', f);
-            focusedPod.reset(true);
-            // Notify screen that it is ready.
-            screen.onShow();
-            self.wallpaperLoader_.scheduleLoad(focusedPod.user.username,
-                                               true /* force */);
-          }
+          focusedPod.removeEventListener('webkitTransitionEnd', f);
+          focusedPod.reset(true);
+          // Notify screen that it is ready.
+          screen.onShow();
+          if (!focusedPod.user.isApp)
+            chrome.send('loadWallpaper', [focusedPod.user.username]);
         });
         // Guard timer for 1 second -- it would conver all possible animations.
         ensureTransitionEndEvent(focusedPod, 1000);
@@ -1720,6 +1997,12 @@ cr.define('login', function() {
             event, this.listeners_[event][0], this.listeners_[event][1]);
       }
       $('login-header-bar').buttonsTabIndex = UserPodTabOrder.HEADER_BAR;
+
+      if (this.podPlacementPostponed_) {
+        this.podPlacementPostponed_ = false;
+        this.placePods_();
+        this.focusPod(this.preselectedPod);
+      }
     },
 
     /**

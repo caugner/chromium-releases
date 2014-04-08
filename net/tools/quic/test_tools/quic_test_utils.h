@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Common utilities for Quic tests
+
 #ifndef NET_TOOLS_QUIC_TEST_TOOLS_QUIC_TEST_UTILS_H_
 #define NET_TOOLS_QUIC_TEST_TOOLS_QUIC_TEST_UTILS_H_
 
@@ -50,12 +52,13 @@ class MockConnection : public QuicConnection {
   explicit MockConnection(bool is_server);
 
   // Uses a MockHelper, GUID of 42.
-  MockConnection(IPEndPoint address,
-                 bool is_server);
+  MockConnection(IPEndPoint address, bool is_server);
 
   // Uses a MockHelper, and 127.0.0.1:123
-  MockConnection(QuicGuid guid,
-                 bool is_server);
+  MockConnection(QuicGuid guid, bool is_server);
+
+  // Uses a Mock helper, GUID of 42, and 127.0.0.1:123.
+  MockConnection(bool is_server, const QuicVersionVector& supported_versions);
 
   virtual ~MockConnection();
 
@@ -70,8 +73,9 @@ class MockConnection : public QuicConnection {
   MOCK_METHOD2(SendConnectionCloseWithDetails, void(
       QuicErrorCode error,
       const std::string& details));
-  MOCK_METHOD2(SendRstStream, void(QuicStreamId id,
-                                   QuicRstStreamErrorCode error));
+  MOCK_METHOD3(SendRstStream, void(QuicStreamId id,
+                                   QuicRstStreamErrorCode error,
+                                   QuicStreamOffset bytes_written));
   MOCK_METHOD3(SendGoAway, void(QuicErrorCode error,
                                 QuicStreamId last_good_stream_id,
                                 const std::string& reason));
@@ -114,20 +118,22 @@ class MockPacketWriter : public QuicPacketWriter {
   MockPacketWriter();
   virtual ~MockPacketWriter();
 
-  MOCK_METHOD5(WritePacket,
+  MOCK_METHOD4(WritePacket,
                WriteResult(const char* buffer,
                            size_t buf_len,
                            const IPAddressNumber& self_address,
-                           const IPEndPoint& peer_address,
-                           QuicBlockedWriterInterface* blocked_writer));
+                           const IPEndPoint& peer_address));
   MOCK_CONST_METHOD0(IsWriteBlockedDataBuffered, bool());
+  MOCK_CONST_METHOD0(IsWriteBlocked, bool());
+  MOCK_METHOD0(SetWritable, void());
 };
 
-class MockQuicSessionOwner : public QuicSessionOwner {
+class MockQuicServerSessionVisitor : public QuicServerSessionVisitor {
  public:
-  MockQuicSessionOwner();
-  ~MockQuicSessionOwner();
+  MockQuicServerSessionVisitor();
+  virtual ~MockQuicServerSessionVisitor();
   MOCK_METHOD2(OnConnectionClosed, void(QuicGuid guid, QuicErrorCode error));
+  MOCK_METHOD1(OnWriteBlocked, void(QuicBlockedWriterInterface* writer));
 };
 
 class TestDecompressorVisitor : public QuicSpdyDecompressor::Visitor {
@@ -147,9 +153,12 @@ class TestDecompressorVisitor : public QuicSpdyDecompressor::Visitor {
 class MockAckNotifierDelegate : public QuicAckNotifier::DelegateInterface {
  public:
   MockAckNotifierDelegate();
-  virtual ~MockAckNotifierDelegate();
 
   MOCK_METHOD0(OnAckNotification, void());
+
+ protected:
+  // Object is ref counted.
+  virtual ~MockAckNotifierDelegate();
 };
 
 }  // namespace test

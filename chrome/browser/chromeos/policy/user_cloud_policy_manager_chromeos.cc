@@ -90,7 +90,7 @@ UserCloudPolicyManagerChromeOS::UserCloudPolicyManagerChromeOS(
     policy_fetch_timeout_.Start(
         FROM_HERE,
         initial_policy_fetch_timeout,
-        base::Bind(&UserCloudPolicyManagerChromeOS::CancelWaitForPolicyFetch,
+        base::Bind(&UserCloudPolicyManagerChromeOS::OnBlockingFetchTimeout,
                    base::Unretained(this)));
   }
 }
@@ -119,7 +119,8 @@ void UserCloudPolicyManagerChromeOS::Connect(
             device_management_service->GetServerUrl())));
   }
   scoped_ptr<CloudPolicyClient> cloud_policy_client(
-      new CloudPolicyClient(std::string(), std::string(), user_affiliation,
+      new CloudPolicyClient(std::string(), std::string(),
+                            kPolicyVerificationKeyHash, user_affiliation,
                             NULL, device_management_service,
                             request_context));
   core()->Connect(cloud_policy_client.Pass());
@@ -191,8 +192,8 @@ void UserCloudPolicyManagerChromeOS::OnInitializationCompleted(
   cloud_policy_service->RemoveObserver(this);
 
   time_init_completed_ = base::Time::Now();
-  UMA_HISTOGRAM_TIMES(kUMADelayInitialization,
-                      time_init_completed_ - time_init_started_);
+  UMA_HISTOGRAM_MEDIUM_TIMES(kUMADelayInitialization,
+                             time_init_completed_ - time_init_started_);
 
   // If the CloudPolicyClient isn't registered at this stage then it needs an
   // OAuth token for the initial registration.
@@ -238,8 +239,9 @@ void UserCloudPolicyManagerChromeOS::OnRegistrationStateChanged(
   if (wait_for_policy_fetch_) {
     time_client_registered_ = base::Time::Now();
     if (!time_token_available_.is_null()) {
-      UMA_HISTOGRAM_TIMES(kUMAInitialFetchDelayClientRegister,
-                          time_client_registered_ - time_token_available_);
+      UMA_HISTOGRAM_MEDIUM_TIMES(
+          kUMAInitialFetchDelayClientRegister,
+          time_client_registered_ - time_token_available_);
     }
 
     // If we're blocked on the policy fetch, now is a good time to issue it.
@@ -297,8 +299,8 @@ void UserCloudPolicyManagerChromeOS::OnOAuth2PolicyTokenFetched(
   DCHECK(!client()->is_registered());
   time_token_available_ = base::Time::Now();
   if (wait_for_policy_fetch_) {
-    UMA_HISTOGRAM_TIMES(kUMAInitialFetchDelayOAuth2Token,
-                        time_token_available_ - time_init_completed_);
+    UMA_HISTOGRAM_MEDIUM_TIMES(kUMAInitialFetchDelayOAuth2Token,
+                               time_token_available_ - time_init_completed_);
   }
 
   if (error.state() == GoogleServiceAuthError::NONE) {
@@ -325,9 +327,18 @@ void UserCloudPolicyManagerChromeOS::OnOAuth2PolicyTokenFetched(
 void UserCloudPolicyManagerChromeOS::OnInitialPolicyFetchComplete(
     bool success) {
   const base::Time now = base::Time::Now();
-  UMA_HISTOGRAM_TIMES(kUMAInitialFetchDelayPolicyFetch,
-                      now - time_client_registered_);
-  UMA_HISTOGRAM_TIMES(kUMAInitialFetchDelayTotal, now - time_init_started_);
+  UMA_HISTOGRAM_MEDIUM_TIMES(kUMAInitialFetchDelayPolicyFetch,
+                             now - time_client_registered_);
+  UMA_HISTOGRAM_MEDIUM_TIMES(kUMAInitialFetchDelayTotal,
+                             now - time_init_started_);
+  CancelWaitForPolicyFetch();
+}
+
+void UserCloudPolicyManagerChromeOS::OnBlockingFetchTimeout() {
+  if (!wait_for_policy_fetch_)
+    return;
+  LOG(WARNING) << "Timed out while waiting for the initial policy fetch. "
+               << "The first session will start without policy.";
   CancelWaitForPolicyFetch();
 }
 
@@ -336,6 +347,7 @@ void UserCloudPolicyManagerChromeOS::CancelWaitForPolicyFetch() {
     return;
 
   wait_for_policy_fetch_ = false;
+  policy_fetch_timeout_.Stop();
   CheckAndPublishPolicy();
   // Now that |wait_for_policy_fetch_| is guaranteed to be false, the scheduler
   // can be started.

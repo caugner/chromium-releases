@@ -72,9 +72,9 @@ void AddContentTypeHandler(content::WebPluginInfo* info,
                            const char* manifest_url) {
   content::WebPluginMimeType mime_type_info;
   mime_type_info.mime_type = mime_type;
-  mime_type_info.additional_param_names.push_back(UTF8ToUTF16("nacl"));
+  mime_type_info.additional_param_names.push_back(base::UTF8ToUTF16("nacl"));
   mime_type_info.additional_param_values.push_back(
-      UTF8ToUTF16(manifest_url));
+      base::UTF8ToUTF16(manifest_url));
   info->mime_types.push_back(mime_type_info);
 }
 }  // namespace
@@ -396,6 +396,8 @@ TEST_F(ChromeContentRendererClientTest, ShouldSuppressErrorPage) {
   client.search_bouncer_.reset(new SearchBouncer);
   client.search_bouncer_->OnSetSearchURLs(
       std::vector<GURL>(), GURL("http://example.com/n"));
-  EXPECT_FALSE(client.ShouldSuppressErrorPage(GURL("http://example.com")));
-  EXPECT_TRUE(client.ShouldSuppressErrorPage(GURL("http://example.com/n")));
+  EXPECT_FALSE(client.ShouldSuppressErrorPage(NULL,
+                                              GURL("http://example.com")));
+  EXPECT_TRUE(client.ShouldSuppressErrorPage(NULL,
+                                             GURL("http://example.com/n")));
 }

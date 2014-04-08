@@ -3,12 +3,14 @@
     <h1 i18n-content="settingsTitle"></h1>
   </header>
   <include src="reset_profile_settings_banner.html">
-<if expr="not pp_ifdef('chromeos')">
-  <include src="sync_section.html">
-</if>
+  <include src="automatic_settings_reset_banner.html">
 <if expr="pp_ifdef('chromeos')">
+  <include src="secondary_user_banner.html">
   <section>
-    <h3 i18n-content="sectionTitleInternet"></h3>
+    <div id="network-section-header" class="section-header">
+      <h3 i18n-content="sectionTitleInternet"></h3>
+      <span class="controlled-setting-indicator" plural></span>
+    </div>
     <div id="network-settings">
       <list id="network-list"></list>
       <div id="shared-proxies" class="checkbox">
@@ -23,6 +25,7 @@
   </section>
 </if>
 <if expr="not pp_ifdef('chromeos')">
+  <include src="sync_section.html">
   <include src="startup_section.html">
 </if>
   <section>
@@ -82,7 +85,7 @@
         </span>
       </span>
     </div>
-<if expr="not pp_ifdef('toolkit_views') and is_posix and not is_macosx">
+<if expr="is_posix and not pp_ifdef('chromeos') and not is_macosx">
     <div class="checkbox"><label>
         <input id="show-window-decorations" type="checkbox"
             pref="browser.custom_chrome_frame" metric="Options_CustomFrame"
@@ -169,8 +172,8 @@
         i18n-values=".innerHTML:profilesSupervisedDashboardTip" hidden>
     </div>
   </section>
+  <section id="set-default-browser-section">
 <if expr="not pp_ifdef('chromeos')">
-  <section>
     <h3 i18n-content="sectionTitleDefaultBrowser"></h3>
     <div>
       <button id="set-as-default-browser"
@@ -185,8 +188,8 @@
         </label>
       </div>
     </div>
-  </section>
 </if>  <!-- not pp_ifdef('chromeos') -->
+  </section>
 <div id="advanced-settings" hidden>
 <div id="advanced-settings-container">
 <if expr="pp_ifdef('chromeos')">
@@ -266,6 +269,22 @@
             </label>
             <span class="controlled-setting-indicator"
                 pref="dns_prefetching.enabled">
+            </span>
+          </span>
+        </span>
+      </div>
+      <div class="checkbox">
+        <span class="controlled-setting-with-label">
+          <input id="safe-browsing-download-feedback-enabled"
+              metric="Options_SafeBrowsingDownloadFeedbackCheckbox"
+              pref="safebrowsing.download_feedback_enabled"
+              type="checkbox">
+          <span>
+            <label for="safe-browsing-download-feedback-enabled"
+                i18n-content="safeBrowsingEnableDownloadFeedback">
+            </label>
+            <span class="controlled-setting-indicator"
+                pref="safebrowsing.download_feedback_enabled">
             </span>
           </span>
         </span>
@@ -352,6 +371,22 @@
         </span>
       </div>
 </if>
+      <div id="hotword-search" hidden>
+        <div class="checkbox">
+          <span class="controlled-setting-with-label">
+            <input id="hotword-search-enable" pref="hotword.search_enabled"
+                metric="Options_HotwordCheckbox" type="checkbox" dialog-pref>
+            <span>
+              <label for="hotword-search-enable"
+                  i18n-values=".innerHTML:hotwordSearchEnable">
+              </label>
+              <span class="controlled-setting-indicator"
+                  pref="hotword.search_enabled" dialog-pref>
+              </span>
+            </span>
+          </span>
+        </div>
+      </div>
     </div>
   </section>
 <if expr="pp_ifdef('chromeos')">
@@ -416,13 +451,6 @@
         </span>
       </span>
     </div>
-    <div class="checkbox" id="password-generation-checkbox">
-      <label>
-        <input id="password-generation-enabled" pref="password_generation.enabled"
-            metric="Options_PasswordGenerationCheckbox" type="checkbox">
-        <span i18n-content="passwordGenerationEnabledDescription"></span>
-      </label>
-    </div>
 <if expr="is_macosx">
     <div id="mac-passwords-warning" i18n-content="macPasswordsWarning" hidden>
     </div>
@@ -481,7 +509,11 @@
 </if>
   <section id="languages-section">
     <h3 i18n-content="advancedSectionTitleLanguages"></h3>
-    <span class="settings-row" i18n-content="languageSectionLabel"></span>
+    <div class="settings-row">
+      <span i18n-content="languageSectionLabel"></span>
+      <a target="_blank" i18n-content="learnMore"
+          i18n-values="href:languagesLearnMoreURL"></a>
+    </div>
     <div class="settings-row">
       <button id="language-button"
           i18n-content="languageAndSpellCheckSettingsButton"></button>
@@ -694,7 +726,7 @@
           </span>
         </div>
       </div>
-      <div id="accessibility-sticky-keys" class="option-name" hidden>
+      <div id="accessibility-sticky-keys" class="option-name">
         <div class="checkbox">
           <span class="controlled-setting-with-label">
             <input id="accessibility-sticky-keys-check"
@@ -791,6 +823,22 @@
                   </span>
                 </div>
               </div>
+            </span>
+          </span>
+        </div>
+      </div>
+      <div class="option_name" id="accessibility_onscreen_keyboard">
+        <div class="checkbox">
+          <span class="controlled-setting-with-label">
+            <input id="accessibility-virtual-keyboard-check"
+                pref="settings.a11y.virtual_keyboard" type="checkbox">
+            <span>
+              <label for="accessibility-virtual-keyboard-check"
+                  i18n-content="accessibilityVirtualKeyboard">
+              </label>
+              <span class="controlled-setting-indicator"
+                  pref="settings.a11y.virtual_keyboard">
+              </span>
             </span>
           </span>
         </div>

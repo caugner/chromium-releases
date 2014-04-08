@@ -17,9 +17,9 @@
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
-#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/policy/core/common/cloud/system_policy_request_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -99,7 +99,7 @@ AutoEnrollmentClient::AutoEnrollmentClient(
       device_id_(base::GenerateGUID()),
       power_initial_(power_initial),
       power_limit_(power_limit),
-      requests_sent_(0),
+      modulus_updates_received_(0),
       device_management_service_(service),
       local_state_(local_state) {
   request_context_ = new SystemPolicyRequestContext(
@@ -127,10 +127,15 @@ void AutoEnrollmentClient::RegisterPrefs(PrefRegistrySimple* registry) {
 // static
 bool AutoEnrollmentClient::IsDisabled() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return !command_line->HasSwitch(
+  // Do not communicate auto-enrollment data to the server if
+  // 1. we are running integration or perf tests with telemetry.
+  // 2. modulus configuration is not present.
+  return command_line->HasSwitch(
+             chromeos::switches::kOobeSkipPostLogin) ||
+         (!command_line->HasSwitch(
              chromeos::switches::kEnterpriseEnrollmentInitialModulus) &&
          !command_line->HasSwitch(
-             chromeos::switches::kEnterpriseEnrollmentModulusLimit);
+             chromeos::switches::kEnterpriseEnrollmentModulusLimit));
 }
 
 // static
@@ -260,8 +265,6 @@ void AutoEnrollmentClient::SendRequest(int power) {
     return;
   }
 
-  requests_sent_++;
-
   // Only power-of-2 moduli are supported for now. These are computed by taking
   // the lower |power| bits of the hash.
   uint64 remainder = 0;
@@ -302,6 +305,8 @@ void AutoEnrollmentClient::OnRequestCompletion(
       response.auto_enrollment_response();
   if (enrollment_response.has_expected_modulus()) {
     // Server is asking us to retry with a different modulus.
+    modulus_updates_received_++;
+
     int64 modulus = enrollment_response.expected_modulus();
     int power = NextPowerOf2(modulus);
     if ((GG_INT64_C(1) << power) != modulus) {
@@ -309,7 +314,7 @@ void AutoEnrollmentClient::OnRequestCompletion(
                    << "modulus. Using the closest power-of-2 instead "
                    << "(" << modulus << " vs 2^" << power << ")";
     }
-    if (requests_sent_ >= 2) {
+    if (modulus_updates_received_ >= 2) {
       LOG(ERROR) << "Auto enrollment error: already retried with an updated "
                  << "modulus but the server asked for a new one again: "
                  << power;

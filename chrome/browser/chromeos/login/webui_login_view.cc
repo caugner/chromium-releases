@@ -20,8 +20,8 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_web_contents_observer.h"
 #include "chrome/browser/media/media_stream_infobar_delegate.h"
+#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/password_manager/password_manager_delegate_impl.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/render_messages.h"
@@ -36,6 +36,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 #include "ui/views/controls/webview/webview.h"
@@ -166,9 +167,7 @@ void WebUILoginView::Init() {
   WebContents* web_contents = webui_login_->GetWebContents();
 
   // Create the password manager that is needed for the proxy.
-  PasswordManagerDelegateImpl::CreateForWebContents(web_contents);
-  PasswordManager::CreateForWebContentsAndDelegate(
-      web_contents, PasswordManagerDelegateImpl::FromWebContents(web_contents));
+  ChromePasswordManagerClient::CreateForWebContents(web_contents);
 
   // LoginHandlerViews uses a constrained window for the password manager view.
   WebContentsModalDialogManager::CreateForWebContents(web_contents);
@@ -401,6 +400,15 @@ void WebUILoginView::RequestMediaAccessPermission(
     NOTREACHED() << "Media stream not allowed for WebUI";
 }
 
+bool WebUILoginView::PreHandleGestureEvent(
+    content::WebContents* source,
+    const blink::WebGestureEvent& event) {
+  // Disable pinch zooming.
+  return event.type == blink::WebGestureEvent::GesturePinchBegin ||
+      event.type == blink::WebGestureEvent::GesturePinchUpdate ||
+      event.type == blink::WebGestureEvent::GesturePinchEnd;
+}
+
 void WebUILoginView::DidFailProvisionalLoad(
     int64 frame_id,
     const base::string16& frame_unique_name,
@@ -409,12 +417,12 @@ void WebUILoginView::DidFailProvisionalLoad(
     int error_code,
     const base::string16& error_description,
     content::RenderViewHost* render_view_host) {
-  if (frame_unique_name != UTF8ToUTF16("gaia-frame"))
+  if (frame_unique_name != base::UTF8ToUTF16("gaia-frame"))
     return;
 
-  base::FundamentalValue error_value(-error_code);
   GetWebUI()->CallJavascriptFunction("login.GaiaSigninScreen.onFrameError",
-                                     error_value);
+                                     base::FundamentalValue(-error_code),
+                                     base::StringValue(validated_url.spec()));
 }
 
 void WebUILoginView::OnLoginPromptVisible() {

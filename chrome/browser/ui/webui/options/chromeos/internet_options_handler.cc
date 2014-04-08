@@ -965,7 +965,7 @@ void InternetOptionsHandler::GetLocalizedValues(
 
   std::string owner;
   chromeos::CrosSettings::Get()->GetString(chromeos::kDeviceOwner, &owner);
-  localized_strings->SetString("ownerUserId", UTF8ToUTF16(owner));
+  localized_strings->SetString("ownerUserId", base::UTF8ToUTF16(owner));
 
   base::DictionaryValue* network_dictionary = new base::DictionaryValue;
   FillNetworkInfo(network_dictionary);
@@ -1085,8 +1085,9 @@ void InternetOptionsHandler::EnableCellularCallback(
       if (locale_config) {
         std::string setup_url = locale_config->setup_url();
         if (!setup_url.empty()) {
+          // The mobile device will be managed by the primary user.
           chrome::ScopedTabbedBrowserDisplayer displayer(
-               ProfileManager::GetDefaultProfileOrOffTheRecord(),
+               ProfileManager::GetPrimaryUserProfile(),
                chrome::HOST_DESKTOP_TYPE_ASH);
           chrome::ShowSingletonTab(displayer.browser(), GURL(setup_url));
           return;
@@ -1353,7 +1354,6 @@ void InternetOptionsHandler::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  OptionsPageUIHandler::Observe(type, source, details);
   if (type == chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED) {
     base::FundamentalValue require_pin(*content::Details<bool>(details).ptr());
     web_ui()->CallJavascriptFunction(

@@ -342,8 +342,8 @@ void SystemTray::SetHideNotifications(bool hide_notifications) {
   hide_notifications_ = hide_notifications;
 }
 
-bool SystemTray::ShouldShowLauncher() const {
-  return system_bubble_.get() && system_bubble_->bubble()->ShouldShowLauncher();
+bool SystemTray::ShouldShowShelf() const {
+  return system_bubble_.get() && system_bubble_->bubble()->ShouldShowShelf();
 }
 
 bool SystemTray::HasSystemBubble() const {
@@ -618,7 +618,7 @@ void SystemTray::SetShelfAlignment(ShelfAlignment alignment) {
 void SystemTray::AnchorUpdated() {
   if (notification_bubble_) {
     notification_bubble_->bubble_view()->UpdateBubble();
-    // Ensure that the notification buble is above the launcher/status area.
+    // Ensure that the notification buble is above the shelf/status area.
     notification_bubble_->bubble_view()->GetWidget()->StackAtTop();
     UpdateBubbleViewArrow(notification_bubble_->bubble_view());
   }
@@ -695,6 +695,10 @@ views::View* SystemTray::GetTrayItemViewForTest(SystemTrayItem* item) {
 void SystemTray::AddTrayUserItemForTest(internal::TrayUser* tray_user) {
   AddTrayItem(tray_user);
   user_items_.push_back(tray_user);
+}
+
+internal::TrayDate* SystemTray::GetTrayDateForTesting() const {
+  return tray_date_;
 }
 
 bool SystemTray::PerformAction(const ui::Event& event) {

@@ -11,7 +11,7 @@ var FEEDBACK_WIDTH = 500;
  * @type {number}
  * @const
  */
-var FEEDBACK_HEIGHT = 625;
+var FEEDBACK_HEIGHT = 585;
 
 var initialFeedbackInfo = null;
 
@@ -27,7 +27,8 @@ var whitelistedExtensionIds = [
   'eemlkeanncmjljgehlbplemhmdmalhdc', // Connectivity Diagnostics
   'kodldpbjkkmmnilagfdheibampofhaom', // Connectivity Diagnostics
   'kkebgepbbgbcmghedmmdfcbdcodlkngh', // Chrome OS Recovery Tool
-  'jndclpdbaamdhonoechobihbbiimdgai'  // Chrome OS Recovery Tool
+  'jndclpdbaamdhonoechobihbbiimdgai', // Chrome OS Recovery Tool
+  'ljoammodoonkhnehlncldjelhidljdpi'  // GetHelp app.
 ];
 
 /**

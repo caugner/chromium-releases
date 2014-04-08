@@ -25,6 +25,8 @@ class SeqencedTaskRunner;
 
 namespace drive {
 
+class EventLogger;
+
 // The JobScheduler is responsible for queuing and scheduling drive jobs.
 // Because jobs are executed concurrently by priority and retried for network
 // failures, there is no guarantee of orderings.
@@ -49,6 +51,7 @@ class JobScheduler
       public JobListInterface {
  public:
   JobScheduler(PrefService* pref_service,
+               EventLogger* logger,
                DriveServiceInterface* drive_service,
                base::SequencedTaskRunner* blocking_task_runner);
   virtual ~JobScheduler();
@@ -152,9 +155,12 @@ class JobScheduler
       const google_apis::EntryActionCallback& callback);
 
   // Adds a AddNewDirectory operation to the queue.
-  void AddNewDirectory(const std::string& parent_resource_id,
-                       const std::string& directory_title,
-                       const google_apis::GetResourceEntryCallback& callback);
+  void AddNewDirectory(
+      const std::string& parent_resource_id,
+      const std::string& directory_title,
+      const DriveServiceInterface::AddNewDirectoryOptions& options,
+      const ClientContext& context,
+      const google_apis::GetResourceEntryCallback& callback);
 
   // Adds a DownloadFile operation to the queue.
   // The first two arguments |virtual_path| and |expected_file_size| are used
@@ -175,6 +181,7 @@ class JobScheduler
                      const base::FilePath& local_file_path,
                      const std::string& title,
                      const std::string& content_type,
+                     const DriveUploader::UploadNewFileOptions& options,
                      const ClientContext& context,
                      const google_apis::GetResourceEntryCallback& callback);
 
@@ -184,17 +191,9 @@ class JobScheduler
       const base::FilePath& drive_file_path,
       const base::FilePath& local_file_path,
       const std::string& content_type,
-      const std::string& etag,
+      const DriveUploader::UploadExistingFileOptions& options,
       const ClientContext& context,
       const google_apis::GetResourceEntryCallback& callback);
-
-  // Adds a CreateFile operation to the queue.
-  void CreateFile(const std::string& parent_resource_id,
-                  const base::FilePath& drive_file_path,
-                  const std::string& title,
-                  const std::string& content_type,
-                  const ClientContext& context,
-                  const google_apis::GetResourceEntryCallback& callback);
 
   // Adds a GetResourceListInDirectoryByWapi operation to the queue.
   // |callback| must not be null.
@@ -384,6 +383,7 @@ class JobScheduler
   // The list of observers for the scheduler.
   ObserverList<JobListObserver> observer_list_;
 
+  EventLogger* logger_;
   DriveServiceInterface* drive_service_;
   scoped_ptr<DriveUploaderInterface> uploader_;
 

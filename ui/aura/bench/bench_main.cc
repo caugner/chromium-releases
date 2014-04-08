@@ -21,8 +21,6 @@
 #include "ui/aura/test/test_screen.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/resource/resource_bundle.h"
-#include "ui/base/ui_base_paths.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/debug_utils.h"
@@ -31,6 +29,8 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/gl/gl_surface.h"
+
 #ifndef GL_GLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES 1
 #endif
@@ -44,7 +44,6 @@ using base::TimeTicks;
 using ui::Compositor;
 using ui::Layer;
 using ui::LayerDelegate;
-using blink::WebGraphicsContext3D;
 
 namespace {
 
@@ -122,11 +121,6 @@ class BenchCompositorObserver : public ui::CompositorObserver {
 
   virtual void OnCompositingLockStateChanged(
       Compositor* compositor) OVERRIDE {}
-
-  virtual void OnUpdateVSyncParameters(ui::Compositor* compositor,
-                                       base::TimeTicks timebase,
-                                       base::TimeDelta interval) OVERRIDE {
-  }
 
   virtual void Draw() {}
 
@@ -293,15 +287,15 @@ int main(int argc, char** argv) {
 
   base::AtExitManager exit_manager;
 
+  gfx::GLSurface::InitializeOneOff();
+
   // The ContextFactory must exist before any Compositors are created.
   bool allow_test_contexts = false;
   ui::InitializeContextFactoryForTests(allow_test_contexts);
 
-  ui::RegisterPathProvider();
   base::i18n::InitializeICU();
-  ResourceBundle::InitSharedInstanceWithLocale("en-US", NULL);
 
-  base::MessageLoop message_loop(base::MessageLoop::TYPE_UI);
+  base::MessageLoopForUI message_loop;
   aura::Env::CreateInstance();
   scoped_ptr<aura::TestScreen> test_screen(
       aura::TestScreen::CreateFullscreen());
@@ -344,11 +338,11 @@ int main(int argc, char** argv) {
 
   if (command_line->HasSwitch("bench-software-scroll")) {
     bench.reset(new SoftwareScrollBench(&page_background,
-                                        root_window->compositor(),
+                                        root_window->host()->compositor(),
                                         frames));
   } else {
     bench.reset(new WebGLBench(&page_background,
-                               root_window->compositor(),
+                               root_window->host()->compositor(),
                                frames));
   }
 

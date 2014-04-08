@@ -7,7 +7,9 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_helper.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
+#include "components/translate/core/browser/translate_download_manager.h"
 #include "grit/generated_resources.h"
 #include "jni/TranslateInfoBarDelegate_jni.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -38,16 +40,27 @@ ScopedJavaLocalRef<jobject> TranslateInfoBar::CreateRenderInfoBar(JNIEnv* env) {
   TranslateInfoBarDelegate* delegate = GetDelegate();
   std::vector<base::string16> languages;
   languages.reserve(delegate->num_languages());
-  for (size_t i = 0; i < delegate->num_languages(); ++i)
-    languages.push_back(delegate->language_name_at(i));
+
+  const std::string& locale =
+      TranslateDownloadManager::GetInstance()->application_locale();
+
+  for (size_t i = 0; i < delegate->num_languages(); ++i) {
+    std::string lang = delegate->language_code_at(i);
+    if (!l10n_util::IsLocaleNameTranslated(lang.c_str(), locale)) {
+      languages.push_back(base::UTF8ToUTF16(""));
+    } else {
+      languages.push_back(delegate->language_name_at(i));
+    }
+  }
 
   base::android::ScopedJavaLocalRef<jobjectArray> java_languages =
       base::android::ToJavaArrayOfStrings(env, languages);
   return Java_TranslateInfoBarDelegate_showTranslateInfoBar(
       env, java_translate_delegate_.obj(), reinterpret_cast<intptr_t>(this),
-      delegate->infobar_type(), delegate->original_language_index(),
+      delegate->translate_step(), delegate->original_language_index(),
       delegate->target_language_index(), delegate->ShouldAlwaysTranslate(),
-      ShouldDisplayNeverTranslateInfoBarOnCancel(), java_languages.obj());
+      ShouldDisplayNeverTranslateInfoBarOnCancel(),
+      delegate->triggered_from_menu(), java_languages.obj());
 }
 
 void TranslateInfoBar::ProcessButton(int action,
@@ -73,13 +86,12 @@ void TranslateInfoBar::ProcessButton(int action,
 
 void TranslateInfoBar::PassJavaInfoBar(InfoBarAndroid* source) {
   TranslateInfoBarDelegate* delegate = GetDelegate();
-  DCHECK_NE(TranslateInfoBarDelegate::BEFORE_TRANSLATE,
-            delegate->infobar_type());
+  DCHECK_NE(TranslateTabHelper::BEFORE_TRANSLATE, delegate->translate_step());
 
   // Ask the former bar to transfer ownership to us.
   DCHECK(source != NULL);
   static_cast<TranslateInfoBar*>(source)->TransferOwnership(
-      this, delegate->infobar_type());
+      this, delegate->translate_step());
 }
 
 void TranslateInfoBar::ApplyTranslateOptions(JNIEnv* env,
@@ -105,11 +117,12 @@ void TranslateInfoBar::ApplyTranslateOptions(JNIEnv* env,
 
 void TranslateInfoBar::TransferOwnership(
     TranslateInfoBar* destination,
-    TranslateInfoBarDelegate::Type new_type) {
+    TranslateTabHelper::TranslateStep new_type) {
+  int new_target_language = destination->GetDelegate()->target_language_index();
   JNIEnv* env = base::android::AttachCurrentThread();
   if (Java_TranslateInfoBarDelegate_changeTranslateInfoBarTypeAndPointer(
       env, java_translate_delegate_.obj(),
-      reinterpret_cast<intptr_t>(destination), new_type)) {
+      reinterpret_cast<intptr_t>(destination), new_type, new_target_language)) {
     ReassignJavaInfoBar(destination);
     destination->SetJavaDelegate(java_translate_delegate_.Release());
   }
@@ -122,10 +135,8 @@ void TranslateInfoBar::SetJavaDelegate(jobject delegate) {
 
 bool TranslateInfoBar::ShouldDisplayNeverTranslateInfoBarOnCancel() {
   TranslateInfoBarDelegate* delegate = GetDelegate();
-  return
-      (delegate->infobar_type() ==
-          TranslateInfoBarDelegate::BEFORE_TRANSLATE) &&
-      delegate->ShouldShowNeverTranslateShortcut();
+  return (delegate->translate_step() == TranslateTabHelper::BEFORE_TRANSLATE) &&
+         delegate->ShouldShowNeverTranslateShortcut();
 }
 
 TranslateInfoBarDelegate* TranslateInfoBar::GetDelegate() {

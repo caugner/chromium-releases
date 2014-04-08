@@ -29,6 +29,8 @@ class ClipboardEvent;
 class CursorShapeInfo;
 }  // namespace protocol
 
+class VideoRenderer;
+
 // ClientUserInterface that indirectly makes and receives JNI calls.
 class ChromotingJniInstance
   : public ClientUserInterface,
@@ -80,6 +82,8 @@ class ChromotingJniInstance
       protocol::ConnectionToHost::State state,
       protocol::ErrorCode error) OVERRIDE;
   virtual void OnConnectionReady(bool ready) OVERRIDE;
+  virtual void OnRouteChanged(const std::string& channel_name,
+                              const protocol::TransportRoute& route) OVERRIDE;
   virtual void SetCapabilities(const std::string& capabilities) OVERRIDE;
   virtual void SetPairingResponse(
       const protocol::PairingResponse& response) OVERRIDE;
@@ -134,6 +138,7 @@ class ChromotingJniInstance
   // This group of variables is to be used on the network thread.
   ClientConfig client_config_;
   scoped_ptr<ClientContext> client_context_;
+  scoped_ptr<VideoRenderer> video_renderer_;
   scoped_ptr<protocol::ConnectionToHost> connection_;
   scoped_ptr<ChromotingClient> client_;
   XmppSignalStrategy::XmppServerConfig xmpp_config_;

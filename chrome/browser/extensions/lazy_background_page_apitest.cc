@@ -14,7 +14,6 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/lazy_background_page_test_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -28,6 +27,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/switches.h"
 #include "net/dns/mock_host_resolver.h"
@@ -395,7 +395,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, MAYBE_IncognitoSplitMode) {
     test::WaitForBookmarkModelToLoad(bookmark_model);
     const BookmarkNode* parent = bookmark_model->bookmark_bar_node();
     bookmark_model->AddURL(
-        parent, 0, ASCIIToUTF16("Title"), GURL("about:blank"));
+        parent, 0, base::ASCIIToUTF16("Title"), GURL("about:blank"));
     page_complete.Wait();
     page2_complete.Wait();
 
@@ -511,8 +511,9 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, EventDispatchToTab) {
   BookmarkModel* bookmark_model =
       BookmarkModelFactory::GetForProfile(browser()->profile());
   test::WaitForBookmarkModelToLoad(bookmark_model);
-  bookmark_utils::AddIfNotBookmarked(
-      bookmark_model, GURL("http://www.google.com"), UTF8ToUTF16("Google"));
+  bookmark_utils::AddIfNotBookmarked(bookmark_model,
+                                     GURL("http://www.google.com"),
+                                     base::UTF8ToUTF16("Google"));
 
   EXPECT_TRUE(event_page_ready.WaitUntilSatisfied());
 

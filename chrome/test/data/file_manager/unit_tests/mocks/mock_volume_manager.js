@@ -10,36 +10,23 @@ function MockVolumeManager() {
   this.volumeInfoList = new cr.ui.ArrayDataModel([]);
 
   this.volumeInfoList.push(MockVolumeManager.createMockVolumeInfo(
-      util.VolumeType.DRIVE, '/drive'));
+      util.VolumeType.DRIVE, 'drive'));
   this.volumeInfoList.push(MockVolumeManager.createMockVolumeInfo(
-      util.VolumeType.DOWNLOADS, '/Downloads'));
+      util.VolumeType.DOWNLOADS, 'downloads'));
 }
 
 /**
  * Returns the corresponding VolumeInfo.
- * @param {string} path Path to be looking for with.
+ *
+ * @param {MockFileEntry} entry MockFileEntry pointing anywhere on a volume.
  * @return {VolumeInfo} Corresponding VolumeInfo.
  */
-MockVolumeManager.prototype.getVolumeInfo = function(path) {
+MockVolumeManager.prototype.getVolumeInfo = function(entry) {
   for (var i = 0; i < this.volumeInfoList.length; i++) {
-    if (this.volumeInfoList.item(i).mountPath === path ||
-        path.indexOf(this.volumeInfoList.item(i).mountPath) === 0)
+    if (this.volumeInfoList.item(i).volumeId === entry.volumeId)
       return this.volumeInfoList.item(i);
   }
   return null;
-};
-
-/**
- * Resolve FileEntry.
- * @param {string} path
- * @param {function(FileEntry)} successCallback Callback on success.
- * @param {function()} errorCallback Callback on error.
- */
-MockVolumeManager.prototype.resolveAbsolutePath = function(
-    path, successCallback, errorCallback) {
-  var mockFileEntry = new MockFileEntry();
-  mockFileEntry.fullPath = path;
-  successCallback(mockFileEntry);
 };
 
 /**
@@ -48,15 +35,13 @@ MockVolumeManager.prototype.resolveAbsolutePath = function(
  * @param {string} path Volume path.
  * @return {VolumeInfo} Created mock VolumeInfo.
  */
-MockVolumeManager.createMockVolumeInfo = function(type, path) {
-  var entry = new MockFileEntry();
-  entry.fullPath = path;
+MockVolumeManager.createMockVolumeInfo = function(type, volumeId) {
+  var rootEntry = new MockFileEntry(volumeId, '/');
 
   var volumeInfo = new VolumeInfo(
       type,
-      path,
-      '',  // volumeId
-      entry,  // root
+      volumeId,
+      rootEntry,
       '',  // error
       '',  // deviceType
       false,  // isReadonly

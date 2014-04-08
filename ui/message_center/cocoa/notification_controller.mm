@@ -4,6 +4,8 @@
 
 #import "ui/message_center/cocoa/notification_controller.h"
 
+#include <algorithm>
+
 #include "base/mac/foundation_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -52,13 +54,32 @@
 @end
 
 ////////////////////////////////////////////////////////////////////////////////
+@interface MCNotificationButton : NSButton
+@end
+
+@implementation MCNotificationButton
+// drawRect: needs to fill the button with a background, otherwise we don't get
+// subpixel antialiasing.
+- (void)drawRect:(NSRect)dirtyRect {
+  NSColor* color = gfx::SkColorToCalibratedNSColor(
+      message_center::kNotificationBackgroundColor);
+  [color set];
+  NSRectFill(dirtyRect);
+  [super drawRect:dirtyRect];
+}
+@end
 
 @interface MCNotificationButtonCell : NSButtonCell {
   BOOL hovered_;
 }
 @end
 
+////////////////////////////////////////////////////////////////////////////////
 @implementation MCNotificationButtonCell
+- (BOOL)isOpaque {
+  return YES;
+}
+
 - (void)drawBezelWithFrame:(NSRect)frame inView:(NSView*)controlView {
   // Else mouseEntered: and mouseExited: won't be called and hovered_ won't be
   // valid.
@@ -200,10 +221,13 @@
 
 // Creates a box that shows a border when the icon is not big enough to fill the
 // space.
-- (NSBox*)createImageBox;
+- (NSBox*)createImageBox:(const gfx::Image&)notificationImage;
 
 // Initializes the closeButton_ ivar with the configured button.
 - (void)configureCloseButtonInFrame:(NSRect)rootFrame;
+
+// Initializes the smallImage_ ivar with the appropriate frame.
+- (void)configureSmallImageInFrame:(NSRect)rootFrame;
 
 // Initializes title_ in the given frame.
 - (void)configureTitleInFrame:(NSRect)rootFrame;
@@ -227,9 +251,9 @@
 // more than the given number of lines. The wrapped text would be painted using
 // the given font. The Ellipsis could be added at the end of the last line if
 // it is too long.
-- (string16)wrapText:(const string16&)text
-             forFont:(NSFont*)font
-    maxNumberOfLines:(size_t)lines;
+- (base::string16)wrapText:(const base::string16&)text
+                   forFont:(NSFont*)font
+          maxNumberOfLines:(size_t)lines;
 @end
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -264,16 +288,22 @@
   [self configureCloseButtonInFrame:rootFrame];
   [rootView addSubview:closeButton_];
 
+  // Create the small image.
+  [self configureSmallImageInFrame:rootFrame];
+  [[self view] addSubview:smallImage_];
+
+  NSRect contentFrame = [self currentContentRect];
+
   // Create the title.
-  [self configureTitleInFrame:rootFrame];
+  [self configureTitleInFrame:contentFrame];
   [rootView addSubview:title_];
 
   // Create the message body.
-  [self configureBodyInFrame:rootFrame];
+  [self configureBodyInFrame:contentFrame];
   [rootView addSubview:message_];
 
   // Create the context message body.
-  [self configureContextMessageInFrame:rootFrame];
+  [self configureContextMessageInFrame:contentFrame];
   [rootView addSubview:contextMessage_];
 
   // Populate the data.
@@ -287,6 +317,8 @@
   NSRect rootFrame = NSMakeRect(0, 0,
       message_center::kNotificationPreferredImageWidth,
       message_center::kNotificationIconSize);
+
+  [smallImage_ setImage:notification_->small_image().AsNSImage()];
 
   // Update the icon.
   [icon_ setImage:notification_->icon().AsNSImage()];
@@ -392,9 +424,9 @@
       [[itemView textContainer] setWidthTracksTextView:NO];
 
       // Construct the text from the title and message.
-      string16 text =
+      base::string16 text =
           items[i].title + base::UTF8ToUTF16(" ") + items[i].message;
-      string16 ellidedText =
+      base::string16 ellidedText =
           [self wrapText:text forFont:font maxNumberOfLines:1];
       [itemView setString:base::SysUTF16ToNSString(ellidedText)];
 
@@ -478,8 +510,8 @@
     NSRect buttonFrame = frame;
     buttonFrame.origin = NSMakePoint(0, y);
     buttonFrame.size.height = message_center::kButtonHeight;
-    base::scoped_nsobject<NSButton> button(
-        [[NSButton alloc] initWithFrame:buttonFrame]);
+    base::scoped_nsobject<MCNotificationButton> button(
+        [[MCNotificationButton alloc] initWithFrame:buttonFrame]);
     base::scoped_nsobject<MCNotificationButtonCell> cell(
         [[MCNotificationButtonCell alloc]
             initTextCell:base::SysUTF16ToNSString(buttonInfo.title)]);
@@ -607,7 +639,7 @@
   return imageBox.autorelease();
 }
 
-- (NSBox*)createImageBox:(gfx::Image)notificationImage {
+- (NSBox*)createImageBox:(const gfx::Image&)notificationImage {
   using message_center::kNotificationImageBorderSize;
   using message_center::kNotificationPreferredImageWidth;
   using message_center::kNotificationPreferredImageHeight;
@@ -624,8 +656,8 @@
   // Images with non-preferred aspect ratios get a border on all sides.
   gfx::Size idealSize = gfx::Size(
       kNotificationPreferredImageWidth, kNotificationPreferredImageHeight);
-  gfx::Size scaledSize = message_center::GetImageSizeForWidth(
-      kNotificationPreferredImageWidth, notificationImage.Size());
+  gfx::Size scaledSize = message_center::GetImageSizeForContainerSize(
+      idealSize, notificationImage.Size());
   if (scaledSize != idealSize) {
     NSSize borderSize =
         NSMakeSize(kNotificationImageBorderSize, kNotificationImageBorderSize);
@@ -643,11 +675,15 @@
 }
 
 - (void)configureCloseButtonInFrame:(NSRect)rootFrame {
-  closeButton_.reset([[HoverImageButton alloc] initWithFrame:NSMakeRect(
-      NSMaxX(rootFrame) - message_center::kControlButtonSize,
-      NSMaxY(rootFrame) - message_center::kControlButtonSize,
-      message_center::kControlButtonSize,
-      message_center::kControlButtonSize)]);
+  // The close button is configured to be the same size as the small image.
+  int closeButtonOriginOffset =
+      message_center::kSmallImageSize + message_center::kSmallImagePadding;
+  NSRect closeButtonFrame =
+      NSMakeRect(NSMaxX(rootFrame) - closeButtonOriginOffset,
+                 NSMaxY(rootFrame) - closeButtonOriginOffset,
+                 message_center::kSmallImageSize,
+                 message_center::kSmallImageSize);
+  closeButton_.reset([[HoverImageButton alloc] initWithFrame:closeButtonFrame]);
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   [closeButton_ setDefaultImage:
       rb.GetNativeImageNamed(IDR_NOTIFICATION_CLOSE).ToNSImage()];
@@ -670,20 +706,31 @@
                        forAttribute:NSAccessibilityTitleAttribute];
 }
 
-- (void)configureTitleInFrame:(NSRect)rootFrame {
-  NSRect frame = [self currentContentRect];
-  frame.size.height = 0;
-  title_.reset([self newLabelWithFrame:frame]);
+- (void)configureSmallImageInFrame:(NSRect)rootFrame {
+  int smallImageXOffset =
+      message_center::kSmallImagePadding + message_center::kSmallImageSize;
+  NSRect smallImageFrame =
+      NSMakeRect(NSMaxX(rootFrame) - smallImageXOffset,
+                 NSMinY(rootFrame) + message_center::kSmallImagePadding,
+                 message_center::kSmallImageSize,
+                 message_center::kSmallImageSize);
+  smallImage_.reset([[NSImageView alloc] initWithFrame:smallImageFrame]);
+  [smallImage_ setImageScaling:NSImageScaleProportionallyUpOrDown];
+  [smallImage_ setAutoresizingMask:NSViewMinYMargin];
+}
+
+- (void)configureTitleInFrame:(NSRect)contentFrame {
+  contentFrame.size.height = 0;
+  title_.reset([self newLabelWithFrame:contentFrame]);
   [title_ setAutoresizingMask:NSViewMinYMargin];
   [title_ setTextColor:gfx::SkColorToCalibratedNSColor(
       message_center::kRegularTextColor)];
   [title_ setFont:[NSFont messageFontOfSize:message_center::kTitleFontSize]];
 }
 
-- (void)configureBodyInFrame:(NSRect)rootFrame {
-  NSRect frame = [self currentContentRect];
-  frame.size.height = 0;
-  message_.reset([self newLabelWithFrame:frame]);
+- (void)configureBodyInFrame:(NSRect)contentFrame {
+  contentFrame.size.height = 0;
+  message_.reset([self newLabelWithFrame:contentFrame]);
   [message_ setAutoresizingMask:NSViewMinYMargin];
   [message_ setTextColor:gfx::SkColorToCalibratedNSColor(
       message_center::kRegularTextColor)];
@@ -691,10 +738,9 @@
       [NSFont messageFontOfSize:message_center::kMessageFontSize]];
 }
 
-- (void)configureContextMessageInFrame:(NSRect)rootFrame {
-  NSRect frame = [self currentContentRect];
-  frame.size.height = 0;
-  contextMessage_.reset([self newLabelWithFrame:frame]);
+- (void)configureContextMessageInFrame:(NSRect)contentFrame {
+  contentFrame.size.height = 0;
+  contextMessage_.reset([self newLabelWithFrame:contentFrame]);
   [contextMessage_ setAutoresizingMask:NSViewMinYMargin];
   [contextMessage_ setTextColor:gfx::SkColorToCalibratedNSColor(
       message_center::kDimTextColor)];
@@ -704,7 +750,13 @@
 
 - (NSTextView*)newLabelWithFrame:(NSRect)frame {
   NSTextView* label = [[NSTextView alloc] initWithFrame:frame];
-  [label setDrawsBackground:NO];
+
+  // The labels MUST draw their background so that subpixel antialiasing can
+  // happen on the text.
+  [label setDrawsBackground:YES];
+  [label setBackgroundColor:gfx::SkColorToCalibratedNSColor(
+      message_center::kNotificationBackgroundColor)];
+
   [label setEditable:NO];
   [label setSelectable:NO];
   [label setTextContainerInset:NSMakeSize(0.0f, 0.0f)];
@@ -715,17 +767,23 @@
 - (NSRect)currentContentRect {
   DCHECK(icon_);
   DCHECK(closeButton_);
+  DCHECK(smallImage_);
 
   NSRect iconFrame, contentFrame;
   NSDivideRect([[self view] bounds], &iconFrame, &contentFrame,
       NSWidth([icon_ frame]) + message_center::kIconToTextPadding,
       NSMinXEdge);
-  contentFrame.size.width -= NSWidth([closeButton_ frame]);
+  // The content area is between the icon on the left and the control area
+  // on the right.
+  int controlAreaWidth =
+      std::max(NSWidth([closeButton_ frame]), NSWidth([smallImage_ frame]));
+  contentFrame.size.width -=
+      2 * message_center::kSmallImagePadding + controlAreaWidth;
   return contentFrame;
 }
 
-- (string16)wrapText:(const string16&)text
-             forFont:(NSFont*)nsfont
+- (base::string16)wrapText:(const base::string16&)text
+                   forFont:(NSFont*)nsfont
     maxNumberOfLines:(size_t)lines {
   if (text.empty())
     return text;
@@ -733,18 +791,19 @@
   int width = NSWidth([self currentContentRect]);
   int height = (lines + 1) * font_list.GetHeight();
 
-  std::vector<string16> wrapped;
+  std::vector<base::string16> wrapped;
   gfx::ElideRectangleText(text, font_list, width, height,
                           gfx::WRAP_LONG_WORDS, &wrapped);
 
   // This could be possible when the input text contains only spaces.
   if (wrapped.empty())
-    return string16();
+    return base::string16();
 
   if (wrapped.size() > lines) {
     // Add an ellipsis to the last line. If this ellipsis makes the last line
     // too wide, that line will be further elided by the gfx::ElideText below.
-    string16 last = wrapped[lines - 1] + UTF8ToUTF16(gfx::kEllipsis);
+    base::string16 last =
+        wrapped[lines - 1] + base::UTF8ToUTF16(gfx::kEllipsis);
     if (gfx::GetStringWidth(last, font_list) > width)
       last = gfx::ElideText(last, font_list, width, gfx::ELIDE_AT_END);
     wrapped.resize(lines - 1);

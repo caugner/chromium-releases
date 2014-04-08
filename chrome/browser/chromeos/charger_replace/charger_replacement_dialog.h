@@ -21,6 +21,9 @@ class ChargerReplacementDialog : public ui::WebDialogDelegate {
   // True if ChargerReplacementDialog should be shown.
   static bool ShouldShowDialog();
 
+  // True if ChargerReplacementDialog is visible.
+  static bool IsDialogVisible();
+
   static void SetFocusOnChargerDialogIfVisible();
 
   void Show();
@@ -29,7 +32,7 @@ class ChargerReplacementDialog : public ui::WebDialogDelegate {
  private:
   // ui::WebDialogDelegate implementation.
   virtual ui::ModalType GetDialogModalType() const OVERRIDE;
-  virtual string16 GetDialogTitle() const OVERRIDE;
+  virtual base::string16 GetDialogTitle() const OVERRIDE;
   virtual GURL GetDialogContentURL() const OVERRIDE;
   virtual void GetWebUIMessageHandlers(
       std::vector<content::WebUIMessageHandler*>* handlers) const OVERRIDE;
@@ -48,7 +51,7 @@ class ChargerReplacementDialog : public ui::WebDialogDelegate {
   static bool is_window_visible_;
   static gfx::NativeWindow current_window_;
 
-  gfx::NativeWindow parent_window_;
+  const gfx::NativeWindow parent_window_;
   bool can_close_;
   ChargerReplacementHandler* charger_replacement_handler_;
 

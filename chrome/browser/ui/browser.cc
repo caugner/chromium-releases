@@ -44,6 +44,7 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/custom_handlers/register_protocol_handler_infobar_delegate.h"
+#include "chrome/browser/custom_handlers/register_protocol_handler_permission_request.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "chrome/browser/devtools/devtools_window.h"
@@ -52,9 +53,7 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/extensions/browser_extension_window_controller.h"
-#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/file_select_helper.h"
@@ -94,14 +93,13 @@
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
+#include "chrome/browser/ui/browser_content_translate_driver_observer.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_iterator.h"
-#include "chrome/browser/ui/browser_language_state_observer.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_tab_contents.h"
 #include "chrome/browser/ui/browser_tab_restore_service_delegate.h"
 #include "chrome/browser/ui/browser_tab_strip_model_delegate.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -128,6 +126,7 @@
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/sync/browser_synced_window_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
+#include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
@@ -136,6 +135,7 @@
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/browser/ui/validation_message_bubble.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
+#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
@@ -173,6 +173,8 @@
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/webplugininfo.h"
+#include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/background_info.h"
@@ -208,6 +210,7 @@
 #endif
 
 using base::TimeDelta;
+using base::UserMetricsAction;
 using content::NativeWebKeyboardEvent;
 using content::NavigationController;
 using content::NavigationEntry;
@@ -216,7 +219,6 @@ using content::PluginService;
 using content::Referrer;
 using content::RenderWidgetHostView;
 using content::SiteInstance;
-using content::UserMetricsAction;
 using content::WebContents;
 using extensions::Extension;
 using ui::WebDialogDelegate;
@@ -350,7 +352,8 @@ Browser::Browser(const CreateParams& params)
       window_has_shown_(false),
       chrome_updater_factory_(this),
       weak_factory_(this),
-      language_state_observer_(new BrowserLanguageStateObserver(this)) {
+      translate_driver_observer_(
+          new BrowserContentTranslateDriverObserver(this)) {
   // If this causes a crash then a window is being opened using a profile type
   // that is disallowed by policy. The crash prevents the disabled window type
   // from opening at all, but the path that triggered it should be fixed.
@@ -980,6 +983,8 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
   // is updated.
   window_->OnActiveTabChanged(old_contents, new_contents, index, reason);
 
+  fullscreen_controller_->OnTabDetachedFromView(old_contents);
+
   // Discarded tabs always get reloaded.
   if (tab_strip_model_->IsTabDiscarded(index)) {
     LOG(WARNING) << "Reloading discarded tab at " << index;
@@ -1153,8 +1158,8 @@ void Browser::OverscrollUpdate(int delta_y) {
 
 void Browser::ShowValidationMessage(content::WebContents* web_contents,
                                     const gfx::Rect& anchor_in_root_view,
-                                    const string16& main_text,
-                                    const string16& sub_text) {
+                                    const base::string16& main_text,
+                                    const base::string16& sub_text) {
   RenderWidgetHostView* rwhv = web_contents->GetRenderWidgetHostView();
   if (rwhv) {
     validation_message_bubble_ =
@@ -1416,13 +1421,13 @@ void Browser::BeforeUnloadFired(WebContents* web_contents,
 
 bool Browser::ShouldFocusLocationBarByDefault(WebContents* source) {
   const content::NavigationEntry* entry =
-      source->GetController().GetVisibleEntry();
+      source->GetController().GetActiveEntry();
   if (entry) {
     GURL url = entry->GetURL();
     GURL virtual_url = entry->GetVirtualURL();
-    if ((url.SchemeIs(chrome::kChromeUIScheme) &&
+    if ((url.SchemeIs(content::kChromeUIScheme) &&
         url.host() == chrome::kChromeUINewTabHost) ||
-        (virtual_url.SchemeIs(chrome::kChromeUIScheme) &&
+        (virtual_url.SchemeIs(content::kChromeUIScheme) &&
         virtual_url.host() == chrome::kChromeUINewTabHost)) {
       return true;
     }
@@ -1440,10 +1445,6 @@ void Browser::SetFocusToLocationBar(bool select_all) {
   //     focusable, but this may be reached at other times, e.g. while in
   //     fullscreen mode, where we need to leave focus in a consistent state.
   window_->SetFocusToLocationBar(select_all);
-}
-
-void Browser::RenderWidgetShowing() {
-  window_->DisableInactiveFrame();
 }
 
 int Browser::GetExtraRenderViewHeight() const {
@@ -1497,7 +1498,7 @@ void Browser::WebContentsCreated(WebContents* source_contents,
   // requests for its initial navigation will start immediately. The WebContents
   // will later be inserted into this browser using Browser::Navigate via
   // AddNewContents.
-  BrowserTabContents::AttachTabHelpers(new_contents);
+  TabHelpers::AttachTabHelpers(new_contents);
 
   // Notify.
   RetargetingDetails details;
@@ -1565,7 +1566,6 @@ void Browser::EnumerateDirectory(WebContents* web_contents,
 }
 
 bool Browser::EmbedsFullscreenWidget() const {
-  // TODO(miu): Make this feature switchable in about:flags?
   return CommandLine::ForCurrentProcess()->
       HasSwitch(switches::kEmbedFlashFullscreen);
 }
@@ -1626,8 +1626,15 @@ void Browser::RegisterProtocolHandler(WebContents* web_contents,
     window_->GetLocationBar()->UpdateContentSettingsIcons();
   }
 
-  RegisterProtocolHandlerInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents), registry, handler);
+  PermissionBubbleManager* bubble_manager =
+      PermissionBubbleManager::FromWebContents(web_contents);
+  if (PermissionBubbleManager::Enabled() && bubble_manager) {
+    bubble_manager->AddRequest(
+        new RegisterProtocolHandlerPermissionRequest(registry, handler));
+  } else {
+    RegisterProtocolHandlerInfoBarDelegate::Create(
+        InfoBarService::FromWebContents(web_contents), registry, handler);
+  }
 }
 
 void Browser::UpdatePreferredSize(WebContents* source,
@@ -1709,7 +1716,9 @@ gfx::Size Browser::GetSizeForNewRenderView(
 // Browser, CoreTabHelperDelegate implementation:
 
 void Browser::SwapTabContents(content::WebContents* old_contents,
-                              content::WebContents* new_contents) {
+                              content::WebContents* new_contents,
+                              bool did_start_load,
+                              bool did_finish_load) {
   int index = tab_strip_model_->GetIndexOfWebContents(old_contents);
   DCHECK_NE(TabStripModel::kNoTab, index);
   tab_strip_model_->ReplaceWebContentsAt(index, new_contents);
@@ -1767,7 +1776,8 @@ void Browser::OnZoomChanged(content::WebContents* source,
                             bool can_show_bubble) {
   if (source == tab_strip_model_->GetActiveWebContents()) {
     // Only show the zoom bubble for zoom changes in the active window.
-    window_->ZoomChangedForActiveTab(can_show_bubble && window_->IsActive());
+    window_->ZoomChangedForActiveTab(can_show_bubble && window_->IsActive() &&
+        !is_devtools());
   }
 }
 
@@ -1892,8 +1902,9 @@ void Browser::UpdateToolbar(bool should_restore_state) {
 
 void Browser::ScheduleUIUpdate(const WebContents* source,
                                unsigned changed_flags) {
-  if (!source)
-    return;
+  DCHECK(source);
+  int index = tab_strip_model_->GetIndexOfWebContents(source);
+  DCHECK_NE(TabStripModel::kNoTab, index);
 
   // Do some synchronous updates.
   if (changed_flags & content::INVALIDATE_TYPE_URL &&
@@ -2097,8 +2108,8 @@ void Browser::SetAsDelegate(WebContents* web_contents, Browser* delegate) {
   ZoomController::FromWebContents(web_contents)->set_observer(delegate);
   TranslateTabHelper* translate_tab_helper =
       TranslateTabHelper::FromWebContents(web_contents);
-  translate_tab_helper->language_state().set_observer(
-      delegate ? delegate->language_state_observer_.get() : NULL);
+  translate_tab_helper->translate_driver().set_observer(
+      delegate ? delegate->translate_driver_observer_.get() : NULL);
 }
 
 void Browser::CloseFrame() {
@@ -2162,9 +2173,20 @@ bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
     if (is_type_tabbed())
       features |= FEATURE_TOOLBAR;
 
-    if (!is_app() || CommandLine::ForCurrentProcess()->HasSwitch(
-                         switches::kEnableStreamlinedHostedApps))
+    ExtensionService* service =
+        extensions::ExtensionSystem::Get(profile_)->extension_service();
+    const extensions::Extension* extension =
+        service ? service->GetInstalledExtension(
+                      web_app::GetExtensionIdFromApplicationName(app_name()))
+                : NULL;
+
+    if (!is_app() || (app_type() == APP_TYPE_HOST &&
+                      app_name() != DevToolsWindow::kDevToolsApp &&
+                      (!extension || !extension->is_legacy_packaged_app()) &&
+                      CommandLine::ForCurrentProcess()->HasSwitch(
+                          switches::kEnableStreamlinedHostedApps))) {
       features |= FEATURE_LOCATIONBAR;
+    }
   }
   return !!(features & feature);
 }
@@ -2247,7 +2269,7 @@ bool Browser::MaybeCreateBackgroundContents(
 
   // Ensure that we're trying to open this from the extension's process.
   SiteInstance* opener_site_instance = opener_web_contents->GetSiteInstance();
-  extensions::ProcessMap* process_map = extensions_service->process_map();
+  extensions::ProcessMap* process_map = extensions::ProcessMap::Get(profile_);
   if (!opener_site_instance->GetProcess() ||
       !process_map->Contains(
           extension->id(), opener_site_instance->GetProcess()->GetID())) {
@@ -2257,7 +2279,7 @@ bool Browser::MaybeCreateBackgroundContents(
   // Only allow a single background contents per app.
   bool allow_js_access = extensions::BackgroundInfo::AllowJSAccess(extension);
   BackgroundContents* existing =
-      service->GetAppBackgroundContents(ASCIIToUTF16(extension->id()));
+      service->GetAppBackgroundContents(base::ASCIIToUTF16(extension->id()));
   if (existing) {
     // For non-scriptable background contents, ignore the request altogether,
     // (returning true, so that a regular WebContents isn't created either).
@@ -2281,7 +2303,7 @@ bool Browser::MaybeCreateBackgroundContents(
                                         route_id,
                                         profile_,
                                         frame_name,
-                                        ASCIIToUTF16(extension->id()),
+                                        base::ASCIIToUTF16(extension->id()),
                                         partition_id,
                                         session_storage_namespace);
 

@@ -25,9 +25,12 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/managed_mode/managed_user_signin_manager_wrapper.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/services/gcm/gcm_profile_service.h"
+#include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/signin/about_signin_internals.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service.h"
@@ -36,9 +39,7 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/backend_migrator.h"
 #include "chrome/browser/sync/glue/change_processor.h"
-#include "chrome/browser/sync/glue/chrome_encryptor.h"
 #include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
-#include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/favicon_cache.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
@@ -52,7 +53,6 @@
 #include "chrome/browser/sync/sessions2/notification_service_sessions_router.h"
 #include "chrome/browser/sync/sessions2/sessions_sync_manager.h"
 #include "chrome/browser/sync/sync_global_error.h"
-#include "chrome/browser/sync/user_selectable_sync_type.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -62,6 +62,9 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/sync_driver/data_type_controller.h"
+#include "components/sync_driver/system_encryptor.h"
+#include "components/sync_driver/user_selectable_sync_type.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -157,10 +160,11 @@ bool ShouldShowActionOnUI(
 ProfileSyncService::ProfileSyncService(
     ProfileSyncComponentsFactory* factory,
     Profile* profile,
-    SigninManagerBase* signin_manager,
+    ManagedUserSigninManagerWrapper* signin_wrapper,
     ProfileOAuth2TokenService* oauth2_token_service,
     StartBehavior start_behavior)
-    : last_auth_error_(AuthError::AuthErrorNone()),
+    : OAuth2TokenService::Consumer("sync"),
+      last_auth_error_(AuthError::AuthErrorNone()),
       passphrase_required_reason_(syncer::REASON_PASSPHRASE_NOT_REQUIRED),
       factory_(factory),
       profile_(profile),
@@ -171,7 +175,7 @@ ProfileSyncService::ProfileSyncService(
       backend_initialized_(false),
       sync_disabled_by_admin_(false),
       is_auth_in_progress_(false),
-      signin_(signin_manager),
+      signin_(signin_wrapper),
       unrecoverable_error_reason_(ERROR_REASON_UNSET),
       expect_sync_configuration_aborted_(false),
       encrypted_types_(syncer::SyncEncryptionHandler::SensitiveTypes()),
@@ -200,8 +204,8 @@ ProfileSyncService::ProfileSyncService(
     sync_service_url_ = GURL(kSyncServerUrl);
   }
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableSyncSessionsV2)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableSyncSessionsV2)) {
     syncer::SyncableService::StartSyncFlare flare(
         sync_start_util::GetFlareForSyncableService(profile->GetPath()));
     scoped_ptr<browser_sync::LocalSessionEventRouter> router(
@@ -223,14 +227,15 @@ bool ProfileSyncService::IsSyncEnabledAndLoggedIn() {
     return false;
 
   // Sync is logged in if there is a non-empty effective username.
-  return !GetEffectiveUsername().empty();
+  return !signin_->GetEffectiveUsername().empty();
 }
 
 bool ProfileSyncService::IsOAuthRefreshTokenAvailable() {
   if (!oauth2_token_service_)
     return false;
 
-  return oauth2_token_service_->RefreshTokenIsAvailable(GetAccountIdToUse());
+  return oauth2_token_service_->RefreshTokenIsAvailable(
+      signin_->GetAccountIdToUse());
 }
 
 void ProfileSyncService::Initialize() {
@@ -251,12 +256,31 @@ void ProfileSyncService::Initialize() {
 
   RegisterAuthNotifications();
 
-  if (!HasSyncSetupCompleted() || GetEffectiveUsername().empty()) {
+  if (!HasSyncSetupCompleted() || signin_->GetEffectiveUsername().empty()) {
     // Clean up in case of previous crash / setup abort / signout.
     DisableForUser();
   }
 
   TrySyncDatatypePrefRecovery();
+
+  last_synced_time_ = sync_prefs_.GetLastSyncedTime();
+
+#if defined(OS_CHROMEOS)
+   std::string bootstrap_token = sync_prefs_.GetEncryptionBootstrapToken();
+   if (bootstrap_token.empty()) {
+     sync_prefs_.SetEncryptionBootstrapToken(
+         sync_prefs_.GetSpareBootstrapToken());
+   }
+#endif
+
+#if !defined(OS_ANDROID)
+   if (!sync_global_error_) {
+     sync_global_error_.reset(new SyncGlobalError(this, signin()));
+     GlobalErrorServiceFactory::GetForProfile(profile_)->AddGlobalError(
+         sync_global_error_.get());
+     AddObserver(sync_global_error_.get());
+   }
+#endif
 
   TryStart();
 }
@@ -391,8 +415,8 @@ browser_sync::OpenTabsUIDelegate* ProfileSyncService::GetOpenTabsUIDelegate() {
   if (!IsSessionsDataTypeControllerRunning())
     return NULL;
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableSyncSessionsV2)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableSyncSessionsV2)) {
     return sessions_sync_manager_.get();
   } else {
     return GetSessionModelAssociatorDeprecated();
@@ -402,8 +426,8 @@ browser_sync::OpenTabsUIDelegate* ProfileSyncService::GetOpenTabsUIDelegate() {
 browser_sync::FaviconCache* ProfileSyncService::GetFaviconCache() {
   // TODO(tim): Clean this up (or remove) once there's only one implementation.
   // Bug 98892.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableSyncSessionsV2)) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableSyncSessionsV2)) {
     return sessions_sync_manager_->GetFaviconCache();
   } else if (GetSessionModelAssociatorDeprecated()) {
     return GetSessionModelAssociatorDeprecated()->GetFaviconCache();
@@ -513,7 +537,7 @@ void ProfileSyncService::InitSettings() {
 
 SyncCredentials ProfileSyncService::GetCredentials() {
   SyncCredentials credentials;
-  credentials.email = GetEffectiveUsername();
+  credentials.email = signin_->GetEffectiveUsername();
   DCHECK(!credentials.email.empty());
   credentials.sync_token = access_token_;
 
@@ -555,14 +579,6 @@ void ProfileSyncService::InitializeBackend(bool delete_stale_data) {
       network_resources_.get());
 }
 
-void ProfileSyncService::CreateBackend() {
-  backend_.reset(
-      factory_->CreateSyncBackendHost(
-          profile_->GetDebugName(),
-          profile_,
-          sync_prefs_.AsWeakPtr()));
-}
-
 bool ProfileSyncService::IsEncryptedDatatypeEnabled() const {
   if (encryption_pending())
     return true;
@@ -592,24 +608,6 @@ void ProfileSyncService::StartUp(StartUpDeferredOption deferred_option) {
 
   if (start_up_time_.is_null()) {
     start_up_time_ = base::Time::Now();
-    last_synced_time_ = sync_prefs_.GetLastSyncedTime();
-
-#if defined(OS_CHROMEOS)
-    std::string bootstrap_token = sync_prefs_.GetEncryptionBootstrapToken();
-    if (bootstrap_token.empty()) {
-      sync_prefs_.SetEncryptionBootstrapToken(
-          sync_prefs_.GetSpareBootstrapToken());
-    }
-#endif
-
-#if !defined(OS_ANDROID)
-    if (!sync_global_error_) {
-      sync_global_error_.reset(new SyncGlobalError(this, signin()));
-      GlobalErrorServiceFactory::GetForProfile(profile_)->AddGlobalError(
-          sync_global_error_.get());
-      AddObserver(sync_global_error_.get());
-    }
-#endif
   } else {
     // We don't care to prevent multiple calls to StartUp in deferred mode
     // because it's fast and has no side effects.
@@ -675,7 +673,11 @@ void ProfileSyncService::StartUpSlowBackendComponents() {
   }
 
   DCHECK(IsSyncEnabledAndLoggedIn());
-  CreateBackend();
+  backend_.reset(
+      factory_->CreateSyncBackendHost(
+          profile_->GetDebugName(),
+          profile_,
+          sync_prefs_.AsWeakPtr()));
 
   // Initialize the backend.  Every time we start up a new SyncBackendHost,
   // we'll want to start from a fresh SyncDB, so delete any old one that might
@@ -730,23 +732,6 @@ void ProfileSyncService::OnGetTokenFailure(
     }
     case GoogleServiceAuthError::SERVICE_ERROR:
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS: {
-      // Report time since token was issued for invalid credentials error.
-      base::Time auth_token_time =
-          AboutSigninInternalsFactory::GetForProfile(profile_)->
-              GetTokenTime(GaiaConstants::kGaiaOAuth2LoginRefreshToken);
-      if (!auth_token_time.is_null()) {
-        base::TimeDelta age = base::Time::Now() - auth_token_time;
-        if (age < base::TimeDelta::FromHours(1)) {
-          UMA_HISTOGRAM_CUSTOM_TIMES("Sync.AuthServerRejectedTokenAgeShort",
-                                     age,
-                                     base::TimeDelta::FromSeconds(1),
-                                     base::TimeDelta::FromHours(1),
-                                     50);
-        }
-        UMA_HISTOGRAM_COUNTS("Sync.AuthServerRejectedTokenAgeLong",
-                             age.InDays());
-      }
-
       if (!sync_prefs_.SyncHasAuthError()) {
         sync_prefs_.SetSyncAuthError(true);
         UMA_HISTOGRAM_ENUMERATION("Sync.SyncAuthError",
@@ -764,7 +749,7 @@ void ProfileSyncService::OnGetTokenFailure(
 
 void ProfileSyncService::OnRefreshTokenAvailable(
     const std::string& account_id) {
-  if (account_id == GetAccountIdToUse())
+  if (account_id == signin_->GetAccountIdToUse())
     OnRefreshTokensLoaded();
 }
 
@@ -807,6 +792,13 @@ void ProfileSyncService::Shutdown() {
 
 void ProfileSyncService::ShutdownImpl(
     browser_sync::SyncBackendHost::ShutdownOption option) {
+  if (sync_global_error_) {
+    GlobalErrorServiceFactory::GetForProfile(profile_)->RemoveGlobalError(
+        sync_global_error_.get());
+    RemoveObserver(sync_global_error_.get());
+    sync_global_error_.reset(NULL);
+  }
+
   if (!backend_)
     return;
 
@@ -863,13 +855,6 @@ void ProfileSyncService::ShutdownImpl(
   if (last_auth_error_.state() != GoogleServiceAuthError::NONE)
     UpdateAuthErrorState(GoogleServiceAuthError::AuthErrorNone());
 
-  if (sync_global_error_) {
-    GlobalErrorServiceFactory::GetForProfile(profile_)->RemoveGlobalError(
-        sync_global_error_.get());
-    RemoveObserver(sync_global_error_.get());
-    sync_global_error_.reset(NULL);
-  }
-
   NotifyObservers();
 }
 
@@ -897,16 +882,11 @@ void ProfileSyncService::UpdateLastSyncedTime() {
 void ProfileSyncService::NotifyObservers() {
   FOR_EACH_OBSERVER(ProfileSyncServiceBase::Observer, observers_,
                     OnStateChanged());
-  // TODO(akalin): Make an Observer subclass that listens and does the
-  // event routing.
-  sync_js_controller_.HandleJsEvent("onServiceStateChanged", JsEventDetails());
 }
 
 void ProfileSyncService::NotifySyncCycleCompleted() {
   FOR_EACH_OBSERVER(ProfileSyncServiceBase::Observer, observers_,
                     OnSyncCycleCompleted());
-  sync_js_controller_.HandleJsEvent(
-      "onServiceStateChanged", JsEventDetails());
 }
 
 void ProfileSyncService::ClearStaleErrors() {
@@ -1095,6 +1075,32 @@ void ProfileSyncService::OnExperimentsChanged(
   if (current_experiments_.Matches(experiments))
     return;
 
+  current_experiments_ = experiments;
+
+  // Handle preference-backed experiments first.
+  if (experiments.gcm_channel_state != syncer::Experiments::UNSET) {
+    profile()->GetPrefs()->SetBoolean(prefs::kGCMChannelEnabled,
+                                      experiments.gcm_channel_state ==
+                                          syncer::Experiments::ENABLED);
+    gcm::GCMProfileService* gcm_profile_service =
+        gcm::GCMProfileServiceFactory::GetForProfile(profile());
+    if (gcm_profile_service) {
+      if (experiments.gcm_channel_state == syncer::Experiments::SUPPRESSED)
+        gcm_profile_service->Stop();
+      else
+        gcm_profile_service->Start();
+    }
+  } else {
+    profile()->GetPrefs()->ClearPref(prefs::kGCMChannelEnabled);
+  }
+
+  if (experiments.enhanced_bookmarks_enabled) {
+    profile_->GetPrefs()->SetBoolean(prefs::kEnhancedBookmarksExperimentEnabled,
+                                     true);
+    profile_->GetPrefs()->SetString(prefs::kEnhancedBookmarksExtensionId,
+                                    experiments.enhanced_bookmarks_ext_id);
+  }
+
   // If this is a first time sync for a client, this will be called before
   // OnBackendInitialized() to ensure the new datatypes are available at sync
   // setup. As a result, the migrator won't exist yet. This is fine because for
@@ -1139,8 +1145,6 @@ void ProfileSyncService::OnExperimentsChanged(
       OnMigrationNeededForTypes(to_register);
     }
   }
-
-  current_experiments_ = experiments;
 }
 
 void ProfileSyncService::UpdateAuthErrorState(const AuthError& error) {
@@ -1232,7 +1236,7 @@ void ProfileSyncService::OnConnectionStatusChange(
   }
 }
 
-void ProfileSyncService::OnStopSyncingPermanently() {
+void ProfileSyncService::StopSyncingPermanently() {
   sync_prefs_.SetStartSuppressed(true);
   DisableForUser();
 }
@@ -1346,7 +1350,7 @@ void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
       // actions in the popup. The current experience might not be optimal for
       // the user. We just dismiss the dialog.
       if (setup_in_progress_) {
-        OnStopSyncingPermanently();
+        StopSyncingPermanently();
         expect_sync_configuration_aborted_ = true;
       }
       // Trigger an unrecoverable error to stop syncing.
@@ -1356,7 +1360,7 @@ void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
                                    ERROR_REASON_ACTIONABLE_ERROR);
       break;
     case syncer::DISABLE_SYNC_ON_CLIENT:
-      OnStopSyncingPermanently();
+      StopSyncingPermanently();
 #if !defined(OS_CHROMEOS)
       // On desktop Chrome, sign out the user after a dashboard clear.
       // TODO(rsimha): Revisit this for M30. See http://crbug.com/252049.
@@ -1618,7 +1622,7 @@ const browser_sync::user_selectable_type::UserSelectableSyncType
     browser_sync::user_selectable_type::PROXY_TABS
   };
 
-  COMPILE_ASSERT(30 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
+  COMPILE_ASSERT(32 == syncer::MODEL_TYPE_COUNT, UpdateCustomConfigHistogram);
 
   if (!sync_everything) {
     const syncer::ModelTypeSet current_types = GetPreferredDataTypes();
@@ -1646,7 +1650,7 @@ const browser_sync::user_selectable_type::UserSelectableSyncType
 #if defined(OS_CHROMEOS)
 void ProfileSyncService::RefreshSpareBootstrapToken(
     const std::string& passphrase) {
-  browser_sync::ChromeEncryptor encryptor;
+  browser_sync::SystemEncryptor encryptor;
   syncer::Cryptographer temp_cryptographer(&encryptor);
   // The first 2 params (hostname and username) doesn't have any effect here.
   syncer::KeyParams key_params = {"localhost", "dummy", passphrase};
@@ -1840,8 +1844,8 @@ void ProfileSyncService::GetModelSafeRoutingInfo(
   }
 }
 
-Value* ProfileSyncService::GetTypeStatusMap() const {
-  scoped_ptr<ListValue> result(new ListValue());
+base::Value* ProfileSyncService::GetTypeStatusMap() const {
+  scoped_ptr<base::ListValue> result(new base::ListValue());
 
   if (!backend_.get() || !backend_initialized_) {
     return result.release();
@@ -1866,7 +1870,8 @@ Value* ProfileSyncService::GetTypeStatusMap() const {
   SyncBackendHost::Status detailed_status = backend_->GetDetailedStatus();
   ModelTypeSet &throttled_types(detailed_status.throttled_types);
   ModelTypeSet registered = GetRegisteredDataTypes();
-  scoped_ptr<DictionaryValue> type_status_header(new DictionaryValue());
+  scoped_ptr<base::DictionaryValue> type_status_header(
+      new base::DictionaryValue());
 
   type_status_header->SetString("name", "Model Type");
   type_status_header->SetString("status", "header");
@@ -1875,11 +1880,11 @@ Value* ProfileSyncService::GetTypeStatusMap() const {
   type_status_header->SetString("num_live", "Live Entries");
   result->Append(type_status_header.release());
 
-  scoped_ptr<DictionaryValue> type_status;
+  scoped_ptr<base::DictionaryValue> type_status;
   for (ModelTypeSet::Iterator it = registered.First(); it.Good(); it.Inc()) {
     ModelType type = it.Get();
 
-    type_status.reset(new DictionaryValue());
+    type_status.reset(new base::DictionaryValue());
     type_status->SetString("name", ModelTypeToString(type));
 
     if (error_map.find(type) != error_map.end()) {
@@ -1975,7 +1980,7 @@ void ProfileSyncService::RequestAccessToken() {
 
   // Invalidate previous token, otherwise token service will return the same
   // token again.
-  const std::string& account_id = GetAccountIdToUse();
+  const std::string& account_id = signin_->GetAccountIdToUse();
   if (!access_token_.empty()) {
     oauth2_token_service_->InvalidateToken(
         account_id, oauth2_scopes, access_token_);
@@ -2161,13 +2166,19 @@ bool ProfileSyncService::IsStartSuppressed() const {
   return sync_prefs_.IsStartSuppressed();
 }
 
+SigninManagerBase* ProfileSyncService::signin() const {
+  return signin_->GetOriginal();
+}
+
 void ProfileSyncService::UnsuppressAndStart() {
   DCHECK(profile_);
   sync_prefs_.SetStartSuppressed(false);
   // Set username in SigninManager, as SigninManager::OnGetUserInfoSuccess
   // is never called for some clients.
-  if (signin_ && signin_->GetAuthenticatedUsername().empty()) {
-    signin_->SetAuthenticatedUsername(sync_prefs_.GetGoogleServicesUsername());
+  if (signin_.get() &&
+      signin_->GetOriginal()->GetAuthenticatedUsername().empty()) {
+    signin_->GetOriginal()->SetAuthenticatedUsername(
+        sync_prefs_.GetGoogleServicesUsername());
   }
   TryStart();
 }
@@ -2215,32 +2226,6 @@ bool ProfileSyncService::IsRetryingAccessTokenFetchForTest() const {
 
 std::string ProfileSyncService::GetAccessTokenForTest() const {
   return access_token_;
-}
-
-std::string ProfileSyncService::GetEffectiveUsername() {
-  if (profile_->IsManaged()) {
-#if defined(ENABLE_MANAGED_USERS)
-    DCHECK_EQ(std::string(), signin_->GetAuthenticatedUsername());
-    return managed_users::kManagedUserPseudoEmail;
-#else
-    NOTREACHED();
-#endif
-  }
-
-  return signin_->GetAuthenticatedUsername();
-}
-
-std::string ProfileSyncService::GetAccountIdToUse() {
-  if (profile_->IsManaged()) {
-#if defined(ENABLE_MANAGED_USERS)
-    return managed_users::kManagedUserPseudoEmail;
-#else
-    NOTREACHED();
-#endif
-  }
-
-  // TODO(fgorski): Use GetPrimaryAccountId() when it's available.
-  return signin_->GetAuthenticatedUsername();
 }
 
 WeakHandle<syncer::JsEventHandler> ProfileSyncService::GetJsEventHandler() {

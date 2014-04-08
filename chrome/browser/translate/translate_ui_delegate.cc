@@ -9,9 +9,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/translate_manager.h"
-#include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
-#include "components/translate/common/translate_constants.h"
+#include "components/translate/core/browser/translate_download_manager.h"
+#include "components/translate/core/browser/translate_prefs.h"
+#include "components/translate/core/common/translate_constants.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -43,7 +44,7 @@ TranslateUIDelegate::TranslateUIDelegate(content::WebContents* web_contents,
   DCHECK(web_contents_);
 
   std::vector<std::string> language_codes;
-  TranslateManager::GetSupportedLanguages(&language_codes);
+  TranslateDownloadManager::GetSupportedLanguages(&language_codes);
 
   // Preparing for the alphabetical order in the locale.
   UErrorCode error = U_ZERO_ERROR;
@@ -82,7 +83,7 @@ TranslateUIDelegate::TranslateUIDelegate(content::WebContents* web_contents,
 
   Profile* profile =
       Profile::FromBrowserContext(web_contents_->GetBrowserContext());
-  prefs_.reset(new TranslatePrefs(profile->GetPrefs()));
+  prefs_ = TranslateTabHelper::CreateTranslatePrefs(profile->GetPrefs());
 }
 
 TranslateUIDelegate::~TranslateUIDelegate() {
@@ -158,7 +159,8 @@ void TranslateUIDelegate::Translate() {
   }
   TranslateManager::GetInstance()->TranslatePage(web_contents(),
                                                  GetOriginalLanguageCode(),
-                                                 GetTargetLanguageCode());
+                                                 GetTargetLanguageCode(),
+                                                 false);
 
   UMA_HISTOGRAM_BOOLEAN(kPerformTranslate, true);
 }
@@ -181,7 +183,7 @@ void TranslateUIDelegate::TranslationDeclined(bool explicitly_closed) {
   // happens when a load stops. That could happen multiple times, including
   // after the user already declined the translation.)
   TranslateTabHelper::FromWebContents(web_contents())->
-      language_state().set_translation_declined(true);
+      GetLanguageState().set_translation_declined(true);
 
   UMA_HISTOGRAM_BOOLEAN(kDeclineTranslate, true);
 
@@ -199,7 +201,7 @@ void TranslateUIDelegate::SetLanguageBlocked(bool value) {
     TranslateTabHelper* translate_tab_helper =
         TranslateTabHelper::FromWebContents(web_contents());
     DCHECK(translate_tab_helper);
-    translate_tab_helper->language_state().SetTranslateEnabled(false);
+    translate_tab_helper->GetLanguageState().SetTranslateEnabled(false);
   } else {
     prefs_->UnblockLanguage(GetOriginalLanguageCode());
   }
@@ -222,7 +224,7 @@ void TranslateUIDelegate::SetSiteBlacklist(bool value) {
     TranslateTabHelper* translate_tab_helper =
         TranslateTabHelper::FromWebContents(web_contents());
     DCHECK(translate_tab_helper);
-    translate_tab_helper->language_state().SetTranslateEnabled(false);
+    translate_tab_helper->GetLanguageState().SetTranslateEnabled(false);
   } else {
     prefs_->RemoveSiteFromBlacklist(host);
   }

@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -24,6 +24,7 @@
             'autofill/core/common/password_form_fill_data_unittest.cc',
             'browser_context_keyed_service/browser_context_dependency_manager_unittest.cc',
             'browser_context_keyed_service/dependency_graph_unittest.cc',
+            'cloud_devices/printer_description_unittest.cc',
             'dom_distiller/core/article_entry_unittest.cc',
             'dom_distiller/core/distiller_unittest.cc',
             'dom_distiller/core/distiller_url_fetcher_unittest.cc',
@@ -31,24 +32,41 @@
             'dom_distiller/core/dom_distiller_model_unittest.cc',
             'dom_distiller/core/dom_distiller_service_unittest.cc',
             'dom_distiller/core/dom_distiller_store_unittest.cc',
-            'dom_distiller/core/dom_distiller_test_util.cc',
-            'dom_distiller/core/dom_distiller_test_util.h',
-            'dom_distiller/core/fake_db.cc',
-            'dom_distiller/core/fake_db.h',
-            'dom_distiller/core/fake_distiller.cc',
-            'dom_distiller/core/fake_distiller.h',
             'dom_distiller/core/task_tracker_unittest.cc',
             'json_schema/json_schema_validator_unittest.cc',
             'json_schema/json_schema_validator_unittest_base.cc',
             'json_schema/json_schema_validator_unittest_base.h',
+            'language_usage_metrics/language_usage_metrics_unittest.cc',
             'navigation_interception/intercept_navigation_resource_throttle_unittest.cc',
+            'password_manager/core/browser/login_database_unittest.cc',
+            'password_manager/core/browser/psl_matching_helper_unittest.cc',
+            'password_manager/core/browser/password_store_default_unittest.cc',
+            'password_manager/core/browser/password_store_unittest.cc',
+            'password_manager/core/browser/password_syncable_service_unittest.cc',
+            'precache/content/precache_manager_unittest.cc',
             'precache/core/precache_database_unittest.cc',
             'precache/core/precache_fetcher_unittest.cc',
             'precache/core/precache_url_table_unittest.cc',
             'sessions/serialized_navigation_entry_unittest.cc',
+            'signin/core/webdata/token_service_table_unittest.cc',
+            'storage_monitor/image_capture_device_manager_unittest.mm',
+            'storage_monitor/media_storage_util_unittest.cc',
+            'storage_monitor/media_transfer_protocol_device_observer_linux_unittest.cc',
+            'storage_monitor/storage_info_unittest.cc',
+            'storage_monitor/storage_monitor_chromeos_unittest.cc',
+            'storage_monitor/storage_monitor_linux_unittest.cc',
+            'storage_monitor/storage_monitor_mac_unittest.mm',
+            'storage_monitor/storage_monitor_unittest.cc',
+            'storage_monitor/storage_monitor_win_unittest.cc',
+            'sync_driver/model_association_manager_unittest.cc',
+            'sync_driver/system_encryptor_unittest.cc',
             'test/run_all_unittests.cc',
-            'translate/common/translate_metrics_unittest.cc',
-            'translate/common/translate_util_unittest.cc',
+            'translate/core/browser/language_state_unittest.cc',
+            'translate/core/browser/translate_browser_metrics_unittest.cc',
+            'translate/core/browser/translate_prefs_unittest.cc',
+            'translate/core/browser/translate_script_unittest.cc',
+            'translate/core/common/translate_metrics_unittest.cc',
+            'translate/core/common/translate_util_unittest.cc',
             'translate/language_detection/language_detection_util_unittest.cc',
             'url_matcher/regex_set_matcher_unittest.cc',
             'url_matcher/string_pattern_unittest.cc',
@@ -60,6 +78,7 @@
             'variations/metrics_util_unittest.cc',
             'variations/variations_associated_data_unittest.cc',
             'variations/variations_seed_processor_unittest.cc',
+            'variations/variations_seed_simulator_unittest.cc',
             'visitedlink/test/visitedlink_unittest.cc',
             'webdata/encryptor/encryptor_password_mac_unittest.cc',
             'webdata/encryptor/encryptor_unittest.cc',
@@ -78,6 +97,8 @@
             '../sync/sync.gyp:sync',
             '../testing/gmock.gyp:gmock',
             '../testing/gtest.gyp:gtest',
+            '../ui/gfx/gfx.gyp:gfx',
+            '../ui/ui.gyp:ui',
 
             # Dependencies of auto_login_parser
             'components.gyp:auto_login_parser',
@@ -87,9 +108,13 @@
             'components.gyp:autofill_core_common',
             'components.gyp:autofill_core_test_support',
 
+            # Dependencies of cloud_devices
+            'components.gyp:cloud_devices',
+
             # Dependencies of dom_distiller
             'components.gyp:distilled_page_proto',
             'components.gyp:dom_distiller_core',
+            'components.gyp:dom_distiller_test_support',
 
             # Dependencies of encryptor
             'components.gyp:encryptor',
@@ -97,11 +122,26 @@
             # Dependencies of json_schema
             'components.gyp:json_schema',
 
-            # Dependencies of precache
+            # Dependencies of language_usage_metrics
+            'components.gyp:language_usage_metrics',
+
+            # Dependencies of password_manager
+            'components.gyp:password_manager_core_browser',
+            'components.gyp:password_manager_core_browser_test_support',
+
+            # Dependencies of precache/core
+            'components.gyp:password_manager_core_browser',
             'components.gyp:precache_core',
 
+            # Dependencies of signin
+            'components.gyp:signin_core',
+
+            # Dependencies of sync_driver
+            'components.gyp:sync_driver_test_support',
+
             # Dependencies of translate.
-            'components.gyp:translate_common',
+            'components.gyp:translate_core_browser',
+            'components.gyp:translate_core_common',
             'components.gyp:translate_language_detection',
 
             # Dependencies of variations
@@ -113,15 +153,22 @@
                 # Dependencies of browser_context_keyed_service
                 'components.gyp:browser_context_keyed_service',
 
-                # Dependencies of 
+                # Dependencies of
                 # intercept_navigation_resource_throttle_unittest.cc
                 '../skia/skia.gyp:skia',
                 'components.gyp:navigation_interception',
+
+                # Dependencies of precache/content
+                'components.gyp:precache_content',
 
                 # Dependencies of sessions
                 '../third_party/protobuf/protobuf.gyp:protobuf_lite',
                 'components.gyp:sessions',
                 'components.gyp:sessions_test_support',
+
+                # Dependencies of storage monitor
+                'components.gyp:storage_monitor',
+                'components.gyp:storage_monitor_test_support',
 
                 # Dependencies of url_matcher.
                 'components.gyp:url_matcher',
@@ -138,6 +185,7 @@
             }, { # 'OS == "ios"'
               'sources/': [
                 ['exclude', '\\.cc$'],
+                ['exclude', '\\.mm$'],
                 ['include', '^test/run_all_unittests\\.cc$'],
                 # TODO(ios): Include files here as they are made to work, see
                 # http://crbug.com/303011.
@@ -146,8 +194,22 @@
                 ['include', '^auto_login_parser/'],
                 ['include', '^autofill/'],
                 ['include', '^dom_distiller/'],
-                ['include', '^precache/'],
+                ['include', '^language_usage_metrics/'],
+                ['include', '^password_manager/'],
+                ['include', '^precache/core/'],
+                ['include', '^signin/'],
+                ['include', '^sync_driver/'],
                 ['include', '^translate/'],
+                # TODO(blundell): Provide the iOS login DB implementation and
+                # then re-enable this test. http://crbug.com/341429
+                ['exclude', '^password_manager/core/browser/login_database_unittest.cc'],
+              ],
+              'conditions': [
+                ['configuration_policy==1', {
+                  'sources/': [
+                    ['include', '^policy/'],
+                  ],
+                }],
               ],
             }],
             ['disable_nacl==0', {
@@ -168,14 +230,24 @@
               'link_settings': {
                 'libraries': [
                   '$(SDKROOT)/System/Library/Frameworks/AddressBook.framework',
+                  '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
+                  '$(SDKROOT)/System/Library/Frameworks/ImageCaptureCore.framework',
                 ],
               },
+              'sources!': [
+                'password_manager/core/browser/password_store_default_unittest.cc',
+              ],
             }],
             ['OS == "android"', {
               'sources!': [
+                'storage_monitor/media_storage_util_unittest.cc',
+                'storage_monitor/storage_info_unittest.cc',
+                'storage_monitor/storage_monitor_unittest.cc',
                 'web_modal/web_contents_modal_dialog_manager_unittest.cc',
               ],
               'dependencies!': [
+                'components.gyp:storage_monitor',
+                'components.gyp:storage_monitor_test_support',
                 'components.gyp:web_modal',
                 'components.gyp:web_modal_test_support',
               ],
@@ -184,6 +256,20 @@
               'dependencies': [
                 '../testing/android/native_test.gyp:native_test_native_code',
               ]
+            }],
+            ['chromeos==1', {
+              'sources!': [
+                'storage_monitor/storage_monitor_linux_unittest.cc',
+              ],
+              'dependencies': [
+                '../chromeos/chromeos.gyp:chromeos_test_support',
+              ],
+            }],
+            ['OS=="linux"', {
+              'dependencies': [
+                '../dbus/dbus.gyp:dbus',
+                '../device/media_transfer_protocol/media_transfer_protocol.gyp:device_media_transfer_protocol',
+              ],
             }],
             ['OS=="win" and win_use_allocator_shim==1', {
               'dependencies': [
@@ -205,6 +291,9 @@
                 'components.gyp:policy_test_support',
               ],
               'sources': [
+                'policy/core/browser/autofill_policy_handler_unittest.cc',
+                'policy/core/browser/browser_policy_connector_unittest.cc',
+                'policy/core/browser/configuration_policy_handler_unittest.cc',
                 'policy/core/common/async_policy_provider_unittest.cc',
                 'policy/core/common/cloud/cloud_policy_client_unittest.cc',
                 'policy/core/common/cloud/cloud_policy_core_unittest.cc',
@@ -232,6 +321,7 @@
                 'policy/core/common/policy_loader_mac_unittest.cc',
                 'policy/core/common/policy_loader_win_unittest.cc',
                 'policy/core/common/policy_map_unittest.cc',
+                'policy/core/common/policy_provider_android_unittest.cc',
                 'policy/core/common/policy_service_impl_unittest.cc',
                 'policy/core/common/policy_statistics_collector_unittest.cc',
                 'policy/core/common/preg_parser_win_unittest.cc',
@@ -241,19 +331,26 @@
                 'policy/core/common/schema_unittest.cc',
               ],
               'conditions': [
-                ['OS=="android"', {
-                  'sources!': [
-                    'policy/core/common/async_policy_provider_unittest.cc',
-                    'policy/core/common/cloud/component_cloud_policy_service_unittest.cc',
-                    'policy/core/common/cloud/component_cloud_policy_store_unittest.cc',
-                    'policy/core/common/cloud/component_cloud_policy_updater_unittest.cc',
-                    'policy/core/common/cloud/external_policy_data_fetcher_unittest.cc',
-                    'policy/core/common/cloud/external_policy_data_updater_unittest.cc',
-                    'policy/core/common/cloud/resource_cache_unittest.cc',
-                    'policy/core/common/config_dir_policy_loader_unittest.cc',
+                ['OS=="android" or OS=="ios"', {
+                  # Note: 'sources!' is processed before any 'sources/', so the
+                  # ['include', '^policy/'] on iOS above will include all of the
+                  # policy source files again. Using 'source/' here too will get
+                  # these files excluded as expected.
+                  'sources/': [
+                    ['exclude', '^policy/core/common/async_policy_provider_unittest\\.cc'],
+                    ['exclude', '^policy/core/common/cloud/component_cloud_policy_service_unittest\\.cc'],
+                    ['exclude', '^policy/core/common/cloud/component_cloud_policy_store_unittest\\.cc'],
+                    ['exclude', '^policy/core/common/cloud/component_cloud_policy_updater_unittest\\.cc'],
+                    ['exclude', '^policy/core/common/cloud/external_policy_data_fetcher_unittest\\.cc'],
+                    ['exclude', '^policy/core/common/cloud/external_policy_data_updater_unittest\\.cc'],
+                    ['exclude', '^policy/core/common/cloud/resource_cache_unittest\\.cc'],
+                    ['exclude', '^policy/core/common/config_dir_policy_loader_unittest\\.cc'],
                   ],
                 }],
                 ['chromeos==1', {
+                  'sources': [
+                    'policy/core/common/proxy_policy_provider_unittest.cc',
+                  ],
                   'sources!': [
                     'policy/core/common/cloud/user_cloud_policy_manager_unittest.cc',
                     'policy/core/common/cloud/user_cloud_policy_store_unittest.cc',
@@ -277,7 +374,6 @@
             '../base/base.gyp:test_support_perf',
             '../content/content_shell_and_tests.gyp:test_support_content',
             '../testing/gtest.gyp:gtest',
-            '../ui/compositor/compositor.gyp:compositor',
             'components.gyp:visitedlink_browser',
           ],
          'include_dirs': [

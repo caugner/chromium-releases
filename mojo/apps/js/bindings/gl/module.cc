@@ -4,15 +4,13 @@
 
 #include "mojo/apps/js/bindings/gl/module.h"
 
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
-
 #include "base/logging.h"
 #include "gin/arguments.h"
 #include "gin/object_template_builder.h"
 #include "gin/per_isolate_data.h"
 #include "gin/wrappable.h"
 #include "mojo/apps/js/bindings/gl/context.h"
+#include "mojo/apps/js/bindings/handle.h"
 
 namespace mojo {
 namespace js {
@@ -24,14 +22,16 @@ namespace {
 
 gin::WrapperInfo kWrapperInfo = { gin::kEmbedderNativeGin };
 
-gin::Handle<Context> CreateContext(const gin::Arguments& args, uint64_t encoded,
-                                   int width, int height) {
-  return Context::Create(args.isolate(), encoded, width, height);
+gin::Handle<Context> CreateContext(
+    const gin::Arguments& args,
+    mojo::Handle handle,
+    v8::Handle<v8::Function> context_lost_callback) {
+  return Context::Create(args.isolate(), handle, context_lost_callback);
 }
 
 }  // namespace
 
-v8::Local<v8::ObjectTemplate> GetModuleTemplate(v8::Isolate* isolate) {
+v8::Local<v8::Value> GetModule(v8::Isolate* isolate) {
   gin::PerIsolateData* data = gin::PerIsolateData::From(isolate);
   v8::Local<v8::ObjectTemplate> templ = data->GetObjectTemplate(&kWrapperInfo);
 
@@ -39,14 +39,10 @@ v8::Local<v8::ObjectTemplate> GetModuleTemplate(v8::Isolate* isolate) {
     templ = gin::ObjectTemplateBuilder(isolate)
         .SetMethod("Context", CreateContext)
         .Build();
-    templ->SetInternalFieldCount(gin::kNumberOfInternalFields);
     data->SetObjectTemplate(&kWrapperInfo, templ);
   }
 
-  Context::GetObjectTemplate(isolate);
-  Opaque::GetObjectTemplate(isolate);
-
-  return templ;
+  return templ->NewInstance();
 }
 
 }  // namespace gl

@@ -45,7 +45,7 @@ std::string MostVisitedIframeSource::GetSource() const {
 void MostVisitedIframeSource::StartDataRequest(
     const std::string& path_and_query,
     int render_process_id,
-    int render_view_id,
+    int render_frame_id,
     const content::URLDataSource::GotDataCallback& callback) {
   GURL url(chrome::kChromeSearchMostVisitedUrl + path_and_query);
   std::string path(url.path());
@@ -60,7 +60,8 @@ void MostVisitedIframeSource::StartDataRequest(
   } else if (path == kThumbnailCSSPath) {
     SendResource(IDR_MOST_VISITED_THUMBNAIL_CSS, callback);
   } else if (path == kThumbnailJSPath) {
-    SendResource(IDR_MOST_VISITED_THUMBNAIL_JS, callback);
+    SendJSWithOrigin(IDR_MOST_VISITED_THUMBNAIL_JS, render_process_id,
+                     render_frame_id, callback);
   } else if (path == kUtilJSPath) {
     SendResource(IDR_MOST_VISITED_UTIL_JS, callback);
   } else if (path == kCommonCSSPath) {
@@ -82,7 +83,7 @@ void MostVisitedIframeSource::StartDataRequest(
 
       // Records the action. This will be available as a time-stamped stream
       // server-side and can be used to compute time-to-long-dwell.
-      content::RecordAction(content::UserMetricsAction("MostVisited_Clicked"));
+      content::RecordAction(base::UserMetricsAction("MostVisited_Clicked"));
     }
     callback.Run(NULL);
   } else {

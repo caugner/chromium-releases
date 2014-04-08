@@ -11,7 +11,6 @@
 #include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
 #include "base/time/time.h"
@@ -21,13 +20,16 @@
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/update_manifest.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
+#include "chrome/utility/chrome_content_utility_ipc_whitelist.h"
 #include "chrome/utility/cloud_print/bitmap_image.h"
 #include "chrome/utility/cloud_print/pwg_encoder.h"
 #include "chrome/utility/extensions/unpacker.h"
+#include "chrome/utility/image_writer/image_writer_handler.h"
 #include "chrome/utility/profile_import_handler.h"
 #include "chrome/utility/web_resource_unpacker.h"
 #include "content/public/child/image_decoder_utils.h"
 #include "content/public/common/content_paths.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/utility/utility_thread.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
@@ -61,6 +63,11 @@
 #include "chrome/utility/media_galleries/picasa_albums_indexer.h"
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#include "chrome/utility/media_galleries/ipc_data_source.h"
+#include "chrome/utility/media_galleries/media_metadata_parser.h"
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+
 #if defined(ENABLE_FULL_PRINTING)
 #include "chrome/common/crash_keys.h"
 #include "printing/backend/print_backend.h"
@@ -68,7 +75,6 @@
 
 #if defined(ENABLE_MDNS)
 #include "chrome/utility/local_discovery/service_discovery_message_handler.h"
-#include "content/public/common/content_switches.h"
 #endif  // ENABLE_MDNS
 
 namespace chrome {
@@ -289,11 +295,20 @@ typedef PdfFunctionsWin PdfFunctions;
 typedef PdfFunctionsBase PdfFunctions;
 #endif  // OS_WIN
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+void SendMediaMetadataToHost(
+    scoped_ptr<extensions::api::media_galleries::MediaMetadata> metadata) {
+  Send(new ChromeUtilityHostMsg_ParseMediaMetadata_Finished(
+      true, *(metadata->ToValue().get())));
+}
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+
 static base::LazyInstance<PdfFunctions> g_pdf_lib = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
-ChromeContentUtilityClient::ChromeContentUtilityClient() {
+ChromeContentUtilityClient::ChromeContentUtilityClient()
+    : filter_messages_(false) {
 #if !defined(OS_ANDROID)
   handlers_.push_back(new ProfileImportHandler());
 #endif  // OS_ANDROID
@@ -304,6 +319,8 @@ ChromeContentUtilityClient::ChromeContentUtilityClient() {
     handlers_.push_back(new local_discovery::ServiceDiscoveryMessageHandler());
   }
 #endif  // ENABLE_MDNS
+
+  handlers_.push_back(new image_writer::ImageWriterHandler());
 }
 
 ChromeContentUtilityClient::~ChromeContentUtilityClient() {
@@ -314,10 +331,22 @@ void ChromeContentUtilityClient::UtilityThreadStarted() {
   std::string lang = command_line->GetSwitchValueASCII(switches::kLang);
   if (!lang.empty())
     extension_l10n_util::SetProcessLocale(lang);
+
+  if (command_line->HasSwitch(switches::kUtilityProcessRunningElevated)) {
+    message_id_whitelist_.insert(kMessageWhitelist,
+                                 kMessageWhitelist + kMessageWhitelistSize);
+    filter_messages_ = true;
+  }
 }
 
 bool ChromeContentUtilityClient::OnMessageReceived(
     const IPC::Message& message) {
+  if (filter_messages_ &&
+      (message_id_whitelist_.find(message.type()) ==
+       message_id_whitelist_.end())) {
+    return false;
+  }
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromeContentUtilityClient, message)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_UnpackExtension, OnUnpackExtension)
@@ -336,12 +365,16 @@ bool ChromeContentUtilityClient::OnMessageReceived(
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseJSON, OnParseJSON)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_GetPrinterCapsAndDefaults,
                         OnGetPrinterCapsAndDefaults)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_GetPrinterSemanticCapsAndDefaults,
+                        OnGetPrinterSemanticCapsAndDefaults)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_StartupPing, OnStartupPing)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection,
                         OnAnalyzeZipFileForDownloadProtection)
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_CheckMediaFile, OnCheckMediaFile)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_ParseMediaMetadata,
+                        OnParseMediaMetadata)
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
 #if defined(OS_CHROMEOS)
@@ -381,7 +414,10 @@ bool ChromeContentUtilityClient::OnMessageReceived(
 // static
 void ChromeContentUtilityClient::PreSandboxStartup() {
 #if defined(ENABLE_MDNS)
-  local_discovery::ServiceDiscoveryMessageHandler::PreSandboxStartup();
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUtilityProcessEnableMDns)) {
+    local_discovery::ServiceDiscoveryMessageHandler::PreSandboxStartup();
+  }
 #endif  // ENABLE_MDNS
 
   g_pdf_lib.Get().Init();
@@ -733,6 +769,29 @@ void ChromeContentUtilityClient::OnGetPrinterCapsAndDefaults(
   ReleaseProcessIfNeeded();
 }
 
+void ChromeContentUtilityClient::OnGetPrinterSemanticCapsAndDefaults(
+    const std::string& printer_name) {
+#if defined(ENABLE_FULL_PRINTING)
+  scoped_refptr<printing::PrintBackend> print_backend =
+      printing::PrintBackend::CreateInstance(NULL);
+  printing::PrinterSemanticCapsAndDefaults printer_info;
+
+  crash_keys::ScopedPrinterInfo crash_key(
+      print_backend->GetPrinterDriverInfo(printer_name));
+
+  if (print_backend->GetPrinterSemanticCapsAndDefaults(printer_name,
+                                                       &printer_info)) {
+    Send(new ChromeUtilityHostMsg_GetPrinterSemanticCapsAndDefaults_Succeeded(
+        printer_name, printer_info));
+  } else  // NOLINT
+#endif
+  {
+    Send(new ChromeUtilityHostMsg_GetPrinterSemanticCapsAndDefaults_Failed(
+        printer_name));
+  }
+  ReleaseProcessIfNeeded();
+}
+
 void ChromeContentUtilityClient::OnStartupPing() {
   Send(new ChromeUtilityHostMsg_ProcessStarted);
   // Don't release the process, we assume further messages are on the way.
@@ -752,12 +811,25 @@ void ChromeContentUtilityClient::OnAnalyzeZipFileForDownloadProtection(
 void ChromeContentUtilityClient::OnCheckMediaFile(
     int64 milliseconds_of_decoding,
     const IPC::PlatformFileForTransit& media_file) {
-  media::MediaFileChecker
-      checker(IPC::PlatformFileForTransitToPlatformFile(media_file));
+  media::MediaFileChecker checker(
+      base::File(IPC::PlatformFileForTransitToPlatformFile(media_file)));
   const bool check_success = checker.Start(
       base::TimeDelta::FromMilliseconds(milliseconds_of_decoding));
   Send(new ChromeUtilityHostMsg_CheckMediaFile_Finished(check_success));
   ReleaseProcessIfNeeded();
+}
+
+void ChromeContentUtilityClient::OnParseMediaMetadata(
+    const std::string& mime_type,
+    int64 total_size) {
+  // Only one IPCDataSource may be created and added to the list of handlers.
+  CHECK(!media_metadata_parser_);
+  metadata::IPCDataSource* source = new metadata::IPCDataSource(total_size);
+  handlers_.push_back(source);
+
+  media_metadata_parser_.reset(new metadata::MediaMetadataParser(source,
+                                                                 mime_type));
+  media_metadata_parser_->Start(base::Bind(&SendMediaMetadataToHost));
 }
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 

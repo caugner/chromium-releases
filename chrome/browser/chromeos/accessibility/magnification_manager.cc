@@ -199,6 +199,13 @@ class MagnificationManagerImpl : public MagnificationManager,
         chrome::NOTIFICATION_CROS_ACCESSIBILITY_TOGGLE_SCREEN_MAGNIFIER,
         content::NotificationService::AllSources(),
         content::Details<AccessibilityStatusEventDetails>(&details));
+
+#if defined(OS_CHROMEOS)
+    if (ash::Shell::GetInstance() && AccessibilityManager::Get()) {
+      ash::Shell::GetInstance()->SetCursorCompositingEnabled(
+          AccessibilityManager::Get()->ShouldEnableCursorCompositing());
+    }
+#endif
   }
 
   // content::NotificationObserver implementation:
@@ -208,14 +215,14 @@ class MagnificationManagerImpl : public MagnificationManager,
     switch (type) {
       case chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE: {
         // Update |profile_| when entering the login screen.
-        Profile* profile = ProfileManager::GetDefaultProfile();
+        Profile* profile = ProfileManager::GetActiveUserProfile();
         if (ProfileHelper::IsSigninProfile(profile))
           SetProfile(profile);
         break;
       }
       case chrome::NOTIFICATION_SESSION_STARTED:
         // Update |profile_| when entering a session.
-        SetProfile(ProfileManager::GetDefaultProfile());
+        SetProfile(ProfileManager::GetActiveUserProfile());
 
         // Add a session state observer to be able to monitor session changes.
         if (!session_state_observer_.get() && ash::Shell::HasInstance())

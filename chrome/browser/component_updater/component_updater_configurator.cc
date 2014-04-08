@@ -21,6 +21,8 @@
 #include "chrome/browser/component_updater/component_patcher_win.h"
 #endif
 
+namespace component_updater {
+
 namespace {
 
 // Default time constants.
@@ -157,7 +159,7 @@ int ChromeConfigurator::InitialDelay() {
 }
 
 int ChromeConfigurator::NextCheckDelay() {
-  return fast_update_ ? 3 : (2 * kDelayOneHour);
+  return fast_update_ ? 3 : (6 * kDelayOneHour);
 }
 
 int ChromeConfigurator::StepDelayMedium() {
@@ -220,3 +222,5 @@ ComponentUpdateService::Configurator* MakeChromeComponentUpdaterConfigurator(
     const CommandLine* cmdline, net::URLRequestContextGetter* context_getter) {
   return new ChromeConfigurator(cmdline, context_getter);
 }
+
+}  // namespace component_updater

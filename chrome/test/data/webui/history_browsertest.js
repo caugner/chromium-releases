@@ -366,7 +366,8 @@ TEST_F('HistoryWebUIFakeBackendTest', 'emptyHistory', function() {
   testDone();
 });
 
-TEST_F('HistoryWebUITest', 'basicTest', function() {
+// Times out on Win: http://crbug.com/336845
+TEST_F('HistoryWebUITest', 'DISABLED_basicTest', function() {
   var resultCount = document.querySelectorAll('.entry').length;
 
   // Check that there are two days of entries.
@@ -566,7 +567,7 @@ TEST_F('HistoryWebUITest', 'multipleSelect', function() {
   testDone();
 });
 
-TEST_F('HistoryWebUITest', 'searchHistory', function() {
+TEST_F('HistoryWebUITest', 'DISABLED_searchHistory', function() {
   var getResultCount = function() {
     return document.querySelectorAll('.entry').length;
   };

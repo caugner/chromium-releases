@@ -66,6 +66,7 @@ WiFiTest::Result WiFiTest::Main(int argc, const char* argv[]) {
   if (!ParseCommandLine(argc, argv)) {
     VLOG(0) <<  "Usage: " << argv[0] <<
                 " [--list]"
+                " [--get_key]"
                 " [--get_properties]"
                 " [--create]"
                 " [--connect]"
@@ -73,7 +74,7 @@ WiFiTest::Result WiFiTest::Main(int argc, const char* argv[]) {
                 " [--network_guid=<network_guid>]"
                 " [--frequency=0|2400|5000]"
                 " [--security=none|WEP-PSK|WPA-PSK|WPA2-PSK]"
-                " [--password=<wifi password>]"
+                " [--password=<wifi_password>]"
                 " [<network_guid>]\n";
     return RESULT_WRONG_USAGE;
   }
@@ -109,7 +110,7 @@ bool WiFiTest::ParseCommandLine(int argc, const char* argv[]) {
     MessageBoxA(NULL, __FUNCTION__, "Debug Me!", MB_OK);
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   scoped_ptr<WiFiService> wifi_service(WiFiService::Create());
 #else
   scoped_ptr<WiFiService> wifi_service(WiFiService::CreateForTest());
@@ -118,7 +119,7 @@ bool WiFiTest::ParseCommandLine(int argc, const char* argv[]) {
   wifi_service->Initialize(NULL);
 
   if (parsed_command_line.HasSwitch("list")) {
-    ListValue network_list;
+    base::ListValue network_list;
     wifi_service->GetVisibleNetworks(std::string(), &network_list);
     VLOG(0) << network_list;
     return true;
@@ -126,7 +127,7 @@ bool WiFiTest::ParseCommandLine(int argc, const char* argv[]) {
 
   if (parsed_command_line.HasSwitch("get_properties")) {
     if (network_guid.length() > 0) {
-      DictionaryValue properties;
+      base::DictionaryValue properties;
       std::string error;
       wifi_service->GetProperties(network_guid, &properties, &error);
       VLOG(0) << error << ":\n" << properties;
@@ -135,7 +136,7 @@ bool WiFiTest::ParseCommandLine(int argc, const char* argv[]) {
   }
 
   // Optional properties (frequency, password) to use for connect or create.
-  scoped_ptr<DictionaryValue> properties(new DictionaryValue());
+  scoped_ptr<base::DictionaryValue> properties(new base::DictionaryValue());
 
   if (!frequency.empty()) {
     int value = 0;
@@ -186,6 +187,18 @@ bool WiFiTest::ParseCommandLine(int argc, const char* argv[]) {
       std::string error;
       wifi_service->StartDisconnect(network_guid, &error);
       VLOG(0) << error;
+      return true;
+    }
+  }
+
+  if (parsed_command_line.HasSwitch("get_key")) {
+    if (network_guid.length() > 0) {
+      std::string error;
+      std::string key_data;
+      wifi_service->GetKeyFromSystem(network_guid,
+                                     &key_data,
+                                     &error);
+      VLOG(0) << key_data << error;
       return true;
     }
   }

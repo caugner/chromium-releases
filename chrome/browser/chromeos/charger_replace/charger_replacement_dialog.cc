@@ -49,6 +49,7 @@ ChargerReplacementDialog::~ChargerReplacementDialog() {
   current_window_ = NULL;
 }
 
+// static
 bool ChargerReplacementDialog::ShouldShowDialog() {
   if (is_window_visible_)
     return false;
@@ -63,6 +64,11 @@ bool ChargerReplacementDialog::ShouldShowDialog() {
           ChargerReplacementHandler::CONFIRM_ORDER_NEW_CHARGER_BY_PHONE);
 }
 
+// static
+bool ChargerReplacementDialog::IsDialogVisible() {
+  return is_window_visible_;
+}
+
 void ChargerReplacementDialog::SetFocusOnChargerDialogIfVisible() {
   if (is_window_visible_ && current_window_)
     current_window_->Focus();
@@ -70,12 +76,16 @@ void ChargerReplacementDialog::SetFocusOnChargerDialogIfVisible() {
 
 void ChargerReplacementDialog::Show() {
   content::RecordAction(
-        content::UserMetricsAction("ShowChargerReplacementDialog"));
+        base::UserMetricsAction("ShowChargerReplacementDialog"));
 
   is_window_visible_ = true;
-  current_window_ = chrome::ShowWebDialog(parent_window_,
-                                          ProfileManager::GetDefaultProfile(),
-                                          this);
+  // We show the dialog for the active user, so that the dialog will get
+  // displayed immediately. The parent window is a system modal/lock container
+  // and does not belong to any user.
+  current_window_ = chrome::ShowWebDialog(
+      parent_window_,
+      ProfileManager::GetActiveUserProfile(),
+      this);
   charger_replacement_handler_->set_charger_window(current_window_);
 }
 
@@ -83,7 +93,7 @@ ui::ModalType ChargerReplacementDialog::GetDialogModalType() const {
   return ui::MODAL_TYPE_SYSTEM;
 }
 
-string16 ChargerReplacementDialog::GetDialogTitle() const {
+base::string16 ChargerReplacementDialog::GetDialogTitle() const {
   return l10n_util::GetStringUTF16(IDS_CHARGER_REPLACEMENT_DIALOG_TITLE);
 }
 

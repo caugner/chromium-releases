@@ -11,7 +11,6 @@
 #include "ui/views/accessible_pane_view.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/focus/focus_manager_factory.h"
 #include "ui/views/focus/focus_manager_test.h"
 #include "ui/views/focus/widget_focus_manager.h"
@@ -163,26 +162,6 @@ TEST_F(FocusManagerTest, WidgetFocusChangeListener) {
   EXPECT_EQ(NativeViewPair(native_view1, native_view2),
             widget_listener.focus_changes()[1]);
 }
-
-#if !defined(USE_AURA)
-class TestTextfield : public Textfield {
- public:
-  TestTextfield() {}
-  virtual gfx::NativeView TestGetNativeControlView() {
-    return native_wrapper_->GetTestingHandle();
-  }
-};
-
-// Tests that NativeControls do set the focused View appropriately on the
-// FocusManager.
-TEST_F(FocusManagerTest, DISABLED_FocusNativeControls) {
-  TestTextfield* textfield = new TestTextfield();
-  GetContentsView()->AddChildView(textfield);
-  // Simulate the native view getting the native focus (such as by user click).
-  FocusNativeView(textfield->TestGetNativeControlView());
-  EXPECT_EQ(textfield, GetFocusManager()->GetFocusedView());
-}
-#endif
 
 // Counts accelerator calls.
 class TestAcceleratorTarget : public ui::AcceleratorTarget {
@@ -537,10 +516,11 @@ class FocusManagerDtorTest : public FocusManagerTest {
 
   class LabelButtonDtorTracked : public LabelButton {
    public:
-    LabelButtonDtorTracked(const string16& text, DtorTrackVector* dtor_tracker)
+    LabelButtonDtorTracked(const base::string16& text,
+                           DtorTrackVector* dtor_tracker)
         : LabelButton(NULL, text),
           dtor_tracker_(dtor_tracker) {
-      SetStyle(STYLE_NATIVE_TEXTBUTTON);
+      SetStyle(STYLE_BUTTON);
     };
     virtual ~LabelButtonDtorTracked() {
       dtor_tracker_->push_back("LabelButtonDtorTracked");
@@ -589,9 +569,9 @@ class FocusManagerDtorTest : public FocusManagerTest {
 #if !defined(USE_AURA)
 TEST_F(FocusManagerDtorTest, FocusManagerDestructedLast) {
   // Setup views hierarchy.
-  GetContentsView()->AddChildView(new TestTextfield());
+  GetContentsView()->AddChildView(new Textfield());
   GetContentsView()->AddChildView(new LabelButtonDtorTracked(
-      ASCIIToUTF16("button"), &dtor_tracker_));
+      base::ASCIIToUTF16("button"), &dtor_tracker_));
 
   // Close the window.
   GetWidget()->Close();

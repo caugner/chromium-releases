@@ -100,6 +100,14 @@ typedef BOOL (^FieldFilterBlock)(NSView<AutofillInputField>*);
 }
 
 - (BOOL)validate {
+  // Account for a subtle timing issue. -validate is called from the dialog's
+  // -accept. -accept then hides the dialog. If the data does not validate the
+  // dialog is then reshown, focusing on the first invalid field. This happens
+  // without running the message loop, so windowWillClose has not fired when
+  // the dialog and error bubble is reshown, leading to a missing error bubble.
+  // Resetting the anchor view here forces the bubble to show.
+  errorBubbleAnchorView_ = nil;
+
   bool allValid = true;
   for (AutofillSectionContainer* details in details_.get()) {
     if (![[details view] isHidden])
@@ -136,7 +144,7 @@ typedef BOOL (^FieldFilterBlock)(NSView<AutofillInputField>*);
     return;
 
   NSPoint scrollPoint = [clipView constrainScrollPoint:
-      NSMakePoint(NSMinX(fieldRect), NSMinY(fieldRect) - bottomPadding)];
+      NSMakePoint(0, NSMinY(fieldRect) - bottomPadding)];
   [clipView scrollToPoint:scrollPoint];
   [scrollView_ reflectScrolledClipView:clipView];
   [self updateErrorBubble];
@@ -156,9 +164,17 @@ typedef BOOL (^FieldFilterBlock)(NSView<AutofillInputField>*);
                     name:NSWindowWillCloseNotification
                   object:[errorBubbleController_ window]];
   errorBubbleController_ = nil;
+  errorBubbleAnchorView_ = nil;
 }
 
 - (void)showErrorBubbleForField:(NSControl<AutofillInputField>*)field {
+  // If there is already a bubble controller handling this field, reuse.
+  if (errorBubbleController_ && errorBubbleAnchorView_ == field) {
+    [errorBubbleController_ setMessage:[field validityMessage]];
+
+    return;
+  }
+
   if (errorBubbleController_)
     [errorBubbleController_ close];
   DCHECK(!errorBubbleController_);
@@ -203,11 +219,12 @@ typedef BOOL (^FieldFilterBlock)(NSView<AutofillInputField>*);
   [errorBubbleController_ setAnchorPoint:
       [parentWindow convertBaseToScreen:anchorPoint]];
 
+  errorBubbleAnchorView_ = field;
   [errorBubbleController_ showWindow:self];
 }
 
 - (void)hideErrorBubble {
-  [errorBubble_ setHidden:YES];
+  [errorBubbleController_ close];
 }
 
 - (void)updateMessageForField:(NSControl<AutofillInputField>*)field {

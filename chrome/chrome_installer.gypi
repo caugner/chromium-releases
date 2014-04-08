@@ -151,35 +151,38 @@
         {
           'target_name': 'installer_util_strings',
           'type': 'none',
-          'rules': [
+          'actions': [
             {
-              'rule_name': 'installer_util_strings',
-              'extension': 'grd',
+              'action_name': 'installer_util_strings',
               'variables': {
-                'create_string_rc_py' : 'installer/util/prebuild/create_string_rc.py',
+                'create_string_rc_py': 'installer/util/prebuild/create_string_rc.py',
               },
+              'conditions': [
+                ['branding=="Chrome"', {
+                  'variables': {
+                    'brand_strings': 'google_chrome_strings',
+                  },
+                }, {
+                  'variables': {
+                    'brand_strings': 'chromium_strings',
+                  },
+                }],
+              ],
               'inputs': [
                 '<(create_string_rc_py)',
-                '<(RULE_INPUT_PATH)',
+                'app/<(brand_strings).grd',
               ],
               'outputs': [
-                # Don't use <(RULE_INPUT_ROOT) to create the output file
-                # name, because the base name of the input
-                # (generated_resources.grd) doesn't match the generated file
-                # (installer_util_strings.h).
                 '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.h',
                 '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.rc',
               ],
               'action': ['python',
                          '<(create_string_rc_py)',
-                         '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings',
-                         '<(branding)',],
-              'message': 'Generating resources from <(RULE_INPUT_PATH)',
-              'msvs_cygwin_shell': 1,
+                         '-i', 'app/<(brand_strings).grd:resources',
+                         '-n', 'installer_util_strings',
+                         '-o', '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings',],
+              'message': 'Generating installer_util_strings',
             },
-          ],
-          'sources': [
-            'app/chromium_strings.grd',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
@@ -268,6 +271,7 @@
             ],
           },
           'sources': [
+            '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.rc',
             'installer/mini_installer/chrome.release',
             'installer/setup/archive_patch_helper.cc',
             'installer/setup/archive_patch_helper.h',
@@ -352,7 +356,6 @@
                 #'--distribution=$(CHROMIUM_BUILD)',
                 '--distribution=_google_chrome',
               ],
-              'msvs_cygwin_shell': 1,
             },
           ],
           'conditions': [
@@ -457,7 +460,6 @@
                 #'--distribution=$(CHROMIUM_BUILD)',
                 '--distribution=_google_chrome',
               ],
-              'msvs_cygwin_shell': 1,
             },
           ],
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -482,7 +484,7 @@
               '<@(nacl_win64_defines)',
           ],
               'dependencies': [
-              '<(DEPTH)/base/base.gyp:base_nacl_win64',
+              '<(DEPTH)/base/base.gyp:base_win64',
           ],
           'configurations': {
             'Common_Base': {
@@ -567,6 +569,9 @@
               '<(PRODUCT_DIR)/libwidevinecdmadapter.so',
               '<(PRODUCT_DIR)/libwidevinecdm.so',
             ],
+            'packaging_files_common': [
+              '<(DEPTH)/build/linux/bin/eu-strip',
+            ],
           }],
           ['target_arch=="x64"', {
             'deb_arch': 'amd64',
@@ -575,6 +580,9 @@
               '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',
               '<(PRODUCT_DIR)/libwidevinecdmadapter.so',
               '<(PRODUCT_DIR)/libwidevinecdm.so',
+            ],
+            'packaging_files_common': [
+              '<!(which eu-strip)',
             ],
           }],
           ['target_arch=="arm"', {

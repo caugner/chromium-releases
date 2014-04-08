@@ -132,6 +132,8 @@ int MapOpenSSLErrorSSL() {
       return ERR_SSL_BAD_RECORD_MAC_ALERT;
     case SSL_R_TLSV1_ALERT_DECRYPT_ERROR:
       return ERR_SSL_DECRYPT_ERROR_ALERT;
+    case SSL_R_TLSV1_UNRECOGNIZED_NAME:
+      return ERR_SSL_UNRECOGNIZED_NAME_ALERT;
     case SSL_R_UNSAFE_LEGACY_RENEGOTIATION_DISABLED:
       return ERR_SSL_UNSAFE_NEGOTIATION;
     case SSL_R_WRONG_NUMBER_OF_KEY_BITS:
@@ -181,6 +183,10 @@ int MapOpenSSLErrorSSL() {
     case SSL_R_TLSV1_ALERT_RECORD_OVERFLOW:
     case SSL_R_TLSV1_ALERT_USER_CANCELLED:
       return ERR_SSL_PROTOCOL_ERROR;
+    case SSL_R_CERTIFICATE_VERIFY_FAILED:
+      // The only way that the certificate verify callback can fail is if
+      // the leaf certificate changed during a renegotiation.
+      return ERR_SSL_SERVER_CERT_CHANGED;
     default:
       LOG(WARNING) << "Unmapped error reason: " << ERR_GET_REASON(error_code);
       return ERR_FAILED;
@@ -208,13 +214,6 @@ int MapOpenSSLError(int err, const crypto::OpenSSLErrStackTracer& tracer) {
       LOG(WARNING) << "Unknown OpenSSL error " << err;
       return ERR_SSL_PROTOCOL_ERROR;
   }
-}
-
-// We do certificate verification after handshake, so we disable the default
-// by registering a no-op verify function.
-int NoOpVerifyCallback(X509_STORE_CTX*, void *) {
-  DVLOG(3) << "skipping cert verify";
-  return 1;
 }
 
 // Utility to construct the appropriate set & clear masks for use the OpenSSL
@@ -268,9 +267,10 @@ class SSLClientSocketOpenSSL::SSLContext {
     DCHECK_NE(ssl_socket_data_index_, -1);
     ssl_ctx_.reset(SSL_CTX_new(SSLv23_client_method()));
     session_cache_.Reset(ssl_ctx_.get(), kDefaultSessionCacheConfig);
-    SSL_CTX_set_cert_verify_callback(ssl_ctx_.get(), NoOpVerifyCallback, NULL);
+    SSL_CTX_set_cert_verify_callback(ssl_ctx_.get(), CertVerifyCallback, NULL);
     SSL_CTX_set_client_cert_cb(ssl_ctx_.get(), ClientCertCallback);
     SSL_CTX_set_channel_id_cb(ssl_ctx_.get(), ChannelIDCallback);
+    SSL_CTX_set_verify(ssl_ctx_.get(), SSL_VERIFY_PEER, NULL);
 #if defined(OPENSSL_NPN_NEGOTIATED)
     // TODO(kristianm): Only select this if ssl_config_.next_proto is not empty.
     // It would be better if the callback were not a global setting,
@@ -298,6 +298,15 @@ class SSLClientSocketOpenSSL::SSLContext {
     SSLClientSocketOpenSSL* socket = GetInstance()->GetClientSocketFromSSL(ssl);
     CHECK(socket);
     socket->ChannelIDRequestCallback(ssl, pkey);
+  }
+
+  static int CertVerifyCallback(X509_STORE_CTX *store_ctx, void *arg) {
+    SSL* ssl = reinterpret_cast<SSL*>(X509_STORE_CTX_get_ex_data(
+        store_ctx, SSL_get_ex_data_X509_STORE_CTX_idx()));
+    SSLClientSocketOpenSSL* socket = GetInstance()->GetClientSocketFromSSL(ssl);
+    CHECK(socket);
+
+    return socket->CertVerifyCallback(store_ctx);
   }
 
   static int SelectNextProtoCallback(SSL* ssl,
@@ -331,6 +340,7 @@ void SSLClientSocket::ClearSessionCache() {
   SSLClientSocketOpenSSL::SSLContext* context =
       SSLClientSocketOpenSSL::SSLContext::GetInstance();
   context->session_cache()->Flush();
+  OpenSSLClientKeyStore::GetInstance()->Flush();
 }
 
 SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
@@ -368,7 +378,7 @@ SSLClientSocketOpenSSL::~SSLClientSocketOpenSSL() {
 
 void SSLClientSocketOpenSSL::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
-  cert_request_info->host_and_port = host_and_port_.ToString();
+  cert_request_info->host_and_port = host_and_port_;
   cert_request_info->cert_authorities = cert_authorities_;
 }
 
@@ -1363,8 +1373,26 @@ void SSLClientSocketOpenSSL::ChannelIDRequestCallback(SSL* ssl,
           ServerBoundCertService::kEPKIPassword,
           encrypted_private_key_info,
           subject_public_key_info));
+  if (!ec_private_key)
+    return;
   set_channel_id_sent(true);
   *pkey = EVP_PKEY_dup(ec_private_key->key());
+}
+
+int SSLClientSocketOpenSSL::CertVerifyCallback(X509_STORE_CTX* store_ctx) {
+  if (!completed_handshake_) {
+    // If the first handshake hasn't completed then we accept any certificates
+    // because we verify after the handshake.
+    return 1;
+  }
+
+  if (X509Certificate::IsSameOSCert(server_cert_->os_cert_handle(),
+                                    sk_X509_value(store_ctx->untrusted, 0))) {
+    return 1;
+  }
+
+  LOG(ERROR) << "Server certificate changed between handshakes";
+  return 0;
 }
 
 // SelectNextProtoCallback is called by OpenSSL during the handshake. If the

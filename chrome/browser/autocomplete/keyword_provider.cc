@@ -15,7 +15,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -23,6 +22,7 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/browser/extension_system.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
@@ -206,8 +206,7 @@ base::string16 KeywordProvider::GetKeywordForText(
         GetExtensionById(template_url->GetExtensionId(), false);
     if (!extension ||
         (profile_->IsOffTheRecord() &&
-        !extension_util::IsIncognitoEnabled(extension->id(),
-                                            extension_service)))
+        !extensions::util::IsIncognitoEnabled(extension->id(), profile_)))
       return base::string16();
   }
 
@@ -285,8 +284,8 @@ void KeywordProvider::Start(const AutocompleteInput& input,
           service->GetExtensionById(template_url->GetExtensionId(), false);
       bool enabled =
           extension && (!profile_->IsOffTheRecord() ||
-                        extension_util::IsIncognitoEnabled(extension->id(),
-                                                           service));
+                        extensions::util::IsIncognitoEnabled(
+                            extension->id(), profile_));
       if (!enabled) {
         i = matches.erase(i);
         continue;
@@ -362,7 +361,7 @@ void KeywordProvider::Start(const AutocompleteInput& input,
         bool have_listeners =
           extensions::ExtensionOmniboxEventRouter::OnInputChanged(
               profile_, template_url->GetExtensionId(),
-              UTF16ToUTF8(remaining_input), current_input_id_);
+              base::UTF16ToUTF8(remaining_input), current_input_id_);
 
         // We only have to wait for suggest results if there are actually
         // extensions listening for input changes.
@@ -590,10 +589,11 @@ void KeywordProvider::Observe(int type,
         // interaction.
         extension_suggest_matches_.push_back(CreateAutocompleteMatch(
             template_url, input, keyword.length(),
-            UTF8ToUTF16(suggestion.content), false, first_relevance - (i + 1)));
+            base::UTF8ToUTF16(suggestion.content), false,
+            first_relevance - (i + 1)));
 
         AutocompleteMatch* match = &extension_suggest_matches_.back();
-        match->contents.assign(UTF8ToUTF16(suggestion.description));
+        match->contents.assign(base::UTF8ToUTF16(suggestion.description));
         match->contents_class =
             extensions::StyleTypesToACMatchClassifications(suggestion);
         match->description.clear();

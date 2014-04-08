@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/time/time.h"
 #include "google_apis/drive/auth_service_interface.h"
 #include "google_apis/drive/base_requests.h"
 #include "google_apis/drive/drive_common_callbacks.h"
@@ -41,6 +42,61 @@ class DriveServiceObserver {
 // URLFetcher that runs on UI thread.
 class DriveServiceInterface {
  public:
+  // Optional parameters for AddNewDirectory().
+  struct AddNewDirectoryOptions {
+    AddNewDirectoryOptions();
+    ~AddNewDirectoryOptions();
+
+    // modified_date of the directory.
+    // Pass the null Time if you are not interested in setting this property.
+    base::Time modified_date;
+
+    // last_viewed_by_me_date of the directory.
+    // Pass the null Time if you are not interested in setting this property.
+    base::Time last_viewed_by_me_date;
+  };
+
+  // Optional parameters for InitiateUploadNewFile().
+  struct InitiateUploadNewFileOptions {
+    InitiateUploadNewFileOptions();
+    ~InitiateUploadNewFileOptions();
+
+    // modified_date of the file.
+    // Pass the null Time if you are not interested in setting this property.
+    base::Time modified_date;
+
+    // last_viewed_by_me_date of the file.
+    // Pass the null Time if you are not interested in setting this property.
+    base::Time last_viewed_by_me_date;
+  };
+
+  // Optional parameters for InitiateUploadExistingFile().
+  struct InitiateUploadExistingFileOptions {
+    InitiateUploadExistingFileOptions();
+    ~InitiateUploadExistingFileOptions();
+
+    // Expected ETag of the file. UPLOAD_ERROR_CONFLICT error is generated when
+    // matching fails.
+    // Pass the empty string to disable this behavior.
+    std::string etag;
+
+    // New parent of the file.
+    // Pass the empty string to keep the property unchanged.
+    std::string parent_resource_id;
+
+    // New title of the file.
+    // Pass the empty string to keep the property unchanged.
+    std::string title;
+
+    // New modified_date of the file.
+    // Pass the null Time if you are not interested in setting this property.
+    base::Time modified_date;
+
+    // New last_viewed_by_me_date of the file.
+    // Pass the null Time if you are not interested in setting this property.
+    base::Time last_viewed_by_me_date;
+  };
+
   virtual ~DriveServiceInterface() {}
 
   // Common service:
@@ -279,6 +335,7 @@ class DriveServiceInterface {
   virtual google_apis::CancelCallback AddNewDirectory(
       const std::string& parent_resource_id,
       const std::string& directory_title,
+      const AddNewDirectoryOptions& options,
       const google_apis::GetResourceEntryCallback& callback) = 0;
 
   // Downloads a file with |resourced_id|. The downloaded file will
@@ -308,6 +365,7 @@ class DriveServiceInterface {
       int64 content_length,
       const std::string& parent_resource_id,
       const std::string& title,
+      const InitiateUploadNewFileOptions& options,
       const google_apis::InitiateUploadCallback& callback) = 0;
 
   // Initiates uploading of an existing document/file.
@@ -318,7 +376,7 @@ class DriveServiceInterface {
       const std::string& content_type,
       int64 content_length,
       const std::string& resource_id,
-      const std::string& etag,
+      const InitiateUploadExistingFileOptions& options,
       const google_apis::InitiateUploadCallback& callback) = 0;
 
   // Resumes uploading of a document/file on the calling thread.
@@ -350,11 +408,16 @@ class DriveServiceInterface {
       const std::string& app_id,
       const google_apis::AuthorizeAppCallback& callback) = 0;
 
+  // Uninstalls a Drive app with the id |app_id|. |callback| must not be null.
+  virtual google_apis::CancelCallback UninstallApp(
+      const std::string& app_id,
+      const google_apis::EntryActionCallback& callback) = 0;
+
   // This is introduced as a temporary short term solution of the performance
   // regression issue on Drive API v2.
   //
-  // This fetches the resource list in a directory by usinig GData WAPI
-  // regardless of base protocol. In other words, even if we enabels Drive API
+  // This fetches the resource list in a directory by using GData WAPI
+  // regardless of base protocol. In other words, even if we enables Drive API
   // v2, this method uses GData WAPI to fetch the resource list.
   //
   // |directory_resource_id| must not be empty.

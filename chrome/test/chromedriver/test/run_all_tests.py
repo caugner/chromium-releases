@@ -8,8 +8,10 @@
 import optparse
 import os
 import platform
+import shutil
 import sys
 import tempfile
+import traceback
 
 _THIS_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_THIS_DIR, os.pardir))
@@ -104,7 +106,28 @@ def RunCppTests(cpp_tests):
 
 def DownloadChrome(version_name, revision, download_site):
   util.MarkBuildStepStart('download %s' % version_name)
-  return archive.DownloadChrome(revision, util.MakeTempDir(), download_site)
+  try:
+    temp_dir = util.MakeTempDir()
+    return (temp_dir, archive.DownloadChrome(revision, temp_dir, download_site))
+  except Exception:
+    traceback.print_exc()
+    util.AddBuildStepText('Skip Java and Python tests')
+    util.MarkBuildStepError()
+    return (None, None)
+
+
+def _KillChromes():
+  chrome_map = {
+      'win': 'chrome.exe',
+      'mac': 'Chromium',
+      'linux': 'chrome',
+  }
+  if util.IsWindows():
+    cmd = ['taskkill', '/F', '/IM']
+  else:
+    cmd = ['killall', '-9']
+  cmd.append(chrome_map[util.GetPlatformName()])
+  util.RunCommand(cmd)
 
 
 def main():
@@ -130,7 +153,12 @@ def main():
   required_build_outputs = [server_name]
   if not options.android_packages:
     required_build_outputs += [cpp_tests_name]
-  build_dir = chrome_paths.GetBuildDir(required_build_outputs)
+  try:
+    build_dir = chrome_paths.GetBuildDir(required_build_outputs)
+  except RuntimeError:
+    util.MarkBuildStepStart('check required binaries')
+    traceback.print_exc()
+    util.MarkBuildStepError()
   constants.SetBuildType(os.path.basename(build_dir))
   print 'Using build outputs from', build_dir
 
@@ -163,9 +191,9 @@ def main():
     latest_snapshot_revision = archive.GetLatestRevision(archive.Site.SNAPSHOT)
     versions = [
         ['HEAD', latest_snapshot_revision],
+        ['33', archive.CHROME_33_REVISION],
         ['32', archive.CHROME_32_REVISION],
-        ['31', archive.CHROME_31_REVISION],
-        ['30', archive.CHROME_30_REVISION]
+        ['31', archive.CHROME_31_REVISION]
     ]
     code = 0
     for version in versions:
@@ -176,7 +204,11 @@ def main():
       if version_name == 'HEAD':
         version_name = version[1]
         download_site = archive.Site.SNAPSHOT
-      chrome_path = DownloadChrome(version_name, version[1], download_site)
+      temp_dir, chrome_path = DownloadChrome(version_name, version[1],
+                                             download_site)
+      if not chrome_path:
+        code = 1
+        continue
       code1 = RunPythonTests(chromedriver,
                              ref_chromedriver,
                              chrome=chrome_path,
@@ -186,6 +218,8 @@ def main():
                            chrome_version=version[0],
                            chrome_version_name='v%s' % version_name)
       code = code or code1 or code2
+      _KillChromes()
+      shutil.rmtree(temp_dir)
     cpp_tests = os.path.join(build_dir, cpp_tests_name)
     return RunCppTests(cpp_tests) or code
 

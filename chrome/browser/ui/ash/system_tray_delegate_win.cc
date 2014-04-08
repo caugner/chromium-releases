@@ -154,7 +154,12 @@ class SystemTrayDelegateWin : public ash::SystemTrayDelegate,
   virtual void ShowUserLogin() OVERRIDE {
   }
 
-  virtual void ShowSpringChargerReplacementDialog() OVERRIDE {
+  virtual bool ShowSpringChargerReplacementDialog() OVERRIDE {
+    return false;
+  }
+
+  virtual bool IsSpringChargerReplacementDialogVisible() OVERRIDE {
+    return false;
   }
 
   virtual bool HasUserConfirmedSafeSpringCharger() OVERRIDE {
@@ -271,6 +276,9 @@ class SystemTrayDelegateWin : public ash::SystemTrayDelegate,
   virtual int GetSystemTrayMenuWidth() OVERRIDE {
     return l10n_util::GetLocalizedContentsWidthInPixels(
         IDS_SYSTEM_TRAY_MENU_BUBBLE_WIDTH_PIXELS);
+  }
+
+  virtual void ActiveUserWasChanged() OVERRIDE {
   }
 
  private:

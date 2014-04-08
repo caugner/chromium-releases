@@ -26,6 +26,7 @@
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebNodeList.h"
+#include "third_party/WebKit/public/web/WebPasswordFormData.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -181,6 +182,33 @@ bool DoUsernamesMatch(const base::string16& username1,
   return StartsWith(username1, username2, true);
 }
 
+// Returns |true| if the given element is both editable and has permission to be
+// autocompleted. The latter can be either because there is no
+// autocomplete='off' set for the element, or because the flag is set to ignore
+// autocomplete='off'. Otherwise, returns |false|.
+bool IsElementAutocompletable(const blink::WebInputElement& element) {
+  return IsElementEditable(element) &&
+         (ShouldIgnoreAutocompleteOffForPasswordFields() ||
+          element.autoComplete());
+}
+
+// Returns true if the password specified in |form| is a default value.
+bool PasswordValueIsDefault(const PasswordForm& form,
+                            blink::WebFormElement form_element) {
+  blink::WebVector<blink::WebNode> temp_elements;
+  form_element.getNamedElements(form.password_element, temp_elements);
+
+  // We are loose in our definition here and will return true if any of the
+  // appropriately named elements match the element to be saved. Currently
+  // we ignore filling passwords where naming is ambigious anyway.
+  for (size_t i = 0; i < temp_elements.size(); ++i) {
+    if (temp_elements[i].to<blink::WebElement>().getAttribute("value") ==
+        form.password_value)
+      return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -190,15 +218,10 @@ PasswordAutofillAgent::PasswordAutofillAgent(content::RenderView* render_view)
     : content::RenderViewObserver(render_view),
       usernames_usage_(NOTHING_TO_AUTOFILL),
       web_view_(render_view->GetWebView()),
-      gesture_handler_(new AutofillWebUserGestureHandler(this)),
-      user_gesture_occurred_(false),
       weak_ptr_factory_(this) {
-  blink::WebUserGestureIndicator::setHandler(gesture_handler_.get());
 }
 
 PasswordAutofillAgent::~PasswordAutofillAgent() {
-  DCHECK(gesture_handler_.get());
-  blink::WebUserGestureIndicator::setHandler(NULL);
 }
 
 bool PasswordAutofillAgent::TextFieldDidEndEditing(
@@ -250,9 +273,8 @@ bool PasswordAutofillAgent::TextDidChangeInTextField(
   if (iter->second.fill_data.wait_for_username)
     return false;
 
-  if (!IsElementEditable(element) || !element.isText() ||
-      (!ShouldIgnoreAutocompleteOffForPasswordFields() &&
-       !element.autoComplete())) {
+  if (!element.isText() || !IsElementAutocompletable(element) ||
+      !IsElementAutocompletable(password)) {
     return false;
   }
 
@@ -324,6 +346,14 @@ bool PasswordAutofillAgent::ShowSuggestions(
       login_to_password_info_.find(element);
   if (iter == login_to_password_info_.end())
     return false;
+
+  // If autocomplete='off' is set on the form elements, no suggestion dialog
+  // should be shown. However, return |true| to indicate that this is a known
+  // password form and that the request to show suggestions has been handled (as
+  // a no-op).
+  if (!IsElementAutocompletable(element) ||
+      !IsElementAutocompletable(iter->second.password_field))
+    return true;
 
   return ShowSuggestionPopup(iter->second.fill_data, element);
 }
@@ -485,24 +515,38 @@ void PasswordAutofillAgent::DidStartProvisionalLoad(blink::WebFrame* frame) {
     // If the navigation is not triggered by a user gesture, e.g. by some ajax
     // callback, then inherit the submitted password form from the previous
     // state. This fixes the no password save issue for ajax login, tracked in
-    // [http://crbug/43219]. Note that there are still some sites that this
-    // fails for because they use some element other than a submit button to
-    // trigger submission (which means WillSendSubmitEvent will not be called).
+    // [http://crbug/43219]. Note that this still fails for sites that use
+    // synchonous XHR as isProcessingUserGesture() will return true.
     blink::WebFrame* form_frame = CurrentOrChildFrameWithSavedForms(frame);
-    if (!blink::WebUserGestureIndicator::isProcessingUserGesture() &&
-        provisionally_saved_forms_[form_frame].get()) {
-      Send(new AutofillHostMsg_PasswordFormSubmitted(
-          routing_id(),
-          *provisionally_saved_forms_[form_frame]));
-      provisionally_saved_forms_.erase(form_frame);
+    if (!blink::WebUserGestureIndicator::isProcessingUserGesture()) {
+      // If onsubmit has been called, try and save that form.
+      if (provisionally_saved_forms_[form_frame].get()) {
+        Send(new AutofillHostMsg_PasswordFormSubmitted(
+            routing_id(),
+            *provisionally_saved_forms_[form_frame]));
+        provisionally_saved_forms_.erase(form_frame);
+      } else {
+        // Loop through the forms on the page looking for one that has been
+        // filled out. If one exists, try and save the credentials.
+        blink::WebVector<blink::WebFormElement> forms;
+        frame->document().forms(forms);
+
+        for (size_t i = 0; i < forms.size(); ++i) {
+          blink::WebFormElement form_element= forms[i];
+          scoped_ptr<PasswordForm> password_form(
+              CreatePasswordForm(form_element));
+          if (password_form.get() &&
+              !password_form->username_value.empty() &&
+              !password_form->password_value.empty() &&
+              !PasswordValueIsDefault(*password_form, form_element)) {
+            Send(new AutofillHostMsg_PasswordFormSubmitted(
+                routing_id(), *password_form));
+          }
+        }
+      }
     }
     // Clear the whole map during main frame navigation.
     provisionally_saved_forms_.clear();
-
-    // We are navigating, se we need to wait for a new user gesture before
-    // filling in passwords.
-    user_gesture_occurred_ = false;
-    gesture_handler_->clearElements();
   }
 }
 
@@ -569,7 +613,7 @@ void PasswordAutofillAgent::GetSuggestions(
     std::vector<base::string16>* realms) {
   if (StartsWith(fill_data.basic_data.fields[0].value, input, false)) {
     suggestions->push_back(fill_data.basic_data.fields[0].value);
-    realms->push_back(UTF8ToUTF16(fill_data.preferred_realm));
+    realms->push_back(base::UTF8ToUTF16(fill_data.preferred_realm));
   }
 
   for (PasswordFormFillData::LoginCollection::const_iterator iter =
@@ -577,7 +621,7 @@ void PasswordAutofillAgent::GetSuggestions(
        iter != fill_data.additional_logins.end(); ++iter) {
     if (StartsWith(iter->first, input, false)) {
       suggestions->push_back(iter->first);
-      realms->push_back(UTF8ToUTF16(iter->second.realm));
+      realms->push_back(base::UTF8ToUTF16(iter->second.realm));
     }
   }
 
@@ -588,7 +632,7 @@ void PasswordAutofillAgent::GetSuggestions(
       if (StartsWith(iter->second[i], input, false)) {
         usernames_usage_ = OTHER_POSSIBLE_USERNAME_SHOWN;
         suggestions->push_back(iter->second[i]);
-        realms->push_back(UTF8ToUTF16(iter->first.realm));
+        realms->push_back(base::UTF8ToUTF16(iter->first.realm));
       }
     }
   }
@@ -645,19 +689,15 @@ void PasswordAutofillAgent::FillFormOnPasswordRecieved(
     return;
 
   // If we can't modify the password, don't try to set the username
-  if (!IsElementEditable(password_element) ||
-      (!ShouldIgnoreAutocompleteOffForPasswordFields() &&
-       !password_element.autoComplete()))
+  if (!IsElementAutocompletable(password_element))
     return;
 
   // Try to set the username to the preferred name, but only if the field
   // can be set and isn't prefilled.
-  if (IsElementEditable(username_element) &&
-      (ShouldIgnoreAutocompleteOffForPasswordFields() ||
-       username_element.autoComplete()) &&
+  if (IsElementAutocompletable(username_element) &&
       username_element.value().isEmpty()) {
     // TODO(tkent): Check maxlength and pattern.
-    username_element.setValue(fill_data.basic_data.fields[0].value);
+    username_element.setValue(fill_data.basic_data.fields[0].value, true);
   }
 
   // Fill if we have an exact match for the username. Note that this sets
@@ -722,17 +762,13 @@ bool PasswordAutofillAgent::FillUserNameAndPassword(
   // fields.
 
   // Don't fill username if password can't be set.
-  if (!IsElementEditable(*password_element) ||
-      (!ShouldIgnoreAutocompleteOffForPasswordFields() &&
-       !password_element->autoComplete())) {
+  if (!IsElementAutocompletable(*password_element)) {
     return false;
   }
 
   // Input matches the username, fill in required values.
-  if (IsElementEditable(*username_element) &&
-      (ShouldIgnoreAutocompleteOffForPasswordFields() ||
-       username_element->autoComplete())) {
-    username_element->setValue(username);
+  if (IsElementAutocompletable(*username_element)) {
+    username_element->setValue(username, true);
     SetElementAutofilled(username_element, true);
 
     if (set_selection) {
@@ -745,17 +781,11 @@ bool PasswordAutofillAgent::FillUserNameAndPassword(
     return false;
   }
 
-  // If a user gesture has not occurred, we setup a handler to listen for the
-  // next user gesture, at which point we then fill in the password. This is to
-  // make sure that we do not fill in the DOM with a password until we believe
-  // the user is intentionally interacting with the page.
-  if (!user_gesture_occurred_) {
-    gesture_handler_->addElement(*password_element);
-    password_element->setSuggestedValue(password);
-  } else {
-    password_element->setValue(password);
-  }
-  SetElementAutofilled(password_element, true);
+  password_element->setValue(password, true);
+  // Note: Don't call SetElementAutofilled() here, as that dispatches an
+  // onChange event in JavaScript, which is not appropriate for the password
+  // element if a user gesture has not yet occured.
+  password_element->setAutofilled(true);
   return true;
 }
 
@@ -826,24 +856,5 @@ bool PasswordAutofillAgent::FindLoginInfo(const blink::WebNode& node,
   *found_password = iter->second;
   return true;
 }
-
-void PasswordAutofillAgent::AutofillWebUserGestureHandler::onGesture() {
-  agent_->set_user_gesture_occurred(true);
-
-  std::vector<blink::WebInputElement>::iterator iter;
-  for (iter = elements_.begin(); iter != elements_.end(); ++iter) {
-    if (!iter->isNull() && !iter->suggestedValue().isNull())
-      iter->setValue(iter->suggestedValue());
-  }
-
-  elements_.clear();
-}
-
-PasswordAutofillAgent::AutofillWebUserGestureHandler::
-    AutofillWebUserGestureHandler(PasswordAutofillAgent* agent)
-    : agent_(agent) {}
-
-PasswordAutofillAgent::AutofillWebUserGestureHandler::
-    ~AutofillWebUserGestureHandler() {}
 
 }  // namespace autofill

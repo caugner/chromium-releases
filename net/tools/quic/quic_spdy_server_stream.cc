@@ -97,12 +97,12 @@ void QuicSpdyServerStream::SendResponse() {
     return;
   }
 
-  DLOG(INFO) << "Sending response for stream " << id();
+  DVLOG(1) << "Sending response for stream " << id();
   SendHeadersAndBody(response->headers(), response->body());
 }
 
 void QuicSpdyServerStream::SendErrorResponse() {
-  DLOG(INFO) << "Sending error response for stream " << id();
+  DVLOG(1) << "Sending error response for stream " << id();
   BalsaHeaders headers;
   headers.SetResponseFirstlineFromStringPieces(
       "HTTP/1.1", "500", "Server Error");
@@ -121,9 +121,13 @@ void QuicSpdyServerStream:: SendHeadersAndBody(
   SpdyHeaderBlock header_block =
       SpdyUtils::ResponseHeadersToSpdyHeaders(response_headers);
 
-  string headers_string =
-      session()->compressor()->CompressHeaders(header_block);
+  if (version() > QUIC_VERSION_12) {
+    WriteHeaders(header_block, body.empty());
+  } else {
+    string headers_string =
+        session()->compressor()->CompressHeaders(header_block);
     WriteOrBufferData(headers_string, body.empty());
+  }
 
   if (!body.empty()) {
     WriteOrBufferData(body, true);

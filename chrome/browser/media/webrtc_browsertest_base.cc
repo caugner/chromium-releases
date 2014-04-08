@@ -58,6 +58,8 @@ WebRtcTestBase::WebRtcTestBase(): detect_errors_in_javascript_(false) {
   // set operation is idempotent.
   logging::SetLogMessageHandler(&JavascriptErrorDetectingLogHandler);
   hit_javascript_errors_.Get() = false;
+
+  EnablePixelOutput();
 }
 
 WebRtcTestBase::~WebRtcTestBase() {
@@ -215,4 +217,18 @@ void WebRtcTestBase::ConnectToPeerConnectionServer(
 
 void WebRtcTestBase::DetectErrorsInJavaScript() {
   detect_errors_in_javascript_ = true;
+}
+
+void WebRtcTestBase::StartDetectingVideo(
+    content::WebContents* tab_contents,
+    const std::string& video_element) const {
+  std::string javascript = base::StringPrintf(
+      "startDetection('%s', 320, 240)", video_element.c_str());
+  EXPECT_EQ("ok-started", ExecuteJavascript(javascript, tab_contents));
+}
+
+void WebRtcTestBase::WaitForVideoToPlay(
+    content::WebContents* tab_contents) const {
+  EXPECT_TRUE(PollingWaitUntil("isVideoPlaying()", "video-playing",
+                               tab_contents));
 }

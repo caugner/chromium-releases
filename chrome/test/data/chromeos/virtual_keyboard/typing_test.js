@@ -180,7 +180,6 @@ function testLowercaseKeysetAsync(testDoneCallback) {
     mockTypeCharacter('s', 0x53, Modifier.NONE);
     mockTypeCharacter('.', 0xBE, Modifier.NONE);
     mockTypeCharacter('\b', 0x08, Modifier.NONE, 0x08);
-    mockTypeCharacter('\t', 0x09, Modifier.NONE, 0x09);
     mockTypeCharacter('\n', 0x0D, Modifier.NONE, 0x0A);
     mockTypeCharacter(' ', 0x20, Modifier.NONE);
   };
@@ -316,7 +315,8 @@ function testFingerOutType(testDoneCallback) {
  * Tests that flicking upwards on a key with hintText types the hint text.
  * @param {Function} testDoneCallback The callback function on completion.
  */
-function testSwipeFlick(testDoneCallback) {
+// TODO(rsadam): Reenable when crbug.com/323211 is fixed.
+function disabled_testSwipeFlick(testDoneCallback) {
   var mockEvent = function(xOffset, yOffset, target, relatedTarget) {
     var bounds = target.getBoundingClientRect();
     return {

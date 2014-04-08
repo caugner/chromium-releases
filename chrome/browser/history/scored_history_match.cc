@@ -27,7 +27,7 @@ namespace history {
 // ScoredHistoryMatch ----------------------------------------------------------
 
 // static
-const size_t ScoredHistoryMatch::kMaxVisitsToScore = 10u;
+const size_t ScoredHistoryMatch::kMaxVisitsToScore = 10;
 const int ScoredHistoryMatch::kDaysToPrecomputeRecencyScoresFor = 366;
 const int ScoredHistoryMatch::kMaxRawTermScore = 30;
 float* ScoredHistoryMatch::raw_term_score_to_topicality_score_ = NULL;
@@ -106,7 +106,7 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
   // typing "w" will inline "ashington..." instead of "ww.washington...".
   const URLPrefix* best_inlineable_prefix =
       (!url_matches_.empty() && (terms.size() == 1)) ?
-      URLPrefix::BestURLPrefix(UTF8ToUTF16(gurl.spec()), terms[0]) :
+      URLPrefix::BestURLPrefix(base::UTF8ToUTF16(gurl.spec()), terms[0]) :
       NULL;
   can_inline_ = (best_inlineable_prefix != NULL) &&
       !IsWhitespace(*(lower_string.rbegin()));
@@ -133,8 +133,8 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
     //
     // Now, the code that implements this.
     // The deepest prefix for this URL regardless of where the match is.
-    const URLPrefix* best_prefix =
-        URLPrefix::BestURLPrefix(UTF8ToUTF16(gurl.spec()), base::string16());
+    const URLPrefix* best_prefix = URLPrefix::BestURLPrefix(
+        base::UTF8ToUTF16(gurl.spec()), base::string16());
     DCHECK(best_prefix != NULL);
     const int num_components_in_best_prefix = best_prefix->num_components;
     // If the URL is inlineable, we must have a match.  Note the prefix that
@@ -171,7 +171,7 @@ ScoredHistoryMatch::ScoredHistoryMatch(const URLRow& row,
     // (because the URL-that-you-typed will go first and everything
     // else will be assigned one minus the previous score, as coded
     // at the end of HistoryURLProvider::DoAutocomplete().
-    if (UTF8ToUTF16(gurl.host()) == terms[0])
+    if (base::UTF8ToUTF16(gurl.host()) == terms[0])
       hup_like_score = HistoryURLProvider::kScoreForBestInlineableResult;
 
     // HistoryURLProvider has the function PromoteOrCreateShorterSuggestion()
@@ -319,23 +319,17 @@ float ScoredHistoryMatch::GetTopicalityScore(
       url.find('/', colon_pos + 3) : url.find('/');
   size_t last_part_of_hostname_pos =
       (end_of_hostname_pos != std::string::npos) ?
-      url.rfind('.', end_of_hostname_pos) :
-      url.rfind('.');
+      url.rfind('.', end_of_hostname_pos) : url.rfind('.');
   // Loop through all URL matches and score them appropriately.
   // First, filter all matches not at a word boundary and in the path (or
   // later).
   url_matches_ = FilterTermMatchesByWordStarts(
-      url_matches_,
-      word_starts.url_word_starts_,
-      end_of_hostname_pos,
+      url_matches_, word_starts.url_word_starts_, end_of_hostname_pos,
       std::string::npos);
   if (colon_pos != std::string::npos) {
     // Also filter matches not at a word boundary and in the scheme.
     url_matches_ = FilterTermMatchesByWordStarts(
-        url_matches_,
-        word_starts.url_word_starts_,
-        0u,
-        colon_pos);
+        url_matches_, word_starts.url_word_starts_, 0, colon_pos);
   }
   for (TermMatches::const_iterator iter = url_matches_.begin();
        iter != url_matches_.end(); ++iter) {
@@ -385,7 +379,7 @@ float ScoredHistoryMatch::GetTopicalityScore(
   end_word_starts = word_starts.title_word_starts_.end();
   int word_num = 0;
   title_matches_ = FilterTermMatchesByWordStarts(
-      title_matches_, word_starts.title_word_starts_, 0u, std::string::npos);
+      title_matches_, word_starts.title_word_starts_, 0, std::string::npos);
   for (TermMatches::const_iterator iter = title_matches_.begin();
        iter != title_matches_.end(); ++iter) {
     // Advance next_word_starts until it's >= the position of the term
@@ -528,8 +522,8 @@ float ScoredHistoryMatch::GetFrecency(const base::Time& now,
     summed_visit_points += (value_of_transition * bucket_weight);
   }
   return visits.size() * summed_visit_points /
-      (discount_frecency_when_few_visits_ ? kMaxVisitsToScore :
-       total_sampled_visits);
+      (discount_frecency_when_few_visits_ ?
+          kMaxVisitsToScore : total_sampled_visits);
 }
 
 // static

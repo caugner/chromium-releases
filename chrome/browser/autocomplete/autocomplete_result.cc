@@ -194,18 +194,27 @@ void AutocompleteResult::SortAndCull(const AutocompleteInput& input,
   default_match_ = matches_.begin();
 
   if (default_match_ != matches_.end()) {
-    const base::string16 debug_info = ASCIIToUTF16("fill_into_edit=") +
-        default_match_->fill_into_edit + ASCIIToUTF16(", provider=") +
-        ((default_match_->provider != NULL) ?
-         ASCIIToUTF16(default_match_->provider->GetName()) : base::string16()) +
-        ASCIIToUTF16(", input=") + input.text();
+    const base::string16 debug_info =
+        base::ASCIIToUTF16("fill_into_edit=") +
+        default_match_->fill_into_edit +
+        base::ASCIIToUTF16(", provider=") +
+        ((default_match_->provider != NULL)
+            ? base::ASCIIToUTF16(default_match_->provider->GetName())
+            : base::string16()) +
+        base::ASCIIToUTF16(", input=") +
+        input.text();
     DCHECK(default_match_->allowed_to_be_default_match) << debug_info;
-    // We shouldn't get query matches for URL inputs, or non-query matches
-    // for query inputs.
-    if (AutocompleteMatch::IsSearchType(default_match_->type)) {
-      DCHECK_NE(AutocompleteInput::URL, input.type()) << debug_info;
-    } else {
-      DCHECK_NE(AutocompleteInput::FORCED_QUERY, input.type()) << debug_info;
+    // If the default match is valid (i.e., not a prompt/placeholder), make
+    // sure the type of destination is what the user would expect given the
+    // input.
+    if (default_match_->destination_url.is_valid()) {
+      // We shouldn't get query matches for URL inputs, or non-query matches
+      // for query inputs.
+      if (AutocompleteMatch::IsSearchType(default_match_->type)) {
+        DCHECK_NE(AutocompleteInput::URL, input.type()) << debug_info;
+      } else {
+        DCHECK_NE(AutocompleteInput::FORCED_QUERY, input.type()) << debug_info;
+      }
     }
   }
 
@@ -258,16 +267,13 @@ AutocompleteMatch* AutocompleteResult::match_at(size_t index) {
 }
 
 bool AutocompleteResult::ShouldHideTopMatch() const {
-  // Gate on our field trial flag.
   return chrome::ShouldHideTopVerbatimMatch() &&
-      TopMatchIsVerbatimAndHasNoConsecutiveVerbatimMatches();
+      TopMatchIsStandaloneVerbatimMatch();
 }
 
-bool AutocompleteResult::TopMatchIsVerbatimAndHasNoConsecutiveVerbatimMatches()
-    const {
-  if (empty() || !match_at(0).IsVerbatimType())
-    return false;
-  return !(size() > 1) || !match_at(1).IsVerbatimType();
+bool AutocompleteResult::TopMatchIsStandaloneVerbatimMatch() const {
+  return !empty() && match_at(0).IsVerbatimType() &&
+      ((size() == 1) || !match_at(1).IsVerbatimType());
 }
 
 void AutocompleteResult::Reset() {

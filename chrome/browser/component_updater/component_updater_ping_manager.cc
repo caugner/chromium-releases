@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/component_updater/component_updater_ping_manager.h"
+
+#include "base/compiler_specific.h"
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -182,7 +184,7 @@ PingManager::~PingManager() {
 // Sends a fire and forget ping when the updates are complete. The ping
 // sender object self-deletes after sending the ping.
 void PingManager::OnUpdateComplete(const CrxUpdateItem* item) {
-  component_updater::PingSender* ping_sender(new PingSender);
+  PingSender* ping_sender(new PingSender);
   ping_sender->SendPing(ping_url_, url_request_context_getter_, item);
 }
 

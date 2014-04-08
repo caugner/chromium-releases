@@ -131,21 +131,18 @@ gfx::Rect SpeechRecognitionBubbleView::GetAnchorRect() {
 }
 
 void SpeechRecognitionBubbleView::Init() {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  const gfx::Font& font = rb.GetFont(ResourceBundle::MediumFont);
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  const gfx::FontList& font_list =
+      rb.GetFontList(ui::ResourceBundle::MediumFont);
 
   heading_ = new views::Label(
-      l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING));
-  heading_->set_border(views::Border::CreateEmptyBorder(
+      l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING), font_list);
+  heading_->SetBorder(views::Border::CreateEmptyBorder(
       kBubbleHeadingVertMargin, 0, kBubbleHeadingVertMargin, 0));
-  heading_->SetFont(font);
   heading_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
-  heading_->SetText(
-      l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING));
   AddChildView(heading_);
 
-  message_ = new views::Label();
-  message_->SetFont(font);
+  message_ = new views::Label(base::string16(), font_list);
   message_->SetMultiLine(true);
   AddChildView(message_);
 
@@ -154,12 +151,12 @@ void SpeechRecognitionBubbleView::Init() {
   AddChildView(icon_);
 
   cancel_ = new views::LabelButton(this, l10n_util::GetStringUTF16(IDS_CANCEL));
-  cancel_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+  cancel_->SetStyle(views::Button::STYLE_BUTTON);
   AddChildView(cancel_);
 
   try_again_ = new views::LabelButton(
       this, l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_TRY_AGAIN));
-  try_again_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
+  try_again_->SetStyle(views::Button::STYLE_BUTTON);
   AddChildView(try_again_);
 
   mic_settings_ = new views::Link(
@@ -315,7 +312,7 @@ void SpeechRecognitionBubbleView::Layout() {
 // Implementation of SpeechRecognitionBubble.
 class SpeechRecognitionBubbleImpl : public SpeechRecognitionBubbleBase {
  public:
-  SpeechRecognitionBubbleImpl(WebContents* web_contents,
+  SpeechRecognitionBubbleImpl(int render_process_id, int render_view_id,
                               Delegate* delegate,
                               const gfx::Rect& element_rect);
   virtual ~SpeechRecognitionBubbleImpl();
@@ -337,9 +334,9 @@ class SpeechRecognitionBubbleImpl : public SpeechRecognitionBubbleBase {
 };
 
 SpeechRecognitionBubbleImpl::SpeechRecognitionBubbleImpl(
-    WebContents* web_contents, Delegate* delegate,
+    int render_process_id, int render_view_id, Delegate* delegate,
     const gfx::Rect& element_rect)
-    : SpeechRecognitionBubbleBase(web_contents),
+    : SpeechRecognitionBubbleBase(render_process_id, render_view_id),
       delegate_(delegate),
       bubble_(NULL),
       element_rect_(element_rect) {
@@ -353,11 +350,14 @@ SpeechRecognitionBubbleImpl::~SpeechRecognitionBubbleImpl() {
 }
 
 void SpeechRecognitionBubbleImpl::Show() {
+  WebContents* web_contents = GetWebContents();
+  if (!web_contents)
+    return;
+
   if (!bubble_) {
     views::View* icon = NULL;
 
     // Anchor to the location bar, in case |element_rect| is offscreen.
-    WebContents* web_contents = GetWebContents();
     Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
     if (browser) {
       BrowserView* browser_view =
@@ -388,20 +388,22 @@ void SpeechRecognitionBubbleImpl::Hide() {
 }
 
 void SpeechRecognitionBubbleImpl::UpdateLayout() {
-  if (bubble_)
+  if (bubble_ && GetWebContents())
     bubble_->UpdateLayout(display_mode(), message_text(), icon_image());
 }
 
 void SpeechRecognitionBubbleImpl::UpdateImage() {
-  if (bubble_)
+  if (bubble_ && GetWebContents())
     bubble_->SetImage(icon_image());
 }
 
 }  // namespace
 
 SpeechRecognitionBubble* SpeechRecognitionBubble::CreateNativeBubble(
-    WebContents* web_contents,
+    int render_process_id,
+    int render_view_id,
     SpeechRecognitionBubble::Delegate* delegate,
     const gfx::Rect& element_rect) {
-  return new SpeechRecognitionBubbleImpl(web_contents, delegate, element_rect);
+  return new SpeechRecognitionBubbleImpl(render_process_id, render_view_id,
+      delegate, element_rect);
 }

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/extensions/api/app_current_window_internal/app_current_window_internal_api.h"
 
-#include "apps/shell_window.h"
-#include "apps/shell_window_registry.h"
+#include "apps/app_window.h"
+#include "apps/app_window_registry.h"
 #include "apps/ui/native_app_window.h"
 #include "base/command_line.h"
 #include "chrome/browser/profiles/profile.h"
@@ -19,16 +19,18 @@
 namespace app_current_window_internal =
     extensions::api::app_current_window_internal;
 
+namespace Show = app_current_window_internal::Show;
 namespace SetBounds = app_current_window_internal::SetBounds;
 namespace SetMinWidth = app_current_window_internal::SetMinWidth;
 namespace SetMinHeight = app_current_window_internal::SetMinHeight;
 namespace SetMaxWidth = app_current_window_internal::SetMaxWidth;
 namespace SetMaxHeight = app_current_window_internal::SetMaxHeight;
 namespace SetIcon = app_current_window_internal::SetIcon;
+namespace SetBadgeIcon = app_current_window_internal::SetBadgeIcon;
 namespace SetShape = app_current_window_internal::SetShape;
 namespace SetAlwaysOnTop = app_current_window_internal::SetAlwaysOnTop;
 
-using apps::ShellWindow;
+using apps::AppWindow;
 using app_current_window_internal::Bounds;
 using app_current_window_internal::Region;
 using app_current_window_internal::RegionRect;
@@ -37,9 +39,9 @@ namespace extensions {
 
 namespace {
 
-const char kNoAssociatedShellWindow[] =
+const char kNoAssociatedAppWindow[] =
     "The context from which the function was called did not have an "
-    "associated shell window.";
+    "associated app window.";
 
 const char kDevChannelOnly[] =
     "This function is currently only available in the Dev channel.";
@@ -50,82 +52,84 @@ const char kRequiresFramelessWindow[] =
 const char kAlwaysOnTopPermission[] =
     "The \"alwaysOnTopWindows\" permission is required.";
 
-const int kUnboundedSize = apps::ShellWindow::SizeConstraints::kUnboundedSize;
+const int kUnboundedSize = apps::AppWindow::SizeConstraints::kUnboundedSize;
 
 }  // namespace
 
 bool AppCurrentWindowInternalExtensionFunction::RunImpl() {
-  apps::ShellWindowRegistry* registry =
-      apps::ShellWindowRegistry::Get(GetProfile());
+  apps::AppWindowRegistry* registry =
+      apps::AppWindowRegistry::Get(GetProfile());
   DCHECK(registry);
   content::RenderViewHost* rvh = render_view_host();
   if (!rvh)
     // No need to set an error, since we won't return to the caller anyway if
     // there's no RVH.
     return false;
-  ShellWindow* window = registry->GetShellWindowForRenderViewHost(rvh);
+  AppWindow* window = registry->GetAppWindowForRenderViewHost(rvh);
   if (!window) {
-    error_ = kNoAssociatedShellWindow;
+    error_ = kNoAssociatedAppWindow;
     return false;
   }
   return RunWithWindow(window);
 }
 
-bool AppCurrentWindowInternalFocusFunction::RunWithWindow(ShellWindow* window) {
+bool AppCurrentWindowInternalFocusFunction::RunWithWindow(AppWindow* window) {
   window->GetBaseWindow()->Activate();
   return true;
 }
 
 bool AppCurrentWindowInternalFullscreenFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   window->Fullscreen();
   return true;
 }
 
 bool AppCurrentWindowInternalMaximizeFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   window->Maximize();
   return true;
 }
 
 bool AppCurrentWindowInternalMinimizeFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   window->Minimize();
   return true;
 }
 
-bool AppCurrentWindowInternalRestoreFunction::RunWithWindow(
-    ShellWindow* window) {
+bool AppCurrentWindowInternalRestoreFunction::RunWithWindow(AppWindow* window) {
   window->Restore();
   return true;
 }
 
 bool AppCurrentWindowInternalDrawAttentionFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   window->GetBaseWindow()->FlashFrame(true);
   return true;
 }
 
 bool AppCurrentWindowInternalClearAttentionFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   window->GetBaseWindow()->FlashFrame(false);
   return true;
 }
 
-bool AppCurrentWindowInternalShowFunction::RunWithWindow(
-    ShellWindow* window) {
-  window->Show(ShellWindow::SHOW_ACTIVE);
+bool AppCurrentWindowInternalShowFunction::RunWithWindow(AppWindow* window) {
+  scoped_ptr<Show::Params> params(Show::Params::Create(*args_));
+  CHECK(params.get());
+  if (params->focused && !*params->focused)
+    window->Show(AppWindow::SHOW_INACTIVE);
+  else
+    window->Show(AppWindow::SHOW_ACTIVE);
   return true;
 }
 
-bool AppCurrentWindowInternalHideFunction::RunWithWindow(
-    ShellWindow* window) {
+bool AppCurrentWindowInternalHideFunction::RunWithWindow(AppWindow* window) {
   window->Hide();
   return true;
 }
 
 bool AppCurrentWindowInternalSetBoundsFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   // Start with the current bounds, and change any values that are specified in
   // the incoming parameters.
   gfx::Rect bounds = window->GetClientBounds();
@@ -146,7 +150,7 @@ bool AppCurrentWindowInternalSetBoundsFunction::RunWithWindow(
 }
 
 bool AppCurrentWindowInternalSetMinWidthFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
     error_ = kDevChannelOnly;
     return false;
@@ -162,7 +166,7 @@ bool AppCurrentWindowInternalSetMinWidthFunction::RunWithWindow(
 }
 
 bool AppCurrentWindowInternalSetMinHeightFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
     error_ = kDevChannelOnly;
     return false;
@@ -178,7 +182,7 @@ bool AppCurrentWindowInternalSetMinHeightFunction::RunWithWindow(
 }
 
 bool AppCurrentWindowInternalSetMaxWidthFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
     error_ = kDevChannelOnly;
     return false;
@@ -194,7 +198,7 @@ bool AppCurrentWindowInternalSetMaxWidthFunction::RunWithWindow(
 }
 
 bool AppCurrentWindowInternalSetMaxHeightFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
     error_ = kDevChannelOnly;
     return false;
@@ -209,8 +213,7 @@ bool AppCurrentWindowInternalSetMaxHeightFunction::RunWithWindow(
   return true;
 }
 
-bool AppCurrentWindowInternalSetIconFunction::RunWithWindow(
-    ShellWindow* window) {
+bool AppCurrentWindowInternalSetIconFunction::RunWithWindow(AppWindow* window) {
   if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV &&
       GetExtension()->location() != extensions::Manifest::COMPONENT) {
     error_ = kDevChannelOnly;
@@ -229,8 +232,38 @@ bool AppCurrentWindowInternalSetIconFunction::RunWithWindow(
   return true;
 }
 
+bool AppCurrentWindowInternalSetBadgeIconFunction::RunWithWindow(
+    AppWindow* window) {
+  if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
+    error_ = kDevChannelOnly;
+    return false;
+  }
+
+  scoped_ptr<SetBadgeIcon::Params> params(SetBadgeIcon::Params::Create(*args_));
+  CHECK(params.get());
+  // The |icon_url| parameter may be a blob url (e.g. an image fetched with an
+  // XMLHttpRequest) or a resource url.
+  GURL url(params->icon_url);
+  if (!url.is_valid() && !params->icon_url.empty())
+    url = GetExtension()->GetResourceURL(params->icon_url);
+
+  window->SetBadgeIconUrl(url);
+  return true;
+}
+
+bool AppCurrentWindowInternalClearBadgeFunction::RunWithWindow(
+    AppWindow* window) {
+  if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
+    error_ = kDevChannelOnly;
+    return false;
+  }
+
+  window->ClearBadge();
+  return true;
+}
+
 bool AppCurrentWindowInternalSetShapeFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
 
   if (!window->GetBaseWindow()->IsFrameless()) {
     error_ = kRequiresFramelessWindow;
@@ -252,7 +285,19 @@ bool AppCurrentWindowInternalSetShapeFunction::RunWithWindow(
     "5DF6ADC8708DF59FCFDDBF16AFBFB451380C2059",
     "1037DEF5F6B06EA46153AD87B6C5C37440E3F2D1",
     "F5815DAFEB8C53B078DD1853B2059E087C42F139",
-    "6A08EFFF9C16E090D6DCC7EC55A01CADAE840513"
+    "6A08EFFF9C16E090D6DCC7EC55A01CADAE840513",
+
+    "C32D6D93E12F5401DAA3A723E0C3CC5F25429BA4",  // http://crbug.com/354258
+    "9099782647D39C778E15C8C6E0D23C88F5CDE170",
+    "B7D5B52D1E5B106288BD7F278CAFA5E8D76108B0",
+    "89349DBAA2C4022FB244AA50182AB60934EB41EE",
+    "CB593E510640572A995CB1B6D41BD85ED51E63F8",
+    "1AD1AC86C87969CD3434FA08D99DBA6840AEA612",
+    "9C2EA21D7975BDF2B3C01C3A454EE44854067A6D",
+    "D2C488C80C3C90C3E01A991112A05E37831E17D0",
+    "6EEC061C0E74B46C7B5BE2EEFA49436368F4988F",
+    "8B344D9E8A4C505EF82A0DBBC25B8BD1F984E777",
+    "E06AFCB1EB0EFD237824CC4AC8FDD3D43E8BC868"
   };
   if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV &&
       !SimpleFeature::IsIdInWhitelist(
@@ -297,7 +342,7 @@ bool AppCurrentWindowInternalSetShapeFunction::RunWithWindow(
 }
 
 bool AppCurrentWindowInternalSetAlwaysOnTopFunction::RunWithWindow(
-    ShellWindow* window) {
+    AppWindow* window) {
   if (!GetExtension()->HasAPIPermission(
           extensions::APIPermission::kAlwaysOnTopWindows)) {
     error_ = kAlwaysOnTopPermission;

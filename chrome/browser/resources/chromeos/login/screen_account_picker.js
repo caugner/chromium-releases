@@ -23,11 +23,14 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
   return {
     EXTERNAL_API: [
       'loadUsers',
+      'runAppForTesting',
+      'setApps',
+      'setShouldShowApps',
+      'showAppError',
       'updateUserImage',
-      'updateUserGaiaNeeded',
+      'forceOnlineSignin',
       'setCapsLockState',
       'forceLockedUserPodFocus',
-      'onWallpaperLoaded',
       'removeUser',
       'showBannerMessage',
       'showUserPodButton',
@@ -76,6 +79,13 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
       }
     },
 
+    /* Cancel user adding if ESC was pressed.
+     */
+    cancel: function() {
+      if (Oobe.getInstance().displayType == DISPLAY_TYPE.USER_ADDING)
+        chrome.send('cancelUserAdding');
+    },
+
     /**
      * Event handler that is invoked just after the frame is shown.
      * @param {string} data Screen init payload.
@@ -95,13 +105,6 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
       var podRow = $('pod-row');
       podRow.handleBeforeShow();
 
-      // If this is showing for the lock screen display the sign out button,
-      // hide the add user button and activate the locked user's pod.
-      var lockedPod = podRow.lockedPod;
-      $('add-user-header-bar-item').hidden = !!lockedPod;
-      var signOutUserItem = $('sign-out-user-item');
-      if (signOutUserItem)
-        signOutUserItem.hidden = !lockedPod;
       // In case of the preselected pod onShow will be called once pod
       // receives focus.
       if (!podRow.preselectedPod)
@@ -183,6 +186,47 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
     },
 
     /**
+     * Runs app with a given id from the list of loaded apps.
+     * @param {!string} app_id of an app to run.
+     * @param {boolean=} opt_diagnostic_mode Whether to run the app in
+     *     diagnostic mode.  Default is false.
+     */
+    runAppForTesting: function(app_id, opt_diagnostic_mode) {
+      $('pod-row').findAndRunAppForTesting(app_id, opt_diagnostic_mode);
+    },
+
+    /**
+     * Adds given apps to the pod row.
+     * @param {array} apps Array of apps.
+     */
+    setApps: function(apps) {
+      $('pod-row').setApps(apps);
+    },
+
+    /**
+     * Sets the flag of whether app pods should be visible.
+     * @param {boolean} shouldShowApps Whether to show app pods.
+     */
+    setShouldShowApps: function(shouldShowApps) {
+      $('pod-row').setShouldShowApps(shouldShowApps);
+    },
+
+    /**
+     * Shows the given kiosk app error message.
+     * @param {!string} message Error message to show.
+     */
+    showAppError: function(message) {
+      // TODO(nkostylev): Figure out a way to show kiosk app launch error
+      // pointing to the kiosk app pod.
+      /** @const */ var BUBBLE_PADDING = 12;
+      $('bubble').showTextForElement($('pod-row'),
+                                     message,
+                                     cr.ui.Bubble.Attachment.BOTTOM,
+                                     $('pod-row').offsetWidth / 2,
+                                     BUBBLE_PADDING);
+    },
+
+    /**
      * Updates current image of a user.
      * @param {string} username User for which to update the image.
      */
@@ -191,11 +235,12 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
     },
 
     /**
-     * Updates user to use gaia login.
-     * @param {string} username User for which to state the state.
+     * Indicates that the given user must authenticate against GAIA during the
+     * next sign-in.
+     * @param {string} username User for whom to enforce GAIA sign-in.
      */
-    updateUserGaiaNeeded: function(username) {
-      $('pod-row').resetUserOAuthTokenStatus(username);
+    forceOnlineSignin: function(username) {
+      $('pod-row').forceOnlineSigninForUser(username);
     },
 
     /**
@@ -213,13 +258,6 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
       var row = $('pod-row');
       if (row.lockedPod)
         row.focusPod(row.lockedPod, true);
-    },
-
-    /**
-     * Mark wallpaper loaded
-     */
-    onWallpaperLoaded: function(username) {
-      $('pod-row').onWallpaperLoaded(username);
     },
 
     /**

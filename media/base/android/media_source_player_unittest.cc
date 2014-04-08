@@ -11,7 +11,7 @@
 #include "media/base/android/media_drm_bridge.h"
 #include "media/base/android/media_player_manager.h"
 #include "media/base/android/media_source_player.h"
-#include "media/base/bind_to_loop.h"
+#include "media/base/bind_to_current_loop.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/test_data_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -28,12 +28,14 @@ namespace media {
     }                                                             \
   } while (0)
 
-static const int kDefaultDurationInMs = 10000;
+const int kDefaultDurationInMs = 10000;
 
-static const char kAudioMp4[] = "audio/mp4";
-static const char kVideoMp4[] = "video/mp4";
-static const char kAudioWebM[] = "audio/webm";
-static const char kVideoWebM[] = "video/webm";
+const char kAudioMp4[] = "audio/mp4";
+const char kVideoMp4[] = "video/mp4";
+const char kAudioWebM[] = "audio/webm";
+const char kVideoWebM[] = "video/webm";
+const MediaDrmBridge::SecurityLevel kL1 = MediaDrmBridge::SECURITY_LEVEL_1;
+const MediaDrmBridge::SecurityLevel kL3 = MediaDrmBridge::SECURITY_LEVEL_3;
 
 // TODO(wolenetz/qinmin): Simplify tests with more effective mock usage, and
 // fix flaky pointer-based MDJ inequality testing. See http://crbug.com/327839.
@@ -82,7 +84,7 @@ class MockMediaPlayerManager : public MediaPlayerManager {
   virtual void OnSessionMessage(int media_keys_id,
                                 uint32 session_id,
                                 const std::vector<uint8>& message,
-                                const std::string& destination_url) OVERRIDE {}
+                                const GURL& destination_url) OVERRIDE {}
   virtual void OnSessionReady(int media_keys_id, uint32 session_id) OVERRIDE {}
   virtual void OnSessionClosed(int media_keys_id, uint32 session_id) OVERRIDE {}
   virtual void OnSessionError(int media_keys_id,
@@ -203,8 +205,8 @@ class MediaSourcePlayerTest : public testing::Test {
   // Prevent usage creep of MSP::set_decode_callback_for_testing() by
   // only using it for the ReleaseWithOnPrefetchDoneAlreadyPosted test.
   void OnNextTestDecodeCallbackPostTaskToReleasePlayer() {
-    player_.set_decode_callback_for_testing(media::BindToLoop(
-      message_loop_.message_loop_proxy(),
+    DCHECK_EQ(&message_loop_, base::MessageLoop::current());
+    player_.set_decode_callback_for_testing(media::BindToCurrentLoop(
       base::Bind(
           &MediaSourcePlayerTest::ReleaseWithPendingPrefetchDoneVerification,
           base::Unretained(this))));
@@ -427,6 +429,37 @@ class MediaSourcePlayerTest : public testing::Test {
 
     // No other seek should have been requested.
     EXPECT_EQ(original_num_seeks + 1, demuxer_->num_seek_requests());
+  }
+
+  // Preroll the decoder job to |target_timestamp|. The first access unit
+  // to decode will have a timestamp equal to |start_timestamp|.
+  // TODO(qinmin): Add additional test cases for out-of-order decodes.
+  // See http://crbug.com/331421.
+  void PrerollDecoderToTime(bool is_audio,
+                            const base::TimeDelta& start_timestamp,
+                            const base::TimeDelta& target_timestamp) {
+    EXPECT_EQ(target_timestamp, player_.GetCurrentTime());
+    // |start_timestamp| must be smaller than |target_timestamp|.
+    EXPECT_LE(start_timestamp, target_timestamp);
+    DemuxerData data = is_audio ? CreateReadFromDemuxerAckForAudio(1) :
+        CreateReadFromDemuxerAckForVideo();
+    int current_timestamp = start_timestamp.InMilliseconds();
+
+    // Send some data with access unit timestamps before the |target_timestamp|,
+    // and continue sending the data until preroll finishes.
+    // This simulates the common condition that AUs received after browser
+    // seek begin with timestamps before the seek target, and don't
+    // immediately complete preroll.
+    while (IsPrerolling(is_audio)) {
+      data.access_units[0].timestamp =
+          base::TimeDelta::FromMilliseconds(current_timestamp);
+      player_.OnDemuxerDataAvailable(data);
+      EXPECT_TRUE(GetMediaDecoderJob(is_audio)->is_decoding());
+      EXPECT_EQ(target_timestamp, player_.GetCurrentTime());
+      current_timestamp += 30;
+      message_loop_.Run();
+    }
+    EXPECT_LE(target_timestamp, player_.GetCurrentTime());
   }
 
   DemuxerData CreateReadFromDemuxerAckWithConfigChanged(bool is_audio,
@@ -677,7 +710,7 @@ class MediaSourcePlayerTest : public testing::Test {
   }
 
   bool IsTypeSupported(const std::vector<uint8>& scheme_uuid,
-                       const std::string& security_level,
+                       MediaDrmBridge::SecurityLevel security_level,
                        const std::string& container,
                        const std::vector<std::string>& codecs) {
     return MediaSourcePlayer::IsTypeSupported(
@@ -689,7 +722,7 @@ class MediaSourcePlayerTest : public testing::Test {
   MockDemuxerAndroid* demuxer_;  // Owned by |player_|.
   MediaSourcePlayer player_;
 
-  // Track whether a possibly asynch decoder callback test hook has run.
+  // Track whether a possibly async decoder callback test hook has run.
   bool decoder_callback_hook_executed_;
 
   // We need to keep the surface texture while the decoder is actively decoding.
@@ -851,6 +884,38 @@ TEST_F(MediaSourcePlayerTest, ChangeMultipleSurfaceWhileDecoding) {
   EXPECT_TRUE(GetMediaDecoderJob(false));
   EXPECT_EQ(2, demuxer_->num_data_requests());
   EXPECT_EQ(1, demuxer_->num_seek_requests());
+}
+
+TEST_F(MediaSourcePlayerTest, SetEmptySurfaceAndStarveWhileDecoding) {
+  SKIP_TEST_IF_MEDIA_CODEC_BRIDGE_IS_NOT_AVAILABLE();
+
+  // Test player pauses if an empty surface is passed.
+  CreateNextTextureAndSetVideoSurface();
+  StartVideoDecoderJob(true);
+  EXPECT_EQ(1, demuxer_->num_data_requests());
+
+  // Send the first input chunk.
+  player_.OnDemuxerDataAvailable(CreateReadFromDemuxerAckForVideo());
+
+  // While the decoder is decoding, pass an empty surface.
+  gfx::ScopedJavaSurface empty_surface;
+  player_.SetVideoSurface(empty_surface.Pass());
+
+  // Let the player starve. However, it should not issue any new data request in
+  // this case.
+  TriggerPlayerStarvation();
+  // Wait for the decoder job to finish decoding and be reset.
+  while (GetMediaDecoderJob(false))
+    message_loop_.RunUntilIdle();
+
+  // No further seek or data requests should have been received since the
+  // surface is empty.
+  EXPECT_EQ(0, demuxer_->num_browser_seek_requests());
+  EXPECT_EQ(1, demuxer_->num_data_requests());
+
+  // Playback resumes once a non-empty surface is passed.
+  CreateNextTextureAndSetVideoSurface();
+  EXPECT_EQ(1, demuxer_->num_browser_seek_requests());
 }
 
 TEST_F(MediaSourcePlayerTest, AudioOnlyStartAfterSeekFinish) {
@@ -1345,24 +1410,8 @@ TEST_F(MediaSourcePlayerTest, PrerollAudioAfterSeek) {
 
   SeekPlayerWithAbort(true, base::TimeDelta::FromMilliseconds(100));
   EXPECT_TRUE(IsPrerolling(true));
-  EXPECT_EQ(100.0, GetPrerollTimestamp().InMillisecondsF());
-
-  // Send some data before the seek position.
-  for (int i = 1; i < 4; ++i) {
-    player_.OnDemuxerDataAvailable(CreateReadFromDemuxerAckForAudio(i));
-    EXPECT_TRUE(GetMediaDecoderJob(true)->is_decoding());
-    message_loop_.Run();
-  }
-  EXPECT_EQ(100.0, player_.GetCurrentTime().InMillisecondsF());
-  EXPECT_TRUE(IsPrerolling(true));
-
-  // Send data after the seek position.
-  DemuxerData data = CreateReadFromDemuxerAckForAudio(3);
-  data.access_units[0].timestamp = base::TimeDelta::FromMilliseconds(100);
-  player_.OnDemuxerDataAvailable(data);
-  message_loop_.Run();
-  EXPECT_LT(100.0, player_.GetCurrentTime().InMillisecondsF());
-  EXPECT_FALSE(IsPrerolling(true));
+  PrerollDecoderToTime(
+      true, base::TimeDelta(), base::TimeDelta::FromMilliseconds(100));
 }
 
 TEST_F(MediaSourcePlayerTest, PrerollVideoAfterSeek) {
@@ -1374,32 +1423,8 @@ TEST_F(MediaSourcePlayerTest, PrerollVideoAfterSeek) {
 
   SeekPlayerWithAbort(false, base::TimeDelta::FromMilliseconds(100));
   EXPECT_TRUE(IsPrerolling(false));
-  EXPECT_EQ(100.0, GetPrerollTimestamp().InMillisecondsF());
-
-  // Send some data before the seek position.
-  DemuxerData data;
-  for (int i = 1; i < 4; ++i) {
-    data = CreateReadFromDemuxerAckForVideo();
-    data.access_units[0].timestamp = base::TimeDelta::FromMilliseconds(i * 30);
-    player_.OnDemuxerDataAvailable(data);
-    EXPECT_TRUE(GetMediaDecoderJob(false)->is_decoding());
-    message_loop_.Run();
-  }
-  EXPECT_EQ(100.0, player_.GetCurrentTime().InMillisecondsF());
-  EXPECT_TRUE(IsPrerolling(false));
-
-  // Send data at the seek position.
-  data = CreateReadFromDemuxerAckForVideo();
-  data.access_units[0].timestamp = base::TimeDelta::FromMilliseconds(100);
-  player_.OnDemuxerDataAvailable(data);
-  message_loop_.Run();
-
-  // TODO(wolenetz/qinmin): Player's maintenance of current time for video-only
-  // streams depends on decoder output, which may be initially inaccurate, and
-  // encoded video test data may also need updating. Verify at least that AU
-  // timestamp-based preroll logic has determined video preroll has completed.
-  // See http://crbug.com/310823 and http://b/11356652.
-  EXPECT_FALSE(IsPrerolling(false));
+  PrerollDecoderToTime(
+      false, base::TimeDelta(), base::TimeDelta::FromMilliseconds(100));
 }
 
 TEST_F(MediaSourcePlayerTest, SeekingAfterCompletingPrerollRestartsPreroll) {
@@ -1451,7 +1476,8 @@ TEST_F(MediaSourcePlayerTest, PrerollContinuesAcrossReleaseAndStart) {
   // and Start().
   StartAudioDecoderJob(true);
 
-  SeekPlayerWithAbort(true, base::TimeDelta::FromMilliseconds(100));
+  base::TimeDelta target_timestamp = base::TimeDelta::FromMilliseconds(100);
+  SeekPlayerWithAbort(true, target_timestamp);
   EXPECT_TRUE(IsPrerolling(true));
   EXPECT_EQ(100.0, GetPrerollTimestamp().InMillisecondsF());
 
@@ -1490,12 +1516,7 @@ TEST_F(MediaSourcePlayerTest, PrerollContinuesAcrossReleaseAndStart) {
   EXPECT_TRUE(IsPrerolling(true));
 
   // Send data after the seek position.
-  data = CreateReadFromDemuxerAckForAudio(3);
-  data.access_units[0].timestamp = base::TimeDelta::FromMilliseconds(100);
-  player_.OnDemuxerDataAvailable(data);
-  message_loop_.Run();
-  EXPECT_LT(100.0, player_.GetCurrentTime().InMillisecondsF());
-  EXPECT_FALSE(IsPrerolling(true));
+  PrerollDecoderToTime(true, target_timestamp, target_timestamp);
 }
 
 TEST_F(MediaSourcePlayerTest, PrerollContinuesAcrossConfigChange) {
@@ -1520,22 +1541,8 @@ TEST_F(MediaSourcePlayerTest, PrerollContinuesAcrossConfigChange) {
   // Simulate arrival of new configs.
   player_.OnDemuxerConfigsAvailable(CreateAudioDemuxerConfigs(kCodecVorbis));
 
-  // Send some data before the seek position.
-  for (int i = 1; i < 4; ++i) {
-    player_.OnDemuxerDataAvailable(CreateReadFromDemuxerAckForAudio(i));
-    EXPECT_TRUE(GetMediaDecoderJob(true)->is_decoding());
-    message_loop_.Run();
-  }
-  EXPECT_EQ(100.0, player_.GetCurrentTime().InMillisecondsF());
-  EXPECT_TRUE(IsPrerolling(true));
-
-  // Send data after the seek position.
-  data = CreateReadFromDemuxerAckForAudio(3);
-  data.access_units[0].timestamp = base::TimeDelta::FromMilliseconds(100);
-  player_.OnDemuxerDataAvailable(data);
-  message_loop_.Run();
-  EXPECT_LT(100.0, player_.GetCurrentTime().InMillisecondsF());
-  EXPECT_FALSE(IsPrerolling(true));
+  PrerollDecoderToTime(
+      true, base::TimeDelta(), base::TimeDelta::FromMilliseconds(100));
 }
 
 TEST_F(MediaSourcePlayerTest, SimultaneousAudioVideoConfigChange) {
@@ -1631,31 +1638,8 @@ TEST_F(MediaSourcePlayerTest, BrowserSeek_PrerollAfterBrowserSeek) {
   EXPECT_EQ(100.0, GetPrerollTimestamp().InMillisecondsF());
   EXPECT_EQ(2, demuxer_->num_data_requests());
 
-  // Send some data with access unit timestamps before the actual browser seek
-  // position. This is a bit unrealistic in this case where the browser seek
-  // jumped forward and next data from demuxer would normally begin at this
-  // browser seek position, immediately completing preroll. For simplicity and
-  // coverage, this test simulates the more common condition that AUs received
-  // after browser seek begin with timestamps before the seek target, and don't
-  // immediately complete preroll.
-  DemuxerData data;
-  for (int i = 1; i < 4; ++i) {
-    data = CreateReadFromDemuxerAckForVideo();
-    data.access_units[0].timestamp = base::TimeDelta::FromMilliseconds(i * 30);
-    player_.OnDemuxerDataAvailable(data);
-    EXPECT_TRUE(GetMediaDecoderJob(false)->is_decoding());
-    message_loop_.Run();
-    EXPECT_TRUE(IsPrerolling(false));
-  }
-
-  EXPECT_EQ(100.0, player_.GetCurrentTime().InMillisecondsF());
-
-  // Send data after the browser seek position.
-  data = CreateReadFromDemuxerAckForVideo();
-  data.access_units[0].timestamp = base::TimeDelta::FromMilliseconds(120);
-  player_.OnDemuxerDataAvailable(data);
-  message_loop_.Run();
-  EXPECT_FALSE(IsPrerolling(false));
+  PrerollDecoderToTime(
+      false, base::TimeDelta(), base::TimeDelta::FromMilliseconds(100));
 }
 
 TEST_F(MediaSourcePlayerTest, VideoDemuxerConfigChange) {
@@ -2065,16 +2049,16 @@ TEST_F(MediaSourcePlayerTest, DISABLED_IsTypeSupported_Widevine) {
   std::vector<std::string> codec_avc_aac(1, "avc1");
   codec_avc_aac.push_back("mp4a");
 
-  EXPECT_TRUE(IsTypeSupported(widevine_uuid, "L3", kVideoMp4, codec_avc));
-  IsTypeSupported(widevine_uuid, "L1", kVideoMp4, codec_avc);
+  EXPECT_TRUE(IsTypeSupported(widevine_uuid, kL3, kVideoMp4, codec_avc));
+  IsTypeSupported(widevine_uuid, kL1, kVideoMp4, codec_avc);
 
   // TODO(xhwang): L1/L3 doesn't apply to audio, so the result is messy.
   // Clean this up after we have a solution to specifying decoding mode.
-  EXPECT_TRUE(IsTypeSupported(widevine_uuid, "L3", kAudioMp4, codec_aac));
-  IsTypeSupported(widevine_uuid, "L1", kAudioMp4, codec_aac);
+  EXPECT_TRUE(IsTypeSupported(widevine_uuid, kL3, kAudioMp4, codec_aac));
+  IsTypeSupported(widevine_uuid, kL1, kAudioMp4, codec_aac);
 
-  EXPECT_TRUE(IsTypeSupported(widevine_uuid, "L3", kVideoMp4, codec_avc_aac));
-  IsTypeSupported(widevine_uuid, "L1", kVideoMp4, codec_avc_aac);
+  EXPECT_TRUE(IsTypeSupported(widevine_uuid, kL3, kVideoMp4, codec_avc_aac));
+  IsTypeSupported(widevine_uuid, kL1, kVideoMp4, codec_avc_aac);
 
   std::vector<std::string> codec_vp8(1, "vp8");
   std::vector<std::string> codec_vorbis(1, "vorbis");
@@ -2084,17 +2068,17 @@ TEST_F(MediaSourcePlayerTest, DISABLED_IsTypeSupported_Widevine) {
   // TODO(xhwang): WebM is actually not supported but currently
   // MediaDrmBridge.isCryptoSchemeSupported() doesn't check the container type.
   // Fix isCryptoSchemeSupported() and update this test as necessary.
-  EXPECT_TRUE(IsTypeSupported(widevine_uuid, "L3", kVideoWebM, codec_vp8));
-  IsTypeSupported(widevine_uuid, "L1", kVideoWebM, codec_vp8);
+  EXPECT_TRUE(IsTypeSupported(widevine_uuid, kL3, kVideoWebM, codec_vp8));
+  IsTypeSupported(widevine_uuid, kL1, kVideoWebM, codec_vp8);
 
   // TODO(xhwang): L1/L3 doesn't apply to audio, so the result is messy.
   // Clean this up after we have a solution to specifying decoding mode.
-  EXPECT_TRUE(IsTypeSupported(widevine_uuid, "L3", kAudioWebM, codec_vorbis));
-  IsTypeSupported(widevine_uuid, "L1", kAudioWebM, codec_vorbis);
+  EXPECT_TRUE(IsTypeSupported(widevine_uuid, kL3, kAudioWebM, codec_vorbis));
+  IsTypeSupported(widevine_uuid, kL1, kAudioWebM, codec_vorbis);
 
   EXPECT_TRUE(
-      IsTypeSupported(widevine_uuid, "L3", kVideoWebM, codec_vp8_vorbis));
-  IsTypeSupported(widevine_uuid, "L1", kVideoWebM, codec_vp8_vorbis);
+      IsTypeSupported(widevine_uuid, kL3, kVideoWebM, codec_vp8_vorbis));
+  IsTypeSupported(widevine_uuid, kL1, kVideoWebM, codec_vp8_vorbis);
 }
 
 TEST_F(MediaSourcePlayerTest, IsTypeSupported_InvalidUUID) {
@@ -2110,8 +2094,8 @@ TEST_F(MediaSourcePlayerTest, IsTypeSupported_InvalidUUID) {
                                   kInvalidUUID + arraysize(kInvalidUUID));
 
   std::vector<std::string> codec_avc(1, "avc1");
-  EXPECT_FALSE(IsTypeSupported(invalid_uuid, "L3", kVideoMp4, codec_avc));
-  EXPECT_FALSE(IsTypeSupported(invalid_uuid, "L1", kVideoMp4, codec_avc));
+  EXPECT_FALSE(IsTypeSupported(invalid_uuid, kL3, kVideoMp4, codec_avc));
+  EXPECT_FALSE(IsTypeSupported(invalid_uuid, kL1, kVideoMp4, codec_avc));
 }
 
 // TODO(xhwang): Are these IsTypeSupported tests device specific?
