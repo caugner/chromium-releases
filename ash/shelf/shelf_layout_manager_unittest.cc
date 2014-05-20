@@ -27,9 +27,9 @@
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_event_dispatcher.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
@@ -861,6 +861,38 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_AutoHide) {
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
 }
 
+// Check that swipes and mouse interactions do have no impact in Maximize mode.
+TEST_F(ShelfLayoutManagerTest, MaximizeModePreventsMouseHide) {
+  aura::Window* root = Shell::GetPrimaryRootWindow();
+  aura::test::EventGenerator generator(root, root);
+  generator.MoveMouseTo(0, 0);
+
+  ShelfLayoutManager* shelf = GetShelfLayoutManager();
+  shelf->SetAutoHideBehavior(ash::SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.context = CurrentContext();
+  // Widget is now owned by the parent window.
+  widget->Init(params);
+  widget->Maximize();
+  widget->Show();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
+
+  shelf->OnMaximizeModeStarted();
+  // LayoutShelf() forces the animation to completion.
+  shelf->LayoutShelf();
+
+  // Drag mouse to bottom of screen. In contrast to normal operation the shelf
+  // should remain visible.
+  generator.MoveMouseTo(0, 0);
+  generator.PressLeftButton();
+  generator.MoveMouseTo(0, root->bounds().bottom() - 1);
+  UpdateAutoHideStateNow();
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
+}
+
 // Test the behavior of the shelf when it is auto hidden and it is on the
 // boundary between the primary and the secondary display.
 TEST_F(ShelfLayoutManagerTest, AutoHideShelfOnScreenBoundary) {
@@ -1493,7 +1525,8 @@ TEST_F(ShelfLayoutManagerTest, MAYBE_SetAlignment) {
             display.work_area().y() - display.bounds().y());
 }
 
-TEST_F(ShelfLayoutManagerTest, GestureEdgeSwipe) {
+//  https://code.google.com/p/chromium/issues/detail?id=356419
+TEST_F(ShelfLayoutManagerTest, DISABLED_GestureEdgeSwipe) {
   ShelfLayoutManager* shelf = GetShelfLayoutManager();
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
   views::Widget* widget = new views::Widget;
@@ -1533,6 +1566,34 @@ TEST_F(ShelfLayoutManagerTest, GestureEdgeSwipe) {
   EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
   EXPECT_FALSE(widget->IsFullscreen());
+}
+
+// Check that in maximize mode gesture swipes on the shelf have no effect.
+TEST_F(ShelfLayoutManagerTest, MaximizeModeGestureEdgeSwipe) {
+  ShelfLayoutManager* shelf = GetShelfLayoutManager();
+  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+  params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.context = CurrentContext();
+  widget->Init(params);
+  widget->Show();
+  widget->Maximize();
+
+  shelf->LayoutShelf();
+
+  shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  shelf->LayoutShelf();
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
+
+  shelf->OnMaximizeModeStarted();
+  shelf->LayoutShelf();
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
+
+  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
+  generator.GestureEdgeSwipe();
+
+  EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
 }
 
 #if defined(OS_WIN)
@@ -1925,6 +1986,34 @@ TEST_F(ShelfLayoutManagerTest, ShelfBackgroundColorAutoHide) {
   EXPECT_EQ(SHELF_BACKGROUND_OVERLAP, GetShelfWidget()->GetBackgroundType());
   w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   EXPECT_EQ(SHELF_BACKGROUND_OVERLAP, GetShelfWidget()->GetBackgroundType());
+}
+
+// Verify that setting the shelf's auto hide mode in maximize mode does not
+// hide.
+TEST_F(ShelfLayoutManagerTest, DoesNotHideInMaximizeMode) {
+  EXPECT_EQ(SHELF_BACKGROUND_DEFAULT, GetShelfWidget()->GetBackgroundType());
+
+  GetShelfLayoutManager()->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  scoped_ptr<aura::Window> w1(CreateTestWindow());
+  w1->Show();
+  ShelfLayoutManager* shelf = GetShelfLayoutManager();
+
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
+
+  GetShelfLayoutManager()->OnMaximizeModeStarted();
+  EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
+
+  // Setting the state again should have no impact.
+  GetShelfLayoutManager()->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  EXPECT_EQ(SHELF_VISIBLE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
+
+  GetShelfLayoutManager()->OnMaximizeModeEnded();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
 }
 
 #if defined(OS_CHROMEOS)

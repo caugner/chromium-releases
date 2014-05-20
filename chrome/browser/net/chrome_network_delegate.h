@@ -32,6 +32,10 @@ class ConnectInterceptor;
 class Predictor;
 }
 
+namespace domain_reliability {
+class DomainReliabilityMonitor;
+}  // namespace domain_reliability
+
 namespace extensions {
 class EventRouterForwarder;
 class InfoMap;
@@ -96,6 +100,12 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
     force_google_safe_search_ = force_google_safe_search;
   }
 
+  void set_domain_reliability_monitor(
+      domain_reliability::DomainReliabilityMonitor*
+          domain_reliability_monitor) {
+    domain_reliability_monitor_ = domain_reliability_monitor;
+  }
+
   // Adds the Client Hints header to HTTP requests.
   void SetEnableClientHints();
 
@@ -141,8 +151,8 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
       net::URLRequest* request,
       const net::CompletionCallback& callback,
       const net::HttpResponseHeaders* original_response_headers,
-      scoped_refptr<net::HttpResponseHeaders>* override_response_headers)
-      OVERRIDE;
+      scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
+      GURL* allowed_unsafe_redirect_url) OVERRIDE;
   virtual void OnBeforeRedirect(net::URLRequest* request,
                                 const GURL& new_location) OVERRIDE;
   virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
@@ -194,6 +204,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
 
   // Weak, owned by our owner.
   const policy::URLBlacklistManager* url_blacklist_manager_;
+  domain_reliability::DomainReliabilityMonitor* domain_reliability_monitor_;
 
   // When true, allow access to all file:// URLs.
   static bool g_allow_file_access_;

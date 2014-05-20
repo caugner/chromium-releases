@@ -8,7 +8,8 @@
  implemented_in="chrome/browser/chromeos/extensions/file_manager/file_browser_private_api_functions.h"]
 namespace fileBrowserPrivate {
 // Type of the mounted volume.
-enum VolumeType { drive, downloads, removable, archive, cloud_device };
+enum VolumeType { drive, downloads, removable, archive, cloud_device, provided,
+                  testing };
 
 // Device type. Available if this is removable volume.
 enum DeviceType { usb, sd, optical, mobile, unknown };
@@ -124,6 +125,13 @@ enum TaskResult {
   empty
 };
 
+// Drive share type.
+enum DriveShareType {
+  can_edit,
+  can_comment,
+  can_view
+};
+
 // A file task represents an action that the file manager can perform over the
 // currently selected files. See
 // chrome/browser/chromeos/extensions/file_manager/file_tasks.h for details
@@ -212,11 +220,8 @@ dictionary VolumeMetadata {
 
   // Description of the profile where the volume belongs.
   // TODO(hirono): Remove the property because of the design change of
-  // multi-profile suuport.
+  // multi-profile support.
   ProfileInfo profile;
-
-  // Disk volume mount point path.
-  DOMString mountPath;
 
   // The path to the mounted device, archive file or network resource.
   DOMString? sourcePath;
@@ -309,8 +314,8 @@ dictionary CopyProgressStatus {
   // pre-compute the size of files being copied for the file (not directory).
   double? size;
 
-  // FileError's code of the error. Available only for ERROR event.
-  long? error;
+  // DOMError's name. Available only for ERROR event.
+  DOMString? error;
 };
 
 // Payload data for file transfer cancel response.
@@ -579,7 +584,7 @@ interface Functions {
   // Pins/unpins a Drive file in the cache.
   // |fileUrl| URL of a file to pin/unpin.
   // |pin| Pass true to pin the file.
-  // |callback| Completion callback. $ref:runtime.lastError will be set if there
+  // |callback| Completion callback. $(ref:runtime.lastError) will be set if there
   //     was an error.
   static void pinDriveFile(DOMString fileUrl,
                            boolean pin,
@@ -700,6 +705,13 @@ interface Functions {
   // |url| Url for the file.
   // |callback|
   static void getShareUrl(DOMString url, GetShareUrlCallback callback);
+
+  // Requests to share drive files.
+  // |url| URL of a file to be shared.
+  // |shareType| Type of access that is getting granted.
+  static void requestDriveShare(DOMString url,
+                                DriveShareType shareType,
+                                SimpleCallback callback);
 
   // Requests to install a webstore item.
   // |item_id| The id of the item to install.

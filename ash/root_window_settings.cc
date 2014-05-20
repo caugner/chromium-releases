@@ -4,7 +4,7 @@
 
 #include "ash/root_window_settings.h"
 
-#include "ui/aura/root_window.h"
+#include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_property.h"
 #include "ui/gfx/display.h"
 
@@ -18,7 +18,8 @@ DEFINE_OWNED_WINDOW_PROPERTY_KEY(RootWindowSettings,
 
 RootWindowSettings::RootWindowSettings()
     : display_id(gfx::Display::kInvalidDisplayID),
-      controller(NULL) {
+      controller(NULL),
+      shutdown(false) {
 }
 
 RootWindowSettings* InitRootWindowSettings(aura::Window* root) {

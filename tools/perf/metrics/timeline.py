@@ -2,104 +2,40 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import collections
-import itertools
 
 from metrics import Metric
 from telemetry.core.timeline import bounds
-from telemetry.page import page_measurement
-
-TRACING_MODE = 'tracing-mode'
-TIMELINE_MODE = 'timeline-mode'
-
-
-class MissingFramesError(page_measurement.MeasurementFailure):
-  def __init__(self):
-    super(MissingFramesError, self).__init__(
-        'No frames found in trace. Unable to normalize results.')
 
 
 class TimelineMetric(Metric):
-  def __init__(self, mode):
+  def __init__(self, model=None, renderer_process=None, action_ranges=None):
     """ Initializes a TimelineMetric object.
     """
     super(TimelineMetric, self).__init__()
-    assert mode in (TRACING_MODE, TIMELINE_MODE)
-    self._mode = mode
-    self._model = None
-    self._renderer_process = None
-    self._actions = []
-    self._action_ranges = []
-
-  def Start(self, page, tab):
-    """Starts gathering timeline data.
-
-    mode: TRACING_MODE or TIMELINE_MODE
-    """
-    self._model = None
-    if self._mode == TRACING_MODE:
-      if not tab.browser.supports_tracing:
-        raise Exception('Not supported')
-      tab.browser.StartTracing()
-    else:
-      assert self._mode == TIMELINE_MODE
-      tab.StartTimelineRecording()
-
-  def Stop(self, page, tab):
-    if self._mode == TRACING_MODE:
-      trace_result = tab.browser.StopTracing()
-      self._model = trace_result.AsTimelineModel()
-      self._renderer_process = self._model.GetRendererProcessFromTab(tab)
-      self._action_ranges = [ action.GetActiveRangeOnTimeline(self._model)
-                              for action in self._actions ]
-      # Make sure no action ranges overlap
-      for combo in itertools.combinations(self._action_ranges, 2):
-        assert not combo[0].Intersects(combo[1])
-    else:
-      tab.StopTimelineRecording()
-      self._model = tab.timeline_model
-      self._renderer_process = self._model.GetAllProcesses()[0]
-
-  def AddActionToIncludeInMetric(self, action):
-    self._actions.append(action)
-
-  @property
-  def model(self):
-    return self._model
-
-  @model.setter
-  def model(self, model):
     self._model = model
-
-  @property
-  def renderer_process(self):
-    return self._renderer_process
-
-  @renderer_process.setter
-  def renderer_process(self, p):
-    self._renderer_process = p
+    self._renderer_process = renderer_process
+    self._action_ranges = action_ranges if action_ranges else []
 
   def AddResults(self, tab, results):
     return
 
 
 class LoadTimesTimelineMetric(TimelineMetric):
-  def __init__(self, mode):
-    super(LoadTimesTimelineMetric, self).__init__(mode)
+  def __init__(self, model=None, renderer_process=None, action_ranges=None):
+    super(LoadTimesTimelineMetric, self).__init__(model, renderer_process,
+                                                  action_ranges)
     self.report_main_thread_only = True
 
   def AddResults(self, _, results):
     assert self._model
     if self.report_main_thread_only:
-      if self._mode == TRACING_MODE:
-        thread_filter = 'CrRendererMain'
-      else:
-        thread_filter = 'thread 0'
+      thread_filter = 'CrRendererMain'
     else:
       thread_filter = None
 
     events_by_name = collections.defaultdict(list)
 
-    for thread in self.renderer_process.threads.itervalues():
+    for thread in self._renderer_process.threads.itervalues():
 
       if thread_filter and not thread.name in thread_filter:
         continue
@@ -123,7 +59,7 @@ class LoadTimesTimelineMetric(TimelineMetric):
         results.Add(full_name + '_max', 'ms', biggest_jank)
         results.Add(full_name + '_avg', 'ms', total / len(times))
 
-    for counter_name, counter in self.renderer_process.counters.iteritems():
+    for counter_name, counter in self._renderer_process.counters.iteritems():
       total = sum(counter.totals)
 
       # Results objects cannot contain the '.' character, so remove that here.
@@ -204,7 +140,8 @@ def ThreadCpuTimeResultName(thread_category):
   return "thread_" + thread_category + "_cpu_time_per_frame"
 
 def ThreadDetailResultName(thread_category, detail):
-  return "thread_" + thread_category + "|" + detail
+  detail_sanitized = detail.replace('.','_')
+  return "thread_" + thread_category + "|" + detail_sanitized
 
 
 class ResultsForThread(object):
@@ -252,12 +189,8 @@ class ResultsForThread(object):
     self.toplevel_slices.extend(self.SlicesInActions(thread.toplevel_slices))
 
   def AddResults(self, num_frames, results):
-    clock_report_name = ThreadTimeResultName(self.name)
-    cpu_report_name  = ThreadCpuTimeResultName(self.name)
-    clock_per_frame = (float(self.clock_time) / num_frames) if num_frames else 0
-    cpu_per_frame   = (float(self.cpu_time) / num_frames) if num_frames else 0
-    results.Add(clock_report_name, 'ms', clock_per_frame)
-    results.Add(cpu_report_name, 'ms', cpu_per_frame)
+    cpu_per_frame = (float(self.cpu_time) / num_frames) if num_frames else 0
+    results.Add(ThreadCpuTimeResultName(self.name), 'ms', cpu_per_frame)
 
   def AddDetailedResults(self, num_frames, results):
     slices_by_category = collections.defaultdict(list)
@@ -279,8 +212,10 @@ class ResultsForThread(object):
 
 
 class ThreadTimesTimelineMetric(TimelineMetric):
-  def __init__(self):
-    super(ThreadTimesTimelineMetric, self).__init__(TRACING_MODE)
+  def __init__(self, model=None, renderer_process=None, action_ranges=None):
+    super(ThreadTimesTimelineMetric, self).__init__(model, renderer_process,
+                                                    action_ranges)
+    # Minimal traces, for minimum noise in CPU-time measurements.
     self.results_to_report = AllThreads
     self.details_to_report = NoThreads
 

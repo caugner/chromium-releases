@@ -103,6 +103,10 @@ base::string16 ToolbarModelImpl::GetText() const {
   if (WouldOmitURLDueToOriginChip())
     return base::string16();
 
+  return GetFormattedURL();
+}
+
+base::string16 ToolbarModelImpl::GetFormattedURL() const {
   std::string languages;  // Empty if we don't have a |navigation_controller|.
   Profile* profile = GetProfile();
   if (profile)
@@ -152,15 +156,30 @@ GURL ToolbarModelImpl::GetURL() const {
 }
 
 bool ToolbarModelImpl::WouldOmitURLDueToOriginChip() const {
+  const char kInterstitialShownKey[] = "interstitial_shown";
+
   // When users type URLs and hit enter, continue to show those URLs until
-  // the navigation commits, because having the omnibox clear immediately
-  // feels like the input was ignored.
-  const NavigationController* navigation_controller = GetNavigationController();
+  // the navigation commits or an interstitial is shown, because having the
+  // omnibox clear immediately feels like the input was ignored.
+  NavigationController* navigation_controller = GetNavigationController();
   if (navigation_controller) {
-    const NavigationEntry* entry = navigation_controller->GetPendingEntry();
-    if (entry &&
-        (entry->GetTransitionType() & content::PAGE_TRANSITION_TYPED) != 0) {
-      return false;
+    NavigationEntry* pending_entry = navigation_controller->GetPendingEntry();
+    if (pending_entry) {
+      const NavigationEntry* visible_entry =
+          navigation_controller->GetVisibleEntry();
+      base::string16 unused;
+      // Keep track that we've shown the origin chip on an interstitial so it
+      // can be shown even after the interstitial was dismissed, to avoid
+      // showing the chip, removing it and then showing it again.
+      if (visible_entry &&
+          visible_entry->GetPageType() == content::PAGE_TYPE_INTERSTITIAL &&
+          !pending_entry->GetExtraData(kInterstitialShownKey, &unused))
+        pending_entry->SetExtraData(kInterstitialShownKey, base::string16());
+      const content::PageTransition transition_type =
+          pending_entry->GetTransitionType();
+      if ((transition_type & content::PAGE_TRANSITION_TYPED) != 0 &&
+          !pending_entry->GetExtraData(kInterstitialShownKey, &unused))
+        return false;
     }
   }
 
@@ -216,8 +235,11 @@ ToolbarModel::SecurityLevel ToolbarModelImpl::GetSecurityLevel(
 
 int ToolbarModelImpl::GetIcon() const {
   if (WouldPerformSearchTermReplacement(false)) {
+    // The secured version of the search icon is necessary if neither the search
+    // button nor origin chip are present to indicate the security state.
     return (chrome::GetDisplaySearchButtonConditions() ==
-        chrome::DISPLAY_SEARCH_BUTTON_NEVER) ?
+        chrome::DISPLAY_SEARCH_BUTTON_NEVER) &&
+        !chrome::ShouldDisplayOriginChipV2() ?
             IDR_OMNIBOX_SEARCH_SECURED : IDR_OMNIBOX_SEARCH;
   }
 

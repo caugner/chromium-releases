@@ -11,7 +11,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/notifications/notification.h"
@@ -127,7 +126,7 @@ std::string StripScopeFromIdentifier(const std::string& extension_id,
 
 class NotificationsApiDelegate : public NotificationDelegate {
  public:
-  NotificationsApiDelegate(ApiFunction* api_function,
+  NotificationsApiDelegate(ChromeAsyncExtensionFunction* api_function,
                            Profile* profile,
                            const std::string& extension_id,
                            const std::string& id)
@@ -144,10 +143,7 @@ class NotificationsApiDelegate : public NotificationDelegate {
 
   virtual void Display() OVERRIDE { }
 
-  virtual void Error() OVERRIDE {
-    scoped_ptr<base::ListValue> args(CreateBaseEventArgs());
-    SendEvent(event_names::kOnNotificationError, args.Pass());
-  }
+  virtual void Error() OVERRIDE {}
 
   virtual void Close(bool by_user) OVERRIDE {
     scoped_ptr<base::ListValue> args(CreateBaseEventArgs());
@@ -208,7 +204,7 @@ class NotificationsApiDelegate : public NotificationDelegate {
     return args.Pass();
   }
 
-  scoped_refptr<ApiFunction> api_function_;
+  scoped_refptr<ChromeAsyncExtensionFunction> api_function_;
   Profile* profile_;
   const std::string extension_id_;
   const std::string id_;

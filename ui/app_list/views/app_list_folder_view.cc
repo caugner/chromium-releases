@@ -17,9 +17,11 @@
 #include "ui/app_list/views/contents_view.h"
 #include "ui/app_list/views/folder_background_view.h"
 #include "ui/app_list/views/folder_header_view.h"
+#include "ui/app_list/views/search_box_view.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/events/event.h"
 #include "ui/gfx/rect_conversions.h"
+#include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/view_model.h"
 #include "ui/views/view_model_utils.h"
 
@@ -40,9 +42,9 @@ const int kOutOfFolderContainerBubbleDelta = 30;
 
 AppListFolderView::AppListFolderView(AppsContainerView* container_view,
                                      AppListModel* model,
-                                     AppListMainView* app_list_main_view,
-                                     content::WebContents* start_page_contents)
+                                     AppListMainView* app_list_main_view)
     : container_view_(container_view),
+      app_list_main_view_(app_list_main_view),
       folder_header_view_(new FolderHeaderView(this)),
       view_model_(new views::ViewModel),
       model_(model),
@@ -52,8 +54,8 @@ AppListFolderView::AppListFolderView(AppsContainerView* container_view,
   AddChildView(folder_header_view_);
   view_model_->Add(folder_header_view_, kIndexFolderHeader);
 
-  items_grid_view_ = new AppsGridView(
-      app_list_main_view, pagination_model_.get(), NULL);
+  items_grid_view_ =
+      new AppsGridView(app_list_main_view_, pagination_model_.get());
   items_grid_view_->set_is_root_level(false);
   items_grid_view_->SetLayout(
       kPreferredIconDimension,
@@ -68,11 +70,11 @@ AppListFolderView::AppListFolderView(AppsContainerView* container_view,
   SetFillsBoundsOpaquely(false);
 #endif
 
-  model_->item_list()->AddObserver(this);
+  model_->AddObserver(this);
 }
 
 AppListFolderView::~AppListFolderView() {
-  model_->item_list()->RemoveObserver(this);
+  model_->RemoveObserver(this);
   // Make sure |items_grid_view_| is deleted before |pagination_model_|.
   RemoveAllChildViews(true);
 }
@@ -126,14 +128,14 @@ bool AppListFolderView::OnKeyPressed(const ui::KeyEvent& event) {
   return items_grid_view_->OnKeyPressed(event);
 }
 
-void AppListFolderView::OnListItemRemoved(size_t index, AppListItem* item) {
+void AppListFolderView::OnAppListItemWillBeDeleted(AppListItem* item) {
   if (item == folder_item_) {
     items_grid_view_->OnFolderItemRemoved();
     folder_header_view_->OnFolderItemRemoved();
     folder_item_ = NULL;
 
     // Do not change state if it is hidden.
-    if (layer()->opacity() == 0.0f)
+    if (hide_for_reparent_ || layer()->opacity() == 0.0f)
       return;
 
     // If the folder item associated with this view is removed from the model,
@@ -270,15 +272,27 @@ void AppListFolderView::DispatchEndDragEventForReparent(
       EndDragFromReparentItemInRootLevel(events_forwarded_to_drag_drop_host);
 }
 
-
 void AppListFolderView::HideViewImmediately() {
   SetVisible(false);
   hide_for_reparent_ = false;
 }
 
+bool AppListFolderView::IsOEMFolder() const {
+  return folder_item_->folder_type() == AppListFolderItem::FOLDER_TYPE_OEM;
+}
+
 void AppListFolderView::NavigateBack(AppListFolderItem* item,
                                      const ui::Event& event_flags) {
   container_view_->ShowApps(item);
+}
+
+void AppListFolderView::GiveBackFocusToSearchBox() {
+  app_list_main_view_->search_box_view()->search_box()->RequestFocus();
+}
+
+void AppListFolderView::SetItemName(AppListFolderItem* item,
+                                    const std::string& name) {
+  model_->SetItemName(item, name);
 }
 
 }  // namespace app_list

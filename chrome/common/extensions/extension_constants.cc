@@ -91,6 +91,7 @@ const char kWebstoreSourceField[] = "utm_source";
 
 const char kLaunchSourceAppList[] = "chrome-app-launcher";
 const char kLaunchSourceAppListSearch[] = "chrome-app-launcher-search";
+const char kLaunchSourceAppListInfoDialog[] = "chrome-app-launcher-info-dialog";
 
 }  // namespace extension_urls
 
@@ -114,7 +115,8 @@ const char kHotwordExtensionId[] = "bepbmhgboaologfdajaanbcjmnhjmhfn";
 const char kPdfExtensionId[] = "mhjfbmdgcfjbbpaeojofohoefgiehjai";
 const char kQuickOfficeComponentExtensionId[] =
     "bpmcpldpdmajfigpchkicefoigmkfalc";
-const char kQuickOfficeDevExtensionId[] = "ionpfmkccalenbmnddpbmocokhaknphg";
+const char kQuickOfficeInternalExtensionId[] =
+    "ehibbfinohgbchlgdbfpikodjaojhccn";
 const char kQuickOfficeExtensionId[] = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
 const char kSettingsAppId[] = "ennkphjdgehloodpbhlhldgbnhmacadg";
 const char kStreamsPrivateTestExtensionId[] =

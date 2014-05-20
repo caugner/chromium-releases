@@ -42,9 +42,6 @@
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item_list.h"
 
-// Build-time generated include file.
-#include "registered_dlls.h"  // NOLINT
-
 using base::ASCIIToUTF16;
 using base::UTF16ToUTF8;
 using installer::InstallerState;
@@ -352,7 +349,7 @@ bool CreateVisualElementsManifest(const base::FilePath& src_path,
     // Write the manifest to |src_path|.
     const std::string manifest(UTF16ToUTF8(manifest16));
     int size = base::checked_cast<int>(manifest.size());
-    if (file_util::WriteFile(
+    if (base::WriteFile(
         src_path.Append(installer::kVisualElementsManifest),
             manifest.c_str(), size) == size) {
       VLOG(1) << "Successfully wrote " << installer::kVisualElementsManifest
@@ -679,14 +676,11 @@ void HandleActiveSetupForBrowser(const base::FilePath& installation_root,
   // present for this user (as some shortcuts used to be installed on first
   // run and this could otherwise re-install shortcuts for users that have
   // already deleted them in the past).
-  base::FilePath first_run_sentinel;
-  InstallUtil::GetSentinelFilePath(
-      chrome::kFirstRunSentinel, chrome.distribution(), &first_run_sentinel);
   // Decide whether to create the shortcuts or simply replace existing
   // shortcuts; if the decision is to create them, only shortcuts whose matching
   // all-users shortcut isn't present on the system will be created.
   InstallShortcutOperation install_operation =
-      (!force && base::PathExists(first_run_sentinel) ?
+      (!force && InstallUtil::IsFirstRunSentinelPresent() ?
            INSTALL_SHORTCUT_REPLACE_EXISTING :
            INSTALL_SHORTCUT_CREATE_EACH_IF_NO_SYSTEM_LEVEL);
 

@@ -22,7 +22,7 @@ class MeasurementThatFails(page_measurement.PageMeasurement):
     raise page_measurement.MeasurementFailure('Intentional failure.')
 
 class MeasurementThatHasDefaults(page_measurement.PageMeasurement):
-  def AddCommandLineOptions(self, parser):
+  def AddCommandLineArgs(self, parser):
     parser.add_option('-x', dest='x', default=3)
 
   def MeasurePage(self, page, tab, results):
@@ -57,7 +57,7 @@ class MeasurementQueryParams(page_measurement.PageMeasurement):
 
 class MeasurementWithAction(page_measurement.PageMeasurement):
   def __init__(self):
-    super(MeasurementWithAction, self).__init__('test_action')
+    super(MeasurementWithAction, self).__init__('RunTestAction')
 
   def MeasurePage(self, page, tab, results):
     pass
@@ -148,12 +148,12 @@ class PageMeasurementUnitTest(
   def testActions(self):
     action_called = [False]
     class MockAction(page_action.PageAction):
-      def RunAction(self, page, tab, previous_action):
+      def RunAction(self, page, tab):
         action_called[0] = True
     all_page_actions.RegisterClassForTest('mock', MockAction)
 
     ps = self.CreatePageSetFromFileInUnittestDataDir('blank.html')
-    setattr(ps.pages[0], 'test_action', {'action': 'mock'})
+    setattr(ps.pages[0], 'RunTestAction', {'action': 'mock'})
     measurement = MeasurementWithAction()
     self.RunMeasurement(measurement, ps, options=self._options)
     self.assertTrue(action_called[0])

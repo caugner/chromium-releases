@@ -89,8 +89,7 @@ class FirstRunMasterPrefsBrowserTestBase : public InProcessBrowserTest {
     ASSERT_TRUE(text_.get());
 
     ASSERT_TRUE(base::CreateTemporaryFile(&prefs_file_));
-    EXPECT_TRUE(file_util::WriteFile(prefs_file_, text_->c_str(),
-                                     text_->size()));
+    EXPECT_TRUE(base::WriteFile(prefs_file_, text_->c_str(), text_->size()));
     first_run::SetMasterPrefsPathForTesting(prefs_file_);
 
     // This invokes BrowserMain, and does the import, so must be done last.
@@ -288,7 +287,8 @@ INSTANTIATE_TEST_CASE_P(
     testing::Values(
         chrome_prefs::internals::kSettingsEnforcementGroupNoEnforcement,
         chrome_prefs::internals::kSettingsEnforcementGroupEnforceOnload,
-        chrome_prefs::internals::kSettingsEnforcementGroupEnforceAlways));
-
+        chrome_prefs::internals::kSettingsEnforcementGroupEnforceAlways,
+        chrome_prefs::internals::
+            kSettingsEnforcementGroupEnforceAlwaysWithExtensions));
 
 #endif  // !defined(OS_CHROMEOS)

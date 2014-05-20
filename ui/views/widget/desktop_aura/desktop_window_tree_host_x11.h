@@ -8,9 +8,6 @@
 #include <X11/extensions/shape.h>
 #include <X11/Xlib.h>
 
-// Get rid of a macro from Xlib.h that conflicts with Aura's RootWindow class.
-#undef RootWindow
-
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -72,10 +69,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11 :
  protected:
   // Overridden from DesktopWindowTreeHost:
   virtual void Init(aura::Window* content_window,
-                    const Widget::InitParams& params,
-                    aura::RootWindow::CreateParams* rw_create_params) OVERRIDE;
-  virtual void OnRootWindowCreated(aura::RootWindow* root,
-                                   const Widget::InitParams& params) OVERRIDE;
+                    const Widget::InitParams& params) OVERRIDE;
+  virtual void OnNativeWidgetCreated(const Widget::InitParams& params) OVERRIDE;
   virtual scoped_ptr<corewm::Tooltip> CreateTooltip() OVERRIDE;
   virtual scoped_ptr<aura::client::DragDropClient>
       CreateDragDropClient(DesktopNativeCursorManager* cursor_manager) OVERRIDE;
@@ -108,6 +103,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11 :
   virtual bool HasCapture() const OVERRIDE;
   virtual void SetAlwaysOnTop(bool always_on_top) OVERRIDE;
   virtual bool IsAlwaysOnTop() const OVERRIDE;
+  virtual void SetVisibleOnAllWorkspaces(bool always_visible) OVERRIDE;
   virtual bool SetWindowTitle(const base::string16& title) OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
   virtual Widget::MoveLoopResult RunMoveLoop(
@@ -133,7 +129,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11 :
   virtual bool IsAnimatingClosed() const OVERRIDE;
 
   // Overridden from aura::WindowTreeHost:
-  virtual aura::RootWindow* GetRootWindow() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
@@ -150,7 +145,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11 :
   virtual void UnConfineCursor() OVERRIDE;
   virtual void PostNativeEvent(const base::NativeEvent& native_event) OVERRIDE;
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
-  virtual void PrepareForShutdown() OVERRIDE;
   virtual void SetCursorNative(gfx::NativeCursor cursor) OVERRIDE;
   virtual void MoveCursorToNative(const gfx::Point& location) OVERRIDE;
   virtual void OnCursorVisibilityChangedNative(bool show) OVERRIDE;
@@ -163,9 +157,9 @@ private:
   // initialization related to talking to the X11 server.
   void InitX11Window(const Widget::InitParams& params);
 
-  // Creates an aura::RootWindow to contain the |content_window|, along with
-  // all aura client objects that direct behavior.
-  aura::RootWindow* InitRootWindow(const Widget::InitParams& params);
+  // Creates an aura::WindowEventDispatcher to contain the |content_window|,
+  // along with all aura client objects that direct behavior.
+  aura::WindowEventDispatcher* InitDispatcher(const Widget::InitParams& params);
 
   // Returns true if there's an X window manager present... in most cases.  Some
   // window managers (notably, ion3) don't implement enough of ICCCM for us to
@@ -254,9 +248,6 @@ private:
   // True if the window has title-bar / borders provided by the window manager.
   bool use_native_frame_;
 
-  // We are owned by the RootWindow, but we have to have a back pointer to it.
-  aura::RootWindow* root_window_;
-
   scoped_ptr<DesktopDispatcherClient> dispatcher_client_;
 
   DesktopDragDropClientAuraX11* drag_drop_client_;
@@ -299,6 +290,12 @@ private:
   scoped_ptr<X11ScopedCapture> x11_capture_;
 
   base::string16 window_title_;
+
+  // Whether we currently are flashing our frame. This feature is implemented
+  // by setting the urgency hint with the window manager, which can draw
+  // attention to the window or completely ignore the hint. We stop flashing
+  // the frame when |xwindow_| gains focus or handles a mouse button event.
+  bool urgency_hint_set_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopWindowTreeHostX11);
 };

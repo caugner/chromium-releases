@@ -5,17 +5,17 @@
 #include <stdio.h>
 #include <string>
 
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "mojo/examples/compositor_app/compositor_host.h"
 #include "mojo/public/bindings/allocation_scope.h"
 #include "mojo/public/bindings/remote_ptr.h"
+#include "mojo/public/cpp/system/core.h"
 #include "mojo/public/gles2/gles2_cpp.h"
 #include "mojo/public/shell/application.h"
-#include "mojo/public/system/core.h"
-#include "mojo/public/system/macros.h"
+#include "mojo/public/shell/shell.mojom.h"
 #include "mojo/services/native_viewport/geometry_conversions.h"
-#include "mojom/native_viewport.h"
-#include "mojom/shell.h"
+#include "mojo/services/native_viewport/native_viewport.mojom.h"
 #include "ui/gfx/rect.h"
 
 #if defined(WIN32)
@@ -51,18 +51,18 @@ class SampleApp : public Application, public NativeViewportClient {
     host_.reset(new CompositorHost(gles2_handle.Pass()));
   }
 
-  virtual void OnCreated() MOJO_OVERRIDE {
+  virtual void OnCreated() OVERRIDE {
   }
 
-  virtual void OnDestroyed() MOJO_OVERRIDE {
+  virtual void OnDestroyed() OVERRIDE {
     base::MessageLoop::current()->Quit();
   }
 
-  virtual void OnBoundsChanged(const Rect& bounds) MOJO_OVERRIDE {
+  virtual void OnBoundsChanged(const Rect& bounds) OVERRIDE {
     host_->SetSize(bounds.size());
   }
 
-  virtual void OnEvent(const Event& event) MOJO_OVERRIDE {
+  virtual void OnEvent(const Event& event) OVERRIDE {
     if (!event.location().is_null()) {
       viewport_->AckEvent(event);
     }

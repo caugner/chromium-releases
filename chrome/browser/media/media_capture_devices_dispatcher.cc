@@ -4,6 +4,8 @@
 
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 
+#include "apps/app_window.h"
+#include "apps/app_window_registry.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
@@ -13,37 +15,51 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
-#include "chrome/browser/media/audio_stream_indicator.h"
 #include "chrome/browser/media/desktop_streams_registry.h"
 #include "chrome/browser/media/media_stream_capture_indicator.h"
 #include "chrome/browser/media/media_stream_infobar_delegate.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/screen_capture_notification_ui.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_media_id.h"
-#include "content/public/browser/media_devices_monitor.h"
+#include "content/public/browser/media_capture_devices.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/media_stream_request.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "grit/generated_resources.h"
 #include "media/audio/audio_manager_base.h"
+#include "media/base/media_switches.h"
+#include "net/base/net_util.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capture_types.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/shell.h"
-#endif  //  defined(OS_CHROMEOS)
+#endif  // defined(OS_CHROMEOS)
+
+// Only do audio stream monitoring for platforms that use it for the tab media
+// indicator UI or the OOM killer.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#define AUDIO_STREAM_MONITORING
+#include "chrome/browser/media/audio_stream_monitor.h"
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
 using content::BrowserThread;
+using content::MediaCaptureDevices;
 using content::MediaStreamDevices;
 
 namespace {
@@ -137,12 +153,15 @@ bool IsOriginForCasting(const GURL& origin) {
 // notification.
 base::string16 GetApplicationTitle(content::WebContents* web_contents,
                                    const extensions::Extension* extension) {
-  // Use extension name as title for extensions and origin for drive-by web.
+  // Use extension name as title for extensions and host/origin for drive-by
+  // web.
   std::string title;
   if (extension) {
     title = extension->name();
   } else {
-    title = web_contents->GetURL().GetOrigin().spec();
+    GURL url = web_contents->GetURL();
+    title = url.SchemeIsSecure() ? net::GetHostAndOptionalPort(url)
+                                 : url.GetOrigin().spec();
   }
   return base::UTF8ToUTF16(title);
 }
@@ -155,7 +174,8 @@ scoped_ptr<content::MediaStreamUI> GetDevicesForDesktopCapture(
     content::DesktopMediaID media_id,
     bool capture_audio,
     bool display_notification,
-    base::string16 application_title) {
+    const base::string16& application_title,
+    const base::string16& registered_extension_name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   scoped_ptr<content::MediaStreamUI> ui;
 
@@ -171,13 +191,79 @@ scoped_ptr<content::MediaStreamUI> GetDevicesForDesktopCapture(
 
   // If required, register to display the notification for stream capture.
   if (display_notification) {
-    ui = ScreenCaptureNotificationUI::Create(l10n_util::GetStringFUTF16(
-        IDS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_TEXT,
-        application_title));
+    if (application_title == registered_extension_name) {
+      ui = ScreenCaptureNotificationUI::Create(l10n_util::GetStringFUTF16(
+          IDS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_TEXT,
+          application_title));
+    } else {
+      ui = ScreenCaptureNotificationUI::Create(l10n_util::GetStringFUTF16(
+          IDS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_TEXT_DELEGATED,
+          registered_extension_name,
+          application_title));
+    }
   }
 
   return ui.Pass();
 }
+
+#if defined(AUDIO_STREAM_MONITORING)
+
+AudioStreamMonitor* AudioStreamMonitorFromRenderFrame(
+    int render_process_id,
+    int render_frame_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  content::WebContents* const web_contents =
+      content::WebContents::FromRenderFrameHost(
+          content::RenderFrameHost::FromID(render_process_id, render_frame_id));
+  if (!web_contents)
+    return NULL;
+  return AudioStreamMonitor::FromWebContents(web_contents);
+}
+
+void StartAudioStreamMonitoringOnUIThread(
+    int render_process_id,
+    int render_frame_id,
+    int stream_id,
+    const AudioStreamMonitor::ReadPowerAndClipCallback& read_power_callback) {
+  AudioStreamMonitor* const audio_stream_monitor =
+      AudioStreamMonitorFromRenderFrame(render_process_id, render_frame_id);
+  if (audio_stream_monitor)
+    audio_stream_monitor->StartMonitoringStream(stream_id, read_power_callback);
+}
+
+void StopAudioStreamMonitoringOnUIThread(
+    int render_process_id,
+    int render_frame_id,
+    int stream_id) {
+  AudioStreamMonitor* const audio_stream_monitor =
+      AudioStreamMonitorFromRenderFrame(render_process_id, render_frame_id);
+  if (audio_stream_monitor)
+    audio_stream_monitor->StopMonitoringStream(stream_id);
+}
+
+#endif  // defined(AUDIO_STREAM_MONITORING)
+
+#if !defined(OS_ANDROID)
+// Find browser or app window from a given |web_contents|.
+gfx::NativeWindow FindParentWindowForWebContents(
+    content::WebContents* web_contents) {
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+  if (browser && browser->window())
+    return browser->window()->GetNativeWindow();
+
+  const apps::AppWindowRegistry::AppWindowList& window_list =
+      apps::AppWindowRegistry::Get(
+          web_contents->GetBrowserContext())->app_windows();
+  for (apps::AppWindowRegistry::AppWindowList::const_iterator iter =
+           window_list.begin();
+       iter != window_list.end(); ++iter) {
+    if ((*iter)->web_contents() == web_contents)
+      return (*iter)->GetNativeWindow();
+  }
+
+  return NULL;
+}
+#endif
 
 }  // namespace
 
@@ -195,10 +281,8 @@ MediaCaptureDevicesDispatcher* MediaCaptureDevicesDispatcher::GetInstance() {
 }
 
 MediaCaptureDevicesDispatcher::MediaCaptureDevicesDispatcher()
-    : devices_enumerated_(false),
-      is_device_enumeration_disabled_(false),
-      media_stream_capture_indicator_(new MediaStreamCaptureIndicator()),
-      audio_stream_indicator_(new AudioStreamIndicator()) {
+    : is_device_enumeration_disabled_(false),
+      media_stream_capture_indicator_(new MediaStreamCaptureIndicator()) {
   // MediaCaptureDevicesDispatcher is a singleton. It should be created on
   // UI thread. Otherwise, it will not receive
   // content::NOTIFICATION_WEB_CONTENTS_DESTROYED, and that will result in
@@ -207,6 +291,17 @@ MediaCaptureDevicesDispatcher::MediaCaptureDevicesDispatcher()
   notifications_registrar_.Add(
       this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
+
+  // AVFoundation is used for video/audio device monitoring and video capture in
+  // Mac. Experimentally, connect it in Canary and Unkown (developer builds).
+#if defined(OS_MACOSX)
+  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+  if (channel == chrome::VersionInfo::CHANNEL_CANARY ||
+      channel == chrome::VersionInfo::CHANNEL_UNKNOWN) {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableAVFoundation);
+  }
+#endif
 }
 
 MediaCaptureDevicesDispatcher::~MediaCaptureDevicesDispatcher() {}
@@ -237,21 +332,19 @@ void MediaCaptureDevicesDispatcher::RemoveObserver(Observer* observer) {
 const MediaStreamDevices&
 MediaCaptureDevicesDispatcher::GetAudioCaptureDevices() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!is_device_enumeration_disabled_ && !devices_enumerated_) {
-    content::EnsureMonitorCaptureDevices();
-    devices_enumerated_ = true;
-  }
-  return audio_devices_;
+  if (is_device_enumeration_disabled_ || !test_audio_devices_.empty())
+    return test_audio_devices_;
+
+  return MediaCaptureDevices::GetInstance()->GetAudioCaptureDevices();
 }
 
 const MediaStreamDevices&
 MediaCaptureDevicesDispatcher::GetVideoCaptureDevices() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!is_device_enumeration_disabled_ && !devices_enumerated_) {
-    content::EnsureMonitorCaptureDevices();
-    devices_enumerated_ = true;
-  }
-  return video_devices_;
+  if (is_device_enumeration_disabled_ || !test_video_devices_.empty())
+    return test_video_devices_;
+
+  return MediaCaptureDevices::GetInstance()->GetVideoCaptureDevices();
 }
 
 void MediaCaptureDevicesDispatcher::Observe(
@@ -300,7 +393,7 @@ void MediaCaptureDevicesDispatcher::ProcessDesktopCaptureAccessRequest(
   scoped_ptr<content::MediaStreamUI> ui;
 
   if (request.video_type != content::MEDIA_DESKTOP_VIDEO_CAPTURE) {
-    callback.Run(devices, ui.Pass());
+    callback.Run(devices, content::MEDIA_DEVICE_INVALID_STATE, ui.Pass());
     return;
   }
 
@@ -312,15 +405,18 @@ void MediaCaptureDevicesDispatcher::ProcessDesktopCaptureAccessRequest(
     return;
   }
 
+  // The extension name that the stream is registered with.
+  std::string original_extension_name;
   // Resolve DesktopMediaID for the specified device id.
   content::DesktopMediaID media_id =
       GetDesktopStreamsRegistry()->RequestMediaForStreamId(
           request.requested_video_device_id, request.render_process_id,
-          request.render_view_id, request.security_origin);
+          request.render_view_id, request.security_origin,
+          &original_extension_name);
 
   // Received invalid device id.
   if (media_id.type == content::DesktopMediaID::TYPE_NONE) {
-    callback.Run(devices, ui.Pass());
+    callback.Run(devices, content::MEDIA_DEVICE_INVALID_STATE, ui.Pass());
     return;
   }
 
@@ -338,9 +434,10 @@ void MediaCaptureDevicesDispatcher::ProcessDesktopCaptureAccessRequest(
 
   ui = GetDevicesForDesktopCapture(
       devices, media_id, capture_audio, true,
-      GetApplicationTitle(web_contents, extension));
+      GetApplicationTitle(web_contents, extension),
+      base::UTF8ToUTF16(original_extension_name));
 
-  callback.Run(devices, ui.Pass());
+  callback.Run(devices, content::MEDIA_DEVICE_OK, ui.Pass());
 }
 
 void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
@@ -384,6 +481,12 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
     // is closed. See http://crbug.com/326690.
     base::string16 application_title =
         GetApplicationTitle(web_contents, extension);
+#if !defined(OS_ANDROID)
+    gfx::NativeWindow parent_window =
+        FindParentWindowForWebContents(web_contents);
+#else
+    gfx::NativeWindow parent_window = NULL;
+#endif
     web_contents = NULL;
 
     // For component extensions, bypass message box.
@@ -397,7 +500,7 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
               IDS_MEDIA_SCREEN_AND_AUDIO_CAPTURE_CONFIRMATION_TEXT,
           application_name);
       chrome::MessageBoxResult result = chrome::ShowMessageBox(
-          NULL,
+          parent_window,
           l10n_util::GetStringFUTF16(
               IDS_MEDIA_SCREEN_CAPTURE_CONFIRMATION_TITLE, application_name),
           confirmation_text,
@@ -425,11 +528,16 @@ void MediaCaptureDevicesDispatcher::ProcessScreenCaptureAccessRequest(
       bool display_notification = !component_extension;
 
       ui = GetDevicesForDesktopCapture(devices, screen_id, capture_audio,
-                                       display_notification, application_title);
+                                       display_notification, application_title,
+                                       application_title);
     }
   }
 
-  callback.Run(devices, ui.Pass());
+  callback.Run(
+    devices,
+    devices.empty() ? content::MEDIA_DEVICE_INVALID_STATE :
+                      content::MEDIA_DEVICE_OK,
+    ui.Pass());
 }
 
 void MediaCaptureDevicesDispatcher::ProcessTabCaptureAccessRequest(
@@ -442,7 +550,7 @@ void MediaCaptureDevicesDispatcher::ProcessTabCaptureAccessRequest(
 
 #if defined(OS_ANDROID)
   // Tab capture is not supported on Android.
-  callback.Run(devices, ui.Pass());
+  callback.Run(devices, content::MEDIA_DEVICE_TAB_CAPTURE_FAILURE, ui.Pass());
 #else  // defined(OS_ANDROID)
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
@@ -450,7 +558,7 @@ void MediaCaptureDevicesDispatcher::ProcessTabCaptureAccessRequest(
       extensions::TabCaptureRegistry::Get(profile);
   if (!tab_capture_registry) {
     NOTREACHED();
-    callback.Run(devices, ui.Pass());
+    callback.Run(devices, content::MEDIA_DEVICE_INVALID_STATE, ui.Pass());
     return;
   }
   bool tab_capture_allowed =
@@ -475,7 +583,11 @@ void MediaCaptureDevicesDispatcher::ProcessTabCaptureAccessRequest(
     ui = media_stream_capture_indicator_->RegisterMediaStream(
         web_contents, devices);
   }
-  callback.Run(devices, ui.Pass());
+  callback.Run(
+    devices,
+    devices.empty() ? content::MEDIA_DEVICE_INVALID_STATE :
+                      content::MEDIA_DEVICE_OK,
+    ui.Pass());
 #endif  // !defined(OS_ANDROID)
 }
 
@@ -504,7 +616,11 @@ void MediaCaptureDevicesDispatcher::
     ui = media_stream_capture_indicator_->RegisterMediaStream(
         web_contents, devices);
   }
-  callback.Run(devices, ui.Pass());
+  callback.Run(
+    devices,
+    devices.empty() ? content::MEDIA_DEVICE_INVALID_STATE :
+                      content::MEDIA_DEVICE_OK,
+    ui.Pass());
 }
 
 void MediaCaptureDevicesDispatcher::ProcessRegularMediaAccessRequest(
@@ -559,6 +675,7 @@ void MediaCaptureDevicesDispatcher::ProcessQueuedAccessRequest(
 void MediaCaptureDevicesDispatcher::OnAccessRequestResponse(
     content::WebContents* web_contents,
     const content::MediaStreamDevices& devices,
+    content::MediaStreamRequestResult result,
     scoped_ptr<content::MediaStreamUI> ui) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -586,7 +703,7 @@ void MediaCaptureDevicesDispatcher::OnAccessRequestResponse(
                    base::Unretained(this), web_contents));
   }
 
-  callback.Run(devices, ui.Pass());
+  callback.Run(devices, result, ui.Pass());
 }
 
 void MediaCaptureDevicesDispatcher::GetDefaultDevicesForProfile(
@@ -667,11 +784,6 @@ MediaCaptureDevicesDispatcher::GetMediaStreamCaptureIndicator() {
   return media_stream_capture_indicator_;
 }
 
-scoped_refptr<AudioStreamIndicator>
-MediaCaptureDevicesDispatcher::GetAudioStreamIndicator() {
-  return audio_stream_indicator_;
-}
-
 DesktopStreamsRegistry*
 MediaCaptureDevicesDispatcher::GetDesktopStreamsRegistry() {
   if (!desktop_streams_registry_)
@@ -679,22 +791,22 @@ MediaCaptureDevicesDispatcher::GetDesktopStreamsRegistry() {
   return desktop_streams_registry_.get();
 }
 
-void MediaCaptureDevicesDispatcher::OnAudioCaptureDevicesChanged(
-    const content::MediaStreamDevices& devices) {
+void MediaCaptureDevicesDispatcher::OnAudioCaptureDevicesChanged() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&MediaCaptureDevicesDispatcher::UpdateAudioDevicesOnUIThread,
-                 base::Unretained(this), devices));
+      base::Bind(
+          &MediaCaptureDevicesDispatcher::NotifyAudioDevicesChangedOnUIThread,
+          base::Unretained(this)));
 }
 
-void MediaCaptureDevicesDispatcher::OnVideoCaptureDevicesChanged(
-    const content::MediaStreamDevices& devices) {
+void MediaCaptureDevicesDispatcher::OnVideoCaptureDevicesChanged() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&MediaCaptureDevicesDispatcher::UpdateVideoDevicesOnUIThread,
-                 base::Unretained(this), devices));
+      base::Bind(
+          &MediaCaptureDevicesDispatcher::NotifyVideoDevicesChangedOnUIThread,
+          base::Unretained(this)));
 }
 
 void MediaCaptureDevicesDispatcher::OnMediaRequestStateChanged(
@@ -713,12 +825,38 @@ void MediaCaptureDevicesDispatcher::OnMediaRequestStateChanged(
           page_request_id, security_origin, device, state));
 }
 
-void MediaCaptureDevicesDispatcher::OnAudioStreamPlayingChanged(
-    int render_process_id, int render_view_id, int stream_id,
-    bool is_playing, float power_dbfs, bool clipped) {
-  audio_stream_indicator_->UpdateWebContentsStatus(
-      render_process_id, render_view_id, stream_id,
-      is_playing, power_dbfs, clipped);
+void MediaCaptureDevicesDispatcher::OnAudioStreamPlaying(
+    int render_process_id,
+    int render_frame_id,
+    int stream_id,
+    const ReadPowerAndClipCallback& read_power_callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+#if defined(AUDIO_STREAM_MONITORING)
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&StartAudioStreamMonitoringOnUIThread,
+                 render_process_id,
+                 render_frame_id,
+                 stream_id,
+                 read_power_callback));
+#endif
+}
+
+void MediaCaptureDevicesDispatcher::OnAudioStreamStopped(
+    int render_process_id,
+    int render_frame_id,
+    int stream_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+#if defined(AUDIO_STREAM_MONITORING)
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&StopAudioStreamMonitoringOnUIThread,
+                 render_process_id,
+                 render_frame_id,
+                 stream_id));
+#endif
 }
 
 void MediaCaptureDevicesDispatcher::OnCreatingAudioStream(
@@ -732,22 +870,16 @@ void MediaCaptureDevicesDispatcher::OnCreatingAudioStream(
           base::Unretained(this), render_process_id, render_frame_id));
 }
 
-void MediaCaptureDevicesDispatcher::UpdateAudioDevicesOnUIThread(
-    const content::MediaStreamDevices& devices) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  devices_enumerated_ = true;
-  audio_devices_ = devices;
+void MediaCaptureDevicesDispatcher::NotifyAudioDevicesChangedOnUIThread() {
+  MediaStreamDevices devices = GetAudioCaptureDevices();
   FOR_EACH_OBSERVER(Observer, observers_,
-                    OnUpdateAudioDevices(audio_devices_));
+                    OnUpdateAudioDevices(devices));
 }
 
-void MediaCaptureDevicesDispatcher::UpdateVideoDevicesOnUIThread(
-    const content::MediaStreamDevices& devices) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  devices_enumerated_ = true;
-  video_devices_ = devices;
+void MediaCaptureDevicesDispatcher::NotifyVideoDevicesChangedOnUIThread() {
+  MediaStreamDevices devices = GetVideoCaptureDevices();
   FOR_EACH_OBSERVER(Observer, observers_,
-                    OnUpdateVideoDevices(video_devices_));
+                    OnUpdateVideoDevices(devices));
 }
 
 void MediaCaptureDevicesDispatcher::UpdateMediaRequestStateOnUIThread(
@@ -825,9 +957,30 @@ void MediaCaptureDevicesDispatcher::OnCreatingAudioStreamOnUIThread(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   FOR_EACH_OBSERVER(Observer, observers_,
                     OnCreatingAudioStream(render_process_id, render_frame_id));
+#if defined(AUDIO_STREAM_MONITORING)
+  content::WebContents* const web_contents =
+      content::WebContents::FromRenderFrameHost(
+          content::RenderFrameHost::FromID(render_process_id, render_frame_id));
+  if (web_contents) {
+    // Note: Calling CreateForWebContents() multiple times is valid (see usage
+    // info for content::WebContentsUserData).
+    AudioStreamMonitor::CreateForWebContents(web_contents);
+  }
+#endif
 }
 
 bool MediaCaptureDevicesDispatcher::IsDesktopCaptureInProgress() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return desktop_capture_sessions_.size() > 0;
+}
+
+
+void MediaCaptureDevicesDispatcher::SetTestAudioCaptureDevices(
+    const MediaStreamDevices& devices) {
+  test_audio_devices_ = devices;
+}
+
+void MediaCaptureDevicesDispatcher::SetTestVideoCaptureDevices(
+    const MediaStreamDevices& devices) {
+  test_video_devices_ = devices;
 }

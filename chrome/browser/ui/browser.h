@@ -451,6 +451,9 @@ class Browser : public TabStripModelObserver,
   virtual void MoveValidationMessage(
       content::WebContents* web_contents,
       const gfx::Rect& anchor_in_root_view) OVERRIDE;
+  virtual bool PreHandleGestureEvent(
+      content::WebContents* source,
+      const blink::WebGestureEvent& event) OVERRIDE;
 
   bool is_type_tabbed() const { return type_ == TYPE_TABBED; }
   bool is_type_popup() const { return type_ == TYPE_POPUP; }
@@ -546,7 +549,8 @@ class Browser : public TabStripModelObserver,
                               bool* was_blocked) OVERRIDE;
   virtual void ActivateContents(content::WebContents* contents) OVERRIDE;
   virtual void DeactivateContents(content::WebContents* contents) OVERRIDE;
-  virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
+  virtual void LoadingStateChanged(content::WebContents* source,
+                                   bool to_different_document) OVERRIDE;
   virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual void MoveContents(content::WebContents* source,
                             const gfx::Rect& pos) OVERRIDE;
@@ -585,7 +589,7 @@ class Browser : public TabStripModelObserver,
       const std::string& partition_id,
       content::SessionStorageNamespace* session_storage_namespace) OVERRIDE;
   virtual void WebContentsCreated(content::WebContents* source_contents,
-                                  int64 source_frame_id,
+                                  int opener_render_frame_id,
                                   const base::string16& frame_name,
                                   const GURL& target_url,
                                   content::WebContents* new_contents) OVERRIDE;
@@ -613,7 +617,6 @@ class Browser : public TabStripModelObserver,
       bool enter_fullscreen) OVERRIDE;
   virtual bool IsFullscreenForTabOrPending(
       const content::WebContents* web_contents) const OVERRIDE;
-  virtual void JSOutOfMemory(content::WebContents* web_contents) OVERRIDE;
   virtual void RegisterProtocolHandler(content::WebContents* web_contents,
                                        const std::string& protocol,
                                        const GURL& url,
@@ -767,10 +770,8 @@ class Browser : public TabStripModelObserver,
   // Shared code between Reload() and ReloadIgnoringCache().
   void ReloadInternal(WindowOpenDisposition disposition, bool ignore_cache);
 
-  // Depending on the disposition, return the current tab or a clone of the
-  // current tab.
-  content::WebContents* GetOrCloneTabForDisposition(
-      WindowOpenDisposition disposition);
+  // Returns true if the Browser window should show the location bar.
+  bool ShouldShowLocationBar() const;
 
   // Implementation of SupportsWindowFeature and CanSupportWindowFeature. If
   // |check_fullscreen| is true, the set of features reflect the actual state of

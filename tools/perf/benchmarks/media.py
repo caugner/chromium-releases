@@ -7,7 +7,7 @@ from telemetry import test
 from telemetry.page import page_measurement
 
 
-class MSEMeasurement(page_measurement.PageMeasurement):
+class _MSEMeasurement(page_measurement.PageMeasurement):
   def MeasurePage(self, page, tab, results):
     media_metric = tab.EvaluateJavaScript('window.__testMetrics')
     trace = media_metric['id'] if 'id' in media_metric else None
@@ -26,6 +26,7 @@ class Media(test.Test):
   page_set = 'page_sets/tough_video_cases.json'
 
 
+@test.Disabled('mac')  # http://crbug.com/353268
 class MediaNetworkSimulation(test.Test):
   """Obtains media metrics under different network simulations."""
   test = media.Media
@@ -38,8 +39,7 @@ class MediaAndroid(test.Test):
   tag = 'android'
   page_set = 'page_sets/tough_video_cases.json'
   # Exclude 4k and 50 fps media files (garden* & crowd*).
-  options = {
-      'page_label_filter_exclude': '4k,50fps'}
+  options = {'page_label_filter_exclude': '4k,50fps'}
 
 
 class MediaChromeOS4kOnly(test.Test):
@@ -47,9 +47,11 @@ class MediaChromeOS4kOnly(test.Test):
   test = media.Media
   tag = 'chromeOS4kOnly'
   page_set = 'page_sets/tough_video_cases.json'
-  options = {'page_label_filter': '4k',
-             # Exclude 50fps test files: crbug/331816
-             'page_label_filter_exclude': '50fps'}
+  options = {
+      'page_label_filter': '4k',
+      # Exclude 50fps test files: crbug/331816
+      'page_label_filter_exclude': '50fps'
+  }
 
 
 class MediaChromeOS(test.Test):
@@ -66,7 +68,7 @@ class MediaChromeOS(test.Test):
 
 class MediaSourceExtensions(test.Test):
   """Obtains media metrics for key media source extensions functions."""
-  test = MSEMeasurement
+  test = _MSEMeasurement
   page_set = 'page_sets/mse_cases.json'
 
   def CustomizeBrowserOptions(self, options):

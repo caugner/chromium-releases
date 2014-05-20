@@ -15,19 +15,19 @@
 #include "chrome/browser/extensions/api/app_runtime/app_runtime_api.h"
 #include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
-#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/app_runtime.h"
-#include "chrome/common/extensions/extension_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/lazy_background_task_queue.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_messages.h"
 #include "extensions/common/manifest_handlers/kiosk_mode_info.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
@@ -54,6 +54,7 @@ using extensions::app_file_handler_util::FirstFileHandlerForFile;
 using extensions::app_file_handler_util::CreateFileEntry;
 using extensions::app_file_handler_util::GrantedFileEntry;
 using extensions::app_file_handler_util::HasFileSystemWritePermission;
+using extensions::EventRouter;
 using extensions::Extension;
 using extensions::ExtensionHost;
 using extensions::ExtensionSystem;
@@ -377,8 +378,7 @@ void RestartPlatformApp(Profile* profile, const Extension* extension) {
   if (win8::IsSingleWindowMetroMode())
     return;
 #endif
-  extensions::EventRouter* event_router =
-      ExtensionSystem::Get(profile)->event_router();
+  EventRouter* event_router = EventRouter::Get(profile);
   bool listening_to_restart = event_router->
       ExtensionHasEventListener(extension->id(),
                                 app_runtime::OnRestarted::kEventName);

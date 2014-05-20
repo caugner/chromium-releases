@@ -17,9 +17,9 @@
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/synced_device_tracker.h"
-#include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/sync_driver/sync_frontend.h"
+#include "components/sync_driver/sync_prefs.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -82,6 +82,7 @@ class MockSyncFrontend : public SyncFrontend {
                void(syncer::ModelTypeSet, bool));
   MOCK_METHOD0(OnEncryptionComplete, void());
   MOCK_METHOD1(OnMigrationNeededForTypes, void(syncer::ModelTypeSet));
+  MOCK_METHOD1(OnProtocolEvent, void(const syncer::ProtocolEvent&));
   MOCK_METHOD1(OnExperimentsChanged,
       void(const syncer::Experiments&));
   MOCK_METHOD1(OnActionableError,
@@ -135,7 +136,7 @@ class SyncBackendHostTest : public testing::Test {
 
   virtual void SetUp() OVERRIDE {
     profile_.reset(new TestingProfile());
-    sync_prefs_.reset(new SyncPrefs(profile_->GetPrefs()));
+    sync_prefs_.reset(new sync_driver::SyncPrefs(profile_->GetPrefs()));
     backend_.reset(new SyncBackendHostImpl(
         profile_->GetDebugName(),
         profile_.get(),
@@ -255,7 +256,7 @@ class SyncBackendHostTest : public testing::Test {
   StrictMock<MockSyncFrontend> mock_frontend_;
   syncer::SyncCredentials credentials_;
   scoped_ptr<TestingProfile> profile_;
-  scoped_ptr<SyncPrefs> sync_prefs_;
+  scoped_ptr<sync_driver::SyncPrefs> sync_prefs_;
   scoped_ptr<SyncBackendHost> backend_;
   scoped_ptr<FakeSyncManagerFactory> fake_manager_factory_;
   FakeSyncManager* fake_manager_;
@@ -697,7 +698,7 @@ TEST_F(SyncBackendHostTest, TestStartupWithOldSyncData) {
       profile_->GetPath().AppendASCII("Sync Data");
   base::FilePath sync_file = temp_directory.AppendASCII("SyncData.sqlite3");
   ASSERT_TRUE(base::CreateDirectory(temp_directory));
-  ASSERT_NE(-1, file_util::WriteFile(sync_file, nonsense, strlen(nonsense)));
+  ASSERT_NE(-1, base::WriteFile(sync_file, nonsense, strlen(nonsense)));
 
   InitializeBackend(true);
 

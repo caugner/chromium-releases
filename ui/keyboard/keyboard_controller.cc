@@ -6,14 +6,12 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "ui/aura/layout_manager.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
-#include "ui/base/ime/text_input_type.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/path.h"
@@ -21,9 +19,15 @@
 #include "ui/gfx/skia_util.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/keyboard/keyboard_controller_proxy.h"
+#include "ui/keyboard/keyboard_layout_manager.h"
 #include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_util.h"
-#include "ui/wm/public/masked_window_targeter.h"
+#include "ui/wm/core/masked_window_targeter.h"
+
+#if defined(OS_CHROMEOS)
+#include "base/process/launch.h"
+#include "base/sys_info.h"
+#endif
 
 namespace {
 
@@ -35,34 +39,6 @@ const int kAnimationDurationMs = 200;
 // The opacity of virtual keyboard container when show animation starts or
 // hide animation finishes.
 const float kAnimationStartOrAfterHideOpacity = 0.2f;
-
-// The ratio between the height of the keyboard and the screen when using the
-// usability keyboard.
-const float kUsabilityKeyboardHeightRatio = 1.0f;
-
-// The default ratio between the height of the keyboard and the screen.
-const float kDefaultKeyboardHeightRatio = 0.3f;
-
-// The ratio between the height of the keyboard and the screen when using the
-// accessibility keyboard.
-const float kAccessibilityKeyboardHeightRatio = 0.3f;
-
-float GetKeyboardHeightRatio(){
-  if (keyboard::IsKeyboardUsabilityExperimentEnabled()) {
-    return kUsabilityKeyboardHeightRatio;
-  } else if (keyboard::GetAccessibilityKeyboardEnabled()) {
-    return kAccessibilityKeyboardHeightRatio;
-  }
-  return kDefaultKeyboardHeightRatio;
-}
-gfx::Rect KeyboardBoundsFromWindowBounds(const gfx::Rect& window_bounds) {
-  const float kKeyboardHeightRatio = GetKeyboardHeightRatio();
-  return gfx::Rect(
-      window_bounds.x(),
-      window_bounds.y() + window_bounds.height() * (1 - kKeyboardHeightRatio),
-      window_bounds.width(),
-      window_bounds.height() * kKeyboardHeightRatio);
-}
 
 // Event targeter for the keyboard container.
 class KeyboardContainerTargeter : public wm::MaskedWindowTargeter {
@@ -80,7 +56,7 @@ class KeyboardContainerTargeter : public wm::MaskedWindowTargeter {
   virtual bool GetHitTestMask(aura::Window* window,
                               gfx::Path* mask) const OVERRIDE {
     gfx::Rect keyboard_bounds = proxy_ ? proxy_->GetKeyboardWindow()->bounds() :
-        KeyboardBoundsFromWindowBounds(window->bounds());
+        keyboard::DefaultKeyboardBoundsFromWindowBounds(window->bounds());
     mask->addRect(RectToSkRect(keyboard_bounds));
     return true;
   }
@@ -123,23 +99,36 @@ class KeyboardWindowDelegate : public aura::WindowDelegate {
   virtual void OnCaptureLost() OVERRIDE {}
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {}
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {}
-  virtual void OnWindowDestroying() OVERRIDE {}
-  virtual void OnWindowDestroyed() OVERRIDE { delete this; }
+  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {}
+  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE { delete this; }
   virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE {}
   virtual bool HasHitTestMask() const OVERRIDE { return true; }
   virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE {
     gfx::Rect keyboard_bounds = proxy_ ? proxy_->GetKeyboardWindow()->bounds() :
-        KeyboardBoundsFromWindowBounds(bounds_);
+        keyboard::DefaultKeyboardBoundsFromWindowBounds(bounds_);
     mask->addRect(RectToSkRect(keyboard_bounds));
   }
-  virtual void DidRecreateLayer(ui::Layer* old_layer,
-                                ui::Layer* new_layer) OVERRIDE {}
 
   gfx::Rect bounds_;
   keyboard::KeyboardControllerProxy* proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(KeyboardWindowDelegate);
 };
+
+void ToggleTouchEventLogging(bool enable) {
+#if defined(OS_CHROMEOS)
+  if (!base::SysInfo::IsRunningOnChromeOS())
+    return;
+  CommandLine command(
+      base::FilePath("/opt/google/touchscreen/toggle_touch_event_logging"));
+  if (enable)
+    command.AppendArg("1");
+  else
+    command.AppendArg("0");
+  VLOG(1) << "Running " << command.GetCommandLineString();
+  base::LaunchProcess(command, base::LaunchOptions(), NULL);
+#endif
+}
 
 }  // namespace
 
@@ -189,59 +178,12 @@ void CallbackAnimationObserver::OnLayerAnimationAborted(
   animator_->RemoveObserver(this);
 }
 
-// LayoutManager for the virtual keyboard container.  Manages a single window
-// (the virtual keyboard) and keeps it positioned at the bottom of the
-// owner window.
-class KeyboardLayoutManager : public aura::LayoutManager {
- public:
-  explicit KeyboardLayoutManager(KeyboardController* controller)
-      : controller_(controller), keyboard_(NULL) {
-  }
-
-  // Overridden from aura::LayoutManager
-  virtual void OnWindowResized() OVERRIDE {
-    if (keyboard_ && !controller_->proxy()->resizing_from_contents())
-      ResizeKeyboardToDefault(keyboard_);
-  }
-  virtual void OnWindowAddedToLayout(aura::Window* child) OVERRIDE {
-    DCHECK(!keyboard_);
-    keyboard_ = child;
-    ResizeKeyboardToDefault(keyboard_);
-  }
-  virtual void OnWillRemoveWindowFromLayout(aura::Window* child) OVERRIDE {}
-  virtual void OnWindowRemovedFromLayout(aura::Window* child) OVERRIDE {}
-  virtual void OnChildWindowVisibilityChanged(aura::Window* child,
-                                              bool visible) OVERRIDE {}
-  virtual void SetChildBounds(aura::Window* child,
-                              const gfx::Rect& requested_bounds) OVERRIDE {
-    // SetChildBounds can be invoked by resizing from the container or by
-    // resizing from the contents (through window.resizeTo call in JS).
-    // The flag resizing_from_contents() is used to determine the keyboard is
-    // resizing from which.
-    if (controller_->proxy()->resizing_from_contents()) {
-      controller_->NotifyKeyboardBoundsChanging(requested_bounds);
-      SetChildBoundsDirect(child, requested_bounds);
-    }
-  }
-
- private:
-  void ResizeKeyboardToDefault(aura::Window* child) {
-    gfx::Rect keyboard_bounds = KeyboardBoundsFromWindowBounds(
-        controller_->GetContainerWindow()->bounds());
-    SetChildBoundsDirect(child, keyboard_bounds);
-  }
-
-  KeyboardController* controller_;
-  aura::Window* keyboard_;
-
-  DISALLOW_COPY_AND_ASSIGN(KeyboardLayoutManager);
-};
-
 KeyboardController::KeyboardController(KeyboardControllerProxy* proxy)
     : proxy_(proxy),
       input_method_(NULL),
       keyboard_visible_(false),
       lock_keyboard_(false),
+      type_(ui::TEXT_INPUT_TYPE_NONE),
       weak_factory_(this) {
   CHECK(proxy);
   input_method_ = proxy_->GetInputMethod();
@@ -281,6 +223,7 @@ void KeyboardController::NotifyKeyboardBoundsChanging(
 
 void KeyboardController::HideKeyboard(HideReason reason) {
   keyboard_visible_ = false;
+  ToggleTouchEventLogging(true);
 
   keyboard::LogKeyboardControlEvent(
       reason == HIDE_REASON_AUTOMATIC ?
@@ -288,6 +231,8 @@ void KeyboardController::HideKeyboard(HideReason reason) {
           keyboard::KEYBOARD_CONTROL_HIDE_USER);
 
   NotifyKeyboardBoundsChanging(gfx::Rect());
+
+  set_lock_keyboard(false);
 
   ui::LayerAnimator* container_animator = container_->layer()->GetAnimator();
   animation_observer_.reset(new CallbackAnimationObserver(
@@ -314,14 +259,21 @@ void KeyboardController::RemoveObserver(KeyboardControllerObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
+void KeyboardController::ShowAndLockKeyboard() {
+  set_lock_keyboard(true);
+  OnShowImeIfNeeded();
+}
+
 void KeyboardController::OnWindowHierarchyChanged(
     const HierarchyChangeParams& params) {
   if (params.new_parent && params.target == container_.get())
     OnTextInputStateChanged(proxy_->GetInputMethod()->GetTextInputClient());
 }
 
-void KeyboardController::SetOverrideContentUrl(const GURL& url) {
-  proxy_->SetOverrideContentUrl(url);
+void KeyboardController::Reload() {
+  // Makes sure the keyboard window is initialized.
+  proxy_->GetKeyboardWindow();
+  proxy_->ReloadKeyboardIfNeeded();
 }
 
 void KeyboardController::OnTextInputStateChanged(
@@ -334,9 +286,9 @@ void KeyboardController::OnTextInputStateChanged(
     return;
   }
 
-  ui::TextInputType type =
-      client ? client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
-  if (type == ui::TEXT_INPUT_TYPE_NONE && !lock_keyboard_) {
+  type_ = client ? client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
+
+  if (type_ == ui::TEXT_INPUT_TYPE_NONE && !lock_keyboard_) {
     if (keyboard_visible_) {
       // Set the visibility state here so that any queries for visibility
       // before the timer fires returns the correct future value.
@@ -353,16 +305,13 @@ void KeyboardController::OnTextInputStateChanged(
       weak_factory_.InvalidateWeakPtrs();
       keyboard_visible_ = true;
     }
-    proxy_->SetUpdateInputType(type);
+    proxy_->SetUpdateInputType(type_);
     // Do not explicitly show the Virtual keyboard unless it is in the process
     // of hiding. Instead, the virtual keyboard is shown in response to a user
     // gesture (mouse or touch) that is received while an element has input
     // focus. Showing the keyboard requires an explicit call to
     // OnShowImeIfNeeded.
   }
-  // TODO(bryeung): whenever the TextInputClient changes we need to notify the
-  // keyboard (with the TextInputType) so that it can reset it's state (e.g.
-  // abandon compositions in progress)
 }
 
 void KeyboardController::OnInputMethodDestroyed(
@@ -382,6 +331,15 @@ void KeyboardController::OnShowImeIfNeeded() {
     container_->AddChild(keyboard);
     keyboard->set_owned_by_parent(false);
   }
+
+  // Must be called after keyboard window is created. LoadSystemKeyboard and
+  // ReloadKeyboardIfNeeded depend on a keyboard web content which created when
+  // creating keyboard window.
+  if (type_ == ui::TEXT_INPUT_TYPE_PASSWORD)
+    proxy_->LoadSystemKeyboard();
+  else
+    proxy_->ReloadKeyboardIfNeeded();
+
   if (keyboard_visible_)
     return;
 
@@ -406,6 +364,7 @@ void KeyboardController::OnShowImeIfNeeded() {
 }
 
 void KeyboardController::ShowKeyboard() {
+  ToggleTouchEventLogging(false);
   ui::LayerAnimator* container_animator = container_->layer()->GetAnimator();
 
   // If the container is not animating, makes sure the position and opacity

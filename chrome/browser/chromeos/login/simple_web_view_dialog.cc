@@ -13,7 +13,6 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
-#include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model_delegate.h"
@@ -21,6 +20,7 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/toolbar/reload_button.h"
+#include "components/password_manager/core/browser/password_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -265,9 +265,10 @@ void SimpleWebViewDialog::NavigationStateChanged(
   }
 }
 
-void SimpleWebViewDialog::LoadingStateChanged(WebContents* source) {
+void SimpleWebViewDialog::LoadingStateChanged(WebContents* source,
+    bool to_different_document) {
   bool is_loading = source->IsLoading();
-  UpdateReload(is_loading, false);
+  UpdateReload(is_loading && to_different_document, false);
   command_updater_->UpdateCommandEnabled(IDC_STOP, is_loading);
 }
 
@@ -346,6 +347,7 @@ void SimpleWebViewDialog::ExecuteCommandWithDisposition(
       // Always reload ignoring cache.
     case IDC_RELOAD_IGNORING_CACHE:
     case IDC_RELOAD_CLEARING_CACHE:
+      location_bar_->Revert();
       web_contents->GetController().ReloadIgnoringCache(true);
       break;
     default:

@@ -180,12 +180,19 @@ class BrowserWindowGtk
       GetWebContentsModalDialogHost() OVERRIDE;
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE;
-  virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
+  virtual void ShowAvatarBubbleFromAvatarButton(AvatarBubbleMode mode) OVERRIDE;
   virtual void ShowPasswordGenerationBubble(
       const gfx::Rect& rect,
       const autofill::PasswordForm& form,
       autofill::PasswordGenerator* password_generator) OVERRIDE;
   virtual int GetRenderViewHeightInsetWithDetachedBookmarkBar() OVERRIDE;
+  virtual void ExecuteExtensionCommand(
+      const extensions::Extension* extension,
+      const extensions::Command& command) OVERRIDE;
+  virtual void ShowPageActionPopup(
+      const extensions::Extension* extension) OVERRIDE;
+  virtual void ShowBrowserActionPopup(
+      const extensions::Extension* extension) OVERRIDE;
 
   // Overridden from NotificationObserver:
   virtual void Observe(int type,
@@ -471,10 +478,6 @@ class BrowserWindowGtk
 
   // Called when the preference changes.
   void OnUseCustomChromeFrameChanged();
-
-  // Determine whether we use should default to native decorations or the custom
-  // frame based on the currently-running window manager.
-  static bool GetCustomFramePrefDefault();
 
   // Handler for |devtools_floating_container_|'s "set-floating-position"
   // signal.

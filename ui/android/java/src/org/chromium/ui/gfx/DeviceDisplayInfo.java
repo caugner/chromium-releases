@@ -4,9 +4,7 @@
 
 package org.chromium.ui.gfx;
 
-import android.content.ComponentCallbacks;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.os.Build;
@@ -27,10 +25,10 @@ import org.chromium.base.JNINamespace;
 @JNINamespace("gfx")
 public class DeviceDisplayInfo {
 
-
     private final Context mAppContext;
     private final WindowManager mWinManager;
     private Point mTempPoint = new Point();
+    private DisplayMetrics mTempMetrics = new DisplayMetrics();
 
     private DeviceDisplayInfo(Context context) {
         mAppContext = context.getApplicationContext();
@@ -42,7 +40,8 @@ public class DeviceDisplayInfo {
      */
     @CalledByNative
     public int getDisplayHeight() {
-        return getMetrics().heightPixels;
+        getDisplay().getSize(mTempPoint);
+        return mTempPoint.y;
     }
 
     /**
@@ -50,7 +49,8 @@ public class DeviceDisplayInfo {
      */
     @CalledByNative
     public int getDisplayWidth() {
-        return getMetrics().widthPixels;
+        getDisplay().getSize(mTempPoint);
+        return mTempPoint.x;
     }
 
     /**
@@ -140,7 +140,8 @@ public class DeviceDisplayInfo {
      */
     @CalledByNative
     public double getDIPScale() {
-        return getMetrics().density;
+        getDisplay().getMetrics(mTempMetrics);
+        return mTempMetrics.density;
     }
 
     /**
@@ -152,21 +153,11 @@ public class DeviceDisplayInfo {
         return mAppContext.getResources().getConfiguration().smallestScreenWidthDp;
     }
 
-    private void registerListener() {
-        mAppContext.registerComponentCallbacks(
-                new ComponentCallbacks() {
-                    @Override
-                    public void onConfigurationChanged(Configuration configuration) {
-                        updateNativeSharedDisplayInfo();
-                    }
-
-                    @Override
-                    public void onLowMemory() {
-                    }
-                });
-    }
-
-    private void updateNativeSharedDisplayInfo() {
+    /**
+     * Inform the native implementation to update its cached representation of
+     * the DeviceDisplayInfo values.
+     */
+    public void updateNativeSharedDisplayInfo() {
         nativeUpdateSharedDeviceDisplayInfo(
                 getDisplayHeight(), getDisplayWidth(),
                 getPhysicalDisplayHeight(), getPhysicalDisplayWidth(),
@@ -178,25 +169,15 @@ public class DeviceDisplayInfo {
         return mWinManager.getDefaultDisplay();
     }
 
-    private DisplayMetrics getMetrics() {
-        return mAppContext.getResources().getDisplayMetrics();
-    }
-
     /**
      * Creates DeviceDisplayInfo for a given Context.
      *
      * @param context A context to use.
      * @return DeviceDisplayInfo associated with a given Context.
      */
+    @CalledByNative
     public static DeviceDisplayInfo create(Context context) {
         return new DeviceDisplayInfo(context);
-    }
-
-    @CalledByNative
-    private static DeviceDisplayInfo createWithListener(Context context) {
-        DeviceDisplayInfo deviceDisplayInfo = new DeviceDisplayInfo(context);
-        deviceDisplayInfo.registerListener();
-        return deviceDisplayInfo;
     }
 
     private native void nativeUpdateSharedDeviceDisplayInfo(

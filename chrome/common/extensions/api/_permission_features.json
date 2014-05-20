@@ -15,6 +15,14 @@
 // hashes back to ids.
 
 {
+  "accessibilityFeatures.modify": {
+    "channel": "dev",
+    "extension_types": ["extension", "platform_app"]
+  },
+  "accessibilityFeatures.read": {
+    "channel": "dev",
+    "extension_types": ["extension", "platform_app"]
+  },
   "activeTab": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"],
@@ -40,8 +48,20 @@
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
     "min_manifest_version": 2
   },
-  "alwaysOnTopWindows": {
+  "app.window.alwaysOnTop": {
     "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
+  "app.window.fullscreen": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
+  "app.window.fullscreen.overrideEsc": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
+  "app.window.shape": {
+    "channel": "dev",
     "extension_types": ["platform_app"]
   },
   "audio": [
@@ -61,6 +81,10 @@
       ]
     }
   ],
+  "automation": {
+    "channel": "trunk",
+    "extension_types": ["extension", "legacy_packaged_app", "platform_app"]
+  },
   "autotestPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"],
@@ -159,7 +183,7 @@
       "8C3741E3AF0B93B6E8E0DDD499BB0B74839EA578",  // http://crbug.com/234235
       "E703483CEF33DEC18B4B6DD84B5C776FB9182BDB",  // http://crbug.com/234235
       "307E96539209F95A1A8740C713E6998A73657D96",  // http://crbug.com/329690
-      "314B0FC37CAE989AF42887E5303BD1E98BF12DDE",  // http://crbug.com/329088
+      "A291B26E088FA6BA53FFD72F0916F06EBA7C585A",  // http://crbug.com/341258
       "D7986543275120831B39EF28D1327552FC343960",  // http://crbug.com/329088
       // TODO(tbarzic): Remove the following six when http://crbug.com/346572
       // gets fixed.
@@ -284,7 +308,7 @@
     }
   ],
   "screenlockPrivate": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types":["platform_app"],
     "whitelist": [
       "lkegkdgachcnekllcdfkijonogckdnjo",  // API test
@@ -357,7 +381,11 @@
   },{
     "channel": "stable",
     "extension_types": ["extension"],
-    "whitelist": [ "2FC374607C2DF285634B67C64A2E356C607091C3" ]
+    "whitelist": [
+      "2FC374607C2DF285634B67C64A2E356C607091C3",  // Quickoffice
+      "3727DD3E564B6055387425027AD74C58784ACC15",  // Quickoffice internal
+      "12E618C3C6E97495AAECF2AC12DEB082353241C6"   // QO component extension
+    ]
   }],
   "fileSystem.directory": [{
     "channel": "stable",
@@ -373,7 +401,11 @@
   },{
     "channel": "stable",
     "extension_types": ["extension"],
-    "whitelist": [ "2FC374607C2DF285634B67C64A2E356C607091C3" ]
+    "whitelist": [
+      "2FC374607C2DF285634B67C64A2E356C607091C3",  // Quickoffice
+      "3727DD3E564B6055387425027AD74C58784ACC15",  // Quickoffice internal
+      "12E618C3C6E97495AAECF2AC12DEB082353241C6"   // QO component extension
+    ]
   }],
   "fileSystemProvider": {
     "channel": "trunk",
@@ -388,12 +420,8 @@
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"]
   },
-  "fullscreen": {
-    "channel": "stable",
-    "extension_types": ["platform_app"]
-  },
   "gcm": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": ["extension", "platform_app"]
   },
   "geolocation": {
@@ -533,7 +561,7 @@
     "channel": "stable",
     "extension_types": [ "platform_app" ]
   },
-  // TODO(thestig) Remove this as part of http://crbug.com/144496
+  // TODO(thestig) Remove this as part of http://crbug.com/166950
   "mediaGalleriesPrivate": {
     "channel": "stable",
     "extension_types": [ "platform_app" ],
@@ -559,7 +587,7 @@
       // also doesn't hurt anything.
       "A948368FC53BE437A55FEB414106E207925482F5",  // File manager
       "2FC374607C2DF285634B67C64A2E356C607091C3",  // Quickoffice
-      "5D3851BEFF680AB6D954B76678EFCCE834465C23",  // Quickoffice dev
+      "3727DD3E564B6055387425027AD74C58784ACC15",  // Quickoffice internal
       "12E618C3C6E97495AAECF2AC12DEB082353241C6",  // QO component extension
       "3727DD3E564B6055387425027AD74C58784ACC15",  // Editor
       "C41AD9DCD670210295614257EF8C9945AD68D86E",  // Google Now
@@ -630,10 +658,6 @@
       "extension", "legacy_packaged_app", "hosted_app", "platform_app"
     ]
   },
-  "overrideEscFullscreen": {
-    "channel": "stable",
-    "extension_types": ["platform_app"]
-  },
   "echoPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
@@ -695,8 +719,8 @@
     "channel": "stable",
     "extension_types": ["platform_app"],
     "whitelist": [
-      "314B0FC37CAE989AF42887E5303BD1E98BF12DDE", // Chrome OS Recovery Tool Dev
-      "D7986543275120831B39EF28D1327552FC343960"  // Chrome OS Recovery Tool
+      "A291B26E088FA6BA53FFD72F0916F06EBA7C585A", // http://crbug.com/329088
+      "D7986543275120831B39EF28D1327552FC343960"  // http://crbug.com/329088
     ]
   },
   "readingListPrivate": {
@@ -767,10 +791,6 @@
   "syncFileSystem": {
     "channel": "stable",
     "extension_types": ["platform_app"]
-  },
-  "systemIndicator": {
-    "channel": "dev",
-    "extension_types": ["extension", "legacy_packaged_app", "platform_app"]
   },
   "storage": {
     "channel": "stable",

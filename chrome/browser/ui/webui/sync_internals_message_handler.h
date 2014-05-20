@@ -10,8 +10,10 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "base/values.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
+#include "chrome/browser/sync/protocol_event_observer.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "sync/js/js_controller.h"
 #include "sync/js/js_event_handler.h"
@@ -24,7 +26,8 @@ class SyncInternalsMessageHandler
     : public content::WebUIMessageHandler,
       public syncer::JsEventHandler,
       public syncer::JsReplyHandler,
-      public ProfileSyncServiceObserver {
+      public ProfileSyncServiceObserver,
+      public browser_sync::ProtocolEventObserver {
  public:
   SyncInternalsMessageHandler();
   virtual ~SyncInternalsMessageHandler();
@@ -52,6 +55,9 @@ class SyncInternalsMessageHandler
 
   // ProfileSyncServiceObserver implementation.
   virtual void OnStateChanged() OVERRIDE;
+
+  // ProtocolEventObserver implementation.
+  virtual void OnProtocolEvent(const syncer::ProtocolEvent& e) OVERRIDE;
 
  private:
   // Helper function to register JsController function callbacks.

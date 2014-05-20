@@ -46,6 +46,7 @@ class FolderHeaderView : public views::View,
 
   // views::View overrides:
   virtual void Layout() OVERRIDE;
+  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
   // views::TextfieldController overrides:
@@ -58,7 +59,7 @@ class FolderHeaderView : public views::View,
 
   // AppListItemObserver overrides:
   virtual void ItemIconChanged() OVERRIDE;
-  virtual void ItemTitleChanged() OVERRIDE;
+  virtual void ItemNameChanged() OVERRIDE;
   virtual void ItemHighlightedChanged() OVERRIDE;
   virtual void ItemIsInstallingChanged() OVERRIDE;
   virtual void ItemPercentDownloadedChanged() OVERRIDE;
@@ -67,6 +68,8 @@ class FolderHeaderView : public views::View,
 
   views::ImageButton* back_button_;  // Owned by views hierarchy.
   FolderNameView* folder_name_view_;  // Owned by views hierarchy.
+
+  const base::string16 folder_name_placeholder_text_;
 
   FolderHeaderViewDelegate* delegate_;
 

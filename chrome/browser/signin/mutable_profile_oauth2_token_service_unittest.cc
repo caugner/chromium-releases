@@ -3,12 +3,13 @@
 // found in the LICENSE file.
 
 #include "base/run_loop.h"
-#include "chrome/browser/signin/mutable_profile_oauth2_token_service.h"
-#include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/signin/core/webdata/token_web_data.h"
+#include "components/signin/core/browser/mutable_profile_oauth2_token_service.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_error_controller.h"
+#include "components/signin/core/browser/webdata/token_web_data.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
@@ -18,7 +19,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_MACOSX)
-#include "components/webdata/encryptor/encryptor.h"
+#include "components/os_crypt/os_crypt.h"
 #endif
 
 // Defining constant here to handle backward compatiblity tests, but this
@@ -40,7 +41,7 @@ class MutableProfileOAuth2TokenServiceTest :
 
   virtual void SetUp() OVERRIDE {
 #if defined(OS_MACOSX)
-    Encryptor::UseMockKeychain(true);
+    OSCrypt::UseMockKeychain(true);
 #endif
 
     profile_.reset(new TestingProfile);
@@ -343,5 +344,5 @@ TEST_F(MutableProfileOAuth2TokenServiceTest, FetchTransientError) {
       oauth2_service_->StartRequest(kEmail, scope_list, &consumer_));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(GoogleServiceAuthError::AuthErrorNone(),
-      oauth2_service_->signin_global_error()->GetLastAuthError());
+      oauth2_service_->signin_error_controller()->auth_error());
 }

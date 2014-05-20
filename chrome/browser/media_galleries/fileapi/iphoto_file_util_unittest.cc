@@ -168,13 +168,13 @@ class IPhotoFileUtilTest : public testing::Test {
     ASSERT_TRUE(fake_library_dir_.CreateUniqueTempDir());
     ASSERT_EQ(
         0,
-        file_util::WriteFile(
+        base::WriteFile(
             fake_library_dir_.path().AppendASCII("a.jpg"),
             NULL,
             0));
     ASSERT_EQ(
         0,
-        file_util::WriteFile(
+        base::WriteFile(
             fake_library_dir_.path().AppendASCII("orig.jpg"),
             NULL,
             0));
@@ -214,6 +214,7 @@ class IPhotoFileUtilTest : public testing::Test {
         storage_policy.get(),
         NULL,
         additional_providers.Pass(),
+        std::vector<fileapi::URLRequestAutoMountHandler>(),
         profile_dir_.path(),
         content::CreateAllowFileAccessOptions());
   }

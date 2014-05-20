@@ -10,12 +10,15 @@
 
 #include "base/memory/scoped_ptr.h"
 
-class CommandLine;
+class ExtensionFunctionRegistry;
 class PrefService;
+
+namespace base {
+class CommandLine;
+}
 
 namespace content {
 class BrowserContext;
-class JavaScriptDialogManager;
 class WebContents;
 }
 
@@ -24,7 +27,7 @@ namespace extensions {
 class ApiActivityMonitor;
 class AppSorting;
 class Extension;
-class ExtensionHost;
+class ExtensionHostDelegate;
 class ExtensionSystem;
 class ExtensionSystemProvider;
 
@@ -43,7 +46,7 @@ class ExtensionsBrowserClient {
 
   // Returns true if extensions have been disabled (e.g. via a command-line flag
   // or preference).
-  virtual bool AreExtensionsDisabled(const CommandLine& command_line,
+  virtual bool AreExtensionsDisabled(const base::CommandLine& command_line,
                                      content::BrowserContext* context) = 0;
 
   // Returns true if the |context| is known to the embedder.
@@ -70,7 +73,7 @@ class ExtensionsBrowserClient {
       content::BrowserContext* context) = 0;
 
   // Returns true if |context| corresponds to a guest session.
-  virtual bool IsGuestSession(content::BrowserContext* context) = 0;
+  virtual bool IsGuestSession(content::BrowserContext* context) const = 0;
 
   // Returns true if |extension_id| can run in an incognito window.
   virtual bool IsExtensionIncognitoEnabled(
@@ -94,12 +97,8 @@ class ExtensionsBrowserClient {
   virtual bool IsBackgroundPageAllowed(
       content::BrowserContext* context) const = 0;
 
-  // Called after the hosting |web_contents| for an extension is created. The
-  // implementation may wish to add preference observers to |web_contents|.
-  virtual void OnExtensionHostCreated(content::WebContents* web_contents) = 0;
-
-  // Called after |host| creates a RenderView for an extension.
-  virtual void OnRenderViewCreatedForBackgroundPage(ExtensionHost* host) = 0;
+  // Creates a new ExtensionHostDelegate instance.
+  virtual scoped_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate() = 0;
 
   // Returns true if the client version has updated since the last run. Called
   // once each time the extensions system is loaded per browser_context. The
@@ -107,15 +106,15 @@ class ExtensionsBrowserClient {
   // version for later comparison.
   virtual bool DidVersionUpdate(content::BrowserContext* context) = 0;
 
+  // Permits an external protocol handler to be launched. See
+  // ExternalProtocolHandler::PermitLaunchUrl() in Chrome.
+  virtual void PermitExternalProtocolHandler() = 0;
+
   // Creates a new AppSorting instance.
   virtual scoped_ptr<AppSorting> CreateAppSorting() = 0;
 
   // Return true if the system is run in forced app mode.
   virtual bool IsRunningInForcedAppMode() = 0;
-
-  // Returns the embedder's JavaScriptDialogManager or NULL if the embedder
-  // does not support JavaScript dialogs.
-  virtual content::JavaScriptDialogManager* GetJavaScriptDialogManager() = 0;
 
   // Returns the embedder's ApiActivityMonitor for |context|. Returns NULL if
   // the embedder does not monitor extension API activity.
@@ -125,6 +124,10 @@ class ExtensionsBrowserClient {
   // Returns the factory that provides an ExtensionSystem to be returned from
   // ExtensionSystem::Get.
   virtual ExtensionSystemProvider* GetExtensionSystemFactory() = 0;
+
+  // Registers extension functions not belonging to the core extensions APIs.
+  virtual void RegisterExtensionFunctions(
+      ExtensionFunctionRegistry* registry) const = 0;
 
   // Returns the single instance of |this|.
   static ExtensionsBrowserClient* Get();

@@ -88,8 +88,7 @@ void ExpectFrameColor(media::VideoFrame* yv12_frame, uint32 expect_rgb_color) {
 // Fill each plane to its reported extents and verify accessors report non
 // zero values.  Additionally, for the first plane verify the rows and
 // row_bytes values are correct.
-void ExpectFrameExtents(VideoFrame::Format format, int planes,
-                        int bytes_per_pixel, const char* expected_hash) {
+void ExpectFrameExtents(VideoFrame::Format format, const char* expected_hash) {
   const unsigned char kFillByte = 0x80;
   const int kWidth = 61;
   const int kHeight = 31;
@@ -100,17 +99,13 @@ void ExpectFrameExtents(VideoFrame::Format format, int planes,
       format, size, gfx::Rect(size), size, kTimestamp);
   ASSERT_TRUE(frame.get());
 
-  for(int plane = 0; plane < planes; plane++) {
+  int planes = VideoFrame::NumPlanes(format);
+  for (int plane = 0; plane < planes; plane++) {
     SCOPED_TRACE(base::StringPrintf("Checking plane %d", plane));
     EXPECT_TRUE(frame->data(plane));
     EXPECT_TRUE(frame->stride(plane));
     EXPECT_TRUE(frame->rows(plane));
     EXPECT_TRUE(frame->row_bytes(plane));
-
-    if (plane == 0) {
-      EXPECT_EQ(frame->rows(plane), kHeight);
-      EXPECT_EQ(frame->row_bytes(plane), kWidth * bytes_per_pixel);
-    }
 
     memset(frame->data(plane), kFillByte,
            frame->stride(plane) * frame->rows(plane));
@@ -200,16 +195,49 @@ TEST(VideoFrame, CreateBlackFrame) {
   }
 }
 
+static void FrameNoLongerNeededCallback(
+    const scoped_refptr<media::VideoFrame>& frame,
+    bool* triggered) {
+  *triggered = true;
+}
+
+TEST(VideoFrame, WrapVideoFrame) {
+  const int kWidth = 4;
+  const int kHeight = 4;
+  scoped_refptr<media::VideoFrame> frame;
+  bool no_longer_needed_triggered = false;
+  {
+    scoped_refptr<media::VideoFrame> wrapped_frame =
+        VideoFrame::CreateBlackFrame(gfx::Size(kWidth, kHeight));
+    ASSERT_TRUE(wrapped_frame.get());
+
+    gfx::Rect visible_rect(1, 1, 1, 1);
+    gfx::Size natural_size = visible_rect.size();
+    frame = media::VideoFrame::WrapVideoFrame(
+        wrapped_frame, visible_rect, natural_size,
+        base::Bind(&FrameNoLongerNeededCallback, wrapped_frame,
+                   &no_longer_needed_triggered));
+    EXPECT_EQ(wrapped_frame->coded_size(), frame->coded_size());
+    EXPECT_EQ(wrapped_frame->data(media::VideoFrame::kYPlane),
+              frame->data(media::VideoFrame::kYPlane));
+    EXPECT_NE(wrapped_frame->visible_rect(), frame->visible_rect());
+    EXPECT_EQ(visible_rect, frame->visible_rect());
+    EXPECT_NE(wrapped_frame->natural_size(), frame->natural_size());
+    EXPECT_EQ(natural_size, frame->natural_size());
+  }
+
+  EXPECT_FALSE(no_longer_needed_triggered);
+  frame = NULL;
+  EXPECT_TRUE(no_longer_needed_triggered);
+}
+
 // Ensure each frame is properly sized and allocated.  Will trigger OOB reads
 // and writes as well as incorrect frame hashes otherwise.
 TEST(VideoFrame, CheckFrameExtents) {
-  // Each call consists of a VideoFrame::Format, # of planes, bytes per pixel,
-  // and the expected hash of all planes if filled with kFillByte (defined in
-  // ExpectFrameExtents).
-  ExpectFrameExtents(
-      VideoFrame::YV12,   3, 1, "71113bdfd4c0de6cf62f48fb74f7a0b1");
-  ExpectFrameExtents(
-      VideoFrame::YV16,   3, 1, "9bb99ac3ff350644ebff4d28dc01b461");
+  // Each call consists of a VideoFrame::Format and the expected hash of all
+  // planes if filled with kFillByte (defined in ExpectFrameExtents).
+  ExpectFrameExtents(VideoFrame::YV12, "8e5d54cb23cd0edca111dd35ffb6ff05");
+  ExpectFrameExtents(VideoFrame::YV16, "cce408a044b212db42a10dfec304b3ef");
 }
 
 static void TextureCallback(uint32* called_sync_point,

@@ -156,11 +156,12 @@ void LauncherContextMenu::Init() {
     if (item_.type == ash::TYPE_APP_SHORTCUT ||
         item_.type == ash::TYPE_WINDOWED_APP ||
         item_.type == ash::TYPE_PLATFORM_APP) {
-      std::string app_id = controller_->GetAppIDForShelfID(item_.id);
-      if (!app_id.empty()) {
+      const extensions::MenuItem::ExtensionKey app_key(
+          controller_->GetAppIDForShelfID(item_.id));
+      if (!app_key.empty()) {
         int index = 0;
         extension_items_->AppendExtensionItems(
-            app_id, base::string16(), &index);
+            app_key, base::string16(), &index);
         AddSeparator(ui::NORMAL_SEPARATOR);
       }
     }
@@ -170,9 +171,9 @@ void LauncherContextMenu::Init() {
   // fullscreen because it is confusing when the preference appears not to
   // apply.
   if (!IsFullScreenMode() &&
-        controller_->CanUserModifyShelfAutoHideBehavior(root_window_)) {
+      controller_->CanUserModifyShelfAutoHideBehavior(root_window_)) {
     AddCheckItemWithStringId(MENU_AUTO_HIDE,
-                              IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE);
+                             IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE);
   }
   if (ash::ShelfWidget::ShelfAlignmentAllowed()) {
     AddSubMenuWithStringId(MENU_ALIGNMENT_MENU,

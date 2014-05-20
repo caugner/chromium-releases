@@ -15,6 +15,7 @@
 #include "net/quic/quic_crypto_client_stream.h"
 #include "net/quic/quic_crypto_server_stream.h"
 #include "net/quic/quic_crypto_stream.h"
+#include "net/quic/quic_session_key.h"
 #include "net/quic/test_tools/quic_connection_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/quic/test_tools/simple_quic_framer.h"
@@ -29,6 +30,9 @@ namespace net {
 namespace test {
 
 namespace {
+
+const char kServerHostname[] = "test.example.com";
+const uint16 kServerPort = 80;
 
 // CryptoFramerVisitor is a framer visitor that records handshake messages.
 class CryptoFramerVisitor : public CryptoFramerVisitorInterface {
@@ -163,7 +167,7 @@ int CryptoTestUtils::HandshakeWithFakeClient(
     QuicCryptoServerStream* server,
     const FakeClientOptions& options) {
   PacketSavingConnection* client_conn = new PacketSavingConnection(false);
-  TestSession client_session(client_conn, DefaultQuicConfig());
+  TestClientSession client_session(client_conn, DefaultQuicConfig());
   QuicCryptoClientConfig crypto_config;
 
   client_session.config()->SetDefaults();
@@ -175,7 +179,9 @@ int CryptoTestUtils::HandshakeWithFakeClient(
   if (options.channel_id_enabled) {
     crypto_config.SetChannelIDSigner(ChannelIDSignerForTesting());
   }
-  QuicCryptoClientStream client("test.example.com", &client_session,
+  QuicSessionKey server_key(kServerHostname, kServerPort, false,
+                            kPrivacyModeDisabled);
+  QuicCryptoClientStream client(server_key, &client_session, NULL,
                                 &crypto_config);
   client_session.SetCryptoStream(&client);
 
@@ -188,7 +194,7 @@ int CryptoTestUtils::HandshakeWithFakeClient(
 
   if (options.channel_id_enabled) {
     EXPECT_EQ(crypto_config.channel_id_signer()->GetKeyForHostname(
-                  "test.example.com"),
+                  kServerHostname),
               server->crypto_negotiated_params().channel_id);
   }
 
@@ -231,6 +237,7 @@ void CryptoTestUtils::CommunicateHandshakeMessages(
   }
 }
 
+// static
 pair<size_t, size_t> CryptoTestUtils::AdvanceHandshake(
     PacketSavingConnection* a_conn,
     QuicCryptoStream* a,

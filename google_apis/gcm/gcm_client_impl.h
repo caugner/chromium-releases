@@ -17,10 +17,13 @@
 #include "google_apis/gcm/engine/gcm_store.h"
 #include "google_apis/gcm/engine/mcs_client.h"
 #include "google_apis/gcm/engine/registration_request.h"
+#include "google_apis/gcm/engine/unregistration_request.h"
 #include "google_apis/gcm/gcm_client.h"
 #include "google_apis/gcm/protocol/android_checkin.pb.h"
 #include "net/base/net_log.h"
 #include "net/url_request/url_request_context_getter.h"
+
+class GURL;
 
 namespace base {
 class Clock;
@@ -35,7 +38,26 @@ namespace gcm {
 class CheckinRequest;
 class ConnectionFactory;
 class GCMClientImplTest;
-class UnregistrationRequest;
+
+// Helper class for building GCM internals. Allows tests to inject fake versions
+// as necessary.
+class GCM_EXPORT GCMInternalsBuilder {
+ public:
+  GCMInternalsBuilder();
+  virtual ~GCMInternalsBuilder();
+
+  virtual scoped_ptr<base::Clock> BuildClock();
+  virtual scoped_ptr<MCSClient> BuildMCSClient(
+      const std::string& version,
+      base::Clock* clock,
+      ConnectionFactory* connection_factory,
+      GCMStore* gcm_store);
+  virtual scoped_ptr<ConnectionFactory> BuildConnectionFactory(
+      const std::vector<GURL>& endpoints,
+      const net::BackoffEntry::Policy& backoff_policy,
+      scoped_refptr<net::HttpNetworkSession> network_session,
+      net::NetLog* net_log);
+};
 
 // Implements the GCM Client. It is used to coordinate MCS Client (communication
 // with MCS) and other pieces of GCM infrastructure like Registration and
@@ -43,13 +65,14 @@ class UnregistrationRequest;
 // applications that send and receive messages.
 class GCM_EXPORT GCMClientImpl : public GCMClient {
  public:
-  GCMClientImpl();
+  explicit GCMClientImpl(scoped_ptr<GCMInternalsBuilder> internals_builder);
   virtual ~GCMClientImpl();
 
   // Overridden from GCMClient:
   virtual void Initialize(
       const checkin_proto::ChromeBuildProto& chrome_build_proto,
       const base::FilePath& store_path,
+      const std::vector<std::string>& account_ids,
       const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
       const scoped_refptr<net::URLRequestContextGetter>&
           url_request_context_getter,
@@ -58,15 +81,17 @@ class GCM_EXPORT GCMClientImpl : public GCMClient {
   virtual void Stop() OVERRIDE;
   virtual void CheckOut() OVERRIDE;
   virtual void Register(const std::string& app_id,
-                        const std::string& cert,
                         const std::vector<std::string>& sender_ids) OVERRIDE;
   virtual void Unregister(const std::string& app_id) OVERRIDE;
   virtual void Send(const std::string& app_id,
                     const std::string& receiver_id,
                     const OutgoingMessage& message) OVERRIDE;
+  virtual GCMStatistics GetStatistics() const OVERRIDE;
 
  private:
   // State representation of the GCMClient.
+  // Any change made to this enum should have corresponding change in the
+  // GetStateString(...) function.
   enum State {
     // Uninitialized.
     UNINITIALIZED,
@@ -97,15 +122,18 @@ class GCM_EXPORT GCMClientImpl : public GCMClient {
   // are pending registration requests to obtain a registration ID for
   // requesting application.
   typedef std::map<std::string, RegistrationRequest*>
-      PendingRegistrations;
+      PendingRegistrationRequests;
 
   // Collection of pending unregistration requests. Keys are app IDs, while
   // values are pending unregistration requests to disable the registration ID
   // currently assigned to the application.
   typedef std::map<std::string, UnregistrationRequest*>
-      PendingUnregistrations;
+      PendingUnregistrationRequests;
 
   friend class GCMClientImplTest;
+
+  // Returns text representation of the enum State.
+  std::string GetStateString() const;
 
   // Callbacks for the MCSClient.
   // Receives messages and dispatches them to relevant user delegates.
@@ -144,33 +172,39 @@ class GCM_EXPORT GCMClientImpl : public GCMClient {
   // Callback for persisting device credentials in the |gcm_store_|.
   void SetDeviceCredentialsCallback(bool success);
 
+  // Callback for persisting registration info in the |gcm_store_|.
+  void UpdateRegistrationCallback(bool success);
+
   // Completes the registration request.
   void OnRegisterCompleted(const std::string& app_id,
+                           const std::vector<std::string>& sender_ids,
                            RegistrationRequest::Status status,
                            const std::string& registration_id);
 
   // Completes the unregistration request.
-  void OnUnregisterCompleted(const std::string& app_id, bool status);
+  void OnUnregisterCompleted(const std::string& app_id,
+                             UnregistrationRequest::Status status);
 
   // Completes the GCM store destroy request.
   void OnGCMStoreDestroyed(bool success);
 
-  // Handles incoming data message and dispatches it the a relevant user
-  // delegate.
+  // Handles incoming data message and dispatches it the delegate of this class.
   void HandleIncomingMessage(const gcm::MCSMessage& message);
 
-  // Fires OnMessageSendError event on |delegate|, with specified |app_id| and
-  // message ID obtained from |incoming_message| if one is available.
-  void NotifyDelegateOnMessageSendError(
-      GCMClient::Delegate* delegate,
-      const std::string& app_id,
-      const IncomingMessage& incoming_message);
+  // Fires OnMessageReceived event on the delegate of this class, based on the
+  // details in |data_message_stanza| and |message_data|.
+  void HandleIncomingDataMessage(
+      const mcs_proto::DataMessageStanza& data_message_stanza,
+      MessageData& message_data);
 
-  // For testing purpose only.
-  // Sets an |mcs_client_| for testing. Takes the ownership of |mcs_client|.
-  // TODO(fgorski): Remove this method. Create GCMEngineFactory that will create
-  // components of the engine.
-  void SetMCSClientForTesting(scoped_ptr<MCSClient> mcs_client);
+  // Fires OnMessageSendError event on the delegate of this calss, based on the
+  // details in |data_message_stanza| and |message_data|.
+  void HandleIncomingSendError(
+      const mcs_proto::DataMessageStanza& data_message_stanza,
+      MessageData& message_data);
+
+  // Builder for the GCM internals (mcs client, etc.).
+  scoped_ptr<GCMInternalsBuilder> internals_builder_;
 
   // State of the GCM Client Implementation.
   State state_;
@@ -201,16 +235,22 @@ class GCM_EXPORT GCMClientImpl : public GCMClient {
   scoped_ptr<MCSClient> mcs_client_;
 
   scoped_ptr<CheckinRequest> checkin_request_;
+  std::vector<std::string> account_ids_;
 
-  // Currently pending registrations. GCMClientImpl owns the
+  // Cached registration info.
+  RegistrationInfoMap registrations_;
+
+  // Currently pending registration requests. GCMClientImpl owns the
   // RegistrationRequests.
-  PendingRegistrations pending_registrations_;
-  STLValueDeleter<PendingRegistrations> pending_registrations_deleter_;
+  PendingRegistrationRequests pending_registration_requests_;
+  STLValueDeleter<PendingRegistrationRequests>
+      pending_registration_requests_deleter_;
 
-  // Currently pending unregistrations. GCMClientImpl owns the
+  // Currently pending unregistration requests. GCMClientImpl owns the
   // UnregistrationRequests.
-  PendingUnregistrations pending_unregistrations_;
-  STLValueDeleter<PendingUnregistrations> pending_unregistrations_deleter_;
+  PendingUnregistrationRequests pending_unregistration_requests_;
+  STLValueDeleter<PendingUnregistrationRequests>
+      pending_unregistration_requests_deleter_;
 
   // Factory for creating references in callbacks.
   base::WeakPtrFactory<GCMClientImpl> weak_ptr_factory_;

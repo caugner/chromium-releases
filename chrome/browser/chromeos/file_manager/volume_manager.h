@@ -14,10 +14,12 @@
 #include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
+#include "chrome/browser/chromeos/file_system_provider/observer.h"
+#include "chrome/browser/chromeos/file_system_provider/service.h"
 #include "chrome/browser/local_discovery/storage/privet_volume_lister.h"
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/disks/disk_mount_manager.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/keyed_service/core/keyed_service.h"
 
 class Profile;
 
@@ -45,7 +47,9 @@ enum VolumeType {
   VOLUME_TYPE_DOWNLOADS_DIRECTORY,
   VOLUME_TYPE_REMOVABLE_DISK_PARTITION,
   VOLUME_TYPE_MOUNTED_ARCHIVE_FILE,
-  VOLUME_TYPE_CLOUD_DEVICE
+  VOLUME_TYPE_CLOUD_DEVICE,
+  VOLUME_TYPE_PROVIDED,  // File system provided by the FileSystemProvider API.
+  VOLUME_TYPE_TESTING
 };
 
 struct VolumeInfo {
@@ -97,14 +101,17 @@ struct VolumeInfo {
 // - Removable disks (volume will be created for each partition, not only one
 //   for a device).
 // - Mounted zip archives.
-class VolumeManager : public BrowserContextKeyedService,
+class VolumeManager : public KeyedService,
                       public drive::DriveIntegrationServiceObserver,
-                      public chromeos::disks::DiskMountManager::Observer {
+                      public chromeos::disks::DiskMountManager::Observer,
+                      public chromeos::file_system_provider::Observer {
  public:
-  VolumeManager(Profile* profile,
-                drive::DriveIntegrationService* drive_integration_service,
-                chromeos::PowerManagerClient* power_manager_client,
-                chromeos::disks::DiskMountManager* disk_mount_manager);
+  VolumeManager(
+      Profile* profile,
+      drive::DriveIntegrationService* drive_integration_service,
+      chromeos::PowerManagerClient* power_manager_client,
+      chromeos::disks::DiskMountManager* disk_mount_manager,
+      chromeos::file_system_provider::Service* file_system_provider_service);
   virtual ~VolumeManager();
 
   // Returns the instance corresponding to the |context|.
@@ -130,8 +137,15 @@ class VolumeManager : public BrowserContextKeyedService,
   bool FindVolumeInfoById(const std::string& volume_id,
                           VolumeInfo* result) const;
 
-  // For testing purpose, adds the custom |path| as the "Downloads" folder.
+  // For testing purpose, registers a native local file system poniting to
+  // |path| with DOWNLOADS type, and adds its volume info.
   bool RegisterDownloadsDirectoryForTesting(const base::FilePath& path);
+
+  // For testing purpose, adds a volume info pointing to |path|, with TESTING
+  // type. Assumes that the mount point is already registered.
+  void AddVolumeInfoForTesting(const base::FilePath& path,
+                               VolumeType volume_type,
+                               chromeos::DeviceType device_type);
 
   // drive::DriveIntegrationServiceObserver overrides.
   virtual void OnFileSystemMounted() OVERRIDE;
@@ -154,6 +168,14 @@ class VolumeManager : public BrowserContextKeyedService,
       chromeos::FormatError error_code,
       const std::string& device_path) OVERRIDE;
 
+  // chromeos::file_system_provider::Observer overrides.
+  virtual void OnProvidedFileSystemRegistered(
+      const chromeos::file_system_provider::ProvidedFileSystem& file_system)
+      OVERRIDE;
+  virtual void OnProvidedFileSystemUnregistered(
+      const chromeos::file_system_provider::ProvidedFileSystem& file_system)
+      OVERRIDE;
+
   // Called on change to kExternalStorageDisabled pref.
   void OnExternalStorageDisabledChanged();
 
@@ -167,13 +189,14 @@ class VolumeManager : public BrowserContextKeyedService,
                       const VolumeInfo& volume_info);
 
   Profile* profile_;
-  drive::DriveIntegrationService* drive_integration_service_;
-  chromeos::disks::DiskMountManager* disk_mount_manager_;
+  drive::DriveIntegrationService* drive_integration_service_;  // Not owned.
+  chromeos::disks::DiskMountManager* disk_mount_manager_;      // Not owned.
   scoped_ptr<MountedDiskMonitor> mounted_disk_monitor_;
   PrefChangeRegistrar pref_change_registrar_;
   ObserverList<VolumeManagerObserver> observers_;
   scoped_ptr<local_discovery::PrivetVolumeLister> privet_volume_lister_;
-
+  chromeos::file_system_provider::Service*
+      file_system_provider_service_;  // Not owned by this class.
   std::map<std::string, VolumeInfo> mounted_volumes_;
 
   DISALLOW_COPY_AND_ASSIGN(VolumeManager);

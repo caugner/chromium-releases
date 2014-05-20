@@ -6,6 +6,8 @@
 
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
+#include "base/timer/mock_timer.h"
+#include "base/timer/timer.h"
 #include "chrome/common/net/net_error_info.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -67,9 +69,14 @@ std::string NetErrorString(net::Error net_error) {
 class NetErrorHelperCoreTest : public testing::Test,
                                public NetErrorHelperCore::Delegate {
  public:
-  NetErrorHelperCoreTest() : core_(this),
+  NetErrorHelperCoreTest() : timer_(new base::MockTimer(false, false)),
+                             core_(this),
                              update_count_(0),
-                             error_html_update_count_(0) {
+                             error_html_update_count_(0),
+                             reload_count_(0),
+                             enable_stale_load_bindings_count_(0) {
+    core_.set_auto_reload_enabled(false);
+    core_.set_timer_for_testing(scoped_ptr<base::Timer>(timer_));
   }
 
   virtual ~NetErrorHelperCoreTest() {
@@ -81,6 +88,14 @@ class NetErrorHelperCoreTest : public testing::Test,
 
   const GURL& url_being_fetched() const { return url_being_fetched_; }
   bool is_url_being_fetched() const { return !url_being_fetched_.is_empty(); }
+
+  int reload_count() const {
+    return reload_count_;
+  }
+
+  int enable_stale_load_bindings_count() const {
+    return enable_stale_load_bindings_count_;
+  }
 
   const std::string& last_update_string() const { return last_update_string_; }
   int update_count() const { return update_count_;  }
@@ -94,6 +109,35 @@ class NetErrorHelperCoreTest : public testing::Test,
 
   void LinkDoctorLoadFailure() {
     LinkDoctorLoadFinished("");
+  }
+
+  base::MockTimer* timer() { return timer_; }
+
+  void DoErrorLoad(net::Error error) {
+    core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                       NetErrorHelperCore::NON_ERROR_PAGE);
+    std::string html;
+    core().GetErrorHTML(NetErrorHelperCore::MAIN_FRAME,
+                        NetError(error), false, &html);
+    EXPECT_FALSE(html.empty());
+    EXPECT_EQ(NetErrorString(error), html);
+
+    core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                       NetErrorHelperCore::ERROR_PAGE);
+    core().OnCommitLoad(NetErrorHelperCore::MAIN_FRAME);
+    core().OnFinishLoad(NetErrorHelperCore::MAIN_FRAME);
+  }
+
+  void DoSuccessLoad() {
+    core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                       NetErrorHelperCore::NON_ERROR_PAGE);
+    core().OnCommitLoad(NetErrorHelperCore::MAIN_FRAME);
+    core().OnFinishLoad(NetErrorHelperCore::MAIN_FRAME);
+  }
+
+  void DoDnsProbe(chrome_common_net::DnsProbeStatus final_status) {
+    core().OnNetErrorInfo(chrome_common_net::DNS_PROBE_STARTED);
+    core().OnNetErrorInfo(final_status);
   }
 
  private:
@@ -115,6 +159,10 @@ class NetErrorHelperCoreTest : public testing::Test,
     last_error_html_ = html;
   }
 
+  virtual void EnableStaleLoadBindings(const GURL& page_url) OVERRIDE {
+    enable_stale_load_bindings_count_++;
+  }
+
   virtual void UpdateErrorPage(const WebURLError& error,
                                bool is_failed_post) OVERRIDE {
     update_count_++;
@@ -133,6 +181,12 @@ class NetErrorHelperCoreTest : public testing::Test,
     url_being_fetched_ = GURL();
   }
 
+  virtual void ReloadPage() OVERRIDE {
+    reload_count_++;
+  }
+
+  base::MockTimer* timer_;
+
   NetErrorHelperCore core_;
 
   GURL url_being_fetched_;
@@ -147,6 +201,10 @@ class NetErrorHelperCoreTest : public testing::Test,
   std::string last_error_html_;
   // Number of times |last_error_html_| has been changed.
   int error_html_update_count_;
+
+  int reload_count_;
+
+  int enable_stale_load_bindings_count_;
 };
 
 //------------------------------------------------------------------------------
@@ -190,12 +248,14 @@ TEST_F(NetErrorHelperCoreTest, MainFrameNonDnsError) {
   EXPECT_EQ(NetErrorString(net::ERR_CONNECTION_RESET), html);
 
   // Error page loads.
+  EXPECT_EQ(0, enable_stale_load_bindings_count());
   core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
                      NetErrorHelperCore::ERROR_PAGE);
   core().OnCommitLoad(NetErrorHelperCore::MAIN_FRAME);
   core().OnFinishLoad(NetErrorHelperCore::MAIN_FRAME);
   EXPECT_EQ(0, update_count());
   EXPECT_EQ(0, error_html_update_count());
+  EXPECT_EQ(1, enable_stale_load_bindings_count());
 }
 
 TEST_F(NetErrorHelperCoreTest, MainFrameNonDnsErrorWithLinkDoctor) {
@@ -593,11 +653,13 @@ TEST_F(NetErrorHelperCoreTest, FinishedBeforeProbePost) {
             html);
 
   // Error page loads.
+  EXPECT_EQ(0, enable_stale_load_bindings_count());
   core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
                      NetErrorHelperCore::ERROR_PAGE);
   core().OnCommitLoad(NetErrorHelperCore::MAIN_FRAME);
   core().OnFinishLoad(NetErrorHelperCore::MAIN_FRAME);
   EXPECT_EQ(0, update_count());
+  EXPECT_EQ(0, enable_stale_load_bindings_count());
 
   core().OnNetErrorInfo(chrome_common_net::DNS_PROBE_STARTED);
   EXPECT_EQ(1, update_count());
@@ -1301,4 +1363,271 @@ TEST_F(NetErrorHelperCoreTest, LinkDoctorStopped) {
   EXPECT_EQ(ProbeErrorString(chrome_common_net::DNS_PROBE_FINISHED_NXDOMAIN),
             last_error_html());
   EXPECT_EQ(1, error_html_update_count());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadDisabled) {
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+
+  EXPECT_FALSE(timer()->IsRunning());
+  EXPECT_EQ(0, reload_count());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadSucceeds) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+
+  EXPECT_TRUE(timer()->IsRunning());
+  EXPECT_EQ(0, reload_count());
+
+  timer()->Fire();
+  EXPECT_FALSE(timer()->IsRunning());
+  EXPECT_EQ(1, reload_count());
+
+  DoSuccessLoad();
+
+  EXPECT_FALSE(timer()->IsRunning());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadRetries) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+
+  EXPECT_TRUE(timer()->IsRunning());
+  base::TimeDelta first_delay = timer()->GetCurrentDelay();
+  EXPECT_EQ(0, reload_count());
+
+  timer()->Fire();
+  EXPECT_FALSE(timer()->IsRunning());
+  EXPECT_EQ(1, reload_count());
+
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+
+  EXPECT_TRUE(timer()->IsRunning());
+  EXPECT_GT(timer()->GetCurrentDelay(), first_delay);
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadStopsTimerOnStop) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  EXPECT_TRUE(timer()->IsRunning());
+  core().OnStop();
+  EXPECT_FALSE(timer()->IsRunning());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadStopsLoadingOnStop) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  EXPECT_EQ(1, core().auto_reload_count());
+  timer()->Fire();
+  EXPECT_EQ(1, reload_count());
+  core().OnStop();
+  EXPECT_FALSE(timer()->IsRunning());
+  EXPECT_EQ(0, core().auto_reload_count());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadStopsOnOtherLoadStart) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  EXPECT_TRUE(timer()->IsRunning());
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::NON_ERROR_PAGE);
+  EXPECT_FALSE(timer()->IsRunning());
+  EXPECT_EQ(1, core().auto_reload_count());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadResetsCountOnSuccess) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  base::TimeDelta delay = timer()->GetCurrentDelay();
+  EXPECT_EQ(1, core().auto_reload_count());
+  timer()->Fire();
+  EXPECT_EQ(1, reload_count());
+  DoSuccessLoad();
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  EXPECT_EQ(1, core().auto_reload_count());
+  EXPECT_EQ(timer()->GetCurrentDelay(), delay);
+  timer()->Fire();
+  EXPECT_EQ(2, reload_count());
+  DoSuccessLoad();
+  EXPECT_EQ(0, core().auto_reload_count());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadRestartsOnOnline) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  base::TimeDelta delay = timer()->GetCurrentDelay();
+  timer()->Fire();
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  EXPECT_TRUE(timer()->IsRunning());
+  EXPECT_NE(delay, timer()->GetCurrentDelay());
+  core().NetworkStateChanged(true);
+  EXPECT_TRUE(timer()->IsRunning());
+  EXPECT_EQ(delay, timer()->GetCurrentDelay());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadDoesNotStartOnOnline) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  timer()->Fire();
+  DoSuccessLoad();
+  EXPECT_FALSE(timer()->IsRunning());
+  core().NetworkStateChanged(true);
+  EXPECT_FALSE(timer()->IsRunning());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadStopsOnOffline) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  EXPECT_TRUE(timer()->IsRunning());
+  core().NetworkStateChanged(false);
+  EXPECT_FALSE(timer()->IsRunning());
+  EXPECT_EQ(0, core().auto_reload_count());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadStopsOnOfflineThenRestartsOnOnline) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  EXPECT_TRUE(timer()->IsRunning());
+  core().NetworkStateChanged(false);
+  EXPECT_FALSE(timer()->IsRunning());
+  core().NetworkStateChanged(true);
+  EXPECT_TRUE(timer()->IsRunning());
+  EXPECT_EQ(1, core().auto_reload_count());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadDoesNotRestartOnOnlineAfterStop) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  timer()->Fire();
+  core().OnStop();
+  core().NetworkStateChanged(true);
+  EXPECT_FALSE(timer()->IsRunning());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadWithDnsProbes) {
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  DoDnsProbe(chrome_common_net::DNS_PROBE_FINISHED_NXDOMAIN);
+  timer()->Fire();
+  EXPECT_EQ(1, reload_count());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadExponentialBackoffLevelsOff) {
+  core().set_auto_reload_enabled(true);
+  base::TimeDelta previous = base::TimeDelta::FromMilliseconds(0);
+  const int kMaxTries = 50;
+  int tries = 0;
+  for (tries = 0; tries < kMaxTries; tries++) {
+    DoErrorLoad(net::ERR_CONNECTION_RESET);
+    EXPECT_TRUE(timer()->IsRunning());
+    if (previous == timer()->GetCurrentDelay())
+      break;
+    previous = timer()->GetCurrentDelay();
+    timer()->Fire();
+  }
+
+  EXPECT_LT(tries, kMaxTries);
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadSlowError) {
+  core().set_auto_reload_enabled(true);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::NON_ERROR_PAGE);
+  std::string html;
+  core().GetErrorHTML(NetErrorHelperCore::MAIN_FRAME,
+                      NetError(net::ERR_CONNECTION_RESET), false, &html);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::ERROR_PAGE);
+  core().OnCommitLoad(NetErrorHelperCore::MAIN_FRAME);
+  EXPECT_FALSE(timer()->IsRunning());
+  // Start a new non-error page load.
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::NON_ERROR_PAGE);
+  EXPECT_FALSE(timer()->IsRunning());
+  // Finish the error page load.
+  core().OnFinishLoad(NetErrorHelperCore::MAIN_FRAME);
+  EXPECT_FALSE(timer()->IsRunning());
+  core().OnCommitLoad(NetErrorHelperCore::MAIN_FRAME);
+  core().OnFinishLoad(NetErrorHelperCore::MAIN_FRAME);
+  EXPECT_FALSE(timer()->IsRunning());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadOnlineSlowError) {
+  core().set_auto_reload_enabled(true);
+  core().NetworkStateChanged(false);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::NON_ERROR_PAGE);
+  std::string html;
+  core().GetErrorHTML(NetErrorHelperCore::MAIN_FRAME,
+                      NetError(net::ERR_CONNECTION_RESET), false, &html);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::ERROR_PAGE);
+  core().OnCommitLoad(NetErrorHelperCore::MAIN_FRAME);
+  EXPECT_FALSE(timer()->IsRunning());
+  core().NetworkStateChanged(true);
+  EXPECT_FALSE(timer()->IsRunning());
+  core().NetworkStateChanged(false);
+  core().OnFinishLoad(NetErrorHelperCore::MAIN_FRAME);
+  EXPECT_FALSE(timer()->IsRunning());
+  core().NetworkStateChanged(true);
+  EXPECT_TRUE(timer()->IsRunning());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadOnlinePendingError) {
+  core().set_auto_reload_enabled(true);
+  core().NetworkStateChanged(false);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::NON_ERROR_PAGE);
+  std::string html;
+  core().GetErrorHTML(NetErrorHelperCore::MAIN_FRAME,
+                      NetError(net::ERR_CONNECTION_RESET), false, &html);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::ERROR_PAGE);
+  EXPECT_FALSE(timer()->IsRunning());
+  core().NetworkStateChanged(true);
+  EXPECT_FALSE(timer()->IsRunning());
+  core().NetworkStateChanged(false);
+  core().OnCommitLoad(NetErrorHelperCore::MAIN_FRAME);
+  core().OnFinishLoad(NetErrorHelperCore::MAIN_FRAME);
+  EXPECT_FALSE(timer()->IsRunning());
+  core().NetworkStateChanged(true);
+  EXPECT_TRUE(timer()->IsRunning());
+}
+
+TEST_F(NetErrorHelperCoreTest, AutoReloadOnlinePartialErrorReplacement) {
+  core().set_auto_reload_enabled(true);
+  core().NetworkStateChanged(false);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::NON_ERROR_PAGE);
+  std::string html;
+  core().GetErrorHTML(NetErrorHelperCore::MAIN_FRAME,
+                      NetError(net::ERR_CONNECTION_RESET), false, &html);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::ERROR_PAGE);
+  core().OnCommitLoad(NetErrorHelperCore::MAIN_FRAME);
+  core().OnFinishLoad(NetErrorHelperCore::MAIN_FRAME);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::NON_ERROR_PAGE);
+  core().GetErrorHTML(NetErrorHelperCore::MAIN_FRAME,
+                      NetError(net::ERR_CONNECTION_RESET), false, &html);
+  core().OnStartLoad(NetErrorHelperCore::MAIN_FRAME,
+                     NetErrorHelperCore::ERROR_PAGE);
+  EXPECT_FALSE(timer()->IsRunning());
+  core().NetworkStateChanged(true);
+  EXPECT_FALSE(timer()->IsRunning());
+}
+
+TEST_F(NetErrorHelperCoreTest, ShouldSuppressErrorPage) {
+  // Set up the environment to test ShouldSuppressErrorPage: auto-reload is
+  // enabled, an error page is loaded, and the auto-reload callback is running.
+  core().set_auto_reload_enabled(true);
+  DoErrorLoad(net::ERR_CONNECTION_RESET);
+  timer()->Fire();
+
+  EXPECT_FALSE(core().ShouldSuppressErrorPage(NetErrorHelperCore::SUB_FRAME,
+                                              GURL(kFailedUrl)));
+  EXPECT_FALSE(core().ShouldSuppressErrorPage(NetErrorHelperCore::MAIN_FRAME,
+                                              GURL("http://some.other.url")));
+  EXPECT_TRUE(core().ShouldSuppressErrorPage(NetErrorHelperCore::MAIN_FRAME,
+                                             GURL(kFailedUrl)));
 }

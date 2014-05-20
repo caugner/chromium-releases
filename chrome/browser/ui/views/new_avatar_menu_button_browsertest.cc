@@ -22,6 +22,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "content/public/test/test_utils.h"
 #include "grit/generated_resources.h"
+#include "ui/views/controls/button/label_button.h"
 
 class NewAvatarMenuButtonTest : public InProcessBrowserTest {
  public:
@@ -90,7 +91,17 @@ void NewAvatarMenuButtonTest::StartAvatarMenu() {
   EXPECT_TRUE(ProfileChooserView::IsShowing());
 }
 
-IN_PROC_BROWSER_TEST_F(NewAvatarMenuButtonTest, SignOut) {
+#if defined(OS_CHROMEOS) || defined (OS_LINUX) || defined (OS_WIN)
+// This test doesn't make sense for ChromeOS since it has a different
+// multi-profiles menu in the system tray instead.
+//
+// Test fails flakily on Linux and Windows http://crbug.com/352710
+#define MAYBE_SignOut DISABLED_SignOut
+#else
+#define MAYBE_SignOut SignOut
+#endif
+
+IN_PROC_BROWSER_TEST_F(NewAvatarMenuButtonTest, MAYBE_SignOut) {
   // If multiprofile mode is not enabled, you can't switch between profiles.
   if (!profiles::IsMultipleProfilesEnabled())
     return;
@@ -111,10 +122,10 @@ IN_PROC_BROWSER_TEST_F(NewAvatarMenuButtonTest, SignOut) {
       menu->GetItemAt(menu->GetActiveProfileIndex());
   EXPECT_FALSE(menu_item_before.signin_required);
 
-  ProfileChooserView::profile_bubble_->LinkClicked(
-      static_cast<views::Link*>(
-          ProfileChooserView::profile_bubble_->signout_current_profile_link_),
-      0);
+  ui::MouseEvent mouse_ev(
+      ui::ET_MOUSE_RELEASED, gfx::Point(), gfx::Point(), 0, 0);
+  ProfileChooserView::profile_bubble_->ButtonPressed(
+      ProfileChooserView::profile_bubble_->lock_button_, mouse_ev);
 
   EXPECT_TRUE(menu->GetItemAt(menu->GetActiveProfileIndex()).signin_required);
 

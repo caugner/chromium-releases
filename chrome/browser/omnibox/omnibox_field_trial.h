@@ -175,6 +175,10 @@ class OmniboxFieldTrial {
   // suggestions can continue to appear after the user has started typing.
   static bool InZeroSuggestAfterTypingFieldTrial();
 
+  // Returns whether the user is in a ZeroSuggest field trial, but should
+  // show recently searched-for queries instead.
+  static bool InZeroSuggestPersonalizedFieldTrial();
+
   // ---------------------------------------------------------
   // For the ShortcutsScoringMaxRelevance experiment that's part of the
   // bundled omnibox field trial.
@@ -216,7 +220,8 @@ class OmniboxFieldTrial {
   // If the user is in an experiment group that, in the provided
   // |current_page_classification| context, demotes the relevance scores
   // of certain types of matches, populates the |demotions_by_type| map
-  // appropriately.  Otherwise, clears |demotions_by_type|.
+  // appropriately.  Otherwise, sets |demotions_by_type| to its default
+  // value based on the context.
   static void GetDemotionsByType(
       AutocompleteInput::PageClassification current_page_classification,
       DemotionMultipliers* demotions_by_type);

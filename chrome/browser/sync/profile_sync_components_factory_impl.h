@@ -12,9 +12,11 @@
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 
-
-class CommandLine;
 class Profile;
+
+namespace base {
+class CommandLine;
+}
 
 namespace extensions {
 class ExtensionSystem;
@@ -23,7 +25,7 @@ class ExtensionSystem;
 class ProfileSyncComponentsFactoryImpl : public ProfileSyncComponentsFactory {
  public:
   ProfileSyncComponentsFactoryImpl(Profile* profile,
-                                   CommandLine* command_line);
+                                   base::CommandLine* command_line);
   virtual ~ProfileSyncComponentsFactoryImpl();
 
   virtual void RegisterDataTypes(ProfileSyncService* pss) OVERRIDE;
@@ -41,7 +43,7 @@ class ProfileSyncComponentsFactoryImpl : public ProfileSyncComponentsFactory {
   virtual browser_sync::SyncBackendHost* CreateSyncBackendHost(
       const std::string& name,
       Profile* profile,
-      const base::WeakPtr<browser_sync::SyncPrefs>& sync_prefs) OVERRIDE;
+      const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs) OVERRIDE;
 
   virtual browser_sync::GenericChangeProcessor* CreateGenericChangeProcessor(
       ProfileSyncService* profile_sync_service,
@@ -59,10 +61,6 @@ class ProfileSyncComponentsFactoryImpl : public ProfileSyncComponentsFactory {
   virtual SyncComponents CreateBookmarkSyncComponents(
       ProfileSyncService* profile_sync_service,
       browser_sync::DataTypeErrorHandler* error_handler) OVERRIDE;
-  virtual SyncComponents CreatePasswordSyncComponents(
-      ProfileSyncService* profile_sync_service,
-      PasswordStore* password_store,
-      browser_sync::DataTypeErrorHandler* error_handler) OVERRIDE;
   virtual SyncComponents CreateTypedUrlSyncComponents(
       ProfileSyncService* profile_sync_service,
       history::HistoryBackend* history_backend,
@@ -73,12 +71,14 @@ class ProfileSyncComponentsFactoryImpl : public ProfileSyncComponentsFactory {
 
  private:
   // Register data types which are enabled on desktop platforms only.
-  void RegisterDesktopDataTypes(ProfileSyncService* pss);
+  void RegisterDesktopDataTypes(syncer::ModelTypeSet disabled_types,
+                                ProfileSyncService* pss);
   // Register data types which are enabled on both desktop and mobile.
-  void RegisterCommonDataTypes(ProfileSyncService* pss);
+  void RegisterCommonDataTypes(syncer::ModelTypeSet disabled_types,
+                               ProfileSyncService* pss);
 
   Profile* profile_;
-  CommandLine* command_line_;
+  base::CommandLine* command_line_;
   // Set on the UI thread (since extensions::ExtensionSystemFactory is
   // non-threadsafe); accessed on both the UI and FILE threads in
   // GetSyncableServiceForType.

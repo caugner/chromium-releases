@@ -211,6 +211,7 @@ SelectionModel RenderTextPango::AdjacentWordSelectionModel(
 }
 
 Range RenderTextPango::GetGlyphBounds(size_t index) {
+  EnsureLayout();
   PangoRectangle pos;
   pango_layout_index_to_pos(layout_, TextIndexToLayoutIndex(index), &pos);
   // TODO(derat): Support fractional ranges for subpixel positioning?
@@ -485,6 +486,8 @@ void RenderTextPango::DrawVisualText(Canvas* canvas) {
       }
     } while (glyph_index < glyph_count);
   }
+
+  renderer.EndDiagonalStrike();
 
   // Undo the temporarily applied composition underlines and selection colors.
   UndoCompositionAndSelectionStyles();

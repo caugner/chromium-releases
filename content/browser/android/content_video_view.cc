@@ -107,10 +107,8 @@ void ContentVideoView::OnPlaybackComplete() {
 void ContentVideoView::OnExitFullscreen() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> content_video_view = GetJavaObject(env);
-  if (!content_video_view.is_null()) {
+  if (!content_video_view.is_null())
     Java_ContentVideoView_onExitFullscreen(env, content_video_view.obj());
-    j_content_video_view_.reset();
-  }
 }
 
 void ContentVideoView::UpdateMediaMetadata() {
@@ -206,8 +204,8 @@ gfx::NativeView ContentVideoView::GetNativeView() {
 JavaObjectWeakGlobalRef ContentVideoView::CreateJavaObject() {
   ContentViewCoreImpl* content_view_core = manager_->GetContentViewCore();
   JNIEnv* env = AttachCurrentThread();
-  bool legacyMode = !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableOverlayFullscreenVideoSubtitle);
+  bool legacyMode = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableOverlayFullscreenVideoSubtitle);
   return JavaObjectWeakGlobalRef(
       env,
       Java_ContentVideoView_createContentVideoView(
@@ -219,6 +217,11 @@ JavaObjectWeakGlobalRef ContentVideoView::CreateJavaObject() {
 }
 
 void ContentVideoView::CreatePowerSaveBlocker() {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableOverlayFullscreenVideoSubtitle)) {
+    return;
+  }
+
   if (power_save_blocker_) return;
 
   power_save_blocker_ = PowerSaveBlocker::Create(

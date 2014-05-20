@@ -7,7 +7,7 @@
 
 #include "base/bind.h"
 #include "mojo/public/bindings/remote_ptr.h"
-#include "mojom/native_viewport.h"
+#include "mojo/services/native_viewport/native_viewport.mojom.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/events/event_source.h"
 #include "ui/gfx/rect.h"
@@ -33,7 +33,6 @@ class WindowTreeHostMojo : public aura::WindowTreeHost,
 
  private:
   // WindowTreeHost:
-  virtual aura::RootWindow* GetRootWindow() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
@@ -50,7 +49,6 @@ class WindowTreeHostMojo : public aura::WindowTreeHost,
   virtual void UnConfineCursor() OVERRIDE;
   virtual void PostNativeEvent(const base::NativeEvent& native_event) OVERRIDE;
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
-  virtual void PrepareForShutdown() OVERRIDE;
   virtual void SetCursorNative(gfx::NativeCursor cursor) OVERRIDE;
   virtual void MoveCursorToNative(const gfx::Point& location) OVERRIDE;
   virtual void OnCursorVisibilityChangedNative(bool show) OVERRIDE;
@@ -59,7 +57,7 @@ class WindowTreeHostMojo : public aura::WindowTreeHost,
   virtual ui::EventProcessor* GetEventProcessor() OVERRIDE;
 
   // Overridden from NativeViewportClient:
-  virtual void OnCreated() MOJO_OVERRIDE;
+  virtual void OnCreated() OVERRIDE;
   virtual void OnDestroyed() OVERRIDE;
   virtual void OnBoundsChanged(const Rect& bounds) OVERRIDE;
   virtual void OnEvent(const Event& event) OVERRIDE;

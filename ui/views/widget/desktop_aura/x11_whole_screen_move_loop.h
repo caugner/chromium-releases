@@ -7,6 +7,7 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_pump_dispatcher.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
@@ -48,15 +49,22 @@ class X11WholeScreenMoveLoop : public base::MessagePumpDispatcher {
   void SetDragImage(const gfx::ImageSkia& image, gfx::Vector2dF offset);
 
  private:
-  // Grabs the pointer, setting the mouse cursor to |cursor|. Returns true if
-  // the grab was successful.
-  bool GrabPointerWithCursor(gfx::NativeCursor cursor);
+  // Grabs the pointer and keyboard, setting the mouse cursor to |cursor|.
+  // Returns true if the grab was successful.
+  bool GrabPointerAndKeyboard(gfx::NativeCursor cursor);
 
   // Creates an input-only window to be used during the drag.
   Window CreateDragInputWindow(XDisplay* display);
 
   // Creates a window to show the drag image during the drag.
   void CreateDragImageWindow();
+
+  // Checks to see if |in_image| is an image that has any visible regions
+  // (defined as having a pixel with alpha > 32). If so, return true.
+  bool CheckIfIconValid();
+
+  // Dispatch mouse movement event to |delegate_| in a posted task.
+  void DispatchMouseMovement();
 
   X11WholeScreenMoveLoopDelegate* delegate_;
 
@@ -77,6 +85,8 @@ class X11WholeScreenMoveLoop : public base::MessagePumpDispatcher {
   scoped_ptr<Widget> drag_widget_;
   gfx::ImageSkia drag_image_;
   gfx::Vector2dF drag_offset_;
+  XMotionEvent last_xmotion_;
+  base::WeakPtrFactory<X11WholeScreenMoveLoop> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(X11WholeScreenMoveLoop);
 };

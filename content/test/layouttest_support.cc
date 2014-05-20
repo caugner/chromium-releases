@@ -24,6 +24,7 @@
 
 using blink::WebDeviceMotionData;
 using blink::WebDeviceOrientationData;
+using blink::WebGamepad;
 using blink::WebGamepads;
 using blink::WebRect;
 using blink::WebSize;
@@ -82,6 +83,14 @@ void SetMockGamepads(const WebGamepads& pads) {
   RendererWebKitPlatformSupportImpl::SetMockGamepadsForTesting(pads);
 }
 
+void MockGamepadConnected(int index, const WebGamepad& pad) {
+  RendererWebKitPlatformSupportImpl::MockGamepadConnected(index, pad);
+}
+
+void MockGamepadDisconnected(int index, const WebGamepad& pad) {
+  RendererWebKitPlatformSupportImpl::MockGamepadDisconnected(index, pad);
+}
+
 void SetMockDeviceMotionData(const WebDeviceMotionData& data) {
   RendererWebKitPlatformSupportImpl::SetMockDeviceMotionDataForTesting(data);
 }
@@ -89,6 +98,11 @@ void SetMockDeviceMotionData(const WebDeviceMotionData& data) {
 void SetMockDeviceOrientationData(const WebDeviceOrientationData& data) {
   RendererWebKitPlatformSupportImpl::
       SetMockDeviceOrientationDataForTesting(data);
+}
+
+void SetMockScreenOrientation(const blink::WebScreenOrientation& orientation) {
+  RendererWebKitPlatformSupportImpl::
+      SetMockScreenOrientationForTesting(orientation);
 }
 
 void EnableRendererLayoutTestMode() {

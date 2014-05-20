@@ -15,13 +15,13 @@
 #include "chrome/browser/media_galleries/media_gallery_context_menu.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
-#include "chrome/common/extensions/permissions/media_galleries_permission.h"
 #include "components/storage_monitor/storage_info.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/permissions/media_galleries_permission.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -30,6 +30,8 @@
 
 using extensions::APIPermission;
 using extensions::Extension;
+using storage_monitor::StorageInfo;
+using storage_monitor::StorageMonitor;
 
 namespace {
 
@@ -257,6 +259,7 @@ void MediaGalleriesDialogController::DidForgetGallery(
   // TODO(scr): remove from new_galleries_ if it's in there.  Should
   // new_galleries be a set? Why don't new_galleries allow context clicking?
   DCHECK(ContainsKey(known_galleries_, pref_id));
+  media_galleries::UsageCount(media_galleries::DIALOG_FORGET_GALLERY);
   forgotten_gallery_ids_.insert(pref_id);
   dialog_->UpdateGalleries();
 }

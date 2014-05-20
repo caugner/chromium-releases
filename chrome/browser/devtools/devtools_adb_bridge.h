@@ -13,8 +13,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/devtools/android_device.h"
 #include "chrome/browser/devtools/refcounted_adb_thread.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/socket/tcp_client_socket.h"
 #include "ui/gfx/size.h"
@@ -51,8 +51,7 @@ class DevToolsAdbBridge
                               const std::string& response)> Callback;
   typedef std::vector<scoped_refptr<AndroidDeviceProvider> > DeviceProviders;
 
-
-  class Wrapper : public BrowserContextKeyedService {
+  class Wrapper : public KeyedService {
    public:
     Wrapper();
     virtual ~Wrapper();
@@ -77,7 +76,7 @@ class DevToolsAdbBridge
     virtual ~Factory();
 
     // BrowserContextKeyedServiceFactory overrides:
-    virtual BrowserContextKeyedService* BuildServiceInstanceFor(
+    virtual KeyedService* BuildServiceInstanceFor(
         content::BrowserContext* context) const OVERRIDE;
     DISALLOW_COPY_AND_ASSIGN(Factory);
   };
@@ -181,6 +180,11 @@ class DevToolsAdbBridge
   void set_device_providers(DeviceProviders device_providers) {
     device_providers_ = device_providers;
   }
+
+  // If the test device provider is set all other providers are ignored.
+  void set_device_provider_for_test(
+      scoped_refptr<AndroidDeviceProvider> device_provider);
+
   static bool HasDevToolsWindow(const std::string& agent_id);
 
  private:
@@ -198,6 +202,7 @@ class DevToolsAdbBridge
   typedef std::vector<Listener*> Listeners;
   Listeners listeners_;
   DeviceProviders device_providers_;
+  DeviceProviders device_providers_for_test_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsAdbBridge);
 };
 

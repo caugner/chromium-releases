@@ -15,12 +15,12 @@
 #include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/i18n/file_util_icu.h"
+#include "base/lazy_instance.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/extensions/api/developer_private/developer_private_api_factory.h"
 #include "chrome/browser/extensions/api/developer_private/entry_picker.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
@@ -51,6 +51,7 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_error.h"
+#include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/management_policy.h"
@@ -149,11 +150,23 @@ namespace Inspect = api::developer_private::Inspect;
 namespace PackDirectory = api::developer_private::PackDirectory;
 namespace Reload = api::developer_private::Reload;
 
-DeveloperPrivateAPI* DeveloperPrivateAPI::Get(Profile* profile) {
-  return DeveloperPrivateAPIFactory::GetForProfile(profile);
+static base::LazyInstance<BrowserContextKeyedAPIFactory<DeveloperPrivateAPI> >
+    g_factory = LAZY_INSTANCE_INITIALIZER;
+
+// static
+BrowserContextKeyedAPIFactory<DeveloperPrivateAPI>*
+DeveloperPrivateAPI::GetFactoryInstance() {
+  return g_factory.Pointer();
 }
 
-DeveloperPrivateAPI::DeveloperPrivateAPI(Profile* profile) : profile_(profile) {
+// static
+DeveloperPrivateAPI* DeveloperPrivateAPI::Get(
+    content::BrowserContext* context) {
+  return GetFactoryInstance()->Get(context);
+}
+
+DeveloperPrivateAPI::DeveloperPrivateAPI(content::BrowserContext* context)
+    : profile_(Profile::FromBrowserContext(context)) {
   RegisterNotifications();
 }
 
@@ -163,7 +176,7 @@ DeveloperPrivateEventRouter::DeveloperPrivateEventRouter(Profile* profile)
     chrome::NOTIFICATION_EXTENSION_INSTALLED,
     chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
     chrome::NOTIFICATION_EXTENSION_LOADED,
-    chrome::NOTIFICATION_EXTENSION_UNLOADED,
+    chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
     chrome::NOTIFICATION_EXTENSION_VIEW_REGISTERED,
     chrome::NOTIFICATION_EXTENSION_VIEW_UNREGISTERED
   };
@@ -217,7 +230,7 @@ void DeveloperPrivateEventRouter::Observe(
       event_data.event_type = developer::EVENT_TYPE_LOADED;
       extension = content::Details<const Extension>(details).ptr();
       break;
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED:
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED:
       event_data.event_type = developer::EVENT_TYPE_UNLOADED;
       extension =
           content::Details<const UnloadedExtensionInfo>(details)->extension;
@@ -782,7 +795,7 @@ bool DeveloperPrivateEnableFunction::RunImpl() {
   }
 
   if (enable) {
-    ExtensionPrefs* prefs = service->extension_prefs();
+    ExtensionPrefs* prefs = ExtensionPrefs::Get(GetProfile());
     if (prefs->DidExtensionEscalatePermissions(extension_id)) {
       AppWindowRegistry* registry = AppWindowRegistry::Get(GetProfile());
       CHECK(registry);
@@ -830,7 +843,8 @@ void DeveloperPrivateEnableFunction::OnRequirementsChecked(
   } else {
     ExtensionErrorReporter::GetInstance()->ReportError(
         base::UTF8ToUTF16(JoinString(requirements_errors, ' ')),
-        true /* be noisy */);
+        true,   // Be noisy.
+        NULL);  // Caller expects no response.
   }
   Release();
 }
@@ -1173,14 +1187,17 @@ void DeveloperPrivateLoadDirectoryFunction::ReadSyncFileSystemDirectoryCb(
 
   }
 
-  // Directory copy operation released here.
-  pending_copy_operations_count_--;
+  if (!has_more) {
+    // Directory copy operation released here.
+    pending_copy_operations_count_--;
 
-  if (!pending_copy_operations_count_) {
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&DeveloperPrivateLoadDirectoryFunction::SendResponse,
-                   this,
-                   success_));
+    if (!pending_copy_operations_count_) {
+      content::BrowserThread::PostTask(
+          content::BrowserThread::UI, FROM_HERE,
+          base::Bind(&DeveloperPrivateLoadDirectoryFunction::SendResponse,
+                     this,
+                     success_));
+    }
   }
 }
 

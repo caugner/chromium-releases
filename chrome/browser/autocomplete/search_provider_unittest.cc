@@ -39,6 +39,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/sync_driver/pref_names.h"
 #include "components/variations/entropy_provider.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -363,7 +364,8 @@ void SearchProviderTest::QueryForInputAndSetWYTMatch(
   ASSERT_GE(provider_->matches().size(), 1u);
   EXPECT_TRUE(FindMatchWithDestination(GURL(
       default_t_url_->url_ref().ReplaceSearchTerms(
-          TemplateURLRef::SearchTermsArgs(text))),
+          TemplateURLRef::SearchTermsArgs(base::CollapseWhitespace(
+              text, false)))),
       wyt_match));
 }
 
@@ -740,10 +742,12 @@ TEST_F(SearchProviderTest, AutocompleteMultipleVisitsImmediately) {
   EXPECT_TRUE(wyt_match.allowed_to_be_default_match);
 }
 
-// Autocompletion should work at a word boundary after a space.
+// Autocompletion should work at a word boundary after a space, and should
+// offer a suggestion for the trimmed search query.
 TEST_F(SearchProviderTest, AutocompleteAfterSpace) {
-  GURL term_url(AddSearchToHistory(default_t_url_, ASCIIToUTF16("two searches"),
-                                   2));
+  AddSearchToHistory(default_t_url_, ASCIIToUTF16("two  searches "), 2);
+  GURL suggested_url(default_t_url_->url_ref().ReplaceSearchTerms(
+      TemplateURLRef::SearchTermsArgs(ASCIIToUTF16("two searches"))));
   profile_.BlockUntilHistoryProcessesPendingRequests();
 
   AutocompleteMatch wyt_match;
@@ -751,9 +755,11 @@ TEST_F(SearchProviderTest, AutocompleteAfterSpace) {
                                                       &wyt_match));
   ASSERT_EQ(2u, provider_->matches().size());
   AutocompleteMatch term_match;
-  EXPECT_TRUE(FindMatchWithDestination(term_url, &term_match));
+  EXPECT_TRUE(FindMatchWithDestination(suggested_url, &term_match));
   EXPECT_GT(term_match.relevance, wyt_match.relevance);
   EXPECT_TRUE(term_match.allowed_to_be_default_match);
+  EXPECT_EQ(ASCIIToUTF16("searches"), term_match.inline_autocompletion);
+  EXPECT_EQ(ASCIIToUTF16("two searches"), term_match.fill_into_edit);
   EXPECT_TRUE(wyt_match.allowed_to_be_default_match);
 }
 
@@ -913,33 +919,41 @@ TEST_F(SearchProviderTest, KeywordVerbatim) {
                    ASCIIToUTF16("k foo") ) } },
 
     // Make sure extra whitespace after the keyword doesn't change the
-    // keyword verbatim query.
+    // keyword verbatim query.  Also verify that interior consecutive
+    // whitespace gets trimmed.
     { ASCIIToUTF16("k   foo"), 2,
       { ResultInfo(GURL("http://keyword/foo"),
                    AutocompleteMatchType::SEARCH_OTHER_ENGINE,
                    true,
                    ASCIIToUTF16("k foo")),
-        ResultInfo(GURL("http://defaultturl/k%20%20%20foo"),
+        ResultInfo(GURL("http://defaultturl/k%20foo"),
                    AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
                    false,
-                   ASCIIToUTF16("k   foo")) } },
+                   ASCIIToUTF16("k foo")) } },
     // Leading whitespace should be stripped before SearchProvider gets the
     // input; hence there are no tests here about how it handles those inputs.
 
-    // But whitespace elsewhere in the query string should matter to both
-    // matches.
+    // Verify that interior consecutive whitespace gets trimmed in either case.
     { ASCIIToUTF16("k  foo  bar"), 2,
-      { ResultInfo(GURL("http://keyword/foo%20%20bar"),
+      { ResultInfo(GURL("http://keyword/foo%20bar"),
                    AutocompleteMatchType::SEARCH_OTHER_ENGINE,
                    true,
-                   ASCIIToUTF16("k foo  bar")),
-        ResultInfo(GURL("http://defaultturl/k%20%20foo%20%20bar"),
+                   ASCIIToUTF16("k foo bar")),
+        ResultInfo(GURL("http://defaultturl/k%20foo%20bar"),
                    AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
                    false,
-                   ASCIIToUTF16("k  foo  bar")) } },
-    // Note in the above test case we don't test trailing whitespace because
-    // SearchProvider still doesn't handle this well.  See related bugs:
-    // 102690, 99239, 164635.
+                   ASCIIToUTF16("k foo bar")) } },
+
+    // Verify that trailing whitespace gets trimmed.
+    { ASCIIToUTF16("k foo bar  "), 2,
+      { ResultInfo(GURL("http://keyword/foo%20bar"),
+                   AutocompleteMatchType::SEARCH_OTHER_ENGINE,
+                   true,
+                   ASCIIToUTF16("k foo bar")),
+        ResultInfo(GURL("http://defaultturl/k%20foo%20bar"),
+                   AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
+                   false,
+                   ASCIIToUTF16("k foo bar")) } },
 
     // Keywords can be prefixed by certain things that should get ignored
     // when constructing the keyword match.
@@ -978,11 +992,12 @@ TEST_F(SearchProviderTest, KeywordVerbatim) {
                    AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
                    true,
                    ASCIIToUTF16("k")) } },
+    // Ditto.  Trailing whitespace shouldn't make a difference.
     { ASCIIToUTF16("k "), 1,
-      { ResultInfo(GURL("http://defaultturl/k%20"),
+      { ResultInfo(GURL("http://defaultturl/k"),
                    AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
                    true,
-                   ASCIIToUTF16("k ")) } }
+                   ASCIIToUTF16("k")) } }
 
     // The fact that verbatim queries to keyword are handled by KeywordProvider
     // not SearchProvider is tested in
@@ -3419,9 +3434,10 @@ TEST_F(SearchProviderTest, RemoveStaleResultsTest) {
         provider_->default_results_.suggest_results.push_back(
             SearchProvider::SuggestResult(
                 ASCIIToUTF16(suggestion), AutocompleteMatchType::SEARCH_SUGGEST,
-                ASCIIToUTF16(suggestion), base::string16(), std::string(),
-                std::string(), false, cases[i].results[j].relevance, false,
-                false, ASCIIToUTF16(cases[i].omnibox_input)));
+                ASCIIToUTF16(suggestion), base::string16(), base::string16(),
+                std::string(), std::string(), false,
+                cases[i].results[j].relevance, false, false,
+                ASCIIToUTF16(cases[i].omnibox_input)));
       }
     }
 
@@ -4004,13 +4020,14 @@ TEST_F(SearchProviderTest, CanSendURL) {
       AutocompleteInput::OTHER, profile_.GetOffTheRecordProfile()));
 
   // Tab sync not enabled.
-  profile_.GetPrefs()->SetBoolean(prefs::kSyncKeepEverythingSynced, false);
-  profile_.GetPrefs()->SetBoolean(prefs::kSyncTabs, false);
+  profile_.GetPrefs()->SetBoolean(sync_driver::prefs::kSyncKeepEverythingSynced,
+                                  false);
+  profile_.GetPrefs()->SetBoolean(sync_driver::prefs::kSyncTabs, false);
   EXPECT_FALSE(SearchProvider::CanSendURL(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       AutocompleteInput::OTHER, &profile_));
-  profile_.GetPrefs()->SetBoolean(prefs::kSyncTabs, true);
+  profile_.GetPrefs()->SetBoolean(sync_driver::prefs::kSyncTabs, true);
 
   // Tab sync is encrypted.
   ProfileSyncService* service =
@@ -4065,4 +4082,72 @@ TEST_F(SearchProviderTest, TestDeleteMatch) {
   fetcher->delegate()->OnURLFetchComplete(fetcher);
   EXPECT_TRUE(provider_->deletion_handlers_.empty());
   EXPECT_FALSE(provider_->is_success());
+}
+
+TEST_F(SearchProviderTest, TestDeleteHistoryQueryMatch) {
+  GURL term_url(
+      AddSearchToHistory(default_t_url_, ASCIIToUTF16("flash games"), 1));
+  profile_.BlockUntilHistoryProcessesPendingRequests();
+
+  AutocompleteMatch games;
+  QueryForInput(ASCIIToUTF16("fla"), false, false);
+  profile_.BlockUntilHistoryProcessesPendingRequests();
+  ASSERT_NO_FATAL_FAILURE(FinishDefaultSuggestQuery());
+  ASSERT_TRUE(FindMatchWithContents(ASCIIToUTF16("flash games"), &games));
+
+  size_t matches_before = provider_->matches().size();
+  provider_->DeleteMatch(games);
+  EXPECT_EQ(matches_before - 1, provider_->matches().size());
+
+  // Process history deletions.
+  profile_.BlockUntilHistoryProcessesPendingRequests();
+
+  // Check that the match is gone.
+  QueryForInput(ASCIIToUTF16("fla"), false, false);
+  profile_.BlockUntilHistoryProcessesPendingRequests();
+  ASSERT_NO_FATAL_FAILURE(FinishDefaultSuggestQuery());
+  EXPECT_FALSE(FindMatchWithContents(ASCIIToUTF16("flash games"), &games));
+}
+
+// Verifies that duplicates are preserved in AddMatchToMap().
+TEST_F(SearchProviderTest, CheckDuplicateMatchesSaved) {
+  AddSearchToHistory(default_t_url_, ASCIIToUTF16("a"), 1);
+  AddSearchToHistory(default_t_url_, ASCIIToUTF16("alpha"), 1);
+  AddSearchToHistory(default_t_url_, ASCIIToUTF16("avid"), 1);
+
+  profile_.BlockUntilHistoryProcessesPendingRequests();
+  QueryForInput(ASCIIToUTF16("a"), false, false);
+
+  // Make sure the default provider's suggest service was queried.
+  net::TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
+      SearchProvider::kDefaultProviderURLFetcherID);
+  ASSERT_TRUE(fetcher);
+
+  // Tell the SearchProvider the suggest query is done.
+  fetcher->set_response_code(200);
+  fetcher->SetResponseString(
+      "[\"a\",[\"a\", \"alpha\", \"avid\", \"apricot\"],[],[],"
+      "{\"google:suggestrelevance\":[1450, 1200, 1150, 1100],"
+      "\"google:verbatimrelevance\":1350}]");
+  fetcher->delegate()->OnURLFetchComplete(fetcher);
+  fetcher = NULL;
+
+  // Run till the history results complete.
+  RunTillProviderDone();
+
+  AutocompleteMatch verbatim, match_alpha, match_apricot, match_avid;
+  EXPECT_TRUE(FindMatchWithContents(ASCIIToUTF16("a"), &verbatim));
+  EXPECT_TRUE(FindMatchWithContents(ASCIIToUTF16("alpha"), &match_alpha));
+  EXPECT_TRUE(FindMatchWithContents(ASCIIToUTF16("apricot"), &match_apricot));
+  EXPECT_TRUE(FindMatchWithContents(ASCIIToUTF16("avid"), &match_avid));
+
+  // Verbatim match duplicates are added such that each one has a higher
+  // relevance than the previous one.
+  EXPECT_EQ(2U, verbatim.duplicate_matches.size());
+
+  // Other match duplicates are added in descending relevance order.
+  EXPECT_EQ(1U, match_alpha.duplicate_matches.size());
+  EXPECT_EQ(1U, match_avid.duplicate_matches.size());
+
+  EXPECT_EQ(0U, match_apricot.duplicate_matches.size());
 }

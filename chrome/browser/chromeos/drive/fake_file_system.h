@@ -60,7 +60,6 @@ class FakeFileSystem : public FileSystemInterface {
                     const FileOperationCallback& callback) OVERRIDE;
   virtual void Move(const base::FilePath& src_file_path,
                     const base::FilePath& dest_file_path,
-                    bool preserve_last_modified,
                     const FileOperationCallback& callback) OVERRIDE;
   virtual void Remove(const base::FilePath& file_path,
                       bool is_recursive,
@@ -88,7 +87,7 @@ class FakeFileSystem : public FileSystemInterface {
                        const GetFileCallback& callback) OVERRIDE;
   virtual void GetFileForSaving(const base::FilePath& file_path,
                                 const GetFileCallback& callback) OVERRIDE;
-  virtual void GetFileContent(
+  virtual base::Closure GetFileContent(
       const base::FilePath& file_path,
       const GetFileContentInitializedCallback& initialized_callback,
       const google_apis::GetContentCallback& get_content_callback,
@@ -123,15 +122,16 @@ class FakeFileSystem : public FileSystemInterface {
   virtual void GetCacheEntry(
       const base::FilePath& drive_file_path,
       const GetCacheEntryCallback& callback) OVERRIDE;
+  virtual void AddPermission(const base::FilePath& drive_file_path,
+                             const std::string& email,
+                             google_apis::drive::PermissionRole role,
+                             const FileOperationCallback& callback) OVERRIDE;
   virtual void Reset(const FileOperationCallback& callback) OVERRIDE;
+  virtual void GetPathFromResourceId(const std::string& resource_id,
+                                     const GetFilePathCallback& callback)
+      OVERRIDE;
 
  private:
-  // Helper of GetResourceEntryById.
-  void GetResourceEntryByIdAfterGetResourceEntry(
-      const GetResourceEntryCallback& callback,
-      google_apis::GDataErrorCode error_in,
-      scoped_ptr<google_apis::ResourceEntry> resource_entry);
-
   // Helpers of GetFileContent.
   // How the method works:
   // 1) Gets ResourceEntry of the path.

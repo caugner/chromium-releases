@@ -90,6 +90,7 @@
 #include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_content_setting_bubble_model_delegate.h"
@@ -128,7 +129,6 @@
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
-#include "chrome/browser/ui/tabs/dock_info.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
@@ -377,7 +377,7 @@ Browser::Browser(const CreateParams& params)
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
@@ -447,9 +447,7 @@ Browser::Browser(const CreateParams& params)
 
 Browser::~Browser() {
   // The tab strip should not have any tabs at this point.
-  if (!browser_shutdown::ShuttingDownWithoutClosingBrowsers())
-    DCHECK(tab_strip_model_->empty());
-
+  DCHECK(tab_strip_model_->empty());
   tab_strip_model_->RemoveObserver(this);
 
   // Destroy the BrowserCommandController before removing the browser, so that
@@ -695,6 +693,13 @@ void Browser::InProgressDownloadResponse(bool cancel_downloads) {
   // Show the download page so the user can figure-out what downloads are still
   // in-progress.
   chrome::ShowDownloads(this);
+
+  // Reset UnloadController::is_attempting_to_close_browser_ so that we don't
+  // prompt every time any tab is closed. http://crbug.com/305516
+  if (IsFastTabUnloadEnabled())
+    fast_unload_controller_->CancelWindowClose();
+  else
+    unload_controller_->CancelWindowClose();
 }
 
 Browser::DownloadClosePreventionType Browser::OkToCloseWithInProgressDownloads(
@@ -780,7 +785,8 @@ void Browser::OnWebContentsInstantSupportDisabled(
 // Browser, Assorted browser commands:
 
 void Browser::ToggleFullscreenModeWithExtension(const GURL& extension_url) {
-  fullscreen_controller_->ToggleFullscreenModeWithExtension(extension_url);
+  fullscreen_controller_->
+      ToggleBrowserFullscreenModeWithExtension(extension_url);
 }
 
 bool Browser::SupportsWindowFeature(WindowFeature feature) const {
@@ -908,7 +914,7 @@ void Browser::TabInsertedAt(WebContents* contents,
 
   // Make sure the loading state is updated correctly, otherwise the throbber
   // won't start if the page is loading.
-  LoadingStateChanged(contents);
+  LoadingStateChanged(contents, true);
 
   interstitial_observers_.push_back(new InterstitialObserver(this, contents));
 
@@ -1110,8 +1116,9 @@ void Browser::TabStripEmpty() {
 
 bool Browser::CanOverscrollContent() const {
 #if defined(USE_AURA)
-  bool overscroll_enabled = CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kOverscrollHistoryNavigation) != "0";
+  const std::string value = CommandLine::ForCurrentProcess()->
+      GetSwitchValueASCII(switches::kOverscrollHistoryNavigation);
+  bool overscroll_enabled = value != "0";
   if (!overscroll_enabled)
     return false;
   if (is_app() || is_devtools() || !is_type_tabbed())
@@ -1120,8 +1127,8 @@ bool Browser::CanOverscrollContent() const {
   // The detached bookmark bar has appearance of floating above the
   // web-contents. This does not play nicely with overscroll navigation
   // gestures. So disable overscroll navigation when the bookmark bar is in the
-  // detached state.
-  if (bookmark_bar_state_ == BookmarkBar::DETACHED)
+  // detached state and the overscroll effect moves the layers.
+  if (value == "1" && bookmark_bar_state_ == BookmarkBar::DETACHED)
     return false;
   return true;
 #else
@@ -1184,6 +1191,17 @@ void Browser::MoveValidationMessage(content::WebContents* web_contents,
     validation_message_bubble_->SetPositionRelativeToAnchor(
         rwhv->GetRenderWidgetHost(), anchor_in_root_view);
   }
+}
+
+bool Browser::PreHandleGestureEvent(content::WebContents* source,
+                                    const blink::WebGestureEvent& event) {
+  // Disable pinch zooming in undocked dev tools window due to poor UX.
+  if (app_name() == DevToolsWindow::kDevToolsApp)
+    return event.type == blink::WebGestureEvent::GesturePinchBegin ||
+           event.type == blink::WebGestureEvent::GesturePinchUpdate ||
+           event.type == blink::WebGestureEvent::GesturePinchEnd;
+
+  return false;
 }
 
 bool Browser::IsMouseLocked() const {
@@ -1321,13 +1339,14 @@ void Browser::DeactivateContents(WebContents* contents) {
   window_->Deactivate();
 }
 
-void Browser::LoadingStateChanged(WebContents* source) {
+void Browser::LoadingStateChanged(WebContents* source,
+    bool to_different_document) {
   window_->UpdateLoadingAnimations(tab_strip_model_->TabsAreLoading());
   window_->UpdateTitleBar();
 
   WebContents* selected_contents = tab_strip_model_->GetActiveWebContents();
   if (source == selected_contents) {
-    bool is_loading = source->IsLoading();
+    bool is_loading = source->IsLoading() && to_different_document;
     command_controller_->LoadingStateChanged(is_loading, false);
     if (GetStatusBubble()) {
       GetStatusBubble()->SetStatus(CoreTabHelper::FromWebContents(
@@ -1490,7 +1509,7 @@ bool Browser::ShouldCreateWebContents(
 }
 
 void Browser::WebContentsCreated(WebContents* source_contents,
-                                 int64 source_frame_id,
+                                 int opener_render_frame_id,
                                  const base::string16& frame_name,
                                  const GURL& target_url,
                                  WebContents* new_contents) {
@@ -1503,7 +1522,7 @@ void Browser::WebContentsCreated(WebContents* source_contents,
   // Notify.
   RetargetingDetails details;
   details.source_web_contents = source_contents;
-  details.source_frame_id = source_frame_id;
+  details.source_render_frame_id = opener_render_frame_id;
   details.target_url = target_url;
   details.target_web_contents = new_contents;
   details.not_yet_in_tabstrip = true;
@@ -1566,8 +1585,12 @@ void Browser::EnumerateDirectory(WebContents* web_contents,
 }
 
 bool Browser::EmbedsFullscreenWidget() const {
-  return CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kEmbedFlashFullscreen);
+#if defined(TOOLKIT_GTK)
+  return false;
+#else
+  return !CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kDisableFullscreenWithinTab);
+#endif
 }
 
 void Browser::ToggleFullscreenModeForTab(WebContents* web_contents,
@@ -1579,16 +1602,6 @@ void Browser::ToggleFullscreenModeForTab(WebContents* web_contents,
 bool Browser::IsFullscreenForTabOrPending(
     const WebContents* web_contents) const {
   return fullscreen_controller_->IsFullscreenForTabOrPending(web_contents);
-}
-
-void Browser::JSOutOfMemory(WebContents* web_contents) {
-  InfoBarService* infobar_service =
-      InfoBarService::FromWebContents(web_contents);
-  if (!infobar_service)
-    return;
-  SimpleAlertInfoBarDelegate::Create(
-      infobar_service, InfoBarDelegate::kNoIconID,
-      l10n_util::GetStringUTF16(IDS_JS_OUT_OF_MEMORY_PROMPT), true);
 }
 
 void Browser::RegisterProtocolHandler(WebContents* web_contents,
@@ -1630,7 +1643,8 @@ void Browser::RegisterProtocolHandler(WebContents* web_contents,
       PermissionBubbleManager::FromWebContents(web_contents);
   if (PermissionBubbleManager::Enabled() && bubble_manager) {
     bubble_manager->AddRequest(
-        new RegisterProtocolHandlerPermissionRequest(registry, handler));
+        new RegisterProtocolHandlerPermissionRequest(registry, handler,
+                                                     url, user_gesture));
   } else {
     RegisterProtocolHandlerInfoBarDelegate::Create(
         InfoBarService::FromWebContents(web_contents), registry, handler);
@@ -1814,7 +1828,16 @@ void Browser::Observe(int type,
                       const content::NotificationSource& source,
                       const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED: {
+      chrome::UpdateCommandEnabled(
+          this,
+          IDC_BOOKMARK_PAGE,
+          !chrome::ShouldRemoveBookmarkThisPageUI(profile_));
+      chrome::UpdateCommandEnabled(
+          this,
+          IDC_BOOKMARK_ALL_TABS,
+          !chrome::ShouldRemoveBookmarkOpenPagesUI(profile_));
+
       if (window()->GetLocationBar())
         window()->GetLocationBar()->UpdatePageActions();
 
@@ -1853,8 +1876,17 @@ void Browser::Observe(int type,
       break;
     }
 
-    case chrome::NOTIFICATION_EXTENSION_UNINSTALLED:
     case chrome::NOTIFICATION_EXTENSION_LOADED:
+      chrome::UpdateCommandEnabled(
+          this,
+          IDC_BOOKMARK_PAGE,
+          !chrome::ShouldRemoveBookmarkThisPageUI(profile_));
+      chrome::UpdateCommandEnabled(
+          this,
+          IDC_BOOKMARK_ALL_TABS,
+          !chrome::ShouldRemoveBookmarkOpenPagesUI(profile_));
+    // fallthrough
+    case chrome::NOTIFICATION_EXTENSION_UNINSTALLED:
       // During window creation on Windows we may end up calling into
       // SHAppBarMessage, which internally spawns a nested message loop. This
       // makes it possible for us to end up here before window creation has
@@ -2154,6 +2186,35 @@ void Browser::TabDetachedAtImpl(content::WebContents* contents,
   }
 }
 
+bool Browser::ShouldShowLocationBar() const {
+  if (!is_app()) {
+    // Hide the URL for singleton settings windows.
+    // TODO(stevenjb): We could avoid this check by setting a Browser
+    // property for "system" windows, possibly shared with hosted app windows.
+    // crbug.com/350128.
+    if (chrome::IsSettingsWindow(this))
+      return false;
+    return true;
+  }
+
+  // Normally apps do not show a location bar.
+  if (app_type() != APP_TYPE_HOST ||
+      app_name() == DevToolsWindow::kDevToolsApp ||
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableStreamlinedHostedApps))
+    return false;
+
+  // If kEnableStreamlinedHostedApps is true, show the locaiton bar for non
+  // legacy packaged apps.
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
+  const extensions::Extension* extension =
+      service ? service->GetInstalledExtension(
+                    web_app::GetExtensionIdFromApplicationName(app_name()))
+              : NULL;
+  return (!extension || !extension->is_legacy_packaged_app());
+}
+
 bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
                                         bool check_fullscreen) const {
   bool hide_ui_for_fullscreen = check_fullscreen && ShouldHideUIForFullscreen();
@@ -2173,20 +2234,8 @@ bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
     if (is_type_tabbed())
       features |= FEATURE_TOOLBAR;
 
-    ExtensionService* service =
-        extensions::ExtensionSystem::Get(profile_)->extension_service();
-    const extensions::Extension* extension =
-        service ? service->GetInstalledExtension(
-                      web_app::GetExtensionIdFromApplicationName(app_name()))
-                : NULL;
-
-    if (!is_app() || (app_type() == APP_TYPE_HOST &&
-                      app_name() != DevToolsWindow::kDevToolsApp &&
-                      (!extension || !extension->is_legacy_packaged_app()) &&
-                      CommandLine::ForCurrentProcess()->HasSwitch(
-                          switches::kEnableStreamlinedHostedApps))) {
+    if (ShouldShowLocationBar())
       features |= FEATURE_LOCATIONBAR;
-    }
   }
   return !!(features & feature);
 }

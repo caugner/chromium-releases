@@ -281,78 +281,59 @@ TEST_F(ProfileInfoCacheTest, BackgroundModeStatus) {
   EXPECT_FALSE(GetCache()->GetBackgroundStatusOfProfileAtIndex(1));
 }
 
-TEST_F(ProfileInfoCacheTest, HasMigrated) {
-  GetCache()->AddProfileToCache(
-      GetProfilePath("path_1"), ASCIIToUTF16("name_1"),
-      base::string16(), 0, std::string());
-  GetCache()->AddProfileToCache(
-      GetProfilePath("path_2"), ASCIIToUTF16("name_2"),
-      base::string16(), 0, std::string());
-
-  // Sanity check.
-  EXPECT_FALSE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(0));
-  EXPECT_FALSE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(1));
-
-  // Set migrated state for 2nd profile.
-  GetCache()->SetHasMigratedToGAIAInfoOfProfileAtIndex(1, true);
-  EXPECT_FALSE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(0));
-  EXPECT_TRUE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(1));
-
-  // Set migrated state for 1st profile.
-  GetCache()->SetHasMigratedToGAIAInfoOfProfileAtIndex(0, true);
-  EXPECT_TRUE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(0));
-  EXPECT_TRUE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(1));
-
-  // Unset migrated state for 2nd profile.
-  GetCache()->SetHasMigratedToGAIAInfoOfProfileAtIndex(1, false);
-  EXPECT_TRUE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(0));
-  EXPECT_FALSE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(1));
-}
-
 TEST_F(ProfileInfoCacheTest, ProfileActiveTime) {
   GetCache()->AddProfileToCache(
       GetProfilePath("path_1"), ASCIIToUTF16("name_1"),
       base::string16(), 0, std::string());
   EXPECT_EQ(base::Time(), GetCache()->GetProfileActiveTimeAtIndex(0));
+  // Before & After times are artificially shifted because just relying upon
+  // the system time can yield problems due to inaccuracies in the
+  // underlying storage system (which uses a double with only 52 bits of
+  // precision to store the 64-bit "time" number).  http://crbug.com/346827
   base::Time before = base::Time::Now();
+  before -= base::TimeDelta::FromSeconds(1);
   GetCache()->SetProfileActiveTimeAtIndex(0);
   base::Time after = base::Time::Now();
+  after += base::TimeDelta::FromSeconds(1);
   EXPECT_LE(before, GetCache()->GetProfileActiveTimeAtIndex(0));
   EXPECT_GE(after, GetCache()->GetProfileActiveTimeAtIndex(0));
 }
 
 TEST_F(ProfileInfoCacheTest, GAIAName) {
   GetCache()->AddProfileToCache(
-      GetProfilePath("path_1"), ASCIIToUTF16("name_1"),
+      GetProfilePath("path_1"), ASCIIToUTF16("Person 1"),
       base::string16(), 0, std::string());
-  base::string16 profile_name(ASCIIToUTF16("profile name 2"));
+  base::string16 profile_name(ASCIIToUTF16("Person 2"));
   GetCache()->AddProfileToCache(
       GetProfilePath("path_2"), profile_name, base::string16(), 0,
       std::string());
 
+  int index1 = GetCache()->GetIndexOfProfileWithPath(GetProfilePath("path_1"));
+  int index2 = GetCache()->GetIndexOfProfileWithPath(GetProfilePath("path_2"));
+
   // Sanity check.
-  EXPECT_TRUE(GetCache()->GetGAIANameOfProfileAtIndex(0).empty());
-  EXPECT_TRUE(GetCache()->GetGAIANameOfProfileAtIndex(1).empty());
-  EXPECT_FALSE(GetCache()->IsUsingGAIANameOfProfileAtIndex(0));
-  EXPECT_FALSE(GetCache()->IsUsingGAIANameOfProfileAtIndex(1));
+  EXPECT_TRUE(GetCache()->GetGAIANameOfProfileAtIndex(index1).empty());
+  EXPECT_TRUE(GetCache()->GetGAIANameOfProfileAtIndex(index2).empty());
 
-  // Set GAIA name.
+  // Set GAIA name. This re-sorts the cache.
   base::string16 gaia_name(ASCIIToUTF16("Pat Smith"));
-  GetCache()->SetGAIANameOfProfileAtIndex(1, gaia_name);
-  EXPECT_TRUE(GetCache()->GetGAIANameOfProfileAtIndex(0).empty());
-  EXPECT_EQ(gaia_name, GetCache()->GetGAIANameOfProfileAtIndex(1));
-  EXPECT_EQ(profile_name, GetCache()->GetNameOfProfileAtIndex(1));
+  GetCache()->SetGAIANameOfProfileAtIndex(index2, gaia_name);
+  index1 = GetCache()->GetIndexOfProfileWithPath(GetProfilePath("path_1"));
+  index2 = GetCache()->GetIndexOfProfileWithPath(GetProfilePath("path_2"));
 
-  // Use GAIA name as profile name.
-  GetCache()->SetIsUsingGAIANameOfProfileAtIndex(1, true);
+  // Since there is a GAIA name, we use that as a display name.
+  EXPECT_TRUE(GetCache()->GetGAIANameOfProfileAtIndex(index1).empty());
+  EXPECT_EQ(gaia_name, GetCache()->GetGAIANameOfProfileAtIndex(index2));
+  EXPECT_EQ(gaia_name, GetCache()->GetNameOfProfileAtIndex(index2));
 
-  EXPECT_EQ(gaia_name, GetCache()->GetNameOfProfileAtIndex(1));
-  EXPECT_EQ(gaia_name, GetCache()->GetGAIANameOfProfileAtIndex(1));
+  // Don't use GAIA name as profile name. This re-sorts the cache.
+  base::string16 custom_name(ASCIIToUTF16("Custom name"));
+  GetCache()->SetNameOfProfileAtIndex(index2, custom_name);
+  index1 = GetCache()->GetIndexOfProfileWithPath(GetProfilePath("path_1"));
+  index2 = GetCache()->GetIndexOfProfileWithPath(GetProfilePath("path_2"));
 
-  // Don't use GAIA name as profile name.
-  GetCache()->SetIsUsingGAIANameOfProfileAtIndex(1, false);
-  EXPECT_EQ(profile_name, GetCache()->GetNameOfProfileAtIndex(1));
-  EXPECT_EQ(gaia_name, GetCache()->GetGAIANameOfProfileAtIndex(1));
+  EXPECT_EQ(custom_name, GetCache()->GetNameOfProfileAtIndex(index2));
+  EXPECT_EQ(gaia_name, GetCache()->GetGAIANameOfProfileAtIndex(index2));
 }
 
 TEST_F(ProfileInfoCacheTest, GAIAPicture) {
@@ -459,7 +440,6 @@ TEST_F(ProfileInfoCacheTest, EmptyGAIAInfo) {
   // Set empty GAIA info.
   GetCache()->SetGAIANameOfProfileAtIndex(0, base::string16());
   GetCache()->SetGAIAPictureOfProfileAtIndex(0, NULL);
-  GetCache()->SetIsUsingGAIANameOfProfileAtIndex(0, true);
   GetCache()->SetIsUsingGAIAPictureOfProfileAtIndex(0, true);
 
   // Verify that the profile name and picture are not empty.

@@ -709,7 +709,7 @@ class HTML5FileWriter {
     // Create a temp file.
     base::FilePath temp_file;
     if (!base::CreateTemporaryFile(&temp_file) ||
-        file_util::WriteFile(temp_file, data, length) != length) {
+        base::WriteFile(temp_file, data, length) != length) {
       return false;
     }
     // Invoke the fileapi to copy it into the sandboxed filesystem.
@@ -810,9 +810,11 @@ api::InterruptReason InterruptReasonContentToExtension(
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                        DownloadExtensionTest_Open) {
   LoadExtension("downloads_split");
+  DownloadsOpenFunction* open_function = new DownloadsOpenFunction();
+  open_function->set_user_gesture(true);
   EXPECT_STREQ(errors::kInvalidId,
                RunFunctionAndReturnError(
-                   new DownloadsOpenFunction(),
+                   open_function,
                    "[-42]").c_str());
 
   DownloadItem* download_item = CreateSlowTestDownload();
@@ -826,14 +828,26 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                          "  \"paused\": false,"
                          "  \"url\": \"%s\"}]",
                          download_item->GetURL().spec().c_str())));
+  open_function = new DownloadsOpenFunction();
+  open_function->set_user_gesture(true);
   EXPECT_STREQ(errors::kNotComplete,
                RunFunctionAndReturnError(
-                   new DownloadsOpenFunction(),
+                   open_function,
                    DownloadItemIdAsArgList(download_item)).c_str());
 
   FinishPendingSlowDownloads();
   EXPECT_FALSE(download_item->GetOpened());
-  EXPECT_TRUE(RunFunction(new DownloadsOpenFunction(),
+
+  open_function = new DownloadsOpenFunction();
+  EXPECT_STREQ(errors::kUserGesture,
+               RunFunctionAndReturnError(
+                  open_function,
+                  DownloadItemIdAsArgList(download_item)).c_str());
+  EXPECT_FALSE(download_item->GetOpened());
+
+  open_function = new DownloadsOpenFunction();
+  open_function->set_user_gesture(true);
+  EXPECT_TRUE(RunFunction(open_function,
                           DownloadItemIdAsArgList(download_item)));
   EXPECT_TRUE(download_item->GetOpened());
 }
@@ -1039,7 +1053,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   base::FilePath real_path = all_downloads[0]->GetTargetFilePath();
   base::FilePath fake_path = all_downloads[1]->GetTargetFilePath();
 
-  EXPECT_EQ(0, file_util::WriteFile(real_path, "", 0));
+  EXPECT_EQ(0, base::WriteFile(real_path, "", 0));
   ASSERT_TRUE(base::PathExists(real_path));
   ASSERT_FALSE(base::PathExists(fake_path));
 

@@ -68,8 +68,7 @@ void AppShortcutManager::RegisterProfilePrefs(
 AppShortcutManager::AppShortcutManager(Profile* profile)
     : profile_(profile),
       is_profile_info_cache_observer_(false),
-      prefs_(profile->GetPrefs()),
-      weak_factory_(this) {
+      prefs_(profile->GetPrefs()) {
   // Use of g_browser_process requires that we are either on the UI thread, or
   // there are no threads initialized (such as in unit tests).
   DCHECK(!content::BrowserThread::IsThreadInitialized(
@@ -119,22 +118,21 @@ void AppShortcutManager::Observe(int type,
           content::Details<const extensions::InstalledExtensionInfo>(details)
               .ptr();
       const Extension* extension = installed_info->extension;
-      if (ShouldCreateShortcutFor(extension)) {
-        // If the app is being updated, update any existing shortcuts but do not
-        // create new ones. If it is being installed, automatically create a
-        // shortcut in the applications menu (e.g., Start Menu).
-        base::Callback<void(const ShellIntegration::ShortcutInfo&)>
-            create_or_update;
-        if (installed_info->is_update) {
-          base::string16 old_title =
-              base::UTF8ToUTF16(installed_info->old_name);
-          create_or_update = base::Bind(&web_app::UpdateAllShortcuts,
-                                        old_title);
-        } else {
-          create_or_update = base::Bind(&CreateShortcutsInApplicationsMenu);
-        }
-
-        web_app::UpdateShortcutInfoAndIconForApp(*extension, profile_,
+      // If the app is being updated, update any existing shortcuts but do not
+      // create new ones. If it is being installed, automatically create a
+      // shortcut in the applications menu (e.g., Start Menu).
+      base::Callback<void(const ShellIntegration::ShortcutInfo&)>
+          create_or_update;
+      if (installed_info->is_update) {
+        base::string16 old_title =
+            base::UTF8ToUTF16(installed_info->old_name);
+        create_or_update = base::Bind(&web_app::UpdateAllShortcuts,
+                                      old_title);
+      } else if (ShouldCreateShortcutFor(extension)) {
+        create_or_update = base::Bind(&CreateShortcutsInApplicationsMenu);
+      }
+      if (!create_or_update.is_null()) {
+        web_app::UpdateShortcutInfoAndIconForApp(extension, profile_,
                                                  create_or_update);
       }
       break;
@@ -191,7 +189,7 @@ void AppShortcutManager::OnceOffCreateShortcuts() {
        it != apps->end(); ++it) {
     if (ShouldCreateShortcutFor(it->get()))
       web_app::UpdateShortcutInfoAndIconForApp(
-          *it->get(), profile_, base::Bind(&CreateShortcutsInApplicationsMenu));
+          it->get(), profile_, base::Bind(&CreateShortcutsInApplicationsMenu));
   }
 }
 

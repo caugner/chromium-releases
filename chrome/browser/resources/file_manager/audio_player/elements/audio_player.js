@@ -12,7 +12,9 @@ Polymer('audio-player', {
   audioElement: null,
   trackList: null,
 
-  // Attributes of the element (little charactor only)
+  // Attributes of the element (little charactor only).
+  // These value must be used only to data binding and shouldn't be assignred
+  // anu value nowhere except in the handler.
   playing: false,
   currenttrackurl: '',
 
@@ -85,7 +87,7 @@ Polymer('audio-player', {
    * @param {boolean} newValue new value.
    */
   onControllerPlayingChanged: function(oldValue, newValue) {
-    this.setAttribute('playing', newValue);
+    this.playing = newValue;
 
     if (newValue) {
       if (!this.audioElement.src) {
@@ -102,6 +104,8 @@ Polymer('audio-player', {
       }
     }
 
+    // When the new status is "stopped".
+    this.cancelAutoAdvance_();
     this.audioElement.pause();
     this.currenttrackurl = '';
     this.lastAudioUpdateTime_ = null;
@@ -201,7 +205,18 @@ Polymer('audio-player', {
         (this.trackList.getNextTrackIndex(forward, repeat) !== -1);
 
     this.audioController.playing = isNextTrackAvailable;
+
+    // If there is only a single file in the list, 'currentTrackInde' is not
+    // changed and the handler is not invoked. Instead, plays here.
+    // TODO(yoshiki): clean up the code around here.
+    if (isNextTrackAvailable &&
+        this.trackList.currentTrackIndex == nextTrackIndex) {
+      this.audioElement.play();
+    }
+
     this.trackList.currentTrackIndex = nextTrackIndex;
+
+    Platform.performMicrotaskCheckpoint();
   },
 
   /**

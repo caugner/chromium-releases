@@ -23,6 +23,10 @@ namespace base {
 class Time;
 }  // namespace base
 
+const char kACMatchPropertyInputText[] = "input text";
+const char kACMatchPropertyContentsPrefix[] = "match contents prefix";
+const char kACMatchPropertyContentsStartIndex[] = "match contents start index";
+
 // AutocompleteMatch ----------------------------------------------------------
 
 // A single result line with classified spans.  The autocomplete popup displays
@@ -162,6 +166,10 @@ struct AutocompleteMatch {
   // an extension).
   static bool IsSearchType(Type type);
 
+  // Convenience function to check if |type| is a special search suggest type -
+  // like entity, personalized, profile or postfix.
+  static bool IsSpecializedSearchType(Type type);
+
   // Copies the destination_url with "www." stripped off to
   // |stripped_destination_url| and also converts https protocol to
   // http.  These two conversions are merely to allow comparisons to
@@ -228,6 +236,10 @@ struct AutocompleteMatch {
   // what will happen when he or she presses enter in those cases if the match
   // is not shown.
   bool IsVerbatimType() const;
+
+  // Returns whether this match or any duplicate of this match can be deleted.
+  // This is used to decide whether we should call DeleteMatch().
+  bool SupportsDeletion() const;
 
   // The provider of this match, used to remember which provider the user had
   // selected when the input changes. This may be NULL, in which case there is
@@ -336,6 +348,10 @@ struct AutocompleteMatch {
   // Information dictionary into which each provider can optionally record a
   // property and associated value and which is presented in chrome://omnibox.
   AdditionalInfo additional_info;
+
+  // A list of matches culled during de-duplication process, retained to
+  // ensure if a match is deleted, the duplicates are deleted as well.
+  std::vector<AutocompleteMatch> duplicate_matches;
 
 #ifndef NDEBUG
   // Does a data integrity check on this match.

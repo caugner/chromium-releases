@@ -146,7 +146,7 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestBasic) {
   content::WindowedNotificationObserver lock_state_observer(
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
       content::NotificationService::AllSources());
-  if (!chromeos::ScreenLocker::GetTester()->IsLocked())
+  if (!tester->IsLocked())
     lock_state_observer.Wait();
 
   // Test to make sure that the widget is actually appearing and is of
@@ -185,7 +185,7 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestFullscreenExit) {
       browser_window->GetNativeWindow());
   {
     Waiter waiter(browser());
-    browser()->fullscreen_controller()->ToggleFullscreenMode();
+    browser()->fullscreen_controller()->ToggleBrowserFullscreenMode();
     waiter.Wait(false /* not locked */, true /* full screen */);
     EXPECT_TRUE(browser_window->IsFullscreen());
     EXPECT_FALSE(window_state->hide_shelf_when_fullscreen());
@@ -206,7 +206,7 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, TestFullscreenExit) {
   EXPECT_FALSE(tester->IsLocked());
   {
     Waiter waiter(browser());
-    browser()->fullscreen_controller()->ToggleFullscreenMode();
+    browser()->fullscreen_controller()->ToggleBrowserFullscreenMode();
     waiter.Wait(false /* not locked */, false /* fullscreen */);
     EXPECT_FALSE(browser_window->IsFullscreen());
   }

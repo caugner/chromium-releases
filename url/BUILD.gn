@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 
 component("url") {
-  external = true
   if (is_win) {
     # Don't conflict with Windows' "url.dll".
     output_name = "url_lib"
@@ -57,7 +56,6 @@ component("url") {
 }
 
 test("url_unittests") {
-  external = true
   sources = [
     "gurl_unittest.cc",
     "url_canon_unittest.cc",
@@ -67,7 +65,8 @@ test("url_unittests") {
   ]
 
   #if (is_posix && !is_mac && !is_ios) {
-  #  if (linux_use_tcmalloc) {
+  #  # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
+  #  if ((use_allocator!="none" && use_allocator!="see_use_tcmalloc") || (use_allocator=="see_use_tcmalloc" && linux_use_tcmalloc) {
   #    deps += "//base/allocator"
   #  }
   #}

@@ -16,9 +16,8 @@ cr.define('speech', function() {
   var PluginState = {
     UNINITIALIZED: 0,
     LOADED: 1,
-    SAMPLING_RATE_READY: 2,
-    READY: 3,
-    RECOGNIZING: 4
+    READY: 2,
+    RECOGNIZING: 3
   };
 
   /**
@@ -35,7 +34,7 @@ cr.define('speech', function() {
   /**
    * The regexp pattern of the hotword recognition result.
    */
-  var recognitionPattern = /^HotwordFiredEvent: \[(.*)\] confidence: (.*)/;
+  var recognitionPattern = /^(HotwordFiredEvent:|hotword)/;
 
   /**
    * @constructor
@@ -51,7 +50,7 @@ cr.define('speech', function() {
       recognizer = document.createElement('EMBED');
       recognizer.id = 'recognizer';
       recognizer.type = 'application/x-nacl';
-      recognizer.src = 'chrome://app-list/hotword_nacl.nmf';
+      recognizer.src = 'chrome://app-list/greconacl.nmf';
       recognizer.width = '1';
       recognizer.height = '1';
       document.body.appendChild(recognizer);
@@ -67,22 +66,16 @@ cr.define('speech', function() {
    * @private
    */
   PluginManager.prototype.onMessage_ = function(messageEvent) {
-    if (this.state == PluginState.LOADED) {
-      if (messageEvent.data == 'stopped')
-        this.state = PluginState.SAMPLING_RATE_READY;
-      return;
-    }
-
     if (messageEvent.data == 'audio') {
-      if (this.state < PluginState.READY)
-        this.onReady_(this);
+      var wasNotReady = this.state < PluginState.READY;
       this.state = PluginState.RECOGNIZING;
-    } else if (messageEvent.data == 'stopped') {
+      if (wasNotReady)
+        this.onReady_(this);
+    } else if (messageEvent.data == 'stopped' &&
+               this.state == PluginState.RECOGNIZING) {
       this.state = PluginState.READY;
-    } else {
-      var matched = recognitionPattern.exec(messageEvent.data);
-      if (matched && matched[1] == 'hotword_ok_google')
-        this.onRecognized_(Number(matched[2]));
+    } else if (recognitionPattern.exec(messageEvent.data)) {
+      this.onRecognized_();
     }
   };
 

@@ -31,7 +31,7 @@ class DistillerPageWebContentsFactory : public DistillerPageFactory {
   virtual ~DistillerPageWebContentsFactory() {}
 
   virtual scoped_ptr<DistillerPage> CreateDistillerPage(
-      DistillerPage::Delegate* delegate) const OVERRIDE;
+      const base::WeakPtr<DistillerPage::Delegate>& delegate) const OVERRIDE;
 
  private:
   content::BrowserContext* browser_context_;
@@ -41,15 +41,13 @@ class DistillerPageWebContentsFactory : public DistillerPageFactory {
 class DistillerPageWebContents : public DistillerPage,
                                  public content::WebContentsObserver {
  public:
-  DistillerPageWebContents(DistillerPage::Delegate* delegate,
+  DistillerPageWebContents(const base::WeakPtr<Delegate>& delegate,
                            content::BrowserContext* browser_context);
   virtual ~DistillerPageWebContents();
 
   // content::WebContentsObserver implementation.
-  virtual void DidFinishLoad(int64 frame_id,
-                             const GURL& validated_url,
-                             bool is_main_frame,
-                             RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DocumentLoadedInFrame(int64 frame_id,
+                                     RenderViewHost* render_view_host) OVERRIDE;
 
   virtual void DidFailLoad(int64 frame_id,
                            const GURL& validated_url,

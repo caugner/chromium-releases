@@ -161,7 +161,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
     command_line->AppendSwitchASCII(switches::kDeviceManagementUrl, url);
 
     invalidation::InvalidationServiceFactory::GetInstance()->
-        SetBuildOnlyFakeInvalidatorsForTest(true);
+        RegisterTestingFactory(invalidation::FakeInvalidationService::Build);
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
@@ -214,7 +214,8 @@ class CloudPolicyTest : public InProcessBrowserTest,
         em::DeviceRegisterRequest::BROWSER;
 #endif
     policy_manager->core()->client()->Register(
-        registration_type, "bogus", std::string(), false, std::string());
+        registration_type, "bogus", std::string(), false, std::string(),
+        std::string());
     run_loop.Run();
     Mock::VerifyAndClearExpectations(&observer);
     policy_manager->core()->client()->RemoveObserver(&observer);
@@ -245,8 +246,8 @@ class CloudPolicyTest : public InProcessBrowserTest,
   }
 
   void SetServerPolicy(const std::string& policy) {
-    int result = file_util::WriteFile(policy_file_path(), policy.data(),
-                                      policy.size());
+    int result = base::WriteFile(policy_file_path(), policy.data(),
+                                 policy.size());
     ASSERT_EQ(static_cast<int>(policy.size()), result);
   }
 

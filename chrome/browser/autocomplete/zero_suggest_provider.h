@@ -49,21 +49,10 @@ class ZeroSuggestProvider : public BaseSearchProvider {
 
   // AutocompleteProvider:
   virtual void Start(const AutocompleteInput& input,
-                     bool /*minimal_changes*/) OVERRIDE;
+                     bool minimal_changes) OVERRIDE;
 
   // Sets |field_trial_triggered_| to false.
   virtual void ResetSession() OVERRIDE;
-
-  // net::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
-
-  // Initiates a new fetch for the given |url| of classification
-  // |page_classification|. |permanent_text| is the omnibox text
-  // for the current page.
-  void StartZeroSuggest(
-      const GURL& curent_page_url,
-      AutocompleteInput::PageClassification page_classification,
-      const base::string16& permanent_text);
 
  private:
   ZeroSuggestProvider(AutocompleteProviderListener* listener,
@@ -72,28 +61,18 @@ class ZeroSuggestProvider : public BaseSearchProvider {
   virtual ~ZeroSuggestProvider();
 
   // BaseSearchProvider:
-  virtual const TemplateURL* GetTemplateURL(
-      const SuggestResult& result) const OVERRIDE;
-  virtual const AutocompleteInput GetInput(
-      const SuggestResult& result) const OVERRIDE;
+  virtual const TemplateURL* GetTemplateURL(bool is_keyword) const OVERRIDE;
+  virtual const AutocompleteInput GetInput(bool is_keyword) const OVERRIDE;
+  virtual Results* GetResultsToFill(bool is_keyword) OVERRIDE;
   virtual bool ShouldAppendExtraParams(
       const SuggestResult& result) const OVERRIDE;
   virtual void StopSuggest() OVERRIDE;
   virtual void ClearAllResults() OVERRIDE;
-
-  // The 4 functions below (that take classes defined in SearchProvider as
-  // arguments) were copied and trimmed from SearchProvider.
-  // TODO(hfung): Refactor them into a new base class common to both
-  // ZeroSuggestProvider and SearchProvider.
-
-  // From the OpenSearch formatted response |root_val|, populate query
-  // suggestions into |suggest_results|, navigation suggestions into
-  // |navigation_results|, and the verbatim relevance score into
-  // |verbatim_relevance|.
-  void FillResults(const base::Value& root_val,
-                   int* verbatim_relevance,
-                   SuggestResults* suggest_results,
-                   NavigationResults* navigation_results);
+  virtual int GetDefaultResultRelevance() const OVERRIDE;
+  virtual void RecordDeletionResult(bool success) OVERRIDE;
+  virtual void LogFetchComplete(bool success, bool is_keyword) OVERRIDE;
+  virtual bool IsKeywordFetcher(const net::URLFetcher* fetcher) const OVERRIDE;
+  virtual void UpdateMatches() OVERRIDE;
 
   // Adds AutocompleteMatches for each of the suggestions in |results| to
   // |map|.
@@ -105,9 +84,6 @@ class ZeroSuggestProvider : public BaseSearchProvider {
 
   // Fetches zero-suggest suggestions by sending a request using |suggest_url|.
   void Run(const GURL& suggest_url);
-
-  // Parses results from the zero-suggest server and updates results.
-  void ParseSuggestResults(const base::Value& root_val);
 
   // Converts the parsed results to a set of AutocompleteMatches and adds them
   // to |matches_|.  Also update the histograms for how many results were
@@ -124,6 +100,15 @@ class ZeroSuggestProvider : public BaseSearchProvider {
   // function to return those |urls|.
   void OnMostVisitedUrlsAvailable(const history::MostVisitedURLList& urls);
 
+  // Returns the relevance score for the verbatim result.
+  int GetVerbatimRelevance() const;
+
+  // Whether we can show zero suggest on |current_page_url| without
+  // sending |current_page_url| as a parameter to the server at |suggest_url|.
+  bool CanShowZeroSuggestWithoutSendingURL(
+      const GURL& suggest_url,
+      const GURL& current_page_url) const;
+
   // Used to build default search engine URLs for suggested queries.
   TemplateURLService* template_url_service_;
 
@@ -139,17 +124,13 @@ class ZeroSuggestProvider : public BaseSearchProvider {
 
   // Fetcher used to retrieve results.
   scoped_ptr<net::URLFetcher> fetcher_;
-  // Whether there's a pending request in flight.
-  bool have_pending_request_;
 
   // Suggestion for the current URL.
   AutocompleteMatch current_url_match_;
-  // Navigation suggestions for the most recent ZeroSuggest input URL.
-  NavigationResults navigation_results_;
-  // Query suggestions for the most recent ZeroSuggest input URL.
-  MatchMap query_matches_map_;
-  // The relevance score for the URL of the current page.
-  int verbatim_relevance_;
+
+  // Contains suggest and navigation results as well as relevance parsed from
+  // the response for the most recent zero suggest input URL.
+  Results results_;
 
   history::MostVisitedURLList most_visited_urls_;
 

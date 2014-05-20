@@ -14,7 +14,6 @@
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process/process.h"
-#include "content/browser/renderer_host/input/touch_disposition_gesture_filter.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/android/content_view_core.h"
@@ -22,6 +21,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "ui/events/gesture_detection/filtered_gesture_provider.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/rect_f.h"
 #include "url/gurl.h"
@@ -37,8 +37,8 @@ struct MenuItem;
 
 // TODO(jrg): this is a shell.  Upstream the rest.
 class ContentViewCoreImpl : public ContentViewCore,
+                            public ui::GestureProviderClient,
                             public NotificationObserver,
-                            public TouchDispositionGestureFilterClient,
                             public WebContentsObserver {
  public:
   static ContentViewCoreImpl* FromWebContents(WebContents* web_contents);
@@ -55,17 +55,14 @@ class ContentViewCoreImpl : public ContentViewCore,
   virtual ui::WindowAndroid* GetWindowAndroid() const OVERRIDE;
   virtual scoped_refptr<cc::Layer> GetLayer() const OVERRIDE;
   virtual void LoadUrl(NavigationController::LoadURLParams& params) OVERRIDE;
-  virtual jint GetCurrentRenderProcessId(JNIEnv* env, jobject obj) OVERRIDE;
   virtual void ShowPastePopup(int x, int y) OVERRIDE;
   virtual void GetScaledContentBitmap(
       float scale,
-      gfx::Size* out_size,
-      gfx::Rect src_rect,
+      jobject bitmap_config,
+      gfx::Rect src_subrect,
       const base::Callback<void(bool, const SkBitmap&)>& result_callback)
       OVERRIDE;
   virtual float GetDpiScale() const OVERRIDE;
-  virtual void RequestContentClipping(const gfx::Rect& clipping,
-                                      const gfx::Size& content_size) OVERRIDE;
   virtual void PauseVideo() OVERRIDE;
   virtual void PauseOrResumeGeolocation(bool should_pause) OVERRIDE;
 
@@ -98,10 +95,22 @@ class ContentViewCoreImpl : public ContentViewCore,
       JNIEnv* env, jobject obj) const;
   jboolean IsIncognito(JNIEnv* env, jobject obj);
   void SendOrientationChangeEvent(JNIEnv* env, jobject obj, jint orientation);
-  void OnTouchEventHandlingBegin(JNIEnv* env,
-                                 jobject obj,
-                                 jobject motion_event);
-  void OnTouchEventHandlingEnd(JNIEnv* env, jobject obj);
+  jboolean OnTouchEvent(JNIEnv* env,
+                        jobject obj,
+                        jobject motion_event,
+                        jlong time_ms,
+                        jint android_action,
+                        jint pointer_count,
+                        jint history_size,
+                        jint action_index,
+                        jfloat pos_x_0,
+                        jfloat pos_y_0,
+                        jfloat pos_x_1,
+                        jfloat pos_y_1,
+                        jint pointer_id_0,
+                        jint pointer_id_1,
+                        jfloat touch_major_0,
+                        jfloat touch_major_1);
   jboolean SendMouseMoveEvent(JNIEnv* env,
                               jobject obj,
                               jlong time_ms,
@@ -122,24 +131,11 @@ class ContentViewCoreImpl : public ContentViewCore,
                   jfloat x, jfloat y, jfloat vx, jfloat vy);
   void FlingCancel(JNIEnv* env, jobject obj, jlong time_ms);
   void SingleTap(JNIEnv* env, jobject obj, jlong time_ms,
-                 jfloat x, jfloat y,
-                 jboolean disambiguation_popup_tap);
-  void SingleTapUnconfirmed(JNIEnv* env, jobject obj, jlong time_ms,
-                            jfloat x, jfloat y);
-  void ShowPress(JNIEnv* env, jobject obj, jlong time_ms,
                  jfloat x, jfloat y);
-  void TapCancel(JNIEnv* env, jobject obj, jlong time_ms,
-                 jfloat x, jfloat y);
-  void TapDown(JNIEnv* env, jobject obj, jlong time_ms,
-               jfloat x, jfloat y);
   void DoubleTap(JNIEnv* env, jobject obj, jlong time_ms,
                  jfloat x, jfloat y) ;
   void LongPress(JNIEnv* env, jobject obj, jlong time_ms,
-                 jfloat x, jfloat y,
-                 jboolean disambiguation_popup_tap);
-  void LongTap(JNIEnv* env, jobject obj, jlong time_ms,
-               jfloat x, jfloat y,
-               jboolean disambiguation_popup_tap);
+                 jfloat x, jfloat y);
   void PinchBegin(JNIEnv* env, jobject obj, jlong time_ms, jfloat x, jfloat y);
   void PinchEnd(JNIEnv* env, jobject obj, jlong time_ms);
   void PinchBy(JNIEnv* env, jobject obj, jlong time_ms,
@@ -148,6 +144,17 @@ class ContentViewCoreImpl : public ContentViewCore,
                                 jfloat x1, jfloat y1,
                                 jfloat x2, jfloat y2);
   void MoveCaret(JNIEnv* env, jobject obj, jfloat x, jfloat y);
+
+  void ResetGestureDetectors(JNIEnv* env, jobject obj);
+  void IgnoreRemainingTouchEvents(JNIEnv* env, jobject obj);
+  void OnWindowFocusLost(JNIEnv* env, jobject obj);
+  void SetDoubleTapSupportForPageEnabled(JNIEnv* env,
+                                         jobject obj,
+                                         jboolean enabled);
+  void SetDoubleTapSupportEnabled(JNIEnv* env, jobject obj, jboolean enabled);
+  void SetMultiTouchZoomSupportEnabled(JNIEnv* env,
+                                       jobject obj,
+                                       jboolean enabled);
 
   void LoadIfNecessary(JNIEnv* env, jobject obj);
   void RequestRestoreLoad(JNIEnv* env, jobject obj);
@@ -165,7 +172,6 @@ class ContentViewCoreImpl : public ContentViewCore,
   int GetNativeImeAdapter(JNIEnv* env, jobject obj);
   void SetFocus(JNIEnv* env, jobject obj, jboolean focused);
   void ScrollFocusedEditableNodeIntoView(JNIEnv* env, jobject obj);
-  void UndoScrollFocusedEditableNodeIntoView(JNIEnv* env, jobject obj);
 
   jint GetBackgroundColor(JNIEnv* env, jobject obj);
   void SetBackgroundColor(JNIEnv* env, jobject obj, jint color);
@@ -179,6 +185,9 @@ class ContentViewCoreImpl : public ContentViewCore,
   bool GetUseDesktopUserAgent(JNIEnv* env, jobject /* obj */);
   void Show();
   void Hide();
+  void SetAllowJavascriptInterfacesInspection(JNIEnv* env,
+                                              jobject obj,
+                                              jboolean allow);
   void AddJavascriptInterface(JNIEnv* env,
                               jobject obj,
                               jobject object,
@@ -198,9 +207,6 @@ class ContentViewCoreImpl : public ContentViewCore,
                              jlong interval_micros);
   void OnVSync(JNIEnv* env, jobject /* obj */, jlong frame_time_micros);
   jboolean OnAnimate(JNIEnv* env, jobject /* obj */, jlong frame_time_micros);
-  jboolean PopulateBitmapFromCompositor(JNIEnv* env,
-                                        jobject obj,
-                                        jobject jbitmap);
   void WasResized(JNIEnv* env, jobject obj);
   jboolean IsRenderWidgetHostViewReady(JNIEnv* env, jobject obj);
   void ExitFullscreen(JNIEnv* env, jobject obj);
@@ -217,18 +223,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                             jint delegate);
   jboolean IsShowingInterstitialPage(JNIEnv* env, jobject obj);
 
-  void AttachExternalVideoSurface(JNIEnv* env,
-                                  jobject obj,
-                                  jint player_id,
-                                  jobject jsurface);
-  void DetachExternalVideoSurface(JNIEnv* env, jobject obj, jint player_id);
   void SetAccessibilityEnabled(JNIEnv* env, jobject obj, bool enabled);
-  void SendActionAfterDoubleTapUma(JNIEnv* env,
-                                   jobject obj,
-                                   jint type,
-                                   jboolean has_delay,
-                                   jint count);
-  void SendSingleTapUma(JNIEnv* env, jobject obj, jint type, jint count);
 
   void ExtractSmartClipData(JNIEnv* env,
                             jobject obj,
@@ -236,6 +231,9 @@ class ContentViewCoreImpl : public ContentViewCore,
                             jint y,
                             jint width,
                             jint height);
+
+  jint GetCurrentRenderProcessId(JNIEnv* env, jobject obj);
+
   // --------------------------------------------------------------------------
   // Public methods that call to Java via JNI
   // --------------------------------------------------------------------------
@@ -262,7 +260,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                        const gfx::Vector2dF& content_offset,
                        float overdraw_bottom_height);
 
-  void UpdateImeAdapter(int native_ime_adapter, int text_input_type,
+  void UpdateImeAdapter(long native_ime_adapter, int text_input_type,
                         const std::string& text,
                         int selection_start, int selection_end,
                         int composition_start, int composition_end,
@@ -278,6 +276,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   void OnSelectionChanged(const std::string& text);
   void OnSelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params);
+  void OnSelectionRootBoundsChanged(const gfx::Rect& bounds);
 
   void StartContentIntent(const GURL& content_url);
 
@@ -291,11 +290,6 @@ class ContentViewCoreImpl : public ContentViewCore,
   // testing/benchmarking purposes
   base::android::ScopedJavaLocalRef<jobject> CreateTouchEventSynthesizer();
 
-  // Notifies the java object about the external surface, requesting for one if
-  // necessary.
-  void NotifyExternalSurface(
-      int player_id, bool is_request, const gfx::RectF& rect);
-
   base::android::ScopedJavaLocalRef<jobject> GetContentVideoViewClient();
 
   // Returns the context that the ContentViewCore was created with, it would
@@ -306,6 +300,9 @@ class ContentViewCoreImpl : public ContentViewCore,
   bool ShouldBlockMediaRequest(const GURL& url);
 
   void DidStopFlinging();
+
+  // Returns the viewport size after accounting for the viewport offset.
+  gfx::Size GetViewSize() const;
 
   // --------------------------------------------------------------------------
   // Methods called from native code
@@ -337,9 +334,8 @@ class ContentViewCoreImpl : public ContentViewCore,
   virtual void RenderViewReady() OVERRIDE;
   virtual void WebContentsDestroyed(WebContents* web_contents) OVERRIDE;
 
-  // TouchDispositionGestureFilterClient implementation.
-  virtual void ForwardGestureEvent(
-      const blink::WebGestureEvent& event) OVERRIDE;
+  // ui::GestureProviderClient implementation.
+  virtual void OnGestureEvent(const ui::GestureEventData& gesture) OVERRIDE;
 
   // --------------------------------------------------------------------------
   // Other private methods and data
@@ -348,8 +344,6 @@ class ContentViewCoreImpl : public ContentViewCore,
   void InitWebContents();
 
   RenderWidgetHostViewAndroid* GetRenderWidgetHostViewAndroid();
-
-  float GetTouchPaddingDip();
 
   blink::WebGestureEvent MakeGestureEvent(
       blink::WebInputEvent::Type type, int64 time_ms, float x, float y) const;
@@ -362,13 +356,18 @@ class ContentViewCoreImpl : public ContentViewCore,
   void DeleteScaledSnapshotTexture();
 
   void SendGestureEvent(const blink::WebGestureEvent& event);
-  void SendSyntheticGestureEvent(const blink::WebGestureEvent& event);
 
   // Update focus state of the RenderWidgetHostView.
   void SetFocusInternal(bool focused);
 
   // Send device_orientation_ to renderer.
   void SendOrientationChangeEventInternal();
+
+  // Utility method for synthesizing a touch cancel event and dispatching it
+  // through the touch pipeline.
+  void CancelActiveTouchSequenceIfNecessary();
+
+  float dpi_scale() const { return dpi_scale_; }
 
   // A weak reference to the Java ContentViewCore object.
   JavaObjectWeakGlobalRef java_ref_;
@@ -396,17 +395,15 @@ class ContentViewCoreImpl : public ContentViewCore,
   // The owning window that has a hold of main application activity.
   ui::WindowAndroid* window_android_;
 
+  // Provides gesture synthesis given a stream of touch events (derived from
+  // Android MotionEvent's) and touch event acks.
+  ui::FilteredGestureProvider gesture_provider_;
+
   // The cache of device's current orientation set from Java side, this value
   // will be sent to Renderer once it is ready.
   int device_orientation_;
 
   bool geolocation_needs_pause_;
-
-  // Handles gesture dispatch as the generating touch events are ack'ed.
-  TouchDispositionGestureFilter touch_disposition_gesture_filter_;
-  bool handling_touch_event_;
-  blink::WebTouchEvent pending_touch_event_;
-  GestureEventPacket pending_gesture_packet_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentViewCoreImpl);
 };

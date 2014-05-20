@@ -165,7 +165,8 @@ class AutofillDialogControllerImpl
   virtual void OnPopupShown() OVERRIDE;
   virtual void OnPopupHidden() OVERRIDE;
   virtual bool ShouldRepostEvent(const ui::MouseEvent& event) OVERRIDE;
-  virtual void DidSelectSuggestion(int identifier) OVERRIDE;
+  virtual void DidSelectSuggestion(const base::string16& value,
+                                   int identifier) OVERRIDE;
   virtual void DidAcceptSuggestion(const base::string16& value,
                                    int identifier) OVERRIDE;
   virtual void RemoveSuggestion(const base::string16& value,
@@ -427,7 +428,15 @@ class AutofillDialogControllerImpl
   // Gets the value for |type| in |section|, whether it comes from manual user
   // input or the active suggestion.
   base::string16 GetValueFromSection(DialogSection section,
-                               ServerFieldType type);
+                                     ServerFieldType type);
+
+  // Returns whether the given section can accept an address with the given
+  // country code.
+  bool CanAcceptCountry(DialogSection section, const std::string& country_code);
+
+  // Whether |profile| should be suggested for |section|.
+  bool ShouldSuggestProfile(DialogSection section,
+                            const AutofillProfile& profile);
 
   // Gets the SuggestionsMenuModel for |section|.
   SuggestionsMenuModel* SuggestionsMenuModelForSection(DialogSection section);
@@ -459,17 +468,13 @@ class AutofillDialogControllerImpl
   base::string16 ExtraSuggestionTextForSection(DialogSection section) const;
   gfx::Image ExtraSuggestionIconForSection(DialogSection section);
 
-  // Loads profiles that can suggest data for |type|. |field_contents| is the
-  // part the user has already typed. |inputs| is the rest of section.
-  // Identifying info is loaded into the last three outparams as well as
-  // |popup_guids_|.
-  void GetProfileSuggestions(
-      ServerFieldType type,
-      const base::string16& field_contents,
-      const DetailInputs& inputs,
-      std::vector<base::string16>* popup_values,
-      std::vector<base::string16>* popup_labels,
-      std::vector<base::string16>* popup_icons);
+  // Suggests address completions using the downloaded i18n validation rules.
+  // Stores the suggestions in |i18n_validator_suggestions_|.
+  void GetI18nValidatorSuggestions(DialogSection section,
+                                   ServerFieldType type,
+                                   std::vector<base::string16>* popup_values,
+                                   std::vector<base::string16>* popup_labels,
+                                   std::vector<base::string16>* popup_icons);
 
   // Like RequestedFieldsForSection, but returns a pointer.
   DetailInputs* MutableRequestedFieldsForSection(DialogSection section);
@@ -513,9 +518,17 @@ class AutofillDialogControllerImpl
   bool IsCreditCardExpirationValid(const base::string16& year,
                                    const base::string16& month) const;
 
+  // Returns true if |profile| has an address we can be sure is invalid.
+  // Profiles with invalid addresses are not suggested in the dropdown menu for
+  // billing and shipping addresses.
+  bool HasInvalidAddress(const AutofillProfile& profile);
+
   // Returns true if |key| refers to a suggestion, as opposed to some control
   // menu item.
   bool IsASuggestionItemKey(const std::string& key) const;
+
+  // Returns whether Autofill is enabled for |profile_|.
+  bool IsAutofillEnabled() const;
 
   // Whether the billing section should be used to fill in the shipping details.
   bool ShouldUseBillingForShipping();
@@ -688,8 +701,8 @@ class AutofillDialogControllerImpl
   YearComboboxModel cc_exp_year_combobox_model_;
 
   // Models for country input.
-  CountryComboboxModel billing_country_combobox_model_;
-  CountryComboboxModel shipping_country_combobox_model_;
+  scoped_ptr<CountryComboboxModel> billing_country_combobox_model_;
+  scoped_ptr<CountryComboboxModel> shipping_country_combobox_model_;
 
   // Models for the suggestion views.
   SuggestionsMenuModel suggested_cc_;
@@ -709,6 +722,9 @@ class AutofillDialogControllerImpl
 
   // The GUIDs for the currently showing unverified profiles popup.
   std::vector<PersonalDataManager::GUIDPair> popup_guids_;
+
+  // The autofill suggestions based on downloaded i18n validation rules.
+  std::vector< ::i18n::addressinput::AddressData> i18n_validator_suggestions_;
 
   // The controller for the currently showing popup (which helps users when
   // they're manually filling the dialog).

@@ -7,9 +7,20 @@
 
 #include <string>
 
+#if defined(CLD2_DYNAMIC_MODE)
+#include "base/basictypes.h"
+#include "base/lazy_instance.h"
+#endif
 #include "base/memory/scoped_ptr.h"
+#if defined(CLD2_DYNAMIC_MODE)
+#include "base/memory/weak_ptr.h"
+#include "base/platform_file.h"
+#include "base/synchronization/lock.h"
+#include "base/task_runner.h"
+#endif
 #include "chrome/browser/ui/translate/translate_bubble_model.h"
 #include "components/translate/content/browser/content_translate_driver.h"
+#include "components/translate/core/browser/translate_client.h"
 #include "components/translate/core/common/translate_errors.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -23,9 +34,11 @@ struct LanguageDetectionDetails;
 class PrefService;
 class TranslateAcceptLanguages;
 class TranslatePrefs;
+class TranslateManager;
 
 class TranslateTabHelper
-    : public content::WebContentsObserver,
+    : public TranslateClient,
+      public content::WebContentsObserver,
       public content::WebContentsUserData<TranslateTabHelper> {
  public:
   virtual ~TranslateTabHelper();
@@ -45,6 +58,18 @@ class TranslateTabHelper
   static TranslateAcceptLanguages* GetTranslateAcceptLanguages(
       content::BrowserContext* browser_context);
 
+  // Helper method to return the TranslateManager instance associated with
+  // |web_contents|, or NULL if there is no such associated instance.
+  static TranslateManager* GetManagerFromWebContents(
+      content::WebContents* web_contents);
+
+  // Gets the associated TranslateManager.
+  TranslateManager* GetTranslateManager();
+
+  // Gets the associated WebContents. Returns NULL if the WebContents is being
+  // destroyed.
+  content::WebContents* GetWebContents();
+
   // Denotes which state the user is in with respect to translate.
   enum TranslateStep {
     BEFORE_TRANSLATE,
@@ -56,11 +81,16 @@ class TranslateTabHelper
   // Called when the embedder should present UI to the user corresponding to the
   // user's current |step|.
   void ShowTranslateUI(TranslateStep step,
-                       content::WebContents* web_contents,
                        const std::string source_language,
                        const std::string target_language,
                        TranslateErrors::Type error_type,
                        bool triggered_from_menu);
+
+  // TranslateClient implementation.
+  virtual TranslateDriver* GetTranslateDriver() OVERRIDE;
+  virtual PrefService* GetPrefs() OVERRIDE;
+  virtual scoped_ptr<TranslatePrefs> GetTranslatePrefs() OVERRIDE;
+  virtual TranslateAcceptLanguages* GetTranslateAcceptLanguages() OVERRIDE;
 
  private:
   explicit TranslateTabHelper(content::WebContents* web_contents);
@@ -71,6 +101,8 @@ class TranslateTabHelper
   virtual void DidNavigateAnyFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
+  virtual void WebContentsDestroyed(
+      content::WebContents* web_contents) OVERRIDE;
 
   void OnLanguageDetermined(const LanguageDetectionDetails& details,
                             bool page_needs_translation);
@@ -79,12 +111,50 @@ class TranslateTabHelper
                         const std::string& translated_lang,
                         TranslateErrors::Type error_type);
 
+#if defined(CLD2_DYNAMIC_MODE)
+  // Called when we receive ChromeViewHostMsg_NeedCLDData from a renderer.
+  // If we have already cached the data, responds immediately; else, enqueues
+  // a HandleCLDDataRequest on the blocking pool to cache the data.
+  // Acquires and releases s_file_lock_ in a non-blocking manner; queries
+  // handled while the file is being cached will gracefully and immediately
+  // fail.
+  // It is up to the originator of the message to poll again later if required;
+  // no "negative response" will be generated.
+  void OnCLDDataRequested();
+
+  // Invoked on the blocking pool in order to cache the data. When successful,
+  // immediately responds to the request that initiated OnCLDDataRequested.
+  // Holds s_file_lock_ while the file is being cached.
+  static void HandleCLDDataRequest();
+
+  // If the CLD data is ready, send it to the renderer. Briefly checks the lock.
+  void MaybeSendCLDDataAvailable();
+
+  // Sends the renderer a response containing the data file handle. No locking.
+  void SendCLDDataAvailable(const base::PlatformFile handle,
+                            const uint64 data_offset,
+                            const uint64 data_length);
+
+  // Necessary for binding the callback to HandleCLDDataRequest on the blocking
+  // pool.
+  base::WeakPtrFactory<TranslateTabHelper> weak_pointer_factory_;
+
+  // The data file,  cached as long as the process stays alive.
+  // We also track the offset at which the data starts, and its length.
+  static base::PlatformFile s_cached_platform_file_; // guarded by file_lock_
+  static uint64 s_cached_data_offset_; // guarded by file_lock_
+  static uint64 s_cached_data_length_; // guarded by file_lock_
+
+  // Guards s_cached_platform_file_
+  static base::LazyInstance<base::Lock> s_file_lock_;
+
+#endif
+
   // Shows the translate bubble.
-  void ShowBubble(content::WebContents* web_contents,
-                  TranslateStep step,
-                  TranslateErrors::Type error_type);
+  void ShowBubble(TranslateStep step, TranslateErrors::Type error_type);
 
   ContentTranslateDriver translate_driver_;
+  scoped_ptr<TranslateManager> translate_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(TranslateTabHelper);
 };

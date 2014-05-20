@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
@@ -289,9 +290,12 @@ void MCSProbe::Start() {
   file_thread_.Start();
   InitializeNetworkState();
   BuildNetworkSession();
+  std::vector<GURL> endpoints(1,
+                              GURL("https://" +
+                                   net::HostPortPair(server_host_,
+                                                     server_port_).ToString()));
   connection_factory_.reset(
-      new ConnectionFactoryImpl(GURL("https://" + net::HostPortPair(
-                                    server_host_, server_port_).ToString()),
+      new ConnectionFactoryImpl(endpoints,
                                 kDefaultBackoffPolicy,
                                 network_session_,
                                 &net_log_));
@@ -426,6 +430,7 @@ void MCSProbe::CheckIn() {
       chrome_build_proto,
       0,
       0,
+      std::vector<std::string>(),
       url_request_context_getter_.get()));
   checkin_request_->Start();
 }

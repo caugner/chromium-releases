@@ -15,7 +15,7 @@ var WebRequestSchema =
     requireNative('schema_registry').GetSchema('webRequest');
 var DeclarativeWebRequestSchema =
     requireNative('schema_registry').GetSchema('declarativeWebRequest');
-var WebView = require('binding').Binding.create('webview').generate();
+var WebView = require('webview').WebView;
 
 var WEB_VIEW_ATTRIBUTE_MAXHEIGHT = 'maxheight';
 var WEB_VIEW_ATTRIBUTE_MAXWIDTH = 'maxwidth';
@@ -65,6 +65,14 @@ var WEB_VIEW_EVENTS = {
   'contentload': {
     evt: CreateEvent('webview.onContentLoad'),
     fields: []
+  },
+  'dialog': {
+    cancelable: true,
+    customHandler: function(webViewInternal, event, webViewEvent) {
+      webViewInternal.handleDialogEvent(event, webViewEvent);
+    },
+    evt: CreateEvent('webview.onDialog'),
+    fields: ['defaultPromptText', 'messageText', 'messageType', 'url']
   },
   'exit': {
      evt: CreateEvent('webview.onExit'),
@@ -158,7 +166,7 @@ function WebViewInternal(webviewNode) {
   privates(webviewNode).internal = this;
   this.webviewNode = webviewNode;
   this.browserPluginNode = this.createBrowserPluginNode();
-  var shadowRoot = this.webviewNode.webkitCreateShadowRoot();
+  var shadowRoot = this.webviewNode.createShadowRoot();
   shadowRoot.appendChild(this.browserPluginNode);
 
   this.setupWebviewNodeAttributes();
@@ -231,6 +239,17 @@ WebViewInternal.prototype.canGoBack = function() {
 WebViewInternal.prototype.canGoForward = function() {
   return this.currentEntryIndex >= 0 &&
       this.currentEntryIndex < (this.entryCount - 1);
+};
+
+/**
+ * @private
+ */
+WebViewInternal.prototype.clearData = function() {
+  if (!this.instanceId) {
+    return;
+  }
+  var args = $Array.concat([this.instanceId], $Array.slice(arguments));
+  $Function.apply(WebView.clearData, null, args);
 };
 
 /**
@@ -566,6 +585,7 @@ WebViewInternal.prototype.setupWebviewNodeEvents = function() {
   this.browserPluginNode.addEventListener('-internal-instanceid-allocated',
                                           onInstanceIdAllocated);
   this.setupWebRequestEvents();
+  this.setupExperimentalContextMenus_();
 
   this.on = {};
   var events = self.getEvents();
@@ -629,6 +649,84 @@ WebViewInternal.prototype.getPermissionTypes = function() {
   var permissions =
       ['media', 'geolocation', 'pointerLock', 'download', 'loadplugin'];
   return permissions.concat(this.maybeGetExperimentalPermissions());
+};
+
+/**
+ * @private
+ */
+WebViewInternal.prototype.handleDialogEvent =
+    function(event, webViewEvent) {
+  var showWarningMessage = function(dialogType) {
+    var VOWELS = ['a', 'e', 'i', 'o', 'u'];
+    var WARNING_MSG_DIALOG_BLOCKED = '<webview>: %1 %2 dialog was blocked.';
+    var article = (VOWELS.indexOf(dialogType.charAt(0)) >= 0) ? 'An' : 'A';
+    var output = WARNING_MSG_DIALOG_BLOCKED.replace('%1', article);
+    output = output.replace('%2', dialogType);
+    window.console.warn(output);
+  };
+
+  var self = this;
+  var browserPluginNode = this.browserPluginNode;
+  var webviewNode = this.webviewNode;
+
+  var requestId = event.requestId;
+  var actionTaken = false;
+
+  var validateCall = function() {
+    var ERROR_MSG_DIALOG_ACTION_ALREADY_TAKEN = '<webview>: ' +
+        'An action has already been taken for this "dialog" event.';
+
+    if (actionTaken) {
+      throw new Error(ERROR_MSG_DIALOG_ACTION_ALREADY_TAKEN);
+    }
+    actionTaken = true;
+  };
+
+  var dialog = {
+    ok: function(user_input) {
+      validateCall();
+      user_input = user_input || '';
+      WebView.setPermission(self.instanceId, requestId, 'allow', user_input);
+    },
+    cancel: function() {
+      validateCall();
+      WebView.setPermission(self.instanceId, requestId, 'deny');
+    }
+  };
+  webViewEvent.dialog = dialog;
+
+  var defaultPrevented = !webviewNode.dispatchEvent(webViewEvent);
+  if (actionTaken) {
+    return;
+  }
+
+  if (defaultPrevented) {
+    // Tell the JavaScript garbage collector to track lifetime of |dialog| and
+    // call back when the dialog object has been collected.
+    MessagingNatives.BindToGC(dialog, function() {
+      // Avoid showing a warning message if the decision has already been made.
+      if (actionTaken) {
+        return;
+      }
+      WebView.setPermission(
+          self.instanceId, requestId, 'default', '', function(allowed) {
+        if (allowed) {
+          return;
+        }
+        showWarningMessage(event.messageType);
+      });
+    });
+  } else {
+    actionTaken = true;
+    // The default action is equivalent to canceling the dialog.
+    WebView.setPermission(
+        self.instanceId, requestId, 'default', '', function(allowed) {
+      if (allowed) {
+        return;
+      }
+      showWarningMessage(event.messageType);
+    });
+  }
 };
 
 /**
@@ -895,8 +993,7 @@ WebViewInternal.prototype.setupWebRequestEvents = function() {
       'request',
       {
         value: request,
-        enumerable: true,
-        writable: false
+        enumerable: true
       }
   );
 };
@@ -989,6 +1086,11 @@ function registerWebViewElement() {
     return privates(this).internal.canGoForward();
   };
 
+  proto.clearData = function() {
+    var internal = privates(this).internal;
+    $Function.apply(internal.clearData, internal, arguments);
+  };
+
   proto.getProcessId = function() {
     return privates(this).internal.getProcessId();
   };
@@ -1072,6 +1174,12 @@ WebViewInternal.prototype.maybeAttachWebRequestEventToObject = function() {};
 WebViewInternal.prototype.maybeGetExperimentalPermissions = function() {
   return [];
 };
+
+/**
+ * Implemented when the experimental API is available.
+ * @private
+ */
+WebViewInternal.prototype.setupExperimentalContextMenus_ = function() {};
 
 exports.WebView = WebView;
 exports.WebViewInternal = WebViewInternal;

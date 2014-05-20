@@ -145,12 +145,20 @@ class TestBrowserWindow : public BrowserWindow {
       GetWebContentsModalDialogHost() OVERRIDE;
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE {}
-  virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE {}
+  virtual void ShowAvatarBubbleFromAvatarButton(AvatarBubbleMode mode)
+      OVERRIDE {}
   virtual void ShowPasswordGenerationBubble(
       const gfx::Rect& rect,
       const autofill::PasswordForm& form,
       autofill::PasswordGenerator* generator) OVERRIDE {}
   virtual int GetRenderViewHeightInsetWithDetachedBookmarkBar() OVERRIDE;
+  virtual void ExecuteExtensionCommand(
+      const extensions::Extension* extension,
+      const extensions::Command& command) OVERRIDE;
+  virtual void ShowPageActionPopup(
+      const extensions::Extension* extension) OVERRIDE;
+  virtual void ShowBrowserActionPopup(
+      const extensions::Extension* extension) OVERRIDE;
 
  protected:
   virtual void DestroyBrowser() OVERRIDE {}

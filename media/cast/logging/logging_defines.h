@@ -18,23 +18,6 @@ static const uint32 kFrameIdUnknown = 0xFFFFFFFF;
 
 typedef uint32 RtpTimestamp;
 
-struct CastLoggingConfig {
-  // Constructs default config - all logging is disabled.
-  CastLoggingConfig();
-  ~CastLoggingConfig();
-
-  bool enable_raw_data_collection;
-  bool enable_stats_data_collection;
-  bool enable_tracing;
-};
-
-// Currently these are the same as the default config.
-CastLoggingConfig GetDefaultCastSenderLoggingConfig();
-CastLoggingConfig GetDefaultCastReceiverLoggingConfig();
-
-// Enable raw and stats data collection. Disable tracing.
-CastLoggingConfig GetLoggingConfigWithRawEventsAndStatsEnabled();
-
 enum CastLoggingEvent {
   // Generic events.
   kUnknown,
@@ -63,18 +46,21 @@ enum CastLoggingEvent {
   kVideoFrameDecoded,
   kVideoRenderDelay,
   // Send-side packet events.
-  kPacketSentToPacer,
-  kPacketSentToNetwork,
-  kPacketRetransmitted,
+  kAudioPacketSentToPacer,
+  kVideoPacketSentToPacer,
+  kAudioPacketSentToNetwork,
+  kVideoPacketSentToNetwork,
+  kAudioPacketRetransmitted,
+  kVideoPacketRetransmitted,
   // Receive-side packet events.
   kAudioPacketReceived,
   kVideoPacketReceived,
   kDuplicateAudioPacketReceived,
   kDuplicateVideoPacketReceived,
-  kNumOfLoggingEvents,
+  kNumOfLoggingEvents = kDuplicateVideoPacketReceived
 };
 
-std::string CastLoggingToString(CastLoggingEvent event);
+const char* CastLoggingToString(CastLoggingEvent event);
 
 // CastLoggingEvent are classified into one of three following types.
 enum EventMediaType { AUDIO_EVENT, VIDEO_EVENT, OTHER_EVENT };

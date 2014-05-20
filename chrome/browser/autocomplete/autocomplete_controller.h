@@ -74,16 +74,10 @@ class AutocompleteController : public AutocompleteProviderListener {
   // If |clear_result| is true, the controller will also erase the result set.
   void Stop(bool clear_result);
 
-  // Begin asynchronously fetching zero-suggest suggestions for |url| of
-  // classification |page_classification|. |permanent_text| is the omnibox
-  // text for the current page.
-  void StartZeroSuggest(
-      const GURL& url,
-      AutocompleteInput::PageClassification page_classification,
-      const base::string16& permanent_text);
-
-  // Cancels any pending zero-suggest fetch.
-  void StopZeroSuggest();
+  // Begin asynchronous fetch of zero-suggest suggestions. The |input| should
+  // contain current omnibox input, the URL of the page we are on, and
+  // that page's classification.
+  void StartZeroSuggest(const AutocompleteInput& input);
 
   // Asks the relevant provider to delete |match|, and ensures observers are
   // notified of resulting changes immediately.  This should only be called when
@@ -234,9 +228,6 @@ class AutocompleteController : public AutocompleteProviderListener {
   // Are we in Start()? This is used to avoid updating |result_| and sending
   // notifications until Start() has been invoked on all providers.
   bool in_start_;
-
-  // Has StartZeroSuggest() been called but not Start()?
-  bool in_zero_suggest_;
 
   Profile* profile_;
 

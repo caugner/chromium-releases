@@ -20,7 +20,6 @@ class Layer;
 }
 
 namespace gfx {
-class Rect;
 class Size;
 class SizeF;
 class Vector2dF;
@@ -49,21 +48,17 @@ class CONTENT_EXPORT ContentViewCore {
   virtual ui::WindowAndroid* GetWindowAndroid() const = 0;
   virtual scoped_refptr<cc::Layer> GetLayer() const = 0;
   virtual void LoadUrl(NavigationController::LoadURLParams& params) = 0;
-  virtual jint GetCurrentRenderProcessId(JNIEnv* env, jobject obj) = 0;
   virtual void ShowPastePopup(int x, int y) = 0;
 
-  // Request a scaled content readback.  The result is passed through the
-  // callback.  The boolean parameter indicates whether the readback was a
-  // success or not.  The content is passed through the SkBitmap parameter.
-  // |out_size| is returned with the size of the content.
+  // Request a scaled content readback. The result is passed through the
+  // callback. The boolean parameter indicates whether the readback was a
+  // success or not. The content is passed through the SkBitmap parameter.
   virtual void GetScaledContentBitmap(
       float scale,
-      gfx::Size* out_size,
+      jobject bitmap_config,
       gfx::Rect src_rect,
       const base::Callback<void(bool, const SkBitmap&)>& result_callback) = 0;
   virtual float GetDpiScale() const = 0;
-  virtual void RequestContentClipping(const gfx::Rect& clipping,
-                                      const gfx::Size& content_size) = 0;
   virtual void PauseVideo() = 0;
   virtual void PauseOrResumeGeolocation(bool should_pause) = 0;
 

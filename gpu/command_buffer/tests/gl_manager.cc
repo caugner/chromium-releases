@@ -39,9 +39,9 @@ GLManager::Options::Options()
       share_mailbox_manager(NULL),
       virtual_manager(NULL),
       bind_generates_resource(false),
+      lose_context_when_out_of_memory(false),
       context_lost_allowed(false),
-      image_manager(NULL) {
-}
+      image_manager(NULL) {}
 
 GLManager::GLManager()
     : context_lost_allowed_(false) {
@@ -188,16 +188,14 @@ void GLManager::Initialize(const GLManager::Options& options) {
   // Create a transfer buffer.
   transfer_buffer_.reset(new TransferBuffer(gles2_helper_.get()));
 
-  bool free_everything_when_invisible = false;
-
   // Create the object exposing the OpenGL API.
-  gles2_implementation_.reset(new gles2::GLES2Implementation(
-      gles2_helper_.get(),
-      client_share_group,
-      transfer_buffer_.get(),
-      options.bind_generates_resource,
-      free_everything_when_invisible ,
-      gpu_control_.get()));
+  gles2_implementation_.reset(
+      new gles2::GLES2Implementation(gles2_helper_.get(),
+                                     client_share_group,
+                                     transfer_buffer_.get(),
+                                     options.bind_generates_resource,
+                                     options.lose_context_when_out_of_memory,
+                                     gpu_control_.get()));
 
   ASSERT_TRUE(gles2_implementation_->Initialize(
       kStartTransferBufferSize,

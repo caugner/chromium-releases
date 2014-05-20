@@ -35,10 +35,8 @@
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/printing/printer_manager_dialog.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
-#include "chrome/browser/signin/signin_manager_base.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -52,6 +50,8 @@
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/print_messages.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager_base.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
@@ -74,7 +74,7 @@
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service_factory.h"
 #endif
 
-#if defined(ENABLE_MDNS)
+#if defined(ENABLE_SERVICE_DISCOVERY)
 #include "chrome/browser/local_discovery/privet_constants.h"
 #endif
 
@@ -127,6 +127,8 @@ enum PrintDestinationBuckets {
   SIGNIN_TRIGGERED,
   PRIVET_DUPLICATE_SELECTED,
   CLOUD_DUPLICATE_SELECTED,
+  REGISTER_PROMO_SHOWN,
+  REGISTER_PROMO_SELECTED,
   PRINT_DESTINATION_BUCKET_BOUNDARY
 };
 
@@ -382,8 +384,7 @@ class PrintPreviewHandler::AccessTokenService
  public:
   explicit AccessTokenService(PrintPreviewHandler* handler)
       : OAuth2TokenService::Consumer("print_preview"),
-        handler_(handler),
-        weak_factory_(this) {
+        handler_(handler) {
   }
 
   void RequestToken(const std::string& type) {
@@ -404,35 +405,13 @@ class PrintPreviewHandler::AccessTokenService
       }
     } else if (type == "device") {
 #if defined(OS_CHROMEOS)
-      chromeos::DeviceOAuth2TokenServiceFactory::Get(
-          base::Bind(
-              &AccessTokenService::DidGetTokenService,
-              weak_factory_.GetWeakPtr(),
-              type));
-      return;
+      chromeos::DeviceOAuth2TokenService* token_service =
+          chromeos::DeviceOAuth2TokenServiceFactory::Get();
+      account_id = token_service->GetRobotAccountId();
+      service = token_service;
 #endif
     }
 
-    ContinueRequestToken(type, service, account_id);
-  }
-
-#if defined(OS_CHROMEOS)
-  // Continuation of RequestToken().
-  void DidGetTokenService(const std::string& type,
-                          chromeos::DeviceOAuth2TokenService* token_service) {
-    std::string account_id;
-    if (token_service)
-      account_id = token_service->GetRobotAccountId();
-    ContinueRequestToken(type,
-                         token_service,
-                         account_id);
-  }
-#endif
-
-  // Continuation of RequestToken().
-  void ContinueRequestToken(const std::string& type,
-                            OAuth2TokenService* service,
-                            const std::string& account_id) {
     if (service) {
       OAuth2TokenService::ScopeSet oauth_scopes;
       oauth_scopes.insert(cloud_print::kCloudPrintAuth);
@@ -472,7 +451,6 @@ class PrintPreviewHandler::AccessTokenService
                    linked_ptr<OAuth2TokenService::Request> > Requests;
   Requests requests_;
   PrintPreviewHandler* handler_;
-  base::WeakPtrFactory<AccessTokenService> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AccessTokenService);
 };
@@ -557,10 +535,9 @@ void PrintPreviewHandler::RegisterMessages() {
 }
 
 bool PrintPreviewHandler::PrivetPrintingEnabled() {
-#if defined(ENABLE_MDNS)
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return !command_line->HasSwitch(switches::kDisableDeviceDiscovery) &&
-      !command_line->HasSwitch(switches::kDisablePrivetLocalPrinting);
+#if defined(ENABLE_SERVICE_DISCOVERY)
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
+    switches::kDisableDeviceDiscovery);
 #else
   return false;
 #endif
@@ -582,7 +559,7 @@ void PrintPreviewHandler::HandleGetPrinters(const base::ListValue* /*args*/) {
 }
 
 void PrintPreviewHandler::HandleGetPrivetPrinters(const base::ListValue* args) {
-#if defined(ENABLE_MDNS)
+#if defined(ENABLE_SERVICE_DISCOVERY)
   if (PrivetPrintingEnabled()) {
     Profile* profile = Profile::FromWebUI(web_ui());
     service_discovery_client_ =
@@ -602,7 +579,7 @@ void PrintPreviewHandler::HandleGetPrivetPrinters(const base::ListValue* args) {
 
 void PrintPreviewHandler::HandleStopGetPrivetPrinters(
     const base::ListValue* args) {
-#if defined(ENABLE_MDNS)
+#if defined(ENABLE_SERVICE_DISCOVERY)
   if (PrivetPrintingEnabled()) {
     printer_lister_->Stop();
   }
@@ -611,7 +588,7 @@ void PrintPreviewHandler::HandleStopGetPrivetPrinters(
 
 void PrintPreviewHandler::HandleGetPrivetPrinterCapabilities(
     const base::ListValue* args) {
-#if defined(ENABLE_MDNS)
+#if defined(ENABLE_SERVICE_DISCOVERY)
   std::string name;
   bool success = args->GetString(0, &name);
   DCHECK(success);
@@ -741,10 +718,11 @@ void PrintPreviewHandler::HandlePrint(const base::ListValue* args) {
     return;
   }
 
-#if defined(ENABLE_MDNS)
+#if defined(ENABLE_SERVICE_DISCOVERY)
   if (print_with_privet && PrivetPrintingEnabled()) {
     std::string printer_name;
     std::string print_ticket;
+    std::string capabilities;
     UMA_HISTOGRAM_COUNTS("PrintPreview.PageCount.PrintWithPrivet", page_count);
     ReportUserActionHistogram(PRINT_WITH_PRIVET);
 
@@ -752,16 +730,18 @@ void PrintPreviewHandler::HandlePrint(const base::ListValue* args) {
     int height = 0;
     if (!settings->GetString(printing::kSettingDeviceName, &printer_name) ||
         !settings->GetString(printing::kSettingTicket, &print_ticket) ||
+        !settings->GetString(printing::kSettingCapabilities, &capabilities) ||
         !settings->GetInteger(printing::kSettingPageWidth, &width) ||
         !settings->GetInteger(printing::kSettingPageHeight, &height) ||
-        width <= 0 || height <=0) {
+        width <= 0 || height <= 0) {
       NOTREACHED();
       base::FundamentalValue http_code_value(-1);
       web_ui()->CallJavascriptFunction("onPrivetPrintFailed", http_code_value);
       return;
     }
 
-    PrintToPrivetPrinter(printer_name, print_ticket, gfx::Size(width, height));
+    PrintToPrivetPrinter(
+        printer_name, print_ticket, capabilities, gfx::Size(width, height));
     return;
   }
 #endif
@@ -1373,8 +1353,7 @@ void PrintPreviewHandler::ConvertColorSettingToCUPSColorModel(
 
 #endif
 
-
-#if defined(ENABLE_MDNS)
+#if defined(ENABLE_SERVICE_DISCOVERY)
 void PrintPreviewHandler::LocalPrinterChanged(
     bool added,
     const std::string& name,
@@ -1426,21 +1405,23 @@ bool PrintPreviewHandler::PrivetUpdateClient(
 
 void PrintPreviewHandler::PrivetLocalPrintUpdateClient(
     std::string print_ticket,
+    std::string capabilities,
     gfx::Size page_size,
     scoped_ptr<local_discovery::PrivetHTTPClient> http_client) {
   if (!PrivetUpdateClient(http_client.Pass()))
     return;
 
-  StartPrivetLocalPrint(print_ticket, page_size);
+  StartPrivetLocalPrint(print_ticket, capabilities, page_size);
 }
 
-void PrintPreviewHandler::StartPrivetLocalPrint(
-    const std::string& print_ticket,
-    const gfx::Size& page_size) {
+void PrintPreviewHandler::StartPrivetLocalPrint(const std::string& print_ticket,
+                                                const std::string& capabilities,
+                                                const gfx::Size& page_size) {
   privet_local_print_operation_ =
       privet_http_client_->CreateLocalPrintOperation(this);
 
   privet_local_print_operation_->SetTicket(print_ticket);
+  privet_local_print_operation_->SetCapabilities(capabilities);
 
   scoped_refptr<base::RefCountedBytes> data;
   base::string16 title;
@@ -1504,14 +1485,17 @@ void PrintPreviewHandler::SendPrivetCapabilitiesError(
       name_value);
 }
 
-void PrintPreviewHandler::PrintToPrivetPrinter(
-    const std::string& device_name,
-    const std::string& ticket,
-    const gfx::Size& page_size) {
+void PrintPreviewHandler::PrintToPrivetPrinter(const std::string& device_name,
+                                               const std::string& ticket,
+                                               const std::string& capabilities,
+                                               const gfx::Size& page_size) {
   CreatePrivetHTTP(
       device_name,
       base::Bind(&PrintPreviewHandler::PrivetLocalPrintUpdateClient,
-                 base::Unretained(this), ticket, page_size));
+                 base::Unretained(this),
+                 ticket,
+                 capabilities,
+                 page_size));
 }
 
 bool PrintPreviewHandler::CreatePrivetHTTP(

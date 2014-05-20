@@ -61,6 +61,7 @@ namespace extension_urls {
   // Values to use with webstore URL launch source field.
   extern const char kLaunchSourceAppList[];
   extern const char kLaunchSourceAppListSearch[];
+  extern const char kLaunchSourceAppListInfoDialog[];
 }  // namespace extension_urls
 
 namespace extension_misc {
@@ -118,8 +119,8 @@ namespace extension_misc {
   // The extension id of the Office Viewer component extension.
   extern const char kQuickOfficeComponentExtensionId[];
 
-  // The extension id of the Office Viewer dev extension.
-  extern const char kQuickOfficeDevExtensionId[];
+  // The extension id of the Office Viewer extension on the internal webstore.
+  extern const char kQuickOfficeInternalExtensionId[];
 
   // The extension id of the Office Viewer extension.
   extern const char kQuickOfficeExtensionId[];

@@ -104,6 +104,8 @@ class ThreadSafetyStressThread : public base::SimpleThread {
     READ_DATA,
     BEGIN_READ_DATA,
     END_READ_DATA,
+    DUPLICATE_BUFFER_HANDLE,
+    MAP_BUFFER,
     ADD_WAITER,
     REMOVE_WAITER,
 
@@ -174,6 +176,19 @@ class ThreadSafetyStressThread : public base::SimpleThread {
         EXPECT_EQ(MOJO_RESULT_INVALID_ARGUMENT,
                   dispatcher_->EndReadData(0));
         break;
+      case DUPLICATE_BUFFER_HANDLE: {
+        scoped_refptr<Dispatcher> unused;
+        EXPECT_EQ(MOJO_RESULT_INVALID_ARGUMENT,
+                  dispatcher_->DuplicateBufferHandle(NULL, &unused));
+        break;
+      }
+      case MAP_BUFFER: {
+        scoped_ptr<RawSharedBuffer::Mapping> unused;
+        EXPECT_EQ(MOJO_RESULT_INVALID_ARGUMENT,
+                  dispatcher_->MapBuffer(0u, 0u, MOJO_MAP_BUFFER_FLAG_NONE,
+                                         &unused));
+        break;
+      }
       case ADD_WAITER: {
         MojoResult r = dispatcher_->AddWaiter(&waiter_,
                                               MOJO_WAIT_FLAG_EVERYTHING, 0);

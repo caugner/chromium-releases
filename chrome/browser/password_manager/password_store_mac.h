@@ -33,7 +33,11 @@ class PasswordStoreMac : public PasswordStore {
       LoginDatabase* login_db);
 
   // Initializes |thread_|.
-  virtual bool Init() OVERRIDE;
+  virtual bool Init(
+      const syncer::SyncableService::StartSyncFlare& flare) OVERRIDE;
+
+  // Stops |thread_|.
+  virtual void Shutdown() OVERRIDE;
 
  protected:
   virtual ~PasswordStoreMac();

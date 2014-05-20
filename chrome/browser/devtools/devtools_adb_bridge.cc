@@ -29,7 +29,7 @@
 #include "chrome/browser/devtools/devtools_target_impl.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_external_agent_proxy.h"
@@ -103,6 +103,11 @@ const BrowserDescriptor kBrowserDescriptors[] = {
     "Chrome Dev"
   },
   {
+    "com.chrome.canary",
+    kChromeDefaultSocket,
+    "Chrome Canary"
+  },
+  {
     "com.google.android.apps.chrome",
     kChromeDefaultSocket,
     "Chromium"
@@ -113,9 +118,9 @@ const BrowserDescriptor kBrowserDescriptors[] = {
     "Content Shell"
   },
   {
-    "org.chromium.chrome.testshell",
-    "chromium_testshell_devtools_remote",
-    "Chromium Test Shell"
+    "org.chromium.chrome.shell",
+    "chrome_shell_devtools_remote",
+    "Chrome Shell"
   },
   {
     "org.chromium.android_webview.shell",
@@ -718,8 +723,7 @@ DevToolsAdbBridge::Factory::Factory()
 
 DevToolsAdbBridge::Factory::~Factory() {}
 
-BrowserContextKeyedService*
-DevToolsAdbBridge::Factory::BuildServiceInstanceFor(
+KeyedService* DevToolsAdbBridge::Factory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   return new DevToolsAdbBridge::Wrapper();
 }
@@ -1097,6 +1101,12 @@ DevToolsAdbBridge::DevToolsAdbBridge()
       has_message_loop_(adb_thread_->message_loop() != NULL) {
 }
 
+void DevToolsAdbBridge::set_device_provider_for_test(
+    scoped_refptr<AndroidDeviceProvider> device_provider) {
+  device_providers_for_test_.clear();
+  device_providers_for_test_.push_back(device_provider);
+}
+
 void DevToolsAdbBridge::AddListener(Listener* listener) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (listeners_.empty())
@@ -1128,7 +1138,10 @@ void DevToolsAdbBridge::RequestRemoteDevices() {
     return;
 
   new AdbPagesCommand(
-      adb_thread_, device_providers_,
+      adb_thread_,
+      device_providers_for_test_.size() ?
+          device_providers_for_test_ :
+          device_providers_,
       base::Bind(&DevToolsAdbBridge::ReceivedRemoteDevices, this));
 }
 

@@ -119,8 +119,7 @@ ScopedListen::~ScopedListen() {
   idle_manager_->OnListenerRemoved(details);
 }
 
-BrowserContextKeyedService* IdleManagerTestFactory(
-    content::BrowserContext* profile) {
+KeyedService* IdleManagerTestFactory(content::BrowserContext* profile) {
   return new IdleManager(static_cast<Profile*>(profile));
 }
 
@@ -513,7 +512,7 @@ TEST_F(IdleTest, UnloadCleanup) {
   UnloadedExtensionInfo details(extension(),
                                 UnloadedExtensionInfo::REASON_UNINSTALL);
   idle_manager_->Observe(
-      chrome::NOTIFICATION_EXTENSION_UNLOADED,
+      chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
       content::Source<Profile>(browser()->profile()),
       content::Details<UnloadedExtensionInfo>(&details));
 
@@ -534,7 +533,7 @@ TEST_F(IdleTest, UnloadOnly) {
   UnloadedExtensionInfo details(extension(),
                                 UnloadedExtensionInfo::REASON_UNINSTALL);
   idle_manager_->Observe(
-      chrome::NOTIFICATION_EXTENSION_UNLOADED,
+      chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
       content::Source<Profile>(browser()->profile()),
       content::Details<UnloadedExtensionInfo>(&details));
 }
@@ -546,7 +545,7 @@ TEST_F(IdleTest, UnloadWhileListening) {
   UnloadedExtensionInfo details(extension(),
                                 UnloadedExtensionInfo::REASON_UNINSTALL);
   idle_manager_->Observe(
-      chrome::NOTIFICATION_EXTENSION_UNLOADED,
+      chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
       content::Source<Profile>(browser()->profile()),
       content::Details<UnloadedExtensionInfo>(&details));
 }

@@ -92,7 +92,8 @@ AutocompleteMatch::AutocompleteMatch(const AutocompleteMatch& match)
       search_terms_args(match.search_terms_args.get() ?
           new TemplateURLRef::SearchTermsArgs(*match.search_terms_args) :
           NULL),
-      additional_info(match.additional_info) {
+      additional_info(match.additional_info),
+      duplicate_matches(match.duplicate_matches) {
 }
 
 AutocompleteMatch::~AutocompleteMatch() {
@@ -127,6 +128,7 @@ AutocompleteMatch& AutocompleteMatch::operator=(
   search_terms_args.reset(match.search_terms_args.get() ?
       new TemplateURLRef::SearchTermsArgs(*match.search_terms_args) : NULL);
   additional_info = match.additional_info;
+  duplicate_matches = match.duplicate_matches;
   return *this;
 }
 
@@ -148,8 +150,6 @@ int AutocompleteMatch::TypeToIcon(Type type) {
     IDR_OMNIBOX_SEARCH,
     IDR_OMNIBOX_SEARCH,
     IDR_OMNIBOX_EXTENSION_APP,
-    // ContactProvider isn't used by the omnibox, so this icon is never
-    // displayed.
     IDR_OMNIBOX_SEARCH,
     IDR_OMNIBOX_HTTP,
   };
@@ -328,7 +328,7 @@ base::string16 AutocompleteMatch::SanitizeString(const base::string16& text) {
   // NOTE: This logic is mirrored by |sanitizeString()| in
   // omnibox_custom_bindings.js.
   base::string16 result;
-  TrimWhitespace(text, TRIM_LEADING, &result);
+  base::TrimWhitespace(text, base::TRIM_LEADING, &result);
   base::RemoveChars(result, kInvalidChars, &result);
   return result;
 }
@@ -338,7 +338,16 @@ bool AutocompleteMatch::IsSearchType(Type type) {
   return type == AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED ||
          type == AutocompleteMatchType::SEARCH_HISTORY ||
          type == AutocompleteMatchType::SEARCH_SUGGEST ||
-         type == AutocompleteMatchType::SEARCH_OTHER_ENGINE;
+         type == AutocompleteMatchType::SEARCH_OTHER_ENGINE ||
+         IsSpecializedSearchType(type);
+}
+
+// static
+bool AutocompleteMatch::IsSpecializedSearchType(Type type) {
+  return type == AutocompleteMatchType::SEARCH_SUGGEST_ENTITY ||
+         type == AutocompleteMatchType::SEARCH_SUGGEST_INFINITE ||
+         type == AutocompleteMatchType::SEARCH_SUGGEST_PERSONALIZED ||
+         type == AutocompleteMatchType::SEARCH_SUGGEST_PROFILE;
 }
 
 void AutocompleteMatch::ComputeStrippedDestinationURL(Profile* profile) {
@@ -457,6 +466,18 @@ bool AutocompleteMatch::IsVerbatimType() const {
   return type == AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED ||
       type == AutocompleteMatchType::URL_WHAT_YOU_TYPED ||
       is_keyword_verbatim_match;
+}
+
+bool AutocompleteMatch::SupportsDeletion() const {
+  if (deletable)
+    return true;
+
+  for (ACMatches::const_iterator it(duplicate_matches.begin());
+       it != duplicate_matches.end(); ++it) {
+    if (it->deletable)
+      return true;
+  }
+  return false;
 }
 
 #ifndef NDEBUG

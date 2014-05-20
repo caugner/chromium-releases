@@ -7,6 +7,7 @@
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_item_types.h"
 #include "ash/shelf/shelf_model.h"
+#include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -14,7 +15,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/test/base/testing_profile.h"
-#include "ui/aura/root_window.h"
+#include "ui/aura/window_event_dispatcher.h"
 
 class TestChromeLauncherController : public ChromeLauncherController {
  public:
@@ -108,3 +109,28 @@ TEST_F(LauncherContextMenuTest,
       menu.get(), LauncherContextMenu::MENU_NEW_WINDOW));
   EXPECT_FALSE(menu->IsCommandIdEnabled(LauncherContextMenu::MENU_NEW_WINDOW));
 }
+
+// Verifies that the "auto hide" menu items are not present in maximized mode.
+TEST_F(LauncherContextMenuTest, NoAutoHideOptionInMaximizedMode) {
+  {
+    scoped_ptr<LauncherContextMenu> menu(
+        CreateLauncherContextMenu(ash::TYPE_BROWSER_SHORTCUT));
+    ASSERT_TRUE(IsItemPresentInMenu(
+        menu.get(), LauncherContextMenu::MENU_AUTO_HIDE));
+  }
+  ash::Shell::GetInstance()->EnableMaximizeModeWindowManager(true);
+  {
+    scoped_ptr<LauncherContextMenu> menu(
+        CreateLauncherContextMenu(ash::TYPE_BROWSER_SHORTCUT));
+    ASSERT_FALSE(IsItemPresentInMenu(
+        menu.get(), LauncherContextMenu::MENU_AUTO_HIDE));
+  }
+  ash::Shell::GetInstance()->EnableMaximizeModeWindowManager(false);
+  {
+    scoped_ptr<LauncherContextMenu> menu(
+        CreateLauncherContextMenu(ash::TYPE_BROWSER_SHORTCUT));
+    ASSERT_TRUE(IsItemPresentInMenu(
+        menu.get(), LauncherContextMenu::MENU_AUTO_HIDE));
+  }
+}
+

@@ -14,6 +14,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/nacl/common/nacl_switches.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/webplugininfo.h"
@@ -201,11 +202,11 @@ NaClBrowserTestBase::NaClBrowserTestBase() {
 NaClBrowserTestBase::~NaClBrowserTestBase() {
 }
 
-void NaClBrowserTestBase::SetUpCommandLine(CommandLine* command_line) {
+void NaClBrowserTestBase::SetUpCommandLine(base::CommandLine* command_line) {
   command_line->AppendSwitch(switches::kEnableNaCl);
 }
 
-void NaClBrowserTestBase::SetUpInProcessBrowserTestFixture() {
+void NaClBrowserTestBase::SetUpOnMainThread() {
   // Sanity check.
   base::FilePath plugin_lib;
   ASSERT_TRUE(PathService::Get(chrome::FILE_NACL_PLUGIN, &plugin_lib));
@@ -236,7 +237,7 @@ GURL NaClBrowserTestBase::TestURL(
 bool NaClBrowserTestBase::RunJavascriptTest(const GURL& url,
                                             TestMessageHandler* handler) {
   JavascriptTestObserver observer(
-      browser()->tab_strip_model()->GetActiveWebContents()->GetRenderViewHost(),
+      browser()->tab_strip_model()->GetActiveWebContents(),
       handler);
   ui_test_utils::NavigateToURL(browser(), url);
   return observer.Run();
@@ -313,9 +314,20 @@ bool NaClBrowserTestPnaclDisabled::IsAPnaclTest() {
 bool NaClBrowserTestPnaclDisabled::IsPnaclDisabled() {
   return true;
 }
-void NaClBrowserTestPnaclDisabled::SetUpCommandLine(CommandLine* command_line) {
+void NaClBrowserTestPnaclDisabled::SetUpCommandLine(
+    base::CommandLine* command_line) {
   NaClBrowserTestBase::SetUpCommandLine(command_line);
   command_line->AppendSwitch(switches::kDisablePnacl);
+}
+
+base::FilePath::StringType NaClBrowserTestNonSfiMode::Variant() {
+  return FILE_PATH_LITERAL("libc-free");
+}
+
+void NaClBrowserTestNonSfiMode::SetUpCommandLine(
+    base::CommandLine* command_line) {
+  NaClBrowserTestBase::SetUpCommandLine(command_line);
+  command_line->AppendSwitch(switches::kEnableNaClNonSfiMode);
 }
 
 base::FilePath::StringType NaClBrowserTestStatic::Variant() {

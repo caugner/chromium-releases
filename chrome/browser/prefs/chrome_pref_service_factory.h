@@ -12,6 +12,7 @@ namespace base {
 class DictionaryValue;
 class FilePath;
 class SequencedTaskRunner;
+class Time;
 }
 
 namespace policy {
@@ -29,6 +30,7 @@ class PrefRegistrySimple;
 class PrefService;
 class PrefServiceSyncable;
 class PrefStore;
+class Profile;
 
 namespace chrome_prefs {
 
@@ -38,6 +40,7 @@ extern const char kSettingsEnforcementTrialName[];
 extern const char kSettingsEnforcementGroupNoEnforcement[];
 extern const char kSettingsEnforcementGroupEnforceOnload[];
 extern const char kSettingsEnforcementGroupEnforceAlways[];
+extern const char kSettingsEnforcementGroupEnforceAlwaysWithExtensions[];
 
 }  // namespace internals
 
@@ -76,9 +79,10 @@ scoped_ptr<PrefServiceSyncable> CreateProfilePrefs(
 // |profile_path|.
 void SchedulePrefsFilePathVerification(const base::FilePath& profile_path);
 
-// Call before calling SchedulePrefHashStoresUpdateCheck to cause it to run with
-// zero delay. For testing only.
-void EnableZeroDelayPrefHashStoreUpdateForTesting();
+// Call before startup tasks kick in to disable delays in
+// chrome_prefs::Schedule*() methods and ignore presence of a domain when
+// determining the active SettingsEnforcement group. For testing only.
+void DisableDelaysAndDomainCheckForTesting();
 
 // Schedules an update check for all PrefHashStores, stores whose version
 // doesn't match the latest version will then be updated. Clears all pref hash
@@ -96,8 +100,19 @@ bool InitializePrefsFromMasterPrefs(
     const base::FilePath& profile_path,
     const base::DictionaryValue& master_prefs);
 
+// Retrieves the time of the last preference reset event, if any, for the
+// provided profile. If no reset has occurred, returns a null |Time|.
+base::Time GetResetTime(Profile* profile);
+
+// Clears the time of the last preference reset event, if any, for the provided
+// profile.
+void ClearResetTime(Profile* profile);
+
 // Register local state prefs used by chrome preference system.
 void RegisterPrefs(PrefRegistrySimple* registry);
+
+// Register user prefs used by chrome preference system.
+void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
 }  // namespace chrome_prefs
 

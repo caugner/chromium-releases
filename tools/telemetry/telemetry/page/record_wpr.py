@@ -22,6 +22,8 @@ from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.page import profile_creator
 from telemetry.page import test_expectations
+from telemetry.page.actions import action_runner as action_runner_module
+from telemetry.page.actions import interact
 
 
 class RecordPage(page_test.PageTest):
@@ -38,12 +40,6 @@ class RecordPage(page_test.PageTest):
   def CanRunForPage(self, page):
     return page.url.startswith('http')
 
-  def CustomizeBrowserOptionsForPageSet(self, pset, options):
-    for page in pset:
-      for compound_action in self._CompoundActionsForPage(page, options):
-        for action in compound_action:
-          action.CustomizeBrowserOptionsForPageSet(options)
-
   def WillNavigateToPage(self, page, tab):
     """Override to ensure all resources are fetched from network."""
     tab.ClearCache(force=False)
@@ -55,7 +51,7 @@ class RecordPage(page_test.PageTest):
     if self.test:
       self.test.DidNavigateToPage(page, tab)
 
-  def Run(self, options, page, tab, results):
+  def RunPage(self, page, tab, results):
     # When recording, sleep to catch any resources that load post-onload.
     tab.WaitForDocumentReadyStateToBeComplete()
 
@@ -74,21 +70,18 @@ class RecordPage(page_test.PageTest):
     # Run the actions for all measurements. Reload the page between
     # actions.
     should_reload = False
-    for compound_action in self._CompoundActionsForPage(page, options):
-      if should_reload:
-        self.RunNavigateSteps(page, tab)
-      self._RunCompoundAction(page, tab, compound_action)
-      should_reload = True
-
-  def _CompoundActionsForPage(self, page, options):
-    actions = []
+    interactive = self.options and self.options.interactive
     for action_name in self._action_names:
       if not hasattr(page, action_name):
         continue
-      interactive = options and options.interactive
-      actions.append(page_test.GetCompoundActionFromPage(
-          page, action_name, interactive))
-    return actions
+      if should_reload:
+        self.RunNavigateSteps(page, tab)
+      action_runner = action_runner_module.ActionRunner(page, tab, self)
+      if interactive:
+        action_runner.RunAction(interact.InteractAction())
+      else:
+        self._RunMethod(page, self._action_name_to_run, action_runner)
+      should_reload = True
 
 
 def _CreatePageSetForUrl(url):
@@ -116,11 +109,11 @@ def Main(base_dir):
                                    index_by_class_name=True)
 
   options = browser_options.BrowserFinderOptions()
-  parser = options.CreateParser('%prog <PageSet|Measurement|Test|URL>')
-  page_runner.AddCommandLineOptions(parser)
+  parser = options.CreateParser('%prog <PageSet|Test|URL>')
+  page_runner.AddCommandLineArgs(parser)
 
   recorder = RecordPage(measurements)
-  recorder.AddCommandLineOptions(parser)
+  recorder.AddCommandLineArgs(parser)
 
   quick_args = [a for a in sys.argv[1:] if not a.startswith('-')]
   if len(quick_args) != 1:
@@ -129,15 +122,12 @@ def Main(base_dir):
   target = quick_args[0]
   if target in tests:
     recorder.test = tests[target]().test()
-    recorder.test.AddCommandLineOptions(parser)
+    recorder.test.AddCommandLineArgs(parser)
+    recorder.test.SetArgumentDefaults(parser)
     parser.parse_args()
+    recorder.test.ProcessCommandLineArgs(parser, options)
     ps = tests[target]().CreatePageSet(options)
-  elif target in measurements:
-    recorder.test = measurements[target]()
-    recorder.test.AddCommandLineOptions(parser)
-    _, args = parser.parse_args()
-    ps = recorder.test.CreatePageSet(args, options)
-  elif target.endswith('.json'):
+  elif target.endswith('.json') or target.endswith('.py'):
     parser.parse_args()
     ps = page_set.PageSet.FromFile(target)
   elif target.startswith('http'):
@@ -146,6 +136,9 @@ def Main(base_dir):
   else:
     parser.print_usage()
     sys.exit(1)
+
+  page_runner.ProcessCommandLineArgs(parser, options)
+  recorder.ProcessCommandLineArgs(parser, options)
 
   expectations = test_expectations.TestExpectations()
 

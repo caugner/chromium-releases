@@ -57,7 +57,6 @@ class LocallyManagedUserCreationScreenHandler : public BaseScreenHandler {
     virtual void AbortFlow() = 0;
     virtual void FinishFlow() = 0;
 
-    virtual void CheckCameraPresence() = 0;
     virtual void OnPhotoTaken(const std::string& raw_data) = 0;
     virtual void OnImageSelected(const std::string& image_url,
                                  const std::string& image_type) = 0;
@@ -124,7 +123,8 @@ class LocallyManagedUserCreationScreenHandler : public BaseScreenHandler {
 
   void HandleGetImages();
   void HandlePhotoTaken(const std::string& image_url);
-  void HandleCheckCameraPresence();
+  void HandleTakePhoto();
+  void HandleDiscardPhoto();
   void HandleSelectImage(const std::string& image_url,
                          const std::string& image_type);
 

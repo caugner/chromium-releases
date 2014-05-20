@@ -7,12 +7,14 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "base/debug/trace_event.h"
+#include "chrome/browser/android/accessibility_util.h"
 #include "chrome/browser/android/banners/app_banner_manager.h"
 #include "chrome/browser/android/bookmarks/bookmarks_bridge.h"
 #include "chrome/browser/android/chrome_web_contents_delegate_android.h"
 #include "chrome/browser/android/chromium_application.h"
 #include "chrome/browser/android/content_view_util.h"
 #include "chrome/browser/android/dev_tools_server.h"
+#include "chrome/browser/android/dom_distiller/feedback_reporter_android.h"
 #include "chrome/browser/android/favicon_helper.h"
 #include "chrome/browser/android/field_trial_helper.h"
 #include "chrome/browser/android/foreign_session_helper.h"
@@ -46,6 +48,7 @@
 #include "chrome/browser/sync/profile_sync_service_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_dialog_controller_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_dialog_result.h"
+#include "chrome/browser/ui/android/autofill/autofill_logger_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_popup_view_android.h"
 #include "chrome/browser/ui/android/chrome_http_auth_handler.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
@@ -61,6 +64,7 @@
 #include "chrome/browser/ui/android/toolbar/toolbar_model_android.h"
 #include "chrome/browser/ui/android/website_settings_popup_android.h"
 #include "components/autofill/core/browser/android/component_jni_registrar.h"
+#include "components/dom_distiller/android/component_jni_registrar.h"
 #include "components/navigation_interception/component_jni_registrar.h"
 #include "components/web_contents_delegate_android/component_jni_registrar.h"
 
@@ -75,22 +79,26 @@ namespace android {
 
 static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
   // Register JNI for components we depend on.
+  { "DomDistiller", dom_distiller::android::RegisterDomDistiller },
   { "NavigationInterception",
     navigation_interception::RegisterNavigationInterceptionJni },
   { "WebContentsDelegateAndroid",
     web_contents_delegate_android::RegisterWebContentsDelegateAndroidJni },
   { "RegisterAuxiliaryProfileLoader", autofill::RegisterAutofillAndroidJni },
   // Register JNI for chrome classes.
+  { "AccessibilityUtils", AccessibilityUtil::Register },
   { "AccountManagementScreenHelper", AccountManagementScreenHelper::Register },
   { "AndroidProfileOAuth2TokenService",
     AndroidProfileOAuth2TokenService::Register },
-  { "AppBannerManager", RegisterAppBannerManager },
+  { "AppBannerManager", banners::RegisterAppBannerManager },
   { "ApplicationLifetime", RegisterApplicationLifetimeAndroid },
   { "AutofillDialogControllerAndroid",
     autofill::AutofillDialogControllerAndroid::
         RegisterAutofillDialogControllerAndroid },
   { "AutofillDialogResult",
     autofill::AutofillDialogResult::RegisterAutofillDialogResult },
+  { "AutofillLoggerAndroid",
+    autofill::AutofillLoggerAndroid::Register },
   { "AutofillPopup",
     autofill::AutofillPopupViewAndroid::RegisterAutofillPopupViewAndroid },
   { "AutoLoginDelegate", AutoLoginInfoBarDelegateAndroid::Register },
@@ -114,6 +122,7 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
       prerender::ExternalPrerenderHandlerAndroid::
       RegisterExternalPrerenderHandlerAndroid },
   { "FaviconHelper", FaviconHelper::RegisterFaviconHelper },
+  { "FeedbackReporter", dom_distiller::android::RegisterFeedbackReporter },
   { "FieldTrialHelper", RegisterFieldTrialHelper },
   { "ForeignSessionHelper",
     ForeignSessionHelper::RegisterForeignSessionHelper },

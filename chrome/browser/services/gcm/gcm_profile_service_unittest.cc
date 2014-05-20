@@ -10,25 +10,30 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
+#include "base/strings/string_tokenizer.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/extension_gcm_app_handler.h"
 #include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/extensions/test_extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
+#include "chrome/browser/services/gcm/gcm_app_handler.h"
 #include "chrome/browser/services/gcm/gcm_client_factory.h"
 #include "chrome/browser/services/gcm/gcm_client_mock.h"
-#include "chrome/browser/services/gcm/gcm_event_router.h"
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
-#include "chrome/browser/signin/signin_manager_base.h"
+#include "chrome/browser/signin/chrome_signin_client.h"
+#include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/webdata/encryptor/encryptor.h"
+#include "components/os_crypt/os_crypt.h"
+#include "components/signin/core/browser/signin_manager_base.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_prefs.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -37,6 +42,8 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
+#else
+#include "chrome/browser/signin/signin_manager.h"
 #endif
 
 using namespace extensions;
@@ -51,9 +58,16 @@ const char kTestingUsername2[] = "user2@example.com";
 const char kTestingUsername3[] = "user3@example.com";
 const char kTestingAppId[] = "TestApp1";
 const char kTestingAppId2[] = "TestApp2";
-const char kTestingSha1Cert[] = "testing_cert1";
 const char kUserId[] = "user1";
 const char kUserId2[] = "user2";
+
+std::vector<std::string> ToSenderList(const std::string& sender_ids) {
+  std::vector<std::string> senders;
+  base::StringTokenizer tokenizer(sender_ids, ",");
+  while (tokenizer.GetNext())
+    senders.push_back(tokenizer.token());
+  return senders;
+}
 
 // Helper class for asynchrnous waiting.
 class Waiter {
@@ -119,7 +133,10 @@ class Waiter {
 
 class FakeSigninManager : public SigninManagerBase {
  public:
-  explicit FakeSigninManager(Profile* profile) {
+  explicit FakeSigninManager(Profile* profile)
+      : SigninManagerBase(
+            ChromeSigninClientFactory::GetInstance()->GetForProfile(profile)),
+        profile_(profile) {
     Initialize(profile, NULL);
   }
 
@@ -128,29 +145,26 @@ class FakeSigninManager : public SigninManagerBase {
 
   void SignIn(const std::string& username) {
     SetAuthenticatedUsername(username);
-
-    GoogleServiceSigninSuccessDetails details(GetAuthenticatedUsername(),
-                                              std::string());
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
-        content::Source<Profile>(profile_),
-        content::Details<const GoogleServiceSigninSuccessDetails>(&details));
+    FOR_EACH_OBSERVER(Observer,
+                      observer_list_,
+                      GoogleSigninSucceeded(username, std::string()));
   }
 
   void SignOut() {
+    std::string username = GetAuthenticatedUsername();
     clear_authenticated_username();
-
-    GoogleServiceSignoutDetails details(GetAuthenticatedUsername());
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_GOOGLE_SIGNED_OUT,
-        content::Source<Profile>(profile_),
-        content::Details<const GoogleServiceSignoutDetails>(&details));
+    profile_->GetPrefs()->ClearPref(prefs::kGoogleServicesUsername);
+    FOR_EACH_OBSERVER(Observer, observer_list_, GoogleSignedOut(username));
   }
+
+ private:
+  Profile* profile_;
 };
 
 }  // namespace
 
-class FakeGCMEventRouter : public GCMEventRouter {
+// TODO(jianli): Move extension specific tests to a separate file.
+class FakeGCMAppHandler : public ExtensionGCMAppHandler {
  public:
   enum Event {
     NO_EVENT,
@@ -159,13 +173,13 @@ class FakeGCMEventRouter : public GCMEventRouter {
     SEND_ERROR_EVENT
   };
 
-  explicit FakeGCMEventRouter(Waiter* waiter)
-      : waiter_(waiter),
-        received_event_(NO_EVENT),
-        send_error_result_(GCMClient::SUCCESS) {
+  FakeGCMAppHandler(Profile* profile, Waiter* waiter)
+      : ExtensionGCMAppHandler(profile),
+        waiter_(waiter),
+        received_event_(NO_EVENT) {
   }
 
-  virtual ~FakeGCMEventRouter() {
+  virtual ~FakeGCMAppHandler() {
   }
 
   virtual void OnMessage(const std::string& app_id,
@@ -184,29 +198,37 @@ class FakeGCMEventRouter : public GCMEventRouter {
     waiter_->SignalCompleted();
   }
 
-  virtual void OnSendError(const std::string& app_id,
-                           const std::string& message_id,
-                           GCMClient::Result result) OVERRIDE {
+  virtual void OnSendError(
+      const std::string& app_id,
+      const GCMClient::SendErrorDetails& send_error_details) OVERRIDE {
     clear_results();
     received_event_ = SEND_ERROR_EVENT;
     app_id_ = app_id;
-    send_error_message_id_ = message_id;
-    send_error_result_ = result;
+    send_error_details_ = send_error_details;
     waiter_->SignalCompleted();
   }
 
   Event received_event() const { return received_event_; }
   const std::string& app_id() const { return app_id_; }
   const GCMClient::IncomingMessage& message() const { return message_; }
-  const std::string& send_message_id() const { return send_error_message_id_; }
-  GCMClient::Result send_result() const { return send_error_result_; }
+  const GCMClient::SendErrorDetails& send_error_details() const {
+    return send_error_details_;
+  }
+  const std::string& send_error_message_id() const {
+    return send_error_details_.message_id;
+  }
+  GCMClient::Result send_error_result() const {
+    return send_error_details_.result;
+  }
+  const GCMClient::MessageData& send_error_data() const {
+    return send_error_details_.additional_data;
+  }
 
   void clear_results() {
     received_event_ = NO_EVENT;
     app_id_.clear();
     message_.data.clear();
-    send_error_message_id_.clear();
-    send_error_result_ = GCMClient::UNKNOWN_ERROR;
+    send_error_details_ = GCMClient::SendErrorDetails();
   }
 
  private:
@@ -214,8 +236,7 @@ class FakeGCMEventRouter : public GCMEventRouter {
   Event received_event_;
   std::string app_id_;
   GCMClient::IncomingMessage message_;
-  std::string send_error_message_id_;
-  GCMClient::Result send_error_result_;
+  GCMClient::SendErrorDetails send_error_details_;
 };
 
 class FakeGCMClientFactory : public GCMClientFactory {
@@ -247,14 +268,14 @@ class FakeGCMClientFactory : public GCMClientFactory {
   DISALLOW_COPY_AND_ASSIGN(FakeGCMClientFactory);
 };
 
-class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
+class GCMProfileServiceTestConsumer {
  public:
-  static BrowserContextKeyedService* BuildFakeSigninManager(
+  static KeyedService* BuildFakeSigninManager(
       content::BrowserContext* context) {
     return new FakeSigninManager(static_cast<Profile*>(context));
   }
 
-  static BrowserContextKeyedService* BuildGCMProfileService(
+  static KeyedService* BuildGCMProfileService(
       content::BrowserContext* context) {
     return new GCMProfileService(static_cast<Profile*>(context));
   }
@@ -269,12 +290,15 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
         has_persisted_registration_info_(false),
         send_result_(GCMClient::SUCCESS) {
     // Create a new profile.
-    profile_.reset(new TestingProfile);
+    TestingProfile::Builder builder;
+    builder.AddTestingFactory(
+        SigninManagerFactory::GetInstance(),
+        GCMProfileServiceTestConsumer::BuildFakeSigninManager);
+    profile_ = builder.Build();
 
-    // Use a fake version of SigninManager.
-    signin_manager_ = static_cast<FakeSigninManager*>(
-        SigninManagerFactory::GetInstance()->SetTestingFactoryAndUse(
-            profile(), &GCMProfileServiceTestConsumer::BuildFakeSigninManager));
+    SigninManagerBase* signin_manager =
+        SigninManagerFactory::GetInstance()->GetForProfile(profile_.get());
+    signin_manager_ = static_cast<FakeSigninManager*>(signin_manager);
 
     // Create extension service in order to uninstall the extension.
     extensions::TestExtensionSystem* extension_system(
@@ -284,14 +308,19 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
         CommandLine::ForCurrentProcess(), base::FilePath(), false);
     extension_service_ = extension_system->Get(profile())->extension_service();
 
+    // EventRouter is needed for GcmJsEventRouter.
+    if (!extension_system->event_router()) {
+      extension_system->SetEventRouter(scoped_ptr<EventRouter>(
+          new EventRouter(profile(), ExtensionPrefs::Get(profile()))));
+    }
+
     // Enable GCM such that tests could be run on all channels.
     profile()->GetPrefs()->SetBoolean(prefs::kGCMChannelEnabled, true);
-
-    // Mock a GCMEventRouter.
-    gcm_event_router_.reset(new FakeGCMEventRouter(waiter_));
   }
 
   virtual ~GCMProfileServiceTestConsumer() {
+    GetGCMProfileService()->RemoveAppHandler(kTestingAppId);
+    GetGCMProfileService()->RemoveAppHandler(kTestingAppId2);
   }
 
   // Returns a barebones test extension.
@@ -339,11 +368,15 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
     GCMProfileService* gcm_profile_service = static_cast<GCMProfileService*>(
         GCMProfileServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile(), &GCMProfileServiceTestConsumer::BuildGCMProfileService));
-    gcm_profile_service->set_testing_delegate(this);
     scoped_ptr<GCMClientFactory> gcm_client_factory(
         new FakeGCMClientFactory(gcm_client_loading_delay_,
                                  gcm_client_error_simulation_));
     gcm_profile_service->Initialize(gcm_client_factory.Pass());
+
+    gcm_app_handler_.reset(new FakeGCMAppHandler(profile(), waiter_));
+    gcm_profile_service->AddAppHandler(kTestingAppId, gcm_app_handler());
+    gcm_profile_service->AddAppHandler(kTestingAppId2, gcm_app_handler());
+
     waiter_->PumpIOLoop();
   }
 
@@ -364,7 +397,6 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
     GetGCMProfileService()->Register(
         app_id,
         sender_ids,
-        kTestingSha1Cert,
         base::Bind(&GCMProfileServiceTestConsumer::RegisterCompleted,
                    base::Unretained(this)));
   }
@@ -373,26 +405,6 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
                          GCMClient::Result result) {
     registration_id_ = registration_id;
     registration_result_ = result;
-    waiter_->SignalCompleted();
-  }
-
-  bool HasPersistedRegistrationInfo(const std::string& app_id) {
-    StateStore* storage = ExtensionSystem::Get(profile())->state_store();
-    if (!storage)
-      return false;
-    has_persisted_registration_info_ = false;
-    storage->GetExtensionValue(
-        app_id,
-        GCMProfileService::GetPersistentRegisterKeyForTesting(),
-        base::Bind(
-            &GCMProfileServiceTestConsumer::ReadRegistrationInfoFinished,
-            base::Unretained(this)));
-    waiter_->WaitUntilCompleted();
-    return has_persisted_registration_info_;
-  }
-
-  void ReadRegistrationInfoFinished(scoped_ptr<base::Value> value) {
-    has_persisted_registration_info_ = value.get() != NULL;
     waiter_->SignalCompleted();
   }
 
@@ -413,6 +425,18 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
     waiter_->SignalCompleted();
   }
 
+  void Unregister(const std::string& app_id) {
+    GetGCMProfileService()->Unregister(
+        app_id,
+        base::Bind(&GCMProfileServiceTestConsumer::UnregisterCompleted,
+                   base::Unretained(this)));
+  }
+
+  void UnregisterCompleted(GCMClient::Result result) {
+    unregistration_result_ = result;
+    waiter_->SignalCompleted();
+  }
+
   GCMProfileService* GetGCMProfileService() const {
     return GCMProfileServiceFactory::GetForProfile(profile());
   }
@@ -430,13 +454,13 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
     return GetGCMProfileService()->gcm_client_ready_;
   }
 
-  bool ExistsCachedRegistrationInfo() const {
-    return !GetGCMProfileService()->registration_info_map_.empty();
+  bool HasAppHandlers() const {
+    return !GetGCMProfileService()->app_handlers_.empty();
   }
 
   Profile* profile() const { return profile_.get(); }
-  FakeGCMEventRouter* gcm_event_router() const {
-    return gcm_event_router_.get();
+  FakeGCMAppHandler* gcm_app_handler() const {
+    return gcm_app_handler_.get();
   }
 
   void set_gcm_client_loading_delay(GCMClientMock::LoadingDelay delay) {
@@ -448,6 +472,9 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
 
   const std::string& registration_id() const { return registration_id_; }
   GCMClient::Result registration_result() const { return registration_result_; }
+  GCMClient::Result unregistration_result() const {
+    return unregistration_result_;
+  }
   const std::string& send_message_id() const { return send_message_id_; }
   GCMClient::Result send_result() const { return send_result_; }
 
@@ -455,22 +482,20 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
     registration_id_.clear();
     registration_result_ = GCMClient::UNKNOWN_ERROR;
   }
+  void clear_unregistration_result() {
+    unregistration_result_ = GCMClient::UNKNOWN_ERROR;
+  }
   void clear_send_result() {
     send_message_id_.clear();
-    send_result_ = GCMClient::UNKNOWN_ERROR;;
+    send_result_ = GCMClient::UNKNOWN_ERROR;
   }
 
  private:
-  // Overridden from GCMProfileService::TestingDelegate:
-  virtual GCMEventRouter* GetEventRouter() const OVERRIDE {
-    return gcm_event_router_.get();
-  }
-
   Waiter* waiter_;  // Not owned.
   scoped_ptr<TestingProfile> profile_;
   ExtensionService* extension_service_;  // Not owned.
   FakeSigninManager* signin_manager_;  // Not owned.
-  scoped_ptr<FakeGCMEventRouter> gcm_event_router_;
+  scoped_ptr<FakeGCMAppHandler> gcm_app_handler_;
 
   GCMClientMock::LoadingDelay gcm_client_loading_delay_;
   GCMClientMock::ErrorSimulation gcm_client_error_simulation_;
@@ -478,6 +503,8 @@ class GCMProfileServiceTestConsumer : public GCMProfileService::TestingDelegate{
   std::string registration_id_;
   GCMClient::Result registration_result_;
   bool has_persisted_registration_info_;
+
+  GCMClient::Result unregistration_result_;
 
   std::string send_message_id_;
   GCMClient::Result send_result_;
@@ -504,10 +531,10 @@ class GCMProfileServiceTest : public testing::Test {
     test_user_manager_.reset(new chromeos::ScopedTestUserManager());
 #endif
 
-    // Encryptor ends up needing access to the keychain on OS X. So use the mock
+    // OSCrypt ends up needing access to the keychain on OS X. So use the mock
     // keychain to prevent prompts.
 #if defined(OS_MACOSX)
-    Encryptor::UseMockKeychain(true);
+    OSCrypt::UseMockKeychain(true);
 #endif
 
     // Create a main profile consumer.
@@ -589,6 +616,14 @@ TEST_F(GCMProfileServiceTest, CreateGCMProfileServiceAfterProfileSignIn) {
   // Create GCMProfileService after sign-in.
   consumer()->CreateGCMProfileServiceInstance();
   EXPECT_FALSE(consumer()->GetUsername().empty());
+}
+
+TEST_F(GCMProfileServiceTest, Shutdown) {
+  consumer()->CreateGCMProfileServiceInstance();
+  EXPECT_TRUE(consumer()->HasAppHandlers());
+
+  consumer()->GetGCMProfileService()->Shutdown();
+  EXPECT_FALSE(consumer()->HasAppHandlers());
 }
 
 TEST_F(GCMProfileServiceTest, SignInAndSignOutUnderPositiveChannelSignal) {
@@ -799,27 +834,6 @@ TEST_F(GCMProfileServiceSingleProfileTest, Register) {
   EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
 }
 
-TEST_F(GCMProfileServiceSingleProfileTest, DoubleRegister) {
-  std::vector<std::string> sender_ids;
-  sender_ids.push_back("sender1");
-  consumer()->Register(kTestingAppId, sender_ids);
-  std::string expected_registration_id =
-      GCMClientMock::GetRegistrationIdFromSenderIds(sender_ids);
-
-  // Calling regsiter 2nd time without waiting 1st one to finish will fail
-  // immediately.
-  sender_ids.push_back("sender2");
-  consumer()->Register(kTestingAppId, sender_ids);
-  EXPECT_TRUE(consumer()->registration_id().empty());
-  EXPECT_EQ(GCMClient::ASYNC_OPERATION_PENDING,
-            consumer()->registration_result());
-
-  // The 1st register is still doing fine.
-  WaitUntilCompleted();
-  EXPECT_EQ(expected_registration_id, consumer()->registration_id());
-  EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
-}
-
 TEST_F(GCMProfileServiceSingleProfileTest, RegisterError) {
   std::vector<std::string> sender_ids;
   sender_ids.push_back("sender1@error");
@@ -847,12 +861,13 @@ TEST_F(GCMProfileServiceSingleProfileTest, RegisterAgainWithSameSenderIDs) {
   consumer()->clear_registration_result();
 
   // Calling register 2nd time with the same set of sender IDs but different
-  // ordering will get back the same registration ID. There is no need to wait
-  // since register simply returns the cached registration ID.
+  // ordering will get back the same registration ID.
   std::vector<std::string> another_sender_ids;
   another_sender_ids.push_back("sender2");
   another_sender_ids.push_back("sender1");
   consumer()->Register(kTestingAppId, another_sender_ids);
+
+  WaitUntilCompleted();
   EXPECT_EQ(expected_registration_id, consumer()->registration_id());
   EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
 }
@@ -879,40 +894,6 @@ TEST_F(GCMProfileServiceSingleProfileTest,
   consumer()->Register(kTestingAppId, sender_ids);
   WaitUntilCompleted();
   EXPECT_EQ(expected_registration_id2, consumer()->registration_id());
-  EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
-}
-
-TEST_F(GCMProfileServiceSingleProfileTest, ReadRegistrationFromStateStore) {
-  scoped_refptr<Extension> extension(consumer()->CreateExtension());
-
-  std::vector<std::string> sender_ids;
-  sender_ids.push_back("sender1");
-  consumer()->Register(extension->id(), sender_ids);
-
-  WaitUntilCompleted();
-  EXPECT_FALSE(consumer()->registration_id().empty());
-  EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
-  std::string old_registration_id = consumer()->registration_id();
-
-  // Clears the results that would be set by the Register callback in
-  // preparation to call register 2nd time.
-  consumer()->clear_registration_result();
-
-  // Register should not reach the server. Forcing GCMClient server error should
-  // help catch this.
-  consumer()->set_gcm_client_error_simulation(GCMClientMock::FORCE_ERROR);
-
-  // Simulate start-up by recreating GCMProfileService.
-  consumer()->CreateGCMProfileServiceInstance();
-
-  // Simulate start-up by reloading extension.
-  consumer()->ReloadExtension(extension);
-
-  // This should read the registration info from the extension's state store.
-  consumer()->Register(extension->id(), sender_ids);
-  PumpIOLoop();
-  PumpUILoop();
-  EXPECT_EQ(old_registration_id, consumer()->registration_id());
   EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
 }
 
@@ -954,25 +935,6 @@ TEST_F(GCMProfileServiceSingleProfileTest,
   EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
 }
 
-TEST_F(GCMProfileServiceSingleProfileTest,
-       PersistedRegistrationInfoRemoveAfterSignOut) {
-  std::vector<std::string> sender_ids;
-  sender_ids.push_back("sender1");
-  consumer()->Register(kTestingAppId, sender_ids);
-  WaitUntilCompleted();
-
-  // The app id and registration info should be persisted.
-  EXPECT_TRUE(profile()->GetPrefs()->HasPrefPath(prefs::kGCMRegisteredAppIDs));
-  EXPECT_TRUE(consumer()->HasPersistedRegistrationInfo(kTestingAppId));
-
-  consumer()->SignOut();
-  PumpUILoop();
-
-  // The app id and persisted registration info should be removed.
-  EXPECT_FALSE(profile()->GetPrefs()->HasPrefPath(prefs::kGCMRegisteredAppIDs));
-  EXPECT_FALSE(consumer()->HasPersistedRegistrationInfo(kTestingAppId));
-}
-
 TEST_F(GCMProfileServiceSingleProfileTest, RegisterAfterSignOut) {
   // This will trigger check-out.
   consumer()->SignOut();
@@ -985,7 +947,7 @@ TEST_F(GCMProfileServiceSingleProfileTest, RegisterAfterSignOut) {
   EXPECT_EQ(GCMClient::NOT_SIGNED_IN, consumer()->registration_result());
 }
 
-TEST_F(GCMProfileServiceSingleProfileTest, Unregister) {
+TEST_F(GCMProfileServiceSingleProfileTest, UnregisterImplicitly) {
   scoped_refptr<Extension> extension(consumer()->CreateExtension());
 
   std::vector<std::string> sender_ids;
@@ -996,22 +958,96 @@ TEST_F(GCMProfileServiceSingleProfileTest, Unregister) {
   EXPECT_FALSE(consumer()->registration_id().empty());
   EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
 
-  // The registration info should be cached.
-  EXPECT_TRUE(consumer()->ExistsCachedRegistrationInfo());
-
-  // The registration info should be persisted.
-  EXPECT_TRUE(consumer()->HasPersistedRegistrationInfo(extension->id()));
-
   // Uninstall the extension.
   consumer()->UninstallExtension(extension);
   base::MessageLoop::current()->RunUntilIdle();
-
-  // The cached registration info should be removed.
-  EXPECT_FALSE(consumer()->ExistsCachedRegistrationInfo());
-
-  // The persisted registration info should be removed.
-  EXPECT_FALSE(consumer()->HasPersistedRegistrationInfo(extension->id()));
 }
+
+TEST_F(GCMProfileServiceSingleProfileTest, UnregisterExplicitly) {
+  std::vector<std::string> sender_ids;
+  sender_ids.push_back("sender1");
+  consumer()->Register(kTestingAppId, sender_ids);
+
+  WaitUntilCompleted();
+  EXPECT_FALSE(consumer()->registration_id().empty());
+  EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
+
+  consumer()->Unregister(kTestingAppId);
+
+  WaitUntilCompleted();
+  EXPECT_EQ(GCMClient::SUCCESS, consumer()->unregistration_result());
+}
+
+TEST_F(GCMProfileServiceSingleProfileTest,
+       UnregisterWhenAsyncOperationPending) {
+  std::vector<std::string> sender_ids;
+  sender_ids.push_back("sender1");
+  // First start registration without waiting for it to complete.
+  consumer()->Register(kTestingAppId, sender_ids);
+
+  // Test that unregistration fails with async operation pending when there is a
+  // registration already in progress.
+  consumer()->Unregister(kTestingAppId);
+  EXPECT_EQ(GCMClient::ASYNC_OPERATION_PENDING,
+            consumer()->unregistration_result());
+
+  // Complete the registration.
+  WaitUntilCompleted();
+  EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
+
+  // Start unregistration without waiting for it to complete. This time no async
+  // operation is pending.
+  consumer()->Unregister(kTestingAppId);
+
+  // Test that unregistration fails with async operation pending when there is
+  // an unregistration already in progress.
+  consumer()->Unregister(kTestingAppId);
+  EXPECT_EQ(GCMClient::ASYNC_OPERATION_PENDING,
+            consumer()->unregistration_result());
+  consumer()->clear_unregistration_result();
+
+  // Complete unregistration.
+  WaitUntilCompleted();
+  EXPECT_EQ(GCMClient::SUCCESS, consumer()->unregistration_result());
+}
+
+TEST_F(GCMProfileServiceSingleProfileTest, RegisterWhenAsyncOperationPending) {
+  std::vector<std::string> sender_ids;
+  sender_ids.push_back("sender1");
+  // First start registration without waiting for it to complete.
+  consumer()->Register(kTestingAppId, sender_ids);
+
+  // Test that registration fails with async operation pending when there is a
+  // registration already in progress.
+  consumer()->Register(kTestingAppId, sender_ids);
+  EXPECT_EQ(GCMClient::ASYNC_OPERATION_PENDING,
+            consumer()->registration_result());
+  consumer()->clear_registration_result();
+
+  // Complete the registration.
+  WaitUntilCompleted();
+  EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
+
+  // Start unregistration without waiting for it to complete. This time no async
+  // operation is pending.
+  consumer()->Unregister(kTestingAppId);
+
+  // Test that registration fails with async operation pending when there is an
+  // unregistration already in progress.
+  consumer()->Register(kTestingAppId, sender_ids);
+  EXPECT_EQ(GCMClient::ASYNC_OPERATION_PENDING,
+            consumer()->registration_result());
+
+  // Complete the first unregistration expecting success.
+  WaitUntilCompleted();
+  EXPECT_EQ(GCMClient::SUCCESS, consumer()->unregistration_result());
+
+  // Test that it is ok to register again after unregistration.
+  consumer()->Register(kTestingAppId, sender_ids);
+  WaitUntilCompleted();
+  EXPECT_EQ(GCMClient::SUCCESS, consumer()->registration_result());
+}
+
 
 TEST_F(GCMProfileServiceSingleProfileTest, Send) {
   GCMClient::OutgoingMessage message;
@@ -1055,33 +1091,57 @@ TEST_F(GCMProfileServiceSingleProfileTest, SendError) {
 
   // Wait for the send error.
   WaitUntilCompleted();
-  EXPECT_EQ(FakeGCMEventRouter::SEND_ERROR_EVENT,
-            consumer()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId, consumer()->gcm_event_router()->app_id());
+  EXPECT_EQ(FakeGCMAppHandler::SEND_ERROR_EVENT,
+            consumer()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId, consumer()->gcm_app_handler()->app_id());
   EXPECT_EQ(consumer()->send_message_id(),
-            consumer()->gcm_event_router()->send_message_id());
+            consumer()->gcm_app_handler()->send_error_message_id());
   EXPECT_NE(GCMClient::SUCCESS,
-            consumer()->gcm_event_router()->send_result());
+            consumer()->gcm_app_handler()->send_error_result());
+  EXPECT_EQ(message.data, consumer()->gcm_app_handler()->send_error_data());
 }
 
 TEST_F(GCMProfileServiceSingleProfileTest, MessageReceived) {
+  consumer()->Register(kTestingAppId, ToSenderList("sender"));
+  WaitUntilCompleted();
   GCMClient::IncomingMessage message;
   message.data["key1"] = "value1";
   message.data["key2"] = "value2";
+  message.sender_id = "sender";
   consumer()->GetGCMClient()->ReceiveMessage(kTestingAppId, message);
   WaitUntilCompleted();
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGE_EVENT,
-            consumer()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId, consumer()->gcm_event_router()->app_id());
-  EXPECT_TRUE(message.data == consumer()->gcm_event_router()->message().data);
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGE_EVENT,
+            consumer()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId, consumer()->gcm_app_handler()->app_id());
+  EXPECT_TRUE(message.data == consumer()->gcm_app_handler()->message().data);
+  EXPECT_TRUE(consumer()->gcm_app_handler()->message().collapse_key.empty());
+  EXPECT_EQ(message.sender_id,
+            consumer()->gcm_app_handler()->message().sender_id);
+}
+
+TEST_F(GCMProfileServiceSingleProfileTest, MessageWithCollapseKeyReceived) {
+  consumer()->Register(kTestingAppId, ToSenderList("sender"));
+  WaitUntilCompleted();
+  GCMClient::IncomingMessage message;
+  message.data["key1"] = "value1";
+  message.collapse_key = "collapse_key_value";
+  message.sender_id = "sender";
+  consumer()->GetGCMClient()->ReceiveMessage(kTestingAppId, message);
+  WaitUntilCompleted();
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGE_EVENT,
+            consumer()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId, consumer()->gcm_app_handler()->app_id());
+  EXPECT_TRUE(message.data == consumer()->gcm_app_handler()->message().data);
+  EXPECT_EQ(message.collapse_key,
+            consumer()->gcm_app_handler()->message().collapse_key);
 }
 
 TEST_F(GCMProfileServiceSingleProfileTest, MessagesDeleted) {
   consumer()->GetGCMClient()->DeleteMessages(kTestingAppId);
   WaitUntilCompleted();
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGES_DELETED_EVENT,
-            consumer()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId, consumer()->gcm_event_router()->app_id());
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGES_DELETED_EVENT,
+            consumer()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId, consumer()->gcm_app_handler()->app_id());
 }
 
 // Tests to make sure that GCMProfileService works for multiple profiles
@@ -1194,42 +1254,55 @@ TEST_F(GCMProfileServiceMultiProfileTest, Send) {
 }
 
 TEST_F(GCMProfileServiceMultiProfileTest, MessageReceived) {
+  consumer()->Register(kTestingAppId, ToSenderList("sender"));
+  WaitUntilCompleted();
+  consumer2()->Register(kTestingAppId, ToSenderList("sender"));
+  WaitUntilCompleted();
+  consumer2()->Register(kTestingAppId2, ToSenderList("sender2"));
+  WaitUntilCompleted();
+
   // Trigger an incoming message for an app in one profile.
   GCMClient::IncomingMessage message;
   message.data["key1"] = "value1";
   message.data["key2"] = "value2";
+  message.sender_id = "sender";
   consumer()->GetGCMClient()->ReceiveMessage(kTestingAppId, message);
 
   // Trigger an incoming message for the same app in another profile.
   GCMClient::IncomingMessage message2;
   message2.data["foo"] = "bar";
+  message2.sender_id = "sender";
   consumer2()->GetGCMClient()->ReceiveMessage(kTestingAppId, message2);
 
   WaitUntilCompleted();
   WaitUntilCompleted();
 
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGE_EVENT,
-            consumer()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId, consumer()->gcm_event_router()->app_id());
-  EXPECT_TRUE(message.data == consumer()->gcm_event_router()->message().data);
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGE_EVENT,
+            consumer()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId, consumer()->gcm_app_handler()->app_id());
+  EXPECT_TRUE(message.data == consumer()->gcm_app_handler()->message().data);
+  EXPECT_EQ("sender", consumer()->gcm_app_handler()->message().sender_id);
 
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGE_EVENT,
-            consumer2()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId, consumer2()->gcm_event_router()->app_id());
-  EXPECT_TRUE(message2.data == consumer2()->gcm_event_router()->message().data);
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGE_EVENT,
+            consumer2()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId, consumer2()->gcm_app_handler()->app_id());
+  EXPECT_TRUE(message2.data == consumer2()->gcm_app_handler()->message().data);
+  EXPECT_EQ("sender", consumer2()->gcm_app_handler()->message().sender_id);
 
   // Trigger another incoming message for a different app in another profile.
   GCMClient::IncomingMessage message3;
   message3.data["bar1"] = "foo1";
   message3.data["bar2"] = "foo2";
+  message3.sender_id = "sender2";
   consumer2()->GetGCMClient()->ReceiveMessage(kTestingAppId2, message3);
 
   WaitUntilCompleted();
 
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGE_EVENT,
-            consumer2()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId2, consumer2()->gcm_event_router()->app_id());
-  EXPECT_TRUE(message3.data == consumer2()->gcm_event_router()->message().data);
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGE_EVENT,
+            consumer2()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId2, consumer2()->gcm_app_handler()->app_id());
+  EXPECT_TRUE(message3.data == consumer2()->gcm_app_handler()->message().data);
+  EXPECT_EQ("sender2", consumer2()->gcm_app_handler()->message().sender_id);
 }
 
 // Test a set of GCM operations on multiple profiles.
@@ -1290,44 +1363,47 @@ TEST_F(GCMProfileServiceMultiProfileTest, Combined) {
   GCMClient::IncomingMessage in_message;
   in_message.data["in1"] = "in_data1";
   in_message.data["in1_2"] = "in_data1_2";
+  in_message.sender_id = "sender1";
   consumer()->GetGCMClient()->ReceiveMessage(kTestingAppId, in_message);
 
   WaitUntilCompleted();
 
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGE_EVENT,
-            consumer()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId, consumer()->gcm_event_router()->app_id());
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGE_EVENT,
+            consumer()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId, consumer()->gcm_app_handler()->app_id());
   EXPECT_TRUE(
-      in_message.data == consumer()->gcm_event_router()->message().data);
+      in_message.data == consumer()->gcm_app_handler()->message().data);
 
   // Trigger 2 incoming messages, one for each app respectively, in another
   // profile.
   GCMClient::IncomingMessage in_message2;
   in_message2.data["in2"] = "in_data2";
+  in_message2.sender_id = "sender3";
   consumer2()->GetGCMClient()->ReceiveMessage(kTestingAppId2, in_message2);
 
   GCMClient::IncomingMessage in_message3;
   in_message3.data["in3"] = "in_data3";
   in_message3.data["in3_2"] = "in_data3_2";
+  in_message3.sender_id = "foo";
   consumer2()->GetGCMClient()->ReceiveMessage(kTestingAppId, in_message3);
 
-  consumer2()->gcm_event_router()->clear_results();
+  consumer2()->gcm_app_handler()->clear_results();
   WaitUntilCompleted();
 
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGE_EVENT,
-            consumer2()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId2, consumer2()->gcm_event_router()->app_id());
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGE_EVENT,
+            consumer2()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId2, consumer2()->gcm_app_handler()->app_id());
   EXPECT_TRUE(
-      in_message2.data == consumer2()->gcm_event_router()->message().data);
+      in_message2.data == consumer2()->gcm_app_handler()->message().data);
 
-  consumer2()->gcm_event_router()->clear_results();
+  consumer2()->gcm_app_handler()->clear_results();
   WaitUntilCompleted();
 
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGE_EVENT,
-            consumer2()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId, consumer2()->gcm_event_router()->app_id());
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGE_EVENT,
+            consumer2()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId, consumer2()->gcm_app_handler()->app_id());
   EXPECT_TRUE(
-      in_message3.data == consumer2()->gcm_event_router()->message().data);
+      in_message3.data == consumer2()->gcm_app_handler()->message().data);
 
   // Send two messages, one for each app respectively, from another profile.
   GCMClient::OutgoingMessage out_message2;
@@ -1354,12 +1430,12 @@ TEST_F(GCMProfileServiceMultiProfileTest, Combined) {
   consumer()->SignOut();
 
   // Register/send stops working for signed-out profile.
-  consumer()->gcm_event_router()->clear_results();
+  consumer()->gcm_app_handler()->clear_results();
   consumer()->Register(kTestingAppId, sender_ids);
   EXPECT_TRUE(consumer()->registration_id().empty());
   EXPECT_EQ(GCMClient::NOT_SIGNED_IN, consumer()->registration_result());
 
-  consumer()->gcm_event_router()->clear_results();
+  consumer()->gcm_app_handler()->clear_results();
   consumer()->Send(kTestingAppId2, kUserId2, out_message3);
   EXPECT_TRUE(consumer()->send_message_id().empty());
   EXPECT_EQ(GCMClient::NOT_SIGNED_IN, consumer()->send_result());
@@ -1367,12 +1443,12 @@ TEST_F(GCMProfileServiceMultiProfileTest, Combined) {
   // Deleted messages event will go through for another signed-in profile.
   consumer2()->GetGCMClient()->DeleteMessages(kTestingAppId2);
 
-  consumer2()->gcm_event_router()->clear_results();
+  consumer2()->gcm_app_handler()->clear_results();
   WaitUntilCompleted();
 
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGES_DELETED_EVENT,
-            consumer2()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId2, consumer2()->gcm_event_router()->app_id());
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGES_DELETED_EVENT,
+            consumer2()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId2, consumer2()->gcm_app_handler()->app_id());
 
   // Send error event will go through for another signed-in profile.
   GCMClient::OutgoingMessage out_message4;
@@ -1384,31 +1460,38 @@ TEST_F(GCMProfileServiceMultiProfileTest, Combined) {
   EXPECT_EQ(consumer2()->send_message_id(), out_message4.id);
   EXPECT_EQ(GCMClient::SUCCESS, consumer2()->send_result());
 
-  consumer2()->gcm_event_router()->clear_results();
+  consumer2()->gcm_app_handler()->clear_results();
   WaitUntilCompleted();
-  EXPECT_EQ(FakeGCMEventRouter::SEND_ERROR_EVENT,
-            consumer2()->gcm_event_router()->received_event());
-  EXPECT_EQ(kTestingAppId, consumer2()->gcm_event_router()->app_id());
-  EXPECT_EQ(consumer2()->send_message_id(),
-            consumer2()->gcm_event_router()->send_message_id());
+  EXPECT_EQ(FakeGCMAppHandler::SEND_ERROR_EVENT,
+            consumer2()->gcm_app_handler()->received_event());
+  EXPECT_EQ(kTestingAppId, consumer2()->gcm_app_handler()->app_id());
+  EXPECT_EQ(out_message4.id,
+            consumer2()->gcm_app_handler()->send_error_message_id());
   EXPECT_NE(GCMClient::SUCCESS,
-            consumer2()->gcm_event_router()->send_result());
+            consumer2()->gcm_app_handler()->send_error_result());
+  EXPECT_EQ(out_message4.data,
+            consumer2()->gcm_app_handler()->send_error_data());
 
   // Sign in with a different user.
   consumer()->SignIn(kTestingUsername3);
 
+  // Signing out cleared all registrations, so we need to register again.
+  consumer()->Register(kTestingAppId, ToSenderList("sender1"));
+  WaitUntilCompleted();
+
   // Incoming message will go through for the new signed-in user.
   GCMClient::IncomingMessage in_message5;
   in_message5.data["in5"] = "in_data5";
+  in_message5.sender_id = "sender1";
   consumer()->GetGCMClient()->ReceiveMessage(kTestingAppId, in_message5);
 
-  consumer()->gcm_event_router()->clear_results();
+  consumer()->gcm_app_handler()->clear_results();
   WaitUntilCompleted();
 
-  EXPECT_EQ(FakeGCMEventRouter::MESSAGE_EVENT,
-            consumer()->gcm_event_router()->received_event());
+  EXPECT_EQ(FakeGCMAppHandler::MESSAGE_EVENT,
+            consumer()->gcm_app_handler()->received_event());
   EXPECT_TRUE(
-      in_message5.data == consumer()->gcm_event_router()->message().data);
+      in_message5.data == consumer()->gcm_app_handler()->message().data);
 }
 
 }  // namespace gcm

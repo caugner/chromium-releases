@@ -5,6 +5,7 @@
 #include "cc/test/pixel_test.h"
 
 #include "base/command_line.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "cc/base/switches.h"
@@ -22,6 +23,7 @@
 #include "cc/test/pixel_test_software_output_device.h"
 #include "cc/test/pixel_test_utils.h"
 #include "cc/test/test_in_process_context_provider.h"
+#include "cc/test/test_shared_bitmap_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace cc {
@@ -73,15 +75,12 @@ bool PixelTest::RunPixelTestWithReadbackTarget(
   gfx::Rect device_clip_rect = external_device_clip_rect_.IsEmpty()
                                    ? device_viewport_rect
                                    : external_device_clip_rect_;
-  bool allow_partial_swap = true;
-
   renderer_->DecideRenderPassAllocationsForFrame(*pass_list);
   renderer_->DrawFrame(pass_list,
                        offscreen_contexts.get(),
                        device_scale_factor,
                        device_viewport_rect,
                        device_clip_rect,
-                       allow_partial_swap,
                        disable_picture_quad_image_filtering_);
 
   // Wait for the readback to complete.
@@ -117,14 +116,18 @@ bool PixelTest::PixelsMatchReference(const base::FilePath& ref_file,
 }
 
 void PixelTest::SetUpGLRenderer(bool use_skia_gpu_backend) {
+  enable_pixel_output_.reset(new gfx::DisableNullDrawGLBindings);
+
   output_surface_.reset(
       new PixelTestOutputSurface(new TestInProcessContextProvider));
   output_surface_->BindToClient(output_surface_client_.get());
 
-  resource_provider_ =
-      ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1);
+  shared_bitmap_manager_.reset(new TestSharedBitmapManager());
+  resource_provider_ = ResourceProvider::Create(
+      output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1);
 
-  texture_mailbox_deleter_ = make_scoped_ptr(new TextureMailboxDeleter);
+  texture_mailbox_deleter_ = make_scoped_ptr(
+      new TextureMailboxDeleter(base::MessageLoopProxy::current()));
 
   renderer_ = GLRenderer::Create(this,
                                  &settings_,
@@ -161,11 +164,13 @@ void PixelTest::SetUpSoftwareRenderer() {
   scoped_ptr<SoftwareOutputDevice> device(new PixelTestSoftwareOutputDevice());
   output_surface_.reset(new PixelTestOutputSurface(device.Pass()));
   output_surface_->BindToClient(output_surface_client_.get());
-  resource_provider_ =
-      ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1);
-  renderer_ = SoftwareRenderer::Create(
-      this, &settings_, output_surface_.get(), resource_provider_.get())
-                  .PassAs<DirectRenderer>();
+  shared_bitmap_manager_.reset(new TestSharedBitmapManager());
+  resource_provider_ = ResourceProvider::Create(
+      output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1);
+  renderer_ =
+      SoftwareRenderer::Create(
+          this, &settings_, output_surface_.get(), resource_provider_.get())
+          .PassAs<DirectRenderer>();
 }
 
 }  // namespace cc

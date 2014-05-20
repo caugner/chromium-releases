@@ -198,6 +198,8 @@ AudioPlayer.prototype.select_ = function(newTrack) {
 
   this.currentTrackIndex_ = newTrack;
   this.player_.currentTrackIndex = this.currentTrackIndex_;
+  Platform.performMicrotaskCheckpoint();
+
   if (!window.appReopen)
     this.player_.audioElement.play();
 
@@ -418,6 +420,6 @@ AudioPlayer.TrackInfo.prototype.setMetadata = function(
 };
 
 // Starts loading the audio player.
-window.addEventListener('WebComponentsReady', function(e) {
+window.addEventListener('polymer-ready', function(e) {
   AudioPlayer.load();
 });

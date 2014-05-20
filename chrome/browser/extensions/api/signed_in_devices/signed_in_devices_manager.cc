@@ -92,20 +92,21 @@ void SignedInDevicesChangeObserver::OnDeviceInfoChange() {
       extension_id_, event.Pass());
 }
 
-static base::LazyInstance<ProfileKeyedAPIFactory<SignedInDevicesManager> >
-g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<SignedInDevicesManager> > g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
-ProfileKeyedAPIFactory<SignedInDevicesManager>*
-    SignedInDevicesManager::GetFactoryInstance() {
+BrowserContextKeyedAPIFactory<SignedInDevicesManager>*
+SignedInDevicesManager::GetFactoryInstance() {
   return g_factory.Pointer();
 }
 
 SignedInDevicesManager::SignedInDevicesManager()
     : profile_(NULL) {}
 
-SignedInDevicesManager::SignedInDevicesManager(Profile* profile)
-    : profile_(profile) {
+SignedInDevicesManager::SignedInDevicesManager(content::BrowserContext* context)
+    : profile_(Profile::FromBrowserContext(context)) {
   extensions::EventRouter* router = extensions::ExtensionSystem::Get(
       profile_)->event_router();
 
@@ -116,7 +117,7 @@ SignedInDevicesManager::SignedInDevicesManager(Profile* profile)
 
   // Register for unload event so we could clear all our listeners when
   // extensions have unloaded.
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
 }
 
@@ -162,11 +163,10 @@ void SignedInDevicesManager::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK_EQ(type, chrome::NOTIFICATION_EXTENSION_UNLOADED);
+  DCHECK_EQ(type, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED);
   UnloadedExtensionInfo* reason =
       content::Details<UnloadedExtensionInfo>(details).ptr();
   RemoveChangeObserverForExtension(reason->extension->id());
 }
 
 }  // namespace extensions
-

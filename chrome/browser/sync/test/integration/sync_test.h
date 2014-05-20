@@ -21,10 +21,13 @@
 #include "sync/test/fake_server/fake_server.h"
 #include "sync/test/local_sync_test_server.h"
 
-
-class CommandLine;
 class Profile;
 class ProfileSyncServiceHarness;
+class P2PInvalidationForwarder;
+
+namespace base {
+class CommandLine;
+}
 
 namespace net {
 class FakeURLFetcherFactory;
@@ -42,8 +45,14 @@ class SyncTest : public InProcessBrowserTest {
   // The different types of live sync tests that can be implemented.
   enum TestType {
     // Tests where only one client profile is synced with the server. Typically
-    // sanity level tests.
+    // sanity level tests. Safe to run against the FakeServer, not just the
+    // older python test server.
     SINGLE_CLIENT,
+
+    // Tests where only one client profile is synced with the server. "Legacy"
+    // means that the scenario isn't yet supported by the FakeServer so they
+    // should be run against the python server instead.
+    SINGLE_CLIENT_LEGACY,
 
     // Tests where two client profiles are synced with the server. Typically
     // functionality level tests.
@@ -109,7 +118,7 @@ class SyncTest : public InProcessBrowserTest {
   virtual void TearDown() OVERRIDE;
 
   // Sets up command line flags required for sync tests.
-  virtual void SetUpCommandLine(CommandLine* cl) OVERRIDE;
+  virtual void SetUpCommandLine(base::CommandLine* cl) OVERRIDE;
 
   // Used to get the number of sync clients used by a test.
   int num_clients() WARN_UNUSED_RESULT { return num_clients_; }
@@ -224,16 +233,13 @@ class SyncTest : public InProcessBrowserTest {
   // Triggers the creation the Synced Bookmarks folder on the server.
   void TriggerCreateSyncedBookmarks();
 
-  // Returns the number of default items that every client syncs.
-  int NumberOfDefaultSyncItems() const;
-
  protected:
   // Add custom switches needed for running the test.
-  virtual void AddTestSwitches(CommandLine* cl);
+  virtual void AddTestSwitches(base::CommandLine* cl);
 
   // Append the command line switches to enable experimental types that aren't
   // on by default yet.
-  virtual void AddOptionalTypesToCommandLine(CommandLine* cl);
+  virtual void AddOptionalTypesToCommandLine(base::CommandLine* cl);
 
   // InProcessBrowserTest override. Destroys all the sync clients and sync
   // profiles created by a test.
@@ -256,12 +262,6 @@ class SyncTest : public InProcessBrowserTest {
   void DisableNotificationsImpl();
   void EnableNotificationsImpl();
 
-  // Set up the test to use the in-process fake server. This must be called
-  // before SetUp().
-  // TODO(pvalenzuela): Remove this method when the C++ fake server becomes
-  // the default server type.
-  void UseFakeServer();
-
   // GAIA account used by the test case.
   std::string username_;
 
@@ -272,7 +272,7 @@ class SyncTest : public InProcessBrowserTest {
   base::FilePath password_file_;
 
   // The FakeServer used in tests with server type IN_PROCESS_FAKE_SERVER.
-  scoped_ptr<syncer::FakeServer> fake_server_;
+  scoped_ptr<fake_server::FakeServer> fake_server_;
 
  private:
   // Helper to ProfileManager::CreateProfile that handles path creation.
@@ -328,6 +328,10 @@ class SyncTest : public InProcessBrowserTest {
   // the default URLFetcher creation mechanism.
   void ClearMockGaiaResponses();
 
+  // Decide which sync server implementation to run against based on the type
+  // of test being run and command line args passed in.
+  void DecideServerType();
+
   // Python sync test server, started on demand.
   syncer::LocalSyncTestServer sync_server_;
 
@@ -360,6 +364,10 @@ class SyncTest : public InProcessBrowserTest {
   // profile with the server.
   ScopedVector<ProfileSyncServiceHarness> clients_;
 
+  // A set of objects to listen for commit activity and broadcast notifications
+  // of this activity to its peer sync clients.
+  ScopedVector<P2PInvalidationForwarder> invalidation_forwarders_;
+
   // Sync profile against which changes to individual profiles are verified. We
   // don't need a corresponding verifier sync client because the contents of the
   // verifier profile are strictly local, and are not meant to be synced.
@@ -386,10 +394,6 @@ class SyncTest : public InProcessBrowserTest {
 
   // The URLFetcherImplFactory instance used to instantiate |fake_factory_|.
   scoped_ptr<net::URLFetcherImplFactory> factory_;
-
-  // Number of default entries (as determined by the existing entries at setup
-  // time on client 0).
-  size_t number_of_default_sync_items_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncTest);
 };

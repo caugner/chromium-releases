@@ -25,6 +25,12 @@ bool IsRunningOnValgrind();
 #define DISABLE_ON_TSAN(test_name) test_name
 #endif  // defined(THREAD_SANITIZER)
 
+#if defined(OS_ANDROID)
+#define DISABLE_ON_ANDROID(test_name) DISABLED_##test_name
+#else
+#define DISABLE_ON_ANDROID(test_name) test_name
+#endif
+
 // While it is perfectly OK for a complex test to provide its own DeathCheck
 // function. Most death tests have very simple requirements. These tests should
 // use one of the predefined DEATH_XXX macros as an argument to
@@ -41,7 +47,7 @@ bool IsRunningOnValgrind();
   sandbox::UnitTests::DeathExitCode, \
       reinterpret_cast<void*>(static_cast<intptr_t>(rc))
 #define DEATH_BY_SIGNAL(s)           \
-  sandbox::UnitTests::DeathExitCode, \
+  sandbox::UnitTests::DeathBySignal, \
       reinterpret_cast<void*>(static_cast<intptr_t>(s))
 
 // A SANDBOX_DEATH_TEST is just like a SANDBOX_TEST (see below), but it assumes

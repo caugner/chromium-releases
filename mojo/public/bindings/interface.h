@@ -8,7 +8,7 @@
 #include <assert.h>
 
 #include "mojo/public/bindings/message.h"
-#include "mojo/public/system/core_cpp.h"
+#include "mojo/public/cpp/system/core.h"
 
 namespace mojo {
 
@@ -22,6 +22,8 @@ class NoInterfaceStub : public MessageReceiver {
  public:
   NoInterfaceStub(NoInterface* unused) {}
   virtual bool Accept(Message* message) MOJO_OVERRIDE;
+  virtual bool AcceptWithResponder(Message* message, MessageReceiver* responder)
+      MOJO_OVERRIDE;
 };
 
 class NoInterface {

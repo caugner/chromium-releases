@@ -60,7 +60,8 @@ var ChromeNotificationId;
  *   actionUrls: (ActionUrls|undefined),
  *   dismissal: Object,
  *   locationBased: (boolean|undefined),
- *   groupName: string
+ *   groupName: string,
+ *   cardTypeId: (number|undefined)
  * }}
  */
 var ReceivedNotification;
@@ -91,12 +92,13 @@ var CombinedCard;
  *
  * @typedef {{
  *   actionUrls: (ActionUrls|undefined),
+ *   cardTypeId: (number|undefined),
  *   timestamp: number,
  *   combinedCard: CombinedCard
  * }}
  *
  */
- var NotificationDataEntry;
+var NotificationDataEntry;
 
 /**
  * Names for tasks that can be created by the this file.
@@ -246,9 +248,11 @@ function buildCardSet() {
           winningCard.receivedNotification.actionUrls &&
           JSON.parse(JSON.stringify(
               winningCard.receivedNotification.actionUrls));
-
+      var winningCardTypeId = winningCard &&
+          winningCard.receivedNotification.cardTypeId;
       return {
         actionUrls: winningActionUrls,
+        cardTypeId: winningCardTypeId,
         timestamp: now,
         combinedCard: combinedCard
       };
@@ -327,35 +331,33 @@ function buildCardSet() {
       // Alarm to show the card.
       tasks.add(UPDATE_CARD_TASK_NAME, function() {
         var cardId = alarm.name.substring(alarmPrefix.length);
-        instrumented.storage.local.get(
-            ['notificationsData', 'notificationGroups'],
-            function(items) {
-              console.log('cardManager.onAlarm.get ' + JSON.stringify(items));
-              items = items || {};
-              /** @type {Object.<string, NotificationDataEntry>} */
-              items.notificationsData = items.notificationsData || {};
-              /** @type {Object.<string, StoredNotificationGroup>} */
-              items.notificationGroups = items.notificationGroups || {};
+        fillFromChromeLocalStorage({
+          /** @type {Object.<string, NotificationDataEntry>} */
+          notificationsData: {},
+          /** @type {Object.<string, StoredNotificationGroup>} */
+          notificationGroups: {}
+        }).then(function(items) {
+          console.log('cardManager.onAlarm.get ' + JSON.stringify(items));
 
-              var combinedCard =
-                (items.notificationsData[cardId] &&
-                 items.notificationsData[cardId].combinedCard) || [];
+          var combinedCard =
+            (items.notificationsData[cardId] &&
+             items.notificationsData[cardId].combinedCard) || [];
 
-              var cardShownCallback = undefined;
-              if (localStorage['explanatoryCardsShown'] <
-                  EXPLANATORY_CARDS_LINK_THRESHOLD) {
-                 cardShownCallback = countExplanatoryCard;
-              }
+          var cardShownCallback = undefined;
+          if (localStorage['explanatoryCardsShown'] <
+              EXPLANATORY_CARDS_LINK_THRESHOLD) {
+             cardShownCallback = countExplanatoryCard;
+          }
 
-              items.notificationsData[cardId] =
-                  update(
-                      cardId,
-                      combinedCard,
-                      items.notificationGroups,
-                      cardShownCallback);
+          items.notificationsData[cardId] =
+              update(
+                  cardId,
+                  combinedCard,
+                  items.notificationGroups,
+                  cardShownCallback);
 
-              chrome.storage.local.set(items);
-            });
+          chrome.storage.local.set(items);
+        });
       });
     }
   });

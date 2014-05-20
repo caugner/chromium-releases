@@ -9,16 +9,18 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/layout_manager.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/test/aura_test_helper.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_event_dispatcher.h"
+#include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/input_method_factory.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/compositor/layer_type.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/compositor/test/context_factories_for_test.h"
 #include "ui/compositor/test/layer_animator_test_controller.h"
 #include "ui/gfx/rect.h"
 #include "ui/keyboard/keyboard_controller.h"
@@ -98,6 +100,8 @@ class TestKeyboardControllerProxy : public KeyboardControllerProxy {
   virtual void RequestAudioInput(content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
       const content::MediaResponseCallback& callback) OVERRIDE { return; }
+  virtual void LoadSystemKeyboard() OVERRIDE {};
+  virtual void ReloadKeyboardIfNeeded() OVERRIDE {};
 
  private:
   scoped_ptr<aura::Window> window_;
@@ -126,67 +130,6 @@ class EventObserver : public ui::EventHandler {
 
   std::map<ui::EventType, int> event_counts_;
   DISALLOW_COPY_AND_ASSIGN(EventObserver);
-};
-
-class TestTextInputClient : public ui::TextInputClient {
- public:
-  explicit TestTextInputClient(ui::TextInputType type)
-      : type_(type) {}
-  virtual ~TestTextInputClient() {}
-
- private:
-  // Overridden from ui::TextInputClient:
-  virtual void SetCompositionText(
-      const ui::CompositionText& composition) OVERRIDE {}
-  virtual void ConfirmCompositionText() OVERRIDE {}
-  virtual void ClearCompositionText() OVERRIDE {}
-  virtual void InsertText(const base::string16& text) OVERRIDE {}
-  virtual void InsertChar(base::char16 ch, int flags) OVERRIDE {}
-  virtual gfx::NativeWindow GetAttachedWindow() const OVERRIDE {
-    return static_cast<gfx::NativeWindow>(NULL);
-  }
-  virtual ui::TextInputType GetTextInputType() const OVERRIDE {
-    return type_;
-  }
-  virtual ui::TextInputMode GetTextInputMode() const OVERRIDE {
-    return ui::TEXT_INPUT_MODE_DEFAULT;
-  }
-  virtual bool CanComposeInline() const OVERRIDE { return false; }
-  virtual gfx::Rect GetCaretBounds() const OVERRIDE { return gfx::Rect(); }
-
-  virtual bool GetCompositionCharacterBounds(
-      uint32 index,
-      gfx::Rect* rect) const OVERRIDE {
-    return false;
-  }
-  virtual bool HasCompositionText() const OVERRIDE { return false; }
-  virtual bool GetTextRange(gfx::Range* range) const OVERRIDE { return false; }
-  virtual bool GetCompositionTextRange(gfx::Range* range) const OVERRIDE {
-    return false;
-  }
-  virtual bool GetSelectionRange(gfx::Range* range) const OVERRIDE {
-    return false;
-  }
-  virtual bool SetSelectionRange(const gfx::Range& range) OVERRIDE {
-    return false;
-  }
-  virtual bool DeleteRange(const gfx::Range& range) OVERRIDE { return false; }
-  virtual bool GetTextFromRange(const gfx::Range& range,
-                                base::string16* text) const OVERRIDE {
-    return false;
-  }
-  virtual void OnInputMethodChanged() OVERRIDE {}
-  virtual bool ChangeTextDirectionAndLayoutAlignment(
-      base::i18n::TextDirection direction) OVERRIDE { return false; }
-  virtual void ExtendSelectionAndDelete(size_t before, size_t after) OVERRIDE {}
-  virtual void EnsureCaretInRect(const gfx::Rect& rect) OVERRIDE {}
-  virtual void OnCandidateWindowShown() OVERRIDE {}
-  virtual void OnCandidateWindowUpdated() OVERRIDE {}
-  virtual void OnCandidateWindowHidden() OVERRIDE {}
-
-  ui::TextInputType type_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestTextInputClient);
 };
 
 class KeyboardContainerObserver : public aura::WindowObserver {
@@ -218,9 +161,12 @@ class KeyboardControllerTest : public testing::Test {
   virtual ~KeyboardControllerTest() {}
 
   virtual void SetUp() OVERRIDE {
+    // The ContextFactory must exist before any Compositors are created.
+    bool enable_pixel_output = false;
+    ui::InitializeContextFactoryForTests(enable_pixel_output);
+
     aura_test_helper_.reset(new aura::test::AuraTestHelper(&message_loop_));
-    bool allow_test_contexts = true;
-    aura_test_helper_->SetUp(allow_test_contexts);
+    aura_test_helper_->SetUp();
     ui::SetUpInputMethodFactoryForTesting();
     focus_controller_.reset(new TestFocusController(root_window()));
     proxy_ = new TestKeyboardControllerProxy();
@@ -231,6 +177,7 @@ class KeyboardControllerTest : public testing::Test {
     controller_.reset();
     focus_controller_.reset();
     aura_test_helper_->TearDown();
+    ui::TerminateContextFactoryForTests();
   }
 
   aura::Window* root_window() { return aura_test_helper_->root_window(); }
@@ -238,7 +185,7 @@ class KeyboardControllerTest : public testing::Test {
   KeyboardController* controller() { return controller_.get(); }
 
   void ShowKeyboard() {
-    TestTextInputClient test_text_input_client(ui::TEXT_INPUT_TYPE_TEXT);
+    ui::DummyTextInputClient test_text_input_client(ui::TEXT_INPUT_TYPE_TEXT);
     SetFocus(&test_text_input_client);
   }
 
@@ -367,11 +314,11 @@ TEST_F(KeyboardControllerTest, EventHitTestingInContainer) {
 TEST_F(KeyboardControllerTest, VisibilityChangeWithTextInputTypeChange) {
   const gfx::Rect& root_bounds = root_window()->bounds();
 
-  TestTextInputClient input_client_0(ui::TEXT_INPUT_TYPE_TEXT);
-  TestTextInputClient input_client_1(ui::TEXT_INPUT_TYPE_TEXT);
-  TestTextInputClient input_client_2(ui::TEXT_INPUT_TYPE_TEXT);
-  TestTextInputClient no_input_client_0(ui::TEXT_INPUT_TYPE_NONE);
-  TestTextInputClient no_input_client_1(ui::TEXT_INPUT_TYPE_NONE);
+  ui::DummyTextInputClient input_client_0(ui::TEXT_INPUT_TYPE_TEXT);
+  ui::DummyTextInputClient input_client_1(ui::TEXT_INPUT_TYPE_TEXT);
+  ui::DummyTextInputClient input_client_2(ui::TEXT_INPUT_TYPE_TEXT);
+  ui::DummyTextInputClient no_input_client_0(ui::TEXT_INPUT_TYPE_NONE);
+  ui::DummyTextInputClient no_input_client_1(ui::TEXT_INPUT_TYPE_NONE);
 
   aura::Window* keyboard_container(controller()->GetContainerWindow());
   scoped_ptr<KeyboardContainerObserver> keyboard_container_observer(
@@ -408,10 +355,10 @@ TEST_F(KeyboardControllerTest, VisibilityChangeWithTextInputTypeChange) {
 TEST_F(KeyboardControllerTest, AlwaysVisibleWhenLocked) {
   const gfx::Rect& root_bounds = root_window()->bounds();
 
-  TestTextInputClient input_client_0(ui::TEXT_INPUT_TYPE_TEXT);
-  TestTextInputClient input_client_1(ui::TEXT_INPUT_TYPE_TEXT);
-  TestTextInputClient no_input_client_0(ui::TEXT_INPUT_TYPE_NONE);
-  TestTextInputClient no_input_client_1(ui::TEXT_INPUT_TYPE_NONE);
+  ui::DummyTextInputClient input_client_0(ui::TEXT_INPUT_TYPE_TEXT);
+  ui::DummyTextInputClient input_client_1(ui::TEXT_INPUT_TYPE_TEXT);
+  ui::DummyTextInputClient no_input_client_0(ui::TEXT_INPUT_TYPE_NONE);
+  ui::DummyTextInputClient no_input_client_1(ui::TEXT_INPUT_TYPE_NONE);
 
   aura::Window* keyboard_container(controller()->GetContainerWindow());
   scoped_ptr<KeyboardContainerObserver> keyboard_container_observer(
@@ -601,8 +548,8 @@ class KeyboardControllerUsabilityTest : public KeyboardControllerTest {
 TEST_F(KeyboardControllerUsabilityTest, KeyboardAlwaysVisibleInUsabilityTest) {
   const gfx::Rect& root_bounds = root_window()->bounds();
 
-  TestTextInputClient input_client(ui::TEXT_INPUT_TYPE_TEXT);
-  TestTextInputClient no_input_client(ui::TEXT_INPUT_TYPE_NONE);
+  ui::DummyTextInputClient input_client(ui::TEXT_INPUT_TYPE_TEXT);
+  ui::DummyTextInputClient no_input_client(ui::TEXT_INPUT_TYPE_NONE);
 
   aura::Window* keyboard_container(controller()->GetContainerWindow());
   keyboard_container->SetBounds(root_bounds);

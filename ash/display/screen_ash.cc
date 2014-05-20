@@ -15,7 +15,7 @@
 #include "base/logging.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/root_window.h"
+#include "ui/aura/window_event_dispatcher.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 
@@ -232,7 +232,11 @@ gfx::Display ScreenAsh::GetDisplayNearestWindow(gfx::NativeView window) const {
   const aura::Window* root_window = window->GetRootWindow();
   if (!root_window)
     return GetPrimaryDisplay();
-  int64 id = internal::GetRootWindowSettings(root_window)->display_id;
+  const internal::RootWindowSettings* rws =
+      internal::GetRootWindowSettings(root_window);
+  if (rws->shutdown)
+    return gfx::Display(1);
+  int64 id = rws->display_id;
   // if id is |kInvaildDisplayID|, it's being deleted.
   DCHECK(id != gfx::Display::kInvalidDisplayID);
 

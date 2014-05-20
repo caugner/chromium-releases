@@ -8,6 +8,7 @@
 #include <functional>
 #include <utility>
 
+#include "apps/ui/web_contents_sizer.h"
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -64,6 +65,19 @@ enum InternalCookieEvent {
   INTERNAL_COOKIE_EVENT_MAX
 };
 
+// Indicates whether existing cookies were sent, and if they were third party
+// cookies, and whether they were for blocking resources.
+// Each value may be inclusive of previous values. We only care about the
+// value with the highest index that has ever occurred in the course of a
+// prerender.
+enum CookieSendType {
+  COOKIE_SEND_TYPE_NONE = 0,
+  COOKIE_SEND_TYPE_FIRST_PARTY = 1,
+  COOKIE_SEND_TYPE_THIRD_PARTY = 2,
+  COOKIE_SEND_TYPE_THIRD_PARTY_BLOCKING_RESOURCE = 3,
+  COOKIE_SEND_TYPE_MAX
+};
+
 void ResumeThrottles(
     std::vector<base::WeakPtr<PrerenderResourceThrottle> > throttles) {
   for (size_t i = 0; i < throttles.size(); i++) {
@@ -77,6 +91,9 @@ void ResumeThrottles(
 // static
 const int PrerenderContents::kNumCookieStatuses =
     (1 << INTERNAL_COOKIE_EVENT_MAX);
+
+// static
+const int PrerenderContents::kNumCookieSendTypes = COOKIE_SEND_TYPE_MAX;
 
 class PrerenderContentsFactoryImpl : public PrerenderContents::Factory {
  public:
@@ -144,10 +161,6 @@ class PrerenderContents::WebContentsDelegateImpl
     // since render-issued offset navigations are not guaranteed,
     // but indicates that the page cares about the history.
     return false;
-  }
-
-  virtual void JSOutOfMemory(WebContents* tab) OVERRIDE {
-    prerender_contents_->Destroy(FINAL_STATUS_JS_OUT_OF_MEMORY);
   }
 
   virtual bool ShouldSuppressDialogs() OVERRIDE {
@@ -224,6 +237,7 @@ PrerenderContents::PrerenderContents(
       creator_child_id_(-1),
       main_frame_id_(0),
       cookie_status_(0),
+      cookie_send_type_(COOKIE_SEND_TYPE_NONE),
       network_bytes_(0) {
   DCHECK(prerender_manager != NULL);
 }
@@ -242,6 +256,9 @@ PrerenderContents* PrerenderContents::CreateMatchCompleteReplacement() {
   DCHECK_EQ(alias_urls_.front(), new_contents->alias_urls_.front());
   DCHECK_EQ(1u, new_contents->alias_urls_.size());
   new_contents->alias_urls_ = alias_urls_;
+  // Erase all but the first alias URL; the replacement has adopted the
+  // remainder without increasing the renderer-side reference count.
+  alias_urls_.resize(1);
   new_contents->set_match_complete_status(
       PrerenderContents::MATCH_COMPLETE_REPLACEMENT);
   NotifyPrerenderCreatedMatchCompleteReplacement(new_contents);
@@ -311,7 +328,7 @@ void PrerenderContents::StartPrerendering(
   web_contents_delegate_.reset(new WebContentsDelegateImpl(this));
   prerender_contents_.get()->SetDelegate(web_contents_delegate_.get());
   // Set the size of the prerender WebContents.
-  prerender_contents_->GetView()->SizeContents(size_);
+  apps::ResizeWebContents(prerender_contents_.get(), size_);
 
   child_id_ = GetRenderViewHost()->GetProcess()->GetID();
   route_id_ = GetRenderViewHost()->GetRoutingID();
@@ -325,13 +342,6 @@ void PrerenderContents::StartPrerendering(
   // Close ourselves when the application is shutting down.
   notification_registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                               content::NotificationService::AllSources());
-
-  // Register for our parent profile to shutdown, so we can shut ourselves down
-  // as well (should only be called for OTR profiles, as we should receive
-  // APP_TERMINATING before non-OTR profiles are destroyed).
-  // TODO(tburkard): figure out if this is needed.
-  notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                              content::Source<Profile>(profile_));
 
   // Register to inform new RenderViews that we're prerendering.
   notification_registrar_.Add(
@@ -393,12 +403,11 @@ PrerenderContents::~PrerenderContents() {
   // Since a lot of prerenders terminate before any meaningful cookie action
   // would have happened, only record the cookie status for prerenders who
   // were used, cancelled, or timed out.
-  if (prerendering_has_started_ &&
-      (final_status() == FINAL_STATUS_USED ||
-       final_status() == FINAL_STATUS_TIMED_OUT ||
-       final_status() == FINAL_STATUS_CANCELLED)) {
+  if (prerendering_has_started_ && final_status() == FINAL_STATUS_USED) {
     prerender_manager_->RecordCookieStatus(origin(), experiment_id(),
                                            cookie_status_);
+    prerender_manager_->RecordCookieSendType(origin(), experiment_id(),
+                                             cookie_send_type_);
   }
   prerender_manager_->RecordFinalStatusWithMatchCompleteStatus(
       origin(), experiment_id(), match_complete_status(), final_status());
@@ -435,10 +444,8 @@ void PrerenderContents::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_PROFILE_DESTROYED:
-      Destroy(FINAL_STATUS_PROFILE_DESTROYED);
-      return;
-
+    // TODO(davidben): Try to remove this in favor of relying on
+    // FINAL_STATUS_PROFILE_DESTROYED.
     case chrome::NOTIFICATION_APP_TERMINATING:
       Destroy(FINAL_STATUS_APP_TERMINATING);
       return;
@@ -807,6 +814,8 @@ void PrerenderContents::OnCancelPrerenderForPrinting() {
 
 void PrerenderContents::RecordCookieEvent(CookieEvent event,
                                           bool is_main_frame_http_request,
+                                          bool is_third_party_cookie,
+                                          bool is_for_blocking_resource,
                                           base::Time earliest_create_date) {
   // We don't care about sent cookies that were created after this prerender
   // started.
@@ -844,6 +853,24 @@ void PrerenderContents::RecordCookieEvent(CookieEvent event,
 
   DCHECK_GE(cookie_status_, 0);
   DCHECK_LT(cookie_status_, kNumCookieStatuses);
+
+  CookieSendType send_type = COOKIE_SEND_TYPE_NONE;
+  if (event == COOKIE_EVENT_SEND) {
+    if (!is_third_party_cookie) {
+      send_type = COOKIE_SEND_TYPE_FIRST_PARTY;
+    } else {
+      if (is_for_blocking_resource) {
+        send_type = COOKIE_SEND_TYPE_THIRD_PARTY_BLOCKING_RESOURCE;
+      } else {
+        send_type = COOKIE_SEND_TYPE_THIRD_PARTY;
+      }
+    }
+  }
+  DCHECK_GE(send_type, 0);
+  DCHECK_LT(send_type, COOKIE_SEND_TYPE_MAX);
+
+  if (cookie_send_type_ < send_type)
+    cookie_send_type_ = send_type;
 }
 
  void PrerenderContents::AddResourceThrottle(

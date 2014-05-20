@@ -49,6 +49,11 @@ public:
         const CR_DEFINE_STATIC_LOCAL(WebString, suffix, ("-can-create-without-renderer"));
         return mimeType.utf8().find(suffix.utf8()) != std::string::npos;
     }
+    virtual void loadURLExternally(blink::WebFrame* frame, const blink::WebURLRequest& request, blink::WebNavigationPolicy policy, const blink::WebString& suggested_name)
+    {
+        m_baseProxy->loadURLExternally(frame, request, policy, suggested_name);
+        Base::loadURLExternally(frame, request, policy, suggested_name);
+    }
     virtual void didStartProvisionalLoad(blink::WebFrame* frame)
     {
         if (m_version > 2)
@@ -91,6 +96,14 @@ public:
     virtual void didFinishLoad(blink::WebFrame* frame)
     {
         Base::didFinishLoad(frame);
+    }
+    virtual void didChangeSelection(bool is_selection_empty) {
+        m_baseProxy->didChangeSelection(is_selection_empty);
+        Base::didChangeSelection(is_selection_empty);
+    }
+    virtual void showContextMenu(const blink::WebContextMenuData& contextMenuData) {
+        m_baseProxy->showContextMenu(Base::GetWebFrame(), contextMenuData);
+        Base::showContextMenu(contextMenuData);
     }
     virtual void didDetectXSS(blink::WebFrame* frame, const blink::WebURL& insecureURL, bool didBlockEntirePage)
     {
@@ -140,6 +153,10 @@ public:
     }
     virtual blink::WebNavigationPolicy decidePolicyForNavigation(blink::WebFrame* frame, blink::WebDataSource::ExtraData* extraData, const blink::WebURLRequest& request, blink::WebNavigationType type, blink::WebNavigationPolicy defaultPolicy, bool isRedirect)
     {
+        blink::WebNavigationPolicy policy = m_baseProxy->decidePolicyForNavigation(frame, extraData, request, type, defaultPolicy, isRedirect);
+        if (policy == blink::WebNavigationPolicyIgnore)
+            return policy;
+
         return Base::decidePolicyForNavigation(frame, extraData, request, type, defaultPolicy, isRedirect);
     }
     virtual bool willCheckAndDispatchMessageEvent(blink::WebFrame* sourceFrame, blink::WebFrame* targetFrame, blink::WebSecurityOrigin target, blink::WebDOMMessageEvent event)
@@ -147,6 +164,11 @@ public:
         if (m_baseProxy->willCheckAndDispatchMessageEvent(sourceFrame, targetFrame, target, event))
             return true;
         return Base::willCheckAndDispatchMessageEvent(sourceFrame, targetFrame, target, event);
+    }
+    virtual void didStopLoading()
+    {
+        m_baseProxy->didStopLoading();
+        Base::didStopLoading();
     }
 
 private:

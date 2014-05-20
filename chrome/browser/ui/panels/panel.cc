@@ -154,8 +154,10 @@ bool PanelExtensionWindowController::IsVisibleToExtension(
 
 Panel::~Panel() {
   DCHECK(!collection_);
+#if !defined(USE_AURA)
   // Invoked by native panel destructor. Do not access native_panel_ here.
-  chrome::EndKeepAlive();  // Remove shutdown prevention.
+  chrome::DecrementKeepAliveCount();  // Remove shutdown prevention.
+#endif
 }
 
 PanelManager* Panel::manager() const {
@@ -436,7 +438,7 @@ void Panel::Observe(int type,
     case content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED:
       ConfigureAutoResize(content::Source<content::WebContents>(source).ptr());
       break;
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED:
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED:
       if (content::Details<extensions::UnloadedExtensionInfo>(
               details)->extension->id() == extension_id())
         Close();
@@ -529,7 +531,7 @@ void Panel::Initialize(const GURL& url,
     native_panel_->AttachWebContents(web_contents);
 
   // Close when the extension is unloaded or the browser is exiting.
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
@@ -537,8 +539,11 @@ void Panel::Initialize(const GURL& url,
                  content::Source<ThemeService>(
                     ThemeServiceFactory::GetForProfile(profile_)));
 
+#if !defined(USE_AURA)
+  // Keep alive for AURA has been moved to panel_view.
   // Prevent the browser process from shutting down while this window is open.
-  chrome::StartKeepAlive();
+  chrome::IncrementKeepAliveCount();
+#endif
 
   UpdateAppIcon();
 }

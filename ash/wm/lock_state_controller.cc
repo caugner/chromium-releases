@@ -17,10 +17,11 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/timer/timer.h"
-#include "ui/aura/root_window.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
-#include "ui/views/corewm/compound_event_filter.h"
+#include "ui/views/controls/menu/menu_controller.h"
+#include "ui/wm/core/compound_event_filter.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/sys_info.h"
@@ -168,12 +169,11 @@ LockStateController::LockStateController()
       animating_lock_(false),
       can_cancel_lock_animation_(false),
       weak_ptr_factory_(this) {
-  Shell::GetPrimaryRootWindow()->GetDispatcher()->AddRootWindowObserver(this);
+  Shell::GetPrimaryRootWindow()->GetHost()->AddObserver(this);
 }
 
 LockStateController::~LockStateController() {
-  Shell::GetPrimaryRootWindow()->GetDispatcher()->RemoveRootWindowObserver(
-      this);
+  Shell::GetPrimaryRootWindow()->GetHost()->RemoveObserver(this);
 }
 
 void LockStateController::SetDelegate(LockStateControllerDelegate* delegate) {
@@ -290,8 +290,8 @@ void LockStateController::SetLockScreenDisplayedCallback(
   lock_screen_displayed_callback_ = callback;
 }
 
-void LockStateController::OnWindowTreeHostCloseRequested(
-                                                const aura::RootWindow*) {
+void LockStateController::OnHostCloseRequested(
+    const aura::WindowTreeHost* host) {
   Shell::GetInstance()->delegate()->Exit();
 }
 
@@ -629,6 +629,7 @@ void LockStateController::PostLockAnimationFinished() {
     lock_screen_displayed_callback_.Run();
     lock_screen_displayed_callback_.Reset();
   }
+  CHECK(!views::MenuController::GetActiveInstance());
   if (shutdown_after_lock_) {
     shutdown_after_lock_ = false;
     StartLockToShutdownTimer();

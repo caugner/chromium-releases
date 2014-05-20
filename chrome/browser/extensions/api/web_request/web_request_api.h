@@ -16,9 +16,9 @@
 #include "base/time/time.h"
 #include "chrome/browser/extensions/api/declarative/rules_registry_service.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/request_stage.h"
-#include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
 #include "chrome/browser/extensions/api/web_request/web_request_permissions.h"
+#include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/url_pattern_set.h"
@@ -59,22 +59,22 @@ class WebRequestRulesRegistry;
 // work is done by ExtensionWebRequestEventRouter below. This class observes
 // extension::EventRouter to deal with event listeners. There is one instance
 // per BrowserContext which is shared with incognito.
-class WebRequestAPI : public ProfileKeyedAPI,
+class WebRequestAPI : public BrowserContextKeyedAPI,
                       public EventRouter::Observer {
  public:
   explicit WebRequestAPI(content::BrowserContext* context);
   virtual ~WebRequestAPI();
 
-  // ProfileKeyedAPI support:
-  static ProfileKeyedAPIFactory<WebRequestAPI>* GetFactoryInstance();
+  // BrowserContextKeyedAPI support:
+  static BrowserContextKeyedAPIFactory<WebRequestAPI>* GetFactoryInstance();
 
   // EventRouter::Observer overrides:
   virtual void OnListenerRemoved(const EventListenerInfo& details) OVERRIDE;
 
  private:
-  friend class ProfileKeyedAPIFactory<WebRequestAPI>;
+  friend class BrowserContextKeyedAPIFactory<WebRequestAPI>;
 
-  // ProfileKeyedAPI support:
+  // BrowserContextKeyedAPI support:
   static const char* service_name() { return "WebRequestAPI"; }
   static const bool kServiceRedirectedInIncognito = true;
   static const bool kServiceIsNULLWhileTesting = true;
@@ -205,9 +205,9 @@ class ExtensionWebRequestEventRouter
   // requests only, and allows modification of incoming response headers.
   // Returns net::ERR_IO_PENDING if an extension is intercepting the request,
   // OK otherwise. |original_response_headers| is reference counted. |callback|
-  // and |override_response_headers| are owned by a URLRequestJob. They are
-  // guaranteed to be valid until |callback| is called or OnURLRequestDestroyed
-  // is called (whatever comes first).
+  // |override_response_headers| and |allowed_unsafe_redirect_url| are owned by
+  // a URLRequestJob. They are guaranteed to be valid until |callback| is called
+  // or OnURLRequestDestroyed is called (whatever comes first).
   // Do not modify |original_response_headers| directly but write new ones
   // into |override_response_headers|.
   int OnHeadersReceived(
@@ -216,7 +216,8 @@ class ExtensionWebRequestEventRouter
       net::URLRequest* request,
       const net::CompletionCallback& callback,
       const net::HttpResponseHeaders* original_response_headers,
-      scoped_refptr<net::HttpResponseHeaders>* override_response_headers);
+      scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
+      GURL* allowed_unsafe_redirect_url);
 
   // Dispatches the OnAuthRequired event to any extensions whose filters match
   // the given request. If the listener is not registered as "blocking", then
@@ -485,6 +486,17 @@ class WebRequestEventHandled : public SyncIOThreadExtensionFunction {
 
  protected:
   virtual ~WebRequestEventHandled() {}
+
+  // Unblocks the network request and sets |error_| such that the developer
+  // console will show the respective error message. Use this function to handle
+  // incorrect requests from the extension that cannot be detected by the schema
+  // validator.
+  void RespondWithError(
+      const std::string& event_name,
+      const std::string& sub_event_name,
+      uint64 request_id,
+      scoped_ptr<ExtensionWebRequestEventRouter::EventResponse> response,
+      const std::string& error);
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;

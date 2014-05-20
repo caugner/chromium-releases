@@ -4,12 +4,13 @@
 
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 
+#include <string>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/debug/trace_event.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
-#include "base/json/json_file_value_serializer.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/default_pref_store.h"
@@ -23,15 +24,13 @@
 #include "base/prefs/pref_value_store.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
-#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/pref_hash_filter.h"
-#include "chrome/browser/prefs/pref_hash_store.h"
-#include "chrome/browser/prefs/pref_hash_store_impl.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable_factory.h"
+#include "chrome/browser/prefs/profile_pref_store_manager.h"
 #include "chrome/browser/profiles/file_path_verifier_win.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -69,19 +68,11 @@ using content::BrowserThread;
 
 namespace {
 
-// The delay in seconds before actual work kicks in after calling
-// SchedulePrefHashStoresUpdateCheck can be set to 0 for tests.
-int g_pref_hash_store_update_check_delay_seconds = 55;
-
-// TODO(erikwright): Enable this on Android when race condition is sorted out.
-// TODO(erikwright): Enable this on Chrome OS once MACs are moved out of Local
-// State.
-const bool kCanUsePrefHashStoreOnPlatform =
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
-    false;
-#else
-    true;
-#endif
+// Whether we are in testing mode; can be enabled via
+// DisableDelaysAndDomainCheckForTesting(). Forces startup checks to occur
+// with no delay and ignores the presence of a domain when determining the
+// active SettingsEnforcement group.
+bool g_disable_delays_and_domain_check_for_testing = false;
 
 // These preferences must be kept in sync with the TrackedPreference enum in
 // tools/metrics/histograms/histograms.xml. To add a new preference, append it
@@ -167,25 +158,34 @@ const size_t kTrackedPrefsReportingIDsCount = 14;
 COMPILE_ASSERT(kTrackedPrefsReportingIDsCount >= arraysize(kTrackedPrefs),
                need_to_increment_ids_count);
 
+// Each group enforces a superset of the protection provided by the previous
+// one.
 enum SettingsEnforcementGroup {
   GROUP_NO_ENFORCEMENT,
   // Only enforce settings on profile loads; still allow seeding of unloaded
   // profiles.
   GROUP_ENFORCE_ON_LOAD,
-  GROUP_ENFORCE_ALWAYS
+  // Also disallow seeding of unloaded profiles.
+  GROUP_ENFORCE_ALWAYS,
+  // Also enforce extension settings.
+  GROUP_ENFORCE_ALWAYS_WITH_EXTENSIONS,
+  // The default enforcement group contains all protection features.
+  GROUP_ENFORCE_DEFAULT
 };
 
 SettingsEnforcementGroup GetSettingsEnforcementGroup() {
 # if defined(OS_WIN)
-  static bool first_call = true;
-  static const bool is_enrolled_to_domain = base::win::IsEnrolledToDomain();
-  if (first_call) {
-    UMA_HISTOGRAM_BOOLEAN("Settings.TrackedPreferencesNoEnforcementOnDomain",
-                          is_enrolled_to_domain);
-    first_call = false;
+  if (!g_disable_delays_and_domain_check_for_testing) {
+    static bool first_call = true;
+    static const bool is_enrolled_to_domain = base::win::IsEnrolledToDomain();
+    if (first_call) {
+      UMA_HISTOGRAM_BOOLEAN("Settings.TrackedPreferencesNoEnforcementOnDomain",
+                            is_enrolled_to_domain);
+      first_call = false;
+    }
+    if (is_enrolled_to_domain)
+      return GROUP_NO_ENFORCEMENT;
   }
-  if (is_enrolled_to_domain)
-    return GROUP_NO_ENFORCEMENT;
 #endif
 
   struct {
@@ -198,10 +198,22 @@ SettingsEnforcementGroup GetSettingsEnforcementGroup() {
       GROUP_ENFORCE_ON_LOAD },
     { chrome_prefs::internals::kSettingsEnforcementGroupEnforceAlways,
       GROUP_ENFORCE_ALWAYS },
+    { chrome_prefs::internals::
+          kSettingsEnforcementGroupEnforceAlwaysWithExtensions,
+      GROUP_ENFORCE_ALWAYS_WITH_EXTENSIONS },
   };
 
-  // TODO(gab): Switch the default to GROUP_ENFORCE_ALWAYS.
-  SettingsEnforcementGroup enforcement_group = GROUP_NO_ENFORCEMENT;
+  // Use the strongest enforcement setting in the absence of a field trial
+  // config on Windows. Remember to update the OFFICIAL_BUILD sections of
+  // pref_hash_browsertest.cc and extension_startup_browsertest.cc when updating
+  // the default value below.
+  // TODO(gab): Enforce this on all platforms.
+  SettingsEnforcementGroup enforcement_group =
+#if defined(OS_WIN)
+      GROUP_ENFORCE_DEFAULT;
+#else
+      GROUP_NO_ENFORCEMENT;
+#endif
   bool group_determined_from_trial = false;
   base::FieldTrial* trial =
       base::FieldTrialList::Find(
@@ -224,6 +236,38 @@ SettingsEnforcementGroup GetSettingsEnforcementGroup() {
                         group_determined_from_trial);
   return enforcement_group;
 }
+
+// Returns the effective preference tracking configuration.
+std::vector<PrefHashFilter::TrackedPreferenceMetadata>
+GetTrackingConfiguration() {
+  const SettingsEnforcementGroup enforcement_group =
+      GetSettingsEnforcementGroup();
+
+  std::vector<PrefHashFilter::TrackedPreferenceMetadata> result;
+  for (size_t i = 0; i < arraysize(kTrackedPrefs); ++i) {
+    PrefHashFilter::TrackedPreferenceMetadata data = kTrackedPrefs[i];
+
+    switch (enforcement_group) {
+      case GROUP_NO_ENFORCEMENT:
+        // Remove enforcement for all tracked preferences.
+        data.enforcement_level = PrefHashFilter::NO_ENFORCEMENT;
+        break;
+      case GROUP_ENFORCE_ON_LOAD:  // Falls through.
+      case GROUP_ENFORCE_ALWAYS:
+        // Keep the default enforcement level for this tracked preference.
+        break;
+      case GROUP_ENFORCE_ALWAYS_WITH_EXTENSIONS:  // Falls through.
+      case GROUP_ENFORCE_DEFAULT:
+        // Specifically enable extension settings enforcement.
+        if (data.name == extensions::pref_names::kExtensions)
+          data.enforcement_level = PrefHashFilter::ENFORCE_ON_LOAD;
+    }
+
+    result.push_back(data);
+  }
+  return result;
+}
+
 
 // Shows notifications which correspond to PersistentPrefStore's reading errors.
 void HandleReadError(PersistentPrefStore::PrefReadError error) {
@@ -257,24 +301,9 @@ void HandleReadError(PersistentPrefStore::PrefReadError error) {
   }
 }
 
-base::FilePath GetPrefFilePathFromProfilePath(
+scoped_ptr<ProfilePrefStoreManager> CreateProfilePrefStoreManager(
     const base::FilePath& profile_path) {
-  return profile_path.Append(chrome::kPreferencesFilename);
-}
-
-// Returns the PrefHashStoreImpl for the profile at |profile_path|; may be NULL
-// on some platforms.
-scoped_ptr<PrefHashStoreImpl> GetPrefHashStoreImpl(
-    const base::FilePath& profile_path) {
-  // TODO(erikwright): Remove this check and change this method's definition to
-  // never NULL once a pref hash store can be used on every platform.
-  if (!kCanUsePrefHashStoreOnPlatform)
-    return scoped_ptr<PrefHashStoreImpl>();
-
-  std::string seed = ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_PREF_HASH_SEED_BIN).as_string();
   std::string device_id;
-
 #if defined(OS_WIN) && defined(ENABLE_RLZ)
   // This is used by
   // chrome/browser/extensions/api/music_manager_private/device_id_win.cc
@@ -284,40 +313,22 @@ scoped_ptr<PrefHashStoreImpl> GetPrefHashStoreImpl(
   // ways to defer preference loading until the device ID can be used.
   rlz_lib::GetMachineId(&device_id);
 #endif
-
-  return make_scoped_ptr(new PrefHashStoreImpl(
-      profile_path.AsUTF8Unsafe(),
-      seed,
+  return make_scoped_ptr(new ProfilePrefStoreManager(
+      profile_path,
+      GetTrackingConfiguration(),
+      kTrackedPrefsReportingIDsCount,
+      ResourceBundle::GetSharedInstance()
+          .GetRawDataResource(IDR_PREF_HASH_SEED_BIN)
+          .as_string(),
       device_id,
       g_browser_process->local_state()));
 }
 
-void HandleResetEvent() {
-  g_browser_process->local_state()->SetInt64(
-      prefs::kProfilePreferenceResetTime,
-      base::Time::Now().ToInternalValue());
-}
-
-scoped_ptr<PrefHashFilter> CreatePrefHashFilter(
-    scoped_ptr<PrefHashStore> pref_hash_store) {
-  const PrefHashFilter::EnforcementLevel enforcement_level =
-      GetSettingsEnforcementGroup() == GROUP_NO_ENFORCEMENT ?
-          PrefHashFilter::NO_ENFORCEMENT : PrefHashFilter::ENFORCE_ON_LOAD;
-  return make_scoped_ptr(new PrefHashFilter(pref_hash_store.Pass(),
-                                            kTrackedPrefs,
-                                            arraysize(kTrackedPrefs),
-                                            kTrackedPrefsReportingIDsCount,
-                                            enforcement_level,
-                                            base::Bind(&HandleResetEvent)));
-}
-
-void PrepareBuilder(
+void PrepareFactory(
     PrefServiceSyncableFactory* factory,
-    const base::FilePath& pref_filename,
-    base::SequencedTaskRunner* pref_io_task_runner,
     policy::PolicyService* policy_service,
     ManagedUserSettingsService* managed_user_settings,
-    scoped_ptr<PrefHashStore> pref_hash_store,
+    scoped_refptr<PersistentPrefStore> user_pref_store,
     const scoped_refptr<PrefStore>& extension_prefs,
     bool async) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -347,134 +358,27 @@ void PrepareBuilder(
       make_scoped_refptr(
           new CommandLinePrefStore(CommandLine::ForCurrentProcess())));
   factory->set_read_error_callback(base::Bind(&HandleReadError));
-  scoped_ptr<PrefFilter> pref_filter;
-  if (pref_hash_store)
-    pref_filter = CreatePrefHashFilter(pref_hash_store.Pass());
-  factory->set_user_prefs(
-      new JsonPrefStore(
-          pref_filename,
-          pref_io_task_runner,
-          pref_filter.Pass()));
-}
-
-// An in-memory PrefStore backed by an immutable DictionaryValue.
-class DictionaryPrefStore : public PrefStore {
- public:
-  explicit DictionaryPrefStore(const base::DictionaryValue* dictionary)
-      : dictionary_(dictionary) {}
-
-  virtual bool GetValue(const std::string& key,
-                        const base::Value** result) const OVERRIDE {
-    const base::Value* tmp = NULL;
-    if (!dictionary_->Get(key, &tmp))
-      return false;
-
-    if (result)
-      *result = tmp;
-    return true;
-  }
-
- private:
-  virtual ~DictionaryPrefStore() {}
-
-  const base::DictionaryValue* dictionary_;
-
-  DISALLOW_COPY_AND_ASSIGN(DictionaryPrefStore);
-};
-
-// Waits for a PrefStore to be initialized and then initializes the
-// corresponding PrefHashStore.
-// The observer deletes itself when its work is completed.
-class InitializeHashStoreObserver : public PrefStore::Observer {
- public:
-  // Creates an observer that will initialize |pref_hash_store| with the
-  // contents of |pref_store| when the latter is fully loaded.
-  InitializeHashStoreObserver(
-      const scoped_refptr<PrefStore>& pref_store,
-      scoped_ptr<PrefHashStoreImpl> pref_hash_store_impl)
-      : pref_store_(pref_store),
-        pref_hash_store_impl_(pref_hash_store_impl.Pass()) {}
-
-  virtual ~InitializeHashStoreObserver();
-
-  // PrefStore::Observer implementation.
-  virtual void OnPrefValueChanged(const std::string& key) OVERRIDE;
-  virtual void OnInitializationCompleted(bool succeeded) OVERRIDE;
-
- private:
-  scoped_refptr<PrefStore> pref_store_;
-  scoped_ptr<PrefHashStoreImpl> pref_hash_store_impl_;
-
-  DISALLOW_COPY_AND_ASSIGN(InitializeHashStoreObserver);
-};
-
-InitializeHashStoreObserver::~InitializeHashStoreObserver() {}
-
-void InitializeHashStoreObserver::OnPrefValueChanged(const std::string& key) {}
-
-void InitializeHashStoreObserver::OnInitializationCompleted(bool succeeded) {
-  // If we successfully loaded the preferences _and_ the PrefHashStoreImpl
-  // hasn't been initialized by someone else in the meantime, initialize it now.
-  const PrefHashStoreImpl::StoreVersion pre_update_version =
-      pref_hash_store_impl_->GetCurrentVersion();
-  if (succeeded && pre_update_version < PrefHashStoreImpl::VERSION_LATEST) {
-    CreatePrefHashFilter(pref_hash_store_impl_.PassAs<PrefHashStore>())->
-        Initialize(*pref_store_);
-    UMA_HISTOGRAM_ENUMERATION(
-        "Settings.TrackedPreferencesAlternateStoreVersionUpdatedFrom",
-        pre_update_version,
-        PrefHashStoreImpl::VERSION_LATEST + 1);
-  }
-  pref_store_->RemoveObserver(this);
-  delete this;
-}
-
-// Initializes/updates the PrefHashStore for the profile preferences file under
-// |profile_path| without actually loading that profile. Also reports the
-// version of that PrefHashStore via UMA, whether it proceeds with initializing
-// it or not. This should only be called if |kCanUsePrefHashStoreOnPlatform|.
-void UpdatePrefHashStoreIfRequired(
-    const base::FilePath& profile_path) {
-  scoped_ptr<PrefHashStoreImpl> pref_hash_store_impl(
-      GetPrefHashStoreImpl(profile_path));
-  DCHECK(pref_hash_store_impl);
-
-  const PrefHashStoreImpl::StoreVersion current_version =
-      pref_hash_store_impl->GetCurrentVersion();
-  UMA_HISTOGRAM_ENUMERATION("Settings.TrackedPreferencesAlternateStoreVersion",
-                            current_version,
-                            PrefHashStoreImpl::VERSION_LATEST + 1);
-
-  // Update the pref hash store if it's not at the latest version and the
-  // SettingsEnforcement group allows seeding of unloaded profiles.
-  if (current_version != PrefHashStoreImpl::VERSION_LATEST &&
-      GetSettingsEnforcementGroup() < GROUP_ENFORCE_ALWAYS) {
-    const base::FilePath pref_file(
-        GetPrefFilePathFromProfilePath(profile_path));
-    scoped_refptr<JsonPrefStore> pref_store(
-        new JsonPrefStore(pref_file,
-                          JsonPrefStore::GetTaskRunnerForFile(
-                              pref_file, BrowserThread::GetBlockingPool()),
-                          scoped_ptr<PrefFilter>()));
-    pref_store->AddObserver(
-        new InitializeHashStoreObserver(pref_store,
-                                        pref_hash_store_impl.Pass()));
-    pref_store->ReadPrefsAsync(NULL);
-  }
+  factory->set_user_prefs(user_pref_store);
 }
 
 // Initialize/update preference hash stores for all profiles but the one whose
 // path matches |ignored_profile_path|.
 void UpdateAllPrefHashStoresIfRequired(
     const base::FilePath& ignored_profile_path) {
+  if (GetSettingsEnforcementGroup() >= GROUP_ENFORCE_ALWAYS)
+    return;
   const ProfileInfoCache& profile_info_cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   const size_t n_profiles = profile_info_cache.GetNumberOfProfiles();
   for (size_t i = 0; i < n_profiles; ++i) {
     const base::FilePath profile_path =
         profile_info_cache.GetPathOfProfileAtIndex(i);
-    if (profile_path != ignored_profile_path)
-      UpdatePrefHashStoreIfRequired(profile_path);
+    if (profile_path != ignored_profile_path) {
+      CreateProfilePrefStoreManager(profile_path)
+          ->UpdateProfileHashStoreIfRequired(
+              JsonPrefStore::GetTaskRunnerForFile(
+                  profile_path, BrowserThread::GetBlockingPool()));
+    }
   }
 }
 
@@ -488,6 +392,8 @@ const char kSettingsEnforcementTrialName[] = "SettingsEnforcement";
 const char kSettingsEnforcementGroupNoEnforcement[] = "no_enforcement";
 const char kSettingsEnforcementGroupEnforceOnload[] = "enforce_on_load";
 const char kSettingsEnforcementGroupEnforceAlways[] = "enforce_always";
+const char kSettingsEnforcementGroupEnforceAlwaysWithExtensions[] =
+    "enforce_always_with_extensions";
 
 }  // namespace internals
 
@@ -498,14 +404,14 @@ scoped_ptr<PrefService> CreateLocalState(
     const scoped_refptr<PrefRegistry>& pref_registry,
     bool async) {
   PrefServiceSyncableFactory factory;
-  PrepareBuilder(&factory,
-                 pref_filename,
-                 pref_io_task_runner,
-                 policy_service,
-                 NULL,
-                 scoped_ptr<PrefHashStore>(),
-                 NULL,
-                 async);
+  PrepareFactory(
+      &factory,
+      policy_service,
+      NULL,  // managed_user_settings
+      new JsonPrefStore(
+          pref_filename, pref_io_task_runner, scoped_ptr<PrefFilter>()),
+      NULL,  // extension_prefs
+      async);
   return factory.Create(pref_registry.get());
 }
 
@@ -519,12 +425,12 @@ scoped_ptr<PrefServiceSyncable> CreateProfilePrefs(
     bool async) {
   TRACE_EVENT0("browser", "chrome_prefs::CreateProfilePrefs");
   PrefServiceSyncableFactory factory;
-  PrepareBuilder(&factory,
-                 GetPrefFilePathFromProfilePath(profile_path),
-                 pref_io_task_runner,
+  PrepareFactory(&factory,
                  policy_service,
                  managed_user_settings,
-                 GetPrefHashStoreImpl(profile_path).PassAs<PrefHashStore>(),
+                 scoped_refptr<PersistentPrefStore>(
+                     CreateProfilePrefStoreManager(profile_path)
+                         ->CreateProfilePrefStore(pref_io_task_runner)),
                  extension_prefs,
                  async);
   return factory.CreateSyncable(pref_registry.get());
@@ -535,70 +441,64 @@ void SchedulePrefsFilePathVerification(const base::FilePath& profile_path) {
   // Only do prefs file verification on Windows.
   const int kVerifyPrefsFileDelaySeconds = 60;
   BrowserThread::GetBlockingPool()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&VerifyPreferencesFile,
-                   GetPrefFilePathFromProfilePath(profile_path)),
-        base::TimeDelta::FromSeconds(kVerifyPrefsFileDelaySeconds));
+      FROM_HERE,
+      base::Bind(&VerifyPreferencesFile,
+                 ProfilePrefStoreManager::GetPrefFilePathFromProfilePath(
+                     profile_path)),
+      base::TimeDelta::FromSeconds(g_disable_delays_and_domain_check_for_testing
+                                       ? 0
+                                       : kVerifyPrefsFileDelaySeconds));
 #endif
 }
 
-void EnableZeroDelayPrefHashStoreUpdateForTesting() {
-  g_pref_hash_store_update_check_delay_seconds = 0;
+void DisableDelaysAndDomainCheckForTesting() {
+  g_disable_delays_and_domain_check_for_testing = true;
 }
 
 void SchedulePrefHashStoresUpdateCheck(
     const base::FilePath& initial_profile_path) {
-  if (!kCanUsePrefHashStoreOnPlatform) {
-    PrefHashStoreImpl::ResetAllPrefHashStores(g_browser_process->local_state());
+  if (!ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking) {
+    ProfilePrefStoreManager::ResetAllPrefHashStores(
+        g_browser_process->local_state());
     return;
   }
 
+  const int kDefaultPrefHashStoresUpdateCheckDelaySeconds = 55;
   BrowserThread::PostDelayedTask(
         BrowserThread::UI,
         FROM_HERE,
         base::Bind(&UpdateAllPrefHashStoresIfRequired,
                    initial_profile_path),
         base::TimeDelta::FromSeconds(
-            g_pref_hash_store_update_check_delay_seconds));
+            g_disable_delays_and_domain_check_for_testing ?
+                0 : kDefaultPrefHashStoresUpdateCheckDelaySeconds));
 }
 
 void ResetPrefHashStore(const base::FilePath& profile_path) {
-  GetPrefHashStoreImpl(profile_path)->Reset();
+  CreateProfilePrefStoreManager(profile_path)->ResetPrefHashStore();
 }
 
 bool InitializePrefsFromMasterPrefs(
     const base::FilePath& profile_path,
     const base::DictionaryValue& master_prefs) {
-  // Create the profile directory if it doesn't exist yet (very possible on
-  // first run).
-  if (!base::CreateDirectory(profile_path))
-    return false;
+  return CreateProfilePrefStoreManager(profile_path)
+      ->InitializePrefsFromMasterPrefs(master_prefs);
+}
 
-  JSONFileValueSerializer serializer(
-      GetPrefFilePathFromProfilePath(profile_path));
+base::Time GetResetTime(Profile* profile) {
+  return ProfilePrefStoreManager::GetResetTime(profile->GetPrefs());
+}
 
-  // Call Serialize (which does IO) on the main thread, which would _normally_
-  // be verboten. In this case however, we require this IO to synchronously
-  // complete before Chrome can start (as master preferences seed the Local
-  // State and Preferences files). This won't trip ThreadIORestrictions as they
-  // won't have kicked in yet on the main thread.
-  bool success = serializer.Serialize(master_prefs);
+void ClearResetTime(Profile* profile) {
+  ProfilePrefStoreManager::ClearResetTime(profile->GetPrefs());
+}
 
-  if (success) {
-    scoped_refptr<const PrefStore> pref_store(
-        new DictionaryPrefStore(&master_prefs));
-    CreatePrefHashFilter(
-        GetPrefHashStoreImpl(profile_path).PassAs<PrefHashStore>())->
-            Initialize(*pref_store);
-  }
-
-  UMA_HISTOGRAM_BOOLEAN("Settings.InitializedFromMasterPrefs", success);
-  return success;
+void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
+  ProfilePrefStoreManager::RegisterProfilePrefs(registry);
 }
 
 void RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterInt64Pref(prefs::kProfilePreferenceResetTime, 0L);
-  PrefHashStoreImpl::RegisterPrefs(registry);
+  ProfilePrefStoreManager::RegisterPrefs(registry);
 }
 
 }  // namespace chrome_prefs

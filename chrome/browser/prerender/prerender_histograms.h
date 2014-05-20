@@ -65,6 +65,11 @@ class PrerenderHistograms {
   void RecordTimeUntilUsed(Origin origin,
                            base::TimeDelta time_until_used) const;
 
+  // Records the time from when a prerender is abandoned to when the user
+  // navigates to it. This must be called on the UI thread.
+  void RecordAbandonTimeUntilUsed(Origin origin,
+                                  base::TimeDelta time_until_used) const;
+
   // Record a PerSessionCount data point.
   void RecordPerSessionCount(Origin origin, int count) const;
 
@@ -104,6 +109,12 @@ class PrerenderHistograms {
   void RecordCookieStatus(Origin origin,
                           uint8 experiment_id,
                           int cookie_status) const;
+
+  // Record a prerender cookie send type. Must be in the range
+  // [0, PrerenderContents::kNumCookieSendTypes).
+  void RecordCookieSendType(Origin origin,
+                            uint8 experiment_id,
+                            int cookie_send_type) const;
 
   void RecordPrerenderPageVisitedStatus(Origin origin,
                                         uint8 experiment_id,

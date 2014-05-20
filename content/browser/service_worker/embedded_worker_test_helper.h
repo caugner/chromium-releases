@@ -21,21 +21,21 @@ namespace content {
 class EmbeddedWorkerRegistry;
 class EmbeddedWorkerTestHelper;
 class ServiceWorkerContextCore;
+struct ServiceWorkerFetchRequest;
 
 // In-Process EmbeddedWorker test helper.
 //
-// Create an instance of this class for a ServiceWorkerContextCore,
-// set up process association by calling Simulate{Add,Remove}Process
-// and test to interact with an embedded worker without creating
-// a child process.
+// Usage: create an instance of this class for a ServiceWorkerContextCore
+// to test browser-side embedded worker code without creating a child process.
 //
 // By default this class just notifies back WorkerStarted and WorkerStopped
-// for StartWorker and StopWorker requests, and ignores any messages sent
-// to the worker.
+// for StartWorker and StopWorker requests. The default implementation
+// also returns success for event messages (e.g. InstallEvent, FetchEvent).
 //
 // Alternatively consumers can subclass this helper and override
-// OnStartWorker(), OnStopWorker() and OnSendMessageToWorker() to add
-// their own logic/verification code.
+// OnStartWorker(), OnStopWorker(), OnSendMessageToWorker(),
+// OnInstallEvent(), OnFetchEvent() etc to add their own
+// logic/verification code.
 //
 // See embedded_worker_instance_unittest.cc for example usages.
 //
@@ -58,7 +58,10 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
+  // IPC sink for EmbeddedWorker messages.
   IPC::TestSink* ipc_sink() { return &sink_; }
+  // Inner IPC sink for script context messages sent via EmbeddedWorker.
+  IPC::TestSink* inner_ipc_sink() { return &inner_sink_; }
 
  protected:
   // Called when StartWorker, StopWorker and SendMessageToWorker message
@@ -66,15 +69,26 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   // they verify given parameters and:
   // - call SimulateWorkerStarted for OnStartWorker
   // - call SimulateWorkerStoped for OnStopWorker
-  // - do nothing for OnSendMessageToWorker
+  // - call OnFooEvent handlers for known events for OnSendMessageToWorker
   virtual void OnStartWorker(int embedded_worker_id,
                              int64 service_worker_version_id,
                              const GURL& script_url);
   virtual void OnStopWorker(int embedded_worker_id);
-  virtual void OnSendMessageToWorker(int thread_id,
+  virtual bool OnSendMessageToWorker(int thread_id,
                                      int embedded_worker_id,
                                      int request_id,
                                      const IPC::Message& message);
+
+  // Called when InstallEvent, FetchEvent message is sent to the embedded
+  // worker. These are called via OnSendMessageToWorker()'s default
+  // implementation. By default they just return success via
+  // SimulateSendMessageToBrowser.
+  virtual void OnInstallEvent(int embedded_worker_id,
+                              int request_id,
+                              int active_version_embedded_worker_id);
+  virtual void OnFetchEvent(int embedded_worker_id,
+                            int request_id,
+                            const ServiceWorkerFetchRequest& request);
 
   // Call this to simulate sending WorkerStarted, WorkerStopped and
   // SendMessageToBrowser to the browser.
@@ -93,13 +107,22 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
                                  int embedded_worker_id,
                                  int request_id,
                                  const IPC::Message& message);
+  void OnInstallEventStub(int active_version_embedded_worker_id);
+  void OnFetchEventStub(const ServiceWorkerFetchRequest& request);
 
   EmbeddedWorkerRegistry* registry();
 
   base::WeakPtr<ServiceWorkerContextCore> context_;
+
   IPC::TestSink sink_;
+  IPC::TestSink inner_sink_;
+
   int next_thread_id_;
-  std::vector<IPC::Message> messages_;
+
+  // Updated each time SendMessageToWorker message is received.
+  int current_embedded_worker_id_;
+  int current_request_id_;
+
   base::WeakPtrFactory<EmbeddedWorkerTestHelper> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(EmbeddedWorkerTestHelper);

@@ -189,10 +189,6 @@ class ExperimentURLRequestContext : public net::URLRequestContext {
     }
 
     net::DhcpProxyScriptFetcherFactory dhcp_factory;
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kDisableDhcpWpad)) {
-      dhcp_factory.set_enabled(false);
-    }
 
 #if defined(OS_IOS)
     experiment_proxy_service->reset(
@@ -412,7 +408,7 @@ void ConnectionTester::TestRunner::ProxyConfigServiceCreated(
   }
   // Fetch a request using the experimental context.
   request_ = request_context_->CreateRequest(
-      experiment.url, net::DEFAULT_PRIORITY, this);
+      experiment.url, net::DEFAULT_PRIORITY, this, NULL);
   request_->Start();
 }
 

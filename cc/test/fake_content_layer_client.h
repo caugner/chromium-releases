@@ -31,6 +31,7 @@ class FakeContentLayerClient : public ContentLayerClient {
                              const gfx::Rect& rect,
                              gfx::RectF* opaque_rect) OVERRIDE;
   virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
+  virtual bool FillsBoundsCompletely() const OVERRIDE;
 
   void set_paint_all_opaque(bool opaque) { paint_all_opaque_ = opaque; }
 
@@ -39,7 +40,7 @@ class FakeContentLayerClient : public ContentLayerClient {
   }
 
   void add_draw_bitmap(const SkBitmap& bitmap,
-                       gfx::Point point,
+                       const gfx::Point& point,
                        const SkPaint& paint) {
     BitmapData data;
     data.bitmap = bitmap;

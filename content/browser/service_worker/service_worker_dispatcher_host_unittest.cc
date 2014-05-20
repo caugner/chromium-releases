@@ -56,7 +56,7 @@ class TestingServiceWorkerDispatcherHost : public ServiceWorkerDispatcherHost {
       int process_id,
       ServiceWorkerContextWrapper* context_wrapper,
       EmbeddedWorkerTestHelper* helper)
-      : ServiceWorkerDispatcherHost(process_id),
+      : ServiceWorkerDispatcherHost(process_id, NULL),
         bad_messages_received_count_(0),
         helper_(helper) {
     Init(context_wrapper);
@@ -99,7 +99,12 @@ TEST_F(ServiceWorkerDispatcherHostTest, DisabledCausesError) {
       ServiceWorkerMsg_ServiceWorkerRegistrationError::ID));
 }
 
-TEST_F(ServiceWorkerDispatcherHostTest, Enabled) {
+// Disable this since now we cache command-line switch in
+// ServiceWorkerUtils::IsFeatureEnabled() and this could be flaky depending
+// on testing order. (crbug.com/352581)
+// TODO(kinuko): Just remove DisabledCausesError test above and enable
+// this test when we remove the --enable-service-worker flag.
+TEST_F(ServiceWorkerDispatcherHostTest, DISABLED_Enabled) {
   DCHECK(!CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kEnableServiceWorker));
   CommandLine::ForCurrentProcess()->AppendSwitch(

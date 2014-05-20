@@ -52,6 +52,112 @@ TEST_F('GoogleNowBackgroundUnitTest', 'AreTasksConflicting', function() {
 });
 
 /**
+ * Server Request Tests
+ */
+TEST_F('GoogleNowBackgroundUnitTest', 'AuthServerRequestSuccess', function() {
+  expectServerRequests(this, 200, '{}');
+  var callbackCalled = false;
+  requestFromServer('GET', 'test/target').then(function(request) {
+    callbackCalled = true;
+    assertTrue(request.status === 200);
+    assertTrue(request.responseText === '{}');
+  });
+  assertTrue(callbackCalled);
+});
+
+TEST_F('GoogleNowBackgroundUnitTest', 'AuthServerRequestForbidden', function() {
+  this.makeAndRegisterMockApis(['authenticationManager.removeToken']);
+  this.mockApis.expects(once()).authenticationManager_removeToken(ANYTHING);
+
+  expectServerRequests(this, 403, '');
+
+  var callbackCalled = false;
+  requestFromServer('GET', 'test/target').then(function(request) {
+    // The promise is resolved even on HTTP failures.
+    callbackCalled = true;
+    assertTrue(request.status === 403);
+  });
+  assertTrue(callbackCalled);
+});
+
+TEST_F('GoogleNowBackgroundUnitTest', 'AuthServerRequestNoAuth', function() {
+  this.makeAndRegisterMockApis(['authenticationManager.removeToken']);
+  this.mockApis.expects(once()).authenticationManager_removeToken(ANYTHING);
+
+  expectServerRequests(this, 401, '');
+
+  var callbackCalled = false;
+  requestFromServer('GET', 'test/target').then(function(request) {
+    // The promise is resolved even on HTTP failures.
+    callbackCalled = true;
+    assertTrue(request.status === 401);
+  });
+  assertTrue(callbackCalled);
+});
+
+function expectServerRequests(fixture, httpStatus, responseText) {
+  fixture.makeAndRegisterMockApis([
+    'authenticationManager.getAuthToken',
+    'buildServerRequest'
+  ]);
+
+  function XMLHttpRequest() {}
+
+  XMLHttpRequest.prototype = {
+    addEventListener: function(type, listener, wantsUntrusted) {},
+    setRequestHeader: function(header, value) {},
+    send: function() {}
+  }
+
+  fixture.mockApis.expects(once()).authenticationManager_getAuthToken()
+      .will(returnValue(Promise.resolve('token')));
+
+  var mockXMLHttpRequest = mock(XMLHttpRequest);
+  var mockXMLHttpRequestProxy = mockXMLHttpRequest.proxy();
+  fixture.mockApis.expects(once())
+      .buildServerRequest(ANYTHING, ANYTHING, ANYTHING)
+      .will(returnValue(mockXMLHttpRequestProxy));
+
+  mockXMLHttpRequest.expects(once())
+      .setRequestHeader('Authorization', 'Bearer token');
+
+  var loadEndSavedArgs = new SaveMockArguments();
+  mockXMLHttpRequest.expects(once())
+      .addEventListener(
+          loadEndSavedArgs.match(eq('loadend')),
+          loadEndSavedArgs.match(ANYTHING),
+          loadEndSavedArgs.match(eq(false)));
+
+  mockXMLHttpRequestProxy.status = httpStatus;
+  mockXMLHttpRequestProxy.response = responseText;
+  mockXMLHttpRequestProxy.responseText = responseText;
+
+  mockXMLHttpRequest.expects(once()).send()
+      .will(invokeCallback(loadEndSavedArgs, 1, mockXMLHttpRequestProxy));
+}
+
+TEST_F('GoogleNowBackgroundUnitTest', 'AuthServerRequestNoToken', function() {
+  this.makeAndRegisterMockApis([
+    'authenticationManager.getAuthToken',
+    'buildServerRequest'
+  ]);
+
+  this.mockApis.expects(once()).authenticationManager_getAuthToken()
+      .will(returnValue(Promise.reject()));
+  this.mockApis.expects(never()).buildServerRequest()
+
+  var thenCalled = false;
+  var catchCalled = false;
+  requestFromServer('GET', 'test/target').then(function(request) {
+    thenCalled = true;
+  }).catch(function() {
+    catchCalled = true;
+  });
+  assertFalse(thenCalled);
+  assertTrue(catchCalled);
+})
+
+/**
  * Mocks global functions and APIs that initialize() depends upon.
  * @param {Test} fixture Test fixture.
  */
@@ -63,13 +169,12 @@ function mockInitializeDependencies(fixture) {
   ]);
   fixture.makeAndRegisterMockApis([
     'authenticationManager.isSignedIn',
-    'chrome.location.clearWatch',
     'chrome.storage.local.remove',
+    'fillFromChromeLocalStorage',
     'instrumented.metricsPrivate.getVariationParams',
     'instrumented.notifications.getAll',
     'instrumented.notifications.getPermissionLevel',
-    'instrumented.preferencesPrivate.googleGeolocationAccessEnabled.get',
-    'instrumented.storage.local.get',
+    'instrumented.webstorePrivate.getBrowserLogin',
     'tasks.add',
     'updateCardsAttempts.isRunning',
     'updateCardsAttempts.stop'
@@ -84,7 +189,6 @@ function mockInitializeDependencies(fixture) {
  * expects() calls cannot be chained with the same argument matchers.
  * @param {object} fixture Test fixture.
  * @param {string} testIdentityToken getAuthToken callback token.
- * @param {boolean} testGeolocationPref Geolocation Preference callback value.
  * @param {object} testExperimentVariationParams Response of
  *     metricsPrivate.getVariationParams.
  * @param {string} testExperimentVariationParams Response of
@@ -95,18 +199,14 @@ function mockInitializeDependencies(fixture) {
 function expectStateMachineCalls(
     fixture,
     testIdentityToken,
-    testGeolocationPref,
     testExperimentVariationParams,
     testNotificationPermissionLevel,
     testGoogleNowEnabled) {
-  var authenticationManagerIsSignedInSavedArgs = new SaveMockArguments();
   fixture.mockApis.expects(once()).
-      authenticationManager_isSignedIn(
-          authenticationManagerIsSignedInSavedArgs.match(ANYTHING)).
-      will(invokeCallback(
-          authenticationManagerIsSignedInSavedArgs,
-          0,
-          testIdentityToken));
+      authenticationManager_isSignedIn().
+      will(returnValue(new Promise(function(resolve) {
+        resolve(!!testIdentityToken);
+      })));
 
   var getVariationParamsSavedArgs = new SaveMockArguments();
   fixture.mockApis.expects(once()).
@@ -115,14 +215,6 @@ function expectStateMachineCalls(
           getVariationParamsSavedArgs.match(ANYTHING)).
       will(invokeCallback(
           getVariationParamsSavedArgs, 1, testExperimentVariationParams));
-
-  var googleGeolocationPrefGetSavedArgs = new SaveMockArguments();
-  fixture.mockApis.expects(once()).
-      instrumented_preferencesPrivate_googleGeolocationAccessEnabled_get(
-          googleGeolocationPrefGetSavedArgs.match(eqJSON({})),
-          googleGeolocationPrefGetSavedArgs.match(ANYTHING)).
-      will(invokeCallback(
-          googleGeolocationPrefGetSavedArgs, 1, {value: testGeolocationPref}));
 
   var notificationGetPermissionLevelSavedArgs = new SaveMockArguments();
   fixture.mockApis.expects(once()).
@@ -133,13 +225,10 @@ function expectStateMachineCalls(
           0,
           testNotificationPermissionLevel))
 
-   var storageGetSavedArgs = new SaveMockArguments();	 
-   fixture.mockApis.expects(once()).	 
-       instrumented_storage_local_get(	 
-           storageGetSavedArgs.match(eq('googleNowEnabled')),	 
-           storageGetSavedArgs.match(ANYTHING)).	 
-       will(invokeCallback(
-          storageGetSavedArgs, 1, {googleNowEnabled: testGoogleNowEnabled}));	 
+  expectChromeLocalStorageGet(
+      fixture,
+      {googleNowEnabled: false},
+      {googleNowEnabled: testGoogleNowEnabled});
 
   fixture.mockGlobals.expects(once()).
       setBackgroundEnable(ANYTHING);
@@ -178,7 +267,6 @@ TEST_F(
 
       // Setup and expectations.
       var testIdentityToken = undefined;
-      var testGeolocationPref = false;
       var testExperimentVariationParams = {};
       var testNotificationPermissionLevel = 'denied';
       var testGoogleNowEnabled = undefined;
@@ -191,57 +279,17 @@ TEST_F(
       this.mockGlobals.expects(once()).recordEvent(
           GoogleNowEvent.STOPPED);
 
-      expectInitialization(this.mockApis);
-
-      expectStateMachineCalls(
-          this,
-          testIdentityToken,
-          testGeolocationPref,
-          testExperimentVariationParams,
-          testNotificationPermissionLevel,
-          testGoogleNowEnabled);
-
-      // Invoking the tested function.
-      initialize();
-    });
-
-TEST_F(
-    'GoogleNowBackgroundUnitTest',
-    'DISABLED_Initialize_ToastStateEmpty2',
-    function() {
-      // Tests the case when getAuthToken succeeds, and the user has never
-      // responded to the toast.
-      // In this case, the function should invoke showWelcomeToast().
-
-      // Setup and expectations.
-      var testIdentityToken = 'some identity token';
-      var testGeolocationPref = false;
-      var testExperimentVariationParams = {};
-      var testNotificationPermissionLevel = 'denied';
-      var testGoogleNowEnabled = undefined;
-
-      mockInitializeDependencies(this);
-
       this.mockGlobals.expects(once()).recordEvent(
-          GoogleNowEvent.EXTENSION_START);
+          GoogleNowEvent.SIGNED_OUT);
 
       expectInitialization(this.mockApis);
 
       expectStateMachineCalls(
           this,
           testIdentityToken,
-          testGeolocationPref,
           testExperimentVariationParams,
           testNotificationPermissionLevel,
           testGoogleNowEnabled);
-
-      var chromeNotificationGetAllSavedArgs = new SaveMockArguments();
-      this.mockApis.expects(exactly(1)).
-          instrumented_notifications_getAll(
-              chromeNotificationGetAllSavedArgs.match(ANYTHING)).
-          will(
-              invokeCallback(chromeNotificationGetAllSavedArgs, 0, {}),
-              invokeCallback(chromeNotificationGetAllSavedArgs, 0, {}));
 
       // Invoking the tested function.
       initialize();
@@ -253,7 +301,6 @@ TEST_F('GoogleNowBackgroundUnitTest', 'Initialize_RunGoogleNow', function() {
 
   // Setup and expectations.
   var testIdentityToken = 'some identity token';
-  var testGeolocationPref = true;
   var testExperimentVariationParams = {};
   var testNotificationPermissionLevel = 'granted';
   var testGoogleNowEnabled = true;
@@ -268,7 +315,6 @@ TEST_F('GoogleNowBackgroundUnitTest', 'Initialize_RunGoogleNow', function() {
   expectStateMachineCalls(
       this,
       testIdentityToken,
-      testGeolocationPref,
       testExperimentVariationParams,
       testNotificationPermissionLevel,
       testGoogleNowEnabled);
@@ -279,50 +325,102 @@ TEST_F('GoogleNowBackgroundUnitTest', 'Initialize_RunGoogleNow', function() {
   initialize();
 });
 
+/**
+ * No Cards Event Recording Tests
+ */
+TEST_F('GoogleNowBackgroundUnitTest', 'NoCardsSignedOut', function() {
+  var signedIn = false;
+  var notificationEnabled = false;
+  var googleNowEnabled = false;
+  this.makeAndRegisterMockGlobals([
+      'recordEvent',
+      'setBackgroundEnable',
+      'setShouldPollCards']);
+
+  this.mockGlobals.stubs().setBackgroundEnable(ANYTHING);
+  this.mockGlobals.stubs().setShouldPollCards(ANYTHING);
+
+  this.mockGlobals.expects(once()).recordEvent(
+      GoogleNowEvent.STOPPED);
+  this.mockGlobals.expects(once()).recordEvent(
+      GoogleNowEvent.SIGNED_OUT);
+  this.mockGlobals.expects(never()).recordEvent(
+      GoogleNowEvent.NOTIFICATION_DISABLED);
+  this.mockGlobals.expects(never()).recordEvent(
+      GoogleNowEvent.GOOGLE_NOW_DISABLED);
+  updateRunningState(signedIn, true, notificationEnabled, googleNowEnabled);
+});
+
 TEST_F(
     'GoogleNowBackgroundUnitTest',
-    'DISABLED_Initialize_NoGeolocation',
+    'NoCardsNotificationsDisabled',
     function() {
-  // Tests the case where everything is in place except for the
-  // Geolocation Preference after the user responded to the toast.
+      var signedIn = true;
+      var notificationEnabled = false;
+      var googleNowEnabled = false;
+      this.makeAndRegisterMockGlobals([
+          'recordEvent',
+          'setBackgroundEnable',
+          'setShouldPollCards']);
 
-  // Setup and expectations.
-  var testIdentityToken = 'some identity token';
-  var testGeolocationPref = false;
-  var testExperimentVariationParams = {};
-  var testNotificationPermissionLevel = 'denied';
-  var testGoogleNowEnabled = undefined;
+      this.mockGlobals.stubs().setBackgroundEnable(ANYTHING);
+      this.mockGlobals.stubs().setShouldPollCards(ANYTHING);
 
+      this.mockGlobals.expects(once()).recordEvent(
+          GoogleNowEvent.STOPPED);
+      this.mockGlobals.expects(never()).recordEvent(
+          GoogleNowEvent.SIGNED_OUT);
+      this.mockGlobals.expects(once()).recordEvent(
+          GoogleNowEvent.NOTIFICATION_DISABLED);
+      this.mockGlobals.expects(never()).recordEvent(
+          GoogleNowEvent.GOOGLE_NOW_DISABLED);
+      updateRunningState(signedIn, true, notificationEnabled, googleNowEnabled);
+    });
 
-  mockInitializeDependencies(this);
+TEST_F('GoogleNowBackgroundUnitTest', 'NoCardsGoogleNowDisabled', function() {
+  var signedIn = true;
+  var notificationEnabled = true;
+  var googleNowEnabled = false;
+  this.makeAndRegisterMockGlobals([
+      'recordEvent',
+      'setBackgroundEnable',
+      'setShouldPollCards']);
 
+  this.mockGlobals.stubs().setBackgroundEnable(ANYTHING);
+  this.mockGlobals.stubs().setShouldPollCards(ANYTHING);
+
+  this.mockGlobals.expects(never()).recordEvent(
+      GoogleNowEvent.STOPPED);
+  this.mockGlobals.expects(never()).recordEvent(
+      GoogleNowEvent.SIGNED_OUT);
+  this.mockGlobals.expects(never()).recordEvent(
+      GoogleNowEvent.NOTIFICATION_DISABLED);
   this.mockGlobals.expects(once()).recordEvent(
-        GoogleNowEvent.EXTENSION_START);
+      GoogleNowEvent.GOOGLE_NOW_DISABLED);
+  updateRunningState(signedIn, true, notificationEnabled, googleNowEnabled);
+});
 
-  this.mockGlobals.expects(once()).recordEvent(
-      GoogleNowEvent.USER_SUPPRESSED);
+TEST_F('GoogleNowBackgroundUnitTest', 'NoCardsEverythingEnabled', function() {
+  var signedIn = true;
+  var notificationEnabled = true;
+  var googleNowEnabled = true;
+  this.makeAndRegisterMockGlobals([
+      'recordEvent',
+      'setBackgroundEnable',
+      'setShouldPollCards']);
 
-  expectInitialization(this.mockApis);
+  this.mockGlobals.stubs().setBackgroundEnable(ANYTHING);
+  this.mockGlobals.stubs().setShouldPollCards(ANYTHING);
 
-  expectStateMachineCalls(
-      this,
-      testIdentityToken,
-      testGeolocationPref,
-      testExperimentVariationParams,
-      testNotificationPermissionLevel,
-      testNotificationPermissionLevel,
-      testGoogleNowEnabled);
-
-  var chromeNotificationGetAllSavedArgs = new SaveMockArguments();
-  this.mockApis.expects(exactly(2)).
-      instrumented_notifications_getAll(
-          chromeNotificationGetAllSavedArgs.match(ANYTHING)).
-      will(
-          invokeCallback(chromeNotificationGetAllSavedArgs, 0, {}),
-          invokeCallback(chromeNotificationGetAllSavedArgs, 0, {}));
-
-  // Invoking the tested function.
-  initialize();
+  this.mockGlobals.expects(never()).recordEvent(
+      GoogleNowEvent.STOPPED);
+  this.mockGlobals.expects(never()).recordEvent(
+      GoogleNowEvent.SIGNED_OUT);
+  this.mockGlobals.expects(never()).recordEvent(
+      GoogleNowEvent.NOTIFICATION_DISABLED);
+  this.mockGlobals.expects(never()).recordEvent(
+      GoogleNowEvent.GOOGLE_NOW_DISABLED);
+  updateRunningState(signedIn, true, notificationEnabled, googleNowEnabled);
 });
 
 /**
@@ -333,7 +431,7 @@ function mockOnNotificationClickedDependencies(fixture) {
   fixture.makeAndRegisterMockApis([
       'chrome.windows.create',
       'chrome.windows.update',
-      'instrumented.storage.local.get',
+      'fillFromChromeLocalStorage',
       'instrumented.tabs.create']);
 }
 
@@ -346,17 +444,14 @@ TEST_F(
 
       // Setup and expectations.
       var testNotificationId = 'TEST_ID';
-      var testNotificationData = {};
+      var testNotificationDataRequest = {notificationsData: {}};
+      var testNotificationData = {notificationsData: {}};
 
       mockOnNotificationClickedDependencies(this);
       this.makeMockLocalFunctions(['selector']);
 
-      var storageGetSavedArgs = new SaveMockArguments();
-      this.mockApis.expects(once()).
-          instrumented_storage_local_get(
-              storageGetSavedArgs.match(eq('notificationsData')),
-              storageGetSavedArgs.match(ANYTHING)).
-          will(invokeCallback(storageGetSavedArgs, 1, testNotificationData));
+      expectChromeLocalStorageGet(
+          this, testNotificationDataRequest, testNotificationData);
 
       // Invoking the tested function.
       onNotificationClicked(
@@ -374,6 +469,7 @@ TEST_F(
       // Setup and expectations.
       var testActionUrls = undefined;
       var testNotificationId = 'TEST_ID';
+      var testNotificationDataRequest = {notificationsData: {}};
       var testNotificationData = {
           notificationsData: {'TEST_ID': {actionUrls: testActionUrls}}
       };
@@ -381,14 +477,13 @@ TEST_F(
       mockOnNotificationClickedDependencies(this);
       this.makeMockLocalFunctions(['selector']);
 
-      var storageGetSavedArgs = new SaveMockArguments();
-      this.mockApis.expects(once()).
-          instrumented_storage_local_get(
-              storageGetSavedArgs.match(eq('notificationsData')),
-              storageGetSavedArgs.match(ANYTHING)).
-          will(invokeCallback(storageGetSavedArgs, 1, testNotificationData));
-      this.mockLocalFunctions.expects(once()).selector(undefined).will(
-          returnValue(undefined));
+      expectChromeLocalStorageGet(
+          this, testNotificationDataRequest, testNotificationData);
+
+      this.mockLocalFunctions.expects(once())
+          .selector(eqJSON(
+              testNotificationData.notificationsData[testNotificationId]))
+          .will(returnValue(undefined));
 
       // Invoking the tested function.
       onNotificationClicked(
@@ -404,6 +499,7 @@ TEST_F(
       // Setup and expectations.
       var testActionUrls = {testField: 'TEST VALUE'};
       var testNotificationId = 'TEST_ID';
+      var testNotificationDataRequest = {notificationsData: {}};
       var testNotificationData = {
           notificationsData: {'TEST_ID': {actionUrls: testActionUrls}}
       };
@@ -413,14 +509,12 @@ TEST_F(
       mockOnNotificationClickedDependencies(this);
       this.makeMockLocalFunctions(['selector']);
 
-      var storageGetSavedArgs = new SaveMockArguments();
-      this.mockApis.expects(once()).
-          instrumented_storage_local_get(
-              storageGetSavedArgs.match(eq('notificationsData')),
-              storageGetSavedArgs.match(ANYTHING)).
-          will(invokeCallback(storageGetSavedArgs, 1, testNotificationData));
-      this.mockLocalFunctions.expects(once()).selector(testActionUrls).will(
-          returnValue(testActionUrl));
+      expectChromeLocalStorageGet(
+          this, testNotificationDataRequest, testNotificationData);
+      this.mockLocalFunctions.expects(once())
+          .selector(eqJSON(
+              testNotificationData.notificationsData[testNotificationId]))
+          .will(returnValue(testActionUrl));
       var chromeTabsCreateSavedArgs = new SaveMockArguments();
       this.mockApis.expects(once()).
           instrumented_tabs_create(
@@ -447,6 +541,7 @@ TEST_F(
       // Setup and expectations.
       var testActionUrls = {testField: 'TEST VALUE'};
       var testNotificationId = 'TEST_ID';
+      var testNotificationDataRequest = {notificationsData: {}};
       var testNotificationData = {
         notificationsData: {'TEST_ID': {actionUrls: testActionUrls}}
       };
@@ -456,14 +551,12 @@ TEST_F(
       mockOnNotificationClickedDependencies(this);
       this.makeMockLocalFunctions(['selector']);
 
-      var storageGetSavedArgs = new SaveMockArguments();
-      this.mockApis.expects(once()).
-          instrumented_storage_local_get(
-              storageGetSavedArgs.match(eq('notificationsData')),
-              storageGetSavedArgs.match(ANYTHING)).
-          will(invokeCallback(storageGetSavedArgs, 1, testNotificationData));
-      this.mockLocalFunctions.expects(once()).selector(testActionUrls).will(
-          returnValue(testActionUrl));
+      expectChromeLocalStorageGet(
+          this, testNotificationDataRequest, testNotificationData);
+      this.mockLocalFunctions.expects(once())
+          .selector(eqJSON(
+              testNotificationData.notificationsData[testNotificationId]))
+          .will(returnValue(testActionUrl));
       var chromeTabsCreateSavedArgs = new SaveMockArguments();
       this.mockApis.expects(once()).
           instrumented_tabs_create(
@@ -597,7 +690,7 @@ TEST_F(
       // Check the output value.
       var expectedCombinedCards = {
         'EXISTING CARD': [
-          1, 
+          1,
           {
             receivedNotification: receivedNotificationNoShowTime,
             hideTime: 11000
@@ -759,29 +852,26 @@ TEST_F(
       var fakeOnCardShownFunction = 'FAKE ON CARD SHOWN FUNCTION';
 
       this.makeAndRegisterMockGlobals([
-        'scheduleNextPoll',
         'combineAndShowNotificationCards',
-        'recordEvent'
+        'recordEvent',
+        'scheduleNextPoll'
       ]);
 
       this.makeAndRegisterMockApis([
         'chrome.storage.local.set',
-        'instrumented.storage.local.get'
+        'fillFromChromeLocalStorage'
       ]);
 
-      var storageGetSavedArgs = new SaveMockArguments();
-      this.mockApis.expects(once()).
-          instrumented_storage_local_get(
-              storageGetSavedArgs.match(
-                  eq(['notificationGroups', 'recentDismissals'])),
-              storageGetSavedArgs.match(ANYTHING)).
-          will(invokeCallback(
-              storageGetSavedArgs,
-              1,
-              {
-                notificationGroups: storedGroups,
-                recentDismissals: recentDismissals
-              }));
+      expectChromeLocalStorageGet(
+          this,
+          {
+            notificationGroups: {},
+            recentDismissals: {}
+          },
+          {
+            notificationGroups: storedGroups,
+            recentDismissals: recentDismissals
+          });
 
       this.mockGlobals.expects(once()).
           scheduleNextPoll(eqJSON(expectedUpdatedGroups), true);
@@ -844,15 +934,15 @@ TEST_F(
       var fakeOnCardShownFunction = 'FAKE ON CARD SHOWN FUNCTION';
 
       this.makeAndRegisterMockGlobals([
-        'scheduleNextPoll',
         'combineAndShowNotificationCards',
+        'onStateChange',
         'recordEvent',
-        'onStateChange'
+        'scheduleNextPoll'
       ]);
 
       this.makeAndRegisterMockApis([
         'chrome.storage.local.set',
-        'instrumented.storage.local.get'
+        'fillFromChromeLocalStorage'
       ]);
 
       this.mockApis.expects(once()).
@@ -861,14 +951,16 @@ TEST_F(
 
       this.mockGlobals.expects(once()).onStateChange();
 
-      var storageGetSavedArgs = new SaveMockArguments();
-      this.mockApis.expects(once()).
-          instrumented_storage_local_get(
-              storageGetSavedArgs.match(
-                  eq(['notificationGroups', 'recentDismissals'])),
-              storageGetSavedArgs.match(ANYTHING)).
-          will(invokeCallback(
-              storageGetSavedArgs, 1, {notificationGroups: storedGroups}));
+      expectChromeLocalStorageGet(
+          this,
+          {
+            notificationGroups: {},
+            recentDismissals: {}
+          },
+          {
+            notificationGroups: storedGroups,
+            recentDismissals: {}
+          });
 
       this.mockGlobals.expects(once()).
           scheduleNextPoll(eqJSON(expectedUpdatedGroups), false);

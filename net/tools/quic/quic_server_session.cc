@@ -34,7 +34,12 @@ QuicCryptoServerStream* QuicServerSession::CreateQuicCryptoServerStream(
 void QuicServerSession::OnConnectionClosed(QuicErrorCode error,
                                            bool from_peer) {
   QuicSession::OnConnectionClosed(error, from_peer);
-  visitor_->OnConnectionClosed(connection()->guid(), error);
+  // In the unlikely event we get a connection close while doing an asynchronous
+  // crypto event, make sure we cancel the callback.
+  if (crypto_stream_.get() != NULL) {
+    crypto_stream_->CancelOutstandingCallbacks();
+  }
+  visitor_->OnConnectionClosed(connection()->connection_id(), error);
 }
 
 void QuicServerSession::OnWriteBlocked() {

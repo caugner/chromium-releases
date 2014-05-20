@@ -26,6 +26,11 @@ MockRenderThread::MockRenderThread()
 }
 
 MockRenderThread::~MockRenderThread() {
+  while (!filters_.empty()) {
+    scoped_refptr<IPC::ChannelProxy::MessageFilter> filter = filters_.back();
+    filters_.pop_back();
+    filter->OnFilterRemoved();
+  }
 }
 
 void MockRenderThread::VerifyRunJavaScriptMessageSend(
@@ -143,7 +148,7 @@ scoped_ptr<base::SharedMemory>
     MockRenderThread::HostAllocateSharedMemoryBuffer(
         size_t buffer_size) {
   scoped_ptr<base::SharedMemory> shared_buf(new base::SharedMemory);
-  if (!shared_buf->CreateAndMapAnonymous(buffer_size)) {
+  if (!shared_buf->CreateAnonymous(buffer_size)) {
     NOTREACHED() << "Cannot map shared memory buffer";
     return scoped_ptr<base::SharedMemory>();
   }
@@ -178,6 +183,10 @@ int MockRenderThread::PostTaskToAllWebWorkers(const base::Closure& closure) {
 
 bool MockRenderThread::ResolveProxy(const GURL& url, std::string* proxy_list) {
   return false;
+}
+
+base::WaitableEvent* MockRenderThread::GetShutdownEvent() {
+  return NULL;
 }
 
 #if defined(OS_WIN)
@@ -219,8 +228,6 @@ void MockRenderThread::OnCreateWindow(
 
 // The Frame expects to be returned a valid route_id different from its own.
 void MockRenderThread::OnCreateChildFrame(int new_frame_routing_id,
-                                          int64 parent_frame_id,
-                                          int64 frame_id,
                                           const std::string& frame_name,
                                           int* new_render_frame_id) {
   *new_render_frame_id = new_frame_routing_id_;

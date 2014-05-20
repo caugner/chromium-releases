@@ -50,8 +50,13 @@ struct UserContext {
               AuthFlow auth_flow);
   virtual ~UserContext();
   bool operator==(const UserContext& context) const;
+
+  void CopyFrom(const UserContext& other);
+
   std::string username;
   std::string password;
+  bool need_password_hashing;
+  std::string key_label;
   std::string auth_code;
   std::string username_hash;
   bool using_oauth;
@@ -108,7 +113,8 @@ class User {
     DEFAULT = 2,
     UNKNOWN = 3,
     ONLINE = 4,
-    WALLPAPER_TYPE_COUNT = 5
+    POLICY = 5,  // Controlled by policy, can't be changed by the user.
+    WALLPAPER_TYPE_COUNT = 6
   };
 
   // Returns the user type.

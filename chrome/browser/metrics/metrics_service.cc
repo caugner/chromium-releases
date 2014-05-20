@@ -188,7 +188,9 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/memory_details.h"
+#include "chrome/browser/metrics/cloned_install_detector.h"
 #include "chrome/browser/metrics/compression_utils.h"
+#include "chrome/browser/metrics/machine_id_provider.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_log_serializer.h"
 #include "chrome/browser/metrics/metrics_reporting_scheduler.h"
@@ -233,6 +235,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/external_metrics.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chromeos/system/statistics_provider.h"
 #endif
 
@@ -356,10 +359,7 @@ bool SendSeparateInitialStabilityLog() {
 }  // namespace
 
 
-SyntheticTrialGroup::SyntheticTrialGroup(uint32 trial,
-                                         uint32 group,
-                                         base::TimeTicks start)
-    : start_time(start) {
+SyntheticTrialGroup::SyntheticTrialGroup(uint32 trial, uint32 group) {
   id.name = trial;
   id.group = group;
 }
@@ -435,10 +435,11 @@ class MetricsMemoryDetails : public MemoryDetails {
 // static
 void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
   DCHECK(IsSingleThreaded());
+  registry->RegisterBooleanPref(prefs::kMetricsResetIds, false);
   registry->RegisterStringPref(prefs::kMetricsClientID, std::string());
+  registry->RegisterInt64Pref(prefs::kMetricsReportingEnabledTimestamp, 0);
   registry->RegisterIntegerPref(prefs::kMetricsLowEntropySource,
                                 kLowEntropySourceNotSet);
-  registry->RegisterInt64Pref(prefs::kMetricsClientIDTimestamp, 0);
   registry->RegisterInt64Pref(prefs::kStabilityLaunchTimeSec, 0);
   registry->RegisterInt64Pref(prefs::kStabilityLastTimestampSec, 0);
   registry->RegisterStringPref(prefs::kStabilityStatsVersion, std::string());
@@ -483,6 +484,11 @@ void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterInt64Pref(prefs::kUninstallLastLaunchTimeSec, 0);
   registry->RegisterInt64Pref(prefs::kUninstallLastObservedRunTimeSec, 0);
 
+  // TODO(asvitkine): Remove these once a couple of releases have passed.
+  // http://crbug.com/357704
+  registry->RegisterStringPref(prefs::kMetricsOldClientID, std::string());
+  registry->RegisterIntegerPref(prefs::kMetricsOldLowEntropySource, 0);
+
 #if defined(OS_ANDROID)
   RegisterPrefsAndroid(registry);
 #endif  // defined(OS_ANDROID)
@@ -521,7 +527,8 @@ void MetricsService::DiscardOldStabilityStats(PrefService* local_state) {
 }
 
 MetricsService::MetricsService()
-    : recording_active_(false),
+    : metrics_ids_reset_check_performed_(false),
+      recording_active_(false),
       reporting_active_(false),
       test_mode_active_(false),
       state_(INITIALIZED),
@@ -633,6 +640,9 @@ MetricsService::CreateEntropyProvider(ReportingState reporting_state) {
 void MetricsService::ForceClientIdCreation() {
   if (!client_id_.empty())
     return;
+
+  ResetMetricsIDsIfNecessary();
+
   PrefService* pref = g_browser_process->local_state();
   client_id_ = pref->GetString(prefs::kMetricsClientID);
   if (!client_id_.empty())
@@ -641,9 +651,14 @@ void MetricsService::ForceClientIdCreation() {
   client_id_ = GenerateClientID();
   pref->SetString(prefs::kMetricsClientID, client_id_);
 
-  // Might as well make a note of how long this ID has existed
-  pref->SetString(prefs::kMetricsClientIDTimestamp,
-                  base::Int64ToString(Time::Now().ToTimeT()));
+  if (pref->GetString(prefs::kMetricsOldClientID).empty()) {
+    // Record the timestamp of when the user opted in to UMA.
+    pref->SetInt64(prefs::kMetricsReportingEnabledTimestamp,
+                   Time::Now().ToTimeT());
+  } else {
+    UMA_HISTOGRAM_BOOLEAN("UMA.ClientIdMigrated", true);
+  }
+  pref->ClearPref(prefs::kMetricsOldClientID);
 }
 
 void MetricsService::EnableRecording() {
@@ -737,16 +752,19 @@ void MetricsService::Observe(int type,
   DCHECK(log_manager_.current_log());
   DCHECK(IsSingleThreaded());
 
-  if (!CanLogNotification())
-    return;
-
+  // Check for notifications related to core stability metrics, or that are
+  // just triggers to end idle mode. Anything else should be added in the later
+  // switch statement, where they take effect only if general metrics should be
+  // logged.
+  bool handled = false;
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_OPENED:
     case chrome::NOTIFICATION_BROWSER_CLOSED:
     case chrome::NOTIFICATION_TAB_PARENTED:
     case chrome::NOTIFICATION_TAB_CLOSING:
     case content::NOTIFICATION_LOAD_STOP:
-      // These notifications are currently used only to break out of idle mode.
+      // These notifications are used only to break out of idle mode.
+      handled = true;
       break;
 
     case content::NOTIFICATION_LOAD_START: {
@@ -754,37 +772,50 @@ void MetricsService::Observe(int type,
           content::Source<content::NavigationController>(source).ptr();
       content::WebContents* web_contents = controller->GetWebContents();
       LogLoadStarted(web_contents);
+      handled = true;
       break;
     }
 
     case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
-        content::RenderProcessHost::RendererClosedDetails* process_details =
-            content::Details<
-                content::RenderProcessHost::RendererClosedDetails>(
-                    details).ptr();
-        content::RenderProcessHost* host =
-            content::Source<content::RenderProcessHost>(source).ptr();
-        LogRendererCrash(
-            host, process_details->status, process_details->exit_code);
-      }
-      break;
-
-    case content::NOTIFICATION_RENDER_WIDGET_HOST_HANG:
-      LogRendererHang();
-      break;
-
-    case chrome::NOTIFICATION_OMNIBOX_OPENED_URL: {
-      MetricsLog* current_log =
-          static_cast<MetricsLog*>(log_manager_.current_log());
-      DCHECK(current_log);
-      current_log->RecordOmniboxOpenedURL(
-          *content::Details<OmniboxLog>(details).ptr());
+      content::RenderProcessHost::RendererClosedDetails* process_details =
+          content::Details<
+              content::RenderProcessHost::RendererClosedDetails>(
+                  details).ptr();
+      content::RenderProcessHost* host =
+          content::Source<content::RenderProcessHost>(source).ptr();
+      LogRendererCrash(
+          host, process_details->status, process_details->exit_code);
+      handled = true;
       break;
     }
 
-    default:
-      NOTREACHED();
+    case content::NOTIFICATION_RENDER_WIDGET_HOST_HANG:
+      LogRendererHang();
+      handled = true;
       break;
+
+    default:
+      // Everything else is handled after the early return check below.
+      break;
+  }
+
+  // If it wasn't one of the stability-related notifications, and event
+  // logging isn't suppressed, handle it.
+  if (!handled && ShouldLogEvents()) {
+    switch (type) {
+      case chrome::NOTIFICATION_OMNIBOX_OPENED_URL: {
+        MetricsLog* current_log =
+            static_cast<MetricsLog*>(log_manager_.current_log());
+        DCHECK(current_log);
+        current_log->RecordOmniboxOpenedURL(
+            *content::Details<OmniboxLog>(details).ptr());
+        break;
+      }
+
+      default:
+        NOTREACHED();
+        break;
+    }
   }
 
   HandleIdleSinceLastTransmission(false);
@@ -997,8 +1028,11 @@ void MetricsService::InitializeMetricsState(ReportingState reporting_state) {
     pref->SetBoolean(prefs::kStabilitySessionEndCompleted, true);
   }
 
-  // Initialize uptime counters.
-  const base::TimeDelta startup_uptime = GetIncrementalUptime(pref);
+  // Call GetUptimes() for the first time, thus allowing all later calls
+  // to record incremental uptimes accurately.
+  base::TimeDelta ignored_uptime_parameter;
+  base::TimeDelta startup_uptime;
+  GetUptimes(pref, &startup_uptime, &ignored_uptime_parameter);
   DCHECK_EQ(0, startup_uptime.InMicroseconds());
   // For backwards compatibility, leave this intact in case Omaha is checking
   // them.  prefs::kStabilityLastTimestampSec may also be useless now.
@@ -1118,7 +1152,7 @@ void MetricsService::OnInitTaskGotGoogleUpdateData(
 }
 
 void MetricsService::OnUserAction(const std::string& action) {
-  if (!CanLogNotification())
+  if (!ShouldLogEvents())
     return;
 
   log_manager_.current_log()->RecordUserAction(action.c_str());
@@ -1144,22 +1178,46 @@ void MetricsService::FinishedReceivingProfilerData() {
   scheduler_->InitTaskComplete();
 }
 
-base::TimeDelta MetricsService::GetIncrementalUptime(PrefService* pref) {
+void MetricsService::GetUptimes(PrefService* pref,
+                                base::TimeDelta* incremental_uptime,
+                                base::TimeDelta* uptime) {
   base::TimeTicks now = base::TimeTicks::Now();
-  // If this is the first call, init |last_updated_time_|.
-  if (last_updated_time_.is_null())
+  // If this is the first call, init |first_updated_time_| and
+  // |last_updated_time_|.
+  if (last_updated_time_.is_null()) {
+    first_updated_time_ = now;
     last_updated_time_ = now;
-  const base::TimeDelta incremental_time = now - last_updated_time_;
+  }
+  *incremental_uptime = now - last_updated_time_;
+  *uptime = now - first_updated_time_;
   last_updated_time_ = now;
 
-  const int64 incremental_time_secs = incremental_time.InSeconds();
+  const int64 incremental_time_secs = incremental_uptime->InSeconds();
   if (incremental_time_secs > 0) {
     int64 metrics_uptime = pref->GetInt64(prefs::kUninstallMetricsUptimeSec);
     metrics_uptime += incremental_time_secs;
     pref->SetInt64(prefs::kUninstallMetricsUptimeSec, metrics_uptime);
   }
+}
 
-  return incremental_time;
+void MetricsService::ResetMetricsIDsIfNecessary() {
+  if (metrics_ids_reset_check_performed_)
+    return;
+
+  metrics_ids_reset_check_performed_ = true;
+
+  PrefService* local_state = g_browser_process->local_state();
+  if (!local_state->GetBoolean(prefs::kMetricsResetIds))
+    return;
+
+  UMA_HISTOGRAM_BOOLEAN("UMA.MetricsIDsReset", true);
+
+  DCHECK(client_id_.empty());
+  DCHECK_EQ(kLowEntropySourceNotSet, low_entropy_source_);
+
+  local_state->ClearPref(prefs::kMetricsClientID);
+  local_state->ClearPref(prefs::kMetricsLowEntropySource);
+  local_state->ClearPref(prefs::kMetricsResetIds);
 }
 
 int MetricsService::GetLowEntropySource() {
@@ -1169,18 +1227,14 @@ int MetricsService::GetLowEntropySource() {
   if (low_entropy_source_ != kLowEntropySourceNotSet)
     return low_entropy_source_;
 
+  ResetMetricsIDsIfNecessary();
+
   PrefService* local_state = g_browser_process->local_state();
   const CommandLine* command_line(CommandLine::ForCurrentProcess());
   // Only try to load the value from prefs if the user did not request a reset.
   // Otherwise, skip to generating a new value.
   if (!command_line->HasSwitch(switches::kResetVariationState)) {
     int value = local_state->GetInteger(prefs::kMetricsLowEntropySource);
-    // Old versions of the code would generate values in the range of [1, 8192],
-    // before the range was switched to [0, 8191] and then to [0, 7999]. Map
-    // 8192 to 0, so that the 0th bucket remains uniform, while re-generating
-    // the low entropy source for old values in the [8000, 8191] range.
-    if (value == 8192)
-      value = 0;
     // If the value is outside the [0, kMaxLowEntropySize) range, re-generate
     // it below.
     if (value >= 0 && value < kMaxLowEntropySize) {
@@ -1193,6 +1247,7 @@ int MetricsService::GetLowEntropySource() {
   UMA_HISTOGRAM_BOOLEAN("UMA.GeneratedLowEntropySource", true);
   low_entropy_source_ = GenerateLowEntropySource();
   local_state->SetInteger(prefs::kMetricsLowEntropySource, low_entropy_source_);
+  local_state->ClearPref(prefs::kMetricsOldLowEntropySource);
   metrics::CachingPermutedEntropyProvider::ClearCache(local_state);
 
   return low_entropy_source_;
@@ -1283,7 +1338,10 @@ void MetricsService::CloseCurrentLog() {
   current_log->RecordEnvironment(plugins_, google_update_metrics_,
                                  synthetic_trials);
   PrefService* pref = g_browser_process->local_state();
-  current_log->RecordStabilityMetrics(GetIncrementalUptime(pref),
+  base::TimeDelta incremental_uptime;
+  base::TimeDelta uptime;
+  GetUptimes(pref, &incremental_uptime, &uptime);
+  current_log->RecordStabilityMetrics(incremental_uptime, uptime,
                                       MetricsLog::ONGOING_LOG);
 
   RecordCurrentHistograms();
@@ -1539,8 +1597,8 @@ void MetricsService::PrepareInitialStabilityLog() {
       new MetricsLog(client_id_, session_id_));
   if (!initial_stability_log->LoadSavedEnvironmentFromPrefs())
     return;
-  initial_stability_log->RecordStabilityMetrics(base::TimeDelta(),
-                                                MetricsLog::INITIAL_LOG);
+  initial_stability_log->RecordStabilityMetrics(
+      base::TimeDelta(), base::TimeDelta(), MetricsLog::INITIAL_LOG);
   log_manager_.LoadPersistedUnsentLogs();
 
   log_manager_.PauseCurrentLog();
@@ -1569,7 +1627,10 @@ void MetricsService::PrepareInitialMetricsLog(MetricsLog::LogType log_type) {
   initial_metrics_log_->RecordEnvironment(plugins_, google_update_metrics_,
                                           synthetic_trials);
   PrefService* pref = g_browser_process->local_state();
-  initial_metrics_log_->RecordStabilityMetrics(GetIncrementalUptime(pref),
+  base::TimeDelta incremental_uptime;
+  base::TimeDelta uptime;
+  GetUptimes(pref, &incremental_uptime, &uptime);
+  initial_metrics_log_->RecordStabilityMetrics(incremental_uptime, uptime,
                                                log_type);
 
   // Histograms only get written to the current log, so make the new log current
@@ -1821,15 +1882,30 @@ void MetricsService::RegisterSyntheticFieldTrial(
     if (synthetic_trial_groups_[i].id.name == trial.id.name) {
       if (synthetic_trial_groups_[i].id.group != trial.id.group) {
         synthetic_trial_groups_[i].id.group = trial.id.group;
-        synthetic_trial_groups_[i].start_time = trial.start_time;
+        synthetic_trial_groups_[i].start_time = base::TimeTicks::Now();
       }
       return;
     }
   }
 
-  SyntheticTrialGroup trial_group(
-      trial.id.name, trial.id.group, base::TimeTicks::Now());
+  SyntheticTrialGroup trial_group = trial;
+  trial_group.start_time = base::TimeTicks::Now();
   synthetic_trial_groups_.push_back(trial_group);
+}
+
+void MetricsService::CheckForClonedInstall() {
+  DCHECK(!cloned_install_detector_);
+
+  metrics::MachineIdProvider* provider =
+      metrics::MachineIdProvider::CreateInstance();
+  if (!provider)
+    return;
+
+  cloned_install_detector_.reset(
+      new metrics::ClonedInstallDetector(provider));
+
+  PrefService* local_state = g_browser_process->local_state();
+  cloned_install_detector_->CheckForClonedInstall(local_state);
 }
 
 void MetricsService::GetCurrentSyntheticFieldTrials(
@@ -1991,8 +2067,8 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
   child_process_stats_buffer_.clear();
 }
 
-bool MetricsService::CanLogNotification() {
-  // We simply don't log anything to UMA if there is a single incognito
+bool MetricsService::ShouldLogEvents() {
+  // We simply don't log events to UMA if there is a single incognito
   // session visible. The problem is that we always notify using the orginal
   // profile in order to simplify notification processing.
   return !chrome::IsOffTheRecordSessionActive();
@@ -2041,4 +2117,23 @@ bool MetricsServiceHelper::IsMetricsReportingEnabled() {
     }
   }
   return result;
+}
+
+bool MetricsServiceHelper::IsCrashReportingEnabled() {
+#if defined(GOOGLE_CHROME_BUILD)
+#if defined(OS_CHROMEOS)
+  bool reporting_enabled = false;
+  chromeos::CrosSettings::Get()->GetBoolean(chromeos::kStatsReportingPref,
+                                            &reporting_enabled);
+  return reporting_enabled;
+#elif defined(OS_ANDROID)
+  // Android has its own settings for metrics / crash uploading.
+  const PrefService* prefs = g_browser_process->local_state();
+  return prefs->GetBoolean(prefs::kCrashReportingEnabled);
+#else
+  return MetricsServiceHelper::IsMetricsReportingEnabled();
+#endif
+#else
+  return false;
+#endif
 }

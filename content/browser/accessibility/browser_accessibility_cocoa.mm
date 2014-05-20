@@ -148,7 +148,7 @@ RoleMap BuildRoleMap() {
     { ui::AX_ROLE_TEXT_AREA, NSAccessibilityTextAreaRole },
     { ui::AX_ROLE_TEXT_FIELD, NSAccessibilityTextFieldRole },
     { ui::AX_ROLE_TIMER, NSAccessibilityGroupRole },
-    { ui::AX_ROLE_TOGGLE_BUTTON, NSAccessibilityButtonRole },
+    { ui::AX_ROLE_TOGGLE_BUTTON, NSAccessibilityCheckBoxRole },
     { ui::AX_ROLE_TOOLBAR, NSAccessibilityToolbarRole },
     { ui::AX_ROLE_TOOLTIP, NSAccessibilityGroupRole },
     { ui::AX_ROLE_TREE, NSAccessibilityOutlineRole },
@@ -206,6 +206,7 @@ RoleMap BuildSubroleMap() {
     { ui::AX_ROLE_STATUS, @"AXApplicationStatus" },
     { ui::AX_ROLE_TAB_PANEL, @"AXTabPanel" },
     { ui::AX_ROLE_TIMER, @"AXApplicationTimer" },
+    { ui::AX_ROLE_TOGGLE_BUTTON, @"AXToggleButton" },
     { ui::AX_ROLE_TOOLTIP, @"AXUserInterfaceTooltip" },
     { ui::AX_ROLE_TREE_ITEM, NSAccessibilityOutlineRowSubrole },
   };
@@ -255,6 +256,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     { NSAccessibilityHeaderAttribute, @"header" },
     { NSAccessibilityHelpAttribute, @"help" },
     { NSAccessibilityIndexAttribute, @"index" },
+    { NSAccessibilityLinkedUIElementsAttribute, @"linkedUIElements" },
     { NSAccessibilityMaxValueAttribute, @"maxValue" },
     { NSAccessibilityMinValueAttribute, @"minValue" },
     { NSAccessibilityNumberOfCharactersAttribute, @"numberOfCharacters" },
@@ -266,6 +268,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     { NSAccessibilityRowHeaderUIElementsAttribute, @"rowHeaders" },
     { NSAccessibilityRowIndexRangeAttribute, @"rowIndexRange" },
     { NSAccessibilityRowsAttribute, @"rows" },
+    // TODO(aboxhall): expose NSAccessibilityServesAsTitleForUIElementsAttribute
     { NSAccessibilitySizeAttribute, @"size" },
     { NSAccessibilitySubroleAttribute, @"subrole" },
     { NSAccessibilityTabsAttribute, @"tabs" },
@@ -577,6 +580,28 @@ NSDictionary* attributeToMethodNameMap = nil;
   return invalid;
 }
 
+- (void)addLinkedUIElementsFromAttribute:(ui::AXIntListAttribute)attribute
+                                   addTo:(NSMutableArray*)outArray {
+  const std::vector<int32>& attributeValues =
+      browserAccessibility_->GetIntListAttribute(attribute);
+  for (size_t i = 0; i < attributeValues.size(); ++i) {
+    BrowserAccessibility* element =
+        browserAccessibility_->manager()->GetFromRendererID(attributeValues[i]);
+    if (element)
+      [outArray addObject:element->ToBrowserAccessibilityCocoa()];
+  }
+}
+
+- (NSArray*)linkedUIElements {
+  NSMutableArray* ret = [[[NSMutableArray alloc] init] autorelease];
+  [self addLinkedUIElementsFromAttribute:ui::AX_ATTR_OWNS_IDS addTo:ret];
+  [self addLinkedUIElementsFromAttribute:ui::AX_ATTR_CONTROLS_IDS addTo:ret];
+  [self addLinkedUIElementsFromAttribute:ui::AX_ATTR_FLOWTO_IDS addTo:ret];
+  if ([ret count] == 0)
+    return nil;
+  return ret;
+}
+
 - (NSNumber*)loaded {
   return [NSNumber numberWithBool:YES];
 }
@@ -663,6 +688,17 @@ NSDictionary* attributeToMethodNameMap = nil;
           ui::AX_ATTR_CANVAS_HAS_FALLBACK)) {
     return NSAccessibilityGroupRole;
   }
+  if (role == ui::AX_ROLE_BUTTON || role == ui::AX_ROLE_TOGGLE_BUTTON) {
+    bool isAriaPressedDefined;
+    bool isMixed;
+    browserAccessibility_->GetAriaTristate("aria-pressed",
+                                           &isAriaPressedDefined,
+                                           &isMixed);
+    if (isAriaPressedDefined)
+      return NSAccessibilityCheckBoxRole;
+    else
+      return NSAccessibilityButtonRole;
+  }
   return NativeRoleFromAXRole(role);
 }
 
@@ -710,6 +746,9 @@ NSDictionary* attributeToMethodNameMap = nil;
     // This control is similar to what VoiceOver calls a "stepper".
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_STEPPER));
+  case ui::AX_ROLE_TOGGLE_BUTTON:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_TOGGLE_BUTTON));
   default:
     break;
   }
@@ -836,6 +875,15 @@ NSDictionary* attributeToMethodNameMap = nil;
     if (titleElement)
       return titleElement->ToBrowserAccessibilityCocoa();
   }
+  std::vector<int32> labelledby_ids =
+      browserAccessibility_->GetIntListAttribute(ui::AX_ATTR_LABELLEDBY_IDS);
+  if (labelledby_ids.size() == 1) {
+    BrowserAccessibility* titleElement =
+        browserAccessibility_->manager()->GetFromRendererID(labelledby_ids[0]);
+    if (titleElement)
+      return titleElement->ToBrowserAccessibilityCocoa();
+  }
+
   return nil;
 }
 
@@ -861,6 +909,18 @@ NSDictionary* attributeToMethodNameMap = nil;
   } else if ([role isEqualToString:NSAccessibilityButtonRole]) {
     // AXValue does not make sense for pure buttons.
     return @"";
+  } else if ([self internalRole] == ui::AX_ROLE_TOGGLE_BUTTON) {
+    int value = 0;
+    bool isAriaPressedDefined;
+    bool isMixed;
+    value = browserAccessibility_->GetAriaTristate(
+        "aria-pressed", &isAriaPressedDefined, &isMixed) ? 1 : 0;
+
+    if (isMixed)
+      value = 2;
+
+    return [NSNumber numberWithInt:value];
+
   } else if ([role isEqualToString:NSAccessibilityCheckBoxRole] ||
              [role isEqualToString:NSAccessibilityRadioButtonRole]) {
     int value = 0;
@@ -1215,6 +1275,7 @@ NSDictionary* attributeToMethodNameMap = nil;
       NSAccessibilityEnabledAttribute,
       NSAccessibilityFocusedAttribute,
       NSAccessibilityHelpAttribute,
+      NSAccessibilityLinkedUIElementsAttribute,
       NSAccessibilityParentAttribute,
       NSAccessibilityPositionAttribute,
       NSAccessibilityRoleAttribute,
@@ -1329,12 +1390,16 @@ NSDictionary* attributeToMethodNameMap = nil;
   }
 
   // Title UI Element.
-  if (browserAccessibility_->HasIntAttribute(
-          ui::AX_ATTR_TITLE_UI_ELEMENT)) {
+  if (browserAccessibility_->HasIntAttribute(ui::AX_ATTR_TITLE_UI_ELEMENT) ||
+      (browserAccessibility_->HasIntListAttribute(ui::AX_ATTR_LABELLEDBY_IDS) &&
+       browserAccessibility_->GetIntListAttribute(ui::AX_ATTR_LABELLEDBY_IDS)
+                            .size() == 1)) {
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
          NSAccessibilityTitleUIElementAttribute,
          nil]];
   }
+  // TODO(aboxhall): expose NSAccessibilityServesAsTitleForUIElementsAttribute
+  // for elements which are referred to by labelledby or are labels
 
   return ret;
 }

@@ -9,16 +9,24 @@
   'custom_cxx_compiler_flags': '',
   'custom_linker_flags': '',
   'run_before_build': '',
+  'build_method': 'destdir',
 
   'variables': {
     'verbose_libraries_build%': 0,
+    'instrumented_libraries_jobs%': 1,
   },
+
+  'jobs': '<(instrumented_libraries_jobs)',
+
   'conditions': [
     ['asan==1', {
       'sanitizer_type': 'asan',
     }],
     ['msan==1', {
       'sanitizer_type': 'msan',
+    }],
+    ['tsan==1', {
+      'sanitizer_type': 'tsan',
     }],
     ['verbose_libraries_build==1', {
       'verbose_libraries_build_flag': '--verbose',
@@ -39,6 +47,8 @@
       'type': 'none',
       'variables': {
         'prune_self_dependency': 1,
+        # Don't add this target to the dependencies of targets with type=none.
+        'link_dependency': 1,
       },
       'dependencies': [
         '<(_sanitizer_type)-libcairo2',
@@ -73,7 +83,6 @@
         '<(_sanitizer_type)-libfontconfig1',
         '<(_sanitizer_type)-pulseaudio',
         '<(_sanitizer_type)-libasound2',
-        '<(_sanitizer_type)-libcups2',
         '<(_sanitizer_type)-pango1.0',
         '<(_sanitizer_type)-libcap2',
         '<(_sanitizer_type)-libudev0',
@@ -83,6 +92,11 @@
         ['asan==1', {
           'dependencies': [
             '<(_sanitizer_type)-libpixman-1-0',
+          ],
+        }],
+        ['msan==1', {
+          'dependencies': [
+            '<(_sanitizer_type)-libcups2',
           ],
         }],
       ],
@@ -127,6 +141,7 @@
       'dependencies=': [
         '<(_sanitizer_type)-libglib2.0-0',
       ],
+      'build_method': 'prefix',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -144,8 +159,14 @@
       'dependencies=': [
         '<(_sanitizer_type)-freetype',
       ],
-      'custom_configure_flags': '--disable-docs',
+      'custom_configure_flags': [
+        '--disable-docs',
+        '--sysconfdir=/etc/',
+        # From debian/rules.
+        '--with-add-fonts=/usr/X11R6/lib/X11/fonts,/usr/local/share/fonts',
+      ],
       'run_before_build': 'libfontconfig.sh',
+      'destdir_build': 1,
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -297,13 +318,16 @@
         '<(_sanitizer_type)-libnspr4',
       ],
       'run_before_build': 'nss.sh',
+      'build_method': 'custom_nss',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
       'library_name': 'pulseaudio',
-      'dependencies=': [],
+      'dependencies=': [
+        '<(_sanitizer_type)-libdbus-1-3',
+      ],
       'run_before_build': 'pulseaudio.sh',
-      'custom_configure_flags': '--with-udev-rules-dir=<(INTERMEDIATE_DIR)/udev/rules.d',
+      'jobs': 1,
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -316,6 +340,7 @@
       'library_name': 'libcups2',
       'dependencies=': [],
       'run_before_build': 'libcups2.sh',
+      'jobs': 1,
       'custom_configure_flags': [
         # Do not touch system-wide directories.
         '--with-rcdir=no',
@@ -325,6 +350,7 @@
         '--with-icondir=no',
         '--with-docdir=no'
       ],
+      'build_method': 'prefix',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -335,13 +361,14 @@
       'custom_configure_flags': [
         # Avoid https://bugs.gentoo.org/show_bug.cgi?id=425620
         '--enable-introspection=no',
-        # More flags are set in download_build_install.py.
       ],
+      'build_method': 'custom_pango',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
       'library_name': 'libcap2',
       'dependencies=': [],
+      'build_method': 'custom_libcap',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {

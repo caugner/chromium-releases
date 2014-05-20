@@ -40,6 +40,7 @@ class GCMClientMock : public GCMClient {
   virtual void Initialize(
       const checkin_proto::ChromeBuildProto& chrome_build_proto,
       const base::FilePath& store_path,
+      const std::vector<std::string>& account_ids,
       const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
       const scoped_refptr<net::URLRequestContextGetter>&
           url_request_context_getter,
@@ -48,12 +49,12 @@ class GCMClientMock : public GCMClient {
   virtual void Stop() OVERRIDE;
   virtual void CheckOut() OVERRIDE;
   virtual void Register(const std::string& app_id,
-                        const std::string& cert,
                         const std::vector<std::string>& sender_ids) OVERRIDE;
   virtual void Unregister(const std::string& app_id) OVERRIDE;
   virtual void Send(const std::string& app_id,
                     const std::string& receiver_id,
                     const OutgoingMessage& message) OVERRIDE;
+  virtual GCMStatistics GetStatistics() const OVERRIDE;
 
   // Initiate the loading that has been delayed.
   // Called on UI thread.
@@ -76,12 +77,13 @@ class GCMClientMock : public GCMClient {
   void CheckinFinished();
   void RegisterFinished(const std::string& app_id,
                         const std::string& registrion_id);
-  void SendFinished(const std::string& app_id, const std::string& message_id);
+  void UnregisterFinished(const std::string& app_id);
+  void SendFinished(const std::string& app_id, const OutgoingMessage& message);
   void MessageReceived(const std::string& app_id,
                        const IncomingMessage& message);
   void MessagesDeleted(const std::string& app_id);
   void MessageSendError(const std::string& app_id,
-                        const std::string& message_id);
+                        const SendErrorDetails& send_error_details);
 
   Delegate* delegate_;
   Status status_;

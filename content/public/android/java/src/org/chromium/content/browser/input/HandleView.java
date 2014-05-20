@@ -15,7 +15,10 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewParent;
+import android.view.animation.AnimationUtils;
 import android.widget.PopupWindow;
+
+import com.google.common.annotations.VisibleForTesting;
 
 import org.chromium.content.browser.PositionObserver;
 
@@ -229,7 +232,8 @@ public class HandleView extends View {
         return mContainer.isShowing();
     }
 
-    private boolean isPositionVisible() {
+    @VisibleForTesting
+    boolean isPositionVisible() {
         // Always show a dragging handle.
         if (mIsDragging) {
             return true;
@@ -249,8 +253,17 @@ public class HandleView extends View {
         final int posX = getContainerPositionX() + (int) mHotspotX;
         final int posY = getContainerPositionY() + (int) mHotspotY;
 
-        return posX >= clip.left && posX <= clip.right &&
+        boolean result = posX >= clip.left && posX <= clip.right &&
                 posY >= clip.top && posY <= clip.bottom;
+
+        final Rect clippingRect = mController.getVisibleClippingRectangle();
+        if (result && clippingRect != null) {
+            // We need to clip against the visible areas as supplied by Blink,
+            // e.g. textaread and text input elements.
+            return clippingRect.contains(getAdjustedPositionX(), getAdjustedPositionY());
+        }
+
+        return result;
     }
 
     // x and y are in physical pixels.
@@ -402,7 +415,8 @@ public class HandleView extends View {
 
     private void updateAlpha() {
         if (mAlpha == 1.f) return;
-        mAlpha = Math.min(1.f, (System.currentTimeMillis() - mFadeStartTime) / FADE_DURATION);
+        mAlpha = Math.min(1.f,
+                (AnimationUtils.currentAnimationTimeMillis() - mFadeStartTime) / FADE_DURATION);
         mDrawable.setAlpha((int) (255 * mAlpha));
         invalidate();
     }
@@ -413,7 +427,7 @@ public class HandleView extends View {
     void beginFadeIn() {
         if (getVisibility() == VISIBLE) return;
         mAlpha = 0.f;
-        mFadeStartTime = System.currentTimeMillis();
+        mFadeStartTime = AnimationUtils.currentAnimationTimeMillis();
         setVisibility(VISIBLE);
     }
 

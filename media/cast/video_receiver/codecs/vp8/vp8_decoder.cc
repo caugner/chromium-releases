@@ -5,31 +5,36 @@
 #include "media/cast/video_receiver/codecs/vp8/vp8_decoder.h"
 
 #include "base/bind.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
+#include "media/cast/logging/logging_defines.h"
 #include "third_party/libvpx/source/libvpx/vpx/vp8dx.h"
 #include "ui/gfx/size.h"
 
+namespace {
+
+void LogFrameDecodedEvent(
+    const scoped_refptr<media::cast::CastEnvironment>& cast_environment,
+    base::TimeTicks event_time,
+    media::cast::RtpTimestamp rtp_timestamp,
+    uint32 frame_id) {
+  cast_environment->Logging()->InsertFrameEvent(
+      event_time, media::cast::kVideoFrameDecoded, rtp_timestamp, frame_id);
+}
+
+}  // namespace
+
 namespace media {
 namespace cast {
-
-void LogFrameDecodedEvent(CastEnvironment* const cast_environment,
-                          uint32 rtp_timestamp,
-                          uint32 frame_id) {
-  cast_environment->Logging()->InsertFrameEvent(
-      cast_environment->Clock()->NowTicks(),
-      kVideoFrameDecoded,
-      rtp_timestamp,
-      frame_id);
-}
 
 Vp8Decoder::Vp8Decoder(scoped_refptr<CastEnvironment> cast_environment)
     : cast_environment_(cast_environment) {
   // Make sure that we initialize the decoder from the correct thread.
   cast_environment_->PostTask(
-      CastEnvironment::VIDEO_DECODER,
+      CastEnvironment::VIDEO,
       FROM_HERE,
       base::Bind(&Vp8Decoder::InitDecoder, base::Unretained(this)));
 }
@@ -60,9 +65,9 @@ void Vp8Decoder::InitDecoder() {
 bool Vp8Decoder::Decode(const transport::EncodedVideoFrame* encoded_frame,
                         const base::TimeTicks render_time,
                         const VideoFrameDecodedCallback& frame_decoded_cb) {
-  DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::VIDEO_DECODER));
+  DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::VIDEO));
   const int frame_id_int = static_cast<int>(encoded_frame->frame_id);
-  VLOG(1) << "VP8 decode frame:" << frame_id_int
+  VLOG(2) << "VP8 decode frame:" << frame_id_int
           << " sized:" << encoded_frame->data.size();
 
   if (encoded_frame->data.empty())
@@ -77,7 +82,7 @@ bool Vp8Decoder::Decode(const transport::EncodedVideoFrame* encoded_frame,
           static_cast<unsigned int>(encoded_frame->data.size()),
           0,
           real_time_decoding)) {
-    VLOG(1) << "Failed to decode VP8 frame.";
+    VLOG(1) << "Failed to decode VP8 frame:" << frame_id_int;
     return false;
   }
 
@@ -117,15 +122,23 @@ bool Vp8Decoder::Decode(const transport::EncodedVideoFrame* encoded_frame,
             (img->d_h + 1) / 2,
             decoded_frame.get());
 
-  VLOG(1) << "Decoded frame " << frame_id_int;
+  VLOG(2) << "Decoded frame " << frame_id_int;
 
   // Update logging from the main thread.
   cast_environment_->PostTask(CastEnvironment::MAIN,
                               FROM_HERE,
-                              base::Bind(LogFrameDecodedEvent,
+                              base::Bind(&LogFrameDecodedEvent,
                                          cast_environment_,
+                                         cast_environment_->Clock()->NowTicks(),
                                          encoded_frame->rtp_timestamp,
                                          encoded_frame->frame_id));
+
+  // Used by chrome/browser/extension/api/cast_streaming/performance_test.cc
+  TRACE_EVENT_INSTANT1(
+      "cast_perf_test", "FrameDecoded",
+      TRACE_EVENT_SCOPE_THREAD,
+      "rtp_timestamp", encoded_frame->rtp_timestamp);
+
   // Frame decoded - return frame to the user via callback.
   cast_environment_->PostTask(
       CastEnvironment::MAIN,

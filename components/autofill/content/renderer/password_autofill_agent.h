@@ -79,6 +79,35 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
   typedef std::map<blink::WebFrame*,
                    linked_ptr<PasswordForm> > FrameToPasswordFormMap;
 
+  // This class holds a vector of autofilled password input elements and makes
+  // sure the autofilled password value is not accessible to JavaScript code
+  // until the user interacts with the page.
+  class PasswordValueGatekeeper {
+   public:
+    PasswordValueGatekeeper();
+    ~PasswordValueGatekeeper();
+
+    // Call this for every autofilled password field, so that the gatekeeper
+    // protects the value accordingly.
+    void RegisterElement(blink::WebInputElement* element);
+
+    // Call this to notify the gatekeeper that the user interacted with the
+    // page.
+    void OnUserGesture();
+
+    // Call this to reset the gatekeeper on a new page navigation.
+    void Reset();
+
+   private:
+    // Make the value of |element| accessible to JavaScript code.
+    void ShowValue(blink::WebInputElement* element);
+
+    bool was_user_gesture_seen_;
+    std::vector<blink::WebInputElement> elements_;
+
+    DISALLOW_COPY_AND_ASSIGN(PasswordValueGatekeeper);
+  };
+
   // RenderViewObserver:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidStartProvisionalLoad(blink::WebFrame* frame) OVERRIDE;
@@ -91,6 +120,7 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
                                    const blink::WebFormElement& form) OVERRIDE;
   virtual void WillSubmitForm(blink::WebFrame* frame,
                               const blink::WebFormElement& form) OVERRIDE;
+  virtual void WillProcessUserGesture() OVERRIDE;
 
   // RenderView IPC handlers:
   void OnFillPasswordForm(const PasswordFormFillData& form_data);
@@ -156,6 +186,8 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
   // Set if the user might be submitting a password form on the current page,
   // but the submit may still fail (i.e. doesn't pass JavaScript validation).
   FrameToPasswordFormMap provisionally_saved_forms_;
+
+  PasswordValueGatekeeper gatekeeper_;
 
   base::WeakPtrFactory<PasswordAutofillAgent> weak_ptr_factory_;
 

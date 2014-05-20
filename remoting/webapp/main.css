@@ -232,6 +232,7 @@ Component: Modal Dialog
   overflow: hidden;
   z-index: 100;
   opacity: 0.0;
+  margin: auto;
   -webkit-transform: scale(1.05);
   -webkit-transition: all 0.218s;
 }
@@ -617,7 +618,6 @@ button {
   top: 200px;
   left: 0;
   width: 100%;
-  display: flex;
 }
 
 .dialog-screen {
@@ -675,6 +675,7 @@ html.apps-v2.scrollable {
 
 #session-client-plugin {
   display: block;
+  flex-shrink: 0;
 }
 
 .session-client-inactive {
@@ -712,6 +713,7 @@ html.apps-v2.scrollable {
 
 .horizontally-centered {
   display: flex;
+  align-items: center;
 }
 
 .vertically-centered {
@@ -743,6 +745,7 @@ html.apps-v2.scrollable {
 /* video-container needs relative position so that mediasource-video-output can
  * be positioned relative to the parent with position:absolute. */
 #video-container {
+  width: 100%;
   position: relative;
 }
 

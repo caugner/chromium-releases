@@ -6,14 +6,13 @@
 #define ASH_DISPLAY_PROJECTING_OBSERVER_CHROMEOS_H_
 
 #include "ash/ash_export.h"
-#include "chromeos/display/output_configurator.h"
+#include "ui/display/chromeos/output_configurator.h"
 
 namespace ash {
 
 namespace internal {
 
-class ASH_EXPORT ProjectingObserver
-    : public chromeos::OutputConfigurator::Observer {
+class ASH_EXPORT ProjectingObserver : public ui::OutputConfigurator::Observer {
  public:
   ProjectingObserver();
   virtual ~ProjectingObserver();
@@ -22,8 +21,8 @@ class ASH_EXPORT ProjectingObserver
   void OnCastingSessionStartedOrStopped(bool started);
 
   // OutputConfigurator::Observer implementation:
-  virtual void OnDisplayModeChanged(const std::vector<
-      chromeos::OutputConfigurator::OutputSnapshot>& outputs) OVERRIDE;
+  virtual void OnDisplayModeChanged(
+      const ui::OutputConfigurator::DisplayStateList& outputs) OVERRIDE;
 
  private:
   // Sends the current projecting state to power manager.

@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/callback_list.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/customization_document.h"
@@ -21,6 +22,7 @@ class Widget;
 namespace chromeos {
 
 class AppLaunchController;
+class AutoEnrollmentController;
 class LoginScreenContext;
 class WebUILoginView;
 class WizardController;
@@ -30,12 +32,6 @@ class WizardController;
 // UI implementation (such as LoginDisplay).
 class LoginDisplayHost {
  public:
-  // Callback for GetAutoEnrollmentCheckResult. It is invoked with when
-  // a decision is made for auto enrollment. It is invoked with "true" when
-  // auto enrollment check is finished and auto enrollment should be enforced.
-  // Otherwise, it is invoked with "false".
-  typedef base::Callback<void(bool)> GetAutoEnrollmentCheckResultCallback;
-
   virtual ~LoginDisplayHost() {}
 
   // Creates UI implementation specific login display instance (views/WebUI).
@@ -65,15 +61,8 @@ class LoginDisplayHost {
   // Toggles status area visibility.
   virtual void SetStatusAreaVisible(bool visible) = 0;
 
-  // Signals the LoginDisplayHost that it can proceed with the Enterprise
-  // Auto-Enrollment checks now.
-  virtual void CheckForAutoEnrollment() = 0;
-
-  // Gets the auto enrollment check results. If the check is still pending,
-  // |callback| will be invoked asynchronously after it is finished. Otherwise,
-  // |callback| is invoked synchronously before this call returns.
-  virtual void GetAutoEnrollmentCheckResult(
-      const GetAutoEnrollmentCheckResultCallback& callback) = 0;
+  // Gets the auto-enrollment client.
+  virtual AutoEnrollmentController* GetAutoEnrollmentController() = 0;
 
   // Starts out-of-box-experience flow or shows other screen handled by
   // Wizard controller i.e. camera, recovery.

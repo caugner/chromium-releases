@@ -131,8 +131,9 @@ class POLICY_EXPORT URLBlacklist {
 // the actual update starts, and grab a WeakPtr.
 class POLICY_EXPORT URLBlacklistManager {
  public:
-  // Returns true if the blacklist should be skipped for |url|.
-  typedef bool (*SkipBlacklistCallback)(const GURL& url);
+  // Returns true if the blacklist should be overridden for |url| and sets
+  // |block| to true if it should be blocked and false otherwise.
+  typedef base::Callback<bool(const GURL&, bool*)> OverrideBlacklistCallback;
 
   // Must be constructed on the UI thread.
   // |background_task_runner| is used to build the blacklist in a background
@@ -144,7 +145,7 @@ class POLICY_EXPORT URLBlacklistManager {
       const scoped_refptr<base::SequencedTaskRunner>& background_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
       URLBlacklist::SegmentURLCallback segment_url,
-      SkipBlacklistCallback skip_blacklist);
+      OverrideBlacklistCallback override_blacklist);
   virtual ~URLBlacklistManager();
 
   // Must be called on the UI thread, before destruction.
@@ -204,7 +205,7 @@ class POLICY_EXPORT URLBlacklistManager {
   URLBlacklist::SegmentURLCallback segment_url_;
 
   // Used to optionally skip blacklisting for some URLs.
-  SkipBlacklistCallback skip_blacklist_;
+  OverrideBlacklistCallback override_blacklist_;
 
   // ---------
   // IO thread

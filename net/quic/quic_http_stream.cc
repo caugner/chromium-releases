@@ -5,6 +5,7 @@
 #include "net/quic/quic_http_stream.h"
 
 #include "base/callback_helpers.h"
+#include "base/metrics/histogram.h"
 #include "base/strings/stringprintf.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -61,9 +62,11 @@ int QuicHttpStream::InitializeStream(const HttpRequestInfo* request_info,
 
   if (request_info->url.SchemeIsSecure()) {
     SSLInfo ssl_info;
-    if (!session_->GetSSLInfo(&ssl_info) || !ssl_info.cert) {
+    bool secure_session = session_->GetSSLInfo(&ssl_info) && ssl_info.cert;
+    UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.SecureResourceSecureSession",
+                          secure_session);
+    if (!secure_session)
       return ERR_REQUEST_FOR_SECURE_RESOURCE_OVER_INSECURE_QUIC;
-    }
   }
 
   stream_net_log_ = stream_net_log;
@@ -419,17 +422,6 @@ int QuicHttpStream::DoSendHeaders() {
   if (!stream_)
     return ERR_UNEXPECTED;
 
-  if (stream_->version() <= QUIC_VERSION_12) {
-    if (request_.empty() && !stream_->CanWrite(
-            base::Bind(&QuicHttpStream::OnIOComplete,
-                       weak_factory_.GetWeakPtr()))) {
-      // Do not compress headers unless it is likely that they can be sent.
-      next_state_ = STATE_SEND_HEADERS;
-      return ERR_IO_PENDING;
-    }
-    request_ = stream_->compressor()->CompressHeadersWithPriority(
-        ConvertRequestPriorityToQuicPriority(priority_), request_headers_);
-  }
   // Log the actual request with the URL Request's net log.
   stream_net_log_.AddEvent(
       NetLog::TYPE_HTTP_TRANSACTION_QUIC_SEND_REQUEST_HEADERS,
@@ -442,11 +434,7 @@ int QuicHttpStream::DoSendHeaders() {
   bool has_upload_data = request_body_stream_ != NULL;
 
   next_state_ = STATE_SEND_HEADERS_COMPLETE;
-  int rv = (stream_->version() > QUIC_VERSION_12) ?
-      stream_->WriteHeaders(request_headers_, !has_upload_data) :
-      stream_->WriteStreamData(request_, !has_upload_data,
-                               base::Bind(&QuicHttpStream::OnIOComplete,
-                                          weak_factory_.GetWeakPtr()));
+  int rv = stream_->WriteHeaders(request_headers_, !has_upload_data, NULL);
   request_headers_.clear();
   return rv;
 }

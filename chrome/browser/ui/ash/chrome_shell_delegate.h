@@ -51,7 +51,7 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual bool IsIncognitoAllowed() const OVERRIDE;
   virtual bool IsRunningInForcedAppMode() const OVERRIDE;
   virtual void PreInit() OVERRIDE;
-  virtual void Shutdown() OVERRIDE;
+  virtual void PreShutdown() OVERRIDE;
   virtual void Exit() OVERRIDE;
   virtual keyboard::KeyboardControllerProxy*
       CreateKeyboardControllerProxy() OVERRIDE;
@@ -61,12 +61,10 @@ class ChromeShellDelegate : public ash::ShellDelegate,
       ash::ShelfModel* model) OVERRIDE;
   virtual ash::SystemTrayDelegate* CreateSystemTrayDelegate() OVERRIDE;
   virtual ash::UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
-  virtual ash::CapsLockDelegate* CreateCapsLockDelegate() OVERRIDE;
   virtual ash::SessionStateDelegate* CreateSessionStateDelegate() OVERRIDE;
   virtual ash::AccessibilityDelegate* CreateAccessibilityDelegate() OVERRIDE;
   virtual ash::NewWindowDelegate* CreateNewWindowDelegate() OVERRIDE;
   virtual ash::MediaDelegate* CreateMediaDelegate() OVERRIDE;
-  virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(
       aura::Window* root,
       ash::ShelfItemDelegate* item_delegate,

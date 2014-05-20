@@ -46,6 +46,7 @@ EnrollmentHandlerChromeOS::EnrollmentHandlerChromeOS(
     const std::string& client_id,
     bool is_auto_enrollment,
     const std::string& requisition,
+    const std::string& current_state_key,
     const AllowedDeviceModes& allowed_device_modes,
     const EnrollmentCallback& completion_callback)
     : store_(store),
@@ -56,6 +57,7 @@ EnrollmentHandlerChromeOS::EnrollmentHandlerChromeOS(
       client_id_(client_id),
       is_auto_enrollment_(is_auto_enrollment),
       requisition_(requisition),
+      current_state_key_(current_state_key),
       allowed_device_modes_(allowed_device_modes),
       completion_callback_(completion_callback),
       device_mode_(DEVICE_MODE_NOT_SET),
@@ -193,7 +195,7 @@ void EnrollmentHandlerChromeOS::AttemptRegistration() {
     enrollment_step_ = STEP_REGISTRATION;
     client_->Register(em::DeviceRegisterRequest::DEVICE,
                       auth_token_, client_id_, is_auto_enrollment_,
-                      requisition_);
+                      requisition_, current_state_key_);
   }
 }
 
@@ -311,8 +313,9 @@ void EnrollmentHandlerChromeOS::HandleLockDeviceResult(
     case EnterpriseInstallAttributes::LOCK_SUCCESS:
       // Get the token service so we can store our robot refresh token.
       enrollment_step_ = STEP_STORE_ROBOT_AUTH;
-      chromeos::DeviceOAuth2TokenServiceFactory::Get(
-          base::Bind(&EnrollmentHandlerChromeOS::DidGetTokenService,
+      chromeos::DeviceOAuth2TokenServiceFactory::Get()->SetAndSaveRefreshToken(
+          refresh_token_,
+          base::Bind(&EnrollmentHandlerChromeOS::HandleRobotAuthTokenStored,
                      weak_ptr_factory_.GetWeakPtr()));
       return;
     case EnterpriseInstallAttributes::LOCK_NOT_READY:
@@ -351,18 +354,10 @@ void EnrollmentHandlerChromeOS::HandleLockDeviceResult(
       EnrollmentStatus::STATUS_LOCK_ERROR));
 }
 
-void EnrollmentHandlerChromeOS::DidGetTokenService(
-    chromeos::DeviceOAuth2TokenService* token_service) {
+void EnrollmentHandlerChromeOS::HandleRobotAuthTokenStored(bool result) {
   CHECK_EQ(STEP_STORE_ROBOT_AUTH, enrollment_step_);
-  // Store the robot API auth refresh token.
-  if (!token_service) {
-    LOG(ERROR) << "Failed to store API refresh token (no token service).";
-    ReportResult(EnrollmentStatus::ForStatus(
-        EnrollmentStatus::STATUS_ROBOT_REFRESH_STORE_FAILED));
-    return;
-  }
 
-  if (!token_service->SetAndSaveRefreshToken(refresh_token_)) {
+  if (!result) {
     LOG(ERROR) << "Failed to store API refresh token.";
     ReportResult(EnrollmentStatus::ForStatus(
         EnrollmentStatus::STATUS_ROBOT_REFRESH_STORE_FAILED));

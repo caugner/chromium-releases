@@ -67,6 +67,8 @@ class ASH_EXPORT StickyKeysController : public ui::EventHandler {
   // Activate sticky keys to intercept and modify incoming events.
   void Enable(bool enabled);
 
+  void SetModifiersEnabled(bool mod3_enabled, bool altgr_enabled);
+
   // Overridden from ui::EventHandler:
   virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
   virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
@@ -92,9 +94,16 @@ class ASH_EXPORT StickyKeysController : public ui::EventHandler {
   // Whether sticky keys is activated and modifying events.
   bool enabled_;
 
+  // Whether the current layout has a mod3 key.
+  bool mod3_enabled_;
+
+  // Whether the current layout has an altgr key.
+  bool altgr_enabled_;
+
   // Sticky key handlers.
   scoped_ptr<StickyKeysHandler> shift_sticky_key_;
   scoped_ptr<StickyKeysHandler> alt_sticky_key_;
+  scoped_ptr<StickyKeysHandler> altgr_sticky_key_;
   scoped_ptr<StickyKeysHandler> ctrl_sticky_key_;
 
   scoped_ptr<StickyKeysOverlay> overlay_;
@@ -138,15 +147,18 @@ class ASH_EXPORT StickyKeysHandler {
     StickyKeysHandlerDelegate();
     virtual ~StickyKeysHandlerDelegate();
 
-    // Dispatches keyboard event synchronously.
+    // Dispatches keyboard event synchronously. |event| is an event that has
+    // been previously dispatched.
     virtual void DispatchKeyEvent(ui::KeyEvent* event,
                                   aura::Window* target) = 0;
 
-    // Dispatches mouse event synchronously.
+    // Dispatches mouse event synchronously. |event| is an event that has
+    // been previously dispatched.
     virtual void DispatchMouseEvent(ui::MouseEvent* event,
                                     aura::Window* target) = 0;
 
-    // Dispatches scroll event synchronously.
+    // Dispatches scroll event synchronously. |event| is an event that has
+    // been previously dispatched.
     virtual void DispatchScrollEvent(ui::ScrollEvent* event,
                                      aura::Window* target) = 0;
   };

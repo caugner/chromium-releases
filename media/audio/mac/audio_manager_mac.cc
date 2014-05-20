@@ -19,7 +19,6 @@
 #include "media/audio/mac/audio_auhal_mac.h"
 #include "media/audio/mac/audio_input_mac.h"
 #include "media/audio/mac/audio_low_latency_input_mac.h"
-#include "media/audio/mac/audio_low_latency_output_mac.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/channel_layout.h"
 #include "media/base/limits.h"
@@ -77,8 +76,8 @@ static void GetAudioDeviceInfo(bool is_input,
 
   // Get the array of device ids for all the devices, which includes both
   // input devices and output devices.
-  scoped_ptr_malloc<AudioDeviceID>
-      devices(reinterpret_cast<AudioDeviceID*>(malloc(size)));
+  scoped_ptr<AudioDeviceID, base::FreeDeleter>
+      devices(static_cast<AudioDeviceID*>(malloc(size)));
   AudioDeviceID* device_ids = devices.get();
   result = AudioObjectGetPropertyData(kAudioObjectSystemObject,
                                       &property_address,
@@ -209,6 +208,18 @@ static AudioDeviceID GetAudioDeviceIdByUId(bool is_input,
   }
 
   return audio_device_id;
+}
+
+template <class T>
+void StopStreams(std::list<T*>* streams) {
+  for (typename std::list<T*>::iterator it = streams->begin();
+       it != streams->end();
+       ++it) {
+    // Stop() is safe to call multiple times, so it doesn't matter if a stream
+    // has already been stopped.
+    (*it)->Stop();
+  }
+  streams->clear();
 }
 
 class AudioManagerMac::AudioPowerObserver : public base::PowerObserver {
@@ -489,8 +500,8 @@ std::string AudioManagerMac::GetAssociatedOutputDeviceID(
     return std::string();
 
   int device_count = size / sizeof(AudioDeviceID);
-  scoped_ptr_malloc<AudioDeviceID>
-      devices(reinterpret_cast<AudioDeviceID*>(malloc(size)));
+  scoped_ptr<AudioDeviceID, base::FreeDeleter>
+      devices(static_cast<AudioDeviceID*>(malloc(size)));
   result = AudioObjectGetPropertyData(
       device, &pa, 0, NULL, &size, devices.get());
   if (result)
@@ -582,7 +593,9 @@ AudioOutputStream* AudioManagerMac::MakeLowLatencyOutputStream(
     current_sample_rate_ = params.sample_rate();
   }
 
-  return new AUHALStream(this, params, device);
+  AudioOutputStream* stream = new AUHALStream(this, params, device);
+  output_streams_.push_back(stream);
+  return stream;
 }
 
 std::string AudioManagerMac::GetDefaultOutputDeviceID() {
@@ -615,7 +628,9 @@ std::string AudioManagerMac::GetDefaultOutputDeviceID() {
 AudioInputStream* AudioManagerMac::MakeLinearInputStream(
     const AudioParameters& params, const std::string& device_id) {
   DCHECK_EQ(AudioParameters::AUDIO_PCM_LINEAR, params.format());
-  return new PCMQueueInAudioInputStream(this, params);
+  AudioInputStream* stream = new PCMQueueInAudioInputStream(this, params);
+  input_streams_.push_back(stream);
+  return stream;
 }
 
 AudioInputStream* AudioManagerMac::MakeLowLatencyInputStream(
@@ -638,6 +653,7 @@ AudioInputStream* AudioManagerMac::MakeLowLatencyInputStream(
             params);
     stream = new AUAudioInputStream(this, params, output_params,
         audio_device_id);
+    input_streams_.push_back(stream);
   }
 
   return stream;
@@ -701,6 +717,18 @@ void AudioManagerMac::ShutdownOnAudioThread() {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   output_device_listener_.reset();
   power_observer_.reset();
+
+  // Since CoreAudio calls have to run on the UI thread and browser shutdown
+  // doesn't wait for outstanding tasks to complete, we may have input/output
+  // streams still running at shutdown.
+  //
+  // To avoid calls into destructed classes, we need to stop the OS callbacks
+  // by stopping the streams.  Note: The streams are leaked since process
+  // destruction is imminent.
+  //
+  // See http://crbug.com/354139 for crash details.
+  StopStreams(&input_streams_);
+  StopStreams(&output_streams_);
 }
 
 void AudioManagerMac::HandleDeviceChanges() {
@@ -738,6 +766,16 @@ int AudioManagerMac::ChooseBufferSize(int output_sample_rate) {
 bool AudioManagerMac::ShouldDeferOutputStreamStart() {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
   return power_observer_->ShouldDeferOutputStreamStart();
+}
+
+void AudioManagerMac::ReleaseOutputStream(AudioOutputStream* stream) {
+  output_streams_.remove(stream);
+  AudioManagerBase::ReleaseOutputStream(stream);
+}
+
+void AudioManagerMac::ReleaseInputStream(AudioInputStream* stream) {
+  input_streams_.remove(stream);
+  AudioManagerBase::ReleaseInputStream(stream);
 }
 
 AudioManager* CreateAudioManager(AudioLogFactory* audio_log_factory) {

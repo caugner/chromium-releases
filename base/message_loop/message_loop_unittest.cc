@@ -36,15 +36,15 @@ namespace base {
 
 namespace {
 
-MessagePump* TypeDefaultMessagePumpFactory() {
+scoped_ptr<MessagePump> TypeDefaultMessagePumpFactory() {
   return MessageLoop::CreateMessagePumpForType(MessageLoop::TYPE_DEFAULT);
 }
 
-MessagePump* TypeIOMessagePumpFactory() {
+scoped_ptr<MessagePump> TypeIOMessagePumpFactory() {
   return MessageLoop::CreateMessagePumpForType(MessageLoop::TYPE_IO);
 }
 
-MessagePump* TypeUIMessagePumpFactory() {
+scoped_ptr<MessagePump> TypeUIMessagePumpFactory() {
   return MessageLoop::CreateMessagePumpForType(MessageLoop::TYPE_UI);
 }
 
@@ -53,34 +53,9 @@ class Foo : public RefCounted<Foo> {
   Foo() : test_count_(0) {
   }
 
-  void Test0() {
-    ++test_count_;
-  }
-
   void Test1ConstRef(const std::string& a) {
     ++test_count_;
     result_.append(a);
-  }
-
-  void Test1Ptr(std::string* a) {
-    ++test_count_;
-    result_.append(*a);
-  }
-
-  void Test1Int(int a) {
-    test_count_ += a;
-  }
-
-  void Test2Ptr(std::string* a, std::string* b) {
-    ++test_count_;
-    result_.append(*a);
-    result_.append(*b);
-  }
-
-  void Test2Mixed(const std::string& a, std::string* b) {
-    ++test_count_;
-    result_.append(a);
-    result_.append(*b);
   }
 
   int test_count() const { return test_count_; }

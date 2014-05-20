@@ -6,6 +6,7 @@
 #define UI_GFX_OZONE_DRI_DRI_SURFACE_FACTORY_H_
 
 #include "base/memory/scoped_ptr.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/ozone/surface_factory_ozone.h"
 
 namespace gfx {
@@ -44,9 +45,16 @@ class GFX_EXPORT DriSurfaceFactory : public SurfaceFactoryOzone {
   virtual scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider(
       gfx::AcceleratedWidget w) OVERRIDE;
 
+  void SetHardwareCursor(AcceleratedWidget window,
+                         const SkBitmap& image,
+                         const gfx::Point& location);
+
+  void MoveHardwareCursor(AcceleratedWidget window, const gfx::Point& location);
+
+  void UnsetHardwareCursor(AcceleratedWidget window);
+
  private:
-  virtual DriSurface* CreateSurface(
-    HardwareDisplayController* controller);
+  virtual DriSurface* CreateSurface(const gfx::Size& size);
 
   virtual DriWrapper* CreateWrapper();
 
@@ -60,12 +68,20 @@ class GFX_EXPORT DriSurfaceFactory : public SurfaceFactoryOzone {
   // pending frame.
   virtual void WaitForPageFlipEvent(int fd);
 
+  // Draw the last set cursor & update the cursor plane.
+  void ResetCursor();
+
   scoped_ptr<DriWrapper> drm_;
 
   HardwareState state_;
 
   // Active output.
   scoped_ptr<HardwareDisplayController> controller_;
+
+  scoped_ptr<DriSurface> cursor_surface_;
+
+  SkBitmap cursor_bitmap_;
+  gfx::Point cursor_location_;
 
   DISALLOW_COPY_AND_ASSIGN(DriSurfaceFactory);
 };

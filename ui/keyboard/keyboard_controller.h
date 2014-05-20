@@ -11,6 +11,7 @@
 #include "base/observer_list.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/ime/input_method_observer.h"
+#include "ui/base/ime/text_input_type.h"
 #include "ui/keyboard/keyboard_export.h"
 #include "url/gurl.h"
 
@@ -30,7 +31,6 @@ namespace keyboard {
 class CallbackAnimationObserver;
 class KeyboardControllerObserver;
 class KeyboardControllerProxy;
-class KeyboardLayoutManager;
 
 // Provides control of the virtual keyboard, including providing a container
 // and controlling visibility.
@@ -58,9 +58,8 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
     return container_.get() != NULL;
   }
 
-  // Sets the override content url. This is used by for input view for extension
-  // IMEs.
-  void SetOverrideContentUrl(const GURL& url);
+  // Reloads the content of the keyboard.
+  void Reload();
 
   // Hides virtual keyboard and notifies observer bounds change.
   // This function should be called with a delay to avoid layout flicker
@@ -78,6 +77,9 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   KeyboardControllerProxy* proxy() { return proxy_.get(); }
 
   void set_lock_keyboard(bool lock) { lock_keyboard_ = lock; }
+
+  // Force the keyboard to show up if not showing and lock the keyboard.
+  void ShowAndLockKeyboard();
 
  private:
   // For access to Observer methods for simulation.
@@ -120,6 +122,7 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   ui::InputMethod* input_method_;
   bool keyboard_visible_;
   bool lock_keyboard_;
+  ui::TextInputType type_;
 
   ObserverList<KeyboardControllerObserver> observer_list_;
 

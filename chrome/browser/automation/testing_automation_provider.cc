@@ -53,7 +53,6 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
-#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -135,6 +134,7 @@
 #include "content/public/common/geoposition.h"
 #include "content/public/common/ssl_status.h"
 #include "content/public/common/webplugininfo.h"
+#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/process_manager.h"
@@ -915,7 +915,7 @@ void TestingAutomationProvider::DragAndDropFilePaths(
     }
 
     drop_data.filenames.push_back(
-        content::DropData::FileInfo(path, base::string16()));
+        ui::FileInfo(base::FilePath::FromUTF16Unsafe(path), base::FilePath()));
   }
 
   const gfx::Point client(x, y);
@@ -2310,8 +2310,8 @@ void TestingAutomationProvider::GetBrowserInfo(
         case extensions::VIEW_TYPE_EXTENSION_DIALOG:
           type = "EXTENSION_DIALOG";
           break;
-        case extensions::VIEW_TYPE_APP_SHELL:
-          type = "APP_SHELL";
+        case extensions::VIEW_TYPE_APP_WINDOW:
+          type = "APP_WINDOW";
           break;
         case extensions::VIEW_TYPE_PANEL:
           type = "PANEL";
@@ -4208,7 +4208,7 @@ void TestingAutomationProvider::IsFullscreenForTab(Browser* browser,
     IPC::Message* reply_message) {
   base::DictionaryValue dict;
   dict.SetBoolean("result",
-      browser->fullscreen_controller()->IsFullscreenForTabOrPending());
+      browser->fullscreen_controller()->IsWindowFullscreenForTabOrPending());
   AutomationJSONReply(this, reply_message).SendSuccess(&dict);
 }
 

@@ -167,6 +167,7 @@ protected:
     bool runModalPromptDialog(blink::WebFrame*, const blink::WebString& message, const blink::WebString& defaultValue, blink::WebString* actualValue);
     bool runModalBeforeUnloadDialog(blink::WebFrame*, const blink::WebString&);
 
+    void loadURLExternally(blink::WebFrame* frame, const blink::WebURLRequest& request, blink::WebNavigationPolicy policy, const blink::WebString& suggested_name);
     void didStartProvisionalLoad(blink::WebFrame*);
     void didReceiveServerRedirectForProvisionalLoad(blink::WebFrame*);
     bool didFailProvisionalLoad(blink::WebFrame*, const blink::WebURLError&);
@@ -288,11 +289,6 @@ public:
         WebTestProxyBase::startDragging(frame, data, mask, image, point);
         // Don't forward this call to Base because we don't want to do a real drag-and-drop.
     }
-    virtual void didChangeSelection(bool isEmptySelection)
-    {
-        WebTestProxyBase::didChangeSelection(isEmptySelection);
-        Base::didChangeSelection(isEmptySelection);
-    }
     virtual void didChangeContents()
     {
         WebTestProxyBase::didChangeContents();
@@ -308,16 +304,6 @@ public:
     {
         WebTestProxyBase::setStatusText(text);
         Base::setStatusText(text);
-    }
-    virtual void didStopLoading()
-    {
-        WebTestProxyBase::didStopLoading();
-        Base::didStopLoading();
-    }
-    virtual void showContextMenu(blink::WebFrame* frame, const blink::WebContextMenuData& contextMenuData)
-    {
-        WebTestProxyBase::showContextMenu(frame, contextMenuData);
-        Base::showContextMenu(frame, contextMenuData);
     }
     virtual blink::WebUserMediaClient* userMediaClient()
     {
@@ -481,13 +467,6 @@ public:
     virtual bool runModalBeforeUnloadDialog(blink::WebFrame* frame, const blink::WebString& message)
     {
         return WebTestProxyBase::runModalBeforeUnloadDialog(frame, message);
-    }
-    virtual blink::WebNavigationPolicy DecidePolicyForNavigation(content::RenderFrame* render_frame, blink::WebFrame* frame, blink::WebDataSource::ExtraData* extraData, const blink::WebURLRequest& request, blink::WebNavigationType type, blink::WebNavigationPolicy defaultPolicy, bool isRedirect)
-    {
-        blink::WebNavigationPolicy policy = WebTestProxyBase::decidePolicyForNavigation(frame, extraData, request, type, defaultPolicy, isRedirect);
-        if (policy == blink::WebNavigationPolicyIgnore)
-            return policy;
-        return Base::DecidePolicyForNavigation(render_frame, frame, extraData, request, type, defaultPolicy, isRedirect);
     }
     virtual bool willCheckAndDispatchMessageEvent(blink::WebFrame* sourceFrame, blink::WebFrame* targetFrame, blink::WebSecurityOrigin target, blink::WebDOMMessageEvent event)
     {

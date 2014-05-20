@@ -23,6 +23,7 @@
 #include "printing/backend/print_backend.h"
 #include "printing/page_range.h"
 #include "printing/pdf_render_settings.h"
+#include "printing/pwg_raster_settings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 #define IPC_MESSAGE_START ChromeUtilityMsgStart
@@ -73,6 +74,14 @@ IPC_STRUCT_TRAITS_BEGIN(printing::PrinterSemanticCapsAndDefaults)
 #endif
   IPC_STRUCT_TRAITS_MEMBER(duplex_capable)
   IPC_STRUCT_TRAITS_MEMBER(duplex_default)
+IPC_STRUCT_TRAITS_END()
+
+IPC_ENUM_TRAITS(printing::PwgRasterTransformType);
+
+IPC_STRUCT_TRAITS_BEGIN(printing::PwgRasterSettings)
+  IPC_STRUCT_TRAITS_MEMBER(odd_page_transform)
+  IPC_STRUCT_TRAITS_MEMBER(rotate_all_pages)
+  IPC_STRUCT_TRAITS_MEMBER(reverse_page_order)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(UpdateManifest::Result)
@@ -177,10 +186,12 @@ IPC_MESSAGE_CONTROL4(ChromeUtilityMsg_RenderPDFPagesToMetafile,
                      std::vector<printing::PageRange>)
 
 // Tell the utility process to render the given PDF into a PWGRaster.
-IPC_MESSAGE_CONTROL3(ChromeUtilityMsg_RenderPDFPagesToPWGRaster,
-                     IPC::PlatformFileForTransit,  /* Input PDF file */
-                     printing::PdfRenderSettings,  /* PDF render settings */
-                     IPC::PlatformFileForTransit   /* Output PWG file */)
+IPC_MESSAGE_CONTROL4(ChromeUtilityMsg_RenderPDFPagesToPWGRaster,
+                     IPC::PlatformFileForTransit, /* Input PDF file */
+                     printing::PdfRenderSettings, /* PDF render settings */
+                     // PWG transform settings.
+                     printing::PwgRasterSettings,
+                     IPC::PlatformFileForTransit /* Output PWG file */)
 
 // Tell the utility process to decode the given JPEG image data with a robust
 // libjpeg codec.
@@ -470,3 +481,17 @@ IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ImageWriter_Failed,
 // Periodic status update about the progress of an operation.
 IPC_MESSAGE_CONTROL1(ChromeUtilityHostMsg_ImageWriter_Progress,
                      int64 /* number of bytes processed */)
+
+#if defined(OS_WIN)
+// Get plain-text WiFi credentials from the system (requires UAC privilege
+// elevation) and encrypt them with |public_key|.
+IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_GetAndEncryptWiFiCredentials,
+                     std::string /* ssid */,
+                     std::vector<uint8> /* public_key */)
+
+// Reply after getting WiFi credentials from the system and encrypting them with
+// caller's public key. |success| is false if error occurred.
+IPC_MESSAGE_CONTROL2(ChromeUtilityHostMsg_GotEncryptedWiFiCredentials,
+                     std::vector<uint8> /* encrypted_key_data */,
+                     bool /* success */)
+#endif  // defined(OS_WIN)

@@ -216,7 +216,7 @@ void LogDuplicatesHistogram(
   std::map<std::string, int> duplicates;
   for (TemplateURLService::TemplateURLVector::const_iterator it =
       template_urls.begin(); it != template_urls.end(); ++it) {
-    std::string keyword = UTF16ToASCII((*it)->keyword());
+    std::string keyword = base::UTF16ToASCII((*it)->keyword());
     base::TrimString(keyword, "_", &keyword);
     duplicates[keyword]++;
   }
@@ -336,7 +336,7 @@ base::string16 TemplateURLService::CleanUserInputKeyword(
     const base::string16& keyword) {
   // Remove the scheme.
   base::string16 result(base::i18n::ToLower(keyword));
-  TrimWhitespace(result, TRIM_ALL, &result);
+  base::TrimWhitespace(result, base::TRIM_ALL, &result);
   url_parse::Component scheme_component;
   if (url_parse::ExtractScheme(base::UTF16ToUTF8(keyword).c_str(),
                                static_cast<int>(keyword.length()),
@@ -519,6 +519,8 @@ void TemplateURLService::AddExtensionControlledTURL(
   DCHECK(template_url);
   DCHECK_EQ(kInvalidTemplateURLID, template_url->id());
   DCHECK(info);
+  DCHECK_EQ(info->wants_to_be_default_engine,
+            template_url->show_in_default_list());
   template_url->extension_info_.swap(info);
   DCHECK(!FindTemplateURLForExtension(
       template_url->GetExtensionId(),
@@ -901,7 +903,7 @@ void TemplateURLService::Observe(int type,
 void TemplateURLService::Shutdown() {
   // This check has to be done at Shutdown() instead of in the dtor to ensure
   // that no clients of WebDataService are holding ptrs to it after the first
-  // phase of the BrowserContextKeyedService Shutdown() process.
+  // phase of the KeyedService Shutdown() process.
   if (load_handle_) {
     DCHECK(service_.get());
     service_->CancelRequest(load_handle_);
@@ -2600,7 +2602,7 @@ void TemplateURLService::AddTemplateURLsAndSetupDefaultEngine(
     } else {
       // The value from the preferences takes over.
       default_search_provider = NULL;
-      if (default_from_prefs.get()) {
+      if (default_from_prefs) {
         TemplateURLData data(default_from_prefs->data());
         data.created_by_policy = true;
         data.id = kInvalidTemplateURLID;
@@ -2643,6 +2645,9 @@ void TemplateURLService::AddTemplateURLsAndSetupDefaultEngine(
     SetTemplateURLs(template_urls);
 
     if (default_search_provider) {
+      base::AutoReset<DefaultSearchChangeOrigin> change_origin(
+          &dsp_change_origin_, default_from_prefs ?
+              dsp_change_origin_ : DSP_CHANGE_NEW_ENGINE_NO_PREFS);
       // Note that this saves the default search provider to prefs.
       SetDefaultSearchProvider(default_search_provider);
     } else {
@@ -2668,15 +2673,9 @@ void TemplateURLService::EnsureDefaultSearchProviderExists() {
     }
     // Don't log anything if the user has a NULL default search provider.
     if (default_search_provider_) {
-      // TODO(pkasting): This histogram obsoletes the next one.  Remove the next
-      // one in Chrome 32 or later.
       UMA_HISTOGRAM_ENUMERATION("Search.DefaultSearchProviderType",
           TemplateURLPrepopulateData::GetEngineType(*default_search_provider_),
           SEARCH_ENGINE_MAX);
-      UMA_HISTOGRAM_ENUMERATION(
-          "Search.DefaultSearchProvider",
-          default_search_provider_->prepopulate_id(),
-          TemplateURLPrepopulateData::kMaxPrepopulatedEngineID);
     }
   }
 }

@@ -10,10 +10,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/local_discovery/test_service_discovery_client.h"
-#include "chrome/browser/signin/profile_oauth2_token_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
-#include "chrome/browser/signin/signin_manager_base.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/local_discovery/local_discovery_ui_handler.h"
@@ -21,11 +20,18 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/web_ui_browsertest.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager_base.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "base/prefs/pref_service.h"
+#include "chrome/common/pref_names.h"
+#endif
 
 using testing::InvokeWithoutArgs;
 using testing::Return;
@@ -354,6 +360,12 @@ class LocalDiscoveryUITest : public WebUIBrowserTest {
     SigninManagerBase* signin_manager =
         SigninManagerFactory::GetForProfile(browser()->profile());
 
+#if defined(OS_CHROMEOS)
+    // Chrome OS initializes prefs::kGoogleServicesUsername to "stub user" so
+    // we need to override it as well.
+    browser()->profile()->GetPrefs()->
+        SetString(prefs::kGoogleServicesUsername, kSampleUser);
+#endif
     DCHECK(signin_manager);
     signin_manager->SetAuthenticatedUsername(kSampleUser);
 

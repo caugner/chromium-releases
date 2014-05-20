@@ -59,6 +59,8 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_CONST_METHOD0(RestoreActiveTexture, void());
   MOCK_CONST_METHOD1(
       RestoreAllTextureUnitBindings, void(const ContextState* state));
+  MOCK_CONST_METHOD1(
+      RestoreActiveTextureUnitBinding, void(unsigned int target));
   MOCK_CONST_METHOD1(RestoreAttribute, void(unsigned index));
   MOCK_CONST_METHOD0(RestoreBufferBindings, void());
   MOCK_CONST_METHOD0(RestoreFramebufferBindings, void());
@@ -87,11 +89,12 @@ class MockGLES2Decoder : public GLES2Decoder {
                                          uint32* service_texture_id));
   MOCK_METHOD0(GetContextLostReason, error::ContextLostReason());
   MOCK_CONST_METHOD1(GetCommandName, const char*(unsigned int command_id));
-  MOCK_METHOD9(ClearLevel, bool(
+  MOCK_METHOD10(ClearLevel, bool(
       unsigned service_id,
       unsigned bind_target,
       unsigned target,
       int level,
+      unsigned internal_format,
       unsigned format,
       unsigned type,
       int width,

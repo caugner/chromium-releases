@@ -43,6 +43,7 @@ extern const char kOptionMediaSize[] = "media_size";
 extern const char kOptionPageOrientation[] = "page_orientation";
 extern const char kOptionPageRange[] = "page_range";
 extern const char kOptionReverse[] = "reverse_order";
+extern const char kOptionPwgRasterConfig[] = "pwg_raster_config";
 
 const char kMargineBottom[] = "bottom_microns";
 const char kMargineLeft[] = "left_microns";
@@ -59,6 +60,10 @@ const char kMediaIsContinuous[] = "is_continuous_feed";
 const char kPageRangeInterval[] = "interval";
 const char kPageRangeEnd[] = "end";
 const char kPageRangeStart[] = "start";
+
+const char kPwgRasterDocumentSheetBack[] = "document_sheet_back";
+const char kPwgRasterReverseOrderStreaming[] = "reverse_order_streaming";
+const char kPwgRasterRotateAllPages[] = "rotate_all_pages";
 
 const char kTypeColorColor[] = "STANDARD_COLOR";
 const char kTypeColorMonochrome[] = "STANDARD_MONOCHROME";
@@ -83,6 +88,11 @@ const char kTypeOrientationAuto[] = "AUTO";
 
 const char kTypeOrientationLandscape[] = "LANDSCAPE";
 const char kTypeOrientationPortrait[] = "PORTRAIT";
+
+const char kTypeDocumentSheetBackNormal[] = "NORMAL";
+const char kTypeDocumentSheetBackRotated[] = "ROTATED";
+const char kTypeDocumentSheetBackManualTumble[] = "MANUAL_TUMBLE";
+const char kTypeDocumentSheetBackFlipped[] = "FLIPPED";
 
 const struct ColorNames {
   ColorType id;
@@ -132,6 +142,15 @@ const struct FitToPageNames {
   { SHRINK_TO_PAGE, kTypeFitToPageShrinkToPage },
   { FILL_PAGE, kTypeFitToPageFillPage },
 };
+
+const struct DocumentSheetBackNames {
+  DocumentSheetBack id;
+  const char* const json_name;
+} kDocumentSheetBackNames[] = {
+      {NORMAL, kTypeDocumentSheetBackNormal},
+      {ROTATED, kTypeDocumentSheetBackRotated},
+      {MANUAL_TUMBLE, kTypeDocumentSheetBackManualTumble},
+      {FLIPPED, kTypeDocumentSheetBackFlipped}};
 
 const int32 kInchToUm = 25400;
 const int32 kMmToUm = 1000;
@@ -211,7 +230,7 @@ const struct MadiaDefinition {
   MAP_CLOUD_PRINT_MEDIA_TYPE(PRC_4, 110, 208, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(PRC_5, 110, 220, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(PRC_8, 120, 309, kMmToUm),
-  MAP_CLOUD_PRINT_MEDIA_TYPE(PRC_6, 120, 320, kMmToUm),
+  MAP_CLOUD_PRINT_MEDIA_TYPE(PRC_6, 120, 230, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(PRC_3, 125, 176, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(PRC_16K, 146, 215, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(PRC_7, 160, 230, kMmToUm),
@@ -225,10 +244,10 @@ const struct MadiaDefinition {
   MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A7, 74, 105, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A6, 105, 148, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A5, 148, 210, kMmToUm),
-  MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A5_EXTRA, 235.5f, 322.3f, kMmToUm),
+  MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A5_EXTRA, 174, 235, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A4, 210, 297, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A4_TAB, 225, 297, kMmToUm),
-  MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A4_EXTRA, 235.5f, 322.3f, kMmToUm),
+  MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A4_EXTRA, 235, 322, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A3, 297, 420, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A4X3, 297, 630, kMmToUm),
   MAP_CLOUD_PRINT_MEDIA_TYPE(ISO_A4X4, 297, 841, kMmToUm),
@@ -349,6 +368,11 @@ bool TypeFromString(const T& names, const std::string& type, IdType* id) {
 }
 
 }  // namespace
+
+PwgRasterConfig::PwgRasterConfig()
+    : document_sheet_back(ROTATED),
+      reverse_order_streaming(false),
+      rotate_all_pages(false) {}
 
 Color::Color() : type(AUTO_COLOR) {}
 
@@ -503,6 +527,40 @@ class ContentTypeTraits : public NoValueValidation,
 
   static void Save(ContentType option, base::DictionaryValue* dict) {
     dict->SetString(kKeyContentType, option);
+  }
+};
+
+class PwgRasterConfigTraits : public NoValueValidation,
+                              public ItemsTraits<kOptionPwgRasterConfig> {
+ public:
+  static bool Load(const base::DictionaryValue& dict, PwgRasterConfig* option) {
+    std::string document_sheet_back;
+    PwgRasterConfig option_out;
+    if (dict.GetString(kPwgRasterDocumentSheetBack, &document_sheet_back)) {
+      if (!TypeFromString(kDocumentSheetBackNames,
+                          document_sheet_back,
+                          &option_out.document_sheet_back)) {
+        return false;
+      }
+    }
+
+    dict.GetBoolean(kPwgRasterReverseOrderStreaming,
+                    &option_out.reverse_order_streaming);
+    dict.GetBoolean(kPwgRasterRotateAllPages, &option_out.rotate_all_pages);
+    *option = option_out;
+    return true;
+  }
+
+  static void Save(const PwgRasterConfig& option, base::DictionaryValue* dict) {
+    dict->SetString(
+        kPwgRasterDocumentSheetBack,
+        TypeToString(kDocumentSheetBackNames, option.document_sheet_back));
+    if (option.reverse_order_streaming)
+      dict->SetBoolean(kPwgRasterReverseOrderStreaming,
+                       option.reverse_order_streaming);
+
+    if (option.rotate_all_pages)
+      dict->SetBoolean(kPwgRasterRotateAllPages, option.rotate_all_pages);
   }
 };
 
@@ -743,6 +801,7 @@ class ReverseTraits : public NoValueValidation,
 using namespace printer;
 
 template class ListCapability<ContentType, ContentTypeTraits>;
+template class ValueCapability<PwgRasterConfig, PwgRasterConfigTraits>;
 template class SelectionCapability<Color, ColorTraits>;
 template class SelectionCapability<DuplexType, DuplexTraits>;
 template class SelectionCapability<OrientationType, OrientationTraits>;
@@ -755,6 +814,7 @@ template class EmptyCapability<class PageRangeTraits>;
 template class BooleanCapability<class CollateTraits>;
 template class BooleanCapability<class ReverseTraits>;
 
+template class TicketItem<PwgRasterConfig, PwgRasterConfigTraits>;
 template class TicketItem<Color, ColorTraits>;
 template class TicketItem<DuplexType, DuplexTraits>;
 template class TicketItem<OrientationType, OrientationTraits>;

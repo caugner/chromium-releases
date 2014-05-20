@@ -13,6 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "chrome/browser/media_galleries/media_folder_finder.h"
 #include "chrome/browser/media_galleries/media_scan_types.h"
 #include "content/public/browser/notification_observer.h"
@@ -84,13 +85,15 @@ class MediaScanManager : public content::NotificationObserver {
 
   scoped_ptr<MediaFolderFinder> folder_finder_;
 
+  base::Time scan_start_time_;
+
   // If not NULL, used to create |folder_finder_|. Used for testing.
   MediaFolderFinderFactory testing_folder_finder_factory_;
 
   // Set of extensions (on all profiles) that have an in-progress scan.
   ScanObserverMap observers_;
 
-  // Used to listen for NOTIFICATION_EXTENSION_UNLOADED events.
+  // Used to listen for NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED events.
   content::NotificationRegistrar registrar_;
 
   base::WeakPtrFactory<MediaScanManager> weak_factory_;

@@ -18,8 +18,8 @@
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
-#include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/extensions/sync_helper.h"
+#include "components/sync_driver/sync_prefs.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -42,16 +42,14 @@ ExtensionSyncService::ExtensionSyncService(Profile* profile,
       extension_service_(extension_service),
       app_sync_bundle_(this),
       extension_sync_bundle_(this),
-      pending_app_enables_(
-          make_scoped_ptr(new browser_sync::SyncPrefs(
-              extension_prefs_->pref_service())),
-          &app_sync_bundle_,
-          syncer::APPS),
-      pending_extension_enables_(
-          make_scoped_ptr(new browser_sync::SyncPrefs(
-              extension_prefs_->pref_service())),
-          &extension_sync_bundle_,
-          syncer::EXTENSIONS) {
+      pending_app_enables_(make_scoped_ptr(new sync_driver::SyncPrefs(
+                               extension_prefs_->pref_service())),
+                           &app_sync_bundle_,
+                           syncer::APPS),
+      pending_extension_enables_(make_scoped_ptr(new sync_driver::SyncPrefs(
+                                     extension_prefs_->pref_service())),
+                                 &extension_sync_bundle_,
+                                 syncer::EXTENSIONS) {
   SetSyncStartFlare(sync_start_util::GetFlareForSyncableService(
       profile_->GetPath()));
 
@@ -387,7 +385,8 @@ bool ExtensionSyncService::ProcessExtensionSyncDataHelper(
 
   // Extension from sync was uninstalled by the user as external extensions.
   // Honor user choice and skip installation/enabling.
-  if (extension_service_->IsExternalExtensionUninstalled(id)) {
+  if (extensions::ExtensionPrefs::Get(profile_)
+          ->IsExternalExtensionUninstalled(id)) {
     LOG(WARNING) << "Extension with id " << id
                  << " from sync was uninstalled as external extension";
     return true;

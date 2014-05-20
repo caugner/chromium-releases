@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -23,7 +23,7 @@ extern const char kHotwordFieldTrialDisabledGroupName[];
 // Provides an interface for the Hotword component that does voice triggered
 // search.
 class HotwordService : public content::NotificationObserver,
-                       public BrowserContextKeyedService {
+                       public KeyedService {
  public:
   // Returns true if the hotword supports the current system language.
   static bool DoesHotwordSupportLanguage(Profile* profile);
@@ -53,6 +53,10 @@ class HotwordService : public content::NotificationObserver,
   // Determine if hotwording is allowed in this profile based on field trials
   // and language.
   virtual bool IsHotwordAllowed();
+
+  // Checks if the user has opted into audio logging. Returns true if the user
+  // is opted in, false otherwise..
+  bool IsOptedIntoAudioLogging();
 
   // Used in the case of an error with the current hotword extension. Tries
   // to reload the extension or in the case of failure, tries to re-download it.

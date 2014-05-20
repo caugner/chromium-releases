@@ -2,12 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import sys
-
-from telemetry.core.platform import linux_platform_backend
-from telemetry.core.platform import mac_platform_backend
-from telemetry.core.platform import win_platform_backend
-
 class Platform(object):
   """The platform that the target browser is running on.
 
@@ -112,6 +106,12 @@ class Platform(object):
     return self._platform_backend.FlushSystemCacheForDirectory(
         directory, ignoring=ignoring)
 
+  def FlushDnsCache(self):
+    """Flushes the OS's DNS cache completely.
+
+    This function may require root or administrator access."""
+    return self._platform_backend.FlushDnsCache()
+
   def LaunchApplication(self, application, parameters=None,
                         elevate_privilege=False):
     """"Launches the given |application| with a list of |parameters| on the OS.
@@ -211,7 +211,8 @@ class Platform(object):
     """Stops monitoring power utilization and returns collects stats
 
     Returns:
-      A dict of power utilization statistics containing: {
+      None if power measurement failed for some reason, otherwise a dict of
+      power utilization statistics containing: {
         # An identifier for the data provider. Allows to evaluate the precision
         # of the data. Example values: monsoon, powermetrics, ds2784
         'identifier': identifier,
@@ -233,14 +234,3 @@ class Platform(object):
       }
     """
     return self._platform_backend.StopMonitoringPowerAsync()
-
-
-def CreatePlatformBackendForCurrentOS():
-  if sys.platform.startswith('linux'):
-    return linux_platform_backend.LinuxPlatformBackend()
-  elif sys.platform == 'darwin':
-    return mac_platform_backend.MacPlatformBackend()
-  elif sys.platform == 'win32':
-    return win_platform_backend.WinPlatformBackend()
-  else:
-    raise NotImplementedError()

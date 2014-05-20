@@ -15,18 +15,15 @@
 #include "media/cast/cast_config.h"
 #include "media/cast/cast_environment.h"
 #include "media/cast/congestion_control/congestion_control.h"
+#include "media/cast/logging/logging_defines.h"
 #include "media/cast/rtcp/rtcp.h"
 #include "media/cast/rtcp/sender_rtcp_event_subscriber.h"
-#include "media/filters/gpu_video_accelerator_factories.h"
-#include "media/video/video_encode_accelerator.h"
 
 namespace media {
 class VideoFrame;
 
 namespace cast {
-
 class LocalRtcpVideoSenderFeedback;
-class LocalRtpVideoSenderStatistics;
 class LocalVideoEncoderCallback;
 class VideoEncoder;
 
@@ -45,8 +42,9 @@ class VideoSender : public base::NonThreadSafe,
  public:
   VideoSender(scoped_refptr<CastEnvironment> cast_environment,
               const VideoSenderConfig& video_config,
-              const scoped_refptr<GpuVideoAcceleratorFactories>& gpu_factories,
-              const CastInitializationCallback& initialization_status,
+              const CreateVideoEncodeAcceleratorCallback& create_vea_cb,
+              const CreateVideoEncodeMemoryCallback& create_video_encode_mem_cb,
+              const CastInitializationCallback& cast_initialization_cb,
               transport::CastTransportSender* const transport_sender);
 
   virtual ~VideoSender();
@@ -60,6 +58,11 @@ class VideoSender : public base::NonThreadSafe,
 
   // Only called from the main cast thread.
   void IncomingRtcpPacket(scoped_ptr<Packet> packet);
+
+  // Store rtp stats computed at the Cast transport sender.
+  void StoreStatistics(const transport::RtcpSenderInfo& sender_info,
+                       base::TimeTicks time_sent,
+                       uint32 rtp_timestamp);
 
  protected:
   // Protected for testability.
@@ -97,16 +100,9 @@ class VideoSender : public base::NonThreadSafe,
       scoped_ptr<transport::EncodedVideoFrame> encoded_frame,
       const base::TimeTicks& capture_time);
 
-  void SendEncodedVideoFrameToTransport(
-      scoped_ptr<transport::EncodedVideoFrame> encoded_frame,
-      const base::TimeTicks& capture_time);
-
   void InitializeTimers();
 
-  void ResendPacketsOnTransportThread(
-      const transport::MissingFramesAndPacketsMap& missing_packets);
-
-  const base::TimeDelta rtp_max_delay_;
+  base::TimeDelta rtp_max_delay_;
   const int max_frame_rate_;
 
   scoped_refptr<CastEnvironment> cast_environment_;
@@ -115,9 +111,8 @@ class VideoSender : public base::NonThreadSafe,
   // Subscribes to raw events.
   // Processes raw audio events to be sent over to the cast receiver via RTCP.
   SenderRtcpEventSubscriber event_subscriber_;
-
+  RtpSenderStatistics rtp_stats_;
   scoped_ptr<LocalRtcpVideoSenderFeedback> rtcp_feedback_;
-  scoped_ptr<LocalRtpVideoSenderStatistics> rtp_video_sender_statistics_;
   scoped_ptr<VideoEncoder> video_encoder_;
   scoped_ptr<Rtcp> rtcp_;
   uint8 max_unacked_frames_;
@@ -129,7 +124,19 @@ class VideoSender : public base::NonThreadSafe,
   int last_skip_count_;
   CongestionControl congestion_control_;
 
+  // This is a "good enough" mapping for finding the RTP timestamp associated
+  // with a video frame. The key is the lowest 8 bits of frame id (which is
+  // what is sent via RTCP). This map is used for logging purposes. The only
+  // time when this mapping will be incorrect is when it receives an ACK for a
+  // old enough frame such that 8-bit wrap around has already occurred, which
+  // should be pretty rare.
+  RtpTimestamp frame_id_to_rtp_timestamp_[256];
+
   bool initialized_;
+  // Indicator for receiver acknowledgments.
+  bool active_session_;
+
+  // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<VideoSender> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoSender);

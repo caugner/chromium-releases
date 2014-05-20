@@ -29,10 +29,6 @@ void SurfaceFactoryOzone::SetInstance(SurfaceFactoryOzone* impl) {
   impl_ = impl;
 }
 
-gfx::Screen* SurfaceFactoryOzone::CreateDesktopScreen() {
-  return NULL;
-}
-
 intptr_t SurfaceFactoryOzone::GetNativeDisplay() {
   return 0;
 }
@@ -50,10 +46,25 @@ const int32* SurfaceFactoryOzone::GetEGLSurfaceProperties(
   return desired_attributes;
 }
 
-void SurfaceFactoryOzone::SetCursorImage(const SkBitmap& image) {
+
+gfx::OverlayCandidatesOzone* SurfaceFactoryOzone::GetOverlayCandidates(
+    gfx::AcceleratedWidget w) {
+  return NULL;
 }
 
-void SurfaceFactoryOzone::MoveCursorTo(const gfx::Point& location) {
+void SurfaceFactoryOzone::ScheduleOverlayPlane(gfx::AcceleratedWidget w,
+                                               int plane_z_order,
+                                               OverlayTransform plane_transform,
+                                               gfx::NativeBufferOzone buffer,
+                                               const gfx::Rect& display_bounds,
+                                               gfx::RectF crop_rect) {
+  NOTREACHED();
+}
+
+gfx::NativeBufferOzone SurfaceFactoryOzone::CreateNativeBuffer(
+    gfx::Size size,
+    BufferFormat format) {
+  return 0;
 }
 
 }  // namespace gfx

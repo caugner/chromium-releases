@@ -21,12 +21,12 @@
 #include "base/logging.h"
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
-#include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/rect.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
+#include "ui/wm/public/activation_change_observer.h"
 
 namespace aura {
 class RootWindow;
@@ -184,6 +184,8 @@ class ASH_EXPORT ShelfLayoutManager :
 
   // Overridden from ash::ShellObserver:
   virtual void OnLockStateChanged(bool locked) OVERRIDE;
+  virtual void OnMaximizeModeStarted() OVERRIDE;
+  virtual void OnMaximizeModeEnded() OVERRIDE;
 
   // Overriden from aura::client::ActivationChangeObserver:
   virtual void OnWindowActivated(aura::Window* gained_active,
@@ -337,10 +339,6 @@ class ASH_EXPORT ShelfLayoutManager :
       const gfx::Rect& dock_bounds,
       DockedWindowLayoutManagerObserver::Reason reason) OVERRIDE;
 
-  // Generates insets for inward edge based on the current shelf alignment.
-  // TODO(sad): Remove this (crbug.com/318879)
-  gfx::Insets GetInsetsForAlignment(int distance) const;
-
   // The RootWindow is cached so that we don't invoke Shell::GetInstance() from
   // our destructor. We avoid that as at the time we're deleted Shell is being
   // deleted too.
@@ -349,6 +347,10 @@ class ASH_EXPORT ShelfLayoutManager :
   // True when inside UpdateBoundsAndOpacity() method. Used to prevent calling
   // UpdateBoundsAndOpacity() again from SetChildBounds().
   bool updating_bounds_;
+
+  // If true, the shelf gets forced (e.g. by the maximize mode) to be always
+  // visible.
+  bool force_shelf_always_visibile_;
 
   // See description above setter.
   ShelfAutoHideBehavior auto_hide_behavior_;

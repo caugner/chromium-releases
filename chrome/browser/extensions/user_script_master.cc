@@ -51,7 +51,7 @@ static bool GetDeclarationValue(const base::StringPiece& line,
   if (temp.empty() || !IsWhitespace(temp[0]))
     return false;
 
-  TrimWhitespaceASCII(temp, TRIM_ALL, value);
+  base::TrimWhitespaceASCII(temp, base::TRIM_ALL, value);
   return true;
 }
 
@@ -287,7 +287,13 @@ static base::SharedMemory* Serialize(const UserScriptList& scripts) {
   // Create the shared memory object.
   base::SharedMemory shared_memory;
 
-  if (!shared_memory.CreateAndMapAnonymous(pickle.size()))
+  base::SharedMemoryCreateOptions options;
+  options.size = pickle.size();
+  options.share_read_only = true;
+  if (!shared_memory.Create(options))
+    return NULL;
+
+  if (!shared_memory.Map(pickle.size()))
     return NULL;
 
   // Copy the pickle to shared memory.
@@ -324,7 +330,7 @@ UserScriptMaster::UserScriptMaster(Profile* profile)
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile_));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
                  content::NotificationService::AllBrowserContextsAndSources());
@@ -392,7 +398,7 @@ void UserScriptMaster::Observe(int type,
         should_start_load = true;
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED: {
       // Remove any content scripts.
       const Extension* extension =
           content::Details<UnloadedExtensionInfo>(details)->extension;

@@ -101,13 +101,17 @@ CommandUtil.canExecuteEnabledOnDriveOnly = function(event, fileManager) {
 };
 
 /**
- * Checks if command should be visible on drive.
+ * Sets the command as visible only when the current volume is drive and it's
+ * running as a normal app, not as a modal dialog.
  * @param {Event} event Command event to mark.
  * @param {FileManager} fileManager FileManager to use.
  */
-CommandUtil.canExecuteVisibleOnDriveOnly = function(event, fileManager) {
-  event.canExecute = fileManager.isOnDrive();
-  event.command.setHidden(!fileManager.isOnDrive());
+CommandUtil.canExecuteVisibleOnDriveInNormalAppModeOnly =
+    function(event, fileManager) {
+  var enabled = fileManager.isOnDrive() &&
+      !DialogType.isModal(fileManager.dialogType);
+  event.canExecute = enabled;
+  event.command.setHidden(!enabled);
 };
 
 /**
@@ -505,7 +509,16 @@ CommandHandler.COMMANDS_['volume-help'] = {
     else
       util.visitURL(str('FILES_APP_HELP_URL'));
   },
-  canExecute: CommandUtil.canExecuteAlways
+  canExecute: function(event, fileManager) {
+    // Hides the help menu in modal dialog mode. It does not make much sense
+    // because after all, users cannot view the help without closing, and
+    // besides that the help page is about Files.app as an app, not about the
+    // dialog mode itself. It can also lead to hard-to-fix bug crbug.com/339089.
+    var hideHelp = DialogType.isModal(fileManager.dialogType);
+    event.canExecute = !hideHelp;
+    event.command.setHidden(hideHelp);
+    fileManager.document_.getElementById('help-separator').hidden = hideHelp;
+  },
 };
 
 /**
@@ -516,7 +529,7 @@ CommandHandler.COMMANDS_['drive-buy-more-space'] = {
   execute: function(event, fileManager) {
     util.visitURL(str('GOOGLE_DRIVE_BUY_STORAGE_URL'));
   },
-  canExecute: CommandUtil.canExecuteVisibleOnDriveOnly
+  canExecute: CommandUtil.canExecuteVisibleOnDriveInNormalAppModeOnly
 };
 
 /**
@@ -527,7 +540,7 @@ CommandHandler.COMMANDS_['drive-go-to-drive'] = {
   execute: function(event, fileManager) {
     util.visitURL(str('GOOGLE_DRIVE_ROOT_URL'));
   },
-  canExecute: CommandUtil.canExecuteVisibleOnDriveOnly
+  canExecute: CommandUtil.canExecuteVisibleOnDriveInNormalAppModeOnly
 };
 
 /**

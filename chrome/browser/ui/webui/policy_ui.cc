@@ -188,11 +188,15 @@ void GetStatusFromCore(const policy::CloudPolicyCore* core,
   dict->SetString("clientId", client_id);
   dict->SetString("username", username);
   dict->SetString("refreshInterval",
-                  ui::TimeFormat::TimeDurationShort(refresh_interval));
+                  ui::TimeFormat::Simple(ui::TimeFormat::FORMAT_DURATION,
+                                         ui::TimeFormat::LENGTH_SHORT,
+                                         refresh_interval));
   dict->SetString("timeSinceLastRefresh", last_refresh_time.is_null() ?
       l10n_util::GetStringUTF16(IDS_POLICY_NEVER_FETCHED) :
-      ui::TimeFormat::TimeElapsed(base::Time::NowFromSystemTime() -
-                                  last_refresh_time));
+      ui::TimeFormat::Simple(ui::TimeFormat::FORMAT_ELAPSED,
+                             ui::TimeFormat::LENGTH_SHORT,
+                             base::Time::NowFromSystemTime() -
+                                 last_refresh_time));
 }
 
 void ExtractDomainFromUsername(base::DictionaryValue* dict) {
@@ -576,7 +580,7 @@ void PolicyUIHandler::RegisterMessages() {
                  chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::NotificationService::AllSources());
   registrar_.Add(this,
-                 chrome::NOTIFICATION_EXTENSION_UNLOADED,
+                 chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::NotificationService::AllSources());
 
   web_ui()->RegisterMessageCallback(
@@ -592,7 +596,7 @@ void PolicyUIHandler::Observe(int type,
                               const content::NotificationSource& source,
                               const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_EXTENSION_LOADED ||
-         type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
+         type == chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED);
   SendPolicyNames();
   SendPolicyValues();
 }

@@ -5,7 +5,6 @@
 #include "google_apis/gcm/gcm_client_impl.h"
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -19,8 +18,6 @@
 #include "google_apis/gcm/engine/connection_factory_impl.h"
 #include "google_apis/gcm/engine/gcm_store_impl.h"
 #include "google_apis/gcm/engine/mcs_client.h"
-#include "google_apis/gcm/engine/registration_request.h"
-#include "google_apis/gcm/engine/unregistration_request.h"
 #include "google_apis/gcm/protocol/mcs.pb.h"
 #include "net/http/http_network_session.h"
 #include "net/url_request/url_request_context.h"
@@ -70,7 +67,14 @@ enum MessageType {
   SEND_ERROR,        // Error sending a message.
 };
 
-const char kMCSEndpoint[] = "https://mtalk.google.com:5228";
+// MCS endpoints. SSL Key pinning is done automatically due to the *.google.com
+// pinning rule.
+// Note: modifying the endpoints will affect the ability to compare the
+// GCM.CurrentEnpoint histogram across versions.
+const char kMCSEndpointMain[] = "https://mtalk.google.com:5228";
+const char kMCSEndpointFallback[] = "https://mtalk.google.com:443";
+
+const int kMaxRegistrationRetries = 5;
 const char kMessageTypeDataMessage[] = "gcm";
 const char kMessageTypeDeletedMessagesKey[] = "deleted_messages";
 const char kMessageTypeKey[] = "message_type";
@@ -113,12 +117,45 @@ MessageType DecodeMessageType(const std::string& value) {
 
 }  // namespace
 
-GCMClientImpl::GCMClientImpl()
-    : state_(UNINITIALIZED),
-      clock_(new base::DefaultClock()),
+GCMInternalsBuilder::GCMInternalsBuilder() {}
+GCMInternalsBuilder::~GCMInternalsBuilder() {}
+
+scoped_ptr<base::Clock> GCMInternalsBuilder::BuildClock() {
+  return make_scoped_ptr<base::Clock>(new base::DefaultClock());
+}
+
+scoped_ptr<MCSClient> GCMInternalsBuilder::BuildMCSClient(
+    const std::string& version,
+    base::Clock* clock,
+    ConnectionFactory* connection_factory,
+    GCMStore* gcm_store) {
+  return make_scoped_ptr<MCSClient>(
+      new MCSClient(version,
+                    clock,
+                    connection_factory,
+                    gcm_store));
+}
+
+scoped_ptr<ConnectionFactory> GCMInternalsBuilder::BuildConnectionFactory(
+      const std::vector<GURL>& endpoints,
+      const net::BackoffEntry::Policy& backoff_policy,
+      scoped_refptr<net::HttpNetworkSession> network_session,
+      net::NetLog* net_log) {
+  return make_scoped_ptr<ConnectionFactory>(
+      new ConnectionFactoryImpl(endpoints,
+                                backoff_policy,
+                                network_session,
+                                net_log));
+}
+
+GCMClientImpl::GCMClientImpl(scoped_ptr<GCMInternalsBuilder> internals_builder)
+    : internals_builder_(internals_builder.Pass()),
+      state_(UNINITIALIZED),
+      clock_(internals_builder_->BuildClock()),
       url_request_context_getter_(NULL),
-      pending_registrations_deleter_(&pending_registrations_),
-      pending_unregistrations_deleter_(&pending_unregistrations_),
+      pending_registration_requests_deleter_(&pending_registration_requests_),
+      pending_unregistration_requests_deleter_(
+          &pending_unregistration_requests_),
       weak_ptr_factory_(this) {
 }
 
@@ -128,6 +165,7 @@ GCMClientImpl::~GCMClientImpl() {
 void GCMClientImpl::Initialize(
     const checkin_proto::ChromeBuildProto& chrome_build_proto,
     const base::FilePath& path,
+    const std::vector<std::string>& account_ids,
     const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
     const scoped_refptr<net::URLRequestContextGetter>&
         url_request_context_getter,
@@ -136,17 +174,17 @@ void GCMClientImpl::Initialize(
   DCHECK(url_request_context_getter);
   DCHECK(delegate);
 
-  chrome_build_proto_.CopyFrom(chrome_build_proto);
   url_request_context_getter_ = url_request_context_getter;
+  const net::HttpNetworkSession::Params* network_session_params =
+      url_request_context_getter_->GetURLRequestContext()->
+          GetNetworkSessionParams();
+  DCHECK(network_session_params);
+  network_session_ = new net::HttpNetworkSession(*network_session_params);
 
-  bool use_mock_keychain = false;
-#if defined(OS_MACOSX)
-  if (CommandLine::ForCurrentProcess()->HasSwitch("use-mock-keychain"))
-    use_mock_keychain = true;
-#endif
+  chrome_build_proto_.CopyFrom(chrome_build_proto);
+  account_ids_ = account_ids;
 
-  gcm_store_.reset(
-      new GCMStoreImpl(use_mock_keychain, path, blocking_task_runner));
+  gcm_store_.reset(new GCMStoreImpl(false, path, blocking_task_runner));
 
   delegate_ = delegate;
 
@@ -170,6 +208,8 @@ void GCMClientImpl::OnLoadCompleted(scoped_ptr<GCMStore::LoadResult> result) {
     return;
   }
 
+  registrations_ = result->registrations;
+
   device_checkin_info_.android_id = result->device_android_id;
   device_checkin_info_.secret = result->device_security_token;
   InitializeMCSClient(result.Pass());
@@ -185,24 +225,19 @@ void GCMClientImpl::OnLoadCompleted(scoped_ptr<GCMStore::LoadResult> result) {
 
 void GCMClientImpl::InitializeMCSClient(
     scoped_ptr<GCMStore::LoadResult> result) {
-  // |mcs_client_| might already be set for testing at this point. No need to
-  // create a |connection_factory_|.
-  if (!mcs_client_.get()) {
-    const net::HttpNetworkSession::Params* network_session_params =
-        url_request_context_getter_->GetURLRequestContext()->
-            GetNetworkSessionParams();
-    DCHECK(network_session_params);
-    network_session_ = new net::HttpNetworkSession(*network_session_params);
-    connection_factory_.reset(new ConnectionFactoryImpl(
-        GURL(kMCSEndpoint),
-        kDefaultBackoffPolicy,
-        network_session_,
-        net_log_.net_log()));
-    mcs_client_.reset(new MCSClient(chrome_build_proto_.chrome_version(),
-                                    clock_.get(),
-                                    connection_factory_.get(),
-                                    gcm_store_.get()));
-  }
+  std::vector<GURL> endpoints;
+  endpoints.push_back(GURL(kMCSEndpointMain));
+  endpoints.push_back(GURL(kMCSEndpointFallback));
+  connection_factory_ = internals_builder_->BuildConnectionFactory(
+      endpoints,
+      kDefaultBackoffPolicy,
+      network_session_,
+      net_log_.net_log());
+  mcs_client_ = internals_builder_->BuildMCSClient(
+      chrome_build_proto_.chrome_version(),
+      clock_.get(),
+      connection_factory_.get(),
+      gcm_store_.get()).Pass();
 
   mcs_client_->Initialize(
       base::Bind(&GCMClientImpl::OnMCSError, weak_ptr_factory_.GetWeakPtr()),
@@ -248,14 +283,14 @@ void GCMClientImpl::ResetState() {
 
 void GCMClientImpl::StartCheckin(const CheckinInfo& checkin_info) {
   checkin_request_.reset(
-      new CheckinRequest(
-          base::Bind(&GCMClientImpl::OnCheckinCompleted,
-                     weak_ptr_factory_.GetWeakPtr()),
-          kDefaultBackoffPolicy,
-          chrome_build_proto_,
-          checkin_info.android_id,
-          checkin_info.secret,
-          url_request_context_getter_));
+      new CheckinRequest(base::Bind(&GCMClientImpl::OnCheckinCompleted,
+                                    weak_ptr_factory_.GetWeakPtr()),
+                         kDefaultBackoffPolicy,
+                         chrome_build_proto_,
+                         checkin_info.android_id,
+                         checkin_info.secret,
+                         account_ids_,
+                         url_request_context_getter_));
   checkin_request_->Start();
 }
 
@@ -291,11 +326,17 @@ void GCMClientImpl::SetDeviceCredentialsCallback(bool success) {
   DCHECK(success);
 }
 
+void GCMClientImpl::UpdateRegistrationCallback(bool success) {
+  // TODO(fgorski): This is one of the signals that store needs a rebuild.
+  DCHECK(success);
+}
+
 void GCMClientImpl::Stop() {
   device_checkin_info_.Reset();
+  connection_factory_.reset();
   mcs_client_.reset();
   checkin_request_.reset();
-  pending_registrations_.clear();
+  pending_registration_requests_.clear();
   state_ = INITIALIZED;
   gcm_store_->Close();
 }
@@ -307,36 +348,51 @@ void GCMClientImpl::CheckOut() {
 }
 
 void GCMClientImpl::Register(const std::string& app_id,
-                             const std::string& cert,
                              const std::vector<std::string>& sender_ids) {
   DCHECK_EQ(state_, READY);
+
+  // If the same sender ids is provided, return the cached registration ID
+  // directly.
+  RegistrationInfoMap::const_iterator registrations_iter =
+      registrations_.find(app_id);
+  if (registrations_iter != registrations_.end() &&
+      registrations_iter->second->sender_ids == sender_ids) {
+    delegate_->OnRegisterFinished(
+        app_id, registrations_iter->second->registration_id, SUCCESS);
+    return;
+  }
+
   RegistrationRequest::RequestInfo request_info(
       device_checkin_info_.android_id,
       device_checkin_info_.secret,
       app_id,
-      cert,
       sender_ids);
-  DCHECK_EQ(0u, pending_registrations_.count(app_id));
+  DCHECK_EQ(0u, pending_registration_requests_.count(app_id));
 
   RegistrationRequest* registration_request =
       new RegistrationRequest(request_info,
                               kDefaultBackoffPolicy,
                               base::Bind(&GCMClientImpl::OnRegisterCompleted,
                                          weak_ptr_factory_.GetWeakPtr(),
-                                         app_id),
+                                         app_id,
+                                         sender_ids),
+                              kMaxRegistrationRetries,
                               url_request_context_getter_);
-  pending_registrations_[app_id] = registration_request;
+  pending_registration_requests_[app_id] = registration_request;
   registration_request->Start();
 }
 
-void GCMClientImpl::OnRegisterCompleted(const std::string& app_id,
-                                        RegistrationRequest::Status status,
-                                        const std::string& registration_id) {
+void GCMClientImpl::OnRegisterCompleted(
+    const std::string& app_id,
+    const std::vector<std::string>& sender_ids,
+    RegistrationRequest::Status status,
+    const std::string& registration_id) {
   DCHECK(delegate_);
 
   Result result;
-  PendingRegistrations::iterator iter = pending_registrations_.find(app_id);
-  if (iter == pending_registrations_.end())
+  PendingRegistrationRequests::iterator iter =
+      pending_registration_requests_.find(app_id);
+  if (iter == pending_registration_requests_.end())
     result = UNKNOWN_ERROR;
   else if (status == RegistrationRequest::INVALID_SENDER)
     result = INVALID_PARAMETER;
@@ -345,19 +401,41 @@ void GCMClientImpl::OnRegisterCompleted(const std::string& app_id,
   else
     result = SUCCESS;
 
+  if (result == SUCCESS) {
+    // Cache it.
+    linked_ptr<RegistrationInfo> registration(new RegistrationInfo);
+    registration->sender_ids = sender_ids;
+    registration->registration_id = registration_id;
+    registrations_[app_id] = registration;
+
+    // Save it in the persistent store.
+    gcm_store_->AddRegistration(
+        app_id,
+        registration,
+        base::Bind(&GCMClientImpl::UpdateRegistrationCallback,
+                   weak_ptr_factory_.GetWeakPtr()));
+  }
+
   delegate_->OnRegisterFinished(
       app_id, result == SUCCESS ? registration_id : std::string(), result);
 
-  if (iter != pending_registrations_.end()) {
+  if (iter != pending_registration_requests_.end()) {
     delete iter->second;
-    pending_registrations_.erase(iter);
+    pending_registration_requests_.erase(iter);
   }
 }
 
 void GCMClientImpl::Unregister(const std::string& app_id) {
   DCHECK_EQ(state_, READY);
-  if (pending_unregistrations_.count(app_id) == 1)
+  if (pending_unregistration_requests_.count(app_id) == 1)
     return;
+
+  // Remove from the cache and persistent store.
+  registrations_.erase(app_id);
+  gcm_store_->RemoveRegistration(
+      app_id,
+      base::Bind(&GCMClientImpl::UpdateRegistrationCallback,
+                 weak_ptr_factory_.GetWeakPtr()));
 
   UnregistrationRequest::RequestInfo request_info(
       device_checkin_info_.android_id,
@@ -372,22 +450,26 @@ void GCMClientImpl::Unregister(const std::string& app_id) {
                      weak_ptr_factory_.GetWeakPtr(),
                      app_id),
           url_request_context_getter_);
-  pending_unregistrations_[app_id] = unregistration_request;
+  pending_unregistration_requests_[app_id] = unregistration_request;
   unregistration_request->Start();
 }
 
-void GCMClientImpl::OnUnregisterCompleted(const std::string& app_id,
-                                          bool status) {
+void GCMClientImpl::OnUnregisterCompleted(
+    const std::string& app_id,
+    UnregistrationRequest::Status status) {
   DVLOG(1) << "Unregister completed for app: " << app_id
            << " with " << (status ? "success." : "failure.");
-  delegate_->OnUnregisterFinished(app_id, status);
+  delegate_->OnUnregisterFinished(
+      app_id,
+      status == UnregistrationRequest::SUCCESS ? SUCCESS : SERVER_ERROR);
 
-  PendingUnregistrations::iterator iter = pending_unregistrations_.find(app_id);
-  if (iter == pending_unregistrations_.end())
+  PendingUnregistrationRequests::iterator iter =
+      pending_unregistration_requests_.find(app_id);
+  if (iter == pending_unregistration_requests_.end())
     return;
 
   delete iter->second;
-  pending_unregistrations_.erase(iter);
+  pending_unregistration_requests_.erase(iter);
 }
 
 void GCMClientImpl::OnGCMStoreDestroyed(bool success) {
@@ -422,6 +504,37 @@ void GCMClientImpl::Send(const std::string& app_id,
   mcs_client_->SendMessage(mcs_message);
 }
 
+std::string GCMClientImpl::GetStateString() const {
+  switch(state_) {
+    case GCMClientImpl::INITIALIZED:
+      return "INITIALIZED";
+    case GCMClientImpl::UNINITIALIZED:
+      return "UNINITIALIZED";
+    case GCMClientImpl::LOADING:
+      return "LOADING";
+    case GCMClientImpl::INITIAL_DEVICE_CHECKIN:
+      return "INITIAL_DEVICE_CHECKIN";
+    case GCMClientImpl::READY:
+      return "READY";
+    default:
+      NOTREACHED();
+      return std::string();
+  }
+}
+
+GCMClient::GCMStatistics GCMClientImpl::GetStatistics() const {
+  GCMClient::GCMStatistics stats;
+  stats.gcm_client_state = GCMClientImpl::GetStateString();
+  stats.connection_client_created = mcs_client_.get() != NULL;
+  if (mcs_client_.get()) {
+    stats.connection_state = mcs_client_->GetStateString();
+    // TODO(juyik): add more statistics such as message metadata list, etc.
+  }
+  if (device_checkin_info_.android_id > 0)
+    stats.android_id = device_checkin_info_.android_id;
+  return stats;
+}
+
 void GCMClientImpl::OnMessageReceivedFromMCS(const gcm::MCSMessage& message) {
   switch (message.tag()) {
     case kLoginResponseTag:
@@ -446,17 +559,21 @@ void GCMClientImpl::OnMessageSentToMCS(int64 user_serial_number,
 
   // TTL_EXCEEDED is singled out here, because it can happen long time after the
   // message was sent. That is why it comes as |OnMessageSendError| event rather
-  // than |OnSendFinished|. All other errors will be raised immediately, through
-  // asynchronous callback.
+  // than |OnSendFinished|. SendErrorDetails.additional_data is left empty.
+  // All other errors will be raised immediately, through asynchronous callback.
   // It is expected that TTL_EXCEEDED will be issued for a message that was
   // previously issued |OnSendFinished| with status SUCCESS.
   // For now, we do not report that the message has been sent and acked
   // successfully.
   // TODO(jianli): Consider adding UMA for this status.
-  if (status == MCSClient::TTL_EXCEEDED)
-    delegate_->OnMessageSendError(app_id, message_id, GCMClient::TTL_EXCEEDED);
-  else if (status != MCSClient::SENT)
+  if (status == MCSClient::TTL_EXCEEDED) {
+    SendErrorDetails send_error_details;
+    send_error_details.message_id = message_id;
+    send_error_details.result = GCMClient::TTL_EXCEEDED;
+    delegate_->OnMessageSendError(app_id, send_error_details);
+  } else if (status != MCSClient::SENT) {
     delegate_->OnSendFinished(app_id, message_id, ToGCMClientResult(status));
+  }
 }
 
 void GCMClientImpl::OnMCSError() {
@@ -465,33 +582,38 @@ void GCMClientImpl::OnMCSError() {
 }
 
 void GCMClientImpl::HandleIncomingMessage(const gcm::MCSMessage& message) {
+  DCHECK(delegate_);
+
   const mcs_proto::DataMessageStanza& data_message_stanza =
       reinterpret_cast<const mcs_proto::DataMessageStanza&>(
           message.GetProtobuf());
-  IncomingMessage incoming_message;
-  MessageType message_type = DATA_MESSAGE;
+  DCHECK_EQ(data_message_stanza.device_user_id(), kDefaultUserSerialNumber);
+
+  // Copying all the data from the stanza to a MessageData object. When present,
+  // keys like kMessageTypeKey or kSendErrorMessageIdKey will be filtered out
+  // later.
+  MessageData message_data;
   for (int i = 0; i < data_message_stanza.app_data_size(); ++i) {
     std::string key = data_message_stanza.app_data(i).key();
-    if (key == kMessageTypeKey)
-      message_type = DecodeMessageType(data_message_stanza.app_data(i).value());
-    else
-      incoming_message.data[key] = data_message_stanza.app_data(i).value();
+    message_data[key] = data_message_stanza.app_data(i).value();
   }
 
-  DCHECK_EQ(data_message_stanza.device_user_id(), kDefaultUserSerialNumber);
-  DCHECK(delegate_);
+  MessageType message_type = DATA_MESSAGE;
+  MessageData::iterator iter = message_data.find(kMessageTypeKey);
+  if (iter != message_data.end()) {
+    message_type = DecodeMessageType(iter->second);
+    message_data.erase(iter);
+  }
 
   switch (message_type) {
     case DATA_MESSAGE:
-      delegate_->OnMessageReceived(data_message_stanza.category(),
-                                   incoming_message);
+      HandleIncomingDataMessage(data_message_stanza, message_data);
       break;
     case DELETED_MESSAGES:
       delegate_->OnMessagesDeleted(data_message_stanza.category());
       break;
     case SEND_ERROR:
-      NotifyDelegateOnMessageSendError(
-          delegate_, data_message_stanza.category(), incoming_message);
+      HandleIncomingSendError(data_message_stanza, message_data);
       break;
     case UNKNOWN:
     default:  // Treat default the same as UNKNOWN.
@@ -501,20 +623,45 @@ void GCMClientImpl::HandleIncomingMessage(const gcm::MCSMessage& message) {
   }
 }
 
-void GCMClientImpl::NotifyDelegateOnMessageSendError(
-    GCMClient::Delegate* delegate,
-    const std::string& app_id,
-    const IncomingMessage& incoming_message) {
-  MessageData::const_iterator iter =
-      incoming_message.data.find(kSendErrorMessageIdKey);
-  std::string message_id;
-  if (iter != incoming_message.data.end())
-    message_id = iter->second;
-  delegate->OnMessageSendError(app_id, message_id, SERVER_ERROR);
+void GCMClientImpl::HandleIncomingDataMessage(
+    const mcs_proto::DataMessageStanza& data_message_stanza,
+    MessageData& message_data) {
+  std::string app_id = data_message_stanza.category();
+
+  // Drop the message when the app is not registered for the sender of the
+  // message.
+  RegistrationInfoMap::iterator iter = registrations_.find(app_id);
+  if (iter == registrations_.end() ||
+      std::find(iter->second->sender_ids.begin(),
+                iter->second->sender_ids.end(),
+                data_message_stanza.from()) == iter->second->sender_ids.end()) {
+    return;
+  }
+
+  IncomingMessage incoming_message;
+  incoming_message.sender_id = data_message_stanza.from();
+  if (data_message_stanza.has_token())
+    incoming_message.collapse_key = data_message_stanza.token();
+  incoming_message.data = message_data;
+  delegate_->OnMessageReceived(app_id, incoming_message);
 }
 
-void GCMClientImpl::SetMCSClientForTesting(scoped_ptr<MCSClient> mcs_client) {
-  mcs_client_ = mcs_client.Pass();
+void GCMClientImpl::HandleIncomingSendError(
+    const mcs_proto::DataMessageStanza& data_message_stanza,
+    MessageData& message_data) {
+  SendErrorDetails send_error_details;
+  send_error_details.additional_data = message_data;
+  send_error_details.result = SERVER_ERROR;
+
+  MessageData::iterator iter =
+      send_error_details.additional_data.find(kSendErrorMessageIdKey);
+  if (iter != send_error_details.additional_data.end()) {
+    send_error_details.message_id = iter->second;
+    send_error_details.additional_data.erase(iter);
+  }
+
+  delegate_->OnMessageSendError(data_message_stanza.category(),
+                                send_error_details);
 }
 
 }  // namespace gcm

@@ -35,6 +35,9 @@ option (which will only apply to following commands) should be one of:
   Component options:
     --shared Build components as shared libraries (default).
     --static Build components as static libraries.
+  Mojo in chromium/content (crbug.com/353602):
+    --use-mojo - Enabled (default).
+    --no-use-mojo - Disabled.
 
 Note: It will abort on the first failure (if any).
 EOF
@@ -48,12 +51,13 @@ do_build() {
 do_unittests() {
   echo "Running unit tests in out/$1 ..."
   "out/$1/mojo_common_unittests" || exit 1
+  "out/$1/mojo_apps_js_unittests" || exit 1
   "out/$1/mojo_js_unittests" || exit 1
   "out/$1/mojo_public_bindings_unittests" || exit 1
   "out/$1/mojo_public_environment_unittests" || exit 1
   "out/$1/mojo_public_system_unittests" || exit 1
   "out/$1/mojo_public_utility_unittests" || exit 1
-  "out/$1/mojo_shell_unittests" || exit 1
+  "out/$1/mojo_service_manager_unittests" || exit 1
   "out/$1/mojo_system_unittests" || exit 1
 }
 
@@ -65,7 +69,12 @@ do_perftests() {
 do_gyp() {
   local gyp_defines="$(make_gyp_defines)"
   echo "Running gyp with GYP_DEFINES=$gyp_defines ..."
-  GYP_DEFINES="$gyp_defines" build/gyp_chromium mojo/mojo.gyp
+  GYP_DEFINES="$gyp_defines" build/gyp_chromium mojo/mojo.gyp || exit 1
+}
+
+do_sync() {
+  # Note: sync only (with hooks, but no gyp-ing).
+  GYP_CHROMIUM_NO_ACTION=1 gclient sync || exit 1
 }
 
 # Valid values: Debug, Release, or Debug_and_Release.
@@ -81,6 +90,9 @@ should_do_Release() {
 COMPILER=clang
 # Valid values: shared or static.
 COMPONENT=shared
+# TODO(vtl): Remove this. crbug.com/353602
+# Valid values: enabled or disabled.
+USE_MOJO=enabled
 make_gyp_defines() {
   local options=()
   # Always include these options.
@@ -99,6 +111,14 @@ make_gyp_defines() {
       ;;
     static)
       options+=("component=static_library")
+      ;;
+  esac
+  case "$USE_MOJO" in
+    enabled)
+      options+=("use_mojo=1")
+      ;;
+    disabled)
+      options+=("use_mojo=0")
       ;;
   esac
   echo ${options[*]}
@@ -135,8 +155,7 @@ for arg in "$@"; do
       do_gyp
       ;;
     sync)
-      # Note: sync only (with hooks, but no gyp-ing).
-      GYP_CHROMIUM_NO_ACTION=1 gclient sync
+      do_sync
       ;;
     show-bash-alias)
       # You want to type something like:
@@ -168,6 +187,12 @@ for arg in "$@"; do
       ;;
     --static)
       COMPONENT=static
+      ;;
+    --use-mojo)
+      USE_MOJO=enabled
+      ;;
+    --no-use-mojo)
+      USE_MOJO=disabled
       ;;
     *)
       echo "Unknown command \"${arg}\". Try \"$(basename "$0") help\"."

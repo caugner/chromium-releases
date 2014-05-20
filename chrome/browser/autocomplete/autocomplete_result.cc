@@ -147,9 +147,24 @@ void AutocompleteResult::SortAndCull(const AutocompleteInput& input,
   for (ACMatches::iterator i(matches_.begin()); i != matches_.end(); ++i)
     i->ComputeStrippedDestinationURL(profile);
 
-  // Remove duplicates.
+  // Sort matches such that duplicate matches are consecutive.
   std::sort(matches_.begin(), matches_.end(),
             &AutocompleteMatch::DestinationSortFunc);
+
+  // Set duplicate_matches for the first match before erasing duplicate matches.
+  for (ACMatches::iterator i(matches_.begin()); i != matches_.end(); ++i) {
+    for (int j = 1; (i + j != matches_.end()) &&
+         AutocompleteMatch::DestinationsEqual(*i, *(i + j)); ++j) {
+      AutocompleteMatch& dup_match(*(i + j));
+      i->duplicate_matches.insert(i->duplicate_matches.end(),
+                                  dup_match.duplicate_matches.begin(),
+                                  dup_match.duplicate_matches.end());
+      dup_match.duplicate_matches.clear();
+      i->duplicate_matches.push_back(dup_match);
+    }
+  }
+
+  // Erase duplicate matches.
   matches_.erase(std::unique(matches_.begin(), matches_.end(),
                              &AutocompleteMatch::DestinationsEqual),
                  matches_.end());
@@ -272,8 +287,17 @@ bool AutocompleteResult::ShouldHideTopMatch() const {
 }
 
 bool AutocompleteResult::TopMatchIsStandaloneVerbatimMatch() const {
-  return !empty() && match_at(0).IsVerbatimType() &&
-      ((size() == 1) || !match_at(1).IsVerbatimType());
+  if (empty() || !match_at(0).IsVerbatimType())
+    return false;
+
+  // Skip any copied matches, under the assumption that they'll be expired and
+  // disappear.  We don't want this disappearance to cause the visibility of the
+  // top match to change.
+  for (const_iterator i(begin() + 1); i != end(); ++i) {
+    if (!i->from_previous)
+      return !i->IsVerbatimType();
+  }
+  return true;
 }
 
 void AutocompleteResult::Reset() {

@@ -34,13 +34,6 @@ class PnaclOptions;
 class PnaclResources;
 class TempFile;
 
-struct PnaclTimeStats {
-  int64_t pnacl_llc_load_time;
-  int64_t pnacl_compile_time;
-  int64_t pnacl_ld_load_time;
-  int64_t pnacl_link_time;
-};
-
 class PnaclTranslateThread {
  public:
   PnaclTranslateThread();
@@ -70,7 +63,7 @@ class PnaclTranslateThread {
   // Send bitcode bytes to the translator. Called from the main thread.
   void PutBytes(std::vector<char>* data, int count);
 
-  const PnaclTimeStats& GetTimeStats() const { return time_stats_; }
+  int64_t GetCompileTime() const { return compile_time_; }
 
  private:
   // Starts an individual llc or ld subprocess used for translation.
@@ -83,13 +76,11 @@ class PnaclTranslateThread {
   // Runs the streaming translation. Called from the helper thread.
   void DoTranslate() ;
   // Signal that Pnacl translation failed, from the translation thread only.
-  void TranslateFailed(enum PluginErrorCode err_code,
+  void TranslateFailed(PP_NaClError err_code,
                        const nacl::string& error_string);
-  // Run the LD subprocess, returning true on success
-  bool RunLdSubprocess(int modules_used,
-                       int is_shared_library,
-                       const nacl::string& soname,
-                       const nacl::string& lib_dependencies);
+  // Run the LD subprocess, returning true on success.
+  // On failure, it returns false and runs the callback.
+  bool RunLdSubprocess();
 
 
   // Callback to run when tasks are completed or an error has occurred.
@@ -119,7 +110,7 @@ class PnaclTranslateThread {
   // Associated with buffer_cond_
   bool done_;
 
-  PnaclTimeStats time_stats_;
+  int64_t compile_time_;
 
   // Data about the translation files, owned by the coordinator
   const Manifest* manifest_;

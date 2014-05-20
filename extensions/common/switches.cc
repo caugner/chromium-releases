@@ -16,11 +16,6 @@ const char kAllowHTTPBackgroundPage[] = "allow-http-background-page";
 const char kAllowLegacyExtensionManifests[] =
     "allow-legacy-extension-manifests";
 
-// Allows injecting extensions and user scripts on the extensions gallery
-// site. Normally prevented for security reasons, but can be useful for
-// automation testing of the gallery.
-const char kAllowScriptingGallery[] = "allow-scripting-gallery";
-
 // Enables extensions to be easily installed from sites other than the web
 // store. Without this flag, they can still be installed, but must be manually
 // dragged onto chrome://extensions/.
@@ -58,10 +53,6 @@ const char kForceDevModeHighlighting[] = "force-dev-mode-highlighting";
 
 // Enables setting global commands through the Extensions Commands API.
 const char kGlobalCommands[] = "global-commands";
-
-// Should we prompt the user before allowing external extensions to install?
-// Default is yes.
-const char kPromptForExternalExtensions[] = "prompt-for-external-extensions";
 
 // Makes component extensions appear in chrome://settings/extensions.
 const char kShowComponentExtensionOptions[] =

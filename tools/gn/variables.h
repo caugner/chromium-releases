@@ -123,21 +123,9 @@ extern const char kDirectDependentConfigs[];
 extern const char kDirectDependentConfigs_HelpShort[];
 extern const char kDirectDependentConfigs_Help[];
 
-extern const char kExternal[];
-extern const char kExternal_HelpShort[];
-extern const char kExternal_Help[];
-
 extern const char kForwardDependentConfigsFrom[];
 extern const char kForwardDependentConfigsFrom_HelpShort[];
 extern const char kForwardDependentConfigsFrom_Help[];
-
-extern const char kGypFile[];
-extern const char kGypFile_HelpShort[];
-extern const char kGypFile_Help[];
-
-extern const char kGypHeader[];
-extern const char kGypHeader_HelpShort[];
-extern const char kGypHeader_Help[];
 
 extern const char kHardDep[];
 extern const char kHardDep_HelpShort[];
@@ -158,6 +146,10 @@ extern const char kLibDirs_Help[];
 extern const char kLibs[];
 extern const char kLibs_HelpShort[];
 extern const char kLibs_Help[];
+
+extern const char kOutputExtension[];
+extern const char kOutputExtension_HelpShort[];
+extern const char kOutputExtension_Help[];
 
 extern const char kOutputName[];
 extern const char kOutputName_HelpShort[];

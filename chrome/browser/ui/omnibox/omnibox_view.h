@@ -44,6 +44,12 @@ class OmniboxView {
   CommandUpdater* command_updater() { return command_updater_; }
   const CommandUpdater* command_updater() const { return command_updater_; }
 
+  // Handle mouse release events concerning the origin chip.
+  void HandleOriginChipMouseRelease();
+
+  // Shared cross-platform focus handling.
+  void OnDidKillFocus();
+
   // For use when switching tabs, this saves the current state onto the tab so
   // that it can be restored during a later call to Update().
   virtual void SaveStateToTab(content::WebContents* tab) = 0;
@@ -130,6 +136,9 @@ class OmniboxView {
   // Sets focus, disables search term replacement, reverts the omnibox, and
   // selects all.
   void ShowURL();
+
+  // Enables search term replacement and reverts the omnibox.
+  void HideURL();
 
   // Re-enables search term replacement on the ToolbarModel, and reverts the
   // edit and popup back to their unedited state (permanent text showing, popup
@@ -225,6 +234,12 @@ class OmniboxView {
   // corpus (e.g. Images) rather than start a new Web search.  This method will
   // only ever return true on mobile ports.
   virtual bool IsIndicatingQueryRefinement() const;
+
+  // Called after a |match| has been opened for the given |profile| and
+  // |web_contents|.
+  virtual void OnMatchOpened(const AutocompleteMatch& match,
+                             Profile* profile,
+                             content::WebContents* web_contents) const;
 
   // Returns |text| with any leading javascript schemas stripped.
   static base::string16 StripJavascriptSchemas(const base::string16& text);

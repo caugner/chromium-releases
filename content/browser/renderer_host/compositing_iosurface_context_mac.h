@@ -14,7 +14,7 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/renderer_host/display_link_mac.h"
+#include "content/public/browser/gpu_data_manager_observer.h"
 #include "ui/gl/scoped_cgl.h"
 
 namespace content {
@@ -28,9 +28,16 @@ CoreAnimationStatus GetCoreAnimationStatus();
 class CompositingIOSurfaceShaderPrograms;
 
 class CompositingIOSurfaceContext
-    : public base::RefCounted<CompositingIOSurfaceContext> {
+    : public base::RefCounted<CompositingIOSurfaceContext>,
+      public content::GpuDataManagerObserver {
  public:
-  enum { kOffscreenContextWindowNumber = -2 };
+  enum {
+    // The number used to look up the context used for async readback and for
+    // initializing the IOSurface.
+    kOffscreenContextWindowNumber = -2,
+    // The number used to look up the context used by CAOpenGLLayers.
+    kCALayerContextWindowNumber = -3,
+  };
 
   // Get or create a GL context for the specified window with the specified
   // surface ordering. Share these GL contexts as much as possible because
@@ -38,10 +45,12 @@ class CompositingIOSurfaceContext
   // http://crbug.com/180463
   static scoped_refptr<CompositingIOSurfaceContext> Get(int window_number);
 
-  // Mark that all the currently existing GL contexts shouldn't be returned
-  // anymore by Get, but rather, new contexts should be created. This is
-  // called as a precaution when unexpected GL errors occur.
-  static void MarkExistingContextsAsNotShareable();
+  // Mark that all the GL contexts in the same sharegroup as this context as
+  // invalid, so they shouldn't be returned anymore by Get, but rather, new
+  // contexts should be created. This is called as a precaution when unexpected
+  // GL errors occur.
+  void PoisonContextAndSharegroup();
+  bool HasBeenPoisoned() const { return poisoned_; }
 
   CompositingIOSurfaceShaderPrograms* shader_program_cache() const {
     return shader_program_cache_.get();
@@ -53,7 +62,8 @@ class CompositingIOSurfaceContext
 
   bool IsVendorIntel();
 
-  DisplayLinkMac* display_link() { return display_link_; }
+  // content::GpuDataManagerObserver implementation.
+  virtual void OnGpuSwitching() OVERRIDE;
 
  private:
   friend class base::RefCounted<CompositingIOSurfaceContext>;
@@ -64,9 +74,8 @@ class CompositingIOSurfaceContext
       base::ScopedTypeRef<CGLContextObj> clg_context_strong,
       CGLContextObj clg_context,
       bool is_vsync_disabled_,
-      scoped_refptr<DisplayLinkMac> display_link,
       scoped_ptr<CompositingIOSurfaceShaderPrograms> shader_program_cache);
-  ~CompositingIOSurfaceContext();
+  virtual ~CompositingIOSurfaceContext();
 
   int window_number_;
   base::scoped_nsobject<NSOpenGLContext> nsgl_context_;
@@ -76,14 +85,11 @@ class CompositingIOSurfaceContext
 
   bool is_vsync_disabled_;
   scoped_ptr<CompositingIOSurfaceShaderPrograms> shader_program_cache_;
-  bool can_be_shared_;
+  bool poisoned_;
 
   bool initialized_is_intel_;
   bool is_intel_;
   GLint screen_;
-
-  // Display link for getting vsync info.
-  scoped_refptr<DisplayLinkMac> display_link_;
 
   // The global map from window number and window ordering to
   // context data.

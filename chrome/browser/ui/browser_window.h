@@ -45,6 +45,7 @@ struct SSLStatus;
 }
 
 namespace extensions {
+class Command;
 class Extension;
 }
 
@@ -366,8 +367,13 @@ class BrowserWindow : public ui::BaseWindow {
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) = 0;
 
-  // Shows the avatar bubble on the window frame off of the avatar button.
-  virtual void ShowAvatarBubbleFromAvatarButton() = 0;
+  // Shows the avatar bubble on the window frame off of the avatar button with
+  // the given mode.
+  enum AvatarBubbleMode {
+    AVATAR_BUBBLE_MODE_DEFAULT,
+    AVATAR_BUBBLE_MODE_ACCOUNT_MANAGEMENT
+  };
+  virtual void ShowAvatarBubbleFromAvatarButton(AvatarBubbleMode mode) = 0;
 
   // Show bubble for password generation positioned relative to |rect|. The
   // subclasses implementing this interface do not own the |password_generator|
@@ -386,6 +392,19 @@ class BrowserWindow : public ui::BaseWindow {
   // shown.  Invoked when a new RenderHostView is created for a non-NTP
   // navigation entry and the bookmark bar is detached.
   virtual int GetRenderViewHeightInsetWithDetachedBookmarkBar() = 0;
+
+  // Executes |command| registered by |extension|.
+  virtual void ExecuteExtensionCommand(const extensions::Extension* extension,
+                                       const extensions::Command& command) = 0;
+
+  // Shows the page action for the extension.
+  virtual void ShowPageActionPopup(const extensions::Extension* extension) = 0;
+
+  // Shows the browser action for the extension. NOTE(wittman): This function
+  // grants tab permissions to the browser action popup, so it should only be
+  // invoked due to user action, not due to invocation from an extensions API.
+  virtual void ShowBrowserActionPopup(
+      const extensions::Extension* extension) = 0;
 
  protected:
   friend class BrowserCloseManager;

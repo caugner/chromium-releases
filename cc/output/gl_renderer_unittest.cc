@@ -18,6 +18,7 @@
 #include "cc/test/pixel_test.h"
 #include "cc/test/render_pass_test_common.h"
 #include "cc/test/render_pass_test_utils.h"
+#include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/context_support.h"
@@ -171,8 +172,11 @@ class GLRendererWithDefaultHarnessTest : public GLRendererTest {
         FakeOutputSurface::Create3d(TestWebGraphicsContext3D::Create()).Pass();
     CHECK(output_surface_->BindToClient(&output_surface_client_));
 
-    resource_provider_ = ResourceProvider::Create(
-                             output_surface_.get(), NULL, 0, false, 1).Pass();
+    shared_bitmap_manager_.reset(new TestSharedBitmapManager());
+    resource_provider_ =
+        ResourceProvider::Create(
+            output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1)
+            .Pass();
     renderer_ = make_scoped_ptr(new FakeRendererGL(&renderer_client_,
                                                    &settings_,
                                                    output_surface_.get(),
@@ -185,6 +189,7 @@ class GLRendererWithDefaultHarnessTest : public GLRendererTest {
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
   FakeRendererClient renderer_client_;
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<FakeRendererGL> renderer_;
 };
@@ -200,8 +205,11 @@ class GLRendererShaderTest : public GLRendererTest {
     output_surface_ = FakeOutputSurface::Create3d().Pass();
     CHECK(output_surface_->BindToClient(&output_surface_client_));
 
-    resource_provider_ = ResourceProvider::Create(
-                             output_surface_.get(), NULL, 0, false, 1).Pass();
+    shared_bitmap_manager_.reset(new TestSharedBitmapManager());
+    resource_provider_ =
+        ResourceProvider::Create(
+            output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1)
+            .Pass();
     renderer_.reset(new FakeRendererGL(&renderer_client_,
                                        &settings_,
                                        output_surface_.get(),
@@ -273,6 +281,7 @@ class GLRendererShaderTest : public GLRendererTest {
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
   FakeRendererClient renderer_client_;
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<FakeRendererGL> renderer_;
 };
@@ -335,7 +344,6 @@ TEST_F(GLRendererWithDefaultHarnessTest,
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   EXPECT_FALSE(renderer_->IsBackbufferDiscarded());
 
@@ -361,7 +369,6 @@ TEST_F(GLRendererWithDefaultHarnessTest,
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   EXPECT_FALSE(renderer_->IsBackbufferDiscarded());
 
@@ -387,7 +394,6 @@ TEST_F(GLRendererWithDefaultHarnessTest, ExternalStencil) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   EXPECT_TRUE(renderer_->stencil_enabled());
 }
@@ -515,8 +521,10 @@ TEST_F(GLRendererTest, InitializationDoesNotMakeSynchronousCalls) {
       scoped_ptr<TestWebGraphicsContext3D>(new ForbidSynchronousCallContext)));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -549,8 +557,10 @@ TEST_F(GLRendererTest, InitializationWithQuicklyLostContextDoesNotAssert) {
       scoped_ptr<TestWebGraphicsContext3D>(new LoseContextOnFirstGetContext)));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -580,8 +590,10 @@ TEST_F(GLRendererTest, OpaqueBackground) {
       context_owned.PassAs<TestWebGraphicsContext3D>()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -612,7 +624,6 @@ TEST_F(GLRendererTest, OpaqueBackground) {
                      1.f,
                      viewport_rect,
                      viewport_rect,
-                     true,
                      false);
   Mock::VerifyAndClearExpectations(context);
 }
@@ -626,8 +637,10 @@ TEST_F(GLRendererTest, TransparentBackground) {
       context_owned.PassAs<TestWebGraphicsContext3D>()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -650,7 +663,6 @@ TEST_F(GLRendererTest, TransparentBackground) {
                      1.f,
                      viewport_rect,
                      viewport_rect,
-                     true,
                      false);
 
   Mock::VerifyAndClearExpectations(context);
@@ -665,8 +677,10 @@ TEST_F(GLRendererTest, OffscreenOutputSurface) {
       context_owned.PassAs<TestWebGraphicsContext3D>()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -690,7 +704,6 @@ TEST_F(GLRendererTest, OffscreenOutputSurface) {
                      1.f,
                      viewport_rect,
                      viewport_rect,
-                     true,
                      false);
   Mock::VerifyAndClearExpectations(context);
 }
@@ -746,8 +759,10 @@ TEST_F(GLRendererTest, VisibilityChangeIsLastCall) {
       FakeOutputSurface::Create3d(provider));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -773,7 +788,6 @@ TEST_F(GLRendererTest, VisibilityChangeIsLastCall) {
                      1.f,
                      viewport_rect,
                      viewport_rect,
-                     true,
                      false);
   renderer.SetVisible(false);
   EXPECT_TRUE(context->last_call_was_set_visibility());
@@ -810,8 +824,10 @@ TEST_F(GLRendererTest, ActiveTextureState) {
       context_owned.PassAs<TestWebGraphicsContext3D>()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -867,7 +883,6 @@ TEST_F(GLRendererTest, ActiveTextureState) {
                      1.f,
                      viewport_rect,
                      viewport_rect,
-                     true,
                      false);
   Mock::VerifyAndClearExpectations(context);
 }
@@ -889,8 +904,10 @@ TEST_F(GLRendererTest, ShouldClearRootRenderPass) {
       mock_context_owned.PassAs<TestWebGraphicsContext3D>()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   settings.should_clear_root_render_pass = false;
@@ -944,7 +961,6 @@ TEST_F(GLRendererTest, ShouldClearRootRenderPass) {
                      1.f,
                      viewport_rect,
                      viewport_rect,
-                     true,
                      false);
 
   // In multiple render passes all but the root pass should clear the
@@ -981,8 +997,10 @@ TEST_F(GLRendererTest, ScissorTestWhenClearing) {
       context_owned.PassAs<TestWebGraphicsContext3D>()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -1027,7 +1045,6 @@ TEST_F(GLRendererTest, ScissorTestWhenClearing) {
                      1.f,
                      viewport_rect,
                      viewport_rect,
-                     true,
                      false);
 }
 
@@ -1074,8 +1091,10 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
   CHECK(output_surface->BindToClient(&output_surface_client));
   output_surface->set_fixed_size(gfx::Size(100, 100));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   settings.partial_swap_enabled = true;
@@ -1105,7 +1124,6 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                        1.f,
                        viewport_rect,
                        clip_rect,
-                       true,
                        false);
     EXPECT_EQ(0, context->discarded());
     context->reset();
@@ -1126,28 +1144,6 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                        1.f,
                        viewport_rect,
                        clip_rect,
-                       true,
-                       false);
-    EXPECT_EQ(1, context->discarded());
-    context->reset();
-  }
-  {
-    // Partial frame, disallow partial swap, should discard.
-    RenderPass::Id root_pass_id(1, 0);
-    TestRenderPass* root_pass = AddRenderPass(&render_passes_in_draw_order_,
-                                              root_pass_id,
-                                              viewport_rect,
-                                              gfx::Transform());
-    AddQuad(root_pass, viewport_rect, SK_ColorGREEN);
-    root_pass->damage_rect = gfx::RectF(2.f, 2.f, 3.f, 3.f);
-
-    renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
-    renderer.DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
-                       1.f,
-                       viewport_rect,
-                       clip_rect,
-                       false,
                        false);
     EXPECT_EQ(1, context->discarded());
     context->reset();
@@ -1170,7 +1166,6 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                        1.f,
                        viewport_rect,
                        clip_rect,
-                       true,
                        false);
     EXPECT_EQ(0, context->discarded());
     context->reset();
@@ -1193,7 +1188,6 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                        1.f,
                        viewport_rect,
                        clip_rect,
-                       true,
                        false);
     EXPECT_EQ(0, context->discarded());
     context->reset();
@@ -1215,7 +1209,6 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                        1.f,
                        viewport_rect,
                        clip_rect,
-                       true,
                        false);
     EXPECT_EQ(0, context->discarded());
     context->reset();
@@ -1238,7 +1231,6 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                        1.f,
                        viewport_rect,
                        clip_rect,
-                       true,
                        false);
     EXPECT_EQ(0, context->discarded());
     context->reset();
@@ -1290,8 +1282,10 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
       context_owned.PassAs<TestWebGraphicsContext3D>()));
   CHECK(output_surface->BindToClient(&output_surface_client));
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(), NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -1318,7 +1312,6 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
                      1.f,
                      device_viewport_rect,
                      device_viewport_rect,
-                     true,
                      false);
 }
 
@@ -1385,7 +1378,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   TestRenderPassProgram(TexCoordPrecisionMedium);
 
@@ -1410,7 +1402,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   TestRenderPassColorMatrixProgram(TexCoordPrecisionMedium);
 
@@ -1436,7 +1427,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   TestRenderPassMaskProgram(TexCoordPrecisionMedium);
 
@@ -1461,7 +1451,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   TestRenderPassMaskColorMatrixProgram(TexCoordPrecisionMedium);
 
@@ -1487,7 +1476,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   TestRenderPassProgramAA(TexCoordPrecisionMedium);
 
@@ -1512,7 +1500,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   TestRenderPassColorMatrixProgramAA(TexCoordPrecisionMedium);
 
@@ -1538,7 +1525,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   TestRenderPassMaskProgramAA(TexCoordPrecisionMedium);
 
@@ -1563,7 +1549,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
   TestRenderPassMaskColorMatrixProgramAA(TexCoordPrecisionMedium);
 }
@@ -1609,7 +1594,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadSkipsAAForClippingTransform) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
 
   // If use_aa incorrectly ignores clipping, it will use the
@@ -1641,7 +1625,6 @@ TEST_F(GLRendererShaderTest, DrawSolidColorShader) {
                        1.f,
                        viewport_rect,
                        viewport_rect,
-                       true,
                        false);
 
   TestSolidColorProgramAA();
@@ -1685,8 +1668,10 @@ class MockOutputSurfaceTest : public GLRendererTest {
     FakeOutputSurfaceClient output_surface_client_;
     CHECK(output_surface_.BindToClient(&output_surface_client_));
 
+    shared_bitmap_manager_.reset(new TestSharedBitmapManager());
     resource_provider_ =
-        ResourceProvider::Create(&output_surface_, NULL, 0, false, 1).Pass();
+        ResourceProvider::Create(
+            &output_surface_, shared_bitmap_manager_.get(), 0, false, 1).Pass();
 
     renderer_.reset(new FakeRendererGL(&renderer_client_,
                                        &settings_,
@@ -1722,7 +1707,6 @@ class MockOutputSurfaceTest : public GLRendererTest {
                          device_scale_factor,
                          device_viewport_rect,
                          device_viewport_rect,
-                         true,
                          false);
   }
 
@@ -1735,6 +1719,7 @@ class MockOutputSurfaceTest : public GLRendererTest {
   LayerTreeSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   StrictMock<MockOutputSurface> output_surface_;
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
   scoped_ptr<ResourceProvider> resource_provider_;
   FakeRendererClient renderer_client_;
   scoped_ptr<FakeRendererGL> renderer_;

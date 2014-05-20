@@ -56,9 +56,6 @@
           'defines': [
             'USE_SYMBOLIZE',
           ],
-          'cflags': [
-            '-Wno-write-strings',
-          ],
         }, {  # desktop_linux == 0 and chromeos == 0
             'sources/': [
               ['exclude', '/xdg_user_dirs/'],
@@ -105,19 +102,6 @@
           # hence the *_android.cc files are included but the actual code
           # doesn't have OS_ANDROID / ANDROID defined.
           'conditions': [
-            # Host build on linux depends on system.gyp::gtk as
-            # default linux build has TOOLKIT_GTK defined.
-            ['host_os == "linux"', {
-              'sources/': [
-                ['include', '^atomicops_internals_x86_gcc\\.cc$'],
-              ],
-              'dependencies': [
-                '../build/linux/system.gyp:gtk',
-              ],
-              'export_dependent_settings': [
-                '../build/linux/system.gyp:gtk',
-              ],
-            }],
             ['host_os == "mac"', {
               'sources/': [
                 ['exclude', '^native_library_linux\\.cc$'],
@@ -131,7 +115,7 @@
         }],
         ['OS == "android" and _toolset == "target"', {
           'conditions': [
-            ['target_arch == "ia32"', {
+            ['target_arch == "ia32" or target_arch == "x64"', {
               'sources/': [
                 ['include', '^atomicops_internals_x86_gcc\\.cc$'],
               ],
@@ -183,7 +167,8 @@
             ],
           },
           'conditions': [
-            ['linux_use_tcmalloc==0', {
+            # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
+            ['use_allocator!="tcmalloc" and (use_allocator!="see_use_tcmalloc" or linux_use_tcmalloc==0)', {
               'defines': [
                 'NO_TCMALLOC',
               ],
@@ -236,9 +221,6 @@
         }],
       ],
       'sources': [
-        'third_party/nspr/prcpucfg.h',
-        'third_party/nspr/prcpucfg_win.h',
-        'third_party/nspr/prtypes.h',
         'third_party/xdg_user_dirs/xdg_user_dir_lookup.cc',
         'third_party/xdg_user_dirs/xdg_user_dir_lookup.h',
         'async_socket_io_handler.h',
@@ -441,8 +423,7 @@
       'target_name': 'base_unittests',
       'type': '<(gtest_target_type)',
       'sources': [
-        # Tests.
-        'android/activity_status_unittest.cc',
+        'android/application_status_listener_unittest.cc',
         'android/jni_android_unittest.cc',
         'android/jni_array_unittest.cc',
         'android/jni_string_unittest.cc',
@@ -454,6 +435,7 @@
         'atomicops_unittest.cc',
         'barrier_closure_unittest.cc',
         'base64_unittest.cc',
+        'big_endian_unittest.cc',
         'bind_unittest.cc',
         'bind_unittest.nc',
         'bits_unittest.cc',
@@ -487,12 +469,14 @@
         'file_version_info_unittest.cc',
         'files/dir_reader_posix_unittest.cc',
         'files/file_path_unittest.cc',
+        'files/file_proxy_unittest.cc',
         'files/file_unittest.cc',
         'files/file_util_proxy_unittest.cc',
         'files/important_file_writer_unittest.cc',
         'files/scoped_temp_dir_unittest.cc',
         'gmock_unittest.cc',
         'guid_unittest.cc',
+        'hash_unittest.cc',
         'id_map_unittest.cc',
         'i18n/break_iterator_unittest.cc',
         'i18n/char_iterator_unittest.cc',
@@ -525,8 +509,8 @@
         'md5_unittest.cc',
         'memory/aligned_memory_unittest.cc',
         'memory/discardable_memory_allocator_android_unittest.cc',
+        'memory/discardable_memory_manager_unittest.cc',
         'memory/discardable_memory_unittest.cc',
-        'memory/discardable_memory_provider_unittest.cc',
         'memory/linked_ptr_unittest.cc',
         'memory/ref_counted_memory_unittest.cc',
         'memory/ref_counted_unittest.cc',
@@ -583,6 +567,7 @@
         'rand_util_unittest.cc',
         'numerics/safe_numerics_unittest.cc',
         'scoped_clear_errno_unittest.cc',
+        'scoped_generic_unittest.cc',
         'scoped_native_library_unittest.cc',
         'scoped_observer.h',
         'security_unittest.cc',
@@ -636,6 +621,7 @@
         'time/time_unittest.cc',
         'time/time_win_unittest.cc',
         'timer/hi_res_timer_manager_unittest.cc',
+        'timer/mock_timer_unittest.cc',
         'timer/timer_unittest.cc',
         'tools_sanity_unittest.cc',
         'tracked_objects_unittest.cc',
@@ -757,7 +743,8 @@
             'message_loop/message_pump_glib_unittest.cc',
           ]
         }],
-        ['OS == "linux" and linux_use_tcmalloc==1', {
+        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
+        ['OS == "linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
             'dependencies': [
               'allocator/allocator.gyp:allocator',
             ],
@@ -798,19 +785,15 @@
             '../third_party/libevent/libevent.gyp:libevent'
           ],
         }],
-        ['use_aura==1 and use_x11==1',  {
-          'sources': [
-            'x11/edid_parser_x11_unittest.cc',
-          ],
-        }],
       ],  # conditions
       'target_conditions': [
         ['OS == "ios" and _toolset != "host"', {
           'sources/': [
             # Pull in specific Mac files for iOS (which have been filtered out
             # by file name rules).
-            ['include', '^mac/objc_property_releaser_unittest\\.mm$'],
             ['include', '^mac/bind_objc_block_unittest\\.mm$'],
+            ['include', '^mac/foundation_util_unittest\\.mm$',],
+            ['include', '^mac/objc_property_releaser_unittest\\.mm$'],
             ['include', '^mac/scoped_nsobject_unittest\\.mm$'],
             ['include', '^sys_string_conversions_mac_unittest\\.mm$'],
           ],
@@ -821,6 +804,27 @@
           ],
         }],
       ],  # target_conditions
+    },
+    {
+      'target_name': 'base_perftests',
+      'type': '<(gtest_target_type)',
+      'dependencies': [
+        'base',
+        'test_support_base',
+        '../testing/gtest.gyp:gtest',
+      ],
+      'sources': [
+        'threading/thread_perftest.cc',
+        'test/run_all_unittests.cc',
+        '../testing/perf/perf_test.cc'
+      ],
+      'conditions': [
+        ['OS == "android" and gtest_target_type == "shared_library"', {
+          'dependencies': [
+            '../testing/android/native_test.gyp:native_test_native_code',
+          ],
+        }],
+      ],
     },
     {
       'target_name': 'base_i18n_perftests',
@@ -1079,9 +1083,6 @@
             4267,
           ],
           'sources': [
-            'third_party/nspr/prcpucfg.h',
-            'third_party/nspr/prcpucfg_win.h',
-            'third_party/nspr/prtypes.h',
             'third_party/xdg_user_dirs/xdg_user_dir_lookup.cc',
             'third_party/xdg_user_dirs/xdg_user_dir_lookup.h',
             'async_socket_io_handler.h',
@@ -1189,6 +1190,9 @@
           'cflags!': [
             '-Wextra',
           ],
+          'defines': [
+            'GLOG_BUILD_CONFIG_INCLUDE="build/build_config.h"',
+          ],
           'sources': [
             'third_party/symbolize/config.h',
             'third_party/symbolize/demangle.cc',
@@ -1240,7 +1244,7 @@
           'target_name': 'base_jni_headers',
           'type': 'none',
           'sources': [
-            'android/java/src/org/chromium/base/ActivityStatus.java',
+            'android/java/src/org/chromium/base/ApplicationStatus.java',
             'android/java/src/org/chromium/base/BuildInfo.java',
             'android/java/src/org/chromium/base/CommandLine.java',
             'android/java/src/org/chromium/base/ContentUriUtils.java',
@@ -1298,7 +1302,7 @@
             'jar_excluded_classes': [ '*/NativeLibraries.class' ],
           },
           'dependencies': [
-            'base_java_activity_state',
+            'base_java_application_state',
             'base_java_memory_pressure_level_list',
             'base_native_libraries_gen',
           ],
@@ -1323,18 +1327,18 @@
           'includes': [ '../build/java.gypi' ],
         },
         {
-          'target_name': 'base_java_activity_state',
+          'target_name': 'base_java_application_state',
           'type': 'none',
-          # This target is used to auto-generate ActivityState.java
+          # This target is used to auto-generate ApplicationState.java
           # from a template file. The source file contains a list of
           # Java constant declarations matching the ones in
-          # android/activity_state_list.h.
+          # android/application_state_list.h.
           'sources': [
-            'android/java/src/org/chromium/base/ActivityState.template',
+            'android/java/src/org/chromium/base/ApplicationState.template',
           ],
           'variables': {
             'package_name': 'org/chromium/base',
-            'template_deps': ['android/activity_state_list.h'],
+            'template_deps': ['android/application_state_list.h'],
           },
           'includes': [ '../build/android/java_cpp_template.gypi' ],
         },
@@ -1391,6 +1395,22 @@
           ],
         },
 
+      ],
+    }],
+    ['OS == "android" and gtest_target_type == "shared_library"', {
+      'targets': [
+        {
+          'target_name': 'base_perftests_apk',
+          'type': 'none',
+          'dependencies': [
+            'base_perftests',
+          ],
+          'variables': {
+            'test_suite_name': 'base_perftests',
+            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)base_perftests<(SHARED_LIB_SUFFIX)',
+          },
+          'includes': [ '../build/apk_test.gypi' ],
+        },
       ],
     }],
     ['OS == "win"', {

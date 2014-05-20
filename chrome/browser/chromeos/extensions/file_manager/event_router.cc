@@ -25,8 +25,6 @@
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/drive/drive_service_interface.h"
-#include "chrome/browser/extensions/event_names.h"
-#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -38,6 +36,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "webkit/common/fileapi/file_system_types.h"
@@ -48,6 +47,8 @@ using chromeos::NetworkHandler;
 using content::BrowserThread;
 using drive::DriveIntegrationService;
 using drive::DriveIntegrationServiceFactory;
+using file_manager::util::EntryDefinition;
+using file_manager::util::FileDefinition;
 
 namespace file_browser_private = extensions::api::file_browser_private;
 
@@ -247,12 +248,6 @@ void BroadcastMountCompletedEvent(
       profile, volume_info, &event.volume_metadata);
   event.is_remounting = is_remounting;
 
-  if (!volume_info.mount_path.empty() &&
-      event.volume_metadata.mount_path.empty()) {
-    event.status =
-        file_browser_private::MOUNT_COMPLETED_STATUS_ERROR_PATH_UNMOUNTED;
-  }
-
   BroadcastEvent(
       profile,
       file_browser_private::OnMountCompleted::kEventName,
@@ -272,6 +267,35 @@ CopyProgressTypeToCopyProgressStatusType(
   }
   NOTREACHED();
   return file_browser_private::COPY_PROGRESS_STATUS_TYPE_NONE;
+}
+
+std::string FileErrorToErrorName(base::File::Error error_code) {
+  namespace js = extensions::api::file_browser_private;
+  switch (error_code) {
+    case base::File::FILE_ERROR_NOT_FOUND:
+      return "NotFoundError";
+    case base::File::FILE_ERROR_INVALID_OPERATION:
+    case base::File::FILE_ERROR_EXISTS:
+    case base::File::FILE_ERROR_NOT_EMPTY:
+      return "InvalidModificationError";
+    case base::File::FILE_ERROR_NOT_A_DIRECTORY:
+    case base::File::FILE_ERROR_NOT_A_FILE:
+      return "TypeMismatchError";
+    case base::File::FILE_ERROR_ACCESS_DENIED:
+      return "NoModificationAllowedError";
+    case base::File::FILE_ERROR_FAILED:
+      return "InvalidStateError";
+    case base::File::FILE_ERROR_ABORT:
+      return "AbortError";
+    case base::File::FILE_ERROR_SECURITY:
+      return "SecurityError";
+    case base::File::FILE_ERROR_NO_SPACE:
+      return "QuotaExceededError";
+    case base::File::FILE_ERROR_INVALID_URL:
+      return "EncodingError";
+    default:
+      return "InvalidModificationError";
+  }
 }
 
 void GrantAccessForAddedProfileToRunningInstance(Profile* added_profile,
@@ -480,8 +504,7 @@ void EventRouter::OnCopyCompleted(int copy_id,
   } else {
     // Send error event.
     status.type = file_browser_private::COPY_PROGRESS_STATUS_TYPE_ERROR;
-    status.error.reset(
-        new int(fileapi::FileErrorToWebFileError(error)));
+    status.error.reset(new std::string(FileErrorToErrorName(error)));
   }
 
   BroadcastEvent(
@@ -679,28 +702,48 @@ void EventRouter::DispatchDirectoryChangeEvent(
 
   for (size_t i = 0; i < extension_ids.size(); ++i) {
     const std::string& extension_id = extension_ids[i];
-    const GURL target_origin_url(
-        extensions::Extension::GetBaseURLFromExtensionId(extension_id));
-    // This will be replaced with a real Entry in custom bindings.
-    const fileapi::FileSystemInfo info =
-        fileapi::GetFileSystemInfoForChromeOS(target_origin_url.GetOrigin());
 
-    file_browser_private::FileWatchEvent event;
-    event.event_type = got_error ?
-        file_browser_private::FILE_WATCH_EVENT_TYPE_ERROR :
-        file_browser_private::FILE_WATCH_EVENT_TYPE_CHANGED;
-    event.entry.additional_properties.SetString("fileSystemName", info.name);
-    event.entry.additional_properties.SetString("fileSystemRoot",
-                                                info.root_url.spec());
-    event.entry.additional_properties.SetString("fileFullPath",
-                                                "/" + virtual_path.value());
-    event.entry.additional_properties.SetBoolean("fileIsDirectory", true);
+    FileDefinition file_definition;
+    file_definition.virtual_path = virtual_path;
+    file_definition.is_directory = true;
 
-    BroadcastEvent(
+    file_manager::util::ConvertFileDefinitionToEntryDefinition(
         profile_,
-        file_browser_private::OnDirectoryChanged::kEventName,
-        file_browser_private::OnDirectoryChanged::Create(event));
+        extension_id,
+        file_definition,
+        base::Bind(
+            &EventRouter::DispatchDirectoryChangeEventWithEntryDefinition,
+            weak_factory_.GetWeakPtr(),
+            got_error));
   }
+}
+
+void EventRouter::DispatchDirectoryChangeEventWithEntryDefinition(
+    bool watcher_error,
+    const EntryDefinition& entry_definition) {
+  if (entry_definition.error != base::File::FILE_OK) {
+    DVLOG(1) << "Unable to dispatch event because resolving the entry "
+             << "definition failed.";
+    return;
+  }
+
+  file_browser_private::FileWatchEvent event;
+  event.event_type = watcher_error
+      ? file_browser_private::FILE_WATCH_EVENT_TYPE_ERROR
+      : file_browser_private::FILE_WATCH_EVENT_TYPE_CHANGED;
+
+  event.entry.additional_properties.SetString(
+      "fileSystemName", entry_definition.file_system_name);
+  event.entry.additional_properties.SetString(
+      "fileSystemRoot", entry_definition.file_system_root_url);
+  event.entry.additional_properties.SetString(
+      "fileFullPath", "/" + entry_definition.full_path.value());
+  event.entry.additional_properties.SetBoolean("fileIsDirectory",
+                                               entry_definition.is_directory);
+
+  BroadcastEvent(profile_,
+                 file_browser_private::OnDirectoryChanged::kEventName,
+                 file_browser_private::OnDirectoryChanged::Create(event));
 }
 
 void EventRouter::ShowRemovableDeviceInFileManager(

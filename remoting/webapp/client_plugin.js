@@ -55,6 +55,8 @@ remoting.ClientPlugin = function(plugin, onExtensionMessage) {
   /** @param {!Array.<string>} capabilities The negotiated capabilities. */
   this.onSetCapabilitiesHandler = function (capabilities) {};
   this.fetchPinHandler = function (supportsPairing) {};
+  /** @param {string} data Remote gnubbyd data. */
+  this.onGnubbyAuthHandler = function(data) {};
 
   /** @type {remoting.MediaSourceRenderer} */
   this.mediaSourceRenderer_ = null;
@@ -167,8 +169,8 @@ remoting.ClientPlugin.prototype.handleMessageMethod_ = function(message) {
 
   if (message.method == 'hello') {
     // Reset the size in case we had to enlarge it to support click-to-play.
-    this.plugin.width = 0;
-    this.plugin.height = 0;
+    this.plugin.style.width = '0px';
+    this.plugin.style.height = '0px';
     this.pluginApiVersion_ = getNumberAttr(message.data, 'apiVersion');
     this.pluginApiMinVersion_ = getNumberAttr(message.data, 'apiMinVersion');
 
@@ -292,9 +294,12 @@ remoting.ClientPlugin.prototype.handleMessageMethod_ = function(message) {
     this.onPairingComplete_(clientId, sharedSecret);
 
   } else if (message.method == 'extensionMessage') {
-    var extMsgType = getStringAttr(message, 'type');
-    var extMsgData = getStringAttr(message, 'data');
+    var extMsgType = getStringAttr(message.data, 'type');
+    var extMsgData = getStringAttr(message.data, 'data');
     switch (extMsgType) {
+      case 'gnubby-auth':
+        this.onGnubbyAuthHandler(extMsgData);
+        break;
       case 'test-echo-reply':
         console.log('Got echo reply: ' + extMsgData);
         break;
@@ -617,7 +622,7 @@ remoting.ClientPlugin.prototype.requestPairing =
  * Send an extension message to the host.
  *
  * @param {string} type The message type.
- * @param {Object} message The message payload.
+ * @param {string} message The message payload.
  */
 remoting.ClientPlugin.prototype.sendClientMessage =
     function(type, message) {
@@ -625,8 +630,8 @@ remoting.ClientPlugin.prototype.sendClientMessage =
     return;
   }
   this.plugin.postMessage(JSON.stringify(
-    { method: 'extensionMessage',
-      data: { type: type, data: JSON.stringify(message) } }));
+      { method: 'extensionMessage',
+        data: { type: type, data: message } }));
 
 };
 
@@ -655,8 +660,8 @@ remoting.ClientPlugin.prototype.showPluginForClickToPlay_ = function() {
   if (!this.helloReceived_) {
     var width = 200;
     var height = 200;
-    this.plugin.width = width;
-    this.plugin.height = height;
+    this.plugin.style.width = width + 'px';
+    this.plugin.style.height = height + 'px';
     // Center the plugin just underneath the "Connnecting..." dialog.
     var parentNode = this.plugin.parentNode;
     var dialog = document.getElementById('client-dialog');

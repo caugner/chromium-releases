@@ -20,6 +20,7 @@
 
 #include <ostream>
 
+#include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "sandbox/linux/seccomp-bpf/bpf_tests.h"
@@ -49,7 +50,7 @@ const char kSandboxDebuggingEnv[] = "CHROME_SANDBOX_DEBUGGING";
 
 // This test should execute no matter whether we have kernel support. So,
 // we make it a TEST() instead of a BPF_TEST().
-TEST(SandboxBPF, CallSupports) {
+TEST(SandboxBPF, DISABLE_ON_TSAN(CallSupports)) {
   // We check that we don't crash, but it's ok if the kernel doesn't
   // support it.
   bool seccomp_bpf_supported =
@@ -64,7 +65,7 @@ TEST(SandboxBPF, CallSupports) {
   std::cout << "Pointer size: " << sizeof(void*) << "\n";
 }
 
-SANDBOX_TEST(SandboxBPF, CallSupportsTwice) {
+SANDBOX_TEST(SandboxBPF, DISABLE_ON_TSAN(CallSupportsTwice)) {
   SandboxBPF::SupportsSeccompSandbox(-1);
   SandboxBPF::SupportsSeccompSandbox(-1);
 }
@@ -670,6 +671,8 @@ BPF_TEST(SandboxBPF, UnsafeTrapWithErrno, RedirectAllSyscallsPolicy) {
   BPF_ASSERT(errno == 0);
 }
 
+bool NoOpCallback() { return true; }
+
 // Test a trap handler that makes use of a broker process to open().
 
 class InitializedOpenBroker {
@@ -682,7 +685,7 @@ class InitializedOpenBroker {
     broker_process_.reset(
         new BrokerProcess(EPERM, allowed_files, std::vector<std::string>()));
     BPF_ASSERT(broker_process() != NULL);
-    BPF_ASSERT(broker_process_->Init(NULL));
+    BPF_ASSERT(broker_process_->Init(base::Bind(&NoOpCallback)));
 
     initialized_ = true;
   }

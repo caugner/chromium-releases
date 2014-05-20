@@ -6,17 +6,14 @@
 
 #include <string>
 
-#include "base/command_line.h"
-#include "base/files/scoped_platform_file_closer.h"
+#include "base/files/file.h"
 #include "base/logging.h"
 #include "base/md5.h"
-#include "base/platform_file.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/drive/drive_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/gdata_wapi_parser.h"
@@ -148,21 +145,6 @@ std::string Identity(const std::string& resource_id) { return resource_id; }
 
 }  // namespace
 
-
-bool IsDriveV2ApiEnabled() {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-
-  // Enable Drive API v2 by default.
-  if (!command_line->HasSwitch(switches::kEnableDriveV2Api))
-    return true;
-
-  std::string value =
-      command_line->GetSwitchValueASCII(switches::kEnableDriveV2Api);
-  StringToLowerASCII(&value);
-  // The value must be "" or "true" for true, or "false" for false.
-  DCHECK(value.empty() || value == "true" || value == "false");
-  return value != "false";
-}
 
 std::string EscapeQueryStringValue(const std::string& str) {
   std::string result;
@@ -340,7 +322,6 @@ scoped_ptr<google_apis::FileResource> ConvertResourceEntryToFileResource(
   file->set_shared(std::find(entry.labels().begin(), entry.labels().end(),
                              "shared") != entry.labels().end());
 
-  file->set_download_url(entry.download_url());
   if (entry.is_folder()) {
     file->set_mime_type(kDriveFolderMimeType);
   } else {
@@ -362,40 +343,29 @@ scoped_ptr<google_apis::FileResource> ConvertResourceEntryToFileResource(
   image_media_metadata->set_height(entry.image_height());
   image_media_metadata->set_rotation(entry.image_rotation());
 
-  ScopedVector<google_apis::ParentReference> parents;
+  std::vector<google_apis::ParentReference>* parents = file->mutable_parents();
   for (size_t i = 0; i < entry.links().size(); ++i) {
     using google_apis::Link;
     const Link& link = *entry.links()[i];
     switch (link.type()) {
       case Link::LINK_PARENT: {
-        scoped_ptr<google_apis::ParentReference> parent(
-            new google_apis::ParentReference);
-        parent->set_parent_link(link.href());
+        google_apis::ParentReference parent;
+        parent.set_parent_link(link.href());
 
         std::string file_id =
             drive::util::ExtractResourceIdFromUrl(link.href());
-        parent->set_file_id(file_id);
-        parent->set_is_root(file_id == kWapiRootDirectoryResourceId);
-        parents.push_back(parent.release());
+        parent.set_file_id(file_id);
+        parent.set_is_root(file_id == kWapiRootDirectoryResourceId);
+        parents->push_back(parent);
         break;
       }
-      case Link::LINK_EDIT:
-        file->set_self_link(link.href());
-        break;
-      case Link::LINK_THUMBNAIL:
-        file->set_thumbnail_link(link.href());
-        break;
       case Link::LINK_ALTERNATE:
         file->set_alternate_link(link.href());
-        break;
-      case Link::LINK_EMBED:
-        file->set_embed_link(link.href());
         break;
       default:
         break;
     }
   }
-  file->set_parents(parents.Pass());
 
   file->set_modified_date(entry.updated_time());
   file->set_last_viewed_by_me_date(entry.last_viewed_time());
@@ -448,7 +418,6 @@ ConvertFileResourceToResourceEntry(
   // This should be the url to download the file_resource.
   {
     google_apis::Content content;
-    content.set_url(file_resource.download_url());
     content.set_mime_type(file_resource.mime_type());
     entry->set_content(content);
   }
@@ -478,31 +447,13 @@ ConvertFileResourceToResourceEntry(
   for (size_t i = 0; i < file_resource.parents().size(); ++i) {
     google_apis::Link* link = new google_apis::Link;
     link->set_type(google_apis::Link::LINK_PARENT);
-    link->set_href(file_resource.parents()[i]->parent_link());
-    links.push_back(link);
-  }
-  if (!file_resource.self_link().is_empty()) {
-    google_apis::Link* link = new google_apis::Link;
-    link->set_type(google_apis::Link::LINK_EDIT);
-    link->set_href(file_resource.self_link());
-    links.push_back(link);
-  }
-  if (!file_resource.thumbnail_link().is_empty()) {
-    google_apis::Link* link = new google_apis::Link;
-    link->set_type(google_apis::Link::LINK_THUMBNAIL);
-    link->set_href(file_resource.thumbnail_link());
+    link->set_href(file_resource.parents()[i].parent_link());
     links.push_back(link);
   }
   if (!file_resource.alternate_link().is_empty()) {
     google_apis::Link* link = new google_apis::Link;
     link->set_type(google_apis::Link::LINK_ALTERNATE);
     link->set_href(file_resource.alternate_link());
-    links.push_back(link);
-  }
-  if (!file_resource.embed_link().is_empty()) {
-    google_apis::Link* link = new google_apis::Link;
-    link->set_type(google_apis::Link::LINK_EMBED);
-    link->set_href(file_resource.embed_link());
     links.push_back(link);
   }
   entry->set_links(links.Pass());
@@ -584,12 +535,9 @@ ConvertChangeListToResourceList(const google_apis::ChangeList& change_list) {
 std::string GetMd5Digest(const base::FilePath& file_path) {
   const int kBufferSize = 512 * 1024;  // 512kB.
 
-  base::PlatformFile file = base::CreatePlatformFile(
-      file_path, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ,
-      NULL, NULL);
-  if (file == base::kInvalidPlatformFileValue)
+  base::File file(file_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
+  if (!file.IsValid())
     return std::string();
-  base::ScopedPlatformFileCloser file_closer(&file);
 
   base::MD5Context context;
   base::MD5Init(&context);
@@ -597,11 +545,7 @@ std::string GetMd5Digest(const base::FilePath& file_path) {
   int64 offset = 0;
   scoped_ptr<char[]> buffer(new char[kBufferSize]);
   while (true) {
-    // Avoid using ReadPlatformFileCurPosNoBestEffort for now.
-    // http://crbug.com/145873
-    int result = base::ReadPlatformFileNoBestEffort(
-        file, offset, buffer.get(), kBufferSize);
-
+    int result = file.Read(offset, buffer.get(), kBufferSize);
     if (result < 0) {
       // Found an error.
       return std::string();

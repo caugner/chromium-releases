@@ -87,13 +87,13 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/screen.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -204,36 +204,17 @@ bool GetAppLaunchContainer(
   // Look at preferences to find the right launch container. If no
   // preference is set, launch as a window.
   extensions::LaunchContainer launch_container = extensions::GetLaunchContainer(
-      extensions_service->extension_prefs(), extension);
+      extensions::ExtensionPrefs::Get(profile), extension);
 
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableStreamlinedHostedApps) &&
+           switches::kEnableStreamlinedHostedApps) &&
       !extensions::HasPreferredLaunchContainer(
-          extensions_service->extension_prefs(), extension)) {
+           extensions::ExtensionPrefs::Get(profile), extension)) {
     launch_container = extensions::LAUNCH_CONTAINER_WINDOW;
   }
 
   *out_extension = extension;
   *out_launch_container = launch_container;
-  return true;
-}
-
-// Parse two comma-separated integers from string. Return true on success.
-bool ParseCommaSeparatedIntegers(const std::string& str,
-                                 int* ret_num1,
-                                 int* ret_num2) {
-  std::vector<std::string> dimensions;
-  base::SplitString(str, ',', &dimensions);
-  if (dimensions.size() != 2)
-    return false;
-
-  int num1, num2;
-  if (!base::StringToInt(dimensions[0], &num1) ||
-      !base::StringToInt(dimensions[1], &num2))
-    return false;
-
-  *ret_num1 = num1;
-  *ret_num2 = num2;
   return true;
 }
 
@@ -305,11 +286,12 @@ class WebContentsCloseObserver : public content::NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(WebContentsCloseObserver);
 };
 
-const Extension* GetDisabledPlatformApp(Profile* profile,
-                                        const std::string& extension_id) {
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  const Extension* extension = service->GetExtensionById(extension_id, true);
+// TODO(koz): Consolidate this function and remove the special casing.
+const Extension* GetPlatformApp(Profile* profile,
+                                const std::string& extension_id) {
+  const Extension* extension =
+      extensions::ExtensionRegistry::Get(profile)->GetExtensionById(
+          extension_id, extensions::ExtensionRegistry::EVERYTHING);
   return extension && extension->is_platform_app() ? extension : NULL;
 }
 
@@ -367,9 +349,9 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
   AppListService::InitAll(profile);
   if (command_line_.HasSwitch(switches::kAppId)) {
     std::string app_id = command_line_.GetSwitchValueASCII(switches::kAppId);
-    const Extension* extension = GetDisabledPlatformApp(profile, app_id);
-    // If |app_id| is a disabled platform app we handle it specially here,
-    // otherwise it will be handled below.
+    const Extension* extension = GetPlatformApp(profile, app_id);
+    // If |app_id| is a disabled or terminated platform app we handle it
+    // specially here, otherwise it will be handled below.
     if (extension) {
       RecordCmdLineAppHistogram(extensions::Manifest::TYPE_PLATFORM_APP);
       AppLaunchParams params(profile, extension,
@@ -425,28 +407,6 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
 #endif  // defined(OS_WIN)
 
   return true;
-}
-
-void StartupBrowserCreatorImpl::ExtractOptionalAppWindowSize(
-    gfx::Rect* bounds) {
-  if (command_line_.HasSwitch(switches::kAppWindowSize)) {
-    int width, height;
-    width = height = 0;
-    std::string switch_value =
-        command_line_.GetSwitchValueASCII(switches::kAppWindowSize);
-    if (ParseCommaSeparatedIntegers(switch_value, &width, &height)) {
-      // TODO(scottmg): NativeScreen might be wrong. http://crbug.com/133312
-      const gfx::Rect work_area =
-          gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().work_area();
-      width = std::min(width, work_area.width());
-      height = std::min(height, work_area.height());
-      bounds->set_size(gfx::Size(width, height));
-      bounds->set_x((work_area.width() - bounds->width()) / 2);
-      // TODO(nkostylev): work_area does include launcher but should not.
-      // Launcher auto hide pref is synced and is most likely not applied here.
-      bounds->set_y((work_area.height() - bounds->height()) / 2);
-    }
-  }
 }
 
 bool StartupBrowserCreatorImpl::IsAppLaunch(std::string* app_url,
@@ -556,12 +516,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
             extensions::Manifest::TYPE_HOSTED_APP);
       }
 
-      gfx::Rect override_bounds;
-      ExtractOptionalAppWindowSize(&override_bounds);
-
-      WebContents* app_tab = OpenAppShortcutWindow(profile,
-                                                   url,
-                                                   override_bounds);
+      WebContents* app_tab = OpenAppShortcutWindow(profile, url);
 
       if (out_app_contents)
         *out_app_contents = app_tab;
@@ -830,10 +785,6 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
 #endif
   }
 
-  // In kiosk mode, we want to always be fullscreen, so switch to that now.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode))
-    chrome::ToggleFullscreenMode(browser);
-
   bool first_tab = true;
   ProtocolHandlerRegistry* registry = profile_ ?
       ProtocolHandlerRegistryFactory::GetForProfile(profile_) : NULL;
@@ -859,12 +810,12 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
     params.tabstrip_add_types = add_types;
     params.extension_app_id = tabs[i].app_id;
 
-#if defined(ENABLE_RLZ)
+#if defined(ENABLE_RLZ) && !defined(OS_IOS)
     if (process_startup && google_util::IsGoogleHomePageUrl(tabs[i].url)) {
       params.extra_headers = RLZTracker::GetAccessPointHttpHeader(
           RLZTracker::CHROME_HOME_PAGE);
     }
-#endif
+#endif  // defined(ENABLE_RLZ) && !defined(OS_IOS)
 
     chrome::Navigate(&params);
 
@@ -884,6 +835,11 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
   // to take care of that.
   if (!browser_creator_ || browser_creator_->show_main_browser_window())
     browser->window()->Show();
+
+  // In kiosk mode, we want to always be fullscreen, so switch to that now.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kStartFullscreen))
+    chrome::ToggleFullscreenMode(browser);
 
   return browser;
 }

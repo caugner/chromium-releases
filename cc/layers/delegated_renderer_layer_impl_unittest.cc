@@ -5,7 +5,6 @@
 #include "cc/layers/delegated_renderer_layer_impl.h"
 
 #include "cc/base/scoped_ptr_vector.h"
-#include "cc/layers/append_quads_data.h"
 #include "cc/layers/quad_sink.h"
 #include "cc/layers/solid_color_layer_impl.h"
 #include "cc/quads/render_pass_draw_quad.h"
@@ -17,9 +16,11 @@
 #include "cc/test/fake_proxy.h"
 #include "cc/test/fake_rendering_stats_instrumentation.h"
 #include "cc/test/geometry_test_utils.h"
+#include "cc/test/layer_test_common.h"
 #include "cc/test/mock_quad_culler.h"
 #include "cc/test/render_pass_test_common.h"
 #include "cc/test/render_pass_test_utils.h"
+#include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_impl.h"
@@ -39,7 +40,8 @@ class DelegatedRendererLayerImplTest : public testing::Test {
     LayerTreeSettings settings;
     settings.minimum_occlusion_tracking_size = gfx::Size();
 
-    host_impl_.reset(new FakeLayerTreeHostImpl(settings, &proxy_));
+    host_impl_.reset(
+        new FakeLayerTreeHostImpl(settings, &proxy_, &shared_bitmap_manager_));
     host_impl_->InitializeRenderer(
         FakeOutputSurface::Create3d().PassAs<OutputSurface>());
     host_impl_->SetViewportSize(gfx::Size(10, 10));
@@ -49,6 +51,7 @@ class DelegatedRendererLayerImplTest : public testing::Test {
   FakeProxy proxy_;
   DebugScopedSetImplThreadAndMainThreadBlocked
       always_impl_thread_and_main_thread_blocked_;
+  TestSharedBitmapManager shared_bitmap_manager_;
   scoped_ptr<LayerTreeHostImpl> host_impl_;
 };
 
@@ -539,7 +542,6 @@ class DelegatedRendererLayerImplTestTransform
           child_pass_rect,
           gfx::Transform());
       MockQuadCuller quad_sink(&pass->quad_list, &pass->shared_quad_state_list);
-      AppendQuadsData data(pass->id);
       SharedQuadState* shared_quad_state = quad_sink.UseSharedQuadState(
           SharedQuadState::Create());
       shared_quad_state->SetAll(child_pass_transform,
@@ -552,12 +554,20 @@ class DelegatedRendererLayerImplTestTransform
 
       scoped_ptr<SolidColorDrawQuad> color_quad;
       color_quad = SolidColorDrawQuad::Create();
-      color_quad->SetNew(shared_quad_state, gfx::Rect(20, 20, 3, 7), 1u, false);
-      quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+      color_quad->SetNew(shared_quad_state,
+                         gfx::Rect(20, 20, 3, 7),
+                         gfx::Rect(20, 20, 3, 7),
+                         1u,
+                         false);
+      quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
       color_quad = SolidColorDrawQuad::Create();
-      color_quad->SetNew(shared_quad_state, gfx::Rect(23, 20, 4, 7), 1u, false);
-      quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+      color_quad->SetNew(shared_quad_state,
+                         gfx::Rect(23, 20, 4, 7),
+                         gfx::Rect(23, 20, 4, 7),
+                         1u,
+                         false);
+      quad_sink.Append(color_quad.PassAs<DrawQuad>());
     }
 
     gfx::Size root_pass_content_bounds(100, 100);
@@ -574,7 +584,6 @@ class DelegatedRendererLayerImplTestTransform
         root_pass_rect,
         gfx::Transform());
     MockQuadCuller quad_sink(&pass->quad_list, &pass->shared_quad_state_list);
-    AppendQuadsData data(pass->id);
     SharedQuadState* shared_quad_state =
         quad_sink.UseSharedQuadState(SharedQuadState::Create());
     shared_quad_state->SetAll(root_pass_transform,
@@ -589,32 +598,49 @@ class DelegatedRendererLayerImplTestTransform
         RenderPassDrawQuad::Create();
     render_pass_quad->SetNew(
         shared_quad_state,
-        gfx::Rect(5, 5, 7, 7),  // rect
+        gfx::Rect(5, 5, 7, 7),  // quad_rect
+        gfx::Rect(5, 5, 7, 7),  // visible_rect
         RenderPass::Id(10, 7),  // render_pass_id
-        false,  // is_replica
-        0,  // mask_resource_id
-        child_pass_rect,  // contents_changed_since_last_frame
-        gfx::RectF(),  // mask_uv_rect
-        FilterOperations(),  // filters
-        FilterOperations());  // background_filters
-    quad_sink.Append(render_pass_quad.PassAs<DrawQuad>(), &data);
+        false,                  // is_replica
+        0,                      // mask_resource_id
+        child_pass_rect,        // contents_changed_since_last_frame
+        gfx::RectF(),           // mask_uv_rect
+        FilterOperations(),     // filters
+        FilterOperations());    // background_filters
+    quad_sink.Append(render_pass_quad.PassAs<DrawQuad>());
 
     scoped_ptr<SolidColorDrawQuad> color_quad;
     color_quad = SolidColorDrawQuad::Create();
-    color_quad->SetNew(shared_quad_state, gfx::Rect(0, 0, 10, 10), 1u, false);
-    quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+    color_quad->SetNew(shared_quad_state,
+                       gfx::Rect(0, 0, 10, 10),
+                       gfx::Rect(0, 0, 10, 10),
+                       1u,
+                       false);
+    quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
     color_quad = SolidColorDrawQuad::Create();
-    color_quad->SetNew(shared_quad_state, gfx::Rect(0, 10, 10, 10), 2u, false);
-    quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+    color_quad->SetNew(shared_quad_state,
+                       gfx::Rect(0, 10, 10, 10),
+                       gfx::Rect(0, 10, 10, 10),
+                       2u,
+                       false);
+    quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
     color_quad = SolidColorDrawQuad::Create();
-    color_quad->SetNew(shared_quad_state, gfx::Rect(10, 0, 10, 10), 3u, false);
-    quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+    color_quad->SetNew(shared_quad_state,
+                       gfx::Rect(10, 0, 10, 10),
+                       gfx::Rect(10, 0, 10, 10),
+                       3u,
+                       false);
+    quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
     color_quad = SolidColorDrawQuad::Create();
-    color_quad->SetNew(shared_quad_state, gfx::Rect(10, 10, 10, 10), 4u, false);
-    quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+    color_quad->SetNew(shared_quad_state,
+                       gfx::Rect(10, 10, 10, 10),
+                       gfx::Rect(10, 10, 10, 10),
+                       4u,
+                       false);
+    quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
     delegated_renderer_layer->SetFrameDataForRenderPasses(
         &delegated_render_passes);
@@ -947,7 +973,6 @@ class DelegatedRendererLayerImplTestClip
           child_pass_rect,
           gfx::Transform());
       MockQuadCuller quad_sink(&pass->quad_list, &pass->shared_quad_state_list);
-      AppendQuadsData data(pass->id);
       SharedQuadState* shared_quad_state =
           quad_sink.UseSharedQuadState(SharedQuadState::Create());
       shared_quad_state->SetAll(child_pass_transform,
@@ -960,12 +985,20 @@ class DelegatedRendererLayerImplTestClip
 
       scoped_ptr<SolidColorDrawQuad> color_quad;
       color_quad = SolidColorDrawQuad::Create();
-      color_quad->SetNew(shared_quad_state, gfx::Rect(20, 20, 3, 7), 1u, false);
-      quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+      color_quad->SetNew(shared_quad_state,
+                         gfx::Rect(20, 20, 3, 7),
+                         gfx::Rect(20, 20, 3, 7),
+                         1u,
+                         false);
+      quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
       color_quad = SolidColorDrawQuad::Create();
-      color_quad->SetNew(shared_quad_state, gfx::Rect(23, 20, 4, 7), 1u, false);
-      quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+      color_quad->SetNew(shared_quad_state,
+                         gfx::Rect(23, 20, 4, 7),
+                         gfx::Rect(23, 20, 4, 7),
+                         1u,
+                         false);
+      quad_sink.Append(color_quad.PassAs<DrawQuad>());
     }
 
     gfx::Size root_pass_content_bounds(50, 50);
@@ -980,7 +1013,6 @@ class DelegatedRendererLayerImplTestClip
         root_pass_rect,
         gfx::Transform());
     MockQuadCuller quad_sink(&pass->quad_list, &pass->shared_quad_state_list);
-    AppendQuadsData data(pass->id);
     SharedQuadState* shared_quad_state =
         quad_sink.UseSharedQuadState(SharedQuadState::Create());
     shared_quad_state->SetAll(root_pass_transform,
@@ -995,32 +1027,49 @@ class DelegatedRendererLayerImplTestClip
         RenderPassDrawQuad::Create();
     render_pass_quad->SetNew(
         shared_quad_state,
-        gfx::Rect(5, 5, 7, 7),  // rect
+        gfx::Rect(5, 5, 7, 7),  // quad_rect
+        gfx::Rect(5, 5, 7, 7),  // visible_quad_rect
         RenderPass::Id(10, 7),  // render_pass_id
-        false,  // is_replica
-        0,  // mask_resource_id
-        child_pass_rect,  // contents_changed_since_last_frame
-        gfx::RectF(),  // mask_uv_rect
-        FilterOperations(),  // filters
-        FilterOperations());  // background_filters
-    quad_sink.Append(render_pass_quad.PassAs<DrawQuad>(), &data);
+        false,                  // is_replica
+        0,                      // mask_resource_id
+        child_pass_rect,        // contents_changed_since_last_frame
+        gfx::RectF(),           // mask_uv_rect
+        FilterOperations(),     // filters
+        FilterOperations());    // background_filters
+    quad_sink.Append(render_pass_quad.PassAs<DrawQuad>());
 
     scoped_ptr<SolidColorDrawQuad> color_quad;
     color_quad = SolidColorDrawQuad::Create();
-    color_quad->SetNew(shared_quad_state, gfx::Rect(0, 0, 10, 10), 1u, false);
-    quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+    color_quad->SetNew(shared_quad_state,
+                       gfx::Rect(0, 0, 10, 10),
+                       gfx::Rect(0, 0, 10, 10),
+                       1u,
+                       false);
+    quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
     color_quad = SolidColorDrawQuad::Create();
-    color_quad->SetNew(shared_quad_state, gfx::Rect(0, 10, 10, 10), 2u, false);
-    quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+    color_quad->SetNew(shared_quad_state,
+                       gfx::Rect(0, 10, 10, 10),
+                       gfx::Rect(0, 10, 10, 10),
+                       2u,
+                       false);
+    quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
     color_quad = SolidColorDrawQuad::Create();
-    color_quad->SetNew(shared_quad_state, gfx::Rect(10, 0, 10, 10), 3u, false);
-    quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+    color_quad->SetNew(shared_quad_state,
+                       gfx::Rect(10, 0, 10, 10),
+                       gfx::Rect(10, 0, 10, 10),
+                       3u,
+                       false);
+    quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
     color_quad = SolidColorDrawQuad::Create();
-    color_quad->SetNew(shared_quad_state, gfx::Rect(10, 10, 10, 10), 4u, false);
-    quad_sink.Append(color_quad.PassAs<DrawQuad>(), &data);
+    color_quad->SetNew(shared_quad_state,
+                       gfx::Rect(10, 10, 10, 10),
+                       gfx::Rect(10, 10, 10, 10),
+                       4u,
+                       false);
+    quad_sink.Append(color_quad.PassAs<DrawQuad>());
 
     delegated_renderer_layer->SetFrameDataForRenderPasses(
         &delegated_render_passes);
@@ -1355,6 +1404,140 @@ TEST_F(DelegatedRendererLayerImplTest, InvalidRenderPassDrawQuad) {
 
   host_impl_->DrawLayers(&frame, gfx::FrameTime::Now());
   host_impl_->DidDrawAllLayers(frame);
+}
+
+TEST_F(DelegatedRendererLayerImplTest, Occlusion) {
+  gfx::Size layer_size(1000, 1000);
+  gfx::Size viewport_size(1000, 1000);
+  gfx::Rect quad_rect(200, 300, 400, 500);
+
+  gfx::Transform transform;
+  transform.Translate(11.0, 0.0);
+
+  LayerTestCommon::LayerImplTest impl;
+
+  FakeDelegatedRendererLayerImpl* delegated_renderer_layer_impl =
+      impl.AddChildToRoot<FakeDelegatedRendererLayerImpl>();
+  delegated_renderer_layer_impl->SetAnchorPoint(gfx::PointF());
+  delegated_renderer_layer_impl->SetBounds(layer_size);
+  delegated_renderer_layer_impl->SetContentBounds(layer_size);
+  delegated_renderer_layer_impl->SetDrawsContent(true);
+
+  ScopedPtrVector<RenderPass> delegated_render_passes;
+  // pass2 is just the size of the quad. It contributes to |pass1| with a
+  // translation of (11,0).
+  RenderPass::Id pass2_id =
+      delegated_renderer_layer_impl->FirstContributingRenderPassId();
+  TestRenderPass* pass2 =
+      AddRenderPass(&delegated_render_passes, pass2_id, quad_rect, transform);
+  AddQuad(pass2, gfx::Rect(quad_rect.size()), SK_ColorRED);
+  // |pass1| covers the whole layer.
+  RenderPass::Id pass1_id = RenderPass::Id(impl.root_layer()->id(), 0);
+  TestRenderPass* pass1 = AddRenderPass(&delegated_render_passes,
+                                        pass1_id,
+                                        gfx::Rect(layer_size),
+                                        gfx::Transform());
+  AddRenderPassQuad(pass1, pass2, 0, FilterOperations(), transform);
+  delegated_renderer_layer_impl->SetFrameDataForRenderPasses(
+      &delegated_render_passes);
+
+  impl.CalcDrawProps(viewport_size);
+
+  // The |quad_rect| translated by the |transform|.
+  gfx::Rect quad_screen_rect = quad_rect + gfx::Vector2d(11, 0);
+
+  {
+    SCOPED_TRACE("No occlusion");
+    gfx::Rect occluded;
+
+    {
+      SCOPED_TRACE("Root render pass");
+      impl.AppendQuadsForPassWithOcclusion(
+          delegated_renderer_layer_impl, pass1_id, occluded);
+      LayerTestCommon::VerifyQuadsExactlyCoverRect(impl.quad_list(),
+                                                   quad_screen_rect);
+      ASSERT_EQ(1u, impl.quad_list().size());
+      EXPECT_EQ(DrawQuad::RENDER_PASS, impl.quad_list()[0]->material);
+    }
+    {
+      SCOPED_TRACE("Contributing render pass");
+      impl.AppendQuadsForPassWithOcclusion(
+          delegated_renderer_layer_impl, pass2_id, occluded);
+      LayerTestCommon::VerifyQuadsExactlyCoverRect(impl.quad_list(),
+                                                   gfx::Rect(quad_rect.size()));
+      ASSERT_EQ(1u, impl.quad_list().size());
+      EXPECT_EQ(DrawQuad::SOLID_COLOR, impl.quad_list()[0]->material);
+    }
+  }
+
+  {
+    SCOPED_TRACE("Full occlusion");
+    {
+      gfx::Rect occluded(delegated_renderer_layer_impl->visible_content_rect());
+
+      SCOPED_TRACE("Root render pass");
+      impl.AppendQuadsForPassWithOcclusion(
+          delegated_renderer_layer_impl, pass1_id, occluded);
+      LayerTestCommon::VerifyQuadsExactlyCoverRect(impl.quad_list(),
+                                                   gfx::Rect());
+      EXPECT_EQ(impl.quad_list().size(), 0u);
+    }
+    {
+      gfx::Rect occluded(delegated_renderer_layer_impl->visible_content_rect());
+      // Move the occlusion to where it is in the contributing surface.
+      occluded -= quad_rect.OffsetFromOrigin();
+
+      SCOPED_TRACE("Contributing render pass");
+      impl.AppendQuadsForPassWithOcclusion(
+          delegated_renderer_layer_impl, pass2_id, occluded);
+      LayerTestCommon::VerifyQuadsExactlyCoverRect(impl.quad_list(),
+                                                   gfx::Rect());
+      EXPECT_EQ(impl.quad_list().size(), 0u);
+    }
+  }
+
+  {
+    SCOPED_TRACE("Partial occlusion");
+    {
+      gfx::Rect occluded(0, 0, 500, 1000);
+
+      SCOPED_TRACE("Root render pass");
+      impl.AppendQuadsForPassWithOcclusion(
+          delegated_renderer_layer_impl, pass1_id, occluded);
+      size_t partially_occluded_count = 0;
+      LayerTestCommon::VerifyQuadsCoverRectWithOcclusion(
+          impl.quad_list(),
+          quad_screen_rect,
+          occluded,
+          &partially_occluded_count);
+      // The layer outputs one quad, which is partially occluded.
+      EXPECT_EQ(1u, impl.quad_list().size());
+      EXPECT_EQ(1u, partially_occluded_count);
+    }
+    {
+      gfx::Rect occluded(0, 0, 500, 1000);
+      // Move the occlusion to where it is in the contributing surface.
+      occluded -= quad_rect.OffsetFromOrigin() + gfx::Vector2d(11, 0);
+
+      SCOPED_TRACE("Contributing render pass");
+      impl.AppendQuadsForPassWithOcclusion(
+          delegated_renderer_layer_impl, pass2_id, occluded);
+      size_t partially_occluded_count = 0;
+      LayerTestCommon::VerifyQuadsCoverRectWithOcclusion(
+          impl.quad_list(),
+          gfx::Rect(quad_rect.size()),
+          occluded,
+          &partially_occluded_count);
+      // The layer outputs one quad, which is partially occluded.
+      EXPECT_EQ(1u, impl.quad_list().size());
+      EXPECT_EQ(1u, partially_occluded_count);
+      // The quad in the contributing surface is at (211,300) in the root.
+      // The occlusion extends to 500 in the x-axis, pushing the left of the
+      // visible part of the quad to 500 - 211 = 300 - 11 inside the quad.
+      EXPECT_EQ(gfx::Rect(300 - 11, 0, 100 + 11, 500).ToString(),
+                impl.quad_list()[0]->visible_rect.ToString());
+    }
+  }
 }
 
 }  // namespace

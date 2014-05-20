@@ -9,11 +9,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/browser_main_parts.h"
-#include "ui/aura/root_window_observer.h"
-
-namespace aura {
-class TestScreen;
-}
+#include "content/public/common/main_function_params.h"
+#include "ui/aura/window_tree_host_observer.h"
 
 namespace content {
 class ShellBrowserContext;
@@ -34,18 +31,16 @@ namespace net {
 class NetLog;
 }
 
-namespace wm {
-class WMTestHelper;
-}
-
 namespace apps {
 
+class ShellAppsClient;
 class ShellBrowserContext;
+class ShellDesktopController;
 class ShellExtensionsClient;
 
 // Handles initialization of AppShell.
 class ShellBrowserMainParts : public content::BrowserMainParts,
-                              public aura::RootWindowObserver {
+                              public aura::WindowTreeHostObserver {
  public:
   explicit ShellBrowserMainParts(
       const content::MainFunctionParams& parameters);
@@ -68,41 +63,28 @@ class ShellBrowserMainParts : public content::BrowserMainParts,
   virtual bool MainMessageLoopRun(int* result_code) OVERRIDE;
   virtual void PostMainMessageLoopRun() OVERRIDE;
 
-  // aura::RootWindowObserver overrides:
-  virtual void OnWindowTreeHostCloseRequested(const aura::RootWindow* root)
-      OVERRIDE;
+  // aura::WindowTreeHostObserver overrides:
+  virtual void OnHostCloseRequested(const aura::WindowTreeHost* host) OVERRIDE;
 
  private:
-  // Creates the window that hosts the apps.
-  void CreateRootWindow();
-
-  // Closes and destroys the root window hosting the app.
-  void DestroyRootWindow();
-
-  // Window placement is controlled by a ViewsDelegate.
-  void CreateViewsDelegate();
-  void DestroyViewsDelegate();
-
   // Creates and initializes the ExtensionSystem.
   void CreateExtensionSystem();
 
+  scoped_ptr<ShellDesktopController> desktop_controller_;
   scoped_ptr<ShellBrowserContext> browser_context_;
   scoped_ptr<ShellExtensionsClient> extensions_client_;
   scoped_ptr<extensions::ShellExtensionsBrowserClient>
       extensions_browser_client_;
+  scoped_ptr<ShellAppsClient> apps_client_;
   scoped_ptr<net::NetLog> net_log_;
-
-  // Enable a minimal set of views::corewm to be initialized.
-  scoped_ptr<wm::WMTestHelper> wm_test_helper_;
-
-  scoped_ptr<aura::TestScreen> test_screen_;
-
-  scoped_ptr<views::Widget> webview_window_;
 
   scoped_ptr<content::ShellDevToolsDelegate> devtools_delegate_;
 
-  // Owned by the BrowserContextKeyedService system.
+  // Owned by the KeyedService system.
   extensions::ShellExtensionSystem* extension_system_;
+
+  // For running app browsertests.
+  const content::MainFunctionParams parameters_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellBrowserMainParts);
 };

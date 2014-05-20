@@ -7,6 +7,7 @@ import unittest
 from telemetry.page import page_measurement_results
 from telemetry.page import page_set
 from telemetry.page import perf_tests_helper
+from telemetry.value import scalar
 
 def _MakePageSet():
   return page_set.PageSet.FromDict({
@@ -78,13 +79,21 @@ class PageMeasurementResultsTest(unittest.TestCase):
     results.WillMeasurePage(self.pages[0])
     results.Add('a', 'a_units', 3)
     results.Add('b', 'b_units', 3)
-    results.AddSummary('c', 'c_units', 3)
+    results.AddSummaryValue(scalar.ScalarValue(None, 'c', 'c_units', 3))
     results.DidMeasurePage()
     self.assertEquals(set(['a', 'b', 'c']),
                       set(results.all_value_names_that_have_been_seen))
     self.assertEquals('a_units', results.GetUnitsForValueName('a'))
     self.assertEquals('b_units', results.GetUnitsForValueName('b'))
     self.assertEquals('c_units', results.GetUnitsForValueName('c'))
+
+  def test_add_summary_value_with_page_specified(self):
+    results = NonPrintingPageMeasurementResults()
+    results.WillMeasurePage(self.pages[0])
+    self.assertRaises(
+      AssertionError,
+      lambda: results.AddSummaryValue(scalar.ScalarValue(self.pages[0],
+                                                         'a', 'units', 3)))
 
   def test_unit_change(self):
     results = NonPrintingPageMeasurementResults()
@@ -150,7 +159,7 @@ class PageMeasurementResultsTest(unittest.TestCase):
     results.Add('a', 'seconds', 3)
     results.DidMeasurePage()
 
-    values = results.GetAllPageSpecificValuesForSuccessfulPages()
+    values = results.all_page_specific_values
     self.assertEquals(3, len(values))
     self.assertEquals([self.pages[0], self.pages[1], self.pages[2]],
                       [v.page for v in values])
@@ -169,7 +178,7 @@ class PageMeasurementResultsTest(unittest.TestCase):
     results.Add('a', 'seconds', 3)
     results.DidMeasurePage()
 
-    values = results.GetAllPageSpecificValuesForSuccessfulPages()
+    values = results.all_page_specific_values
     self.assertEquals(2, len(values))
     self.assertEquals([self.pages[0], self.pages[2]],
                       [v.page for v in values])

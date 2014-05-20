@@ -20,6 +20,10 @@ import org.chromium.chromoting.jni.JniInterface;
  * A simple screen that does nothing except display a DesktopView and notify it of rotations.
  */
 public class Desktop extends Activity {
+    /** Web page to be displayed in the Help screen when launched from this activity. */
+    private static final String HELP_URL =
+            "http://support.google.com/chrome/?p=mobile_crd_connecthost";
+
     /** The surface that displays the remote host's desktop feed. */
     private DesktopView mRemoteHostDesktop;
 
@@ -99,12 +103,16 @@ public class Desktop extends Activity {
                         KeyEvent.KEYCODE_FORWARD_DEL,
                     };
                     for (int key : keys) {
-                        JniInterface.keyboardAction(key, true);
+                        JniInterface.sendKeyEvent(key, true);
                     }
                     for (int key : keys) {
-                        JniInterface.keyboardAction(key, false);
+                        JniInterface.sendKeyEvent(key, false);
                     }
                 }
+                return true;
+
+            case R.id.actionbar_help:
+                HelpActivity.launch(this, HELP_URL);
                 return true;
 
             default:
@@ -119,32 +127,48 @@ public class Desktop extends Activity {
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // Send ACTION_MULTIPLE event as TextEvent.
+        //
+        // TODO(sergeyu): For all keys on English keyboard Android generates
+        // ACTION_DOWN/ACTION_UP events, so they are sent as KeyEvent instead of
+        // TextEvent. As result the host may handle them as non-English chars
+        // when it has non-English layout selected, which might be confusing for
+        // the user. This code should be fixed to send all text input events as
+        // TextEvent, but it cannot be done now because not all hosts support
+        // TextEvent. Also, to handle keyboard shortcuts properly this code will
+        // need to track the state of modifier keys (such as Ctrl or Alt) and
+        // send KeyEvents in the case any of the modifier keys are pressed.
+        if (event.getAction() == KeyEvent.ACTION_MULTIPLE) {
+            JniInterface.sendTextEvent(event.getCharacters());
+            return super.dispatchKeyEvent(event);
+        }
+
         boolean depressed = event.getAction() == KeyEvent.ACTION_DOWN;
 
         switch (event.getKeyCode()) {
             case KeyEvent.KEYCODE_AT:
-                JniInterface.keyboardAction(KeyEvent.KEYCODE_SHIFT_LEFT, depressed);
-                JniInterface.keyboardAction(KeyEvent.KEYCODE_2, depressed);
+                JniInterface.sendKeyEvent(KeyEvent.KEYCODE_SHIFT_LEFT, depressed);
+                JniInterface.sendKeyEvent(KeyEvent.KEYCODE_2, depressed);
                 break;
 
             case KeyEvent.KEYCODE_POUND:
-                JniInterface.keyboardAction(KeyEvent.KEYCODE_SHIFT_LEFT, depressed);
-                JniInterface.keyboardAction(KeyEvent.KEYCODE_3, depressed);
+                JniInterface.sendKeyEvent(KeyEvent.KEYCODE_SHIFT_LEFT, depressed);
+                JniInterface.sendKeyEvent(KeyEvent.KEYCODE_3, depressed);
                 break;
 
             case KeyEvent.KEYCODE_STAR:
-                JniInterface.keyboardAction(KeyEvent.KEYCODE_SHIFT_LEFT, depressed);
-                JniInterface.keyboardAction(KeyEvent.KEYCODE_8, depressed);
+                JniInterface.sendKeyEvent(KeyEvent.KEYCODE_SHIFT_LEFT, depressed);
+                JniInterface.sendKeyEvent(KeyEvent.KEYCODE_8, depressed);
                 break;
 
             case KeyEvent.KEYCODE_PLUS:
-                JniInterface.keyboardAction(KeyEvent.KEYCODE_SHIFT_LEFT, depressed);
-                JniInterface.keyboardAction(KeyEvent.KEYCODE_EQUALS, depressed);
+                JniInterface.sendKeyEvent(KeyEvent.KEYCODE_SHIFT_LEFT, depressed);
+                JniInterface.sendKeyEvent(KeyEvent.KEYCODE_EQUALS, depressed);
                 break;
 
             default:
                 // We try to send all other key codes to the host directly.
-                JniInterface.keyboardAction(event.getKeyCode(), depressed);
+                JniInterface.sendKeyEvent(event.getKeyCode(), depressed);
         }
 
         return super.dispatchKeyEvent(event);

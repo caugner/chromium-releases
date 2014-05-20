@@ -4,10 +4,9 @@
 
 #include "chrome/browser/ui/autofill/autofill_dialog_i18n_input.h"
 
-#include "base/command_line.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/browser_process.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
@@ -23,8 +22,6 @@ namespace i18ninput {
 
 namespace {
 
-static int g_enabled_for_testing_ = 0;
-
 using base::UTF16ToUTF8;
 using ::i18n::addressinput::AddressData;
 using ::i18n::addressinput::AddressField;
@@ -39,29 +36,14 @@ DetailInput::Length LengthFromHint(AddressUiComponent::LengthHint hint) {
 
 }  // namespace
 
-bool Enabled() {
-  if (g_enabled_for_testing_ > 0)
-    return true;
-
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return !command_line->HasSwitch(::switches::kDisableAutofillAddressI18n);
-}
-
-ScopedEnableForTesting::ScopedEnableForTesting() {
-  ++g_enabled_for_testing_;
-  DCHECK_GE(g_enabled_for_testing_, 1);
-}
-
-ScopedEnableForTesting::~ScopedEnableForTesting() {
-  --g_enabled_for_testing_;
-  DCHECK_GE(g_enabled_for_testing_, 0);
-}
-
 void BuildAddressInputs(common::AddressType address_type,
                         const std::string& country_code,
                         DetailInputs* inputs) {
+  // TODO(rouslan): Store the language code for the autofill profile.
+  // http://crbug.com/354955
   std::vector<AddressUiComponent> components(
-      ::i18n::addressinput::BuildComponents(country_code));
+      ::i18n::addressinput::BuildComponents(
+          country_code, g_browser_process->GetApplicationLocale(), NULL));
 
   const bool billing = address_type == common::ADDRESS_TYPE_BILLING;
 
@@ -78,6 +60,7 @@ void BuildAddressInputs(common::AddressType address_type,
     DetailInput input = { length, server_type, placeholder };
     inputs->push_back(input);
 
+#if defined(OS_MACOSX) || defined(OS_ANDROID)
     if (component.field == ::i18n::addressinput::STREET_ADDRESS &&
         component.length_hint == AddressUiComponent::HINT_LONG) {
       // TODO(dbeam): support more than 2 address lines. http://crbug.com/324889
@@ -87,6 +70,7 @@ void BuildAddressInputs(common::AddressType address_type,
       DetailInput input = { length, server_type, placeholder };
       inputs->push_back(input);
     }
+#endif
   }
 
   ServerFieldType server_type =
@@ -163,8 +147,14 @@ ServerFieldType TypeForField(AddressField address_field,
       return billing ? ADDRESS_BILLING_ZIP : ADDRESS_HOME_ZIP;
     case ::i18n::addressinput::SORTING_CODE:
       return billing ? ADDRESS_BILLING_SORTING_CODE : ADDRESS_HOME_SORTING_CODE;
+#if defined(OS_MACOSX) || defined(OS_ANDROID)
     case ::i18n::addressinput::STREET_ADDRESS:
       return billing ? ADDRESS_BILLING_LINE1 : ADDRESS_HOME_LINE1;
+#else
+    case ::i18n::addressinput::STREET_ADDRESS:
+      return billing ? ADDRESS_BILLING_STREET_ADDRESS :
+                       ADDRESS_HOME_STREET_ADDRESS;
+#endif
     case ::i18n::addressinput::RECIPIENT:
       return billing ? NAME_BILLING_FULL : NAME_FULL;
     case ::i18n::addressinput::ORGANIZATION:
@@ -172,6 +162,62 @@ ServerFieldType TypeForField(AddressField address_field,
   }
   NOTREACHED();
   return UNKNOWN_TYPE;
+}
+
+bool FieldForType(ServerFieldType server_type,
+                  ::i18n::addressinput::AddressField* field) {
+  switch (server_type) {
+    case ADDRESS_BILLING_COUNTRY:
+    case ADDRESS_HOME_COUNTRY:
+      if (field)
+        *field = ::i18n::addressinput::COUNTRY;
+      return true;
+    case ADDRESS_BILLING_STATE:
+    case ADDRESS_HOME_STATE:
+      if (field)
+        *field = ::i18n::addressinput::ADMIN_AREA;
+      return true;
+    case ADDRESS_BILLING_CITY:
+    case ADDRESS_HOME_CITY:
+      if (field)
+        *field = ::i18n::addressinput::LOCALITY;
+      return true;
+    case ADDRESS_BILLING_DEPENDENT_LOCALITY:
+    case ADDRESS_HOME_DEPENDENT_LOCALITY:
+      if (field)
+        *field = ::i18n::addressinput::DEPENDENT_LOCALITY;
+      return true;
+    case ADDRESS_BILLING_SORTING_CODE:
+    case ADDRESS_HOME_SORTING_CODE:
+      if (field)
+        *field = ::i18n::addressinput::SORTING_CODE;
+      return true;
+    case ADDRESS_BILLING_ZIP:
+    case ADDRESS_HOME_ZIP:
+      if (field)
+        *field = ::i18n::addressinput::POSTAL_CODE;
+      return true;
+    case ADDRESS_BILLING_STREET_ADDRESS:
+    case ADDRESS_BILLING_LINE1:
+    case ADDRESS_BILLING_LINE2:
+    case ADDRESS_HOME_STREET_ADDRESS:
+    case ADDRESS_HOME_LINE1:
+    case ADDRESS_HOME_LINE2:
+      if (field)
+        *field = ::i18n::addressinput::STREET_ADDRESS;
+      return true;
+    case COMPANY_NAME:
+      if (field)
+        *field = ::i18n::addressinput::ORGANIZATION;
+      return true;
+    case NAME_BILLING_FULL:
+    case NAME_FULL:
+      if (field)
+        *field = ::i18n::addressinput::RECIPIENT;
+      return true;
+    default:
+      return false;
+  }
 }
 
 void CreateAddressData(
@@ -195,6 +241,18 @@ void CreateAddressData(
       UTF16ToUTF8(get_info.Run(AutofillType(ADDRESS_HOME_STREET_ADDRESS))),
       '\n',
       &address_data->address_lines);
+}
+
+bool CountryIsFullySupported(const std::string& country_code) {
+  DCHECK_EQ(2U, country_code.size());
+  std::vector< ::i18n::addressinput::AddressUiComponent> components =
+      ::i18n::addressinput::BuildComponents(
+          country_code, g_browser_process->GetApplicationLocale(), NULL);
+  for (size_t i = 0; i < components.size(); ++i) {
+    if (components[i].field == ::i18n::addressinput::DEPENDENT_LOCALITY)
+      return false;
+  }
+  return true;
 }
 
 }  // namespace i18ninput

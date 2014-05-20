@@ -57,8 +57,14 @@ class GAIAInfoUpdateServiceTest : public ProfileInfoCacheTest {
   }
 
   Profile* profile() {
-    if (!profile_)
-      profile_ = testing_profile_manager_.CreateTestingProfile("profile_1");
+    if (!profile_) {
+      profile_ = testing_profile_manager_.CreateTestingProfile("Person 1");
+      // The testing manager sets the profile name manually, which counts as
+      // a user-customized profile name. Reset this to match the default name
+      // we are actually using.
+      size_t index = GetCache()->GetIndexOfProfileWithPath(profile_->GetPath());
+      GetCache()->SetProfileIsUsingDefaultNameAtIndex(index, true);
+    }
     return profile_;
   }
 
@@ -89,7 +95,6 @@ TEST_F(GAIAInfoUpdateServiceTest, DownloadSuccess) {
 
   // On success both the profile info and GAIA info should be updated.
   size_t index = GetCache()->GetIndexOfProfileWithPath(profile()->GetPath());
-  EXPECT_TRUE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(index));
   EXPECT_EQ(name, GetCache()->GetNameOfProfileAtIndex(index));
   EXPECT_EQ(name, GetCache()->GetGAIANameOfProfileAtIndex(index));
   EXPECT_TRUE(gfx::test::IsEqual(
@@ -112,45 +117,12 @@ TEST_F(GAIAInfoUpdateServiceTest, DownloadFailure) {
                                    ProfileDownloaderDelegate::SERVICE_ERROR);
 
   // On failure nothing should be updated.
-  EXPECT_FALSE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(index));
   EXPECT_EQ(old_name, GetCache()->GetNameOfProfileAtIndex(index));
   EXPECT_EQ(base::string16(), GetCache()->GetGAIANameOfProfileAtIndex(index));
   EXPECT_TRUE(gfx::test::IsEqual(
       old_image, GetCache()->GetAvatarIconOfProfileAtIndex(index)));
   EXPECT_EQ(NULL, GetCache()->GetGAIAPictureOfProfileAtIndex(index));
   EXPECT_EQ(std::string(), service.GetCachedPictureURL());
-}
-
-TEST_F(GAIAInfoUpdateServiceTest, NoMigration) {
-  size_t index = GetCache()->GetIndexOfProfileWithPath(profile()->GetPath());
-  base::string16 old_name = GetCache()->GetNameOfProfileAtIndex(index);
-  gfx::Image old_image = GetCache()->GetAvatarIconOfProfileAtIndex(index);
-
-  // Mark the profile as migrated.
-  GetCache()->SetHasMigratedToGAIAInfoOfProfileAtIndex(index, true);
-
-  GAIAInfoUpdateService service(profile());
-  NiceMock<ProfileDownloaderMock> downloader(&service);
-  base::string16 new_name = base::ASCIIToUTF16("Pat Smith");
-  EXPECT_CALL(downloader, GetProfileFullName()).WillOnce(Return(new_name));
-  gfx::Image new_image = gfx::test::CreateImage();
-  const SkBitmap* new_bmp = new_image.ToSkBitmap();
-  EXPECT_CALL(downloader, GetProfilePicture()).WillOnce(Return(*new_bmp));
-  EXPECT_CALL(downloader, GetProfilePictureStatus()).
-      WillOnce(Return(ProfileDownloader::PICTURE_SUCCESS));
-  EXPECT_CALL(downloader, GetProfilePictureURL()).WillOnce(Return(""));
-
-  service.OnProfileDownloadSuccess(&downloader);
-
-  // On success with no migration the profile info should not be updated but
-  // the GAIA info should be updated.
-  EXPECT_TRUE(GetCache()->GetHasMigratedToGAIAInfoOfProfileAtIndex(index));
-  EXPECT_EQ(old_name, GetCache()->GetNameOfProfileAtIndex(index));
-  EXPECT_EQ(new_name, GetCache()->GetGAIANameOfProfileAtIndex(index));
-  EXPECT_TRUE(gfx::test::IsEqual(
-      old_image, GetCache()->GetAvatarIconOfProfileAtIndex(index)));
-  EXPECT_TRUE(gfx::test::IsEqual(
-      new_image, *GetCache()->GetGAIAPictureOfProfileAtIndex(index)));
 }
 
 TEST_F(GAIAInfoUpdateServiceTest, ShouldUseGAIAProfileInfo) {

@@ -7,6 +7,13 @@
 
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
+#include "url/gurl.h"
+
+namespace base {
+class DictionaryValue;
+}
+
 namespace content {
 class BrowserContext;
 }
@@ -14,6 +21,7 @@ class BrowserContext;
 namespace extensions {
 
 class Extension;
+struct ExtensionInfo;
 
 namespace util {
 
@@ -65,6 +73,23 @@ bool IsExtensionIdle(const std::string& extension_id,
 // Returns true if |extension_id| is installed permanently and not ephemerally.
 bool IsExtensionInstalledPermanently(const std::string& extension_id,
                                      content::BrowserContext* context);
+
+// Returns the site of the |extension_id|, given the associated |context|.
+// Suitable for use with BrowserContext::GetStoragePartitionForSite().
+GURL GetSiteForExtensionId(const std::string& extension_id,
+                           content::BrowserContext* context);
+
+// Sets the name, id, and icon resource path of the given extension into the
+// returned dictionary.
+scoped_ptr<base::DictionaryValue> GetExtensionInfo(const Extension* extension);
+
+// Returns true if the extension has isolated storage.
+bool HasIsolatedStorage(const ExtensionInfo& info);
+
+// Returns true if the site URL corresponds to an extension or app and has
+// isolated storage.
+bool SiteHasIsolatedStorage(const GURL& extension_site_url,
+                            content::BrowserContext* context);
 
 }  // namespace util
 }  // namespace extensions

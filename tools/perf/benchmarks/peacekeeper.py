@@ -16,11 +16,12 @@ mean of individual tests scores.
 
 import os
 
-from metrics import statistics
 from telemetry import test
 from telemetry.page import page_measurement
 from telemetry.page import page_set
+from telemetry.util import statistics
 from telemetry.value import merge_values
+from telemetry.value import scalar
 
 class _PeaceKeeperMeasurement(page_measurement.PageMeasurement):
 
@@ -65,10 +66,11 @@ class _PeaceKeeperMeasurement(page_measurement.PageMeasurement):
         group_by_name_suffix=True)
     combined_score = [x for x in combined if x.name == 'Score'][0]
     total = statistics.GeometricMean(combined_score.values)
-    results.AddSummary('Score', 'score', total, 'Total')
+    results.AddSummaryValue(
+        scalar.ScalarValue(None, 'Total.Score', 'score', total))
 
 
-class _PeaceKeeperBenchmark(test.Test):
+class PeaceKeeperBenchmark(test.Test):
   """A base class for Peackeeper benchmarks."""
   test = _PeaceKeeperMeasurement
 
@@ -98,7 +100,7 @@ class _PeaceKeeperBenchmark(test.Test):
     return page_set.PageSet.FromDict(page_set_dict, os.path.abspath(__file__))
 
 
-class PeaceKeeperRender(_PeaceKeeperBenchmark):
+class PeaceKeeperRender(PeaceKeeperBenchmark):
   """PeaceKeeper rendering benchmark suite.
 
   These tests measure your browser's ability to render and modify specific
@@ -113,7 +115,7 @@ class PeaceKeeperRender(_PeaceKeeperBenchmark):
                ]
 
 
-class PeaceKeeperData(_PeaceKeeperBenchmark):
+class PeaceKeeperData(PeaceKeeperBenchmark):
   """PeaceKeeper Data operations benchmark suite.
 
   These tests measure your browser's ability to add, remove and modify data
@@ -132,7 +134,7 @@ class PeaceKeeperData(_PeaceKeeperBenchmark):
                ]
 
 
-class PeaceKeeperDom(_PeaceKeeperBenchmark):
+class PeaceKeeperDom(PeaceKeeperBenchmark):
   """PeaceKeeper DOM operations benchmark suite.
 
   These tests emulate the methods used to create typical dynamic webpages.
@@ -172,7 +174,7 @@ class PeaceKeeperDom(_PeaceKeeperBenchmark):
                ]
 
 
-class PeaceKeeperTextParsing(_PeaceKeeperBenchmark):
+class PeaceKeeperTextParsing(PeaceKeeperBenchmark):
   """PeaceKeeper Text Parsing benchmark suite.
 
   These tests measure your browser's performance in typical text manipulations
@@ -201,7 +203,7 @@ class PeaceKeeperTextParsing(_PeaceKeeperBenchmark):
                ]
 
 
-class PeaceKeeperHTML5Canvas(_PeaceKeeperBenchmark):
+class PeaceKeeperHTML5Canvas(PeaceKeeperBenchmark):
   """PeaceKeeper HTML5 Canvas benchmark suite.
 
   These tests use HTML5 Canvas, which is a web technology for drawing and
@@ -218,7 +220,7 @@ class PeaceKeeperHTML5Canvas(_PeaceKeeperBenchmark):
                ]
 
 
-class PeaceKeeperHTML5Capabilities(_PeaceKeeperBenchmark):
+class PeaceKeeperHTML5Capabilities(PeaceKeeperBenchmark):
   """PeaceKeeper HTML5 Capabilities benchmark suite.
 
   These tests checks browser HTML5 capabilities support for WebGL, Video

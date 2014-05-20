@@ -13,6 +13,7 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui.h"
+#include "sync/internal_api/public/events/protocol_event.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/js/js_arg_list.h"
 #include "sync/js/js_event_details.h"
@@ -33,6 +34,7 @@ SyncInternalsMessageHandler::~SyncInternalsMessageHandler() {
   ProfileSyncService* service = GetProfileSyncService();
   if (service && service->HasObserver(this)) {
     service->RemoveObserver(this);
+    service->RemoveProtocolEventObserver(this);
   }
 }
 
@@ -43,6 +45,7 @@ void SyncInternalsMessageHandler::RegisterMessages() {
   ProfileSyncService* service = GetProfileSyncService();
   if (service) {
     service->AddObserver(this);
+    service->AddProtocolEventObserver(this);
     js_controller_ = service->GetJsController();
     js_controller_->AddJsEventHandler(this);
   }
@@ -57,8 +60,6 @@ void SyncInternalsMessageHandler::RegisterMessages() {
       base::Bind(&SyncInternalsMessageHandler::HandleRequestListOfTypes,
                  base::Unretained(this)));
 
-  RegisterJsControllerCallback("getNotificationState");
-  RegisterJsControllerCallback("getNotificationInfo");
   RegisterJsControllerCallback("getAllNodes");
   RegisterJsControllerCallback("getClientServerTraffic");
 }
@@ -98,6 +99,16 @@ void SyncInternalsMessageHandler::HandleJsReply(
 
 void SyncInternalsMessageHandler::OnStateChanged() {
   SendAboutInfo();
+}
+
+void SyncInternalsMessageHandler::OnProtocolEvent(
+    const syncer::ProtocolEvent& event) {
+  scoped_ptr<base::DictionaryValue> value(
+      syncer::ProtocolEvent::ToValue(event));
+  web_ui()->CallJavascriptFunction(
+      "chrome.sync.dispatchEvent",
+      base::StringValue("onProtocolEvent"),
+      *value);
 }
 
 void SyncInternalsMessageHandler::HandleJsEvent(

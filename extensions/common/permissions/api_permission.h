@@ -35,6 +35,8 @@ class APIPermission {
     kUnknown = -1,
 
     // Real permissions.
+    kAccessibilityFeaturesModify,
+    kAccessibilityFeaturesRead,
     kActiveTab,
     kActivityLogPrivate,
     kAdView,
@@ -42,6 +44,7 @@ class APIPermission {
     kAlwaysOnTopWindows,
     kAudio,
     kAudioCapture,
+    kAutomation,
     kAutoTestPrivate,
     kBackground,
     kBookmark,
@@ -136,7 +139,6 @@ class APIPermission {
     kStreamsPrivate,
     kSyncFileSystem,
     kSystemPrivate,
-    kSystemIndicator,
     kSystemDisplay,
     kSystemStorage,
     kTab,
@@ -162,6 +164,7 @@ class APIPermission {
     kWebrtcLoggingPrivate,
     kWebstorePrivate,
     kWebView,
+    kWindowShape,
     kScreenlockPrivate,
     kSystemCpu,
     kSystemMemory,

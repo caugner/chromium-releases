@@ -36,7 +36,7 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
-#include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
@@ -421,11 +421,9 @@ bool DownloadItemView::OnMouseDragged(const ui::MouseEvent& event) {
       IconManager* im = g_browser_process->icon_manager();
       gfx::Image* icon = im->LookupIconFromFilepath(
           download()->GetTargetFilePath(), IconLoader::SMALL);
-      if (icon) {
-        views::Widget* widget = GetWidget();
-        DragDownloadItem(
-            download(), icon, widget ? widget->GetNativeView() : NULL);
-      }
+      views::Widget* widget = GetWidget();
+      DragDownloadItem(
+          download(), icon, widget ? widget->GetNativeView() : NULL);
     }
   } else if (ExceededDragThreshold(event.location() - drag_start_point_)) {
     dragging_ = true;
@@ -493,14 +491,13 @@ bool DownloadItemView::GetTooltipText(const gfx::Point& p,
   return true;
 }
 
-void DownloadItemView::GetAccessibleState(ui::AccessibleViewState* state) {
+void DownloadItemView::GetAccessibleState(ui::AXViewState* state) {
   state->name = accessible_name_;
-  state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
-  if (model_.IsDangerous()) {
-    state->state = ui::AccessibilityTypes::STATE_UNAVAILABLE;
-  } else {
-    state->state = ui::AccessibilityTypes::STATE_HASPOPUP;
-  }
+  state->role = ui::AX_ROLE_BUTTON;
+  if (model_.IsDangerous())
+    state->AddStateFlag(ui::AX_STATE_DISABLED);
+  else
+    state->AddStateFlag(ui::AX_STATE_HASPOPUP);
 }
 
 void DownloadItemView::OnThemeChanged() {
@@ -1239,7 +1236,7 @@ void DownloadItemView::SizeLabelToMinWidth() {
     return;
 
   base::string16 label_text = dangerous_download_label_->text();
-  TrimWhitespace(label_text, TRIM_ALL, &label_text);
+  base::TrimWhitespace(label_text, base::TRIM_ALL, &label_text);
   DCHECK_EQ(base::string16::npos, label_text.find('\n'));
 
   // Make the label big so that GetPreferredSize() is not constrained by the
@@ -1325,7 +1322,7 @@ void DownloadItemView::UpdateAccessibleName() {
   // has changed so they can announce it immediately.
   if (new_name != accessible_name_) {
     accessible_name_ = new_name;
-    NotifyAccessibilityEvent(ui::AccessibilityTypes::EVENT_NAME_CHANGED, true);
+    NotifyAccessibilityEvent(ui::AX_EVENT_TEXT_CHANGED, true);
   }
 }
 

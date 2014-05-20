@@ -379,7 +379,7 @@ bool IsPrintThrottlingDisabled() {
 
 }  // namespace
 
-FrameReference::FrameReference(const blink::WebFrame* frame) {
+FrameReference::FrameReference(blink::WebFrame* frame) {
   Reset(frame);
 }
 
@@ -390,18 +390,25 @@ FrameReference::FrameReference() {
 FrameReference::~FrameReference() {
 }
 
-void FrameReference::Reset(const blink::WebFrame* frame) {
+void FrameReference::Reset(blink::WebFrame* frame) {
   if (frame) {
     view_ = frame->view();
-    frame_name_ = frame->uniqueName();
+    frame_ = frame;
   } else {
     view_ = NULL;
-    frame_name_.reset();
+    frame_ = NULL;
   }
 }
 
 blink::WebFrame* FrameReference::GetFrame() {
-  return view_ ? view_->findFrameByName(frame_name_) : NULL;
+  if (view_ == NULL || frame_ == NULL)
+    return NULL;
+  for (blink::WebFrame* frame = view_->mainFrame(); frame != NULL;
+           frame = frame->traverseNext(false)) {
+    if (frame == frame_)
+      return frame;
+  }
+  return NULL;
 }
 
 blink::WebView* FrameReference::view() {
@@ -654,6 +661,7 @@ void PrepareFrameAndViewForPrint::CopySelection(
   blink::WebView* web_view = blink::WebView::create(this);
   owns_web_view_ = true;
   content::ApplyWebPreferences(prefs, web_view);
+
   web_view->setMainFrame(blink::WebFrame::create(this));
   frame_.Reset(web_view->mainFrame());
   node_to_print_.reset();
@@ -809,8 +817,6 @@ bool PrintWebViewHelper::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(PrintMsg_PrintPages, OnPrintPages)
     IPC_MESSAGE_HANDLER(PrintMsg_PrintForSystemDialog, OnPrintForSystemDialog)
     IPC_MESSAGE_HANDLER(PrintMsg_InitiatePrintPreview, OnInitiatePrintPreview)
-    IPC_MESSAGE_HANDLER(PrintMsg_PrintNodeUnderContextMenu,
-                        OnPrintNodeUnderContextMenu)
     IPC_MESSAGE_HANDLER(PrintMsg_PrintPreview, OnPrintPreview)
     IPC_MESSAGE_HANDLER(PrintMsg_PrintForPrintPreview, OnPrintForPrintPreview)
     IPC_MESSAGE_HANDLER(PrintMsg_PrintingDone, OnPrintingDone)
@@ -1155,10 +1161,6 @@ void PrintWebViewHelper::OnPrintingDone(bool success) {
 
 void PrintWebViewHelper::SetScriptedPrintBlocked(bool blocked) {
   is_scripted_printing_blocked_ = blocked;
-}
-
-void PrintWebViewHelper::OnPrintNodeUnderContextMenu() {
-  PrintNode(render_view()->GetContextMenuNode());
 }
 
 void PrintWebViewHelper::OnInitiatePrintPreview(bool selection_only) {

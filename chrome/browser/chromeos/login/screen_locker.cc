@@ -14,6 +14,7 @@
 #include "ash/wm/lock_state_controller.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/wm_event.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
@@ -24,9 +25,13 @@
 #include "base/strings/string_util.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/extensions/screenlock_private_api.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
+#include "chrome/browser/chromeos/login/extended_authenticator.h"
 #include "chrome/browser/chromeos/login/login_performer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/managed/supervised_user_authentication.h"
+#include "chrome/browser/chromeos/login/supervised_user_manager.h"
 #include "chrome/browser/chromeos/login/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/webui_screen_locker.h"
@@ -67,56 +72,46 @@ namespace {
 // unlock happens even if animations are broken.
 const int kUnlockGuardTimeoutMs = 400;
 
-// Observer to start ScreenLocker when the screen lock
-class ScreenLockObserver : public SessionManagerClient::Observer,
+// Observer to start ScreenLocker when locking the screen is requested.
+class ScreenLockObserver : public SessionManagerClient::StubDelegate,
                            public content::NotificationObserver,
                            public UserAddingScreen::Observer {
  public:
   ScreenLockObserver() : session_started_(false) {
     registrar_.Add(this,
-                   chrome::NOTIFICATION_LOGIN_USER_CHANGED,
-                   content::NotificationService::AllSources());
-    registrar_.Add(this,
                    chrome::NOTIFICATION_SESSION_STARTED,
                    content::NotificationService::AllSources());
+    DBusThreadManager::Get()->GetSessionManagerClient()->SetStubDelegate(this);
+  }
+
+  virtual ~ScreenLockObserver() {
+    if (DBusThreadManager::IsInitialized()) {
+      DBusThreadManager::Get()->GetSessionManagerClient()->SetStubDelegate(
+          NULL);
+    }
   }
 
   bool session_started() const { return session_started_; }
+
+  // SessionManagerClient::StubDelegate overrides:
+  virtual void LockScreenForStub() OVERRIDE {
+    ScreenLocker::HandleLockScreenRequest();
+  }
 
   // NotificationObserver overrides:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
-    switch (type) {
-      case chrome::NOTIFICATION_LOGIN_USER_CHANGED: {
-        // Register Screen Lock only after a user has logged in.
-        SessionManagerClient* session_manager =
-            DBusThreadManager::Get()->GetSessionManagerClient();
-        if (!session_manager->HasObserver(this))
-          session_manager->AddObserver(this);
-        break;
-      }
-
-      case chrome::NOTIFICATION_SESSION_STARTED: {
-        session_started_ = true;
-        break;
-      }
-
-      default:
-        NOTREACHED();
-    }
+    if (type == chrome::NOTIFICATION_SESSION_STARTED)
+      session_started_ = true;
+    else
+      NOTREACHED() << "Unexpected notification " << type;
   }
 
-  // TODO(derat): Remove this once the session manager is calling the LockScreen
-  // method instead of emitting a signal.
-  virtual void LockScreen() OVERRIDE {
-    VLOG(1) << "Received LockScreen D-Bus signal from session manager";
-    ScreenLocker::HandleLockScreenRequest();
-  }
-
+  // UserAddingScreen::Observer overrides:
   virtual void OnUserAddingFinished() OVERRIDE {
     UserAddingScreen::Get()->RemoveObserver(this);
-    LockScreen();
+    ScreenLocker::HandleLockScreenRequest();
   }
 
  private:
@@ -126,8 +121,7 @@ class ScreenLockObserver : public SessionManagerClient::Observer,
   DISALLOW_COPY_AND_ASSIGN(ScreenLockObserver);
 };
 
-static base::LazyInstance<ScreenLockObserver> g_screen_lock_observer =
-    LAZY_INSTANCE_INITIALIZER;
+ScreenLockObserver* g_screen_lock_observer = NULL;
 
 }  // namespace
 
@@ -156,14 +150,14 @@ ScreenLocker::ScreenLocker(const UserList& users)
 
   ash::Shell::GetInstance()->
       lock_state_controller()->SetLockScreenDisplayedCallback(
-          base::Bind(base::IgnoreResult(&ash::PlaySystemSound),
+          base::Bind(base::IgnoreResult(&ash::PlaySystemSoundIfSpokenFeedback),
                      static_cast<media::SoundsManager::SoundKey>(
-                         chromeos::SOUND_LOCK),
-                     true /* honor_spoken_feedback */));
+                         chromeos::SOUND_LOCK)));
 }
 
 void ScreenLocker::Init() {
   authenticator_ = LoginUtils::Get()->CreateAuthenticator(this);
+  extended_authenticator_ = new ExtendedAuthenticator(this);
   delegate_.reset(new WebUIScreenLocker(this));
   delegate_->LockScreen();
 
@@ -257,15 +251,65 @@ void ScreenLocker::UnlockOnLoginSuccess() {
 void ScreenLocker::Authenticate(const UserContext& user_context) {
   LOG_ASSERT(IsUserLoggedIn(user_context.username))
       << "Invalid user trying to unlock.";
+
   authentication_start_time_ = base::Time::Now();
   delegate_->SetInputEnabled(false);
   delegate_->OnAuthenticate();
 
+  // Send authentication request to chrome.screenlockPrivate API event router
+  // if the authentication type is not the system password.
+  LoginDisplay::AuthType auth_type = GetAuthType(user_context.username);
+  if (auth_type != LoginDisplay::OFFLINE_PASSWORD) {
+    const User* unlock_user = FindUnlockUser(user_context.username);
+    LOG_ASSERT(unlock_user);
+
+    Profile* profile = UserManager::Get()->GetProfileByUser(unlock_user);
+    extensions::ScreenlockPrivateEventRouter* router =
+        extensions::ScreenlockPrivateEventRouter::GetFactoryInstance()->Get(
+            profile);
+    router->OnAuthAttempted(auth_type, user_context.password);
+    return;
+  }
+
+  // Special case: supervised users. Use special authenticator.
+  if (const User* user = FindUnlockUser(user_context.username)) {
+    if (user->GetType() == User::USER_TYPE_LOCALLY_MANAGED) {
+      UserContext updated_context =
+          UserManager::Get()
+              ->GetSupervisedUserManager()
+              ->GetAuthentication()
+              ->TransformPasswordInContext(user_context);
+      // TODO(antrim) : replace empty closure with explicit method.
+      // http://crbug.com/351268
+      BrowserThread::PostTask(
+          BrowserThread::UI,
+          FROM_HERE,
+          base::Bind(&ExtendedAuthenticator::AuthenticateToCheck,
+                     extended_authenticator_.get(),
+                     updated_context,
+                     base::Closure()));
+      return;
+    }
+  }
+
+  // TODO(antrim) : migrate to new authenticator for all types of users.
+  // http://crbug.com/351268
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&Authenticator::AuthenticateToUnlock,
                  authenticator_.get(),
                  user_context));
+}
+
+const User* ScreenLocker::FindUnlockUser(const std::string& user_id) {
+  const User* unlock_user = NULL;
+  for (UserList::const_iterator it = users_.begin(); it != users_.end(); ++it) {
+    if ((*it)->email() == user_id) {
+      unlock_user = *it;
+      break;
+    }
+  }
+  return unlock_user;
 }
 
 void ScreenLocker::AuthenticateByPassword(const std::string& password) {
@@ -304,10 +348,36 @@ void ScreenLocker::ShowUserPodButton(const std::string& username,
 
   screenlock_icon_provider_->AddIcon(username, icon);
 
-  // Append the current time to the URL so the image will not be cached.
-  std::string icon_url = ScreenlockIconSource::GetIconURLForUser(username)
-       + "?" + base::Int64ToString(base::Time::Now().ToInternalValue());
-  delegate_->ShowUserPodButton(username, icon_url, click_callback);
+  if (!username.empty()) {
+    // Append the current time to the URL so the image will not be cached.
+    std::string icon_url =
+        ScreenlockIconSource::GetIconURLForUser(username) + "?uniq=" +
+        base::Int64ToString(base::Time::Now().ToInternalValue());
+    delegate_->ShowUserPodButton(username, icon_url, click_callback);
+  }
+}
+
+void ScreenLocker::HideUserPodButton(const std::string& username) {
+  if (!locked_)
+    return;
+  screenlock_icon_provider_->RemoveIcon(username);
+  delegate_->HideUserPodButton(username);
+}
+
+void ScreenLocker::SetAuthType(const std::string& username,
+                               LoginDisplay::AuthType auth_type,
+                               const std::string& initial_value) {
+  if (!locked_)
+    return;
+  delegate_->SetAuthType(username, auth_type, initial_value);
+}
+
+LoginDisplay::AuthType ScreenLocker::GetAuthType(const std::string& username)
+    const {
+  // Return default authentication type when not locked.
+  if (!locked_)
+    return LoginDisplay::OFFLINE_PASSWORD;
+  return delegate_->GetAuthType(username);
 }
 
 void ScreenLocker::ShowErrorMessage(int error_msg_id,
@@ -324,21 +394,31 @@ void ScreenLocker::SetLoginStatusConsumer(
 
 // static
 void ScreenLocker::InitClass() {
-  g_screen_lock_observer.Get();
+  DCHECK(!g_screen_lock_observer);
+  g_screen_lock_observer = new ScreenLockObserver;
+}
+
+// static
+void ScreenLocker::ShutDownClass() {
+  DCHECK(g_screen_lock_observer);
+  delete g_screen_lock_observer;
+  g_screen_lock_observer = NULL;
 }
 
 // static
 void ScreenLocker::HandleLockScreenRequest() {
   VLOG(1) << "Received LockScreen request from session manager";
+  DCHECK(g_screen_lock_observer);
   if (UserAddingScreen::Get()->IsRunning()) {
     VLOG(1) << "Waiting for user adding screen to stop";
-    UserAddingScreen::Get()->AddObserver(g_screen_lock_observer.Pointer());
+    UserAddingScreen::Get()->AddObserver(g_screen_lock_observer);
     UserAddingScreen::Get()->Cancel();
     return;
   }
-  if (g_screen_lock_observer.Get().session_started() &&
+  if (g_screen_lock_observer->session_started() &&
       UserManager::Get()->CanCurrentUserLock()) {
     ScreenLocker::Show();
+    ash::Shell::GetInstance()->lock_state_controller()->OnStartingLock();
   } else {
     // If the current user's session cannot be locked or the user has not
     // completed all sign-in steps yet, log out instead. The latter is done to
@@ -372,7 +452,8 @@ void ScreenLocker::Show() {
   if (active_window_state &&
       active_window_state->IsFullscreen() &&
       active_window_state->hide_shelf_when_fullscreen()) {
-    active_window_state->ToggleFullscreen();
+    const ash::wm::WMEvent event(ash::wm::WM_EVENT_TOGGLE_FULLSCREEN);
+    active_window_state->OnWMEvent(&event);
   }
 
   if (!screen_locker_) {
@@ -411,7 +492,7 @@ void ScreenLocker::ScheduleDeletion() {
     return;
   VLOG(1) << "Deleting ScreenLocker " << screen_locker_;
 
-  ash::PlaySystemSound(SOUND_UNLOCK, true /* honor_spoken_feedback */);
+  ash::PlaySystemSoundIfSpokenFeedback(SOUND_UNLOCK);
 
   delete screen_locker_;
   screen_locker_ = NULL;
@@ -440,6 +521,7 @@ ScreenLocker::~ScreenLocker() {
       content::Source<ScreenLocker>(this),
       content::Details<bool>(&state));
   VLOG(1) << "Calling session manager's HandleLockScreenDismissed D-Bus method";
+
   DBusThreadManager::Get()->GetSessionManagerClient()->
       NotifyLockScreenDismissed();
 }

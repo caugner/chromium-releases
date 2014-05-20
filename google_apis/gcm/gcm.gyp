@@ -31,7 +31,7 @@
       'dependencies': [
         '../../base/base.gyp:base',
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-        '../../components/components.gyp:encryptor',
+        '../../components/components.gyp:os_crypt',
         '../../net/net.gyp:net',
         '../../third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
         '../../third_party/protobuf/protobuf.gyp:protobuf_lite',
@@ -62,6 +62,8 @@
         'engine/heartbeat_manager.h',
         'engine/mcs_client.cc',
         'engine/mcs_client.h',
+        'engine/registration_info.cc',
+        'engine/registration_info.h',
         'engine/registration_request.cc',
         'engine/registration_request.h',
         'engine/unregistration_request.cc',
@@ -113,7 +115,7 @@
       'dependencies': [
         '../../base/base.gyp:run_all_unittests',
         '../../base/base.gyp:base',
-        '../../components/components.gyp:encryptor',
+        '../../components/components.gyp:os_crypt',
         '../../net/net.gyp:net',
         '../../net/net.gyp:net_test_support',
         '../../testing/gtest.gyp:gtest',

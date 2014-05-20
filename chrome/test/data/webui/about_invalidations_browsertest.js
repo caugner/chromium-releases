@@ -17,7 +17,7 @@ InvalidationsWebUITest.prototype = {
    **/
   browsePreload: 'chrome://invalidations',
   runAccessibilityChecks: false,
-  accessibilityIssuesAreErrors: false,
+  accessibilityIssuesAreErrors: false
 };
 
 // Test that registering an invalidations appears properly on the textarea.
@@ -45,18 +45,76 @@ TEST_F('InvalidationsWebUITest', 'testChangingInvalidationsState', function() {
   var newState = 'INVALIDATIONS_ENABLED';
   var newNewState = 'TRANSIENT_INVALIDATION_ERROR';
 
-  chrome.invalidations.updateState(newState);
+  chrome.invalidations.updateInvalidatorState(newState);
   expectEquals(invalidationsState.textContent,
     'INVALIDATIONS_ENABLED',
     'could not change the invalidations text');
   invalidationsLog.value = '';
-  chrome.invalidations.updateState(newNewState);
+  chrome.invalidations.updateInvalidatorState(newNewState);
   expectEquals(invalidationsState.textContent,
     'TRANSIENT_INVALIDATION_ERROR');
   var isContained =
     invalidationsLog.value.indexOf(
-      'Invalidations service state changed to '+
+      'Invalidations service state changed to ' +
       '"TRANSIENT_INVALIDATION_ERROR"') != -1;
   expectTrue(isContained, 'Actual log is:' + invalidationsLog.value);
 });
 
+// Test that objects ids appear on the table.
+TEST_F('InvalidationsWebUITest', 'testRegisteringNewIds', function() {
+  var newDataType = [
+    { name: 'EXTENSIONS', source: 1004},
+    { name: 'FAVICON_IMAGE', source: 1004}
+    ];
+  var pattern1 = ['Fake', '1004', 'EXTENSIONS', '0', '', '', ''];
+  var pattern2 = ['Fake', '1004', 'FAVICON_IMAGE', '0', '', '', ''];
+  // Register two objects ID with 'Fake' registrar
+  chrome.invalidations.updateIds('Fake', newDataType);
+  // Disable the Extensions ObjectId by only sending FAVICON_IMAGE
+  newDataType = [{ name: 'FAVICON_IMAGE', source: 1004}];
+  chrome.invalidations.updateIds('Fake', newDataType);
+
+  // Test that the two patterns are contained in the table.
+  var oidTable = $('objectsid-table-container');
+  var foundPattern1 = false;
+  var foundPattern2 = false;
+  for (var row = 0; row < oidTable.rows.length; row++) {
+    var pattern1Test = true;
+    var pattern2Test = true;
+    for (var cell = 0; cell < oidTable.rows[row].cells.length; cell++) {
+      pattern1Test = pattern1Test
+          && (pattern1[cell] == oidTable.rows[row].cells[cell].textContent);
+      pattern2Test = pattern2Test
+          && (pattern2[cell] == oidTable.rows[row].cells[cell].textContent);
+    }
+    if (pattern1Test)
+      expectEquals('greyed', oidTable.rows[row].className);
+    if (pattern2Test)
+      expectEquals('content', oidTable.rows[row].className);
+
+    foundPattern1 = foundPattern1 || pattern1Test;
+    foundPattern2 = foundPattern2 || pattern2Test;
+    if (foundPattern2)
+      expectTrue(foundPattern1, 'The entries were not ordererd');
+  }
+  expectTrue(foundPattern1 && foundPattern2, "couldn't find both objects ids");
+});
+
+// Test that registering new handlers appear on the website.
+TEST_F('InvalidationsWebUITest', 'testUpdatingRegisteredHandlers', function() {
+  function text() { return $('registered-handlers').textContent; }
+  chrome.invalidations.updateHandlers(['FakeApi', 'FakeClient']);
+  expectNotEquals(text().indexOf('FakeApi'), -1);
+  expectNotEquals(text().indexOf('FakeClient'), -1);
+
+  chrome.invalidations.updateHandlers(['FakeClient']);
+  expectEquals(text().indexOf('FakeApi'), -1);
+  expectNotEquals(text().indexOf('FakeClient'), -1);
+});
+
+// Test that an object showing internal state is correctly displayed.
+TEST_F('InvalidationsWebUITest', 'testUpdatingInternalDisplay', function() {
+  var newDetailedStatus = {MessagesSent: 1};
+  chrome.invalidations.updateDetailedStatus(newDetailedStatus);
+  expectEquals( $('internal-display').value, '{\n  \"MessagesSent\": 1\n}');
+});

@@ -12,8 +12,8 @@
 #include "chromeos/dbus/mock_shill_manager_client.h"
 #include "chromeos/dbus/mock_shill_profile_client.h"
 #include "chromeos/dbus/mock_shill_service_client.h"
-#include "chromeos/dbus/shill_stub_helper.h"
 #include "chromeos/network/network_configuration_handler.h"
+#include "chromeos/network/network_profile_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_state_handler_observer.h"
@@ -346,9 +346,12 @@ TEST_F(NetworkConfigurationHandlerTest, ClearPropertiesError) {
 TEST_F(NetworkConfigurationHandlerTest, CreateConfiguration) {
   std::string networkName = "MyNetwork";
   std::string key = "SSID";
+  std::string type = "wifi";
   std::string profile = "profile path";
   base::DictionaryValue value;
   shill_property_util::SetSSID(networkName, &value);
+  value.SetWithoutPathExpansion(shill::kTypeProperty,
+                                base::Value::CreateStringValue(type));
   value.SetWithoutPathExpansion(shill::kProfileProperty,
                                 base::Value::CreateStringValue(profile));
 
@@ -600,7 +603,7 @@ TEST_F(NetworkConfigurationHandlerStubTest, StubCreateConfiguration) {
   properties.SetStringWithoutPathExpansion(
       shill::kStateProperty, shill::kStateIdle);
   properties.SetStringWithoutPathExpansion(
-      shill::kProfileProperty, shill_stub_helper::kSharedProfilePath);
+      shill::kProfileProperty, NetworkProfileHandler::GetSharedProfilePath());
 
   network_configuration_handler_->CreateConfiguration(
       properties,
@@ -620,7 +623,7 @@ TEST_F(NetworkConfigurationHandlerStubTest, StubCreateConfiguration) {
   std::string actual_profile;
   EXPECT_TRUE(GetServiceStringProperty(
       create_service_path_, shill::kProfileProperty, &actual_profile));
-  EXPECT_EQ(shill_stub_helper::kSharedProfilePath, actual_profile);
+  EXPECT_EQ(NetworkProfileHandler::GetSharedProfilePath(), actual_profile);
 }
 
 }  // namespace chromeos

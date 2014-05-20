@@ -57,21 +57,23 @@ class ChromotingJniInstance
   // Provides the user's PIN and resumes the host authentication attempt. Call
   // on the UI thread once the user has finished entering this PIN into the UI,
   // but only after the UI has been asked to provide a PIN (via FetchSecret()).
-  void ProvideSecret(const std::string& pin, bool create_pair);
+  void ProvideSecret(const std::string& pin, bool create_pair,
+                     const std::string& device_name);
 
   // Schedules a redraw on the display thread. May be called from any thread.
   void RedrawDesktop();
 
   // Moves the host's cursor to the specified coordinates, optionally with some
   // mouse button depressed. If |button| is BUTTON_UNDEFINED, no click is made.
-  void PerformMouseAction(int x, int y,
-                          protocol::MouseEvent_MouseButton button,
-                          bool button_down);
-
-  void PerformMouseWheelDeltaAction(int delta_x, int delta_y);
+  void SendMouseEvent(int x, int y,
+                      protocol::MouseEvent_MouseButton button,
+                      bool button_down);
+  void SendMouseWheelEvent(int delta_x, int delta_y);
 
   // Sends the provided keyboard scan code to the host.
-  void PerformKeyboardAction(int key_code, bool key_down);
+  void SendKeyEvent(int key_code, bool key_down);
+
+  void SendTextEvent(const std::string& text);
 
   // Records paint time for statistics logging, if enabled. May be called from
   // any thread.
@@ -115,6 +117,9 @@ class ChromotingJniInstance
   void FetchSecret(bool pairable,
                    const protocol::SecretFetchedCallback& callback);
 
+  // Sets the device name. Can be called on any thread.
+  void SetDeviceName(const std::string& device_name);
+
   // Enables or disables periodic logging of performance statistics. Called on
   // the network thread.
   void EnableStatsLogging(bool enabled);
@@ -153,6 +158,10 @@ class ChromotingJniInstance
   // network thread. (This is safe because ProvideSecret() is invoked at most
   // once per run, and always before any reference to this flag.)
   bool create_pairing_;
+
+  // The device name to appear in the paired-clients list. Accessed on the
+  // network thread.
+  std::string device_name_;
 
   // If this is true, performance statistics will be periodically written to
   // the Android log. Used on the network thread.

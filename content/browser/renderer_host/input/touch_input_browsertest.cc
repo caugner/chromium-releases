@@ -13,9 +13,9 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/content_browser_test.h"
+#include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
-#include "content/test/content_browser_test.h"
-#include "content/test/content_browser_test_utils.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/events/event_switches.h"
 #include "ui/events/latency_info.h"
@@ -82,7 +82,8 @@ namespace content {
 class InputEventMessageFilter : public BrowserMessageFilter {
  public:
   InputEventMessageFilter()
-      : type_(WebInputEvent::Undefined),
+      : BrowserMessageFilter(InputMsgStart),
+        type_(WebInputEvent::Undefined),
         state_(INPUT_EVENT_ACK_STATE_UNKNOWN) {}
 
   void WaitForAck(WebInputEvent::Type type) {
@@ -168,10 +169,8 @@ class TouchInputBrowserTest : public ContentBrowserTest,
   scoped_refptr<InputEventMessageFilter> filter_;
 };
 
-// Touch input event tests don't work on Mac with the legacy software renderer.
-// These can be enabled when software compositing is enabled.
-// http://crbug.com/268038
 #if defined(OS_MACOSX)
+// TODO(ccameron): Failing on mac: crbug.com/346363
 #define MAYBE_TouchNoHandler DISABLED_TouchNoHandler
 #else
 #define MAYBE_TouchNoHandler TouchNoHandler
@@ -202,15 +201,7 @@ IN_PROC_BROWSER_TEST_P(TouchInputBrowserTest, MAYBE_TouchNoHandler) {
   touch.ResetPoints();
 }
 
-// Touch input event tests don't work on Mac with the legacy software renderer.
-// These can be enabled when software compositing is enabled.
-// http://crbug.com/268038
-#if defined(OS_MACOSX)
-#define MAYBE_TouchHandlerNoConsume DISABLED_TouchHandlerNoConsume
-#else
-#define MAYBE_TouchHandlerNoConsume TouchHandlerNoConsume
-#endif
-IN_PROC_BROWSER_TEST_P(TouchInputBrowserTest, MAYBE_TouchHandlerNoConsume) {
+IN_PROC_BROWSER_TEST_P(TouchInputBrowserTest, TouchHandlerNoConsume) {
   LoadURLAndAddFilter();
   SyntheticWebTouchEvent touch;
 
@@ -227,15 +218,7 @@ IN_PROC_BROWSER_TEST_P(TouchInputBrowserTest, MAYBE_TouchHandlerNoConsume) {
   touch.ResetPoints();
 }
 
-// Touch input event tests don't work on Mac with the legacy software renderer.
-// These can be enabled when software compositing is enabled.
-// http://crbug.com/268038
-#if defined(OS_MACOSX)
-#define MAYBE_TouchHandlerConsume DISABLED_TouchHandlerConsume
-#else
-#define MAYBE_TouchHandlerConsume TouchHandlerConsume
-#endif
-IN_PROC_BROWSER_TEST_P(TouchInputBrowserTest, MAYBE_TouchHandlerConsume) {
+IN_PROC_BROWSER_TEST_P(TouchInputBrowserTest, TouchHandlerConsume) {
   LoadURLAndAddFilter();
   SyntheticWebTouchEvent touch;
 
@@ -251,10 +234,8 @@ IN_PROC_BROWSER_TEST_P(TouchInputBrowserTest, MAYBE_TouchHandlerConsume) {
   filter()->WaitForAck(WebInputEvent::TouchEnd);
 }
 
-// Touch input event tests don't work on Mac with the legacy software renderer.
-// These can be enabled when software compositing is enabled.
-// http://crbug.com/268038
 #if defined(OS_MACOSX)
+// TODO(ccameron): Failing on mac: crbug.com/346363
 #define MAYBE_MultiPointTouchPress DISABLED_MultiPointTouchPress
 #else
 #define MAYBE_MultiPointTouchPress MultiPointTouchPress
@@ -283,10 +264,13 @@ IN_PROC_BROWSER_TEST_P(TouchInputBrowserTest, MAYBE_MultiPointTouchPress) {
   EXPECT_EQ(INPUT_EVENT_ACK_STATE_CONSUMED, filter()->last_ack_state());
 }
 
+// Threaded compositing is always enabled on Aura and Mac.
+#if !defined(USE_AURA) && !defined(OS_MACOSX)
 INSTANTIATE_TEST_CASE_P(WithoutInputHandlerProxy, TouchInputBrowserTest,
     ::testing::Values(std::string(switches::kDisableThreadedCompositing)));
+#endif
 
-#if !defined(OS_MACOSX)
+#if defined(USE_AURA) || defined(OS_MACOSX)
 INSTANTIATE_TEST_CASE_P(WithInputHandlerProxy, TouchInputBrowserTest,
     ::testing::Values(std::string(switches::kEnableThreadedCompositing)));
 #endif

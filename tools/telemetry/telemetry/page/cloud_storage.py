@@ -17,6 +17,7 @@ from telemetry.core import util
 
 
 PUBLIC_BUCKET = 'chromium-telemetry'
+PARTNER_BUCKET = 'chrome-partner-telemetry'
 INTERNAL_BUCKET = 'chrome-telemetry'
 
 
@@ -100,6 +101,7 @@ def SupportsProdaccess(gsutil_path):
 
 def _RunCommand(args):
   gsutil_path = FindGsutil()
+
   gsutil = subprocess.Popen([sys.executable, gsutil_path] + args,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
   stdout, stderr = gsutil.communicate()
@@ -176,15 +178,14 @@ def GetIfChanged(file_path, bucket=None):
   if not os.path.exists(hash_path):
     return False
 
-  with open(hash_path, 'rb') as f:
-    expected_hash = f.read(1024).rstrip()
-  if os.path.exists(file_path) and GetHash(file_path) == expected_hash:
+  expected_hash = ReadHash(hash_path)
+  if os.path.exists(file_path) and CalculateHash(file_path) == expected_hash:
     return False
 
   if bucket:
     buckets = [bucket]
   else:
-    buckets = [PUBLIC_BUCKET, INTERNAL_BUCKET]
+    buckets = [PUBLIC_BUCKET, PARTNER_BUCKET, INTERNAL_BUCKET]
 
   found = False
   for bucket in buckets:
@@ -201,7 +202,7 @@ def GetIfChanged(file_path, bucket=None):
   return found
 
 
-def GetHash(file_path):
+def CalculateHash(file_path):
   """Calculates and returns the hash of the file at file_path."""
   sha1 = hashlib.sha1()
   with open(file_path, 'rb') as f:
@@ -212,3 +213,8 @@ def GetHash(file_path):
         break
       sha1.update(chunk)
   return sha1.hexdigest()
+
+
+def ReadHash(hash_path):
+  with open(hash_path, 'rb') as f:
+    return f.read(1024).rstrip()

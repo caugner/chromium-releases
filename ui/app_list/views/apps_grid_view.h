@@ -69,12 +69,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
 
   // Constructs the app icon grid view. |delegate| is the delegate of this
   // view, which usually is the hosting AppListView. |pagination_model| is
-  // the paging info shared within the launcher UI. |start_page_contents| is
-  // the contents for the launcher start page. It could be NULL if the start
-  // page is not available.
+  // the paging info shared within the launcher UI.
   AppsGridView(AppsGridViewDelegate* delegate,
-               PaginationModel* pagination_model,
-               content::WebContents* start_page_contents);
+               PaginationModel* pagination_model);
   virtual ~AppsGridView();
 
   // Sets fixed layout parameters. After setting this, CalculateLayout below
@@ -104,9 +101,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
                     Pointer pointer,
                     const ui::LocatedEvent& event);
 
-  // Called from AppListItemView when it receives a drag event.
-  void UpdateDragFromItem(Pointer pointer,
-                          const ui::LocatedEvent& event);
+  // Called from AppListItemView when it receives a drag event. Returns true
+  // if the drag is still happening.
+  bool UpdateDragFromItem(Pointer pointer, const ui::LocatedEvent& event);
 
   // Called when the user is dragging an app. |point| is in grid view
   // coordinates.
@@ -322,9 +319,11 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // to anther folder target.
   void ReparentItemToAnotherFolder(views::View* item_view, const Index& target);
 
-  // Updates both data model and view_model_ for removing last item from
-  // |source_folder| which is the parent folder of the re-parenting item.
-  void RemoveLastItemFromReparentItemFolder(AppListFolderItem* source_folder);
+  // If there is only 1 item left in the source folder after reparenting an item
+  // from it, updates both data model and view_model_ for removing last item
+  // from the source folder and removes the source folder.
+  void RemoveLastItemFromReparentItemFolderIfNecessary(
+      const std::string& source_folder_id);
 
   // If user does not drop the re-parenting folder item to any valid target,
   // cancel the re-parenting action, let the item go back to its original
@@ -334,12 +333,12 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // Cancels any context menus showing for app items on the current page.
   void CancelContextMenusOnCurrentPage();
 
+  // Removes the AppListItemView at |index| in |view_model_| and deletes it.
+  void DeleteItemViewAtIndex(int index);
+
   // Returns true if |point| lies within the bounds of this grid view plus a
   // buffer area surrounding it.
   bool IsPointWithinDragBuffer(const gfx::Point& point) const;
-
-  // Handles start page layout and transition animation.
-  void LayoutStartPage();
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
@@ -395,6 +394,10 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // Gets the bounds of the tile located at |row| and |col| on current page.
   gfx::Rect GetTileBounds(int row, int col) const;
 
+  // Returns true if the slot of |index| is the first empty slot next to the
+  // last item on the last page.
+  bool IsFirstEmptySlot(const Index& index) const;
+
   // Gets the item view located at |slot| on the current page. If there is
   // no item located at |slot|, returns NULL.
   views::View* GetViewAtSlotOnCurrentPage(int slot);
@@ -431,12 +434,14 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   gfx::Rect GetTargetIconRectInFolder(AppListItemView* drag_item_view,
       AppListItemView* folder_item_view);
 
+  // Returns true if the grid view is under an OEM folder.
+  bool IsUnderOEMFolder();
+
   AppListModel* model_;  // Owned by AppListView.
   AppListItemList* item_list_;  // Not owned.
   AppsGridViewDelegate* delegate_;
   PaginationModel* pagination_model_;  // Owned by AppListController.
   PageSwitcher* page_switcher_view_;  // Owned by views hierarchy.
-  views::WebView* start_page_view_;  // Owned by views hierarchy.
 
   gfx::Size icon_size_;
   int cols_;
@@ -451,6 +456,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   views::View* selected_view_;
 
   AppListItemView* drag_view_;
+
+  // The index of the drag_view_ when the drag starts.
+  Index drag_view_init_index_;
 
   // The point where the drag started in AppListItemView coordinates.
   gfx::Point drag_view_offset_;

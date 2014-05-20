@@ -118,7 +118,7 @@ MediaGalleriesScanResultDialogCocoa::MediaGalleriesScanResultDialogCocoa(
   [alert_ setInformativeText:
       base::SysUTF16ToNSString(controller_->GetSubtext())];
   [alert_ addButtonWithTitle:
-      l10n_util::GetNSString(IDS_MEDIA_GALLERIES_DIALOG_CONFIRM)
+      l10n_util::GetNSString(IDS_MEDIA_GALLERIES_SCAN_RESULT_DIALOG_CONFIRM)
                keyEquivalent:kKeyEquivalentReturn
                       target:cocoa_controller_
                       action:@selector(onAcceptButton:)];
@@ -149,8 +149,9 @@ void MediaGalleriesScanResultDialogCocoa::InitDialogControls() {
   main_container_.reset([[NSBox alloc] init]);
   [main_container_ setBoxType:NSBoxCustom];
   [main_container_ setBorderType:NSLineBorder];
-  [main_container_ setBorderWidth:0];
+  [main_container_ setBorderWidth:1];
   [main_container_ setCornerRadius:0];
+  [main_container_ setContentViewMargins:NSZeroSize];
   [main_container_ setTitlePosition:NSNoTitle];
   [main_container_ setBorderColor:[NSColor colorWithCalibratedRed:kDetailGray
                                                             green:kDetailGray
@@ -171,7 +172,7 @@ void MediaGalleriesScanResultDialogCocoa::InitDialogControls() {
   checkboxes_.reset([[NSMutableArray alloc] init]);
   [scroll_view setDocumentView:checkbox_container_];
 
-  CGFloat y_pos = kCheckboxMargin;
+  CGFloat y_pos = 0;
 
   y_pos = CreateCheckboxes(y_pos, controller_->GetGalleryList());
 
@@ -184,11 +185,14 @@ void MediaGalleriesScanResultDialogCocoa::InitDialogControls() {
     [scroll_view setFrame:scroll_frame];
   }
 
-  [main_container_ setFrame:NSMakeRect(
-      0, 0, kCheckboxMaxWidth, NSHeight(scroll_frame))];
+  [main_container_ setFrameFromContentFrame:scroll_frame];
   [alert_ setAccessoryView:main_container_];
 
   [alert_ layout];
+}
+
+void MediaGalleriesScanResultDialogCocoa::AcceptDialogForTesting() {
+  OnAcceptClicked();
 }
 
 CGFloat MediaGalleriesScanResultDialogCocoa::CreateCheckboxes(
@@ -307,7 +311,7 @@ void MediaGalleriesScanResultDialogCocoa::UpdateScanResultCheckbox(
   [details sizeToFit];
   NSRect details_rect = [details bounds];
 
-  // Size the views. If all the elements don't natually fit, the checkbox
+  // Size the views. If all the elements don't naturally fit, the checkbox
   // should get squished and will elide in the middle.  However, it shouldn't
   // squish too much so it gets at least half of the max width and the details
   // text should elide as well in that case.

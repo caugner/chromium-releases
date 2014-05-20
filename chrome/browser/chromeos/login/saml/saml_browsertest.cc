@@ -29,7 +29,6 @@
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -246,17 +245,7 @@ class SamlTest : public InProcessBrowserTest {
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
-    FakeGaia::MergeSessionParams params;
-    params.auth_sid_cookie = kTestAuthSIDCookie;
-    params.auth_lsid_cookie = kTestAuthLSIDCookie;
-    params.auth_code = kTestAuthCode;
-    params.refresh_token = kTestRefreshToken;
-    params.access_token = kTestAuthLoginAccessToken;
-    params.gaia_uber_token = kTestGaiaUberToken;
-    params.session_sid_cookie = kTestSessionSIDCookie;
-    params.session_lsid_cookie = kTestSessionLSIDCookie;
-    params.email = kFirstSAMLUserEmail;
-    fake_gaia_.SetMergeSessionParams(params);
+    SetMergeSessionParams(kFirstSAMLUserEmail);
 
     embedded_test_server()->RegisterRequestHandler(
         base::Bind(&FakeGaia::HandleRequest, base::Unretained(&fake_gaia_)));
@@ -278,6 +267,20 @@ class SamlTest : public InProcessBrowserTest {
                                              base::Bind(&chrome::AttemptExit));
       content::RunMessageLoop();
     }
+  }
+
+  void SetMergeSessionParams(const std::string& email) {
+    FakeGaia::MergeSessionParams params;
+    params.auth_sid_cookie = kTestAuthSIDCookie;
+    params.auth_lsid_cookie = kTestAuthLSIDCookie;
+    params.auth_code = kTestAuthCode;
+    params.refresh_token = kTestRefreshToken;
+    params.access_token = kTestAuthLoginAccessToken;
+    params.gaia_uber_token = kTestGaiaUberToken;
+    params.session_sid_cookie = kTestSessionSIDCookie;
+    params.session_lsid_cookie = kTestSessionLSIDCookie;
+    params.email = email;
+    fake_gaia_.SetMergeSessionParams(params);
   }
 
   WebUILoginDisplay* GetLoginDisplay() {
@@ -352,16 +355,15 @@ class SamlTest : public InProcessBrowserTest {
   }
 
   content::WebUI* GetLoginUI() {
-    return static_cast<chromeos::LoginDisplayHostImpl*>(
-        chromeos::LoginDisplayHostImpl::default_host())->GetOobeUI()->web_ui();
+    return static_cast<LoginDisplayHostImpl*>(
+        LoginDisplayHostImpl::default_host())->GetOobeUI()->web_ui();
   }
 
-  // Executes Js code in the auth iframe hosted by gaia_auth extension.
+  // Executes JavaScript code in the auth iframe hosted by gaia_auth extension.
   void ExecuteJsInSigninFrame(const std::string& js) {
-    ASSERT_TRUE(content::ExecuteScriptInFrame(
-        GetLoginUI()->GetWebContents(),
-        "//iframe[@id='signin-frame']\n//iframe",
-        js));
+    content::RenderFrameHost* frame =
+        LoginDisplayHostImpl::GetGaiaAuthIframe(GetLoginUI()->GetWebContents());
+    ASSERT_TRUE(content::ExecuteScript(frame, js));
   }
 
   FakeSamlIdp* fake_saml_idp() { return &fake_saml_idp_; }
@@ -504,6 +506,20 @@ IN_PROC_BROWSER_TEST_F(SamlTest, UseAutenticatedUserEmailAddress) {
   const User* user = UserManager::Get()->GetActiveUser();
   ASSERT_TRUE(user);
   EXPECT_EQ(kFirstSAMLUserEmail, user->email());
+}
+
+// Verifies that if the authenticated user's e-mail address cannot be retrieved,
+// an error message is shown.
+IN_PROC_BROWSER_TEST_F(SamlTest, FailToRetrieveAutenticatedUserEmailAddress) {
+  fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
+  StartSamlAndWaitForIdpPageLoad(kFirstSAMLUserEmail);
+
+  SetMergeSessionParams("");
+  SetSignFormField("Email", "fake_user");
+  SetSignFormField("Password", "fake_password");
+  ExecuteJsInSigninFrame("document.getElementById('Submit').click();");
+
+  OobeScreenWaiter(OobeDisplay::SCREEN_FATAL_ERROR).Wait();
 }
 
 // Tests the password confirm flow: show error on the first failure and

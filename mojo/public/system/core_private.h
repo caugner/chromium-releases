@@ -5,7 +5,7 @@
 #ifndef MOJO_PUBLIC_SYSTEM_CORE_PRIVATE_H_
 #define MOJO_PUBLIC_SYSTEM_CORE_PRIVATE_H_
 
-#include "mojo/public/system/core.h"
+#include "mojo/public/c/system/core.h"
 
 namespace mojo {
 
@@ -68,7 +68,7 @@ class MOJO_SYSTEM_EXPORT Core {
                                  uint32_t num_elements_read) = 0;
   virtual MojoResult CreateSharedBuffer(
       const MojoCreateSharedBufferOptions* options,
-      uint64_t* num_bytes,
+      uint64_t num_bytes,
       MojoHandle* shared_buffer_handle) = 0;
   virtual MojoResult DuplicateBufferHandle(
       MojoHandle buffer_handle,

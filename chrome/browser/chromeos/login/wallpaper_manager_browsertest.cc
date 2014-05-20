@@ -53,7 +53,8 @@ const char kTestUser2Hash[] = "test2@domain.com-hash";
 }  // namespace
 
 class WallpaperManagerBrowserTest : public InProcessBrowserTest,
-                                    public DesktopBackgroundControllerObserver {
+                                    public DesktopBackgroundControllerObserver,
+                                    public testing::WithParamInterface<bool> {
  public:
   WallpaperManagerBrowserTest () : controller_(NULL),
                                    local_state_(NULL) {
@@ -71,6 +72,8 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest,
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(switches::kLoginManager);
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
+    if (GetParam())
+      command_line->AppendSwitch(::switches::kMultiProfiles);
   }
 
   virtual void CleanUpOnMainThread() OVERRIDE {
@@ -78,9 +81,8 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest,
     controller_ = NULL;
   }
 
-  // Update the display configuration as given in |display_specs|.
-  // See ash::test::DisplayManagerTestApi::UpdateDisplay for more
-  // details.
+  // Update the display configuration as given in |display_specs|.  See
+  // ash::test::DisplayManagerTestApi::UpdateDisplay for more details.
   void UpdateDisplay(const std::string& display_specs) {
     ash::test::DisplayManagerTestApi display_manager_test_api(
         ash::Shell::GetInstance()->display_manager());
@@ -130,7 +132,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest,
     scoped_refptr<base::RefCountedStaticMemory> image_data(
         ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
             resource_id, ui::SCALE_FACTOR_100P));
-    int written = file_util::WriteFile(
+    int written = base::WriteFile(
         wallpaper_path,
         reinterpret_cast<const char*>(image_data->front()),
         image_data->size());
@@ -150,7 +152,7 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest,
 
 // Tests that the appropriate custom wallpaper (large vs. small) is loaded
 // depending on the desktop resolution.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTest,
                        LoadCustomLargeWallpaperForLargeExternalScreen) {
   WallpaperManager* wallpaper_manager = WallpaperManager::Get();
   LogIn(kTestUser1, kTestUser1Hash);
@@ -226,7 +228,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
 // If chrome tries to reload the same wallpaper twice, the latter request should
 // be prevented. Otherwise, there are some strange animation issues as
 // described in crbug.com/158383.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTest,
                        PreventReloadingSameWallpaper) {
   WallpaperManager* wallpaper_manager = WallpaperManager::Get();
   // New user log in, a default wallpaper is loaded.
@@ -242,7 +244,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
   wallpaper_manager->SetUserWallpaperNow(kTestUser1);
   WaitAsyncWallpaperLoadFinished();
   EXPECT_EQ(1, LoadedWallpapers());
-  wallpaper_manager->ClearWallpaperCache();
+  wallpaper_manager->ClearDisposableWallpaperCache();
 
   // Change wallpaper to a custom wallpaper.
   std::string id = base::Int64ToString(base::Time::Now().ToInternalValue());
@@ -280,7 +282,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
 // lagacy wallpapers should migrate to new wallpaper picker version seamlessly.
 // This tests make sure we compatible with migrated old wallpapers.
 // crosbug.com/38429
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTest,
                        PRE_UseMigratedWallpaperInfo) {
   // New user log in, a default wallpaper is loaded.
   LogIn(kTestUser1, kTestUser1Hash);
@@ -300,7 +302,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
   WallpaperManager::Get()->SetUserWallpaperInfo(kTestUser1, info, true);
 }
 
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTest,
                        UseMigratedWallpaperInfo) {
   LogIn(kTestUser1, kTestUser1Hash);
   WaitAsyncWallpaperLoadFinished();
@@ -311,7 +313,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
 
 // Some users have old user profiles which may never get a chance to migrate.
 // This tests make sure we compatible with these profiles.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTest,
                        PRE_UsePreMigrationWallpaperInfo) {
   // New user log in, a default wallpaper is loaded.
   LogIn(kTestUser1, kTestUser1Hash);
@@ -321,7 +323,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
   WallpaperManager::Get()->RemoveUserWallpaperInfo(kTestUser1);
 }
 
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTest,
                        UsePreMigrationWallpaperInfo) {
   LogIn(kTestUser1, kTestUser1Hash);
   WaitAsyncWallpaperLoadFinished();
@@ -331,7 +333,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
 
 // Test for http://crbug.com/265689. When hooked up a large external monitor,
 // the default large resolution wallpaper should load.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTest,
                        HotPlugInScreenAtGAIALoginScreen) {
   UpdateDisplay("800x600");
   // Set initial wallpaper to the default wallpaper.
@@ -357,7 +359,7 @@ class WallpaperManagerBrowserTestNoAnimation
 
 // Same test as WallpaperManagerBrowserTest.UseMigratedWallpaperInfo. But
 // disabled boot and login animation.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTestNoAnimation,
                        PRE_UseMigratedWallpaperInfo) {
   // New user log in, a default wallpaper is loaded.
   LogIn(kTestUser1, kTestUser1Hash);
@@ -377,7 +379,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
   WallpaperManager::Get()->SetUserWallpaperInfo(kTestUser1, info, true);
 }
 
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTestNoAnimation,
                        UseMigratedWallpaperInfo) {
   LogIn(kTestUser1, kTestUser1Hash);
   WaitAsyncWallpaperLoadFinished();
@@ -388,7 +390,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
 
 // Same test as WallpaperManagerBrowserTest.UsePreMigrationWallpaperInfo. But
 // disabled boot and login animation.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTestNoAnimation,
                        PRE_UsePreMigrationWallpaperInfo) {
   // New user log in, a default wallpaper is loaded.
   LogIn(kTestUser1, kTestUser1Hash);
@@ -399,7 +401,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
   WallpaperManager::Get()->RemoveUserWallpaperInfo(kTestUser1);
 }
 
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTestNoAnimation,
                        UsePreMigrationWallpaperInfo) {
   LogIn(kTestUser1, kTestUser1Hash);
   WaitAsyncWallpaperLoadFinished();
@@ -420,7 +422,7 @@ class WallpaperManagerBrowserTestCrashRestore
   }
 };
 
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCrashRestore,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTestCrashRestore,
                        PRE_RestoreWallpaper) {
   LogIn(kTestUser1, kTestUser1Hash);
   WaitAsyncWallpaperLoadFinished();
@@ -428,7 +430,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCrashRestore,
 
 // Test for crbug.com/270278. It simulates a browser crash and verifies if user
 // wallpaper is loaded.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCrashRestore,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTestCrashRestore,
                        RestoreWallpaper) {
   EXPECT_EQ(1, LoadedWallpapers());
 }
@@ -454,7 +456,7 @@ class WallpaperManagerBrowserTestCacheUpdate
 };
 
 // Sets kTestUser1's wallpaper to a custom wallpaper.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCacheUpdate,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTestCacheUpdate,
                        PRE_VerifyWallpaperCache) {
   // Add kTestUser1 to user list. kTestUser1 is the default login profile.
   LogIn(kTestUser1, kTestUser1Hash);
@@ -498,13 +500,13 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCacheUpdate,
 // Tests for crbug.com/339576. Wallpaper cache should be updated in
 // multi-profile mode when user:
 // 1. chooses an online wallpaper from wallpaper
-//    picker(calls SetWallpaperFromImageSkia);
+//    picker (calls SetWallpaperFromImageSkia);
 // 2. chooses a custom wallpaper from wallpaper
-//    picker(calls SetCustomWallpaper);
+//    picker (calls SetCustomWallpaper);
 // 3. reverts to a default wallpaper.
 // Also, when user login at multi-profile mode, previous logged in users'
 // wallpaper cache should not be deleted.
-IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCacheUpdate,
+IN_PROC_BROWSER_TEST_P(WallpaperManagerBrowserTestCacheUpdate,
                        VerifyWallpaperCache) {
   WaitAsyncWallpaperLoadFinished();
   WallpaperManager* wallpaper_manager = WallpaperManager::Get();
@@ -551,5 +553,21 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCacheUpdate,
   // SetDefaultWallpaper should invalidate the user's wallpaper cache.
   EXPECT_FALSE(test_api->GetWallpaperFromCache(kTestUser1, &cached_wallpaper));
 }
+
+INSTANTIATE_TEST_CASE_P(WallpaperManagerBrowserTestInstantiation,
+                        WallpaperManagerBrowserTest,
+                        testing::Bool());
+
+INSTANTIATE_TEST_CASE_P(WallpaperManagerBrowserTestNoAnimationInstantiation,
+                        WallpaperManagerBrowserTestNoAnimation,
+                        testing::Bool());
+
+INSTANTIATE_TEST_CASE_P(WallpaperManagerBrowserTestCrashRestoreInstantiation,
+                        WallpaperManagerBrowserTestCrashRestore,
+                        testing::Bool());
+
+INSTANTIATE_TEST_CASE_P(WallpaperManagerBrowserTestCacheUpdateInstantiation,
+                        WallpaperManagerBrowserTestCacheUpdate,
+                        testing::Bool());
 
 }  // namespace chromeos

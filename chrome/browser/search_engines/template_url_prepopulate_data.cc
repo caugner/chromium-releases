@@ -8,7 +8,6 @@
 #include <locale.h>
 #endif
 
-#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
@@ -22,7 +21,6 @@
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
@@ -438,7 +436,7 @@ const PrepopulatedEngine* engines_TN[] =
 
 // Turkey
 const PrepopulatedEngine* engines_TR[] =
-    { &google, &bing_tr_TR, &yahoo_tr, };
+    { &google, &bing_tr_TR, &yahoo_tr, &yandex_tr, };
 
 // Trinidad and Tobago
 const PrepopulatedEngine* engines_TT[] =
@@ -506,7 +504,7 @@ const PrepopulatedEngine* kAllEngines[] = {
   &yahoo_my,     &yahoo_nl,     &yahoo_nz,     &yahoo_pe,     &yahoo_ph,
   &yahoo_qc,     &yahoo_ro,     &yahoo_ru,     &yahoo_se,     &yahoo_sg,
   &yahoo_th,     &yahoo_tr,     &yahoo_tw,     &yahoo_uk,     &yahoo_ve,
-  &yahoo_vn,     &yahoo_za,     &yandex_ru,    &yandex_ua,
+  &yahoo_vn,     &yahoo_za,     &yandex_ru,    &yandex_tr,    &yandex_ua,
 
   // UMA-only engines:
   &atlas_cz,     &atlas_sk,     &avg,          &babylon,      &conduit,
@@ -515,7 +513,7 @@ const PrepopulatedEngine* kAllEngines[] = {
   &neti,         &nigma,        &ok,           &rambler,      &sapo,
   &search_results, &searchnu,   &snapdo,       &softonic,     &sweetim,
   &terra_ar,     &terra_es,     &tut,          &walla,        &wp,
-  &yandex_tr,    &zoznam,
+  &zoznam,
 };
 
 const struct LogoURLs {
@@ -680,33 +678,25 @@ int GetCurrentCountryID() {
 #endif  // OS_*
 
 int GetCountryIDFromPrefs(PrefService* prefs) {
-  // See if the user overrode the country on the command line.
-  const std::string country(
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kCountry));
-  if (country.length() == 2)
-    return CountryCharsToCountryIDWithUpdate(country[0], country[1]);
+  if (!prefs)
+    return GetCurrentCountryID();
 
   // Cache first run Country ID value in prefs, and use it afterwards.  This
   // ensures that just because the user moves around, we won't automatically
   // make major changes to their available search providers, which would feel
   // surprising.
-  if (!prefs)
-    return GetCurrentCountryID();
-
-  int new_country_id = GetCurrentCountryID();
+  if (!prefs->HasPrefPath(prefs::kCountryIDAtInstall)) {
+    int new_country_id = GetCurrentCountryID();
 #if defined(OS_WIN)
-  // Migrate the old platform-specific value if it's present.
-  if (prefs->HasPrefPath(prefs::kGeoIDAtInstall)) {
-    int geo_id = prefs->GetInteger(prefs::kGeoIDAtInstall);
-    prefs->ClearPref(prefs::kGeoIDAtInstall);
-    new_country_id = GeoIDToCountryID(geo_id);
-  }
+    // Migrate the old platform-specific value if it's present.
+    if (prefs->HasPrefPath(prefs::kGeoIDAtInstall)) {
+      int geo_id = prefs->GetInteger(prefs::kGeoIDAtInstall);
+      prefs->ClearPref(prefs::kGeoIDAtInstall);
+      new_country_id = GeoIDToCountryID(geo_id);
+    }
 #endif
-
-  if (!prefs->HasPrefPath(prefs::kCountryIDAtInstall))
     prefs->SetInteger(prefs::kCountryIDAtInstall, new_country_id);
-
+  }
   return prefs->GetInteger(prefs::kCountryIDAtInstall);
 }
 

@@ -5,6 +5,7 @@
 #include "ui/app_list/views/apps_container_view.h"
 
 #include <algorithm>
+#include <vector>
 
 #include "base/command_line.h"
 #include "ui/app_list/app_list_constants.h"
@@ -22,17 +23,14 @@ namespace app_list {
 
 AppsContainerView::AppsContainerView(AppListMainView* app_list_main_view,
                                      PaginationModel* pagination_model,
-                                     AppListModel* model,
-                                     content::WebContents* start_page_contents)
+                                     AppListModel* model)
     : model_(model),
       show_state_(SHOW_APPS),
       top_icon_animation_pending_count_(0) {
-  apps_grid_view_ = new AppsGridView(
-      app_list_main_view, pagination_model, start_page_contents);
+  apps_grid_view_ = new AppsGridView(app_list_main_view, pagination_model);
   int cols = kPreferredCols;
   int rows = kPreferredRows;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      app_list::switches::kEnableExperimentalAppList)) {
+  if (app_list::switches::IsExperimentalAppListPositionEnabled()) {
     cols = kExperimentalPreferredCols;
     rows = kExperimentalPreferredRows;
   }
@@ -42,15 +40,12 @@ AppsContainerView::AppsContainerView(AppListMainView* app_list_main_view,
   folder_background_view_ = new FolderBackgroundView();
   AddChildView(folder_background_view_);
 
-  app_list_folder_view_ = new AppListFolderView(
-      this,
-      model,
-      app_list_main_view,
-      start_page_contents);
+  app_list_folder_view_ =
+      new AppListFolderView(this, model, app_list_main_view);
   AddChildView(app_list_folder_view_);
 
   apps_grid_view_->SetModel(model_);
-  apps_grid_view_->SetItemList(model_->item_list());
+  apps_grid_view_->SetItemList(model_->top_level_item_list());
   SetShowState(SHOW_APPS,
                false);  /* show apps without animation */
 }

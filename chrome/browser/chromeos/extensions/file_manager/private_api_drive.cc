@@ -4,21 +4,31 @@
 
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_drive.h"
 
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
 #include "chrome/browser/chromeos/file_manager/file_tasks.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/url_util.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/drive/drive_app_registry.h"
 #include "chrome/browser/drive/event_logger.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/extensions/api/file_browser_private.h"
 #include "content/public/browser/browser_thread.h"
 #include "webkit/common/fileapi/file_system_info.h"
 #include "webkit/common/fileapi/file_system_util.h"
 
 using content::BrowserThread;
+
+using file_manager::util::EntryDefinition;
+using file_manager::util::EntryDefinitionCallback;
+using file_manager::util::EntryDefinitionList;
+using file_manager::util::EntryDefinitionListCallback;
+using file_manager::util::FileDefinition;
+using file_manager::util::FileDefinitionList;
 
 namespace extensions {
 namespace {
@@ -35,11 +45,13 @@ const char kDriveConnectionReasonNotReady[] = "not_ready";
 const char kDriveConnectionReasonNoNetwork[] = "no_network";
 const char kDriveConnectionReasonNoService[] = "no_service";
 
-// Copies properties from |entry_proto| to |properties|.
+// Copies properties from |entry_proto| to |properties|. |shared_with_me| is
+// given from the running profile.
 void FillDriveEntryPropertiesValue(
     const drive::ResourceEntry& entry_proto,
+    bool shared_with_me,
     api::file_browser_private::DriveEntryProperties* properties) {
-  properties->shared_with_me.reset(new bool(entry_proto.shared_with_me()));
+  properties->shared_with_me.reset(new bool(shared_with_me));
   properties->shared.reset(new bool(entry_proto.shared()));
 
   if (!entry_proto.has_file_specific_info())
@@ -69,11 +81,37 @@ void FillDriveEntryPropertiesValue(
       new std::string(file_specific_info.content_mime_type()));
 }
 
+// Creates entry definition list for (metadata) search result info list.
+template <class T>
+void ConvertSearchResultInfoListToEntryDefinitionList(
+    Profile* profile,
+    const std::string& extension_id,
+    const std::vector<T>& search_result_info_list,
+    const EntryDefinitionListCallback& callback) {
+  FileDefinitionList file_definition_list;
+
+  for (size_t i = 0; i < search_result_info_list.size(); ++i) {
+    FileDefinition file_definition;
+    file_definition.virtual_path =
+        file_manager::util::ConvertDrivePathToRelativeFileSystemPath(
+            profile, extension_id, search_result_info_list.at(i).path);
+    file_definition.is_directory = search_result_info_list.at(i).is_directory;
+    file_definition_list.push_back(file_definition);
+  }
+
+  file_manager::util::ConvertFileDefinitionListToEntryDefinitionList(
+      profile,
+      extension_id,
+      file_definition_list,  // Safe, since copied internally.
+      callback);
+}
+
 }  // namespace
 
 FileBrowserPrivateGetDriveEntryPropertiesFunction::
-    FileBrowserPrivateGetDriveEntryPropertiesFunction() {
-}
+    FileBrowserPrivateGetDriveEntryPropertiesFunction()
+    : properties_(
+          new extensions::api::file_browser_private::DriveEntryProperties) {}
 
 FileBrowserPrivateGetDriveEntryPropertiesFunction::
     ~FileBrowserPrivateGetDriveEntryPropertiesFunction() {
@@ -87,16 +125,20 @@ bool FileBrowserPrivateGetDriveEntryPropertiesFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(params);
 
   const GURL file_url = GURL(params->file_url);
-  file_path_ =
-      drive::util::ExtractDrivePath(file_manager::util::GetLocalPathFromURL(
-          render_view_host(), GetProfile(), file_url));
+  const base::FilePath local_path = file_manager::util::GetLocalPathFromURL(
+      render_view_host(), GetProfile(), file_url);
+  file_path_ = drive::util::ExtractDrivePath(local_path);
+  file_owner_profile_ = drive::util::ExtractProfileFromPath(local_path);
 
-  properties_.reset(new extensions::api::file_browser_private::
-                    DriveEntryProperties);
+  // Owner not found.
+  if (!file_owner_profile_) {
+    CompleteGetFileProperties(drive::FILE_ERROR_FAILED);
+    return true;
+  }
 
   // Start getting the file info.
-  drive::FileSystemInterface* file_system =
-      drive::util::GetFileSystemByProfile(GetProfile());
+  drive::FileSystemInterface* const file_system =
+      drive::util::GetFileSystemByProfile(file_owner_profile_);
   if (!file_system) {
     // |file_system| is NULL if Drive is disabled or not mounted.
     CompleteGetFileProperties(drive::FILE_ERROR_FAILED);
@@ -105,28 +147,91 @@ bool FileBrowserPrivateGetDriveEntryPropertiesFunction::RunImpl() {
 
   file_system->GetResourceEntry(
       file_path_,
-      base::Bind(&FileBrowserPrivateGetDriveEntryPropertiesFunction::
-                     OnGetFileInfo, this));
+      base::Bind(
+          &FileBrowserPrivateGetDriveEntryPropertiesFunction::OnGetFileInfo,
+          this));
   return true;
 }
 
 void FileBrowserPrivateGetDriveEntryPropertiesFunction::OnGetFileInfo(
     drive::FileError error,
     scoped_ptr<drive::ResourceEntry> entry) {
-  DCHECK(properties_);
-
   if (error != drive::FILE_ERROR_OK) {
     CompleteGetFileProperties(error);
     return;
   }
   DCHECK(entry);
+  owner_resource_entry_.swap(entry);
 
-  FillDriveEntryPropertiesValue(*entry, properties_.get());
+  if (GetProfile()->IsSameProfile(file_owner_profile_)) {
+    StartParseFileInfo(owner_resource_entry_->shared_with_me());
+    return;
+  }
 
-  drive::FileSystemInterface* file_system =
+  // If the running profile does not own the file, obtain the shared_with_me
+  // flag from the running profile's value.
+  drive::FileSystemInterface* const file_system =
       drive::util::GetFileSystemByProfile(GetProfile());
-  drive::DriveAppRegistry* app_registry =
-      drive::util::GetDriveAppRegistryByProfile(GetProfile());
+  if (!file_system) {
+    CompleteGetFileProperties(drive::FILE_ERROR_FAILED);
+    return;
+  }
+  file_system->GetPathFromResourceId(
+      owner_resource_entry_->resource_id(),
+      base::Bind(
+          &FileBrowserPrivateGetDriveEntryPropertiesFunction::OnGetRunningPath,
+          this));
+}
+
+void FileBrowserPrivateGetDriveEntryPropertiesFunction::OnGetRunningPath(
+    drive::FileError error,
+    const base::FilePath& file_path) {
+  if (error != drive::FILE_ERROR_OK) {
+    // The running profile does not know the file.
+    StartParseFileInfo(false);
+    return;
+  }
+
+  drive::FileSystemInterface* const file_system =
+      drive::util::GetFileSystemByProfile(GetProfile());
+  if (!file_system) {
+    // The drive is disable for the running profile.
+    StartParseFileInfo(false);
+    return;
+  }
+  file_system->GetResourceEntry(
+      file_path,
+      base::Bind(
+          &FileBrowserPrivateGetDriveEntryPropertiesFunction::OnGetShareInfo,
+          this));
+}
+
+void FileBrowserPrivateGetDriveEntryPropertiesFunction::OnGetShareInfo(
+    drive::FileError error,
+    scoped_ptr<drive::ResourceEntry> entry) {
+  if (error != drive::FILE_ERROR_OK) {
+    CompleteGetFileProperties(error);
+    return;
+  }
+  DCHECK(entry);
+  StartParseFileInfo(entry->shared_with_me());
+}
+
+void FileBrowserPrivateGetDriveEntryPropertiesFunction::StartParseFileInfo(
+    bool shared_with_me) {
+  if (!g_browser_process->profile_manager()->IsValidProfile(
+          file_owner_profile_)) {
+    CompleteGetFileProperties(drive::FILE_ERROR_FAILED);
+    return;
+  }
+
+  FillDriveEntryPropertiesValue(
+      *owner_resource_entry_, shared_with_me, properties_.get());
+
+  drive::FileSystemInterface* const file_system =
+      drive::util::GetFileSystemByProfile(file_owner_profile_);
+  drive::DriveAppRegistry* const app_registry =
+      drive::util::GetDriveAppRegistryByProfile(file_owner_profile_);
   if (!file_system || !app_registry) {
     // |file_system| or |app_registry| is NULL if Drive is disabled.
     CompleteGetFileProperties(drive::FILE_ERROR_FAILED);
@@ -135,13 +240,13 @@ void FileBrowserPrivateGetDriveEntryPropertiesFunction::OnGetFileInfo(
 
   // The properties meaningful for directories are already filled in
   // FillDriveEntryPropertiesValue().
-  if (entry.get() && !entry->has_file_specific_info()) {
-    CompleteGetFileProperties(error);
+  if (!owner_resource_entry_->has_file_specific_info()) {
+    CompleteGetFileProperties(drive::FILE_ERROR_OK);
     return;
   }
 
   const drive::FileSpecificInfo& file_specific_info =
-      entry->file_specific_info();
+      owner_resource_entry_->file_specific_info();
 
   // Get drive WebApps that can accept this file. We just need to extract the
   // doc icon for the drive app, which is set as default.
@@ -152,7 +257,7 @@ void FileBrowserPrivateGetDriveEntryPropertiesFunction::OnGetFileInfo(
   if (!drive_apps.empty()) {
     std::string default_task_id =
         file_manager::file_tasks::GetDefaultTaskIdFromPrefs(
-            *GetProfile()->GetPrefs(),
+            *file_owner_profile_->GetPrefs(),
             file_specific_info.content_mime_type(),
             file_path_.Extension());
     file_manager::file_tasks::TaskDescriptor default_task;
@@ -382,28 +487,43 @@ bool FileBrowserPrivateSearchDriveFunction::RunImpl() {
 void FileBrowserPrivateSearchDriveFunction::OnSearch(
     drive::FileError error,
     const GURL& next_link,
-    scoped_ptr<std::vector<drive::SearchResultInfo> > results) {
+    scoped_ptr<SearchResultInfoList> results) {
   if (error != drive::FILE_ERROR_OK) {
     SendResponse(false);
     return;
   }
 
+  // Outlives the following conversion, since the pointer is bound to the
+  // callback.
   DCHECK(results.get());
+  const SearchResultInfoList& results_ref = *results.get();
 
+  ConvertSearchResultInfoListToEntryDefinitionList(
+      GetProfile(),
+      extension_->id(),
+      results_ref,
+      base::Bind(&FileBrowserPrivateSearchDriveFunction::OnEntryDefinitionList,
+                 this,
+                 next_link,
+                 base::Passed(&results)));
+}
+
+void FileBrowserPrivateSearchDriveFunction::OnEntryDefinitionList(
+    const GURL& next_link,
+    scoped_ptr<SearchResultInfoList> search_result_info_list,
+    scoped_ptr<EntryDefinitionList> entry_definition_list) {
+  DCHECK_EQ(search_result_info_list->size(), entry_definition_list->size());
   base::ListValue* entries = new base::ListValue();
 
   // Convert Drive files to something File API stack can understand.
-  fileapi::FileSystemInfo info =
-      fileapi::GetFileSystemInfoForChromeOS(source_url_.GetOrigin());
-  for (size_t i = 0; i < results->size(); ++i) {
+  for (EntryDefinitionList::const_iterator it = entry_definition_list->begin();
+       it != entry_definition_list->end();
+       ++it) {
     base::DictionaryValue* entry = new base::DictionaryValue();
-    entry->SetString("fileSystemName", info.name);
-    entry->SetString("fileSystemRoot", info.root_url.spec());
-    entry->SetString("fileFullPath",
-        "/" + file_manager::util::ConvertDrivePathToRelativeFileSystemPath(
-            GetProfile(), extension_->id(),
-            results->at(i).path).AsUTF8Unsafe());
-    entry->SetBoolean("fileIsDirectory", results->at(i).is_directory);
+    entry->SetString("fileSystemName", it->file_system_name);
+    entry->SetString("fileSystemRoot", it->file_system_root_url);
+    entry->SetString("fileFullPath", "/" + it->full_path.AsUTF8Unsafe());
+    entry->SetBoolean("fileIsDirectory", it->is_directory);
     entries->Append(entry);
   }
 
@@ -475,33 +595,50 @@ void FileBrowserPrivateSearchDriveMetadataFunction::OnSearchMetadata(
     return;
   }
 
+  // Outlives the following conversion, since the pointer is bound to the
+  // callback.
   DCHECK(results.get());
+  const drive::MetadataSearchResultVector& results_ref = *results.get();
 
+  ConvertSearchResultInfoListToEntryDefinitionList(
+      GetProfile(),
+      extension_->id(),
+      results_ref,
+      base::Bind(
+          &FileBrowserPrivateSearchDriveMetadataFunction::OnEntryDefinitionList,
+          this,
+          base::Passed(&results)));
+}
+
+void FileBrowserPrivateSearchDriveMetadataFunction::OnEntryDefinitionList(
+    scoped_ptr<drive::MetadataSearchResultVector> search_result_info_list,
+    scoped_ptr<EntryDefinitionList> entry_definition_list) {
+  DCHECK_EQ(search_result_info_list->size(), entry_definition_list->size());
   base::ListValue* results_list = new base::ListValue();
 
   // Convert Drive files to something File API stack can understand.  See
   // file_browser_handler_custom_bindings.cc and
   // file_browser_private_custom_bindings.js for how this is magically
   // converted to a FileEntry.
-  fileapi::FileSystemInfo info =
-      fileapi::GetFileSystemInfoForChromeOS(source_url_.GetOrigin());
-  for (size_t i = 0; i < results->size(); ++i) {
+  for (size_t i = 0; i < entry_definition_list->size(); ++i) {
     base::DictionaryValue* result_dict = new base::DictionaryValue();
 
     // FileEntry fields.
     base::DictionaryValue* entry = new base::DictionaryValue();
-    entry->SetString("fileSystemName", info.name);
-    entry->SetString("fileSystemRoot", info.root_url.spec());
-    entry->SetString("fileFullPath",
-        "/" + file_manager::util::ConvertDrivePathToRelativeFileSystemPath(
-            GetProfile(), extension_->id(),
-            results->at(i).path).AsUTF8Unsafe());
+    entry->SetString(
+        "fileSystemName", entry_definition_list->at(i).file_system_name);
+    entry->SetString(
+        "fileSystemRoot", entry_definition_list->at(i).file_system_root_url);
+    entry->SetString(
+        "fileFullPath",
+        "/" + entry_definition_list->at(i).full_path.AsUTF8Unsafe());
     entry->SetBoolean("fileIsDirectory",
-                      results->at(i).entry.file_info().is_directory());
+                      entry_definition_list->at(i).is_directory);
 
     result_dict->Set("entry", entry);
-    result_dict->SetString("highlightedBaseName",
-                           results->at(i).highlighted_base_name);
+    result_dict->SetString(
+        "highlightedBaseName",
+        search_result_info_list->at(i).highlighted_base_name);
     results_list->Append(result_dict);
   }
 
@@ -612,6 +749,61 @@ void FileBrowserPrivateGetShareUrlFunction::OnGetShareUrl(
 
   SetResult(new base::StringValue(share_url.spec()));
   SendResponse(true);
+}
+
+bool FileBrowserPrivateRequestDriveShareFunction::RunImpl() {
+  using extensions::api::file_browser_private::RequestDriveShare::Params;
+  const scoped_ptr<Params> params(Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  const base::FilePath path = file_manager::util::GetLocalPathFromURL(
+      render_view_host(), GetProfile(), GURL(params->url));
+  const base::FilePath drive_path = drive::util::ExtractDrivePath(path);
+  Profile* const owner_profile = drive::util::ExtractProfileFromPath(path);
+
+  if (!owner_profile)
+    return false;
+
+  drive::FileSystemInterface* const owner_file_system =
+      drive::util::GetFileSystemByProfile(owner_profile);
+  if (!owner_file_system)
+    return false;
+
+  const chromeos::User* const user =
+      chromeos::UserManager::Get()->GetUserByProfile(GetProfile());
+  if (!user || !user->is_logged_in())
+    return false;
+
+  google_apis::drive::PermissionRole role =
+      google_apis::drive::PERMISSION_ROLE_READER;
+  switch (params->share_type) {
+    case api::file_browser_private::DRIVE_SHARE_TYPE_NONE:
+      NOTREACHED();
+      return false;
+    case api::file_browser_private::DRIVE_SHARE_TYPE_CAN_EDIT:
+      role = google_apis::drive::PERMISSION_ROLE_WRITER;
+      break;
+    case api::file_browser_private::DRIVE_SHARE_TYPE_CAN_COMMENT:
+      role = google_apis::drive::PERMISSION_ROLE_COMMENTER;
+      break;
+    case api::file_browser_private::DRIVE_SHARE_TYPE_CAN_VIEW:
+      role = google_apis::drive::PERMISSION_ROLE_READER;
+      break;
+  }
+
+  // Share |drive_path| in |owner_file_system| to |user->email()|.
+  owner_file_system->AddPermission(
+      drive_path,
+      user->email(),
+      role,
+      base::Bind(&FileBrowserPrivateRequestDriveShareFunction::OnAddPermission,
+                 this));
+  return true;
+}
+
+void FileBrowserPrivateRequestDriveShareFunction::OnAddPermission(
+    drive::FileError error) {
+  SendResponse(error == drive::FILE_ERROR_OK);
 }
 
 }  // namespace extensions

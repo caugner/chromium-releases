@@ -7,7 +7,7 @@
 <translation id="1729654308190250600">እባክዎ ባዶ ያልሆነ የኢሜይል አድራሻ ያስገቡ።</translation>
 <translation id="6015796118275082299">ዓመት</translation>
 <translation id="9186171386827445984">ሰነዱን በመጫን ላይ፦ <ph name="PAGE_NUMBER"/>/<ph name="NUMBER_OF_PAGES"/> ገጾች...</translation>
-<translation id="1235745349614807883">የቅርብ ጊዜ ፍለጋዎችን አስወግድ</translation>
+<translation id="1235745349614807883">የቅርብ ጊዜ ፍለጋዎችን አጽዳ</translation>
 <translation id="7223624360433298498">ያለፈው ጊዜ</translation>
 <translation id="1171774979989969504">እባክዎ የኢሜይል አድራሻ ያስገቡ።</translation>
 <translation id="709897737746224366">እባክዎ የተጠየቀውን ቅርጸት ያዛምዱ።</translation>
@@ -49,7 +49,7 @@
 <translation id="9050748414552849310">የተዘጉ የስዕል መግለጫዎችን አሳይ</translation>
 <translation id="4522570452068850558">ዝርዝሮች</translation>
 <translation id="8451268428117625855">እባክዎ ፋይል ይምረጡ።</translation>
-<translation id="8117451130807776954">በዚህ ሣምንት</translation>
+<translation id="8117451130807776954">በዚህ ሳምንት</translation>
 <translation id="5966707198760109579">ሳምንት</translation>
 <translation id="2901282870647571346">የአሁኑ የፊልም ሁኔታ</translation>
 <translation id="2060505056492490888">«<ph name="DOT"/>» በ«<ph name="INVALIDDOMAIN"/>» ውስጥ በተሳሳተ ቦታ ላይ ነው የገባው።</translation>
@@ -80,6 +80,7 @@
 <translation id="2597378329261239068">ይህ ሰነድ በይለፍ ቃል የተጠበቀ ነው። እባክዎ የይለፍ ቃል ያስገቡ።</translation>
 <translation id="5466621249238537318">እባክዎ አንድ ወይም ተጨማሪ ፋይሎችን ይምረጡ።</translation>
 <translation id="9132465097189459683">ሌላ...</translation>
+<translation id="10623998915015855">የማቀያየሪያ አዝራር</translation>
 <translation id="8750798805984357768">እባክዎ ከእነዚህ አማራጮች ውስጥ አንዱን ይምረጡ።</translation>
 <translation id="7740050170769002709">የኤች ቲ ኤም ኤል ይዘት</translation>
 <translation id="6692633176391053278">አስኪያጅ</translation>

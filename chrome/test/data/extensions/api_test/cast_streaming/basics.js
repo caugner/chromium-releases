@@ -8,35 +8,6 @@ var udpTransport = chrome.cast.streaming.udpTransport;
 var createSession = chrome.cast.streaming.session.create;
 var pass = chrome.test.callbackPass;
 
-function TestStateMachine(stream, audioId, videoId, udpId) {
-  this.stream = stream;
-  this.audioId = audioId;
-  this.videoId = videoId;
-  this.udpId = udpId;
-  this.audioStarted = false;
-  this.videoStarted = false;
-  this.audioStopped = false;
-  this.videoStopped = false;
-}
-
-TestStateMachine.prototype.onStarted = function(id) {
-  if (id == this.audioId)
-    this.audioStarted = true;
-  if (id == this.videoId)
-    this.videoStarted = true;
-  if (this.audioStarted && this.videoStarted)
-    this.onAllStarted();
-}
-
-TestStateMachine.prototype.onStopped = function(id) {
-  if (id == this.audioId)
-    this.audioStopped = true;
-  if (id == this.videoId)
-    this.videoStopped = true;
-  if (this.audioStopped && this.videoStopped)
-    this.onAllStopped();
-}
-
 chrome.test.runTests([
   function rtpStreamStart() {
     console.log("[TEST] rtpStreamStart");
@@ -62,6 +33,9 @@ chrome.test.runTests([
             stateMachine.onStarted.bind(stateMachine));
         stateMachine.onAllStarted =
             pass(function(audioId, videoId) {
+          console.log("Enabling logging.");
+          rtpStream.toggleLogging(audioId, true);
+          rtpStream.toggleLogging(videoId, true);
           console.log("Stopping.");
           rtpStream.stop(audioId);
           rtpStream.stop(videoId);
@@ -69,7 +43,17 @@ chrome.test.runTests([
         rtpStream.onStopped.addListener(
             stateMachine.onStopped.bind(stateMachine));
         stateMachine.onAllStopped =
+            pass(function(audioId, videoId) {
+          rtpStream.getRawEvents(audioId,
+              stateMachine.onGotRawEvents.bind(stateMachine, audioId));
+          rtpStream.getRawEvents(videoId,
+              stateMachine.onGotRawEvents.bind(stateMachine, videoId));
+        }.bind(null, audioId, videoId));
+        stateMachine.onGotAllLogs =
             pass(function(stream, audioId, videoId, udpId) {
+          console.log("Disabling logging.");
+          rtpStream.toggleLogging(audioId, false);
+          rtpStream.toggleLogging(videoId, false);
           console.log("Destroying.");
           rtpStream.destroy(audioId);
           rtpStream.destroy(videoId);

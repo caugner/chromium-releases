@@ -24,10 +24,11 @@ CHROME_PACKAGE_NAMES = {
       ['org.chromium.content_shell_apk',
        android_browser_backend.ContentShellBackendSettings,
        'ContentShell.apk'],
+  # TODO(tonyg): rename android-chromium-testshell to android-chrome-shell
   'android-chromium-testshell':
-      ['org.chromium.chrome.testshell',
-       android_browser_backend.ChromiumTestShellBackendSettings,
-       'ChromiumTestShell.apk'],
+      ['org.chromium.chrome.shell',
+       android_browser_backend.ChromeShellBackendSettings,
+       'ChromeShell.apk'],
   'android-webview':
       ['com.android.webview.chromium.shell',
        android_browser_backend.WebviewBackendSettings,
@@ -42,6 +43,10 @@ CHROME_PACKAGE_NAMES = {
        None],
   'android-chrome-dev':
       ['com.google.android.apps.chrome_dev',
+       android_browser_backend.ChromeBackendSettings,
+       None],
+  'android-chrome-canary':
+      ['com.chrome.canary',
        android_browser_backend.ChromeBackendSettings,
        None],
   'android-jb-system-chrome':

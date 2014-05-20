@@ -29,9 +29,12 @@ class FailedDataTypesHandler;
 class GenericChangeProcessor;
 class SharedChangeProcessor;
 class SyncBackendHost;
-class SyncPrefs;
 class DataTypeErrorHandler;
 }  // namespace browser_sync
+
+namespace sync_driver {
+class SyncPrefs;
+}
 
 namespace syncer {
 class DataTypeDebugInfoListener;
@@ -88,7 +91,7 @@ class ProfileSyncComponentsFactory {
   virtual browser_sync::SyncBackendHost* CreateSyncBackendHost(
       const std::string& name,
       Profile* profile,
-      const base::WeakPtr<browser_sync::SyncPrefs>& sync_prefs) = 0;
+      const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs) = 0;
 
   // Creating this in the factory helps us mock it out in testing.
   virtual browser_sync::GenericChangeProcessor* CreateGenericChangeProcessor(
@@ -109,10 +112,6 @@ class ProfileSyncComponentsFactory {
   // Legacy datatypes that need to be converted to the SyncableService API.
   virtual SyncComponents CreateBookmarkSyncComponents(
       ProfileSyncService* profile_sync_service,
-      browser_sync::DataTypeErrorHandler* error_handler) = 0;
-  virtual SyncComponents CreatePasswordSyncComponents(
-      ProfileSyncService* profile_sync_service,
-      PasswordStore* password_store,
       browser_sync::DataTypeErrorHandler* error_handler) = 0;
   virtual SyncComponents CreateTypedUrlSyncComponents(
       ProfileSyncService* profile_sync_service,

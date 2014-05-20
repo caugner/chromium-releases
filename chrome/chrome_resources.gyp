@@ -6,7 +6,6 @@
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
     'about_credits_file': '<(SHARED_INTERMEDIATE_DIR)/about_credits.html',
     'additional_modules_list_file': '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/internal/additional_modules_list.txt',
-    'repack_locales_cmd': ['python', 'tools/build/repack_locales.py'],
   },
   'targets': [
     {
@@ -38,6 +37,13 @@
           'includes': ['../build/grit_action.gypi' ],
         },
         {
+          'action_name': 'password_manager_internals_resources',
+          'variables': {
+            'grit_grd_file': 'browser/resources/password_manager_internals_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
           'action_name': 'signin_internals_resources',
           'variables': {
             'grit_grd_file': 'browser/resources/signin_internals_resources.grd',
@@ -63,7 +69,7 @@
       'conditions': [
         ['OS != "ios"', {
           'dependencies': [
-            '../components/component_resources.gyp:component_resources',
+            '../components/components_resources.gyp:components_resources',
             '../content/browser/devtools/devtools_resources.gyp:devtools_resources',
             '../content/browser/tracing/tracing_resources.gyp:tracing_resources',
           ],
@@ -88,14 +94,6 @@
                 'grit_grd_file': 'browser/resources/quota_internals_resources.grd',
               },
               'includes': [ '../build/grit_action.gypi' ],
-            },
-            {
-              'action_name': 'devtools_discovery_page_resources',
-              'variables': {
-                'grit_grd_file':
-                   'browser/devtools/frontend/devtools_discovery_page_resources.grd',
-              },
-              'includes': [ '../build/grit_action.gypi' ]
             },
             {
               'action_name': 'sync_file_system_internals_resources',
@@ -321,9 +319,6 @@
     {
       'target_name': 'packed_extra_resources',
       'type': 'none',
-      'variables': {
-        'repack_path': '../tools/grit/grit/format/repack.py',
-      },
       'dependencies': [
         'chrome_extra_resources',
         'packed_resources',
@@ -351,9 +346,6 @@
     {
       'target_name': 'packed_resources',
       'type': 'none',
-      'variables': {
-        'repack_path': '../tools/grit/grit/format/repack.py',
-      },
       'dependencies': [
         # MSVS needs the dependencies explictly named, Make is able to
         # derive the dependencies from the output files.
@@ -361,20 +353,25 @@
         'chrome_strings',
         'platform_locale_settings',
         'theme_resources',
-        '<(DEPTH)/components/component_strings.gyp:component_strings',
+        '<(DEPTH)/components/components_strings.gyp:components_strings',
         '<(DEPTH)/net/net.gyp:net_resources',
         '<(DEPTH)/ui/base/strings/ui_strings.gyp:ui_strings',
         '<(DEPTH)/ui/resources/ui_resources.gyp:ui_resources',
       ],
       'actions': [
         {
-          'includes': ['chrome_repack_chrome.gypi']
-        },
-        {
+          'action_name': 'repack_locales_pack',
+          'variables': {
+            'pak_locales': '<(locales)',
+          },
           'includes': ['chrome_repack_locales.gypi']
         },
         {
-          'includes': ['chrome_repack_pseudo_locales.gypi']
+          'action_name': 'repack_pseudo_locales_pack',
+          'variables': {
+            'pak_locales': '<(pseudo_locales)',
+          },
+          'includes': ['chrome_repack_locales.gypi']
         },
         {
           'includes': ['chrome_repack_chrome_100_percent.gypi']
@@ -447,7 +444,7 @@
                 },
               ],
             }],
-            ['enable_hidpi == 1 and OS!="win"', {
+            ['enable_hidpi == 1', {
               'copies': [
                 {
                   'destination': '<(PRODUCT_DIR)',
