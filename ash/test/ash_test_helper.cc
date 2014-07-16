@@ -30,6 +30,10 @@
 #include "ui/keyboard/keyboard.h"
 #endif
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 #if defined(USE_X11)
 #include "ui/aura/window_tree_host_x11.h"
 #endif
@@ -94,7 +98,7 @@ void AshTestHelper::SetUp(bool start_session) {
 
   test::DisplayManagerTestApi(shell->display_manager()).
       DisableChangeDisplayUponHostResize();
-  ShellTestApi(shell).DisableOutputConfiguratorAnimation();
+  ShellTestApi(shell).DisableDisplayConfiguratorAnimation();
 
   test_screenshot_delegate_ = new TestScreenshotDelegate();
   shell->accelerator_controller()->SetScreenshotDelegate(
@@ -134,7 +138,7 @@ void AshTestHelper::TearDown() {
 
 void AshTestHelper::RunAllPendingInMessageLoop() {
   DCHECK(base::MessageLoopForUI::current() == message_loop_);
-  aura::Env::CreateInstance();
+  aura::Env::CreateInstance(true);
   base::RunLoop run_loop;
   run_loop.RunUntilIdle();
 }
@@ -145,6 +149,24 @@ aura::Window* AshTestHelper::CurrentContext() {
     root_window = Shell::GetPrimaryRootWindow();
   DCHECK(root_window);
   return root_window;
+}
+
+// static
+bool AshTestHelper::SupportsMultipleDisplays() {
+#if defined(OS_WIN)
+  return false;
+#else
+  return true;
+#endif
+}
+
+// static
+bool AshTestHelper::SupportsHostWindowResize() {
+#if defined(OS_WIN)
+  return false;
+#else
+  return true;
+#endif
 }
 
 }  // namespace test

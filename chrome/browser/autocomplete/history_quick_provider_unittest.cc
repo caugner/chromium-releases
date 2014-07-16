@@ -16,10 +16,11 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_service.h"
@@ -33,6 +34,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/bookmarks/core/test/bookmark_test_helpers.h"
 #include "content/public/test/test_browser_thread.h"
 #include "sql/transaction.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -90,7 +92,11 @@ struct TestURLInfo {
   {"http://popularsitewithroot.com/", "popularsitewithroot.com", 50, 50, 0},
   {"http://testsearch.com/?q=thequery", "Test Search Engine", 10, 10, 0},
   {"http://testsearch.com/", "Test Search Engine", 9, 9, 0},
-  {"http://anotherengine.com/?q=thequery", "Another Search Engine", 8, 8, 0}
+  {"http://anotherengine.com/?q=thequery", "Another Search Engine", 8, 8, 0},
+  // The encoded stuff between /wiki/ and the # is 第二次世界大戦
+  {"http://ja.wikipedia.org/wiki/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E4%B8%96%E7%95"
+   "%8C%E5%A4%A7%E6%88%A6#.E3.83.B4.E3.82.A7.E3.83.AB.E3.82.B5.E3.82.A4.E3."
+   "83.A6.E4.BD.93.E5.88.B6", "Title Unimportant", 2, 2, 0}
 };
 
 class HistoryQuickProviderTest : public testing::Test,
@@ -156,7 +162,8 @@ void HistoryQuickProviderTest::SetUp() {
   profile_.reset(new TestingProfile());
   ASSERT_TRUE(profile_->CreateHistoryService(true, false));
   profile_->CreateBookmarkModel(true);
-  test::WaitForBookmarkModelToLoad(profile_.get());
+  test::WaitForBookmarkModelToLoad(
+      BookmarkModelFactory::GetForProfile(profile_.get()));
   profile_->BlockUntilHistoryIndexIsRefreshed();
   history_service_ =
       HistoryServiceFactory::GetForProfile(profile_.get(),
@@ -250,8 +257,7 @@ void HistoryQuickProviderTest::RunTest(const base::string16 text,
   base::MessageLoop::current()->RunUntilIdle();
   AutocompleteInput input(text, base::string16::npos, base::string16(),
                           GURL(), AutocompleteInput::INVALID_SPEC,
-                          prevent_inline_autocomplete, false, true,
-                          AutocompleteInput::ALL_MATCHES);
+                          prevent_inline_autocomplete, false, true, true);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->done());
 
@@ -306,6 +312,13 @@ TEST_F(HistoryQuickProviderTest, SimpleSingleMatch) {
                   ASCIIToUTF16(".org/favorite_page.html"));
 }
 
+TEST_F(HistoryQuickProviderTest, WordBoundariesWithPunctuationMatch) {
+  std::vector<std::string> expected_urls;
+  expected_urls.push_back("http://popularsitewithpathonly.com/moo");
+  RunTest(ASCIIToUTF16("/moo"), false, expected_urls, false,
+          ASCIIToUTF16("popularsitewithpathonly.com/moo"), base::string16());
+}
+
 TEST_F(HistoryQuickProviderTest, MultiTermTitleMatch) {
   std::vector<std::string> expected_urls;
   expected_urls.push_back(
@@ -350,6 +363,38 @@ TEST_F(HistoryQuickProviderTest, EncodingMatch) {
   RunTest(ASCIIToUTF16("path with spaces"), false, expected_urls, false,
           ASCIIToUTF16("spaces.com/path with spaces/foo.html"),
           base::string16());
+}
+
+TEST_F(HistoryQuickProviderTest, ContentsClass) {
+  std::vector<std::string> expected_urls;
+  expected_urls.push_back(
+      "http://ja.wikipedia.org/wiki/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E4%B8%96%E7"
+      "%95%8C%E5%A4%A7%E6%88%A6#.E3.83.B4.E3.82.A7.E3.83.AB.E3.82.B5.E3.82."
+      "A4.E3.83.A6.E4.BD.93.E5.88.B6");
+  RunTest(base::UTF8ToUTF16("第二 e3"), false, expected_urls, false,
+          base::UTF8ToUTF16("ja.wikipedia.org/wiki/第二次世界大戦#.E3.83.B4.E3."
+                            "82.A7.E3.83.AB.E3.82.B5.E3.82.A4.E3.83.A6.E4.BD."
+                            "93.E5.88.B6"),
+          base::string16());
+#ifndef NDEBUG
+  ac_matches_[0].Validate();
+#endif
+  // Verify that contents_class divides the string in the right places.
+  // [22, 24) is the "第二".  All the other pairs are the "e3".
+  ACMatchClassifications contents_class(ac_matches_[0].contents_class);
+  size_t expected_offsets[] = { 0, 22, 24, 31, 33, 40, 42, 49, 51, 58, 60, 67,
+                                69, 76, 78 };
+  // ScoredHistoryMatch may not highlight all the occurrences of these terms
+  // because it only highlights terms at word breaks, and it only stores word
+  // breaks up to some specified number of characters (50 at the time of this
+  // comment).  This test is written flexibly so it still will pass if we
+  // increase that number in the future.  Regardless, we require the first
+  // five offsets to be correct--in this example these cover at least one
+  // occurrence of each term.
+  EXPECT_LE(contents_class.size(), arraysize(expected_offsets));
+  EXPECT_GE(contents_class.size(), 5u);
+  for (size_t i = 0; i < contents_class.size(); ++i)
+    EXPECT_EQ(expected_offsets[i], contents_class[i].offset);
 }
 
 TEST_F(HistoryQuickProviderTest, VisitCountMatches) {
@@ -584,7 +629,7 @@ TEST_F(HistoryQuickProviderTest, CullSearchResults) {
       TemplateURLServiceFactory::GetForProfile(profile_.get());
   TemplateURL* template_url = new TemplateURL(profile_.get(), data);
   template_url_service->Add(template_url);
-  template_url_service->SetDefaultSearchProvider(template_url);
+  template_url_service->SetUserSelectedDefaultSearchProvider(template_url);
   template_url_service->Load();
 
   // A search results page should not be returned when typing a query.

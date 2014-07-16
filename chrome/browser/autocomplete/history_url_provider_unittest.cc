@@ -15,6 +15,7 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
+#include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -280,8 +281,7 @@ void HistoryURLProviderTest::RunTest(
     AutocompleteInput::Type* identified_input_type) {
   AutocompleteInput input(text, base::string16::npos, desired_tld, GURL(),
                           AutocompleteInput::INVALID_SPEC,
-                          prevent_inline_autocomplete, false, true,
-                          AutocompleteInput::ALL_MATCHES);
+                          prevent_inline_autocomplete, false, true, true);
   *identified_input_type = input.type();
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
@@ -291,11 +291,8 @@ void HistoryURLProviderTest::RunTest(
   if (sort_matches_) {
     for (ACMatches::iterator i = matches_.begin(); i != matches_.end(); ++i)
       i->ComputeStrippedDestinationURL(profile_.get());
-    std::sort(matches_.begin(), matches_.end(),
-              &AutocompleteMatch::DestinationSortFunc);
-    matches_.erase(std::unique(matches_.begin(), matches_.end(),
-                               &AutocompleteMatch::DestinationsEqual),
-                   matches_.end());
+    AutocompleteResult::DedupMatchesByDestination(
+        input.current_page_classification(), false, &matches_);
     std::sort(matches_.begin(), matches_.end(),
               &AutocompleteMatch::MoreRelevant);
   }
@@ -563,7 +560,7 @@ TEST_F(HistoryURLProviderTest, EmptyVisits) {
   AutocompleteInput input(ASCIIToUTF16("p"), base::string16::npos,
                           base::string16(), GURL(),
                           AutocompleteInput::INVALID_SPEC, false, false, true,
-                          AutocompleteInput::ALL_MATCHES);
+                          true);
   autocomplete_->Start(input, false);
   // HistoryURLProvider shouldn't be done (waiting on async results).
   EXPECT_FALSE(autocomplete_->done());
@@ -605,7 +602,7 @@ TEST_F(HistoryURLProviderTest, DontAutocompleteOnTrailingWhitespace) {
   AutocompleteInput input(ASCIIToUTF16("slash "), base::string16::npos,
                           base::string16(), GURL(),
                           AutocompleteInput::INVALID_SPEC, false, false,
-                          true, AutocompleteInput::ALL_MATCHES);
+                          true, true);
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
     base::MessageLoop::current()->Run();
@@ -784,7 +781,7 @@ TEST_F(HistoryURLProviderTest, CrashDueToFixup) {
     AutocompleteInput input(ASCIIToUTF16(test_cases[i]), base::string16::npos,
                             base::string16(), GURL(),
                             AutocompleteInput::INVALID_SPEC,
-                            false, false, true, AutocompleteInput::ALL_MATCHES);
+                            false, false, true, true);
     autocomplete_->Start(input, false);
     if (!autocomplete_->done())
       base::MessageLoop::current()->Run();
@@ -800,7 +797,7 @@ TEST_F(HistoryURLProviderTest, CullSearchResults) {
       TemplateURLServiceFactory::GetForProfile(profile_.get());
   TemplateURL* template_url = new TemplateURL(profile_.get(), data);
   template_url_service->Add(template_url);
-  template_url_service->SetDefaultSearchProvider(template_url);
+  template_url_service->SetUserSelectedDefaultSearchProvider(template_url);
   template_url_service->Load();
 
   // URLs we will be using, plus the visit counts they will initially get
@@ -902,7 +899,7 @@ TEST_F(HistoryURLProviderTest, SuggestExactInput) {
                             base::string16::npos, base::string16(),
                             GURL("about:blank"),
                             AutocompleteInput::INVALID_SPEC, false, false, true,
-                            AutocompleteInput::ALL_MATCHES);
+                            true);
     AutocompleteMatch match(autocomplete_->SuggestExactInput(
         input.text(), input.canonicalized_url(), test_cases[i].trim_http));
     EXPECT_EQ(ASCIIToUTF16(test_cases[i].contents), match.contents);

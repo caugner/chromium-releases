@@ -279,6 +279,8 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       std::vector<std::string> codecs;
       codecs.push_back(kCdmSupportedCodecVorbis);
       codecs.push_back(kCdmSupportedCodecVp8);
+      // TODO(xhwang): Add VP9 when it's supported by Widevine CDM.
+      // See http://crbug.com/361318
 #if defined(USE_PROPRIETARY_CODECS)
 // TODO(ddorwin): Rename these macros to reflect their real meaning: whether the
 // CDM Chrome was built [and shipped] with support these types.
@@ -489,14 +491,6 @@ void ChromeContentClient::AddAdditionalSchemes(
 #if defined(OS_CHROMEOS)
   standard_schemes->push_back(chrome::kCrosScheme);
 #endif
-}
-
-bool ChromeContentClient::CanHandleWhileSwappedOut(
-    const IPC::Message& msg) {
-  // Any Chrome-specific messages (apart from those listed in
-  // CanSendWhileSwappedOut) that must be handled by the browser when sent from
-  // swapped out renderers.
-  return false;
 }
 
 std::string ChromeContentClient::GetProduct() const {

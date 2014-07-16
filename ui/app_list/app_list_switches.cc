@@ -13,27 +13,23 @@ namespace switches {
 const char kDisableSyncAppList[] = "disable-sync-app-list";
 
 // If set, the voice search is disabled in app list UI.
-const char kEnableVoiceSearch[] = "enable-app-list-voice-search";
+const char kDisableVoiceSearch[] = "disable-app-list-voice-search";
 
 // If set, the app info context menu item is available in the app list UI.
 const char kEnableAppInfo[] = "enable-app-list-app-info";
 
-// If set, the experimental app list will be used.
+// If set, the app list will be centered and wide instead of tall.
+const char kEnableCenteredAppList[] = "enable-centered-app-list";
+
+// If set, the experimental app list will be used. Implies
+// --enable-centered-app-list.
 const char kEnableExperimentalAppList[] = "enable-experimental-app-list";
-
-// If set, the experimental app list position will be used.
-const char kEnableExperimentalAppListPosition[] =
-    "enable-experimental-app-list-position";
-
-// If set, it will always listen to the audio locally and open the app-list
-// when the hotword is recognized.
-const char kEnableHotwordAlwaysOn[] = "enable-app-list-hotword-always-on";
 
 // Enables syncing of the app list independent of extensions.
 const char kEnableSyncAppList[] = "enable-sync-app-list";
 
 bool IsAppListSyncEnabled() {
-#if defined(OS_CHROMEOS)
+#if defined(TOOLKIT_VIEWS)
   return !CommandLine::ForCurrentProcess()->HasSwitch(kDisableSyncAppList);
 #else
   return CommandLine::ForCurrentProcess()->HasSwitch(kEnableSyncAppList);
@@ -52,16 +48,7 @@ bool IsFolderUIEnabled() {
 bool IsVoiceSearchEnabled() {
   // Speech recognition in AppList is only for ChromeOS right now.
 #if defined(OS_CHROMEOS)
-  return CommandLine::ForCurrentProcess()->HasSwitch(kEnableVoiceSearch);
-#else
-  return false;
-#endif
-}
-
-bool IsHotwordAlwaysOnEnabled() {
-#if defined(OS_CHROMEOS)
-  return IsVoiceSearchEnabled() &&
-      CommandLine::ForCurrentProcess()->HasSwitch(kEnableHotwordAlwaysOn);
+  return !CommandLine::ForCurrentProcess()->HasSwitch(kDisableVoiceSearch);
 #else
   return false;
 #endif
@@ -76,9 +63,8 @@ bool IsExperimentalAppListEnabled() {
       kEnableExperimentalAppList);
 }
 
-bool IsExperimentalAppListPositionEnabled() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-             kEnableExperimentalAppListPosition) ||
+bool IsCenteredAppListEnabled() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(kEnableCenteredAppList) ||
          IsExperimentalAppListEnabled();
 }
 

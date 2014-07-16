@@ -49,7 +49,7 @@
 #endif
 
 #if defined(USE_X11)
-#include <X11/Xlib.h>
+#include "ui/gfx/x/x11_connection.h"
 #endif
 
 namespace ash {
@@ -98,7 +98,7 @@ AshTestBase::AshTestBase()
   // This is needed for tests which use this base class but are run in browser
   // test binaries so don't get the default initialization in the unit test
   // suite.
-  XInitThreads();
+  gfx::InitializeThreadedX11();
 #endif
 
   thread_bundle_.reset(new content::TestBrowserThreadBundle);
@@ -207,22 +207,12 @@ aura::test::EventGenerator& AshTestBase::GetEventGenerator() {
   return *event_generator_.get();
 }
 
-// static
 bool AshTestBase::SupportsMultipleDisplays() {
-#if defined(OS_WIN)
-  return base::win::GetVersion() < base::win::VERSION_WIN8;
-#else
-  return true;
-#endif
+  return AshTestHelper::SupportsMultipleDisplays();
 }
 
-// static
 bool AshTestBase::SupportsHostWindowResize() {
-#if defined(OS_WIN)
-  return base::win::GetVersion() < base::win::VERSION_WIN8;
-#else
-  return true;
-#endif
+  return AshTestHelper::SupportsHostWindowResize();
 }
 
 void AshTestBase::UpdateDisplay(const std::string& display_specs) {

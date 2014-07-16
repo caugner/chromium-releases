@@ -32,6 +32,27 @@ function ImageMIMETypeOnlyTest() {
   RunMetadataTest("test.jpg", {metadataType: 'mimeTypeOnly'}, verifyMetadata);
 }
 
+function ImageTagsTest() {
+  function verifyMetadata(metadata) {
+    chrome.test.assertEq("image/jpeg", metadata.mimeType);
+    chrome.test.assertEq(5616, metadata.width);
+    chrome.test.assertEq(3744, metadata.height);
+    chrome.test.assertEq(0, metadata.rotation);
+    chrome.test.assertEq(300.0, metadata.xResolution);
+    chrome.test.assertEq(300.0, metadata.yResolution);
+    chrome.test.assertEq("Canon", metadata.cameraMake);
+    chrome.test.assertEq("Canon EOS 5D Mark II", metadata.cameraModel);
+    chrome.test.assertEq(0.01, metadata.exposureTimeSeconds);
+    chrome.test.assertFalse(metadata.flashFired);
+    chrome.test.assertEq(3.2, metadata.fNumber);
+    chrome.test.assertEq(100, metadata.focalLengthMm);
+    chrome.test.assertEq(1600, metadata.isoEquivalent);
+    chrome.test.succeed();
+  }
+
+  RunMetadataTest("test.jpg", {}, verifyMetadata);
+}
+
 function MP3MIMETypeOnlyTest() {
   function verifyMetadata(metadata) {
     chrome.test.assertEq("audio/mpeg", metadata.mimeType);
@@ -51,6 +72,22 @@ function MP3TagsTest() {
     chrome.test.assertEq("OK Computer", metadata.album);
     chrome.test.assertEq(1, metadata.track);
     chrome.test.assertEq("Alternative", metadata.genre);
+
+    chrome.test.assertEq(3, metadata.rawTags.length);
+
+    chrome.test.assertEq("mp3", metadata.rawTags[0].type);
+    chrome.test.assertEq("OK Computer", metadata.rawTags[0].tags["album"]);
+    chrome.test.assertEq("Radiohead", metadata.rawTags[0].tags["artist"]);
+    chrome.test.assertEq("1997", metadata.rawTags[0].tags["date"]);
+    chrome.test.assertEq("Lavf54.4.100", metadata.rawTags[0].tags["encoder"]);
+    chrome.test.assertEq("Alternative", metadata.rawTags[0].tags["genre"]);
+    chrome.test.assertEq("Airbag", metadata.rawTags[0].tags["title"]);
+    chrome.test.assertEq("1", metadata.rawTags[0].tags["track"]);
+
+    chrome.test.assertEq("mp3", metadata.rawTags[1].type);
+
+    chrome.test.assertEq("png", metadata.rawTags[2].type);
+
     chrome.test.succeed();
   }
 
@@ -61,6 +98,32 @@ function RotatedVideoTest() {
   function verifyMetadata(metadata) {
     chrome.test.assertEq("video/mp4", metadata.mimeType);
     chrome.test.assertEq(90, metadata.rotation);
+
+    chrome.test.assertEq(3, metadata.rawTags.length);
+
+    chrome.test.assertEq("mov,mp4,m4a,3gp,3g2,mj2", metadata.rawTags[0].type);
+    chrome.test.assertEq("isom3gp4",
+                         metadata.rawTags[0].tags["compatible_brands"]);
+    chrome.test.assertEq("2014-02-11 00:39:25",
+                         metadata.rawTags[0].tags["creation_time"]);
+    chrome.test.assertEq("isom", metadata.rawTags[0].tags["major_brand"]);
+    chrome.test.assertEq("0", metadata.rawTags[0].tags["minor_version"]);
+
+    chrome.test.assertEq("h264", metadata.rawTags[1].type);
+    chrome.test.assertEq("2014-02-11 00:39:25",
+                         metadata.rawTags[1].tags["creation_time"]);
+    chrome.test.assertEq("VideoHandle",
+                         metadata.rawTags[1].tags["handler_name"]);
+    chrome.test.assertEq("eng", metadata.rawTags[1].tags["language"]);
+    chrome.test.assertEq("90", metadata.rawTags[1].tags["rotate"]);
+
+    chrome.test.assertEq("aac", metadata.rawTags[2].type);
+    chrome.test.assertEq("2014-02-11 00:39:25",
+                         metadata.rawTags[2].tags["creation_time"]);
+    chrome.test.assertEq("SoundHandle",
+                         metadata.rawTags[2].tags["handler_name"]);
+    chrome.test.assertEq("eng", metadata.rawTags[2].tags["language"]);
+
     chrome.test.succeed();
   }
 
@@ -73,7 +136,8 @@ chrome.test.getConfig(function(config) {
 
   // Should still be able to sniff MP3 MIME type without proprietary codecs.
   var testsToRun = [
-    ImageMIMETypeOnlyTest
+    ImageMIMETypeOnlyTest,
+    ImageTagsTest
   ];
 
   if (useProprietaryCodecs) {

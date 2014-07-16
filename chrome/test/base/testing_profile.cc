@@ -15,8 +15,8 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -28,6 +28,7 @@
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context_factory.h"
+#include "chrome/browser/guest_view/guest_view_manager.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
@@ -56,6 +57,8 @@
 #include "chrome/test/base/history_index_restore_observer.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/common/bookmark_constants.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/user_prefs/user_prefs.h"
@@ -493,20 +496,28 @@ void TestingProfile::DestroyTopSites() {
 
 static KeyedService* BuildBookmarkModel(content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  BookmarkModel* bookmark_model = new BookmarkModel(profile);
-  bookmark_model->Load(profile->GetIOTaskRunner());
-  return bookmark_model;
+  ChromeBookmarkClient* bookmark_client =
+      new ChromeBookmarkClient(profile, false);
+  bookmark_client->model()->Load(
+      profile->GetPrefs(),
+      profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
+      profile->GetPath(),
+      profile->GetIOTaskRunner(),
+      content::BrowserThread::GetMessageLoopProxyForThread(
+          content::BrowserThread::UI));
+  return bookmark_client;
 }
 
 void TestingProfile::CreateBookmarkModel(bool delete_file) {
   if (delete_file) {
-    base::FilePath path = GetPath().Append(chrome::kBookmarksFileName);
+    base::FilePath path = GetPath().Append(bookmarks::kBookmarksFileName);
     base::DeleteFile(path, false);
   }
   // This will create a bookmark model.
-  BookmarkModel* bookmark_service = static_cast<BookmarkModel*>(
-      BookmarkModelFactory::GetInstance()->SetTestingFactoryAndUse(
-          this, BuildBookmarkModel));
+  BookmarkModel* bookmark_service =
+      static_cast<ChromeBookmarkClient*>(
+          BookmarkModelFactory::GetInstance()->SetTestingFactoryAndUse(
+              this, BuildBookmarkModel))->model();
 
   HistoryService* history_service =
       HistoryServiceFactory::GetForProfileWithoutCreating(this);
@@ -550,6 +561,10 @@ void TestingProfile::BlockUntilTopSitesLoaded() {
       chrome::NOTIFICATION_TOP_SITES_LOADED,
       content::NotificationService::AllSources());
   top_sites_loaded_observer.Wait();
+}
+
+void TestingProfile::SetGuestSession(bool guest) {
+  guest_session_ = guest;
 }
 
 base::FilePath TestingProfile::GetPath() const {
@@ -811,6 +826,11 @@ HostContentSettingsMap* TestingProfile::GetHostContentSettingsMap() {
 content::GeolocationPermissionContext*
 TestingProfile::GetGeolocationPermissionContext() {
   return ChromeGeolocationPermissionContextFactory::GetForProfile(this);
+}
+
+content::BrowserPluginGuestManagerDelegate*
+    TestingProfile::GetGuestManagerDelegate() {
+  return GuestViewManager::FromBrowserContext(this);
 }
 
 std::wstring TestingProfile::GetName() {

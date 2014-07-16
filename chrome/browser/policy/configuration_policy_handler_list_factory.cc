@@ -23,7 +23,7 @@
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/policy/core/common/schema.h"
 #include "components/translate/core/common/translate_pref_names.h"
-#include "grit/component_strings.h"
+#include "grit/components_strings.h"
 #include "policy/policy_constants.h"
 
 #if !defined(OS_IOS)
@@ -99,10 +99,10 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kForceSafeSearch,
     base::Value::TYPE_BOOLEAN },
   { key::kPasswordManagerEnabled,
-    prefs::kPasswordManagerEnabled,
+    password_manager::prefs::kPasswordManagerEnabled,
     base::Value::TYPE_BOOLEAN },
   { key::kPasswordManagerAllowShowPasswords,
-    prefs::kPasswordManagerAllowShowPasswords,
+    password_manager::prefs::kPasswordManagerAllowShowPasswords,
     base::Value::TYPE_BOOLEAN },
   { key::kPrintingEnabled,
     prefs::kPrintingEnabled,
@@ -203,9 +203,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kSigninAllowed,
     prefs::kSigninAllowed,
     base::Value::TYPE_BOOLEAN },
-  { key::kEnableOriginBoundCerts,
-    prefs::kEnableOriginBoundCerts,
-    base::Value::TYPE_BOOLEAN },
   { key::kDisableSSLRecordSplitting,
     prefs::kDisableSSLRecordSplitting,
     base::Value::TYPE_BOOLEAN },
@@ -278,6 +275,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kRemoteAccessHostAllowGnubbyAuth,
     prefs::kRemoteAccessHostAllowGnubbyAuth,
     base::Value::TYPE_BOOLEAN },
+  { key::kRemoteAccessHostAllowRelayedConnection,
+    prefs::kRemoteAccessHostAllowRelayedConnection,
+    base::Value::TYPE_BOOLEAN },
+  { key::kRemoteAccessHostUdpPortRange,
+    prefs::kRemoteAccessHostUdpPortRange,
+    base::Value::TYPE_STRING },
   { key::kCloudPrintProxyEnabled,
     prefs::kCloudPrintProxyEnabled,
     base::Value::TYPE_BOOLEAN },
@@ -467,7 +470,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
 
 #if defined(OS_ANDROID)
   { key::kDataCompressionProxyEnabled,
-    prefs::kSpdyProxyAuthEnabled,
+    data_reduction_proxy::prefs::kDataReductionProxyEnabled,
     base::Value::TYPE_BOOLEAN },
 #endif  // defined(OS_ANDROID)
 

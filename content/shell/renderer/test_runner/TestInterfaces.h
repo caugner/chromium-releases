@@ -25,15 +25,12 @@ class WebView;
 }
 
 namespace content {
+
 class AccessibilityController;
 class EventSender;
 class GamepadController;
 class TestRunner;
 class TextInputController;
-}
-
-namespace WebTestRunner {
-
 class WebTestDelegate;
 class WebTestProxyBase;
 
@@ -53,20 +50,20 @@ public:
     void windowOpened(WebTestProxyBase*);
     void windowClosed(WebTestProxyBase*);
 
-    content::AccessibilityController* accessibilityController();
-    content::EventSender* eventSender();
-    content::TestRunner* testRunner();
+    AccessibilityController* accessibilityController();
+    EventSender* eventSender();
+    TestRunner* testRunner();
     WebTestDelegate* delegate();
     WebTestProxyBase* proxy();
     const std::vector<WebTestProxyBase*>& windowList();
     blink::WebThemeEngine* themeEngine();
 
 private:
-    scoped_ptr<content::AccessibilityController> m_accessibilityController;
-    scoped_ptr<content::EventSender> m_eventSender;
-    scoped_ptr<content::GamepadController> m_gamepadController;
-    scoped_ptr<content::TextInputController> m_textInputController;
-    scoped_ptr<content::TestRunner> m_testRunner;
+    scoped_ptr<AccessibilityController> m_accessibilityController;
+    scoped_ptr<EventSender> m_eventSender;
+    scoped_ptr<GamepadController> m_gamepadController;
+    scoped_ptr<TextInputController> m_textInputController;
+    scoped_ptr<TestRunner> m_testRunner;
     WebTestDelegate* m_delegate;
     WebTestProxyBase* m_proxy;
 
@@ -80,6 +77,6 @@ private:
     DISALLOW_COPY_AND_ASSIGN(TestInterfaces);
 };
 
-}
+}  // namespace content
 
 #endif  // CONTENT_SHELL_RENDERER_TEST_RUNNER_TESTINTERFACES_H_

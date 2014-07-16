@@ -20,14 +20,15 @@ class TcpLossAlgorithmTest : public ::testing::Test {
   TcpLossAlgorithmTest()
       : unacked_packets_() {
     rtt_stats_.UpdateRtt(QuicTime::Delta::FromMilliseconds(100),
-                         QuicTime::Delta::Zero());
+                         QuicTime::Delta::Zero(),
+                         clock_.Now());
   }
 
   void SendDataPacket(QuicPacketSequenceNumber sequence_number) {
     SerializedPacket packet(sequence_number, PACKET_1BYTE_SEQUENCE_NUMBER,
                             NULL, 0, new RetransmittableFrames());
     unacked_packets_.AddPacket(packet);
-    unacked_packets_.SetPending(sequence_number, clock_.Now(), 1000);
+    unacked_packets_.SetSent(sequence_number, clock_.Now(), 1000, true);
   }
 
   void VerifyLosses(QuicPacketSequenceNumber largest_observed,
@@ -170,7 +171,7 @@ TEST_F(TcpLossAlgorithmTest, DontEarlyRetransmitNeuteredPacket) {
   // Early retransmit when the final packet gets acked and the first is nacked.
   unacked_packets_.SetNotPending(2);
   unacked_packets_.NackPacket(1, 1);
-  unacked_packets_.NeuterPacket(1);
+  unacked_packets_.NeuterIfPendingOrRemovePacket(1);
   VerifyLosses(2, NULL, 0);
   EXPECT_EQ(QuicTime::Zero(), loss_algorithm_.GetLossTimeout());
 }

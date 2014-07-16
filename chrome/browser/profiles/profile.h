@@ -21,7 +21,6 @@ class ExtensionService;
 class ExtensionSpecialStoragePolicy;
 class FaviconService;
 class HostContentSettingsMap;
-class PasswordStore;
 class PrefProxyConfigTracker;
 class PrefService;
 class PromoCounter;
@@ -401,6 +400,11 @@ class Profile : public content::BrowserContext {
   int accessibility_pause_level_;
 
   DISALLOW_COPY_AND_ASSIGN(Profile);
+};
+
+// The comparator for profile pointers as key in a map.
+struct ProfileCompare {
+  bool operator()(Profile* a, Profile* b) const;
 };
 
 #if defined(COMPILER_GCC)

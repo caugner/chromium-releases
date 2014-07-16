@@ -40,7 +40,12 @@ DEFAULT_GCLIENT_CUSTOM_DEPS = {
         "chrome/deps/adobe/flash/binaries/ppapi/win/.git",
     "src/third_party/adobe/flash/binaries/ppapi/win_x64":
         "https://chrome-internal.googlesource.com/"
-        "chrome/deps/adobe/flash/binaries/ppapi/win_x64/.git",}
+        "chrome/deps/adobe/flash/binaries/ppapi/win_x64/.git",
+    "src/chrome/tools/test/reference_build/chrome_win": None,
+    "src/chrome/tools/test/reference_build/chrome_mac": None,
+    "src/chrome/tools/test/reference_build/chrome_linux": None,
+    "src/third_party/WebKit/LayoutTests": None,
+    "src/tools/valgrind": None,}
 
 GCLIENT_SPEC_DATA = [
   { "name"        : "src",
@@ -54,6 +59,7 @@ GCLIENT_SPEC_DATA = [
 GCLIENT_SPEC_ANDROID = "\ntarget_os = ['android']"
 GCLIENT_CUSTOM_DEPS_V8 = {"src/v8_bleeding_edge": "git://github.com/v8/v8.git"}
 FILE_DEPS_GIT = '.DEPS.git'
+FILE_DEPS = 'DEPS'
 
 REPO_PARAMS = [
   'https://chrome-internal.googlesource.com/chromeos/manifest-internal/',
@@ -453,6 +459,15 @@ def SetupAndroidBuildEnvironment(opts, path_to_src=None):
   for line in out.splitlines():
     (k, _, v) = line.partition('=')
     os.environ[k] = v
+  # envsetup.sh no longer sets OS=android to GYP_DEFINES env variable
+  # (CL/170273005). Set this variable explicitly inorder to build chrome on
+  # android.
+  try:
+    if 'OS=android' not in os.environ['GYP_DEFINES']:
+      os.environ['GYP_DEFINES'] = '%s %s' % (os.environ['GYP_DEFINES'],
+                                              'OS=android')
+  except KeyError:
+    os.environ['GYP_DEFINES'] = 'OS=android'
 
   return not proc.returncode
 

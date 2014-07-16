@@ -44,17 +44,16 @@ class ListChangesTaskTest : public testing::Test {
 
     scoped_ptr<drive::FakeDriveService>
         fake_drive_service(new drive::FakeDriveService);
-    ASSERT_TRUE(fake_drive_service->LoadAccountMetadataForWapi(
-        "sync_file_system/account_metadata.json"));
-    ASSERT_TRUE(fake_drive_service->LoadResourceListForWapi(
-        "gdata/empty_feed.json"));
 
     scoped_ptr<drive::DriveUploaderInterface>
         drive_uploader(new drive::DriveUploader(
-            fake_drive_service.get(), base::MessageLoopProxy::current()));
+            fake_drive_service.get(),
+            base::MessageLoopProxy::current()));
 
-    fake_drive_service_helper_.reset(new FakeDriveServiceHelper(
-        fake_drive_service.get(), drive_uploader.get(), kSyncRootFolderTitle));
+    fake_drive_service_helper_.reset(
+        new FakeDriveServiceHelper(fake_drive_service.get(),
+                                   drive_uploader.get(),
+                                   kSyncRootFolderTitle));
 
     sync_task_manager_.reset(new SyncTaskManager(
         base::WeakPtr<SyncTaskManager::Client>(),
@@ -63,7 +62,10 @@ class ListChangesTaskTest : public testing::Test {
 
     context_.reset(new SyncEngineContext(
         fake_drive_service.PassAs<drive::DriveServiceInterface>(),
-        drive_uploader.Pass(), base::MessageLoopProxy::current()));
+        drive_uploader.Pass(),
+        base::MessageLoopProxy::current(),
+        base::MessageLoopProxy::current(),
+        base::MessageLoopProxy::current()));
 
     SetUpRemoteFolders();
 
@@ -167,7 +169,6 @@ class ListChangesTaskTest : public testing::Test {
         new SyncEngineInitializer(
             context_.get(),
             base::MessageLoopProxy::current(),
-            context_->GetDriveService(),
             database_dir_.path(),
             in_memory_env_.get());
 

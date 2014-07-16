@@ -112,7 +112,7 @@ ChromeosInfoPrivateGetFunction::ChromeosInfoPrivateGetFunction() {
 ChromeosInfoPrivateGetFunction::~ChromeosInfoPrivateGetFunction() {
 }
 
-bool ChromeosInfoPrivateGetFunction::RunImpl() {
+bool ChromeosInfoPrivateGetFunction::RunAsync() {
   base::ListValue* list = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetList(0, &list));
   scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
@@ -185,7 +185,7 @@ ChromeosInfoPrivateSetFunction::ChromeosInfoPrivateSetFunction() {
 ChromeosInfoPrivateSetFunction::~ChromeosInfoPrivateSetFunction() {
 }
 
-bool ChromeosInfoPrivateSetFunction::RunImpl() {
+bool ChromeosInfoPrivateSetFunction::RunSync() {
   std::string param_name;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &param_name));
   if (param_name == kPropertyTimezone) {

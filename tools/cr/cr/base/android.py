@@ -25,7 +25,8 @@ class AndroidPlatform(cr.Platform):
 
   ACTIVE = cr.Config.From(
       CR_ENVSETUP=os.path.join('{CR_SRC}', 'build', 'android', 'envsetup.sh'),
-      CR_ADB=os.path.join('{ANDROID_SDK_ROOT}', 'platform-tools', 'adb'),
+      CR_ADB=os.path.join('{CR_SRC}', 'third_party', 'android_tools', 'sdk',
+          'platform-tools', 'adb'),
       CR_TARGET_SUFFIX='_apk',
       CR_BINARY=os.path.join('{CR_BUILD_DIR}', 'apks', '{CR_TARGET_NAME}.apk'),
       CR_ACTION='android.intent.action.VIEW',
@@ -36,7 +37,6 @@ class AndroidPlatform(cr.Platform):
       CR_TEST_RUNNER=os.path.join(
           '{CR_SRC}', 'build', 'android', 'test_runner.py'),
       CR_ADB_GDB=os.path.join('{CR_SRC}', 'build', 'android', 'adb_gdb'),
-      CHROMIUM_OUT_DIR='{CR_OUT_BASE}',
       CR_DEFAULT_TARGET='chrome_shell',
       GYP_DEF_OS='android'
   )

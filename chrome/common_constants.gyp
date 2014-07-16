@@ -13,9 +13,6 @@
 
   'target_defaults': {
     'sources': [
-      # TODO(yoz): Create an extension_constants target for these.
-      '../extensions/common/constants.cc',
-      '../extensions/common/constants.h',
       'common/chrome_constants.cc',
       'common/chrome_constants.h',
       'common/chrome_icon_resources_win.cc',
@@ -73,6 +70,7 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '../components/components.gyp:bookmarks_core_common',
         '../components/nacl.gyp:nacl_switches',
         '../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
       ],
@@ -83,11 +81,6 @@
           'sources/': [
             ['include', '^common/chrome_paths_mac\\.mm$'],
           ],
-        }],
-      ],
-      'conditions': [
-        ['toolkit_uses_gtk == 1', {
-          'dependencies': ['../build/linux/system.gyp:gtk'],
         }],
       ],
     },

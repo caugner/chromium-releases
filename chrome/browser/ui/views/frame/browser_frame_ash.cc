@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/frame/browser_frame_ash.h"
 
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_state_delegate.h"
 #include "ash/wm/window_util.h"
@@ -97,6 +98,27 @@ void BrowserFrameAsh::OnWindowTargetVisibilityChanged(bool visible) {
   views::NativeWidgetAura::OnWindowTargetVisibilityChanged(visible);
 }
 
+bool BrowserFrameAsh::ShouldSaveWindowPlacement() const {
+  return NULL == GetWidget()->GetNativeWindow()->GetProperty(
+                     ash::kRestoreBoundsOverrideKey);
+}
+
+void BrowserFrameAsh::GetWindowPlacement(
+    gfx::Rect* bounds,
+    ui::WindowShowState* show_state) const {
+  gfx::Rect* override_bounds = GetWidget()->GetNativeWindow()->GetProperty(
+                                   ash::kRestoreBoundsOverrideKey);
+  if (override_bounds && !override_bounds->IsEmpty()) {
+    *bounds = *override_bounds;
+    *show_state = GetWidget()->GetNativeWindow()->GetProperty(
+                      ash::kRestoreShowStateOverrideKey);
+  } else {
+    *bounds = GetWidget()->GetRestoredBounds();
+    *show_state = GetWidget()->GetNativeWindow()->GetProperty(
+                      aura::client::kShowStateKey);
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserFrameAsh, NativeBrowserFrame implementation:
 
@@ -123,7 +145,7 @@ BrowserFrameAsh::~BrowserFrameAsh() {
 // BrowserFrameAsh, private:
 
 void BrowserFrameAsh::SetWindowAutoManaged() {
-  if (browser_view_->browser()->type() != Browser::TYPE_POPUP ||
+  if (!browser_view_->browser()->is_type_popup() ||
       browser_view_->browser()->is_app()) {
     ash::wm::GetWindowState(GetNativeWindow())->
         set_window_position_managed(true);

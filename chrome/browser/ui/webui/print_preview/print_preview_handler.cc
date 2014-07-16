@@ -27,7 +27,6 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/printing/print_error_dialog.h"
 #include "chrome/browser/printing/print_job_manager.h"
@@ -36,7 +35,6 @@
 #include "chrome/browser/printing/printer_manager_dialog.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -50,7 +48,9 @@
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/print_messages.h"
+#include "components/cloud_devices/common/cloud_devices_urls.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -58,10 +58,10 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "printing/backend/print_backend.h"
+#include "printing/backend/print_backend_consts.h"
 #include "printing/metafile.h"
 #include "printing/metafile_impl.h"
 #include "printing/pdf_render_settings.h"
@@ -129,6 +129,8 @@ enum PrintDestinationBuckets {
   CLOUD_DUPLICATE_SELECTED,
   REGISTER_PROMO_SHOWN,
   REGISTER_PROMO_SELECTED,
+  ACCOUNT_CHANGED,
+  ADD_ACCOUNT_SELECTED,
   PRINT_DESTINATION_BUCKET_BOUNDARY
 };
 
@@ -259,7 +261,7 @@ void ReportPrintSettingsStats(const base::DictionaryValue& settings) {
 // Callback that stores a PDF file on disk.
 void PrintToPdfCallback(printing::Metafile* metafile,
                         const base::FilePath& path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   metafile->SaveTo(path);
   // |metafile| must be deleted on the UI thread.
   BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE, metafile);
@@ -267,7 +269,7 @@ void PrintToPdfCallback(printing::Metafile* metafile,
 
 std::string GetDefaultPrinterOnFileThread(
     scoped_refptr<printing::PrintBackend> print_backend) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
   std::string default_printer = print_backend->GetDefaultPrinterName();
   VLOG(1) << "Default Printer: " << default_printer;
@@ -277,7 +279,7 @@ std::string GetDefaultPrinterOnFileThread(
 void EnumeratePrintersOnFileThread(
     scoped_refptr<printing::PrintBackend> print_backend,
     base::ListValue* printers) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
   VLOG(1) << "Enumerate printers start";
   printing::PrinterList printer_list;
@@ -286,19 +288,36 @@ void EnumeratePrintersOnFileThread(
   for (printing::PrinterList::iterator it = printer_list.begin();
        it != printer_list.end(); ++it) {
     base::DictionaryValue* printer_info = new base::DictionaryValue;
+    printers->Append(printer_info);
     std::string printer_name;
+    std::string printer_description;
 #if defined(OS_MACOSX)
     // On Mac, |it->printer_description| specifies the printer name and
     // |it->printer_name| specifies the device name / printer queue name.
     printer_name = it->printer_description;
+    if (!it->options[kDriverNameTagName].empty())
+      printer_description = it->options[kDriverNameTagName];
 #else
     printer_name = it->printer_name;
+    printer_description = it->printer_description;
 #endif
-    printer_info->SetString(printing::kSettingPrinterName, printer_name);
     printer_info->SetString(printing::kSettingDeviceName, it->printer_name);
+    printer_info->SetString(printing::kSettingPrinterDescription,
+                            printer_description);
+    printer_info->SetString(printing::kSettingPrinterName, printer_name);
     VLOG(1) << "Found printer " << printer_name
             << " with device name " << it->printer_name;
-    printers->Append(printer_info);
+
+    base::DictionaryValue* options = new base::DictionaryValue;
+    printer_info->Set(printing::kSettingPrinterOptions, options);
+    for (std::map<std::string, std::string>::iterator opt = it->options.begin();
+         opt != it->options.end();
+         ++opt) {
+      options->SetString(opt->first, opt->second);
+    }
+
+    VLOG(1) << "Found printer " << printer_name << " with device name "
+            << it->printer_name;
   }
   VLOG(1) << "Enumerate printers finished, found " << printers->GetSize()
           << " printers";
@@ -314,7 +333,7 @@ void GetPrinterCapabilitiesOnFileThread(
     const std::string& printer_name,
     const GetPrinterCapabilitiesSuccessCallback& success_cb,
     const GetPrinterCapabilitiesFailureCallback& failure_cb) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DCHECK(!printer_name.empty());
 
   VLOG(1) << "Get printer capabilities start for " << printer_name;
@@ -414,7 +433,7 @@ class PrintPreviewHandler::AccessTokenService
 
     if (service) {
       OAuth2TokenService::ScopeSet oauth_scopes;
-      oauth_scopes.insert(cloud_print::kCloudPrintAuth);
+      oauth_scopes.insert(cloud_devices::kCloudPrintAuthScope);
       scoped_ptr<OAuth2TokenService::Request> request(
           service->StartRequest(account_id, oauth_scopes, this));
       requests_[type].reset(request.release());
@@ -809,7 +828,7 @@ void PrintPreviewHandler::PrintToPdf() {
     PostPrintToPdfTask();
   } else if (!select_file_dialog_.get() ||
              !select_file_dialog_->IsRunning(platform_util::GetTopLevel(
-                 preview_web_contents()->GetView()->GetNativeView()))) {
+                 preview_web_contents()->GetNativeView()))) {
     PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
         web_ui()->GetController());
     // Pre-populating select file dialog with print job title.
@@ -880,13 +899,18 @@ void PrintPreviewHandler::OnSigninComplete() {
     print_preview_ui->OnReloadPrintersList();
 }
 
-void PrintPreviewHandler::HandleSignin(const base::ListValue* /*args*/) {
+void PrintPreviewHandler::HandleSignin(const base::ListValue* args) {
+  bool add_account = false;
+  bool success = args->GetBoolean(0, &add_account);
+  DCHECK(success);
+
   Profile* profile = Profile::FromBrowserContext(
       preview_web_contents()->GetBrowserContext());
   chrome::ScopedTabbedBrowserDisplayer displayer(
       profile, chrome::GetActiveDesktop());
   print_dialog_cloud::CreateCloudPrintSigninTab(
       displayer.browser(),
+      add_account,
       base::Bind(&PrintPreviewHandler::OnSigninComplete,
                  weak_factory_.GetWeakPtr()));
 }
@@ -913,7 +937,7 @@ void PrintPreviewHandler::PrintWithCloudPrintDialog() {
   }
 
   gfx::NativeWindow modal_parent = platform_util::GetTopLevel(
-      preview_web_contents()->GetView()->GetNativeView());
+      preview_web_contents()->GetNativeView());
   print_dialog_cloud::CreatePrintDialogForBytes(
       preview_web_contents()->GetBrowserContext(),
       modal_parent,
@@ -932,15 +956,12 @@ void PrintPreviewHandler::PrintWithCloudPrintDialog() {
 void PrintPreviewHandler::HandleManageCloudPrint(
     const base::ListValue* /*args*/) {
   ++manage_cloud_printers_dialog_request_count_;
-  Profile* profile = Profile::FromBrowserContext(
-      preview_web_contents()->GetBrowserContext());
-  preview_web_contents()->OpenURL(
-      content::OpenURLParams(
-          CloudPrintURL(profile).GetCloudPrintServiceManageURL(),
-          content::Referrer(),
-          NEW_FOREGROUND_TAB,
-          content::PAGE_TRANSITION_LINK,
-          false));
+  preview_web_contents()->OpenURL(content::OpenURLParams(
+      cloud_devices::GetCloudPrintRelativeURL("manage.html"),
+      content::Referrer(),
+      NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_LINK,
+      false));
 }
 
 void PrintPreviewHandler::HandleShowSystemDialog(
@@ -1155,7 +1176,7 @@ void PrintPreviewHandler::SendCloudPrintEnabled() {
       preview_web_contents()->GetBrowserContext());
   PrefService* prefs = profile->GetPrefs();
   if (prefs->GetBoolean(prefs::kCloudPrintSubmitEnabled)) {
-    GURL gcp_url(CloudPrintURL(profile).GetCloudPrintServiceURL());
+    GURL gcp_url(cloud_devices::GetCloudPrintURL());
     base::StringValue gcp_url_value(gcp_url.spec());
     web_ui()->CallJavascriptFunction("setUseCloudPrint", gcp_url_value);
   }
@@ -1212,8 +1233,7 @@ void PrintPreviewHandler::SelectFile(const base::FilePath& default_filename) {
       &file_type_info,
       0,
       base::FilePath::StringType(),
-      platform_util::GetTopLevel(
-          preview_web_contents()->GetView()->GetNativeView()),
+      platform_util::GetTopLevel(preview_web_contents()->GetNativeView()),
       NULL);
 }
 

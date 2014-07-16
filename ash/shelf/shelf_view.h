@@ -19,33 +19,32 @@
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/view.h"
 
+namespace ui {
+class MenuModel;
+}
+
 namespace views {
 class BoundsAnimator;
-class MenuModelAdapter;
 class MenuRunner;
 class ViewModel;
 }
 
 namespace ash {
-
-namespace test {
-class ShelfViewTestAPI;
-}
-
 class ShelfDelegate;
 class ShelfIconObserver;
 class ShelfItemDelegateManager;
 class ShelfModel;
 struct ShelfItem;
-
-namespace internal {
-
 class DragImageView;
 class OverflowBubble;
 class OverflowButton;
 class ShelfButton;
 class ShelfLayoutManager;
 class ShelfTooltipManager;
+
+namespace test {
+class ShelfViewTestAPI;
+}
 
 extern const int SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM;
 extern const int SHELF_ALIGNMENT_UMA_ENUM_VALUE_LEFT;
@@ -235,11 +234,6 @@ class ASH_EXPORT ShelfView : public views::View,
   // Toggles the overflow menu.
   void ToggleOverflowBubble();
 
-  // Update first launcher button's padding. This method adds padding to the
-  // first button to include the leading inset. It needs to be called once on
-  // button creation and every time when shelf alignment is changed.
-  void UpdateFirstButtonPadding();
-
   // Invoked after the fading out animation for item deletion is ended.
   void OnFadeOutAnimationEnded();
 
@@ -248,12 +242,6 @@ class ASH_EXPORT ShelfView : public views::View,
 
   // Updates the visible range of overflow items in |overflow_view|.
   void UpdateOverflowRange(ShelfView* overflow_view);
-
-  // Returns the launcher button size.
-  int GetButtonSize() const;
-
-  // Returns the button spacing.
-  int GetButtonSpacing() const;
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
@@ -305,11 +293,11 @@ class ASH_EXPORT ShelfView : public views::View,
                                       const gfx::Point& point,
                                       ui::MenuSourceType source_type) OVERRIDE;
 
-  // Show either a context or normal click menu of given |menu_model_adapter|.
+  // Show either a context or normal click menu of given |menu_model|.
   // If |context_menu| is set, the displayed menu is a context menu and not
   // a menu listing one or more running applications.
   // The |click_point| is only used for |context_menu|'s.
-  void ShowMenu(scoped_ptr<views::MenuModelAdapter> menu_model_adapter,
+  void ShowMenu(ui::MenuModel* menu_model,
                 views::View* source,
                 const gfx::Point& click_point,
                 bool context_menu,
@@ -380,6 +368,10 @@ class ASH_EXPORT ShelfView : public views::View,
 
   scoped_ptr<views::FocusSearch> focus_search_;
 
+  scoped_ptr<ui::MenuModel> list_menu_model_;
+
+  scoped_ptr<ui::MenuModel> context_menu_model_;
+
   scoped_ptr<views::MenuRunner> launcher_menu_runner_;
 
   ObserverList<ShelfIconObserver> observers_;
@@ -420,7 +412,7 @@ class ASH_EXPORT ShelfView : public views::View,
 
   // The image proxy for drag operations when a drag and drop host exists and
   // the item can be dragged outside the app grid.
-  scoped_ptr<ash::internal::DragImageView> drag_image_;
+  scoped_ptr<ash::DragImageView> drag_image_;
 
   // The cursor offset to the middle of the dragged item.
   gfx::Vector2d drag_image_offset_;
@@ -452,7 +444,6 @@ class ASH_EXPORT ShelfView : public views::View,
   DISALLOW_COPY_AND_ASSIGN(ShelfView);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SHELF_SHELF_VIEW_H_

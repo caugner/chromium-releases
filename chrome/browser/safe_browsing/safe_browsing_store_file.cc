@@ -8,6 +8,7 @@
 #include "base/files/scoped_file.h"
 #include "base/md5.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/sparse_histogram.h"
 
 namespace {
 
@@ -18,7 +19,7 @@ const int32 kFileMagic = 0x600D71FE;
 // Version history:
 // Version 6: aad08754/r2814 by erikkay@google.com on 2008-10-02 (sqlite)
 // Version 7: 6afe28a5/r37435 by shess@chromium.org on 2010-01-28
-// Version 8: ????????/r????? by shess@chromium.org on 2014-03-??
+// Version 8: d3dd0715/r259791 by shess@chromium.org on 2014-03-27
 const int32 kFileVersion = 8;
 
 // ReadAndVerifyHeader() returns this in case of error.
@@ -45,7 +46,7 @@ const int64 kUpdateStorageBytes = 100 * 1024;
 const uint32 kMinShardStride = 1 << 24;
 
 // Strides over the entire SBPrefix space.
-const uint64 kMaxShardStride = GG_LONGLONG(1u) << 32;
+const uint64 kMaxShardStride = 1ULL << 32;
 
 // Maximum SBPrefix value.
 const SBPrefix kMaxSBPrefix = ~0;
@@ -75,6 +76,48 @@ struct ShardHeader {
   uint32 add_prefix_count, sub_prefix_count;
   uint32 add_hash_count, sub_hash_count;
 };
+
+// Enumerate different format-change events for histogramming
+// purposes.  DO NOT CHANGE THE ORDERING OF THESE VALUES.
+enum FormatEventType {
+  // Corruption detected, broken down by file format.
+  FORMAT_EVENT_FILE_CORRUPT,
+  FORMAT_EVENT_SQLITE_CORRUPT,  // Obsolete
+
+  // The type of format found in the file.  The expected case (new
+  // file format) is intentionally not covered.
+  FORMAT_EVENT_FOUND_SQLITE,
+  FORMAT_EVENT_FOUND_UNKNOWN,
+
+  // The number of SQLite-format files deleted should be the same as
+  // FORMAT_EVENT_FOUND_SQLITE.  It can differ if the delete fails,
+  // or if a failure prevents the update from succeeding.
+  FORMAT_EVENT_SQLITE_DELETED,  // Obsolete
+  FORMAT_EVENT_SQLITE_DELETE_FAILED,  // Obsolete
+
+  // Found and deleted (or failed to delete) the ancient "Safe
+  // Browsing" file.
+  FORMAT_EVENT_DELETED_ORIGINAL,
+  FORMAT_EVENT_DELETED_ORIGINAL_FAILED,
+
+  // The checksum did not check out in CheckValidity() or in
+  // FinishUpdate().  This most likely indicates that the machine
+  // crashed before the file was fully sync'ed to disk.
+  FORMAT_EVENT_VALIDITY_CHECKSUM_FAILURE,
+  FORMAT_EVENT_UPDATE_CHECKSUM_FAILURE,
+
+  // The header checksum was incorrect in ReadAndVerifyHeader().  Likely
+  // indicates that the system crashed while writing an update.
+  FORMAT_EVENT_HEADER_CHECKSUM_FAILURE,
+
+  // Memory space for histograms is determined by the max.  ALWAYS
+  // ADD NEW VALUES BEFORE THIS ONE.
+  FORMAT_EVENT_MAX
+};
+
+void RecordFormatEvent(FormatEventType event_type) {
+  UMA_HISTOGRAM_ENUMERATION("SB2.FormatEvent", event_type, FORMAT_EVENT_MAX);
+}
 
 // Rewind the file.  Using fseek(2) because rewind(3) errors are
 // weird.
@@ -169,17 +212,9 @@ void DeleteChunksFromSet(const base::hash_set<int32>& deleted,
   }
 }
 
-// base::MD5Final() modifies |context| in generating |digest|.  This wrapper
-// generates an intermediate digest without modifying the context.
-void MD5IntermediateDigest(base::MD5Digest* digest, base::MD5Context* context) {
-  base::MD5Context temp_context;
-  memcpy(&temp_context, context, sizeof(temp_context));
-  base::MD5Final(digest, &temp_context);
-}
-
 bool ReadAndVerifyChecksum(FILE* fp, base::MD5Context* context) {
   base::MD5Digest calculated_digest;
-  MD5IntermediateDigest(&calculated_digest, context);
+  base::MD5IntermediateFinal(&calculated_digest, context);
 
   base::MD5Digest file_digest;
   if (!ReadItem(&file_digest, fp, context))
@@ -241,6 +276,9 @@ int ReadAndVerifyHeader(const base::FilePath& filename,
   size_t add_chunks_count = 0;
   size_t sub_chunks_count = 0;
 
+  // Track version read to inform removal of support for older versions.
+  UMA_HISTOGRAM_SPARSE_SLOWLY("SB2.StoreVersionRead", header->v8.version);
+
   if (header->v8.version == 7) {
     version = 7;
 
@@ -271,8 +309,10 @@ int ReadAndVerifyHeader(const base::FilePath& filename,
   }
 
   // v8 includes a checksum to validate the header.
-  if (version > 7 && !ReadAndVerifyChecksum(fp, context))
+  if (version > 7 && !ReadAndVerifyChecksum(fp, context)) {
+    RecordFormatEvent(FORMAT_EVENT_HEADER_CHECKSUM_FAILURE);
     return kInvalidVersion;
+  }
 
   return version;
 }
@@ -304,7 +344,7 @@ bool WriteHeader(uint32 out_stride,
 
   // Write out the header digest.
   base::MD5Digest header_digest;
-  MD5IntermediateDigest(&header_digest, context);
+  base::MD5IntermediateFinal(&header_digest, context);
   if (!WriteItem(header_digest, fp, context))
     return false;
 
@@ -394,12 +434,6 @@ bool prefix_bounder(SBPrefix val, const T& elt) {
 // aggregate operations on same.
 class StateInternal {
  public:
-  explicit StateInternal(const std::vector<SBAddFullHash>& pending_adds)
-    : add_full_hashes_(pending_adds.begin(), pending_adds.end()) {
-  }
-
-  StateInternal() {}
-
   // Append indicated amount of data from |fp|.
   bool AppendData(size_t add_prefix_count, size_t sub_prefix_count,
                   size_t add_hash_count, size_t sub_hash_count,
@@ -597,11 +631,6 @@ bool ReadDbStateHelper(const base::FilePath& filename,
 }  // namespace
 
 // static
-void SafeBrowsingStoreFile::RecordFormatEvent(FormatEventType event_type) {
-  UMA_HISTOGRAM_ENUMERATION("SB2.FormatEvent", event_type, FORMAT_EVENT_MAX);
-}
-
-// static
 void SafeBrowsingStoreFile::CheckForOriginalAndDelete(
     const base::FilePath& current_filename) {
   const base::FilePath original_filename(
@@ -736,9 +765,8 @@ bool SafeBrowsingStoreFile::GetAddFullHashes(
 }
 
 bool SafeBrowsingStoreFile::WriteAddHash(int32 chunk_id,
-                                         base::Time receive_time,
                                          const SBFullHash& full_hash) {
-  add_hashes_.push_back(SBAddFullHash(chunk_id, receive_time, full_hash));
+  add_hashes_.push_back(SBAddFullHash(chunk_id, full_hash));
   return true;
 }
 
@@ -872,7 +900,6 @@ bool SafeBrowsingStoreFile::FinishChunk() {
 }
 
 bool SafeBrowsingStoreFile::DoUpdate(
-    const std::vector<SBAddFullHash>& pending_adds,
     safe_browsing::PrefixSetBuilder* builder,
     std::vector<SBAddFullHash>* add_full_hashes_result) {
   DCHECK(file_.get() || empty_);
@@ -896,7 +923,7 @@ bool SafeBrowsingStoreFile::DoUpdate(
                        std::max(static_cast<int>(update_size / 1024), 1));
 
   // Chunk updates to integrate.
-  StateInternal new_state(pending_adds);
+  StateInternal new_state;
 
   // Read update chunks.
   for (int i = 0; i < chunks_written_; ++i) {
@@ -1098,8 +1125,10 @@ bool SafeBrowsingStoreFile::DoUpdate(
 
   // Verify the overall checksum.
   if (!empty_) {
-    if (!ReadAndVerifyChecksum(file_.get(), &in_context))
+    if (!ReadAndVerifyChecksum(file_.get(), &in_context)) {
+      RecordFormatEvent(FORMAT_EVENT_UPDATE_CHECKSUM_FAILURE);
       return OnCorruptDatabase();
+    }
 
     // TODO(shess): Verify EOF?
 
@@ -1136,13 +1165,12 @@ bool SafeBrowsingStoreFile::DoUpdate(
 }
 
 bool SafeBrowsingStoreFile::FinishUpdate(
-    const std::vector<SBAddFullHash>& pending_adds,
     safe_browsing::PrefixSetBuilder* builder,
     std::vector<SBAddFullHash>* add_full_hashes_result) {
   DCHECK(builder);
   DCHECK(add_full_hashes_result);
 
-  if (!DoUpdate(pending_adds, builder, add_full_hashes_result)) {
+  if (!DoUpdate(builder, add_full_hashes_result)) {
     CancelUpdate();
     return false;
   }

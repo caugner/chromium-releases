@@ -19,6 +19,7 @@
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -26,13 +27,13 @@
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_icon_set.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "grit/chromium_strings.h"
@@ -204,12 +205,13 @@ ExtensionDisabledGlobalError::ExtensionDisabledGlobalError(
     icon_ = gfx::Image(
         gfx::ImageSkiaOperations::CreateResizedImage(
             extension_->is_app() ?
-                extensions::IconsInfo::GetDefaultAppIcon() :
-                extensions::IconsInfo::GetDefaultExtensionIcon(),
+                extensions::util::GetDefaultAppIcon() :
+                extensions::util::GetDefaultExtensionIcon(),
             skia::ImageOperations::RESIZE_BEST,
             gfx::Size(kIconSize, kIconSize)));
   }
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                  content::Source<Profile>(service->profile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_REMOVED,
                  content::Source<Profile>(service->profile()));
@@ -316,7 +318,7 @@ void ExtensionDisabledGlobalError::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   // The error is invalidated if the extension has been loaded or removed.
-  DCHECK(type == chrome::NOTIFICATION_EXTENSION_LOADED ||
+  DCHECK(type == chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED ||
          type == chrome::NOTIFICATION_EXTENSION_REMOVED);
   const Extension* extension = content::Details<const Extension>(details).ptr();
   if (extension != extension_)
@@ -324,7 +326,7 @@ void ExtensionDisabledGlobalError::Observe(
   GlobalErrorServiceFactory::GetForProfile(service_->profile())->
       RemoveGlobalError(this);
 
-  if (type == chrome::NOTIFICATION_EXTENSION_LOADED)
+  if (type == chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED)
     user_response_ = REENABLE;
   else if (type == chrome::NOTIFICATION_EXTENSION_REMOVED)
     user_response_ = UNINSTALL;

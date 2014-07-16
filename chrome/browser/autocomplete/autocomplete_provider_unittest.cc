@@ -96,7 +96,7 @@ void TestProvider::Start(const AutocompleteInput& input,
       3, 1, AutocompleteMatchType::SEARCH_SUGGEST,
       TemplateURLRef::SearchTermsArgs(base::ASCIIToUTF16("query")));
 
-  if (input.matches_requested() == AutocompleteInput::ALL_MATCHES) {
+  if (input.want_asynchronous_matches()) {
     done_ = false;
     base::MessageLoop::current()->PostTask(
         FROM_HERE, base::Bind(&TestProvider::Run, this));
@@ -222,7 +222,7 @@ void AutocompleteProviderTest::RegisterTemplateURL(
   TemplateURLService* turl_model =
       TemplateURLServiceFactory::GetForProfile(&profile_);
   turl_model->Add(default_t_url);
-  turl_model->SetDefaultSearchProvider(default_t_url);
+  turl_model->SetUserSelectedDefaultSearchProvider(default_t_url);
   turl_model->Load();
   TemplateURLID default_provider_id = default_t_url->id();
   ASSERT_NE(0, default_provider_id);
@@ -298,15 +298,16 @@ void AutocompleteProviderTest::
   TemplateURLService* turl_model =
       TemplateURLServiceFactory::GetForProfile(&profile_);
   turl_model->Add(default_t_url);
-  turl_model->SetDefaultSearchProvider(default_t_url);
+  turl_model->SetUserSelectedDefaultSearchProvider(default_t_url);
   TemplateURLID default_provider_id = default_t_url->id();
   ASSERT_NE(0, default_provider_id);
 
   // Create another TemplateURL for KeywordProvider.
-  data.short_name = base::ASCIIToUTF16("k");
-  data.SetKeyword(base::ASCIIToUTF16("k"));
-  data.SetURL("http://keyword/{searchTerms}");
-  TemplateURL* keyword_t_url = new TemplateURL(&profile_, data);
+  TemplateURLData data2;
+  data2.short_name = base::ASCIIToUTF16("k");
+  data2.SetKeyword(base::ASCIIToUTF16("k"));
+  data2.SetURL("http://keyword/{searchTerms}");
+  TemplateURL* keyword_t_url = new TemplateURL(&profile_, data2);
   turl_model->Add(keyword_t_url);
   ASSERT_NE(0, keyword_t_url->id());
 
@@ -403,8 +404,7 @@ void AutocompleteProviderTest::RunQuery(const base::string16 query) {
   result_.Reset();
   controller_->Start(AutocompleteInput(
       query, base::string16::npos, base::string16(), GURL(),
-      AutocompleteInput::INVALID_SPEC, true, false, true,
-      AutocompleteInput::ALL_MATCHES));
+      AutocompleteInput::INVALID_SPEC, true, false, true, true));
 
   if (!controller_->done())
     // The message loop will terminate when all autocomplete input has been
@@ -423,7 +423,7 @@ void AutocompleteProviderTest::RunExactKeymatchTest(
   controller_->Start(AutocompleteInput(
       base::ASCIIToUTF16("k test"), base::string16::npos, base::string16(),
       GURL(), AutocompleteInput::INVALID_SPEC, true, false,
-      allow_exact_keyword_match, AutocompleteInput::SYNCHRONOUS_MATCHES));
+      allow_exact_keyword_match, false));
   EXPECT_TRUE(controller_->done());
   EXPECT_EQ(AutocompleteProvider::TYPE_SEARCH,
       controller_->result().default_match()->provider->type());

@@ -28,6 +28,8 @@
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/input_event.h"
 #include "ppapi/cpp/rect.h"
+#include "ppapi/cpp/var_array_buffer.h"
+#include "ppapi/cpp/var_dictionary.h"
 #include "remoting/base/constants.h"
 #include "remoting/base/util.h"
 #include "remoting/client/chromoting_client.h"
@@ -45,6 +47,7 @@
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/libjingle_transport_factory.h"
 #include "third_party/libjingle/source/talk/base/helpers.h"
+#include "third_party/libjingle/source/talk/base/ssladapter.h"
 #include "url/gurl.h"
 
 // Windows defines 'PostMessage', so we have to undef it.
@@ -219,7 +222,12 @@ ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
   char random_seed[kRandomSeedSize];
   crypto::RandBytes(random_seed, sizeof(random_seed));
   talk_base::InitRandom(random_seed, sizeof(random_seed));
-#endif  // defined(USE_OPENSSL)
+#else
+  // Libjingle's SSL implementation is not really used, but it has to be
+  // initialized for NSS builds to make sure that RNG is initialized in NSS,
+  // because libjingle uses it.
+  talk_base::InitializeSSL();
+#endif  // !defined(USE_OPENSSL)
 
   // Send hello message.
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
@@ -274,13 +282,6 @@ bool ChromotingInstance::Init(uint32_t argc,
     LOG(ERROR) << "Not an app or extension";
     return false;
   }
-
-  // Enable support for SSL server sockets, which must be done as early as
-  // possible, preferably before any NSS SSL sockets (client or server) have
-  // been created.
-  // It's possible that the hosting process has already made use of SSL, in
-  // which case, there may be a slight race.
-  net::EnableSSLServerSockets();
 
   // Start all the threads.
   context_.Start();
@@ -683,7 +684,7 @@ void ChromotingInstance::ConnectWithConfig(const ClientConfig& config,
   scoped_ptr<protocol::TransportFactory> transport_factory(
       new protocol::LibjingleTransportFactory(
           signal_strategy_.get(), port_allocator.Pass(),
-          NetworkSettings(NetworkSettings::NAT_TRAVERSAL_ENABLED)));
+          NetworkSettings(NetworkSettings::NAT_TRAVERSAL_FULL)));
 
   // Kick off the connection.
   client_->Start(signal_strategy_.get(), transport_factory.Pass());

@@ -5,12 +5,15 @@
 #ifndef CHROME_BROWSER_CHROMEOS_FILE_MANAGER_VOLUME_MANAGER_H_
 #define CHROME_BROWSER_CHROMEOS_FILE_MANAGER_VOLUME_MANAGER_H_
 
+#include <map>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
@@ -20,6 +23,7 @@
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/storage_monitor/removable_storage_observer.h"
 
 class Profile;
 
@@ -30,10 +34,6 @@ class PowerManagerClient;
 namespace content {
 class BrowserContext;
 }  // namespace content
-
-namespace drive {
-class DriveIntegrationService;
-}  // namespace drive
 
 namespace file_manager {
 
@@ -49,12 +49,16 @@ enum VolumeType {
   VOLUME_TYPE_MOUNTED_ARCHIVE_FILE,
   VOLUME_TYPE_CLOUD_DEVICE,
   VOLUME_TYPE_PROVIDED,  // File system provided by the FileSystemProvider API.
+  VOLUME_TYPE_MTP,
   VOLUME_TYPE_TESTING
 };
 
 struct VolumeInfo {
   VolumeInfo();
   ~VolumeInfo();
+
+  // The ID for provided file system. If other type, then equal to zero.
+  int file_system_id;
 
   // The ID of the volume.
   std::string volume_id;
@@ -104,7 +108,8 @@ struct VolumeInfo {
 class VolumeManager : public KeyedService,
                       public drive::DriveIntegrationServiceObserver,
                       public chromeos::disks::DiskMountManager::Observer,
-                      public chromeos::file_system_provider::Observer {
+                      public chromeos::file_system_provider::Observer,
+                      public storage_monitor::RemovableStorageObserver {
  public:
   VolumeManager(
       Profile* profile,
@@ -117,7 +122,7 @@ class VolumeManager : public KeyedService,
   // Returns the instance corresponding to the |context|.
   static VolumeManager* Get(content::BrowserContext* context);
 
-  // Intializes this instance.
+  // Initializes this instance.
   void Initialize();
 
   // Disposes this instance.
@@ -169,17 +174,26 @@ class VolumeManager : public KeyedService,
       const std::string& device_path) OVERRIDE;
 
   // chromeos::file_system_provider::Observer overrides.
-  virtual void OnProvidedFileSystemRegistered(
-      const chromeos::file_system_provider::ProvidedFileSystem& file_system)
-      OVERRIDE;
-  virtual void OnProvidedFileSystemUnregistered(
-      const chromeos::file_system_provider::ProvidedFileSystem& file_system)
-      OVERRIDE;
+  virtual void OnProvidedFileSystemMount(
+      const chromeos::file_system_provider::ProvidedFileSystemInfo&
+          file_system_info,
+      base::File::Error error) OVERRIDE;
+  virtual void OnProvidedFileSystemUnmount(
+      const chromeos::file_system_provider::ProvidedFileSystemInfo&
+          file_system_info,
+      base::File::Error error) OVERRIDE;
 
   // Called on change to kExternalStorageDisabled pref.
   void OnExternalStorageDisabledChanged();
 
+  // RemovableStorageObserver overrides.
+  virtual void OnRemovableStorageAttached(
+      const storage_monitor::StorageInfo& info) OVERRIDE;
+  virtual void OnRemovableStorageDetached(
+      const storage_monitor::StorageInfo& info) OVERRIDE;
+
  private:
+  void OnStorageMonitorInitialized();
   void OnPrivetVolumesAvailable(
       const local_discovery::PrivetVolumeLister::VolumeList& volumes);
   void DoMountEvent(chromeos::MountError error_code,
@@ -199,6 +213,9 @@ class VolumeManager : public KeyedService,
       file_system_provider_service_;  // Not owned by this class.
   std::map<std::string, VolumeInfo> mounted_volumes_;
 
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<VolumeManager> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(VolumeManager);
 };
 

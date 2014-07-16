@@ -37,8 +37,6 @@ void* GetCdmHost(int host_interface_version, void* user_data);
 // Content Decryption Module (CDM).
 class CdmAdapter : public pp::Instance,
                    public pp::ContentDecryptor_Private,
-                   public cdm::Host_1,
-                   public cdm::Host_2,
                    public cdm::Host_4 {
  public:
   CdmAdapter(PP_Instance instance, pp::Module* module);
@@ -83,29 +81,6 @@ class CdmAdapter : public pp::Instance,
   virtual cdm::Buffer* Allocate(uint32_t capacity) OVERRIDE;
   virtual void SetTimer(int64_t delay_ms, void* context) OVERRIDE;
   virtual double GetCurrentWallTimeInSeconds() OVERRIDE;
-  virtual void SendKeyMessage(
-      const char* session_id, uint32_t session_id_length,
-      const char* message, uint32_t message_length,
-      const char* default_url, uint32_t default_url_length) OVERRIDE;
-  virtual void SendKeyError(const char* session_id,
-                            uint32_t session_id_length,
-                            cdm::MediaKeyError error_code,
-                            uint32_t system_code) OVERRIDE;
-  virtual void GetPrivateData(int32_t* instance,
-                              GetPrivateInterface* get_interface) OVERRIDE;
-
-  // cdm::Host_2 implementation.
-  virtual void SendPlatformChallenge(
-      const char* service_id, uint32_t service_id_length,
-      const char* challenge, uint32_t challenge_length) OVERRIDE;
-  virtual void EnableOutputProtection(
-      uint32_t desired_protection_mask) OVERRIDE;
-  virtual void QueryOutputProtectionStatus() OVERRIDE;
-  virtual void OnDeferredInitializationDone(
-      cdm::StreamType stream_type,
-      cdm::Status decoder_status) OVERRIDE;
-
-  // cdm::Host_4 implementation.
   virtual void OnSessionCreated(uint32_t session_id,
                                 const char* web_session_id,
                                 uint32_t web_session_id_length) OVERRIDE;
@@ -119,9 +94,26 @@ class CdmAdapter : public pp::Instance,
   virtual void OnSessionError(uint32_t session_id,
                               cdm::MediaKeyError error_code,
                               uint32_t system_code) OVERRIDE;
+  virtual void SendPlatformChallenge(
+      const char* service_id, uint32_t service_id_length,
+      const char* challenge, uint32_t challenge_length) OVERRIDE;
+  virtual void EnableOutputProtection(
+      uint32_t desired_protection_mask) OVERRIDE;
+  virtual void QueryOutputProtectionStatus() OVERRIDE;
+  virtual void OnDeferredInitializationDone(
+      cdm::StreamType stream_type,
+      cdm::Status decoder_status) OVERRIDE;
   virtual cdm::FileIO* CreateFileIO(cdm::FileIOClient* client) OVERRIDE;
 
  private:
+  // These are reported to UMA server. Do not change the existing values!
+  enum OutputProtectionStatus {
+    OUTPUT_PROTECTION_QUERIED = 0,
+    OUTPUT_PROTECTION_NO_EXTERNAL_LINK = 1,
+    OUTPUT_PROTECTION_ALL_EXTERNAL_LINKS_PROTECTED = 2,
+    OUTPUT_PROTECTION_MAX = 3
+  };
+
   typedef linked_ptr<DecryptedBlockImpl> LinkedDecryptedBlock;
   typedef linked_ptr<VideoFrameImpl> LinkedVideoFrame;
   typedef linked_ptr<AudioFramesImpl> LinkedAudioFrames;
@@ -181,6 +173,10 @@ class CdmAdapter : public pp::Instance,
 #endif  // !defined(NDEBUG)
 
 #if defined(OS_CHROMEOS)
+  void ReportOutputProtectionUMA(OutputProtectionStatus status);
+  void ReportOutputProtectionQuery();
+  void ReportOutputProtectionQueryResult();
+
   void SendPlatformChallengeDone(int32_t result);
   void EnableProtectionDone(int32_t result);
   void QueryOutputProtectionStatusDone(int32_t result);
@@ -200,6 +196,11 @@ class CdmAdapter : public pp::Instance,
   uint32_t output_link_mask_;
   uint32_t output_protection_mask_;
   bool query_output_protection_in_progress_;
+
+  // Tracks whether an output protection query and a positive query result (no
+  // unprotected external link) have been reported to UMA.
+  bool uma_for_output_protection_query_reported_;
+  bool uma_for_output_protection_positive_result_reported_;
 #endif
 
   PpbBufferAllocator allocator_;

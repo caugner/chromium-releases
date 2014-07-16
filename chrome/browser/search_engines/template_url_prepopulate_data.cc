@@ -80,7 +80,7 @@ const PrepopulatedEngine* engines_BA[] =
 
 // Belgium
 const PrepopulatedEngine* engines_BE[] =
-    { &google, &bing_nl_BE, &bing_fr_BE, &yahoo_be, &yahoo_fr_be, };
+    { &google, &bing_nl_BE, &bing_fr_BE, &yahoo, &yahoo_fr, };
 
 // Bulgaria
 const PrepopulatedEngine* engines_BG[] =
@@ -128,7 +128,7 @@ const PrepopulatedEngine* engines_CL[] =
 
 // China
 const PrepopulatedEngine* engines_CN[] =
-    { &google, &baidu, &sogou, &soso, };
+    { &google, &baidu, &sogou, };
 
 // Colombia
 const PrepopulatedEngine* engines_CO[] =
@@ -268,7 +268,7 @@ const PrepopulatedEngine* engines_KW[] =
 
 // South Korea
 const PrepopulatedEngine* engines_KR[] =
-    { &google, &naver, &daum, &nate, };
+    { &google, &naver, &daum, };
 
 // Kazakhstan
 const PrepopulatedEngine* engines_KZ[] =
@@ -476,7 +476,7 @@ const PrepopulatedEngine* engines_YE[] =
 
 // South Africa
 const PrepopulatedEngine* engines_ZA[] =
-    { &google, &bing, &yahoo_za, };
+    { &google, &bing, &yahoo, };
 
 // Zimbabwe
 const PrepopulatedEngine* engines_ZW[] =
@@ -494,17 +494,16 @@ const PrepopulatedEngine* kAllEngines[] = {
   &bing_fr_FR,   &bing_it_IT,   &bing_ja_JP,   &bing_lv_LV,   &bing_nb_NO,
   &bing_nl_BE,   &bing_pl_PL,   &bing_pt_BR,   &bing_pt_PT,   &bing_ru_RU,
   &bing_sv_SE,   &bing_tr_TR,   &bing_zh_HK,   &bing_zh_TW,   &daum,
-  &google,       &kvasir,       &mail_ru,      &najdi,        &nate,
-  &naver,        &onet,         &seznam,       &sogou,        &soso,
-  &vinden,       &virgilio,     &yahoo,        &yahoo_ar,     &yahoo_at,
-  &yahoo_au,     &yahoo_be,     &yahoo_br,     &yahoo_ca,     &yahoo_ch,
-  &yahoo_cl,     &yahoo_co,     &yahoo_de,     &yahoo_dk,     &yahoo_es,
-  &yahoo_fi,     &yahoo_fr,     &yahoo_fr_be,  &yahoo_gr,     &yahoo_hk,
-  &yahoo_id,     &yahoo_in,     &yahoo_jp,     &yahoo_maktoob, &yahoo_mx,
-  &yahoo_my,     &yahoo_nl,     &yahoo_nz,     &yahoo_pe,     &yahoo_ph,
-  &yahoo_qc,     &yahoo_ro,     &yahoo_ru,     &yahoo_se,     &yahoo_sg,
-  &yahoo_th,     &yahoo_tr,     &yahoo_tw,     &yahoo_uk,     &yahoo_ve,
-  &yahoo_vn,     &yahoo_za,     &yandex_ru,    &yandex_tr,    &yandex_ua,
+  &google,       &kvasir,       &mail_ru,      &najdi,        &naver,
+  &onet,         &seznam,       &sogou,        &vinden,       &virgilio,
+  &yahoo,        &yahoo_ar,     &yahoo_at,     &yahoo_au,     &yahoo_br,
+  &yahoo_ca,     &yahoo_ch,     &yahoo_cl,     &yahoo_co,     &yahoo_de,
+  &yahoo_dk,     &yahoo_es,     &yahoo_fi,     &yahoo_fr,     &yahoo_gr,
+  &yahoo_hk,     &yahoo_id,     &yahoo_in,     &yahoo_jp,     &yahoo_maktoob,
+  &yahoo_mx,     &yahoo_my,     &yahoo_nl,     &yahoo_nz,     &yahoo_pe,
+  &yahoo_ph,     &yahoo_qc,     &yahoo_ro,     &yahoo_ru,     &yahoo_se,
+  &yahoo_sg,     &yahoo_th,     &yahoo_tr,     &yahoo_tw,     &yahoo_uk,
+  &yahoo_ve,     &yahoo_vn,     &yandex_ru,    &yandex_tr,    &yandex_ua,
 
   // UMA-only engines:
   &atlas_cz,     &atlas_sk,     &avg,          &babylon,      &conduit,
@@ -1058,8 +1057,7 @@ void GetPrepopulationSetFromCountryID(PrefService* prefs,
   }
 }
 
-TemplateURL* MakePrepopulatedTemplateURL(
-    Profile* profile,
+scoped_ptr<TemplateURLData> MakePrepopulatedTemplateURLData(
     const base::string16& name,
     const base::string16& keyword,
     const base::StringPiece& search_url,
@@ -1076,44 +1074,43 @@ TemplateURL* MakePrepopulatedTemplateURL(
     const base::ListValue& alternate_urls,
     const base::StringPiece& search_terms_replacement_key,
     int id) {
+  scoped_ptr<TemplateURLData> data(new TemplateURLData);
 
-  TemplateURLData data;
-
-  data.short_name = name;
-  data.SetKeyword(keyword);
-  data.SetURL(search_url.as_string());
-  data.suggestions_url = suggest_url.as_string();
-  data.instant_url = instant_url.as_string();
-  data.image_url = image_url.as_string();
-  data.new_tab_url = new_tab_url.as_string();
-  data.search_url_post_params = search_url_post_params.as_string();
-  data.suggestions_url_post_params = suggest_url_post_params.as_string();
-  data.instant_url_post_params = instant_url_post_params.as_string();
-  data.image_url_post_params = image_url_post_params.as_string();
-  data.favicon_url = GURL(favicon_url.as_string());
-  data.show_in_default_list = true;
-  data.safe_for_autoreplace = true;
-  data.input_encodings.push_back(encoding.as_string());
-  data.date_created = base::Time();
-  data.last_modified = base::Time();
-  data.prepopulate_id = id;
+  data->short_name = name;
+  data->SetKeyword(keyword);
+  data->SetURL(search_url.as_string());
+  data->suggestions_url = suggest_url.as_string();
+  data->instant_url = instant_url.as_string();
+  data->image_url = image_url.as_string();
+  data->new_tab_url = new_tab_url.as_string();
+  data->search_url_post_params = search_url_post_params.as_string();
+  data->suggestions_url_post_params = suggest_url_post_params.as_string();
+  data->instant_url_post_params = instant_url_post_params.as_string();
+  data->image_url_post_params = image_url_post_params.as_string();
+  data->favicon_url = GURL(favicon_url.as_string());
+  data->show_in_default_list = true;
+  data->safe_for_autoreplace = true;
+  data->input_encodings.push_back(encoding.as_string());
+  data->date_created = base::Time();
+  data->last_modified = base::Time();
+  data->prepopulate_id = id;
   for (size_t i = 0; i < alternate_urls.GetSize(); ++i) {
     std::string alternate_url;
     alternate_urls.GetString(i, &alternate_url);
     DCHECK(!alternate_url.empty());
-    data.alternate_urls.push_back(alternate_url);
+    data->alternate_urls.push_back(alternate_url);
   }
-  data.search_terms_replacement_key = search_terms_replacement_key.as_string();
-  return new TemplateURL(profile, data);
+  data->search_terms_replacement_key = search_terms_replacement_key.as_string();
+  return data.Pass();
 }
 
-ScopedVector<TemplateURL> GetPrepopulatedTemplateFromPrefs(Profile* profile) {
-  ScopedVector<TemplateURL> t_urls;
-  if (!profile)
+ScopedVector<TemplateURLData> GetPrepopulatedTemplateURLData(
+    PrefService* prefs) {
+  ScopedVector<TemplateURLData> t_urls;
+  if (!prefs)
     return t_urls.Pass();
 
-  const base::ListValue* list =
-      profile->GetPrefs()->GetList(prefs::kSearchProviderOverrides);
+  const base::ListValue* list = prefs->GetList(prefs::kSearchProviderOverrides);
   if (!list)
     return t_urls.Pass();
 
@@ -1158,35 +1155,42 @@ ScopedVector<TemplateURL> GetPrepopulatedTemplateFromPrefs(Profile* profile) {
       engine->GetList("alternate_urls", &alternate_urls);
       engine->GetString("search_terms_replacement_key",
           &search_terms_replacement_key);
-      t_urls.push_back(MakePrepopulatedTemplateURL(profile, name, keyword,
+      t_urls.push_back(MakePrepopulatedTemplateURLData(name, keyword,
           search_url, suggest_url, instant_url, image_url, new_tab_url,
           search_url_post_params, suggest_url_post_params,
           instant_url_post_params, image_url_post_params,
           favicon_url, encoding, *alternate_urls, search_terms_replacement_key,
-          id));
+          id).release());
     }
   }
   return t_urls.Pass();
 }
 
-// The caller owns the returned TemplateURL.
-TemplateURL* MakePrepopulatedTemplateURLFromPrepopulateEngine(
-    Profile* profile,
-    const PrepopulatedEngine& engine) {
-
+scoped_ptr<TemplateURLData>
+    MakePrepopulatedTemplateURLDataFromPrepopulateEngine(
+        const PrepopulatedEngine& engine) {
   base::ListValue alternate_urls;
   if (engine.alternate_urls) {
     for (size_t i = 0; i < engine.alternate_urls_size; ++i)
       alternate_urls.AppendString(std::string(engine.alternate_urls[i]));
   }
 
-  return MakePrepopulatedTemplateURL(profile, base::WideToUTF16(engine.name),
-      base::WideToUTF16(engine.keyword), engine.search_url, engine.suggest_url,
-      engine.instant_url, engine.image_url, engine.new_tab_url,
-      engine.search_url_post_params, engine.suggest_url_post_params,
-      engine.instant_url_post_params, engine.image_url_post_params,
-      engine.favicon_url, engine.encoding, alternate_urls,
-      engine.search_terms_replacement_key, engine.id);
+  return MakePrepopulatedTemplateURLData(base::WideToUTF16(engine.name),
+                                         base::WideToUTF16(engine.keyword),
+                                         engine.search_url,
+                                         engine.suggest_url,
+                                         engine.instant_url,
+                                         engine.image_url,
+                                         engine.new_tab_url,
+                                         engine.search_url_post_params,
+                                         engine.suggest_url_post_params,
+                                         engine.instant_url_post_params,
+                                         engine.image_url_post_params,
+                                         engine.favicon_url,
+                                         engine.encoding,
+                                         alternate_urls,
+                                         engine.search_terms_replacement_key,
+                                         engine.id);
 }
 
 bool SameDomain(const GURL& given_url, const GURL& prepopulated_url) {
@@ -1238,48 +1242,46 @@ int GetDataVersion(PrefService* prefs) {
       kCurrentDataVersion;
 }
 
-ScopedVector<TemplateURL> GetPrepopulatedEngines(
-    Profile* profile, size_t* default_search_provider_index) {
+ScopedVector<TemplateURLData> GetPrepopulatedEngines(
+    PrefService* prefs,
+    size_t* default_search_provider_index) {
   // If there is a set of search engines in the preferences file, it overrides
   // the built-in set.
   *default_search_provider_index = 0;
-  ScopedVector<TemplateURL> t_urls = GetPrepopulatedTemplateFromPrefs(profile);
+  ScopedVector<TemplateURLData> t_urls = GetPrepopulatedTemplateURLData(prefs);
   if (!t_urls.empty())
     return t_urls.Pass();
 
   const PrepopulatedEngine** engines;
   size_t num_engines;
-  GetPrepopulationSetFromCountryID(profile ? profile->GetPrefs() : NULL,
-                                   &engines, &num_engines);
+  GetPrepopulationSetFromCountryID(prefs, &engines, &num_engines);
   for (size_t i = 0; i != num_engines; ++i) {
-    t_urls.push_back(
-        MakePrepopulatedTemplateURLFromPrepopulateEngine(profile, *engines[i]));
+    t_urls.push_back(MakePrepopulatedTemplateURLDataFromPrepopulateEngine(
+                         *engines[i]).release());
   }
   return t_urls.Pass();
 }
 
-void ClearPrepopulatedEnginesInPrefs(Profile* profile) {
-  if (!profile)
+void ClearPrepopulatedEnginesInPrefs(PrefService* prefs) {
+  if (!prefs)
     return;
 
-  PrefService* prefs = profile->GetPrefs();
-  DCHECK(prefs);
   prefs->ClearPref(prefs::kSearchProviderOverrides);
   prefs->ClearPref(prefs::kSearchProviderOverridesVersion);
 }
 
-TemplateURL* GetPrepopulatedDefaultSearch(Profile* profile) {
-  TemplateURL* default_search_provider = NULL;
+scoped_ptr<TemplateURLData> GetPrepopulatedDefaultSearch(PrefService* prefs) {
+  scoped_ptr<TemplateURLData> default_search_provider;
   size_t default_search_index;
   // This could be more efficient.  We are loading all the URLs to only keep
   // the first one.
-  ScopedVector<TemplateURL> loaded_urls = GetPrepopulatedEngines(
-      profile, &default_search_index);
+  ScopedVector<TemplateURLData> loaded_urls =
+      GetPrepopulatedEngines(prefs, &default_search_index);
   if (default_search_index < loaded_urls.size()) {
-    default_search_provider = loaded_urls[default_search_index];
+    default_search_provider.reset(loaded_urls[default_search_index]);
     loaded_urls.weak_erase(loaded_urls.begin() + default_search_index);
   }
-  return default_search_provider;
+  return default_search_provider.Pass();
 }
 
 SearchEngineType GetEngineType(const TemplateURL& url) {

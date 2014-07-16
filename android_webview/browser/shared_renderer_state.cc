@@ -8,19 +8,11 @@
 #include "base/bind.h"
 #include "base/location.h"
 
-using base::AutoLock;
-
 namespace android_webview {
 
-DrawGLInput::DrawGLInput() : frame_id(0) {}
+DrawGLInput::DrawGLInput() : frame_id(0), width(0), height(0) {}
 
 DrawGLResult::DrawGLResult() : frame_id(0), clip_contains_visible_rect(false) {}
-
-namespace internal {
-
-BothThreads::BothThreads() : compositor(NULL) {}
-
-}  // namespace internal
 
 SharedRendererState::SharedRendererState(
     scoped_refptr<base::MessageLoopProxy> ui_loop,
@@ -28,7 +20,11 @@ SharedRendererState::SharedRendererState(
     : ui_loop_(ui_loop),
       client_on_ui_(client),
       weak_factory_on_ui_thread_(this),
-      ui_thread_weak_ptr_(weak_factory_on_ui_thread_.GetWeakPtr()) {
+      ui_thread_weak_ptr_(weak_factory_on_ui_thread_.GetWeakPtr()),
+      compositor_(NULL),
+      memory_policy_dirty_(false),
+      hardware_allowed_(false),
+      hardware_initialized_(false) {
   DCHECK(ui_loop_->BelongsToCurrentThread());
   DCHECK(client_on_ui_);
 }
@@ -48,80 +44,77 @@ void SharedRendererState::ClientRequestDrawGL() {
 
 void SharedRendererState::ClientRequestDrawGLOnUIThread() {
   DCHECK(ui_loop_->BelongsToCurrentThread());
-  if (!client_on_ui_->RequestDrawGL(NULL)) {
+  if (!client_on_ui_->RequestDrawGL(NULL, false)) {
     LOG(ERROR) << "Failed to request GL process. Deadlock likely";
   }
 }
 
 void SharedRendererState::SetCompositorOnUiThread(
     content::SynchronousCompositor* compositor) {
-  AutoLock lock(lock_);
+  base::AutoLock lock(lock_);
   DCHECK(ui_loop_->BelongsToCurrentThread());
-  both().compositor = compositor;
+  compositor_ = compositor;
 }
 
-bool SharedRendererState::CompositorInitializeHwDraw(
-    scoped_refptr<gfx::GLSurface> surface) {
-  AutoLock lock(lock_);
-  DCHECK(both().compositor);
-  return both().compositor->InitializeHwDraw(surface);
+content::SynchronousCompositor* SharedRendererState::GetCompositor() {
+  base::AutoLock lock(lock_);
+  DCHECK(compositor_);
+  return compositor_;
 }
 
-void SharedRendererState::CompositorReleaseHwDraw() {
-  AutoLock lock(lock_);
-  DCHECK(both().compositor);
-  both().compositor->ReleaseHwDraw();
+void SharedRendererState::SetMemoryPolicy(
+    const content::SynchronousCompositorMemoryPolicy new_policy) {
+  base::AutoLock lock(lock_);
+  if (memory_policy_ != new_policy) {
+    memory_policy_ = new_policy;
+    memory_policy_dirty_ = true;
+  }
 }
 
-bool SharedRendererState::CompositorDemandDrawHw(
-    gfx::Size surface_size,
-    const gfx::Transform& transform,
-    gfx::Rect viewport,
-    gfx::Rect clip,
-    bool stencil_enabled) {
-  AutoLock lock(lock_);
-  DCHECK(both().compositor);
-  return both().compositor->DemandDrawHw(
-      surface_size, transform, viewport, clip, stencil_enabled);
-}
-
-bool SharedRendererState::CompositorDemandDrawSw(SkCanvas* canvas) {
-  AutoLock lock(lock_);
-  DCHECK(both().compositor);
-  return both().compositor->DemandDrawSw(canvas);
-}
-
-void SharedRendererState::CompositorSetMemoryPolicy(
-    const content::SynchronousCompositorMemoryPolicy& policy) {
-  AutoLock lock(lock_);
-  DCHECK(both().compositor);
-  return both().compositor->SetMemoryPolicy(policy);
-}
-
-void SharedRendererState::CompositorDidChangeRootLayerScrollOffset() {
-  AutoLock lock(lock_);
-  DCHECK(both().compositor);
-  both().compositor->DidChangeRootLayerScrollOffset();
+content::SynchronousCompositorMemoryPolicy
+SharedRendererState::GetMemoryPolicy() const {
+  base::AutoLock lock(lock_);
+  return memory_policy_;
 }
 
 void SharedRendererState::SetDrawGLInput(const DrawGLInput& input) {
-  AutoLock lock(lock_);
-  both().draw_gl_input = input;
+  base::AutoLock lock(lock_);
+  draw_gl_input_ = input;
 }
 
 DrawGLInput SharedRendererState::GetDrawGLInput() const {
-  AutoLock lock(lock_);
-  return both().draw_gl_input;
+  base::AutoLock lock(lock_);
+  return draw_gl_input_;
 }
 
-internal::BothThreads& SharedRendererState::both() {
-  lock_.AssertAcquired();
-  return both_threads_;
+void SharedRendererState::SetHardwareAllowed(bool allowed) {
+  base::AutoLock lock(lock_);
+  hardware_allowed_ = allowed;
 }
 
-const internal::BothThreads& SharedRendererState::both() const {
-  lock_.AssertAcquired();
-  return both_threads_;
+bool SharedRendererState::IsHardwareAllowed() const {
+  base::AutoLock lock(lock_);
+  return hardware_allowed_;
+}
+
+void SharedRendererState::SetHardwareInitialized(bool initialized) {
+  base::AutoLock lock(lock_);
+  hardware_initialized_ = initialized;
+}
+
+bool SharedRendererState::IsHardwareInitialized() const {
+  base::AutoLock lock(lock_);
+  return hardware_initialized_;
+}
+
+void SharedRendererState::SetMemoryPolicyDirty(bool is_dirty) {
+  base::AutoLock lock(lock_);
+  memory_policy_dirty_ = is_dirty;
+}
+
+bool SharedRendererState::IsMemoryPolicyDirty() const {
+  base::AutoLock lock(lock_);
+  return memory_policy_dirty_;
 }
 
 }  // namespace android_webview

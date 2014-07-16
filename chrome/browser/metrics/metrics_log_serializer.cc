@@ -14,6 +14,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/pref_names.h"
 
+using metrics::MetricsLogBase;
+using metrics::MetricsLogManager;
+
 namespace {
 
 // The number of "initial" logs to save, and hope to send during a future Chrome
@@ -62,7 +65,7 @@ void MetricsLogSerializer::SerializeLogs(
   const char* pref = NULL;
   size_t store_length_limit = 0;
   switch (log_type) {
-    case MetricsLogBase::INITIAL_LOG:
+    case MetricsLogBase::INITIAL_STABILITY_LOG:
       pref = prefs::kMetricsInitialLogs;
       store_length_limit = kInitialLogsPersistLimit;
       break;
@@ -88,7 +91,7 @@ void MetricsLogSerializer::DeserializeLogs(
   DCHECK(local_state);
 
   const char* pref;
-  if (log_type == MetricsLogBase::INITIAL_LOG)
+  if (log_type == MetricsLogBase::INITIAL_STABILITY_LOG)
     pref = prefs::kMetricsInitialLogs;
   else
     pref = prefs::kMetricsOngoingLogs;

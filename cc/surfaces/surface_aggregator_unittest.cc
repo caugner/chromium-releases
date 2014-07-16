@@ -418,7 +418,7 @@ void AddSolidColorQuadWithBlendMode(const gfx::Size& size,
   float opacity = 1.f;
 
   bool force_anti_aliasing_off = false;
-  scoped_ptr<SharedQuadState> sqs = SharedQuadState::Create();
+  SharedQuadState* sqs = pass->CreateAndAppendSharedQuadState();
   sqs->SetAll(content_to_target_transform,
               content_bounds,
               visible_content_rect,
@@ -426,7 +426,6 @@ void AddSolidColorQuadWithBlendMode(const gfx::Size& size,
               is_clipped,
               opacity,
               blend_mode);
-  pass->shared_quad_state_list.push_back(sqs.Pass());
 
   scoped_ptr<SolidColorDrawQuad> color_quad = SolidColorDrawQuad::Create();
   color_quad->SetNew(pass->shared_quad_state_list.back(),
@@ -480,7 +479,7 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateSharedQuadStateProperties) {
   Surface grandchild_surface(&manager_, NULL, surface_size);
   scoped_ptr<RenderPass> grandchild_pass = RenderPass::Create();
   gfx::Rect output_rect(surface_size);
-  gfx::RectF damage_rect(surface_size);
+  gfx::Rect damage_rect(surface_size);
   gfx::Transform transform_to_root_target;
   grandchild_pass->SetNew(
       pass_id, output_rect, damage_rect, transform_to_root_target);

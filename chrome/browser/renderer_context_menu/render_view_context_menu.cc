@@ -35,7 +35,7 @@
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/guestview/webview/webview_guest.h"
+#include "chrome/browser/guest_view/web_view/web_view_guest.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -51,7 +51,7 @@
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/tab_contents/retargeting_details.h"
-#include "chrome/browser/translate/translate_manager.h"
+#include "chrome/browser/translate/translate_service.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -68,6 +68,7 @@
 #include "chrome/common/spellcheck_messages.h"
 #include "chrome/common/url_constants.h"
 #include "components/translate/core/browser/translate_download_manager.h"
+#include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/download_manager.h"
@@ -198,17 +199,15 @@ const struct UmaEnumCommandIdPair {
   { 46, IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS },
   { 47, IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS },
   { 48, IDC_CONTENT_CONTEXT_ADDSEARCHENGINE },
-  { 49, IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES },
-  { 50, IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT },
-  { 51, IDC_SPEECH_INPUT_MENU },
   { 52, IDC_CONTENT_CONTEXT_OPENLINKWITH },
   { 53, IDC_CHECK_SPELLING_WHILE_TYPING },
   { 54, IDC_SPELLCHECK_MENU },
   { 55, IDC_CONTENT_CONTEXT_SPELLING_TOGGLE },
   { 56, IDC_SPELLCHECK_LANGUAGES_FIRST },
   { 57, IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE },
+  { 58, IDC_SPELLCHECK_SUGGESTION_0 },
   // Add new items here and use |enum_id| from the next line.
-  { 58, 0 },  // Must be the last. Increment |enum_id| when new IDC was added.
+  { 59, 0 },  // Must be the last. Increment |enum_id| when new IDC was added.
 };
 
 // Collapses large ranges of ids before looking for UMA enum.
@@ -231,6 +230,11 @@ int CollapleCommandsForUMA(int id) {
   if (id >= IDC_SPELLCHECK_LANGUAGES_FIRST &&
       id <= IDC_SPELLCHECK_LANGUAGES_LAST) {
     return IDC_SPELLCHECK_LANGUAGES_FIRST;
+  }
+
+  if (id >= IDC_SPELLCHECK_SUGGESTION_0 &&
+      id <= IDC_SPELLCHECK_SUGGESTION_LAST) {
+    return IDC_SPELLCHECK_SUGGESTION_0;
   }
 
   return id;
@@ -411,14 +415,12 @@ RenderViewContextMenu::RenderViewContextMenu(
                        this,
                        &menu_model_,
                        base::Bind(MenuItemMatchesParams, params_)),
-      speech_input_submenu_model_(this),
       protocol_handler_submenu_model_(this),
       protocol_handler_registry_(
           ProtocolHandlerRegistryFactory::GetForProfile(profile_)),
       command_executed_(false) {
   content_type_.reset(ContextMenuContentTypeFactory::Create(
-                          source_web_contents_,
-                          render_frame_host, params));
+                          source_web_contents_, params));
 }
 
 RenderViewContextMenu::~RenderViewContextMenu() {
@@ -627,6 +629,11 @@ void RenderViewContextMenu::InitMenu() {
   if (content_type_->SupportsGroup(
           ContextMenuContentType::ITEM_GROUP_MEDIA_AUDIO)) {
     AppendAudioItems();
+  }
+
+  if (content_type_->SupportsGroup(
+          ContextMenuContentType::ITEM_GROUP_MEDIA_CANVAS)) {
+    AppendCanvasItems();
   }
 
   if (content_type_->SupportsGroup(
@@ -843,6 +850,14 @@ void RenderViewContextMenu::AppendAudioItems() {
                                   IDS_CONTENT_CONTEXT_OPENAUDIONEWTAB);
 }
 
+void RenderViewContextMenu::AppendCanvasItems() {
+  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEIMAGEAS,
+                                  IDS_CONTENT_CONTEXT_SAVEIMAGEAS);
+
+  // TODO(zino): We should support 'copy image' for canvas.
+  // http://crbug.com/369092
+}
+
 void RenderViewContextMenu::AppendVideoItems() {
   AppendMediaItems();
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
@@ -904,7 +919,7 @@ void RenderViewContextMenu::AppendPageItems() {
                                   IDS_CONTENT_CONTEXT_SAVEPAGEAS);
   menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
 
-  if (TranslateManager::IsTranslatableURL(params_.page_url)) {
+  if (TranslateService::IsTranslatableURL(params_.page_url)) {
     std::string locale = g_browser_process->GetApplicationLocale();
     locale = TranslateDownloadManager::GetLanguageCode(locale);
     base::string16 language =
@@ -1022,7 +1037,6 @@ void RenderViewContextMenu::AppendEditableItems() {
 
   if (use_spellcheck_and_search)
     AppendSpellcheckOptionsSubMenu();
-  AppendSpeechInputOptionsSubMenu();
   AppendPlatformEditableItems();
 
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
@@ -1044,24 +1058,6 @@ void RenderViewContextMenu::AppendSpellcheckOptionsSubMenu() {
   }
   spellchecker_submenu_observer_->InitMenu(params_);
   observers_.AddObserver(spellchecker_submenu_observer_.get());
-}
-
-void RenderViewContextMenu::AppendSpeechInputOptionsSubMenu() {
-  if (params_.speech_input_enabled) {
-    speech_input_submenu_model_.AddCheckItem(
-        IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES,
-        l10n_util::GetStringUTF16(
-            IDS_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES));
-
-    speech_input_submenu_model_.AddItemWithStringId(
-        IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT,
-        IDS_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT);
-
-    menu_model_.AddSubMenu(
-        IDC_SPEECH_INPUT_MENU,
-        l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPEECH_INPUT_MENU),
-        &speech_input_submenu_model_);
-  }
 }
 
 void RenderViewContextMenu::AppendProtocolHandlerSubMenu() {
@@ -1169,7 +1165,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return IsDevCommandEnabled(id);
 
     case IDC_CONTENT_CONTEXT_VIEWPAGEINFO:
-      if (source_web_contents_->GetController().GetActiveEntry() == NULL)
+      if (source_web_contents_->GetController().GetVisibleEntry() == NULL)
         return false;
       // Disabled if no browser is associated (e.g. desktop notifications).
       if (chrome::FindBrowserWithWebContents(source_web_contents_) == NULL)
@@ -1225,6 +1221,9 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       if (!local_state->GetBoolean(prefs::kAllowFileSelectionDialogs))
         return false;
 
+      if (params_.media_type == WebContextMenuData::MediaTypeCanvas)
+        return true;
+
       return params_.src_url.is_valid() &&
           ProfileIOData::IsHandledProtocol(params_.src_url.scheme());
     }
@@ -1253,12 +1252,9 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
              (params_.media_flags &
               WebContextMenuData::MediaInError) == 0;
 
-    // Media controls can be toggled only for video player. If we toggle
-    // controls for audio then the player disappears, and there is no way to
-    // return it back.
     case IDC_CONTENT_CONTEXT_CONTROLS:
       return (params_.media_flags &
-              WebContextMenuData::MediaHasVideo) != 0;
+              WebContextMenuData::MediaCanToggleControls) != 0;
 
     case IDC_CONTENT_CONTEXT_ROTATECW:
     case IDC_CONTENT_CONTEXT_ROTATECCW:
@@ -1308,15 +1304,11 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       if (!local_state->GetBoolean(prefs::kAllowFileSelectionDialogs))
         return false;
 
-      // Instead of using GetURL here, we use url() (which is the "real" url of
-      // the page) from the NavigationEntry because its reflects their origin
-      // rather than the display one (returned by GetURL) which may be
-      // different (like having "view-source:" on the front).
-      // TODO(nasko): Audit all GetActiveEntry calls in this file.
-      NavigationEntry* active_entry =
-          source_web_contents_->GetController().GetActiveEntry();
-      return content::IsSavableURL(
-          (active_entry) ? active_entry->GetURL() : GURL());
+      // We save the last committed entry (which the user is looking at), as
+      // opposed to any pending URL that hasn't committed yet.
+      NavigationEntry* entry =
+          source_web_contents_->GetController().GetLastCommittedEntry();
+      return content::IsSavableURL(entry ? entry->GetURL() : GURL());
     }
 
     case IDC_CONTENT_CONTEXT_RELOADFRAME:
@@ -1380,11 +1372,6 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_SPELLCHECK_MENU:
       return true;
 
-    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES:
-    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT:
-    case IDC_SPEECH_INPUT_MENU:
-      return true;
-
     case IDC_CONTENT_CONTEXT_OPENLINKWITH:
       return true;
 
@@ -1430,19 +1417,13 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
     return extension_items_.IsCommandIdChecked(id);
   }
 
-#if defined(ENABLE_INPUT_SPEECH)
-  // Check box for menu item 'Block offensive words'.
-  if (id == IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES) {
-    return profile_->GetPrefs()->GetBoolean(
-        prefs::kSpeechRecognitionFilterProfanities);
-  }
-#endif
-
   return false;
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
   command_executed_ = true;
+  RecordUsedItem(id);
+
   // If this command is is added by one of our observers, we dispatch it to the
   // observer.
   ObserverListBase<RenderViewContextMenuObserver>::Iterator it(observers_);
@@ -1452,9 +1433,6 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       return observer->ExecuteCommand(id);
   }
 
-  RecordUsedItem(id);
-
-  RenderViewHost* rvh = source_web_contents_->GetRenderViewHost();
   RenderFrameHost* render_frame_host =
       RenderFrameHost::FromID(render_process_id_, render_frame_id_);
 
@@ -1469,8 +1447,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
         source_web_contents_, false, std::string());
     }
 #endif
-    if (render_frame_host)
-      render_frame_host->ExecuteCustomContextMenuCommand(action, context);
+    source_web_contents_->ExecuteCustomContextMenuCommand(action, context);
     return;
   }
 
@@ -1542,28 +1519,18 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_SAVEAVAS:
     case IDC_CONTENT_CONTEXT_SAVEIMAGEAS: {
-      RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
-      const GURL& referrer =
-          params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
-      const GURL& url = params_.src_url;
-      int64 post_id = -1;
-      if (url == source_web_contents_->GetURL()) {
-        const NavigationEntry* entry =
-            source_web_contents_->GetController().GetActiveEntry();
-        if (entry)
-          post_id = entry->GetPostID();
+      if (params_.media_type == WebContextMenuData::MediaTypeCanvas) {
+        source_web_contents_->GetRenderViewHost()->SaveImageAt(
+          params_.x, params_.y);
+      } else {
+        // TODO(zino): We can use SaveImageAt() like a case of canvas.
+        RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
+        const GURL& referrer =
+            params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
+        const GURL& url = params_.src_url;
+        source_web_contents_->SaveFrame(url, content::Referrer(
+            referrer, params_.referrer_policy));
       }
-      DownloadManager* dlm = BrowserContext::GetDownloadManager(profile_);
-      scoped_ptr<DownloadUrlParameters> dl_params(
-          DownloadUrlParameters::FromWebContents(source_web_contents_, url));
-      dl_params->set_referrer(
-          content::Referrer(referrer, params_.referrer_policy));
-      dl_params->set_post_id(post_id);
-      dl_params->set_prefer_cache(true);
-      if (post_id >= 0)
-        dl_params->set_method("POST");
-      dl_params->set_prompt(true);
-      dlm->DownloadUrl(dl_params.Pass());
       break;
     }
 
@@ -1742,8 +1709,10 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     case IDC_CONTENT_CONTEXT_VIEWPAGEINFO: {
       NavigationController* controller = &source_web_contents_->GetController();
       // Important to use GetVisibleEntry to match what's showing in the
-      // omnibox.
+      // omnibox.  This may return null.
       NavigationEntry* nav_entry = controller->GetVisibleEntry();
+      if (!nav_entry)
+        return;
       Browser* browser =
           chrome::FindBrowserWithWebContents(source_web_contents_);
       chrome::ShowWebsiteSettings(browser, source_web_contents_,
@@ -1778,7 +1747,10 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     }
 
     case IDC_CONTENT_CONTEXT_RELOADFRAME:
-      rvh->ReloadFrame();
+      // We always obey the cache here.
+      // TODO(evanm): Perhaps we could allow shift-clicking the menu item to do
+      // a cache-ignoring reload of the frame.
+      source_web_contents_->ReloadFocusedFrame(false);
       break;
 
     case IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE:
@@ -1795,43 +1767,35 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     }
 
     case IDC_CONTENT_CONTEXT_UNDO:
-      if (render_frame_host)
-        render_frame_host->Undo();
+      source_web_contents_->Undo();
       break;
 
     case IDC_CONTENT_CONTEXT_REDO:
-      if (render_frame_host)
-        render_frame_host->Redo();
+      source_web_contents_->Redo();
       break;
 
     case IDC_CONTENT_CONTEXT_CUT:
-      if (render_frame_host)
-        render_frame_host->Cut();
+      source_web_contents_->Cut();
       break;
 
     case IDC_CONTENT_CONTEXT_COPY:
-      if (render_frame_host)
-        render_frame_host->Copy();
+      source_web_contents_->Copy();
       break;
 
     case IDC_CONTENT_CONTEXT_PASTE:
-      if (render_frame_host)
-        render_frame_host->Paste();
+      source_web_contents_->Paste();
       break;
 
     case IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE:
-      if (render_frame_host)
-        render_frame_host->PasteAndMatchStyle();
+      source_web_contents_->PasteAndMatchStyle();
       break;
 
     case IDC_CONTENT_CONTEXT_DELETE:
-      if (render_frame_host)
-        render_frame_host->Delete();
+      source_web_contents_->Delete();
       break;
 
     case IDC_CONTENT_CONTEXT_SELECTALL:
-      if (render_frame_host)
-        render_frame_host->SelectAll();
+      source_web_contents_->SelectAll();
       break;
 
     case IDC_CONTENT_CONTEXT_SEARCHWEBFOR:
@@ -1887,24 +1851,6 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
     }
 
-#if defined(ENABLE_INPUT_SPEECH)
-    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES: {
-      profile_->GetPrefs()->SetBoolean(
-          prefs::kSpeechRecognitionFilterProfanities,
-          !profile_->GetPrefs()->GetBoolean(
-              prefs::kSpeechRecognitionFilterProfanities));
-      break;
-    }
-#endif
-    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT: {
-      GURL url(chrome::kSpeechInputAboutURL);
-      GURL localized_url = google_util::AppendGoogleLocaleParam(url);
-      // Open URL with no referrer field (because user clicked on menu item).
-      OpenURL(localized_url, GURL(), NEW_FOREGROUND_TAB,
-              content::PAGE_TRANSITION_LINK);
-      break;
-    }
-
     default:
       NOTREACHED();
       break;
@@ -1951,10 +1897,7 @@ void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
       source_web_contents_->GetRenderWidgetHostView();
   if (view)
     view->SetShowingContextMenu(false);
-  RenderFrameHost* render_frame_host =
-      RenderFrameHost::FromID(render_process_id_, render_frame_id_);
-  if (render_frame_host)
-    render_frame_host->NotifyContextMenuClosed(params_.custom_context);
+  source_web_contents_->NotifyContextMenuClosed(params_.custom_context);
 
   if (!command_executed_) {
     FOR_EACH_OBSERVER(RenderViewContextMenuObserver,

@@ -9,19 +9,20 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_icon_image.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/client_side_detection_host.h"
 #include "chrome/browser/safe_browsing/safe_browsing_tab_observer.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "grit/chromium_strings.h"
-#include "grit/component_strings.h"
+#include "grit/components_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/net_util.h"
@@ -121,7 +122,7 @@ bool OriginChipInfo::Update(const content::WebContents* web_contents,
                                   extension,
                                   extensions::IconsInfo::GetIcons(extension),
                                   extension_misc::EXTENSION_ICON_BITTY,
-                                  extensions::IconsInfo::GetDefaultAppIcon(),
+                                  extensions::util::GetDefaultAppIcon(),
                                   owner_));
 
     // Forces load of the image.
@@ -141,6 +142,10 @@ bool OriginChipInfo::Update(const content::WebContents* web_contents,
   }
 
   return true;
+}
+
+base::string16 OriginChipInfo::Tooltip() const {
+  return base::UTF8ToUTF16(displayed_url_.spec());
 }
 
 // static

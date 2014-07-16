@@ -15,6 +15,9 @@ const char kAppOemManifestFile[]            = "app-mode-oem-manifest";
 // Possible values: parallel|postpone. Default: parallel.
 const char kAshWebUIInit[]                  = "ash-webui-init";
 
+// Specifies the URL of the consumer device management backend.
+const char kConsumerDeviceManagementUrl[]   = "consumer-device-management-url";
+
 // Forces the stub implementation of dbus clients.
 const char kDbusStub[] = "dbus-stub";
 
@@ -37,8 +40,16 @@ const char kDisableEnterpriseUserReporting[] =
 // Disable Genius App and use the original Help App instead.
 const char kDisableGeniusApp[]              = "disable-genius-app";
 
+// Disable lock UI (user pods) scrolling into view with CSS change when virtual
+// keyboard is shown.
+const char kDisableLockScrollIntoView[]    = "disable-lock-scroll-into-view";
+
 // Avoid doing expensive animations upon login.
 const char kDisableLoginAnimations[]        = "disable-login-animations";
+
+// Disable login UI (user pods) scrolling into view on JS side when virtual
+// keyboard is shown.
+const char kDisableLoginScrollIntoView[]    = "disable-login-scroll-into-view";
 
 // Disable new channel switcher UI.
 const char kDisableNewChannelSwitcherUI[]   = "disable-new-channel-switcher-ui";
@@ -64,6 +75,16 @@ const char kEchoExtensionPath[]             = "echo-ext-path";
 
 // Enables switching between different cellular carriers from the UI.
 const char kEnableCarrierSwitching[]        = "enable-carrier-switching";
+
+// Enables consumer management, which allows user to enroll, remotely lock and
+// locate the device.
+const char kEnableConsumerManagement[]      = "enable-consumer-management";
+
+// Enables MTP support in Files.app.
+const char kEnableFileManagerMTP[] = "enable-filemanager-mtp";
+
+// Enable explicit HID detection on OOBE.
+const char kEnableHIDDetectionOnOOBE[]     = "enable-hid-detection-on-oobe";
 
 // Enables notifications about captive portals in session.
 const char kEnableNetworkPortalNotification[] =
@@ -106,6 +127,10 @@ const char kEnterpriseEnrollmentSkipRobotAuth[] =
 const char kFileManagerEnableNewAudioPlayer[] =
     "file-manager-enable-new-audio-player";
 
+// Enables the new gallery in the Files.app.
+const char kFileManagerEnableNewGallery[] =
+    "file-manager-enable-new-gallery";
+
 // Passed to Chrome the first time that it's run after the system boots.
 // Not passed on restart after sign out.
 const char kFirstExecAfterBoot[]            = "first-exec-after-boot";
@@ -128,16 +153,14 @@ const char kHasChromeOSDiamondKey[]         = "has-chromeos-diamond-key";
 // Path for the screensaver used in Kiosk mode
 const char kKioskModeScreensaverPath[]      = "kiosk-mode-screensaver-path";
 
-// Allows override of oobe for testing - goes directly to the login screen.
-const char kLoginScreen[]                   = "login-screen";
-
 // Enables Chrome-as-a-login-manager behavior.
 const char kLoginManager[]                  = "login-manager";
 
 // Specifies a password to be used to login (along with login-user).
 const char kLoginPassword[]                 = "login-password";
 
-// Specifies the profile to use once a chromeos user is logged in.
+// Specifies the profile to use once a chromeos user is logged in. This is
+// required unless --multi-profile is set.
 const char kLoginProfile[]                  = "login-profile";
 
 // Specifies the user which is already logged in.
@@ -174,10 +197,6 @@ const char kPowerStub[] = "power-stub";
 //  'interactive=3' - Interactive mode, connect/scan/etc requests take 3 secs
 const char kShillStub[] = "shill-stub";
 
-// Skips the machine hwid check. Useful for running in VMs because they have no
-// hwid.
-const char kSkipHWIDCheck[]                 = "skip-hwid-check";
-
 // Sends test messages on first call to RequestUpdate (stub only).
 const char kSmsTestMessages[]               = "sms-test-messages";
 
@@ -186,14 +205,8 @@ const char kSmsTestMessages[]               = "sms-test-messages";
 // This option is for testing the chromeos build of chrome on the desktop only.
 const char kStubCrosSettings[]              = "stub-cros-settings";
 
-// Disables user image sync.
-const char kDisableUserImageSync[]          = "disable-user-image-sync";
-
 // Disables SAML sigin support.
 const char kDisableSamlSignin[]             = "disable-saml-signin";
-
-// Overrides the manifest of the GAIA auth extension with the given file.
-const char kGAIAAuthExtensionManifest[]     = "gaia-auth-extension-manifest";
 
 // Disables new first-run overlay UI.
 const char kDisableFirstRunUI[] = "disable-first-run-ui";
@@ -206,9 +219,6 @@ const char kForceFirstRunUI[] = "force-first-run-ui";
 
 // Enables testing for auto update UI.
 const char kTestAutoUpdateUI[] = "test-auto-update-ui";
-
-// Enables features required for supervised user sync,
-const char kEnableSupervisedPasswordSync[] = "enable-supervised-password-sync";
 
 }  // namespace switches
 }  // namespace chromeos

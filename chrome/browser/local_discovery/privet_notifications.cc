@@ -36,7 +36,6 @@
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/message_center/message_center_util.h"
 #include "ui/message_center/notifier_settings.h"
 
 #if defined(ENABLE_MDNS)
@@ -117,6 +116,11 @@ void PrivetNotificationsListener::DeviceChanged(
 
 void PrivetNotificationsListener::CreateInfoOperation(
     scoped_ptr<PrivetHTTPClient> http_client) {
+  if (!http_client) {
+    // Do nothing if resolution fails.
+    return;
+  }
+
   std::string name = http_client->GetName();
   DeviceContextMap::iterator device_iter = devices_seen_.find(name);
   DCHECK(device_iter != devices_seen_.end());
@@ -221,9 +225,7 @@ void PrivetNotificationService::DeviceCacheFlushed() {
 bool PrivetNotificationService::IsEnabled() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   return !command_line->HasSwitch(switches::kDisableDeviceDiscovery) &&
-      !command_line->HasSwitch(
-          switches::kDisableDeviceDiscoveryNotifications) &&
-      message_center::IsRichNotificationEnabled();
+      !command_line->HasSwitch(switches::kDisableDeviceDiscoveryNotifications);
 }
 
 // static
@@ -365,7 +367,7 @@ std::string PrivetNotificationDelegate::id() const {
   return kPrivetNotificationID;
 }
 
-content::RenderViewHost* PrivetNotificationDelegate::GetRenderViewHost() const {
+content::WebContents* PrivetNotificationDelegate::GetWebContents() const {
   return NULL;
 }
 

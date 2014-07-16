@@ -17,7 +17,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/chrome_extensions_client.h"
-#include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/update_manifest.h"
 #include "chrome/common/safe_browsing/zip_analyzer.h"
 #include "chrome/utility/chrome_content_utility_ipc_whitelist.h"
@@ -31,7 +30,10 @@
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/utility/utility_thread.h"
+#include "courgette/courgette.h"
+#include "courgette/third_party/bsdiff.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/manifest.h"
 #include "media/base/media.h"
 #include "media/base/media_file_checker.h"
@@ -66,6 +68,7 @@
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
+#include "chrome/utility/media_galleries/image_metadata_extractor.h"
 #include "chrome/utility/media_galleries/ipc_data_source.h"
 #include "chrome/utility/media_galleries/media_metadata_parser.h"
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -371,6 +374,10 @@ bool ChromeContentUtilityClient::OnMessageReceived(
                         OnGetPrinterCapsAndDefaults)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_GetPrinterSemanticCapsAndDefaults,
                         OnGetPrinterSemanticCapsAndDefaults)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_PatchFileBsdiff,
+                        OnPatchFileBsdiff)
+    IPC_MESSAGE_HANDLER(ChromeUtilityMsg_PatchFileCourgette,
+                        OnPatchFileCourgette)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_StartupPing, OnStartupPing)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_AnalyzeZipFileForDownloadProtection,
                         OnAnalyzeZipFileForDownloadProtection)
@@ -430,6 +437,11 @@ void ChromeContentUtilityClient::PreSandboxStartup() {
 #endif  // ENABLE_MDNS
 
   g_pdf_lib.Get().Init();
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  // Initialize libexif for image metadata parsing.
+  metadata::ImageMetadataExtractor::InitializeLibrary();
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
   // Load media libraries for media file validation.
   base::FilePath media_path;
@@ -714,14 +726,6 @@ bool ChromeContentUtilityClient::RenderPDFPagesToPWGRaster(
       page_number = total_page_count - 1 - page_number;
     }
 
-    bool rotate = false;
-
-    // Transform odd pages.
-    if (page_number % 2) {
-      rotate =
-          (bitmap_settings.odd_page_transform != printing::TRANSFORM_NORMAL);
-    }
-
     if (!g_pdf_lib.Get().RenderPDFPageToBitmap(data.data(),
                                                data.size(),
                                                page_number,
@@ -733,9 +737,36 @@ bool ChromeContentUtilityClient::RenderPDFPagesToPWGRaster(
                                                autoupdate)) {
       return false;
     }
+
+    cloud_print::PwgHeaderInfo header_info;
+    header_info.dpi = settings.dpi();
+    header_info.total_pages = total_page_count;
+
+    // Transform odd pages.
+    if (page_number % 2) {
+      switch (bitmap_settings.odd_page_transform) {
+        case printing::TRANSFORM_NORMAL:
+          break;
+        case printing::TRANSFORM_ROTATE_180:
+          header_info.flipx = true;
+          header_info.flipy = true;
+          break;
+        case printing::TRANSFORM_FLIP_HORIZONTAL:
+          header_info.flipx = true;
+          break;
+        case printing::TRANSFORM_FLIP_VERTICAL:
+          header_info.flipy = true;
+          break;
+      }
+    }
+
+    if (bitmap_settings.rotate_all_pages) {
+      header_info.flipx = !header_info.flipx;
+      header_info.flipy = !header_info.flipy;
+    }
+
     std::string pwg_page;
-    if (!encoder.EncodePage(
-            image, settings.dpi(), total_page_count, &pwg_page, rotate))
+    if (!encoder.EncodePage(image, header_info, &pwg_page))
       return false;
     bytes_written = base::WritePlatformFileAtCurrentPos(bitmap_file,
                                                         pwg_page.data(),
@@ -823,6 +854,43 @@ void ChromeContentUtilityClient::OnGetPrinterSemanticCapsAndDefaults(
   ReleaseProcessIfNeeded();
 }
 
+void ChromeContentUtilityClient::OnPatchFileBsdiff(
+    const base::FilePath& input_file,
+    const base::FilePath& patch_file,
+    const base::FilePath& output_file) {
+  if (input_file.empty() || patch_file.empty() || output_file.empty()) {
+    Send(new ChromeUtilityHostMsg_PatchFile_Failed(-1));
+  } else {
+    const int patch_status = courgette::ApplyBinaryPatch(input_file,
+                                                         patch_file,
+                                                         output_file);
+    if (patch_status != courgette::OK)
+      Send(new ChromeUtilityHostMsg_PatchFile_Failed(patch_status));
+    else
+      Send(new ChromeUtilityHostMsg_PatchFile_Succeeded());
+  }
+  ReleaseProcessIfNeeded();
+}
+
+void ChromeContentUtilityClient::OnPatchFileCourgette(
+    const base::FilePath& input_file,
+    const base::FilePath& patch_file,
+    const base::FilePath& output_file) {
+  if (input_file.empty() || patch_file.empty() || output_file.empty()) {
+    Send(new ChromeUtilityHostMsg_PatchFile_Failed(-1));
+  } else {
+    const int patch_status = courgette::ApplyEnsemblePatch(
+        input_file.value().c_str(),
+        patch_file.value().c_str(),
+        output_file.value().c_str());
+    if (patch_status != courgette::C_OK)
+      Send(new ChromeUtilityHostMsg_PatchFile_Failed(patch_status));
+    else
+      Send(new ChromeUtilityHostMsg_PatchFile_Succeeded());
+  }
+  ReleaseProcessIfNeeded();
+}
+
 void ChromeContentUtilityClient::OnStartupPing() {
   Send(new ChromeUtilityHostMsg_ProcessStarted);
   // Don't release the process, we assume further messages are on the way.
@@ -877,9 +945,8 @@ void ChromeContentUtilityClient::OnParseITunesPrefXml(
 void ChromeContentUtilityClient::OnParseIPhotoLibraryXmlFile(
     const IPC::PlatformFileForTransit& iphoto_library_file) {
   iphoto::IPhotoLibraryParser parser;
-  base::PlatformFile file =
-      IPC::PlatformFileForTransitToPlatformFile(iphoto_library_file);
-  bool result = parser.Parse(iapps::ReadPlatformFileAsString(file));
+  base::File file = IPC::PlatformFileForTransitToFile(iphoto_library_file);
+  bool result = parser.Parse(iapps::ReadFileAsString(file.Pass()));
   Send(new ChromeUtilityHostMsg_GotIPhotoLibrary(result, parser.library()));
   ReleaseProcessIfNeeded();
 }
@@ -889,9 +956,8 @@ void ChromeContentUtilityClient::OnParseIPhotoLibraryXmlFile(
 void ChromeContentUtilityClient::OnParseITunesLibraryXmlFile(
     const IPC::PlatformFileForTransit& itunes_library_file) {
   itunes::ITunesLibraryParser parser;
-  base::PlatformFile file =
-      IPC::PlatformFileForTransitToPlatformFile(itunes_library_file);
-  bool result = parser.Parse(iapps::ReadPlatformFileAsString(file));
+  base::File file = IPC::PlatformFileForTransitToFile(itunes_library_file);
+  bool result = parser.Parse(iapps::ReadFileAsString(file.Pass()));
   Send(new ChromeUtilityHostMsg_GotITunesLibrary(result, parser.library()));
   ReleaseProcessIfNeeded();
 }
@@ -899,22 +965,22 @@ void ChromeContentUtilityClient::OnParseITunesLibraryXmlFile(
 void ChromeContentUtilityClient::OnParsePicasaPMPDatabase(
     const picasa::AlbumTableFilesForTransit& album_table_files) {
   picasa::AlbumTableFiles files;
-  files.indicator_file = IPC::PlatformFileForTransitToPlatformFile(
-      album_table_files.indicator_file);
-  files.category_file = IPC::PlatformFileForTransitToPlatformFile(
-      album_table_files.category_file);
-  files.date_file = IPC::PlatformFileForTransitToPlatformFile(
-      album_table_files.date_file);
-  files.filename_file = IPC::PlatformFileForTransitToPlatformFile(
-      album_table_files.filename_file);
-  files.name_file = IPC::PlatformFileForTransitToPlatformFile(
-      album_table_files.name_file);
-  files.token_file = IPC::PlatformFileForTransitToPlatformFile(
-      album_table_files.token_file);
-  files.uid_file = IPC::PlatformFileForTransitToPlatformFile(
-      album_table_files.uid_file);
+  files.indicator_file =
+      IPC::PlatformFileForTransitToFile(album_table_files.indicator_file);
+  files.category_file =
+      IPC::PlatformFileForTransitToFile(album_table_files.category_file);
+  files.date_file =
+      IPC::PlatformFileForTransitToFile(album_table_files.date_file);
+  files.filename_file =
+      IPC::PlatformFileForTransitToFile(album_table_files.filename_file);
+  files.name_file =
+      IPC::PlatformFileForTransitToFile(album_table_files.name_file);
+  files.token_file =
+      IPC::PlatformFileForTransitToFile(album_table_files.token_file);
+  files.uid_file =
+      IPC::PlatformFileForTransitToFile(album_table_files.uid_file);
 
-  picasa::PicasaAlbumTableReader reader(files);
+  picasa::PicasaAlbumTableReader reader(files.Pass());
   bool parse_success = reader.Init();
   Send(new ChromeUtilityHostMsg_ParsePicasaPMPDatabase_Finished(
       parse_success,

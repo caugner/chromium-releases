@@ -6,13 +6,17 @@ package org.chromium.android_webview.test;
 
 import android.content.Context;
 import android.graphics.Point;
+import android.net.http.SslError;
 import android.os.Build;
 import android.os.SystemClock;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
 import android.webkit.WebSettings;
+
+import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import org.apache.http.Header;
 import org.apache.http.HttpRequest;
@@ -22,7 +26,7 @@ import org.chromium.android_webview.AwSettings.LayoutAlgorithm;
 import org.chromium.android_webview.InterceptedRequestData;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.ImagePageGenerator;
-import org.chromium.android_webview.test.util.JavascriptEventObserver;
+import org.chromium.android_webview.test.util.VideoTestUtil;
 import org.chromium.android_webview.test.util.VideoTestWebServer;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
@@ -1722,8 +1726,12 @@ public class AwSettingsTest extends AwTestBase {
                 views.getClient1()));
     }
 
+    /*
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    crbug.com/370950
+    */
+    @DisabledTest
     public void testFileUrlAccessWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -1731,8 +1739,12 @@ public class AwSettingsTest extends AwTestBase {
             new AwSettingsFileUrlAccessTestHelper(views.getContainer1(), views.getClient1(), 1));
     }
 
+    /*
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    crbug.com/370950
+    */
+    @DisabledTest
     public void testContentUrlAccessWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2339,7 +2351,7 @@ public class AwSettingsTest extends AwTestBase {
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
     public void testUseWideViewportWithTwoViews() throws Throwable {
-        ViewPair views = createViews();
+        ViewPair views = createViews(true);
         runPerViewSettingsTest(
             new AwSettingsUseWideViewportTestHelper(views.getContainer0(), views.getClient0()),
             new AwSettingsUseWideViewportTestHelper(views.getContainer1(), views.getClient1()));
@@ -2348,7 +2360,7 @@ public class AwSettingsTest extends AwTestBase {
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
     public void testUseWideViewportWithTwoViewsNoQuirks() throws Throwable {
-        ViewPair views = createViews(false);
+        ViewPair views = createViews();
         runPerViewSettingsTest(
             new AwSettingsUseWideViewportTestHelper(views.getContainer0(), views.getClient0()),
             new AwSettingsUseWideViewportTestHelper(views.getContainer1(), views.getClient1()));
@@ -2535,51 +2547,6 @@ public class AwSettingsTest extends AwTestBase {
         assertEquals(defaultScale, getPixelScaleOnUiThread(awContents), .01f);
     }
 
-    /**
-     * Run video test.
-     * @param requiredUserGesture the settings of MediaPlaybackRequiresUserGesture.
-     * @param waitTime time for waiting event happen, -1 means forever.
-     * @return true if the event happened,
-     * @throws Throwable throw exception if timeout.
-     */
-    private boolean runVideoTest(final boolean requiredUserGesture, long waitTime)
-            throws Throwable {
-        final JavascriptEventObserver observer = new JavascriptEventObserver();
-        TestAwContentsClient client = new TestAwContentsClient();
-        final AwContents awContents = createAwTestContainerViewOnMainSync(client).getAwContents();
-        getInstrumentation().runOnMainSync(new Runnable() {
-            @Override
-            public void run() {
-                AwSettings awSettings = awContents.getSettings();
-                awSettings.setJavaScriptEnabled(true);
-                awSettings.setMediaPlaybackRequiresUserGesture(requiredUserGesture);
-                observer.register(awContents.getContentViewCore(), "javaObserver");
-            }
-        });
-        VideoTestWebServer webServer = new VideoTestWebServer(getActivity());
-        try {
-            String data = "<html><head><script>" +
-                "addEventListener('DOMContentLoaded', function() { " +
-                "  document.getElementById('video').addEventListener('play', function() { " +
-                "    javaObserver.notifyJava(); " +
-                "  }, false); " +
-                "}, false); " +
-                "</script></head><body>" +
-                "<video id='video' autoplay control src='" +
-                webServer.getOnePixelOneFrameWebmURL() + "' /> </body></html>";
-            loadDataAsync(awContents, data, "text/html", false);
-            if (waitTime == -1) {
-                observer.waitForEvent();
-                return true;
-            } else {
-                return observer.waitForEvent(waitTime);
-            }
-        } finally {
-            if (webServer != null && webServer.getTestWebServer() != null)
-                webServer.getTestWebServer().shutdown();
-        }
-    }
-
     /*
     @LargeTest
     @Feature({"AndroidWebView", "Preferences"})
@@ -2587,14 +2554,14 @@ public class AwSettingsTest extends AwTestBase {
     */
     @DisabledTest
     public void testMediaPlaybackWithoutUserGesture() throws Throwable {
-        assertTrue(runVideoTest(false, -1));
+        assertTrue(VideoTestUtil.runVideoTest(this, false, WAIT_TIMEOUT_MS));
     }
 
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
     public void testMediaPlaybackWithUserGesture() throws Throwable {
         // Wait for 5 second to see if video played.
-        assertFalse(runVideoTest(true, 5000));
+        assertFalse(VideoTestUtil.runVideoTest(this, true, scaleTimeout(5000)));
     }
 
     @SmallTest
@@ -2632,6 +2599,61 @@ public class AwSettingsTest extends AwTestBase {
                 webServer.getTestWebServer().shutdown();
         }
     }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testAllowMixedMode() throws Throwable {
+        final TestAwContentsClient contentClient = new TestAwContentsClient() {
+            @Override
+            public void onReceivedSslError(ValueCallback<Boolean> callback, SslError error) {
+                callback.onReceiveValue(true);
+            }
+        };
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        final AwSettings awSettings = getAwSettingsOnUiThread(awContents);
+
+        awSettings.setJavaScriptEnabled(true);
+
+        TestWebServer httpsServer = new TestWebServer(true);
+        TestWebServer httpServer = new TestWebServer(false);
+
+        final String JS_URL = "/insecure.js";
+        final String IMG_URL = "/insecure.png";
+        final String SECURE_URL = "/secure.html";
+        httpServer.setResponse(JS_URL, "window.loaded_js = 42;", null);
+        httpServer.setResponseBase64(IMG_URL, CommonResources.FAVICON_DATA_BASE64, null);
+
+        final String JS_HTML = "<script src=\"" + httpServer.getResponseUrl(JS_URL) +
+                "\"></script>";
+        final String IMG_HTML = "<img src=\"" + httpServer.getResponseUrl(IMG_URL) + "\" />";
+        final String SECURE_HTML = "<body>" + IMG_HTML + " " + JS_HTML + "</body>";
+
+        String secureUrl = httpsServer.setResponse(SECURE_URL, SECURE_HTML, null);
+
+        awSettings.setMixedContentMode(AwSettings.MIXED_CONTENT_NEVER_ALLOW);
+        loadUrlSync(awContents, contentClient.getOnPageFinishedHelper(), secureUrl);
+        assertEquals(1, httpsServer.getRequestCount(SECURE_URL));
+        assertEquals(0, httpServer.getRequestCount(JS_URL));
+        assertEquals(0, httpServer.getRequestCount(IMG_URL));
+
+        awSettings.setMixedContentMode(AwSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        loadUrlSync(awContents, contentClient.getOnPageFinishedHelper(), secureUrl);
+        assertEquals(2, httpsServer.getRequestCount(SECURE_URL));
+        assertEquals(1, httpServer.getRequestCount(JS_URL));
+        assertEquals(1, httpServer.getRequestCount(IMG_URL));
+
+        awSettings.setMixedContentMode(AwSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        loadUrlSync(awContents, contentClient.getOnPageFinishedHelper(), secureUrl);
+        assertEquals(3, httpsServer.getRequestCount(SECURE_URL));
+        assertEquals(1, httpServer.getRequestCount(JS_URL));
+        assertEquals(2, httpServer.getRequestCount(IMG_URL));
+
+        httpServer.shutdown();
+        httpsServer.shutdown();
+    }
+
 
     static class ViewPair {
         private final AwTestContainerView mContainer0;
@@ -2722,7 +2744,7 @@ public class AwSettingsTest extends AwTestBase {
     }
 
     private ViewPair createViews() throws Throwable {
-        return createViews(true);
+        return createViews(false);
     }
 
     private ViewPair createViews(boolean supportsLegacyQuirks) throws Throwable {

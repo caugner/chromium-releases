@@ -17,13 +17,13 @@ namespace cast {
 class StandaloneCastEnvironment : public CastEnvironment,
                                   public base::ThreadChecker {
  public:
-  explicit StandaloneCastEnvironment();
+  StandaloneCastEnvironment();
 
   // Stops all threads backing the task runners, blocking the caller until
   // complete.
   void Shutdown();
 
- private:
+ protected:
   virtual ~StandaloneCastEnvironment();
 
   base::Thread main_thread_;

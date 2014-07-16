@@ -8,6 +8,7 @@
 #include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_manager_client.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -18,12 +19,16 @@
 #include "ipc/ipc_message_macros.h"
 #include "net/cert/cert_status_flags.h"
 
+namespace password_manager {
+
 ContentPasswordManagerDriver::ContentPasswordManagerDriver(
     content::WebContents* web_contents,
-    PasswordManagerClient* client)
+    PasswordManagerClient* client,
+    autofill::AutofillManagerDelegate* autofill_manager_delegate)
     : WebContentsObserver(web_contents),
       password_manager_(client),
-      password_generation_manager_(client) {
+      password_generation_manager_(client),
+      password_autofill_manager_(client, autofill_manager_delegate) {
   DCHECK(web_contents);
 }
 
@@ -47,6 +52,16 @@ void ContentPasswordManagerDriver::AccountCreationFormsFound(
   content::RenderViewHost* host = web_contents()->GetRenderViewHost();
   host->Send(new AutofillMsg_AccountCreationFormsDetected(host->GetRoutingID(),
                                                           forms));
+}
+
+void ContentPasswordManagerDriver::AcceptPasswordAutofillSuggestion(
+    const base::string16& username,
+    const base::string16& password) {
+  content::RenderViewHost* host = web_contents()->GetRenderViewHost();
+  host->Send(
+      new AutofillMsg_AcceptPasswordAutofillSuggestion(host->GetRoutingID(),
+                                                       username,
+                                                       password));
 }
 
 bool ContentPasswordManagerDriver::DidLastPageLoadEncounterSSLErrors() {
@@ -75,6 +90,11 @@ PasswordManager* ContentPasswordManagerDriver::GetPasswordManager() {
   return &password_manager_;
 }
 
+PasswordAutofillManager*
+ContentPasswordManagerDriver::GetPasswordAutofillManager() {
+  return &password_autofill_manager_;
+}
+
 void ContentPasswordManagerDriver::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
@@ -94,6 +114,15 @@ bool ContentPasswordManagerDriver::OnMessageReceived(
   IPC_MESSAGE_FORWARD(AutofillHostMsg_PasswordFormSubmitted,
                       &password_manager_,
                       PasswordManager::OnPasswordFormSubmitted)
+  IPC_MESSAGE_FORWARD(AutofillHostMsg_ShowPasswordSuggestions,
+                      &password_autofill_manager_,
+                      PasswordAutofillManager::OnShowPasswordSuggestions)
+  IPC_MESSAGE_FORWARD(AutofillHostMsg_AddPasswordFormMapping,
+                      &password_autofill_manager_,
+                      PasswordAutofillManager::OnAddPasswordFormMapping)
+  IPC_MESSAGE_FORWARD(AutofillHostMsg_RecordSavePasswordProgress,
+                      password_manager_.client(),
+                      PasswordManagerClient::LogSavePasswordProgress)
   IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -105,3 +134,5 @@ autofill::AutofillManager* ContentPasswordManagerDriver::GetAutofillManager() {
       autofill::ContentAutofillDriver::FromWebContents(web_contents());
   return driver ? driver->autofill_manager() : NULL;
 }
+
+}  // namespace password_manager

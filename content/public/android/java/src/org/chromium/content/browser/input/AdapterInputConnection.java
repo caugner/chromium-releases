@@ -8,6 +8,7 @@ import android.os.SystemClock;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Selection;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
@@ -101,7 +102,8 @@ public class AdapterInputConnection extends BaseInputConnection {
         } else if (imeAdapter.getTextInputType() == ImeAdapter.sTextInputTypeNumber) {
             // Number
             outAttrs.inputType = InputType.TYPE_CLASS_NUMBER
-                    | InputType.TYPE_NUMBER_VARIATION_NORMAL;
+                    | InputType.TYPE_NUMBER_VARIATION_NORMAL
+                    | InputType.TYPE_NUMBER_FLAG_DECIMAL;
             outAttrs.imeOptions |= EditorInfo.IME_ACTION_NEXT;
         }
         outAttrs.initialSelStart = Selection.getSelectionStart(mEditable);
@@ -128,16 +130,18 @@ public class AdapterInputConnection extends BaseInputConnection {
      *                         composition.
      * @param compositionEnd The character offset of the composition end, or -1 if there is no
      *                       selection.
-     * @param requireAck True when the update was not caused by IME, false otherwise.
+     * @param isNonImeChange True when the update was caused by non-IME (e.g. Javascript).
      */
     @VisibleForTesting
     public void updateState(String text, int selectionStart, int selectionEnd, int compositionStart,
-            int compositionEnd, boolean requireAck) {
+            int compositionEnd, boolean isNonImeChange) {
         if (DEBUG) {
             Log.w(TAG, "updateState [" + text + "] [" + selectionStart + " " + selectionEnd + "] ["
-                    + compositionStart + " " + compositionEnd + "] [" + requireAck + "]");
+                    + compositionStart + " " + compositionEnd + "] [" + isNonImeChange + "]");
         }
-        if (!requireAck) return;
+        // If this update is from the IME, no further state modification is necessary because the
+        // state should have been updated already by the IM framework directly.
+        if (!isNonImeChange) return;
 
         // Non-breaking spaces can cause the IME to get confused. Replace with normal spaces.
         text = text.replace('\u00A0', ' ');
@@ -209,6 +213,7 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean setComposingText(CharSequence text, int newCursorPosition) {
         if (DEBUG) Log.w(TAG, "setComposingText [" + text + "] [" + newCursorPosition + "]");
+        if (maybePerformEmptyCompositionWorkaround(text)) return true;
         super.setComposingText(text, newCursorPosition);
         updateSelectionIfRequired();
         return mImeAdapter.checkCompositionQueueAndCallNative(text.toString(),
@@ -221,6 +226,7 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean commitText(CharSequence text, int newCursorPosition) {
         if (DEBUG) Log.w(TAG, "commitText [" + text + "] [" + newCursorPosition + "]");
+        if (maybePerformEmptyCompositionWorkaround(text)) return true;
         super.commitText(text, newCursorPosition);
         updateSelectionIfRequired();
         return mImeAdapter.checkCompositionQueueAndCallNative(text.toString(),
@@ -441,6 +447,33 @@ public class AdapterInputConnection extends BaseInputConnection {
 
     private InputMethodManagerWrapper getInputMethodManagerWrapper() {
         return mImeAdapter.getInputMethodManagerWrapper();
+    }
+
+    /**
+     * This method works around the issue crbug.com/373934 where Blink does not cancel
+     * the composition when we send a commit with the empty text.
+     *
+     * TODO(aurimas) Remove this once crbug.com/373934 is fixed.
+     *
+     * @param text Text that software keyboard requested to commit.
+     * @return Whether the workaround was performed.
+     */
+    private boolean maybePerformEmptyCompositionWorkaround(CharSequence text) {
+        int selectionStart = Selection.getSelectionStart(mEditable);
+        int selectionEnd = Selection.getSelectionEnd(mEditable);
+        int compositionStart = getComposingSpanStart(mEditable);
+        int compositionEnd = getComposingSpanEnd(mEditable);
+        if (TextUtils.isEmpty(text) && (selectionStart == selectionEnd)
+                && compositionStart != INVALID_COMPOSITION
+                && compositionEnd != INVALID_COMPOSITION) {
+            beginBatchEdit();
+            finishComposingText();
+            int selection = Selection.getSelectionStart(mEditable);
+            deleteSurroundingText(selection - compositionStart, selection - compositionEnd);
+            endBatchEdit();
+            return true;
+        }
+        return false;
     }
 
     @VisibleForTesting

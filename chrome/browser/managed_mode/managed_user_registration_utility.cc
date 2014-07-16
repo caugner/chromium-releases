@@ -20,12 +20,12 @@
 #include "chrome/browser/managed_mode/managed_user_sync_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
@@ -228,6 +228,7 @@ void ManagedUserRegistrationUtilityImpl::Register(
   callback_ = callback;
   pending_managed_user_id_ = managed_user_id;
 
+  bool need_password_update = !info.password_data.empty();
   const base::DictionaryValue* dict =
       prefs_->GetDictionary(prefs::kManagedUsers);
   is_existing_managed_user_ = dict->HasKey(managed_user_id);
@@ -246,13 +247,15 @@ void ManagedUserRegistrationUtilityImpl::Register(
     std::string key;
     bool need_keys = !info.password_signature_key.empty() ||
                      !info.password_encryption_key.empty();
-    bool keys_need_update =
-        need_keys &&
+    bool have_keys =
         value->GetString(ManagedUserSyncService::kPasswordSignatureKey, &key) &&
         !key.empty() &&
         value->GetString(ManagedUserSyncService::kPasswordEncryptionKey,
                          &key) &&
         !key.empty();
+
+    bool keys_need_update = need_keys && !have_keys;
+
     if (keys_need_update) {
       managed_user_sync_service_->UpdateManagedUser(
           pending_managed_user_id_,
@@ -263,6 +266,7 @@ void ManagedUserRegistrationUtilityImpl::Register(
           info.avatar_index);
     } else {
       // The user already exists and does not need to be updated.
+      need_password_update = false;
       OnManagedUserAcknowledged(managed_user_id);
     }
     avatar_updated_ =
@@ -278,7 +282,7 @@ void ManagedUserRegistrationUtilityImpl::Register(
   managed_user_shared_settings_service_->SetValue(
       pending_managed_user_id_, kAvatarKey,
       base::FundamentalValue(info.avatar_index));
-  if (!info.password_data.empty()) {
+  if (need_password_update) {
     password_update_.reset(new ManagedUserSharedSettingsUpdate(
         managed_user_shared_settings_service_,
         pending_managed_user_id_,

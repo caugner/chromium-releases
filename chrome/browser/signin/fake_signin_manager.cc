@@ -6,15 +6,14 @@
 
 #include "base/callback_helpers.h"
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_global_error.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/notification_service.h"
 
 FakeSigninManagerBase::FakeSigninManagerBase(Profile* profile)
     : SigninManagerBase(
@@ -32,7 +31,7 @@ KeyedService* FakeSigninManagerBase::Build(content::BrowserContext* context) {
 #else
   manager = new FakeSigninManager(profile);
 #endif
-  manager->Initialize(profile, NULL);
+  manager->Initialize(NULL);
   SigninManagerFactory::GetInstance()
       ->NotifyObserversOfSigninManagerCreationForTesting(manager);
   return manager;
@@ -42,7 +41,8 @@ KeyedService* FakeSigninManagerBase::Build(content::BrowserContext* context) {
 
 FakeSigninManager::FakeSigninManager(Profile* profile)
     : SigninManager(
-          ChromeSigninClientFactory::GetInstance()->GetForProfile(profile)) {}
+          ChromeSigninClientFactory::GetInstance()->GetForProfile(profile),
+          ProfileOAuth2TokenServiceFactory::GetForProfile(profile)) {}
 
 FakeSigninManager::~FakeSigninManager() {
 }
@@ -67,6 +67,24 @@ void FakeSigninManager::CompletePendingSignin() {
                     GoogleSigninSucceeded(authenticated_username_, password_));
 }
 
+void FakeSigninManager::AddMergeSessionObserver(
+    MergeSessionHelper::Observer* observer) {
+  SigninManager::AddMergeSessionObserver(observer);
+  merge_session_observer_list_.AddObserver(observer);
+}
+
+void FakeSigninManager::RemoveMergeSessionObserver(
+    MergeSessionHelper::Observer* observer) {
+  SigninManager::RemoveMergeSessionObserver(observer);
+  merge_session_observer_list_.RemoveObserver(observer);
+}
+
+void FakeSigninManager::NotifyMergeSessionObservers(
+    const GoogleServiceAuthError& error) {
+  FOR_EACH_OBSERVER(MergeSessionHelper::Observer, merge_session_observer_list_,
+                    MergeSessionCompleted(GetAuthenticatedUsername(), error));
+}
+
 void FakeSigninManager::SignIn(const std::string& username,
                                const std::string& password) {
   StartSignInWithRefreshToken(
@@ -85,14 +103,6 @@ void FakeSigninManager::SignOut() {
   set_password(std::string());
   const std::string username = authenticated_username_;
   authenticated_username_.clear();
-
-  // TODO(blundell): Eliminate this notification send once crbug.com/333997 is
-  // fixed.
-  GoogleServiceSignoutDetails details(username);
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_GOOGLE_SIGNED_OUT,
-      content::Source<Profile>(profile_),
-      content::Details<const GoogleServiceSignoutDetails>(&details));
 
   FOR_EACH_OBSERVER(SigninManagerBase::Observer, observer_list_,
                     GoogleSignedOut(username));

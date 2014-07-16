@@ -16,12 +16,14 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
+#include "base/time/time.h"
 #include "base/tracked_objects.h"
 #include "components/os_crypt/os_crypt.h"
 #include "google_apis/gcm/base/mcs_message.h"
 #include "google_apis/gcm/base/mcs_util.h"
 #include "google_apis/gcm/protocol/mcs.pb.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
+#include "third_party/leveldatabase/src/include/leveldb/write_batch.h"
 
 namespace gcm {
 
@@ -53,6 +55,16 @@ const char kOutgoingMsgKeyStart[] = "outgoing1-";
 // Key guaranteed to be higher than all outgoing message keys.
 // Used for limiting iteration.
 const char kOutgoingMsgKeyEnd[] = "outgoing2-";
+// Lowest lexicographically ordered G-service settings key.
+// Used for prefixing G-services settings.
+const char kGServiceSettingKeyStart[] = "gservice1-";
+// Key guaranteed to be higher than all G-services settings keys.
+// Used for limiting iteration.
+const char kGServiceSettingKeyEnd[] = "gservice2-";
+// Key for digest of the last G-services settings update.
+const char kGServiceSettingsDigestKey[] = "gservices_digest";
+// Key used to timestamp last checkin (marked with G services settings update).
+const char kLastCheckinTimeKey[] = "last_checkin_time";
 
 std::string MakeRegistrationKey(const std::string& app_id) {
   return kRegistrationKeyStart + app_id;
@@ -72,6 +84,14 @@ std::string MakeOutgoingKey(const std::string& persistent_id) {
 
 std::string ParseOutgoingKey(const std::string& key) {
   return key.substr(arraysize(kOutgoingMsgKeyStart) - 1);
+}
+
+std::string MakeGServiceSettingKey(const std::string& setting_name) {
+  return kGServiceSettingKeyStart + setting_name;
+}
+
+std::string ParseGServiceSettingKey(const std::string& key) {
+  return key.substr(arraysize(kGServiceSettingKeyStart) - 1);
 }
 
 // Note: leveldb::Slice keeps a pointer to the data in |s|, which must therefore
@@ -117,7 +137,12 @@ class GCMStoreImpl::Backend
                            const UpdateCallback& callback);
   void RemoveUserSerialNumber(const std::string& username,
                               const UpdateCallback& callback);
-  void SetNextSerialNumber(int64 serial_number, const UpdateCallback& callback);
+  void SetLastCheckinTime(const base::Time& last_checkin_time,
+                          const UpdateCallback& callback);
+  void SetGServicesSettings(
+      const std::map<std::string, std::string>& settings,
+      const std::string& digest,
+      const UpdateCallback& callback);
 
  private:
   friend class base::RefCountedThreadSafe<Backend>;
@@ -127,6 +152,9 @@ class GCMStoreImpl::Backend
   bool LoadRegistrations(RegistrationInfoMap* registrations);
   bool LoadIncomingMessages(std::vector<std::string>* incoming_messages);
   bool LoadOutgoingMessages(OutgoingMessageMap* outgoing_messages);
+  bool LoadLastCheckinTime(base::Time* last_checkin_time);
+  bool LoadGServicesSettings(std::map<std::string, std::string>* settings,
+                             std::string* digest);
 
   const base::FilePath path_;
   scoped_refptr<base::SequencedTaskRunner> foreground_task_runner_;
@@ -171,12 +199,18 @@ void GCMStoreImpl::Backend::Load(const LoadCallback& callback) {
                              &result->device_security_token) ||
       !LoadRegistrations(&result->registrations) ||
       !LoadIncomingMessages(&result->incoming_messages) ||
-      !LoadOutgoingMessages(&result->outgoing_messages)) {
+      !LoadOutgoingMessages(&result->outgoing_messages) ||
+      !LoadLastCheckinTime(&result->last_checkin_time) ||
+      !LoadGServicesSettings(&result->gservices_settings,
+                             &result->gservices_digest)) {
     result->device_android_id = 0;
     result->device_security_token = 0;
     result->registrations.clear();
     result->incoming_messages.clear();
     result->outgoing_messages.clear();
+    result->gservices_settings.clear();
+    result->gservices_digest.clear();
+    result->last_checkin_time = base::Time::FromInternalValue(0LL);
     foreground_task_runner_->PostTask(FROM_HERE,
                                       base::Bind(callback,
                                                  base::Passed(&result)));
@@ -445,6 +479,61 @@ void GCMStoreImpl::Backend::RemoveOutgoingMessages(
                                                AppIdToMessageCountMap()));
 }
 
+void GCMStoreImpl::Backend::SetLastCheckinTime(
+    const base::Time& last_checkin_time,
+    const UpdateCallback& callback) {
+  leveldb::WriteOptions write_options;
+  write_options.sync = true;
+
+  int64 last_checkin_time_internal = last_checkin_time.ToInternalValue();
+  const leveldb::Status s =
+      db_->Put(write_options,
+               MakeSlice(kLastCheckinTimeKey),
+               MakeSlice(base::Int64ToString(last_checkin_time_internal)));
+
+  if (!s.ok())
+    LOG(ERROR) << "LevelDB set last checkin time failed: " << s.ToString();
+  foreground_task_runner_->PostTask(FROM_HERE, base::Bind(callback, s.ok()));
+}
+
+void GCMStoreImpl::Backend::SetGServicesSettings(
+    const std::map<std::string, std::string>& settings,
+    const std::string& settings_digest,
+    const UpdateCallback& callback) {
+  leveldb::WriteBatch write_batch;
+
+  // Remove all existing settings.
+  leveldb::ReadOptions read_options;
+  read_options.verify_checksums = true;
+  scoped_ptr<leveldb::Iterator> iter(db_->NewIterator(read_options));
+  for (iter->Seek(MakeSlice(kGServiceSettingKeyStart));
+       iter->Valid() && iter->key().ToString() < kGServiceSettingKeyEnd;
+       iter->Next()) {
+    write_batch.Delete(iter->key());
+  }
+
+  // Add the new settings.
+  for (std::map<std::string, std::string>::const_iterator iter =
+           settings.begin();
+       iter != settings.end(); ++iter) {
+    write_batch.Put(MakeSlice(MakeGServiceSettingKey(iter->first)),
+                    MakeSlice(iter->second));
+  }
+
+  // Update the settings digest.
+  write_batch.Put(MakeSlice(kGServiceSettingsDigestKey),
+                  MakeSlice(settings_digest));
+
+  // Write it all in a batch.
+  leveldb::WriteOptions write_options;
+  write_options.sync = true;
+
+  leveldb::Status s = db_->Write(write_options, &write_batch);
+  if (!s.ok())
+    LOG(ERROR) << "LevelDB GService Settings update failed: " << s.ToString();
+  foreground_task_runner_->PostTask(FROM_HERE, base::Bind(callback, s.ok()));
+}
+
 bool GCMStoreImpl::Backend::LoadDeviceCredentials(uint64* android_id,
                                                   uint64* security_token) {
   leveldb::ReadOptions read_options;
@@ -560,17 +649,60 @@ bool GCMStoreImpl::Backend::LoadOutgoingMessages(
   return true;
 }
 
+bool GCMStoreImpl::Backend::LoadLastCheckinTime(
+    base::Time* last_checkin_time) {
+  leveldb::ReadOptions read_options;
+  read_options.verify_checksums = true;
+
+  std::string result;
+  leveldb::Status s = db_->Get(read_options,
+                               MakeSlice(kLastCheckinTimeKey),
+                               &result);
+  int64 time_internal = 0LL;
+  if (s.ok() && !base::StringToInt64(result, &time_internal))
+    LOG(ERROR) << "Failed to restore last checkin time. Using default = 0.";
+
+  // In case we cannot read last checkin time, we default it to 0, as we don't
+  // want that situation to cause the whole load to fail.
+  *last_checkin_time = base::Time::FromInternalValue(time_internal);
+
+  return true;
+}
+
+bool GCMStoreImpl::Backend::LoadGServicesSettings(
+    std::map<std::string, std::string>* settings,
+    std::string* digest) {
+  leveldb::ReadOptions read_options;
+  read_options.verify_checksums = true;
+
+  // Load all of the GServices settings.
+  scoped_ptr<leveldb::Iterator> iter(db_->NewIterator(read_options));
+  for (iter->Seek(MakeSlice(kGServiceSettingKeyStart));
+       iter->Valid() && iter->key().ToString() < kGServiceSettingKeyEnd;
+       iter->Next()) {
+    std::string value = iter->value().ToString();
+    if (value.empty()) {
+      LOG(ERROR) << "Error reading GService Settings " << value;
+      return false;
+    }
+    std::string id = ParseGServiceSettingKey(iter->key().ToString());
+    (*settings)[id] = value;
+    DVLOG(1) << "Found G Service setting with key: " << id
+             << ", and value: " << value;
+  }
+
+  // Load the settings digest. It's ok if it is empty.
+  db_->Get(read_options, MakeSlice(kGServiceSettingsDigestKey), digest);
+
+  return true;
+}
+
 GCMStoreImpl::GCMStoreImpl(
-    bool use_mock_keychain,
     const base::FilePath& path,
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner)
     : backend_(new Backend(path, base::MessageLoopProxy::current())),
       blocking_task_runner_(blocking_task_runner),
       weak_ptr_factory_(this) {
-// On OSX, prevent the Keychain permissions popup during unit tests.
-#if defined(OS_MACOSX)
-  OSCrypt::UseMockKeychain(use_mock_keychain);
-#endif
 }
 
 GCMStoreImpl::~GCMStoreImpl() {}
@@ -732,6 +864,29 @@ void GCMStoreImpl::RemoveOutgoingMessages(
                  base::Bind(&GCMStoreImpl::RemoveOutgoingMessagesContinuation,
                             weak_ptr_factory_.GetWeakPtr(),
                             callback)));
+}
+
+void GCMStoreImpl::SetLastCheckinTime(const base::Time& last_checkin_time,
+                                      const UpdateCallback& callback) {
+  blocking_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&GCMStoreImpl::Backend::SetLastCheckinTime,
+                 backend_,
+                 last_checkin_time,
+                 callback));
+}
+
+void GCMStoreImpl::SetGServicesSettings(
+    const std::map<std::string, std::string>& settings,
+    const std::string& digest,
+    const UpdateCallback& callback) {
+  blocking_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&GCMStoreImpl::Backend::SetGServicesSettings,
+                 backend_,
+                 settings,
+                 digest,
+                 callback));
 }
 
 void GCMStoreImpl::LoadContinuation(const LoadCallback& callback,

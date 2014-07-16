@@ -7,14 +7,16 @@
 #include "apps/shell/browser/shell_app_sorting.h"
 #include "apps/shell/browser/shell_extension_system_factory.h"
 #include "apps/shell/browser/shell_extension_web_contents_observer.h"
+#include "apps/shell/browser/shell_runtime_api_delegate.h"
+#include "apps/shell/common/api/generated_api.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/pref_service_factory.h"
 #include "base/prefs/testing_pref_store.h"
-#include "chrome/common/extensions/api/generated_api.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "components/user_prefs/user_prefs.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/app_sorting.h"
+#include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_host_delegate.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/common/api/generated_api.h"
@@ -148,10 +150,38 @@ bool ShellExtensionsBrowserClient::CanExtensionCrossIncognito(
   return false;
 }
 
+bool ShellExtensionsBrowserClient::IsWebViewRequest(
+    net::URLRequest* request) const {
+  return false;
+}
+
+net::URLRequestJob*
+ShellExtensionsBrowserClient::MaybeCreateResourceBundleRequestJob(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
+    const base::FilePath& directory_path,
+    const std::string& content_security_policy,
+    bool send_cors_header) {
+  return NULL;
+}
+
+bool ShellExtensionsBrowserClient::AllowCrossRendererResourceLoad(
+    net::URLRequest* request,
+    bool is_incognito,
+    const Extension* extension,
+    InfoMap* extension_info_map) {
+  // Note: This may need to change if app_shell supports webview.
+  return false;
+}
+
 PrefService* ShellExtensionsBrowserClient::GetPrefServiceForContext(
     BrowserContext* context) {
   return prefs_.get();
 }
+
+void ShellExtensionsBrowserClient::GetEarlyExtensionPrefsObservers(
+    content::BrowserContext* context,
+    std::vector<ExtensionPrefsObserver*>* observers) const {}
 
 bool ShellExtensionsBrowserClient::DeferLoadingBackgroundHosts(
     BrowserContext* context) const {
@@ -171,9 +201,6 @@ ShellExtensionsBrowserClient::CreateExtensionHostDelegate() {
 bool ShellExtensionsBrowserClient::DidVersionUpdate(BrowserContext* context) {
   // TODO(jamescook): We might want to tell extensions when app_shell updates.
   return false;
-}
-
-void ShellExtensionsBrowserClient::PermitExternalProtocolHandler() {
 }
 
 scoped_ptr<AppSorting> ShellExtensionsBrowserClient::CreateAppSorting() {
@@ -197,10 +224,17 @@ ShellExtensionsBrowserClient::GetExtensionSystemFactory() {
 
 void ShellExtensionsBrowserClient::RegisterExtensionFunctions(
     ExtensionFunctionRegistry* registry) const {
+  // Register core extension-system APIs.
   extensions::core_api::GeneratedFunctionRegistry::RegisterAll(registry);
-  // TODO(rockot): Remove dependency on src/chrome once we have some core APIs
-  // moved out. See http://crbug.com/349042.
-  extensions::api::GeneratedFunctionRegistry::RegisterAll(registry);
+
+  // Register chrome.shell APIs.
+  apps::shell_api::GeneratedFunctionRegistry::RegisterAll(registry);
+}
+
+scoped_ptr<RuntimeAPIDelegate>
+ShellExtensionsBrowserClient::CreateRuntimeAPIDelegate(
+    content::BrowserContext* context) const {
+  return scoped_ptr<RuntimeAPIDelegate>(new apps::ShellRuntimeAPIDelegate());
 }
 
 }  // namespace extensions

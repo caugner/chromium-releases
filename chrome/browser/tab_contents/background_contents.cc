@@ -10,7 +10,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
@@ -122,6 +121,12 @@ void BackgroundContents::AddNewContents(WebContents* source,
                                         bool* was_blocked) {
   delegate_->AddWebContents(
       new_contents, disposition, initial_pos, user_gesture, was_blocked);
+}
+
+bool BackgroundContents::IsNeverVisible(content::WebContents* web_contents) {
+  DCHECK_EQ(extensions::VIEW_TYPE_BACKGROUND_CONTENTS,
+            extensions::GetViewType(web_contents));
+  return true;
 }
 
 void BackgroundContents::RenderProcessGone(base::TerminationStatus status) {

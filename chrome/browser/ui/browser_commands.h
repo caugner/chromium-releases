@@ -92,11 +92,11 @@ bool CanDuplicateTabAt(Browser* browser, int index);
 void ConvertPopupToTabbedBrowser(Browser* browser);
 void Exit();
 void BookmarkCurrentPage(Browser* browser);
-void BookmarkCurrentPageFromStar(Browser* browser);
 bool CanBookmarkCurrentPage(const Browser* browser);
 void BookmarkAllTabs(Browser* browser);
 bool CanBookmarkAllTabs(const Browser* browser);
 void Translate(Browser* browser);
+void ManagePasswordsForPage(Browser* browser);
 void TogglePagePinnedToStartScreen(Browser* browser);
 void SavePage(Browser* browser);
 bool CanSavePage(const Browser* browser);
@@ -157,8 +157,9 @@ void ViewSelectedSource(Browser* browser);
 bool CanViewSource(const Browser* browser);
 
 void CreateApplicationShortcuts(Browser* browser);
-void CreateHostedAppFromCurrentWebContents(Browser* browser);
+void CreateBookmarkAppFromCurrentWebContents(Browser* browser);
 bool CanCreateApplicationShortcuts(const Browser* browser);
+bool CanCreateBookmarkApp(const Browser* browser);
 
 void ConvertTabToAppWindow(Browser* browser, content::WebContents* contents);
 

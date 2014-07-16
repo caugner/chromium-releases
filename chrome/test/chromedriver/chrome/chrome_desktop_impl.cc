@@ -114,8 +114,10 @@ Status ChromeDesktopImpl::WaitForPageToLoad(const std::string& url,
   if (id.empty())
     return Status(kUnknownError, "page could not be found: " + url);
 
-  scoped_ptr<WebView> web_view_tmp(new WebViewImpl(
-      id, GetBuildNo(), devtools_http_client_->CreateClient(id)));
+  scoped_ptr<WebView> web_view_tmp(
+      new WebViewImpl(id,
+                      devtools_http_client_->browser_info(),
+                      devtools_http_client_->CreateClient(id)));
   Status status = web_view_tmp->ConnectIfNecessary();
   if (status.IsError())
     return status;

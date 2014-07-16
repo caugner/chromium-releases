@@ -10,7 +10,8 @@
 
 namespace extensions {
 
-ExtensionRegistry::ExtensionRegistry() {}
+ExtensionRegistry::ExtensionRegistry(content::BrowserContext* browser_context)
+    : browser_context_(browser_context) {}
 ExtensionRegistry::~ExtensionRegistry() {}
 
 // static
@@ -38,14 +39,18 @@ void ExtensionRegistry::RemoveObserver(ExtensionRegistryObserver* observer) {
 
 void ExtensionRegistry::TriggerOnLoaded(const Extension* extension) {
   DCHECK(enabled_extensions_.Contains(extension->id()));
-  FOR_EACH_OBSERVER(
-      ExtensionRegistryObserver, observers_, OnExtensionLoaded(extension));
+  FOR_EACH_OBSERVER(ExtensionRegistryObserver,
+                    observers_,
+                    OnExtensionLoaded(browser_context_, extension));
 }
 
-void ExtensionRegistry::TriggerOnUnloaded(const Extension* extension) {
+void ExtensionRegistry::TriggerOnUnloaded(
+    const Extension* extension,
+    UnloadedExtensionInfo::Reason reason) {
   DCHECK(!enabled_extensions_.Contains(extension->id()));
-  FOR_EACH_OBSERVER(
-      ExtensionRegistryObserver, observers_, OnExtensionUnloaded(extension));
+  FOR_EACH_OBSERVER(ExtensionRegistryObserver,
+                    observers_,
+                    OnExtensionUnloaded(browser_context_, extension, reason));
 }
 
 const Extension* ExtensionRegistry::GetExtensionById(const std::string& id,

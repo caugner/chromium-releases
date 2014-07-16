@@ -32,7 +32,6 @@ _EXCLUDED_PATHS = (
 # checks until it's transitioned to chromium coding style.
 _TESTRUNNER_PATHS = (
     r"^content[\\\/]shell[\\\/]renderer[\\\/]test_runner[\\\/].*",
-    r"^content[\\\/]shell[\\\/]common[\\\/]test_runner[\\\/].*",
     r"^content[\\\/]shell[\\\/]tools[\\\/]plugin[\\\/].*",
 )
 
@@ -80,7 +79,7 @@ _BANNED_OBJC_FUNCTIONS = (
       False,
     ),
     (
-      'NSTrackingArea',
+      r'/NSTrackingArea\W',
       (
        'The use of NSTrackingAreas is prohibited. Please use CrTrackingArea',
        'instead.',
@@ -232,6 +231,17 @@ _BANNED_CPP_FUNCTIONS = (
         # Files that #define IGNORE_EINTR.
         r'^base[\\\/]posix[\\\/]eintr_wrapper\.h$',
         r'^ppapi[\\\/]tests[\\\/]test_broker\.cc$',
+      ),
+    ),
+    (
+      r'/v8::Extension\(',
+      (
+        'Do not introduce new v8::Extensions into the code base, use',
+        'gin::Wrappable instead. See http://crbug.com/334679',
+      ),
+      True,
+      (
+        r'extensions[/\\]renderer[/\\]safe_builtins\.*',
       ),
     ),
 )
@@ -386,7 +396,14 @@ def _CheckNoBannedFunctions(input_api, output_api):
   for f in input_api.AffectedFiles(file_filter=file_filter):
     for line_num, line in f.ChangedContents():
       for func_name, message, error in _BANNED_OBJC_FUNCTIONS:
-        if func_name in line:
+        matched = False
+        if func_name[0:1] == '/':
+          regex = func_name[1:]
+          if input_api.re.search(regex, line):
+            matched = True
+        elif func_name in line:
+            matched = True
+        if matched:
           problems = warnings;
           if error:
             problems = errors;
@@ -901,8 +918,7 @@ def _CheckSpamLogging(input_api, output_api):
                  r"^chrome[\\\/]browser[\\\/]ui[\\\/]startup[\\\/]"
                      r"startup_browser_creator\.cc$",
                  r"^chrome[\\\/]installer[\\\/]setup[\\\/].*",
-                 r"^chrome[\\\/]renderer[\\\/]extensions[\\\/]"
-                     r"logging_native_handler\.cc$",
+                 r"^extensions[\\\/]renderer[\\\/]logging_native_handler\.cc$",
                  r"^content[\\\/]common[\\\/]gpu[\\\/]client[\\\/]"
                      r"gl_helper_benchmark\.cc$",
                  r"^native_client_sdk[\\\/]",
@@ -1061,6 +1077,44 @@ def _CheckJavaStyle(input_api, output_api):
       input_api, output_api, 'tools/android/checkstyle/chromium-style-5.0.xml')
 
 
+_DEPRECATED_CSS = [
+  # Values
+  ( "-webkit-box", "flex" ),
+  ( "-webkit-inline-box", "inline-flex" ),
+  ( "-webkit-flex", "flex" ),
+  ( "-webkit-inline-flex", "inline-flex" ),
+  ( "-webkit-min-content", "min-content" ),
+  ( "-webkit-max-content", "max-content" ),
+
+  # Properties
+  ( "-webkit-background-clip", "background-clip" ),
+  ( "-webkit-background-origin", "background-origin" ),
+  ( "-webkit-background-size", "background-size" ),
+  ( "-webkit-box-shadow", "box-shadow" ),
+
+  # Functions
+  ( "-webkit-gradient", "gradient" ),
+  ( "-webkit-repeating-gradient", "repeating-gradient" ),
+  ( "-webkit-linear-gradient", "linear-gradient" ),
+  ( "-webkit-repeating-linear-gradient", "repeating-linear-gradient" ),
+  ( "-webkit-radial-gradient", "radial-gradient" ),
+  ( "-webkit-repeating-radial-gradient", "repeating-radial-gradient" ),
+]
+
+def _CheckNoDeprecatedCSS(input_api, output_api):
+  """ Make sure that we don't use deprecated CSS
+      properties, functions or values. """
+  results = []
+  file_filter = lambda f: f.LocalPath().endswith('.css')
+  for fpath in input_api.AffectedFiles(file_filter=file_filter):
+    for line_num, line in fpath.ChangedContents():
+      for (deprecated_value, value) in _DEPRECATED_CSS:
+        if input_api.re.search(deprecated_value, line):
+          results.append(output_api.PresubmitError(
+              "%s:%d: Use of deprecated CSS %s, use %s instead" %
+              (fpath.LocalPath(), line_num, deprecated_value, value)))
+  return results
+
 def _CommonChecks(input_api, output_api):
   """Checks common to both upload and commit."""
   results = []
@@ -1096,6 +1150,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckForAnonymousVariables(input_api, output_api))
   results.extend(_CheckCygwinShell(input_api, output_api))
   results.extend(_CheckUserActionUpdate(input_api, output_api))
+  results.extend(_CheckNoDeprecatedCSS(input_api, output_api))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(
@@ -1245,6 +1300,18 @@ def CheckChangeOnUpload(input_api, output_api):
   return results
 
 
+def GetTryServerMasterForBot(bot):
+  """Returns the Try Server master for the given bot.
+
+  Assumes that most Try Servers are on the tryserver.chromium master."""
+  non_default_master_map = {
+      'linux_gpu': 'tryserver.chromium.gpu',
+      'mac_gpu': 'tryserver.chromium.gpu',
+      'win_gpu': 'tryserver.chromium.gpu',
+  }
+  return non_default_master_map.get(bot, 'tryserver.chromium')
+
+
 def GetDefaultTryConfigs(bots=None):
   """Returns a list of ('bot', set(['tests']), optionally filtered by [bots].
 
@@ -1289,6 +1356,7 @@ def GetDefaultTryConfigs(bots=None):
       # TODO(maruel): An option would be to run 'sizes' but not count a failure
       # of this step as a try job failure.
       'android_aosp': ['compile'],
+      'android_chromium_gn_compile_rel': ['compile'],
       'android_clang_dbg': ['slave_steps'],
       'android_dbg': ['slave_steps'],
       'cros_x86': ['defaulttests'],
@@ -1311,8 +1379,10 @@ def GetDefaultTryConfigs(bots=None):
       'linux_chromium_chromeos_clang_dbg': ['defaulttests'],
       'linux_chromium_chromeos_rel': ['defaulttests'],
       'linux_chromium_compile_dbg': ['defaulttests'],
+      'linux_chromium_gn_rel': ['defaulttests'],
       'linux_chromium_rel': ['defaulttests'],
       'linux_chromium_clang_dbg': ['defaulttests'],
+      'linux_gpu': ['defaulttests'],
       'linux_nacl_sdk_build': ['compile'],
       'linux_rel': [
           'telemetry_perf_unittests',
@@ -1320,6 +1390,7 @@ def GetDefaultTryConfigs(bots=None):
       ],
       'mac_chromium_compile_dbg': ['defaulttests'],
       'mac_chromium_rel': ['defaulttests'],
+      'mac_gpu': ['defaulttests'],
       'mac_nacl_sdk_build': ['compile'],
       'mac_rel': [
           'telemetry_perf_unittests',
@@ -1327,6 +1398,10 @@ def GetDefaultTryConfigs(bots=None):
       ],
       'win': ['compile'],
       'win_chromium_compile_dbg': ['defaulttests'],
+      'win_chromium_dbg': ['defaulttests'],
+      'win_chromium_rel': ['defaulttests'],
+      'win_chromium_x64_rel': ['defaulttests'],
+      'win_gpu': ['defaulttests'],
       'win_nacl_sdk_build': ['compile'],
       'win_rel': standard_tests + [
           'app_list_unittests',
@@ -1375,16 +1450,18 @@ def GetDefaultTryConfigs(bots=None):
                                  for x in builders_and_tests[bot]]
 
   if bots:
-    return {
-        'tryserver.chromium': dict((bot, set(builders_and_tests[bot]))
-                                   for bot in bots)
-    }
+    filtered_builders_and_tests = dict((bot, set(builders_and_tests[bot]))
+                                       for bot in bots)
   else:
-    return {
-        'tryserver.chromium': dict(
-            (bot, set(tests))
-            for bot, tests in builders_and_tests.iteritems())
-    }
+    filtered_builders_and_tests = dict(
+        (bot, set(tests))
+        for bot, tests in builders_and_tests.iteritems())
+
+  # Build up the mapping from tryserver master to bot/test.
+  out = dict()
+  for bot, tests in filtered_builders_and_tests.iteritems():
+    out.setdefault(GetTryServerMasterForBot(bot), {})[bot] = tests
+  return out
 
 
 def CheckChangeOnCommit(input_api, output_api):
@@ -1419,7 +1496,7 @@ def GetPreferredTryMasters(project, change):
         'mac_chromium_rel',
     ])
   if all(re.search('(^|[/_])win[/_.]', f) for f in files):
-    return GetDefaultTryConfigs(['win', 'win_rel'])
+    return GetDefaultTryConfigs(['win_chromium_dbg', 'win_chromium_rel'])
   if all(re.search('(^|[/_])android[/_.]', f) for f in files):
     return GetDefaultTryConfigs([
         'android_aosp',
@@ -1430,18 +1507,23 @@ def GetPreferredTryMasters(project, change):
     return GetDefaultTryConfigs(['ios_rel_device', 'ios_dbg_simulator'])
 
   builders = [
+      'android_chromium_gn_compile_rel',
       'android_clang_dbg',
       'android_dbg',
       'ios_dbg_simulator',
       'ios_rel_device',
       'linux_chromium_chromeos_rel',
       'linux_chromium_clang_dbg',
+      'linux_chromium_gn_rel',
       'linux_chromium_rel',
+      'linux_gpu',
       'mac_chromium_compile_dbg',
       'mac_chromium_rel',
+      'mac_gpu',
       'win_chromium_compile_dbg',
-      'win_rel',
-      'win_x64_rel',
+      'win_chromium_rel',
+      'win_chromium_x64_rel',
+      'win_gpu',
   ]
 
   # Match things like path/aura/file.cc and path/file_aura.cc.

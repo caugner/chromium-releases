@@ -10,7 +10,7 @@
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
-#include "grit/component_strings.h"
+#include "grit/components_strings.h"
 #include "third_party/libaddressinput/chromium/cpp/include/libaddressinput/address_data.h"
 #include "third_party/libaddressinput/chromium/cpp/include/libaddressinput/address_field.h"
 #include "third_party/libaddressinput/chromium/cpp/include/libaddressinput/address_ui.h"
@@ -38,12 +38,12 @@ DetailInput::Length LengthFromHint(AddressUiComponent::LengthHint hint) {
 
 void BuildAddressInputs(common::AddressType address_type,
                         const std::string& country_code,
-                        DetailInputs* inputs) {
-  // TODO(rouslan): Store the language code for the autofill profile.
-  // http://crbug.com/354955
+                        DetailInputs* inputs,
+                        std::string* language_code) {
   std::vector<AddressUiComponent> components(
       ::i18n::addressinput::BuildComponents(
-          country_code, g_browser_process->GetApplicationLocale(), NULL));
+          country_code, g_browser_process->GetApplicationLocale(),
+          language_code));
 
   const bool billing = address_type == common::ADDRESS_TYPE_BILLING;
 
@@ -59,18 +59,6 @@ void BuildAddressInputs(common::AddressType address_type,
     base::string16 placeholder = l10n_util::GetStringUTF16(component.name_id);
     DetailInput input = { length, server_type, placeholder };
     inputs->push_back(input);
-
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
-    if (component.field == ::i18n::addressinput::STREET_ADDRESS &&
-        component.length_hint == AddressUiComponent::HINT_LONG) {
-      // TODO(dbeam): support more than 2 address lines. http://crbug.com/324889
-      ServerFieldType server_type =
-          billing ? ADDRESS_BILLING_LINE2 : ADDRESS_HOME_LINE2;
-      base::string16 placeholder = l10n_util::GetStringUTF16(component.name_id);
-      DetailInput input = { length, server_type, placeholder };
-      inputs->push_back(input);
-    }
-#endif
   }
 
   ServerFieldType server_type =
@@ -147,14 +135,9 @@ ServerFieldType TypeForField(AddressField address_field,
       return billing ? ADDRESS_BILLING_ZIP : ADDRESS_HOME_ZIP;
     case ::i18n::addressinput::SORTING_CODE:
       return billing ? ADDRESS_BILLING_SORTING_CODE : ADDRESS_HOME_SORTING_CODE;
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
-    case ::i18n::addressinput::STREET_ADDRESS:
-      return billing ? ADDRESS_BILLING_LINE1 : ADDRESS_HOME_LINE1;
-#else
     case ::i18n::addressinput::STREET_ADDRESS:
       return billing ? ADDRESS_BILLING_STREET_ADDRESS :
                        ADDRESS_HOME_STREET_ADDRESS;
-#endif
     case ::i18n::addressinput::RECIPIENT:
       return billing ? NAME_BILLING_FULL : NAME_FULL;
     case ::i18n::addressinput::ORGANIZATION:

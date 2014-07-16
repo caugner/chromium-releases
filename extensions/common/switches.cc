@@ -16,11 +16,6 @@ const char kAllowHTTPBackgroundPage[] = "allow-http-background-page";
 const char kAllowLegacyExtensionManifests[] =
     "allow-legacy-extension-manifests";
 
-// Enables extensions to be easily installed from sites other than the web
-// store. Without this flag, they can still be installed, but must be manually
-// dragged onto chrome://extensions/.
-const char kEasyOffStoreExtensionInstall[] = "easy-off-store-extension-install";
-
 // Enables extension APIs that are in development.
 const char kEnableExperimentalExtensionApis[] =
     "enable-experimental-extension-apis";
@@ -40,6 +35,16 @@ const char kEventPageIdleTime[] = "event-page-idle-time";
 // notified of its impending unload and that unload happening.
 const char kEventPageSuspendingTime[] = "event-page-unloading-time";
 
+// Values for the kExtensionContentVerification flag. See ContentVerifier::Mode
+// for more explanation.
+const char kExtensionContentVerificationBootstrap[] = "bootstrap";
+const char kExtensionContentVerificationEnforceStrict[] = "enforce_strict";
+const char kExtensionContentVerificationEnforce[] = "enforce";
+
+// Name of the command line flag to force content verification to be on in one
+// of various modes.
+const char kExtensionContentVerification[] = "extension-content-verification";
+
 // Marks a renderer as extension process.
 const char kExtensionProcess[] = "extension-process";
 
@@ -57,6 +62,9 @@ const char kGlobalCommands[] = "global-commands";
 // Makes component extensions appear in chrome://settings/extensions.
 const char kShowComponentExtensionOptions[] =
     "show-component-extension-options";
+
+// Adds the given extension ID to all the permission whitelists.
+const char kWhitelistedExtensionID[] = "whitelisted-extension-id";
 
 }  // namespace switches
 

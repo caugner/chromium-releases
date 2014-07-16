@@ -42,9 +42,8 @@ class MockSessionManagerClient : public SessionManagerClient {
   MOCK_METHOD2(StoreDevicePolicy,
                void(const std::string&,
                     const StorePolicyCallback&));
-  MOCK_METHOD4(StorePolicyForUser,
+  MOCK_METHOD3(StorePolicyForUser,
                void(const std::string&,
-                    const std::string&,
                     const std::string&,
                     const StorePolicyCallback&));
   MOCK_METHOD3(StoreDeviceLocalAccountPolicy,
@@ -54,6 +53,7 @@ class MockSessionManagerClient : public SessionManagerClient {
   MOCK_METHOD2(SetFlagsForUser,
                void(const std::string&,
                     const std::vector<std::string>&));
+  MOCK_METHOD1(GetServerBackedStateKeys, void(const StateKeysCallback&));
 };
 
 }  // namespace chromeos

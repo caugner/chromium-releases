@@ -4,6 +4,7 @@
 
 #include "chrome/browser/policy/policy_helpers.h"
 
+#include "net/base/net_errors.h"
 #include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
@@ -12,19 +13,20 @@
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_IOS)
-#include "chrome/browser/signin/signin_manager.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "google_apis/gaia/gaia_urls.h"
 #endif
 
 namespace policy {
 
-bool OverrideBlacklistForURL(const GURL& url, bool* block) {
+bool OverrideBlacklistForURL(const GURL& url, bool* block, int* reason) {
 #if defined(OS_CHROMEOS)
   // On ChromeOS browsing is only allowed once OOBE has completed. Therefore all
   // requests are blocked until this condition is met.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kOobeGuestSession)) {
     if (!url.SchemeIs("chrome") && !url.SchemeIs("chrome-extension")) {
+      *reason = net::ERR_BLOCKED_ENROLLMENT_CHECK_PENDING;
       *block = true;
       return true;
     }

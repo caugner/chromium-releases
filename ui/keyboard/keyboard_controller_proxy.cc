@@ -11,11 +11,12 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/bindings_policy.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/window.h"
+#include "ui/base/ime/input_method.h"
+#include "ui/base/ime/text_input_client.h"
 #include "ui/keyboard/keyboard_constants.h"
 #include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_util.h"
@@ -50,13 +51,15 @@ class KeyboardContentsDelegate : public content::WebContentsDelegate,
   virtual void MoveContents(content::WebContents* source,
                             const gfx::Rect& pos) OVERRIDE {
     aura::Window* keyboard = proxy_->GetKeyboardWindow();
+    // keyboard window must have been added to keyboard container window at this
+    // point. Otherwise, wrong keyboard bounds is used and may cause problem as
+    // described in crbug.com/367788.
+    DCHECK(keyboard->parent());
     gfx::Rect bounds = keyboard->bounds();
     int new_height = pos.height();
     bounds.set_y(bounds.y() + bounds.height() - new_height);
     bounds.set_height(new_height);
-    proxy_->set_resizing_from_contents(true);
     keyboard->SetBounds(bounds);
-    proxy_->set_resizing_from_contents(false);
   }
 
   // Overridden from content::WebContentsDelegate:
@@ -67,7 +70,7 @@ class KeyboardContentsDelegate : public content::WebContentsDelegate,
   }
 
   // Overridden from content::WebContentsObserver:
-  virtual void WebContentsDestroyed(content::WebContents* contents) OVERRIDE {
+  virtual void WebContentsDestroyed() OVERRIDE {
     delete this;
   }
 
@@ -81,7 +84,7 @@ class KeyboardContentsDelegate : public content::WebContentsDelegate,
 namespace keyboard {
 
 KeyboardControllerProxy::KeyboardControllerProxy()
-    : default_url_(kKeyboardURL), resizing_from_contents_(false) {
+    : default_url_(kKeyboardURL) {
 }
 
 KeyboardControllerProxy::~KeyboardControllerProxy() {
@@ -120,7 +123,7 @@ aura::Window* KeyboardControllerProxy::GetKeyboardWindow() {
     LoadContents(GetVirtualKeyboardUrl());
   }
 
-  return keyboard_contents_->GetView()->GetNativeView();
+  return keyboard_contents_->GetNativeView();
 }
 
 bool KeyboardControllerProxy::HasKeyboardWindow() const {
@@ -141,6 +144,15 @@ void KeyboardControllerProxy::SetUpdateInputType(ui::TextInputType type) {
 }
 
 void KeyboardControllerProxy::EnsureCaretInWorkArea() {
+  if (GetInputMethod()->GetTextInputClient()) {
+    aura::Window* keyboard_window = GetKeyboardWindow();
+    aura::Window* root_window = keyboard_window->GetRootWindow();
+    gfx::Rect available_bounds = root_window->bounds();
+    gfx::Rect keyboard_bounds = keyboard_window->bounds();
+    available_bounds.set_height(available_bounds.height() -
+        keyboard_bounds.height());
+    GetInputMethod()->GetTextInputClient()->EnsureCaretInRect(available_bounds);
+  }
 }
 
 void KeyboardControllerProxy::LoadSystemKeyboard() {

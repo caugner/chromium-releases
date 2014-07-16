@@ -215,12 +215,15 @@ FileBrowserHandlerExecutor::SetupFileAccessPermissions(
     base::FilePath local_path = url.path();
     base::FilePath virtual_path = url.virtual_path();
 
-    bool is_drive_file = url.type() == fileapi::kFileSystemTypeDrive;
+    const bool is_drive_file = url.type() == fileapi::kFileSystemTypeDrive;
     DCHECK(!is_drive_file || drive::util::IsUnderDriveMountPoint(local_path));
 
-    // If the file is under drive mount point, there is no actual file to be
-    // found on the url.path().
-    if (!is_drive_file) {
+    const bool is_native_file =
+        url.type() == fileapi::kFileSystemTypeNativeLocal ||
+        url.type() == fileapi::kFileSystemTypeRestrictedNativeLocal;
+
+    // If the file is from a physical volume, actual file must be found.
+    if (is_native_file) {
       if (!base::PathExists(local_path) ||
           base::IsLink(local_path) ||
           !base::GetFileInfo(local_path, &file_info)) {
@@ -359,9 +362,8 @@ void FileBrowserHandlerExecutor::SetupPermissionsAndDispatchEvent(
     return;
   }
 
-  extensions::EventRouter* event_router =
-      extensions::ExtensionSystem::Get(profile_)->event_router();
-  if (!event_router) {
+  extensions::EventRouter* router = extensions::EventRouter::Get(profile_);
+  if (!router) {
     ExecuteDoneOnUIThread(false);
     return;
   }
@@ -394,7 +396,7 @@ void FileBrowserHandlerExecutor::SetupPermissionsAndDispatchEvent(
   scoped_ptr<extensions::Event> event(new extensions::Event(
       "fileBrowserHandler.onExecute", event_args.Pass()));
   event->restrict_to_browser_context = profile_;
-  event_router->DispatchEventToExtension(extension_->id(), event.Pass());
+  router->DispatchEventToExtension(extension_->id(), event.Pass());
 
   ExecuteDoneOnUIThread(true);
 }
@@ -483,8 +485,10 @@ bool ExecuteFileBrowserHandler(
 }
 
 bool IsFallbackFileBrowserHandler(const file_tasks::TaskDescriptor& task) {
-  return (task.task_type == file_tasks::TASK_TYPE_FILE_BROWSER_HANDLER &&
+  return ((task.task_type == file_tasks::TASK_TYPE_FILE_BROWSER_HANDLER ||
+           task.task_type == file_tasks::TASK_TYPE_FILE_HANDLER) &&
           (task.app_id == kFileManagerAppId ||
+           task.app_id == kVideoPlayerAppId ||
            task.app_id == extension_misc::kQuickOfficeComponentExtensionId ||
            task.app_id == extension_misc::kQuickOfficeInternalExtensionId ||
            task.app_id == extension_misc::kQuickOfficeExtensionId));

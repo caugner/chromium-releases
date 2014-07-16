@@ -44,9 +44,11 @@ class MEDIA_EXPORT MediaDrmBridge : public MediaKeys {
   static bool IsSecurityLevelSupported(const std::string& key_system,
                                        SecurityLevel security_level);
 
-  // TODO(xhwang): The |container_mime_type| is not the same as contentType in
-  // the EME spec. Revisit this once the spec issue with initData type is
-  // resolved.
+  // Checks whether |key_system| is supported.
+  static bool IsKeySystemSupported(const std::string& key_system);
+
+  // Checks whether |key_system| is supported with |container_mime_type|.
+  // |container_mime_type| must not be empty.
   static bool IsKeySystemSupportedWithType(
       const std::string& key_system,
       const std::string& container_mime_type);
@@ -59,7 +61,7 @@ class MEDIA_EXPORT MediaDrmBridge : public MediaKeys {
   // pointer otherwise.
   static scoped_ptr<MediaDrmBridge> Create(int cdm_id,
                                            const std::string& key_system,
-                                           const GURL& frame_url,
+                                           const GURL& security_origin,
                                            MediaPlayerManager* manager);
 
   // Returns true if |security_level| is successfully set, or false otherwise.
@@ -120,12 +122,12 @@ class MEDIA_EXPORT MediaDrmBridge : public MediaKeys {
 
   int cdm_id() const { return cdm_id_; }
 
-  GURL frame_url() const { return frame_url_; }
+  const GURL& security_origin() const { return security_origin_; }
 
  private:
   MediaDrmBridge(int cdm_id,
                  const std::vector<uint8>& scheme_uuid,
-                 const GURL& frame_url,
+                 const GURL& security_origin,
                  MediaPlayerManager* manager);
 
   // Get the security level of the media.
@@ -137,8 +139,8 @@ class MEDIA_EXPORT MediaDrmBridge : public MediaKeys {
   // UUID of the key system.
   std::vector<uint8> scheme_uuid_;
 
-  // media stream's frame URL.
-  const GURL frame_url_;
+  // media stream's security origin.
+  const GURL security_origin_;
 
   // Java MediaDrm instance.
   base::android::ScopedJavaGlobalRef<jobject> j_media_drm_;

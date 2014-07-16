@@ -110,7 +110,6 @@ class DeviceSettingsTestHelper : public SessionManagerClient {
                                  const StorePolicyCallback& callback) OVERRIDE;
   virtual void StorePolicyForUser(const std::string& username,
                                   const std::string& policy_blob,
-                                  const std::string& policy_key,
                                   const StorePolicyCallback& callback) OVERRIDE;
   virtual void StoreDeviceLocalAccountPolicy(
       const std::string& account_id,
@@ -119,6 +118,8 @@ class DeviceSettingsTestHelper : public SessionManagerClient {
   virtual void SetFlagsForUser(
       const std::string& account_id,
       const std::vector<std::string>& flags) OVERRIDE;
+  virtual void GetServerBackedStateKeys(
+      const StateKeysCallback& callback) OVERRIDE;
 
  private:
   struct PolicyState {

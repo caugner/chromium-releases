@@ -23,6 +23,9 @@ using std::string;
 
 namespace {
 
+const char kClassMustLeftMostlyDeriveGC[] =
+    "[blink-gc] Class %0 must derive its GC base in the left-most position.";
+
 const char kClassRequiresTraceMethod[] =
     "[blink-gc] Class %0 requires a trace method"
     " because it contains fields that require tracing.";
@@ -112,6 +115,10 @@ const char kManualDispatchMethodNote[] =
 const char kDerivesNonStackAllocated[] =
     "[blink-gc] Stack-allocated class %0 derives class %1"
     " which is not stack allocated.";
+
+const char kClassOverridesNew[] =
+    "[blink-gc] Garbage collected class %0"
+    " is not permitted to override its new operator.";
 
 struct BlinkGCPluginOptions {
   BlinkGCPluginOptions() : enable_oilpan(false), dump_graph(false) {}
@@ -430,6 +437,7 @@ class CheckGCRootsVisitor : public RecursiveEdgeVisitor {
 // This visitor checks that the fields of a class are "well formed".
 // - OwnPtr, RefPtr and RawPtr must not point to a GC derived types.
 // - An on-heap class must never contain GC roots.
+// - Only stack-allocated types may point to stack-allocated types.
 class CheckFieldsVisitor : public RecursiveEdgeVisitor {
  public:
   typedef std::vector<std::pair<FieldPoint*, Edge*> > Errors;
@@ -481,18 +489,25 @@ class CheckFieldsVisitor : public RecursiveEdgeVisitor {
     if (!Parent() || !edge->value()->IsGCAllocated())
       return;
 
-    if (Parent()->IsOwnPtr() ||
-        (stack_allocated_host_ && Parent()->IsRawPtr())) {
-      invalid_fields_.push_back(std::make_pair(current_, Parent()));
+    // In transition mode, disallow  OwnPtr<T>, RawPtr<T> to GC allocated T's,
+    // also disallow T* in stack-allocated types.
+    if (options_.enable_oilpan) {
+      if (Parent()->IsOwnPtr() ||
+          Parent()->IsRawPtrClass() ||
+          (stack_allocated_host_ && Parent()->IsRawPtr() &&
+           // TODO: Remove this exception once the node hierarchy is moved.
+           !edge->value()->IsTreeShared())) {
+        invalid_fields_.push_back(std::make_pair(current_, Parent()));
+        return;
+      }
+
       return;
     }
 
-    // Don't check raw and ref pointers in transition mode.
-    if (options_.enable_oilpan)
-      return;
-
-    if (Parent()->IsRawPtr() || Parent()->IsRefPtr())
+    if (Parent()->IsRawPtr() || Parent()->IsRefPtr() || Parent()->IsOwnPtr()) {
       invalid_fields_.push_back(std::make_pair(current_, Parent()));
+      return;
+    }
   }
 
  private:
@@ -523,6 +538,8 @@ class BlinkGCPluginConsumer : public ASTConsumer {
     options_.ignored_directories.push_back("/heap/");
 
     // Register warning/error messages.
+    diag_class_must_left_mostly_derive_gc_ = diagnostic_.getCustomDiagID(
+        getErrorLevel(), kClassMustLeftMostlyDeriveGC);
     diag_class_requires_trace_method_ =
         diagnostic_.getCustomDiagID(getErrorLevel(), kClassRequiresTraceMethod);
     diag_base_requires_tracing_ =
@@ -551,6 +568,8 @@ class BlinkGCPluginConsumer : public ASTConsumer {
         diagnostic_.getCustomDiagID(getErrorLevel(), kMissingFinalizeDispatch);
     diag_derives_non_stack_allocated_ =
         diagnostic_.getCustomDiagID(getErrorLevel(), kDerivesNonStackAllocated);
+    diag_class_overrides_new_ =
+        diagnostic_.getCustomDiagID(getErrorLevel(), kClassOverridesNew);
 
     // Register note messages.
     diag_field_requires_tracing_note_ = diagnostic_.getCustomDiagID(
@@ -683,17 +702,36 @@ class BlinkGCPluginConsumer : public ASTConsumer {
     }
 
     if (info->IsGCDerived()) {
+      CheckLeftMostDerived(info);
+
       CheckDispatch(info);
 
-      CheckGCRootsVisitor visitor;
-      if (visitor.ContainsGCRoots(info))
-        ReportClassContainsGCRoots(info, &visitor.gc_roots());
+      if (CXXMethodDecl* newop = info->DeclaresNewOperator())
+        ReportClassOverridesNew(info, newop);
+
+      // TODO: Remove this exception once TreeShared is properly traced.
+      if (!info->IsTreeShared()) {
+        CheckGCRootsVisitor visitor;
+        if (visitor.ContainsGCRoots(info))
+          ReportClassContainsGCRoots(info, &visitor.gc_roots());
+      }
 
       if (info->NeedsFinalization())
         CheckFinalization(info);
     }
 
     DumpClass(info);
+  }
+
+  void CheckLeftMostDerived(RecordInfo* info) {
+    CXXRecordDecl* left_most = info->record();
+    CXXRecordDecl::base_class_iterator it = left_most->bases_begin();
+    while (it != left_most->bases_end()) {
+      left_most = it->getType()->getAsCXXRecordDecl();
+      it = left_most->bases_begin();
+    }
+    if (!Config::IsGCBase(left_most->getName()))
+      ReportClassMustLeftMostlyDeriveGC(info);
   }
 
   void CheckDispatch(RecordInfo* info) {
@@ -886,6 +924,14 @@ class BlinkGCPluginConsumer : public ASTConsumer {
         json_->Write("lbl", lbl);
         json_->Write("kind", kind);
         json_->Write("loc", loc);
+        json_->Write("ptr",
+                     !Parent() ? "val" :
+                     Parent()->IsRawPtr() ? "raw" :
+                     Parent()->IsRefPtr() ? "ref" :
+                     Parent()->IsOwnPtr() ? "own" :
+                     (Parent()->IsMember() ||
+                      Parent()->IsWeakMember()) ? "mem" :
+                     "val");
         json_->CloseObject();
       }
 
@@ -1021,6 +1067,14 @@ class BlinkGCPluginConsumer : public ASTConsumer {
     }
     *filename = ploc.getFilename();
     return true;
+  }
+
+  void ReportClassMustLeftMostlyDeriveGC(RecordInfo* info) {
+    SourceLocation loc = info->record()->getInnerLocStart();
+    SourceManager& manager = instance_.getSourceManager();
+    FullSourceLoc full_loc(loc, manager);
+    diagnostic_.Report(full_loc, diag_class_must_left_mostly_derive_gc_)
+        << info->record();
   }
 
   void ReportClassRequiresTraceMethod(RecordInfo* info) {
@@ -1191,6 +1245,13 @@ class BlinkGCPluginConsumer : public ASTConsumer {
         << info->record() << base->info()->record();
   }
 
+  void ReportClassOverridesNew(RecordInfo* info, CXXMethodDecl* newop) {
+    SourceLocation loc = newop->getLocStart();
+    SourceManager& manager = instance_.getSourceManager();
+    FullSourceLoc full_loc(loc, manager);
+    diagnostic_.Report(full_loc, diag_class_overrides_new_) << info->record();
+  }
+
   void NoteManualDispatchMethod(CXXMethodDecl* dispatch) {
     SourceLocation loc = dispatch->getLocStart();
     SourceManager& manager = instance_.getSourceManager();
@@ -1256,6 +1317,7 @@ class BlinkGCPluginConsumer : public ASTConsumer {
         << overridden;
   }
 
+  unsigned diag_class_must_left_mostly_derive_gc_;
   unsigned diag_class_requires_trace_method_;
   unsigned diag_base_requires_tracing_;
   unsigned diag_fields_require_tracing_;
@@ -1270,6 +1332,7 @@ class BlinkGCPluginConsumer : public ASTConsumer {
   unsigned diag_missing_trace_dispatch_;
   unsigned diag_missing_finalize_dispatch_;
   unsigned diag_derives_non_stack_allocated_;
+  unsigned diag_class_overrides_new_;
 
   unsigned diag_field_requires_tracing_note_;
   unsigned diag_raw_ptr_to_gc_managed_class_note_;

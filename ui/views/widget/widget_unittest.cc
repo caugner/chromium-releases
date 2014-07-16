@@ -71,9 +71,6 @@ class EventCountView : public View {
   virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE {
     RecordEvent(*event);
   }
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE {
-    RecordEvent(*event);
-  }
   virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE {
     RecordEvent(*event);
   }
@@ -89,7 +86,7 @@ class EventCountView : public View {
 };
 
 // A view that keeps track of the events it receives, and consumes all scroll
-// gesture events.
+// gesture events and ui::ET_SCROLL events.
 class ScrollableEventCountView : public EventCountView {
  public:
   ScrollableEventCountView() {}
@@ -109,6 +106,12 @@ class ScrollableEventCountView : public EventCountView {
       default:
         break;
     }
+  }
+
+  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE {
+    EventCountView::OnScrollEvent(event);
+    if (event->type() == ui::ET_SCROLL)
+      event->SetHandled();
   }
 
   DISALLOW_COPY_AND_ASSIGN(ScrollableEventCountView);
@@ -1446,13 +1449,15 @@ TEST_F(WidgetTest, GestureScrollEventDispatching) {
 }
 
 // Tests that event-handlers installed on the RootView get triggered correctly.
+// TODO(tdanderson): Clean up this test as part of crbug.com/355680.
 TEST_F(WidgetTest, EventHandlersOnRootView) {
   Widget* widget = CreateTopLevelNativeWidget();
   View* root_view = widget->GetRootView();
 
-  EventCountView* view = new EventCountView;
+  scoped_ptr<EventCountView> view(new EventCountView());
+  view->set_owned_by_client();
   view->SetBounds(0, 0, 20, 20);
-  root_view->AddChildView(view);
+  root_view->AddChildView(view.get());
 
   EventCountHandler h1;
   root_view->AddPreTargetHandler(&h1);
@@ -1462,16 +1467,6 @@ TEST_F(WidgetTest, EventHandlersOnRootView) {
 
   widget->SetBounds(gfx::Rect(0, 0, 100, 100));
   widget->Show();
-
-  ui::TouchEvent pressed(ui::ET_TOUCH_PRESSED,
-                         gfx::Point(10, 10),
-                         0, 0,
-                         ui::EventTimeForNow(),
-                         1.0, 0.0, 1.0, 0.0);
-  widget->OnTouchEvent(&pressed);
-  EXPECT_EQ(1, h1.GetEventCount(ui::ET_TOUCH_PRESSED));
-  EXPECT_EQ(1, view->GetEventCount(ui::ET_TOUCH_PRESSED));
-  EXPECT_EQ(1, h2.GetEventCount(ui::ET_TOUCH_PRESSED));
 
   ui::GestureEvent begin(ui::ET_GESTURE_BEGIN,
       5, 5, 0, ui::EventTimeForNow(),
@@ -1483,16 +1478,6 @@ TEST_F(WidgetTest, EventHandlersOnRootView) {
   EXPECT_EQ(1, h1.GetEventCount(ui::ET_GESTURE_BEGIN));
   EXPECT_EQ(1, view->GetEventCount(ui::ET_GESTURE_BEGIN));
   EXPECT_EQ(1, h2.GetEventCount(ui::ET_GESTURE_BEGIN));
-
-  ui::TouchEvent released(ui::ET_TOUCH_RELEASED,
-                          gfx::Point(10, 10),
-                          0, 0,
-                          ui::EventTimeForNow(),
-                          1.0, 0.0, 1.0, 0.0);
-  widget->OnTouchEvent(&released);
-  EXPECT_EQ(1, h1.GetEventCount(ui::ET_TOUCH_RELEASED));
-  EXPECT_EQ(1, view->GetEventCount(ui::ET_TOUCH_RELEASED));
-  EXPECT_EQ(1, h2.GetEventCount(ui::ET_TOUCH_RELEASED));
 
   widget->OnGestureEvent(&end);
   EXPECT_EQ(1, h1.GetEventCount(ui::ET_GESTURE_END));
@@ -1507,9 +1492,67 @@ TEST_F(WidgetTest, EventHandlersOnRootView) {
                          0, 20,
                          2);
   widget->OnScrollEvent(&scroll);
-  EXPECT_EQ(1, h1.GetEventCount(ui::ET_SCROLL));
+  EXPECT_EQ(2, h1.GetEventCount(ui::ET_SCROLL));
   EXPECT_EQ(1, view->GetEventCount(ui::ET_SCROLL));
-  EXPECT_EQ(1, h2.GetEventCount(ui::ET_SCROLL));
+  EXPECT_EQ(2, h2.GetEventCount(ui::ET_SCROLL));
+
+  // Unhandled scroll events are turned into wheel events and re-dispatched.
+  EXPECT_EQ(1, h1.GetEventCount(ui::ET_MOUSEWHEEL));
+  EXPECT_EQ(1, view->GetEventCount(ui::ET_MOUSEWHEEL));
+  EXPECT_EQ(1, h2.GetEventCount(ui::ET_MOUSEWHEEL));
+
+  h1.ResetCounts();
+  view->ResetCounts();
+  h2.ResetCounts();
+
+  ui::ScrollEvent fling(ui::ET_SCROLL_FLING_START,
+                        gfx::Point(5, 5),
+                        ui::EventTimeForNow(),
+                        0,
+                        0, 20,
+                        0, 20,
+                        2);
+  widget->OnScrollEvent(&fling);
+  EXPECT_EQ(2, h1.GetEventCount(ui::ET_SCROLL_FLING_START));
+  EXPECT_EQ(1, view->GetEventCount(ui::ET_SCROLL_FLING_START));
+  EXPECT_EQ(2, h2.GetEventCount(ui::ET_SCROLL_FLING_START));
+
+  // Unhandled scroll events which are not of type ui::ET_SCROLL should not
+  // be turned into wheel events and re-dispatched.
+  EXPECT_EQ(0, h1.GetEventCount(ui::ET_MOUSEWHEEL));
+  EXPECT_EQ(0, view->GetEventCount(ui::ET_MOUSEWHEEL));
+  EXPECT_EQ(0, h2.GetEventCount(ui::ET_MOUSEWHEEL));
+
+  h1.ResetCounts();
+  view->ResetCounts();
+  h2.ResetCounts();
+
+  // Replace the child of |root_view| with a ScrollableEventCountView so that
+  // ui::ET_SCROLL events are marked as handled at the target phase.
+  root_view->RemoveChildView(view.get());
+  ScrollableEventCountView* scroll_view = new ScrollableEventCountView;
+  scroll_view->SetBounds(0, 0, 20, 20);
+  root_view->AddChildView(scroll_view);
+
+  ui::ScrollEvent consumed_scroll(ui::ET_SCROLL,
+                                  gfx::Point(5, 5),
+                                  ui::EventTimeForNow(),
+                                  0,
+                                  0, 20,
+                                  0, 20,
+                                  2);
+  widget->OnScrollEvent(&consumed_scroll);
+
+  // The event is handled at the target phase and should not reach the
+  // post-target handler.
+  EXPECT_EQ(1, h1.GetEventCount(ui::ET_SCROLL));
+  EXPECT_EQ(1, scroll_view->GetEventCount(ui::ET_SCROLL));
+  EXPECT_EQ(0, h2.GetEventCount(ui::ET_SCROLL));
+
+  // Handled scroll events are not turned into wheel events and re-dispatched.
+  EXPECT_EQ(0, h1.GetEventCount(ui::ET_MOUSEWHEEL));
+  EXPECT_EQ(0, scroll_view->GetEventCount(ui::ET_MOUSEWHEEL));
+  EXPECT_EQ(0, h2.GetEventCount(ui::ET_MOUSEWHEEL));
 
   widget->CloseNow();
 }

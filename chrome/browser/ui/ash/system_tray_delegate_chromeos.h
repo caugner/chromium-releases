@@ -7,12 +7,13 @@
 
 #include "apps/app_window_registry.h"
 #include "ash/ime/input_method_menu_manager.h"
-#include "ash/session_state_observer.h"
+#include "ash/session/session_state_observer.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "base/callback_list.h"
 #include "base/compiler_specific.h"
+#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
@@ -61,7 +62,6 @@ class SystemTrayDelegateChromeOS
   virtual void Shutdown() OVERRIDE;
   virtual bool GetTrayVisibilityOnStartup() OVERRIDE;
   virtual ash::user::LoginStatus GetUserLoginStatus() const OVERRIDE;
-  virtual bool IsOobeCompleted() const OVERRIDE;
   virtual void ChangeProfilePicture() OVERRIDE;
   virtual const std::string GetEnterpriseDomain() const OVERRIDE;
   virtual const base::string16 GetEnterpriseMessage() const OVERRIDE;
@@ -74,6 +74,7 @@ class SystemTrayDelegateChromeOS
   virtual void ShowSettings() OVERRIDE;
   virtual bool ShouldShowSettings() OVERRIDE;
   virtual void ShowDateSettings() OVERRIDE;
+  virtual void ShowSetTimeDialog() OVERRIDE;
   virtual void ShowNetworkSettings(const std::string& service_path) OVERRIDE;
   virtual void ShowBluetoothSettings() OVERRIDE;
   virtual void ShowDisplaySettings() OVERRIDE;
@@ -120,6 +121,7 @@ class SystemTrayDelegateChromeOS
   virtual void ShowOtherNetworkDialog(const std::string& type) OVERRIDE;
   virtual bool GetBluetoothAvailable() OVERRIDE;
   virtual bool GetBluetoothEnabled() OVERRIDE;
+  virtual bool GetBluetoothDiscovering() OVERRIDE;
   virtual void ChangeProxySettings() OVERRIDE;
   virtual ash::VolumeControlDelegate* GetVolumeControlDelegate() const OVERRIDE;
   virtual void SetVolumeControlDelegate(
@@ -133,6 +135,8 @@ class SystemTrayDelegateChromeOS
   virtual bool IsNetworkBehindCaptivePortal(
       const std::string& service_path) const OVERRIDE;
   virtual bool IsSearchKeyMappedToCapsLock() OVERRIDE;
+  virtual ash::tray::UserAccountsDelegate* GetUserAccountsDelegate(
+      const std::string& user_id) OVERRIDE;
 
   // browser tests need to call ShouldUse24HourClock().
   bool GetShouldUse24HourClockForTesting() const;
@@ -250,8 +254,6 @@ class SystemTrayDelegateChromeOS
   virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
 
   // Overridden from apps::AppWindowRegistry::Observer:
-  virtual void OnAppWindowAdded(apps::AppWindow* app_window) OVERRIDE;
-  virtual void OnAppWindowIconChanged(apps::AppWindow* app_window) OVERRIDE;
   virtual void OnAppWindowRemoved(apps::AppWindow* app_window) OVERRIDE;
 
   void OnAccessibilityStatusChanged(
@@ -277,6 +279,8 @@ class SystemTrayDelegateChromeOS
   scoped_ptr<ash::VolumeControlDelegate> volume_control_delegate_;
   scoped_ptr<CrosSettingsObserverSubscription> device_settings_observer_;
   scoped_ptr<AccessibilityStatusSubscription> accessibility_subscription_;
+  base::ScopedPtrHashMap<std::string, ash::tray::UserAccountsDelegate>
+      accounts_delegates_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemTrayDelegateChromeOS);
 };

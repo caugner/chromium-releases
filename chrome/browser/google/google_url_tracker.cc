@@ -13,11 +13,11 @@
 #include "chrome/browser/google/google_url_tracker_infobar_delegate.h"
 #include "chrome/browser/google/google_url_tracker_navigation_helper.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/infobars/core/infobar.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -249,14 +249,9 @@ void GoogleURLTracker::StartFetchIfDesirable() {
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kGoogleBaseURL))
     return;
 
-  std::string fetch_url = CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kGoogleSearchDomainCheckURL);
-  if (fetch_url.empty())
-    fetch_url = kSearchDomainCheckURL;
-
   already_fetched_ = true;
-  fetcher_.reset(net::URLFetcher::Create(fetcher_id_, GURL(fetch_url),
-                                         net::URLFetcher::GET, this));
+  fetcher_.reset(net::URLFetcher::Create(
+      fetcher_id_, GURL(kSearchDomainCheckURL), net::URLFetcher::GET, this));
   ++fetcher_id_;
   // We don't want this fetch to set new entries in the cache or cookies, lest
   // we alarm the user.
@@ -349,7 +344,8 @@ void GoogleURLTracker::OnNavigationCommitted(InfoBarService* infobar_service,
   if (map_entry->has_infobar_delegate()) {
     map_entry->infobar_delegate()->Update(search_url);
   } else {
-    InfoBar* infobar = infobar_creator_.Run(infobar_service, this, search_url);
+    infobars::InfoBar* infobar =
+        infobar_creator_.Run(infobar_service, this, search_url);
     if (infobar) {
       map_entry->SetInfoBarDelegate(
           static_cast<GoogleURLTrackerInfoBarDelegate*>(infobar->delegate()));

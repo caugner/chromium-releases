@@ -4,55 +4,19 @@
 
 #include "ui/events/platform/x11/x11_event_source.h"
 
-#include <glib.h>
 #include <X11/extensions/XInput2.h>
 #include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/XKBlib.h>
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
+#include "ui/gfx/x/x11_types.h"
 
 namespace ui {
 
 namespace {
-
-struct GLibX11Source : public GSource {
-  // Note: The GLibX11Source is created and destroyed by GLib. So its
-  // constructor/destructor may or may not get called.
-  XDisplay* display;
-  GPollFD* poll_fd;
-};
-
-gboolean XSourcePrepare(GSource* source, gint* timeout_ms) {
-  GLibX11Source* gxsource = static_cast<GLibX11Source*>(source);
-  if (XPending(gxsource->display))
-    *timeout_ms = 0;
-  else
-    *timeout_ms = -1;
-  return FALSE;
-}
-
-gboolean XSourceCheck(GSource* source) {
-  GLibX11Source* gxsource = static_cast<GLibX11Source*>(source);
-  return XPending(gxsource->display);
-}
-
-gboolean XSourceDispatch(GSource* source,
-                         GSourceFunc unused_func,
-                         gpointer data) {
-  X11EventSource* x11_source = static_cast<X11EventSource*>(data);
-  x11_source->DispatchXEvents();
-  return TRUE;
-}
-
-GSourceFuncs XSourceFuncs = {
-  XSourcePrepare,
-  XSourceCheck,
-  XSourceDispatch,
-  NULL
-};
 
 int g_xinput_opcode = -1;
 
@@ -116,18 +80,13 @@ bool InitializeXkb(XDisplay* display) {
 }  // namespace
 
 X11EventSource::X11EventSource(XDisplay* display)
-    : display_(display),
-      x_source_(NULL) {
+    : display_(display) {
   CHECK(display_);
   InitializeXInput2(display_);
   InitializeXkb(display_);
-
-  InitXSource();
 }
 
 X11EventSource::~X11EventSource() {
-  g_source_destroy(x_source_);
-  g_source_unref(x_source_);
 }
 
 // static
@@ -165,34 +124,19 @@ void X11EventSource::BlockUntilWindowMapped(XID window) {
 ////////////////////////////////////////////////////////////////////////////////
 // X11EventSource, private
 
-void X11EventSource::InitXSource() {
-  CHECK(!x_source_);
-  CHECK(display_) << "Unable to get connection to X server";
-
-  x_poll_.reset(new GPollFD());
-  x_poll_->fd = ConnectionNumber(display_);
-  x_poll_->events = G_IO_IN;
-  x_poll_->revents = 0;
-
-  GLibX11Source* glib_x_source = static_cast<GLibX11Source*>
-      (g_source_new(&XSourceFuncs, sizeof(GLibX11Source)));
-  glib_x_source->display = display_;
-  glib_x_source->poll_fd = x_poll_.get();
-
-  x_source_ = glib_x_source;
-  g_source_add_poll(x_source_, x_poll_.get());
-  g_source_set_can_recurse(x_source_, TRUE);
-  g_source_set_callback(x_source_, NULL, this, NULL);
-  g_source_attach(x_source_, g_main_context_default());
-}
-
 uint32_t X11EventSource::DispatchEvent(XEvent* xevent) {
   bool have_cookie = false;
   if (xevent->type == GenericEvent &&
       XGetEventData(xevent->xgeneric.display, &xevent->xcookie)) {
     have_cookie = true;
   }
-  int action = PlatformEventSource::DispatchEvent(xevent);
+
+  uint32_t action = PlatformEventSource::DispatchEvent(xevent);
+  if (xevent->type == GenericEvent &&
+      xevent->xgeneric.evtype == XI_HierarchyChanged) {
+    ui::UpdateDeviceList();
+  }
+
   if (have_cookie)
     XFreeEventData(xevent->xgeneric.display, &xevent->xcookie);
   return action;

@@ -18,13 +18,14 @@
 #include "net/base/net_errors.h"
 #include "url/gurl.h"
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_NACL)
 #include <ifaddrs.h>
-#endif
 #include <net/if.h>
 #include <netinet/in.h>
+#endif
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
+#include <net/if_media.h>
 #include <netinet/in_var.h>
 #include <sys/ioctl.h>
 #endif
@@ -83,44 +84,41 @@ void RemovePermanentIPv6AddressesWhereTemporaryExists(
 
 #endif
 
-}  // namespace
+#if defined(OS_MACOSX) && !defined(OS_IOS)
 
-bool FileURLToFilePath(const GURL& url, base::FilePath* path) {
-  *path = base::FilePath();
-  std::string& file_path_str = const_cast<std::string&>(path->value());
-  file_path_str.clear();
+NetworkChangeNotifier::ConnectionType GetNetworkInterfaceType(
+    int addr_family, const std::string& interface_name) {
+  NetworkChangeNotifier::ConnectionType type =
+      NetworkChangeNotifier::CONNECTION_UNKNOWN;
 
-  if (!url.is_valid())
-    return false;
+  struct ifmediareq ifmr = {};
+  strncpy(ifmr.ifm_name, interface_name.c_str(), sizeof(ifmr.ifm_name) - 1);
 
-  // Firefox seems to ignore the "host" of a file url if there is one. That is,
-  // file://foo/bar.txt maps to /bar.txt.
-  // TODO(dhg): This should probably take into account UNCs which could
-  // include a hostname other than localhost or blank
-  std::string old_path = url.path();
+  int s = socket(addr_family, SOCK_DGRAM, 0);
+  if (s == -1) {
+    return type;
+  }
 
-  if (old_path.empty())
-    return false;
-
-  // GURL stores strings as percent-encoded 8-bit, this will undo if possible.
-  old_path = UnescapeURLComponent(old_path,
-      UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
-
-  // Collapse multiple path slashes into a single path slash.
-  std::string new_path;
-  do {
-    new_path = old_path;
-    ReplaceSubstringsAfterOffset(&new_path, 0, "//", "/");
-    old_path.swap(new_path);
-  } while (new_path != old_path);
-
-  file_path_str.assign(old_path);
-
-  return !file_path_str.empty();
+  if (ioctl(s, SIOCGIFMEDIA, &ifmr) != -1) {
+    if (ifmr.ifm_current & IFM_IEEE80211) {
+      type = NetworkChangeNotifier::CONNECTION_WIFI;
+    } else if (ifmr.ifm_current & IFM_ETHER) {
+      type = NetworkChangeNotifier::CONNECTION_ETHERNET;
+    }
+  }
+  close(s);
+  return type;
 }
 
+#endif
+
+}  // namespace
+
 bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
-#if defined(OS_ANDROID)
+#if defined(OS_NACL)
+  NOTIMPLEMENTED();
+  return false;
+#elif defined(OS_ANDROID)
   std::string network_list = android::GetNetworkList();
   base::StringTokenizer network_interfaces(network_list, "\n");
   while (network_interfaces.GetNext()) {
@@ -142,7 +140,9 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
     CHECK(base::StringToUint(network_tokenizer.token(), &index));
 
     networks->push_back(
-        NetworkInterface(name, name, index, address, network_prefix));
+        NetworkInterface(name, name, index,
+                         NetworkChangeNotifier::CONNECTION_UNKNOWN,
+                         address, network_prefix));
   }
   return true;
 #else
@@ -212,6 +212,8 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
     }
 
     NetworkInterfaceInfo network_info;
+    NetworkChangeNotifier::ConnectionType connection_type =
+        NetworkChangeNotifier::CONNECTION_UNKNOWN;
 #if defined(OS_MACOSX) && !defined(OS_IOS)
     // Check if this is a temporary address. Currently this is only supported
     // on Mac.
@@ -226,6 +228,8 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
         network_info.permanent = !(ifr.ifr_ifru.ifru_flags & IN6_IFF_TEMPORARY);
       }
     }
+
+    connection_type = GetNetworkInterfaceType(addr->sa_family, name);
 #endif
 
     IPEndPoint address;
@@ -243,7 +247,7 @@ bool GetNetworkList(NetworkInterfaceList* networks, int policy) {
       }
       network_info.interface = NetworkInterface(
           name, name, if_nametoindex(name.c_str()),
-          address.address(), net_mask);
+          connection_type, address.address(), net_mask);
 
       network_infos.push_back(NetworkInterfaceInfo(network_info));
     }

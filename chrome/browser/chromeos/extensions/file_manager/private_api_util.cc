@@ -125,7 +125,6 @@ void VolumeInfoToVolumeMetadata(
     const VolumeInfo& volume_info,
     file_browser_private::VolumeMetadata* volume_metadata) {
   DCHECK(volume_metadata);
-  DCHECK(!volume_info.mount_path.empty());
 
   volume_metadata->volume_id = volume_info.volume_id;
 
@@ -161,6 +160,9 @@ void VolumeInfoToVolumeMetadata(
       break;
     case VOLUME_TYPE_PROVIDED:
       volume_metadata->volume_type = file_browser_private::VOLUME_TYPE_PROVIDED;
+      break;
+    case VOLUME_TYPE_MTP:
+      volume_metadata->volume_type = file_browser_private::VOLUME_TYPE_MTP;
       break;
     case VOLUME_TYPE_TESTING:
       volume_metadata->volume_type =

@@ -30,7 +30,6 @@ class AboutResource;
 
 namespace drive {
 
-class DriveServiceInterface;
 class EventLogger;
 class JobScheduler;
 class ResourceEntry;
@@ -51,7 +50,6 @@ class DirectoryLoader {
                   base::SequencedTaskRunner* blocking_task_runner,
                   ResourceMetadata* resource_metadata,
                   JobScheduler* scheduler,
-                  DriveServiceInterface* drive_service,
                   AboutResourceLoader* about_resource_loader,
                   LoaderController* apply_task_controller);
   ~DirectoryLoader();
@@ -61,25 +59,29 @@ class DirectoryLoader {
   void RemoveObserver(ChangeListLoaderObserver* observer);
 
   // Reads the directory contents.
-  // |callback| must not be null.
+  // |entries_callback| can be null.
+  // |completion_callback| must not be null.
   void ReadDirectory(const base::FilePath& directory_path,
-                     const ReadDirectoryCallback& callback);
+                     const ReadDirectoryEntriesCallback& entries_callback,
+                     const FileOperationCallback& completion_callback);
 
  private:
   class FeedFetcher;
   struct ReadDirectoryCallbackState;
 
   // Part of ReadDirectory().
-  void ReadDirectoryAfterGetEntry(const base::FilePath& directory_path,
-                                  const ReadDirectoryCallback& callback,
-                                  bool should_try_loading_parent,
-                                  const ResourceEntry* entry,
-                                  FileError error);
-  void ReadDirectoryAfterLoadParent(const base::FilePath& directory_path,
-                                    const ReadDirectoryCallback& callback,
-                                    FileError error,
-                                    scoped_ptr<ResourceEntryVector> entries,
-                                    bool has_more);
+  void ReadDirectoryAfterGetEntry(
+      const base::FilePath& directory_path,
+      const ReadDirectoryEntriesCallback& entries_callback,
+      const FileOperationCallback& completion_callback,
+      bool should_try_loading_parent,
+      const ResourceEntry* entry,
+      FileError error);
+  void ReadDirectoryAfterLoadParent(
+      const base::FilePath& directory_path,
+      const ReadDirectoryEntriesCallback& entries_callback,
+      const FileOperationCallback& completion_callback,
+      FileError error);
   void ReadDirectoryAfterGetAboutResource(
       const std::string& local_id,
       google_apis::GDataErrorCode status,
@@ -88,7 +90,6 @@ class DirectoryLoader {
       scoped_ptr<google_apis::AboutResource> about_resource,
       const std::string& local_id,
       const ResourceEntry* entry,
-      const ResourceEntryVector* child_entries,
       const int64* local_changestamp,
       FileError error);
 
@@ -102,8 +103,7 @@ class DirectoryLoader {
 
   // Sends |entries| to the callbacks.
   void SendEntries(const std::string& local_id,
-                   const ResourceEntryVector& entries,
-                   bool has_more);
+                   const ResourceEntryVector& entries);
 
   // ================= Implementation for directory loading =================
   // Loads the directory contents from server, and updates the local metadata.
@@ -126,7 +126,6 @@ class DirectoryLoader {
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   ResourceMetadata* resource_metadata_;  // Not owned.
   JobScheduler* scheduler_;  // Not owned.
-  DriveServiceInterface* drive_service_;  // Not owned.
   AboutResourceLoader* about_resource_loader_;  // Not owned.
   LoaderController* loader_controller_;  // Not owned.
   ObserverList<ChangeListLoaderObserver> observers_;

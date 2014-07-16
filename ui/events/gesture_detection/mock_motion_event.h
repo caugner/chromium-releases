@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/time/time.h"
 #include "ui/events/gesture_detection/motion_event.h"
@@ -11,6 +13,7 @@ namespace ui {
 
 struct MockMotionEvent : public MotionEvent {
   enum { MAX_POINTERS = 3 };
+  enum { TOUCH_MAJOR = 10 };
 
   MockMotionEvent();
   explicit MockMotionEvent(Action action);
@@ -21,6 +24,17 @@ struct MockMotionEvent : public MotionEvent {
                   float y0,
                   float x1,
                   float y1);
+  MockMotionEvent(Action action,
+                  base::TimeTicks time,
+                  float x0,
+                  float y0,
+                  float x1,
+                  float y1,
+                  float x2,
+                  float y2);
+  MockMotionEvent(Action action,
+                  base::TimeTicks time,
+                  const std::vector<gfx::PointF>& positions);
   MockMotionEvent(const MockMotionEvent& other);
   virtual ~MockMotionEvent();
 
@@ -28,6 +42,7 @@ struct MockMotionEvent : public MotionEvent {
   virtual Action GetAction() const OVERRIDE;
   virtual int GetActionIndex() const OVERRIDE;
   virtual size_t GetPointerCount() const OVERRIDE;
+  virtual int GetId() const OVERRIDE;
   virtual int GetPointerId(size_t pointer_index) const OVERRIDE;
   virtual float GetX(size_t pointer_index) const OVERRIDE;
   virtual float GetY(size_t pointer_index) const OVERRIDE;
@@ -48,15 +63,20 @@ struct MockMotionEvent : public MotionEvent {
   virtual scoped_ptr<MotionEvent> Cancel() const OVERRIDE;
 
   // Utility methods.
+  void SetId(int new_id);
+  void SetTime(base::TimeTicks new_time);
   void PressPoint(float x, float y);
   void MovePoint(size_t index, float x, float y);
   void ReleasePoint();
   void CancelPoint();
+  void SetTouchMajor(float new_touch_major);
 
   MotionEvent::Action action;
   size_t pointer_count;
   gfx::PointF points[MAX_POINTERS];
   base::TimeTicks time;
+  float touch_major;
+  int id;
 };
 
 }  // namespace ui

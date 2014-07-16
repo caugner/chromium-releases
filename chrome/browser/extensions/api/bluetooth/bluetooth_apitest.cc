@@ -16,6 +16,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_out_of_band_pairing_data.h"
+#include "device/bluetooth/bluetooth_uuid.h"
 #include "device/bluetooth/test/mock_bluetooth_adapter.h"
 #include "device/bluetooth/test/mock_bluetooth_device.h"
 #include "device/bluetooth/test/mock_bluetooth_discovery_session.h"
@@ -28,6 +29,7 @@ using device::BluetoothDevice;
 using device::BluetoothDiscoverySession;
 using device::BluetoothOutOfBandPairingData;
 using device::BluetoothProfile;
+using device::BluetoothUUID;
 using device::MockBluetoothAdapter;
 using device::MockBluetoothDevice;
 using device::MockBluetoothDiscoverySession;
@@ -72,7 +74,6 @@ class BluetoothApiTest : public ExtensionApiTest {
     device3_.reset(new testing::NiceMock<MockBluetoothDevice>(
         mock_adapter_, 0, "d3", "31:32:33:34:35:36",
         false /* paired */, false /* connected */));
-
   }
 
   void DiscoverySessionCallback(
@@ -102,9 +103,12 @@ class BluetoothApiTest : public ExtensionApiTest {
   scoped_ptr<testing::NiceMock<MockBluetoothProfile> > profile1_;
   scoped_ptr<testing::NiceMock<MockBluetoothProfile> > profile2_;
 
-  extensions::ExtensionBluetoothEventRouter* event_router() {
-    return extensions::BluetoothAPI::Get(browser()->profile())
-        ->bluetooth_event_router();
+  extensions::BluetoothEventRouter* event_router() {
+    return bluetooth_api()->event_router();
+  }
+
+  extensions::BluetoothAPI* bluetooth_api() {
+    return extensions::BluetoothAPI::Get(browser()->profile());
   }
 
  private:
@@ -148,6 +152,11 @@ static BluetoothOutOfBandPairingData GetOutOfBandPairingData() {
 }
 
 static bool CallClosure(const base::Closure& callback) {
+  callback.Run();
+  return true;
+}
+
+static bool CallErrorClosure(const BluetoothDevice::ErrorCallback& callback) {
   callback.Run();
   return true;
 }
@@ -316,9 +325,9 @@ IN_PROC_BROWSER_TEST_F(BluetoothApiTest, SetOutOfBandPairingData) {
   testing::Mock::VerifyAndClearExpectations(device1_.get());
   EXPECT_CALL(*mock_adapter_, GetDevice(device1_->GetAddress()))
       .WillOnce(testing::Return(device1_.get()));
-  EXPECT_CALL(*device1_,
-              ClearOutOfBandPairingData(testing::_,
-                                        testing::Truly(CallClosure)));
+  EXPECT_CALL(
+      *device1_,
+      ClearOutOfBandPairingData(testing::_, testing::Truly(CallErrorClosure)));
 
   set_oob_function = setupFunction(
       new api::BluetoothSetOutOfBandPairingDataFunction);
@@ -560,13 +569,21 @@ IN_PROC_BROWSER_TEST_F(BluetoothApiTest, OnConnection) {
   scoped_refptr<device::MockBluetoothSocket> socket =
       new device::MockBluetoothSocket();
 
-  event_router()->AddProfile("1234", extension->id(), profile1_.get());
-  event_router()->DispatchConnectionEvent(
-      extension->id(), "1234", device1_.get(), socket);
+  EXPECT_CALL(*mock_adapter_, GetDevice(device1_->GetAddress()))
+      .WillOnce(testing::Return(device1_.get()));
+
+  event_router()->AddProfile(
+      BluetoothUUID("1234"), extension->id(), profile1_.get());
+  bluetooth_api()->DispatchConnectionEvent(
+      extension->id(), BluetoothUUID("1234"), device1_.get(), socket);
+  // Connection events are dispatched using a couple of PostTask to the UI
+  // thread. Waiting until idle ensures the event is dispatched to the
+  // receiver(s).
+  base::RunLoop().RunUntilIdle();
 
   listener.Reply("go");
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
-  event_router()->RemoveProfile("1234");
+  event_router()->RemoveProfile(BluetoothUUID("1234"));
 }
 
 IN_PROC_BROWSER_TEST_F(BluetoothApiTest, GetDevices) {
@@ -638,10 +655,15 @@ IN_PROC_BROWSER_TEST_F(BluetoothApiTest, DeviceInfo) {
     .WillRepeatedly(testing::Return(0x240A));
   EXPECT_CALL(*device1_.get(), GetDeviceID())
     .WillRepeatedly(testing::Return(0x0400));
+  EXPECT_CALL(*device1_, GetRSSI()).WillRepeatedly(testing::Return(-42));
+  EXPECT_CALL(*device1_, GetCurrentHostTransmitPower())
+      .WillRepeatedly(testing::Return(-16));
+  EXPECT_CALL(*device1_, GetMaximumHostTransmitPower())
+      .WillRepeatedly(testing::Return(10));
 
   BluetoothDevice::UUIDList uuids;
-  uuids.push_back("00001105-0000-1000-8000-00805f9b34fb");
-  uuids.push_back("00001106-0000-1000-8000-00805f9b34fb");
+  uuids.push_back(BluetoothUUID("1105"));
+  uuids.push_back(BluetoothUUID("1106"));
 
   EXPECT_CALL(*device1_.get(), GetUUIDs())
       .WillOnce(testing::Return(uuids));

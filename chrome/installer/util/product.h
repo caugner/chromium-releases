@@ -81,16 +81,6 @@ class Product {
       return options_.erase(option) != 0;
   }
 
-  // Returns the path(s) to the directory that holds the user data (primary
-  // and, if applicable to |dist|, alternate).  This is always inside a user's
-  // local application data folder (e.g., "AppData\Local or "Local
-  // Settings\Application Data" in %USERPROFILE%). Note that these are the
-  // defaults and do not take into account that they can be overriden with a
-  // command line parameter.  |paths| may be empty on return, but is guaranteed
-  // not to contain empty paths otherwise. If more than one path is returned,
-  // they are guaranteed to be siblings.
-  void GetUserDataPaths(std::vector<base::FilePath>* paths) const;
-
   // Launches Chrome without waiting for it to exit.
   bool LaunchChrome(const base::FilePath& application_path) const;
 

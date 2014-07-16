@@ -24,18 +24,23 @@ class LoggingRaw : public base::NonThreadSafe {
   LoggingRaw();
   ~LoggingRaw();
 
-  // Inform of new event: three types of events: frame, packets and generic.
+  // Inform of new event: two types of events: frame and packet.
   // Frame events can be inserted with different parameters.
   void InsertFrameEvent(const base::TimeTicks& time_of_event,
                         CastLoggingEvent event, uint32 rtp_timestamp,
                         uint32 frame_id);
 
-  // Size - Inserting the size implies that this is an encoded frame.
   // This function is only applicable for the following frame events:
   // kAudioFrameEncoded, kVideoFrameEncoded
-  void InsertFrameEventWithSize(const base::TimeTicks& time_of_event,
+  // |size| - Size of encoded frame.
+  // |key_frame| - Whether the frame is a key frame. This field is only
+  //               applicable for kVideoFrameEncoded event.
+  // |target_bitrate| - The target bitrate of the encoder the time the frame
+  // was encoded. Only applicable for kVideoFrameEncoded event.
+  void InsertEncodedFrameEvent(const base::TimeTicks& time_of_event,
                                 CastLoggingEvent event, uint32 rtp_timestamp,
-                                uint32 frame_id, int size);
+                                uint32 frame_id, int size, bool key_frame,
+                                int target_bitrate);
 
   // Render/playout delay
   // This function is only applicable for the following frame events:
@@ -49,11 +54,6 @@ class LoggingRaw : public base::NonThreadSafe {
                          CastLoggingEvent event, uint32 rtp_timestamp,
                          uint32 frame_id, uint16 packet_id,
                          uint16 max_packet_id, size_t size);
-
-  // Insert a generic event. The interpretation of |value| depends on
-  // type of |event|.
-  void InsertGenericEvent(const base::TimeTicks& time_of_event,
-                          CastLoggingEvent event, int value);
 
   // Adds |subscriber| so that it will start receiving events on main thread.
   // Note that this class does not own |subscriber|.
@@ -70,7 +70,7 @@ class LoggingRaw : public base::NonThreadSafe {
   void InsertBaseFrameEvent(const base::TimeTicks& time_of_event,
                             CastLoggingEvent event, uint32 frame_id,
                             uint32 rtp_timestamp, base::TimeDelta delay,
-                            int size);
+                            int size, bool key_frame, int target_bitrate);
 
   // List of subscriber pointers. This class does not own the subscribers.
   std::vector<RawEventSubscriber*> subscribers_;

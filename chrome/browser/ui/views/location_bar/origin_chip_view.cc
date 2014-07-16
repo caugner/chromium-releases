@@ -11,6 +11,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_icon_image.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -24,12 +25,12 @@
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -74,7 +75,7 @@ OriginChipExtensionIcon::OriginChipExtensionIcon(
           extension,
           extensions::IconsInfo::GetIcons(extension),
           extension_misc::EXTENSION_ICON_BITTY,
-          extensions::IconsInfo::GetDefaultAppIcon(),
+          extensions::util::GetDefaultAppIcon(),
           this)) {
   // Forces load of the image.
   icon_image_->image_skia().GetRepresentation(1.0f);
@@ -216,7 +217,7 @@ void OriginChipView::Update(content::WebContents* web_contents) {
         host);
   }
   host_label_->SetText(host);
-  host_label_->SetTooltipText(host);
+  host_label_->SetTooltipText(base::UTF8ToUTF16(url.spec()));
   host_label_->SetElideBehavior(views::Label::NO_ELIDE);
 
   int icon = location_bar_view_->GetToolbarModel()->GetIconForSecurityLevel(
@@ -250,6 +251,44 @@ void OriginChipView::Update(content::WebContents* web_contents) {
   SchedulePaint();
 }
 
+void OriginChipView::OnChanged() {
+  Update(location_bar_view_->GetWebContents());
+  // TODO(gbillock): Also need to potentially repaint infobars to make sure the
+  // arrows are pointing to the right spot. Only needed for some edge cases.
+}
+
+int OriginChipView::ElideDomainTarget(int target_max_width) {
+  base::string16 host =
+      OriginChip::LabelFromURLForProfile(url_displayed_, profile_);
+  host_label_->SetText(host);
+  int width = GetPreferredSize().width();
+  if (width <= target_max_width)
+    return width;
+
+  gfx::Size label_size = host_label_->GetPreferredSize();
+  int padding_width = width - label_size.width();
+
+  host_label_->SetText(ElideHost(
+      location_bar_view_->GetToolbarModel()->GetURL(),
+      host_label_->font_list(), target_max_width - padding_width));
+  return GetPreferredSize().width();
+}
+
+void OriginChipView::FadeIn() {
+  fade_in_animation_->Show();
+}
+
+gfx::Size OriginChipView::GetPreferredSize() {
+  gfx::Size label_size = host_label_->GetPreferredSize();
+  gfx::Size icon_size = location_icon_view_->GetPreferredSize();
+  int icon_spacing = showing_16x16_icon_ ?
+      (k16x16IconLeadingSpacing + k16x16IconTrailingSpacing) : 0;
+  return gfx::Size(kEdgeThickness + icon_size.width() + icon_spacing +
+                   kIconTextSpacing + label_size.width() +
+                   kTrailingLabelMargin + kEdgeThickness,
+                   icon_size.height());
+}
+
 void OriginChipView::SetBorderImages(const int images[3][9]) {
   scoped_ptr<views::LabelButtonBorder> border(
       new views::LabelButtonBorder(views::Button::STYLE_BUTTON));
@@ -276,16 +315,6 @@ void OriginChipView::SetBorderImages(const int images[3][9]) {
       bitmap.getColor(bitmap.width() / 2, bitmap.height() / 2));
 }
 
-void OriginChipView::OnChanged() {
-  Update(location_bar_view_->GetWebContents());
-  // TODO(gbillock): Also need to potentially repaint infobars to make sure the
-  // arrows are pointing to the right spot. Only needed for some edge cases.
-}
-
-void OriginChipView::FadeIn() {
-  fade_in_animation_->Show();
-}
-
 void OriginChipView::AnimationProgressed(const gfx::Animation* animation) {
   if (animation == fade_in_animation_.get())
     SchedulePaint();
@@ -298,17 +327,6 @@ void OriginChipView::AnimationEnded(const gfx::Animation* animation) {
     fade_in_animation_->Reset();
   else
     views::LabelButton::AnimationEnded(animation);
-}
-
-gfx::Size OriginChipView::GetPreferredSize() {
-  gfx::Size label_size = host_label_->GetPreferredSize();
-  gfx::Size icon_size = location_icon_view_->GetPreferredSize();
-  int icon_spacing = showing_16x16_icon_ ?
-      (k16x16IconLeadingSpacing + k16x16IconTrailingSpacing) : 0;
-  return gfx::Size(kEdgeThickness + icon_size.width() + icon_spacing +
-                   kIconTextSpacing + label_size.width() +
-                   kTrailingLabelMargin + kEdgeThickness,
-                   icon_size.height());
 }
 
 void OriginChipView::Layout() {
@@ -341,23 +359,6 @@ void OriginChipView::OnPaintBorder(gfx::Canvas* canvas) {
   } else {
     views::LabelButton::OnPaintBorder(canvas);
   }
-}
-
-int OriginChipView::ElideDomainTarget(int target_max_width) {
-  base::string16 host =
-      OriginChip::LabelFromURLForProfile(url_displayed_, profile_);
-  host_label_->SetText(host);
-  int width = GetPreferredSize().width();
-  if (width <= target_max_width)
-    return width;
-
-  gfx::Size label_size = host_label_->GetPreferredSize();
-  int padding_width = width - label_size.width();
-
-  host_label_->SetText(ElideHost(
-      location_bar_view_->GetToolbarModel()->GetURL(),
-      host_label_->font_list(), target_max_width - padding_width));
-  return GetPreferredSize().width();
 }
 
 // TODO(gbillock): Make the LocationBarView or OmniboxView the listener for

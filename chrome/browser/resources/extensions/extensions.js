@@ -3,11 +3,13 @@
 // found in the LICENSE file.
 
 <include src="../uber/uber_utils.js"></include>
+<include src="extension_code.js"></include>
 <include src="extension_commands_overlay.js"></include>
 <include src="extension_focus_manager.js"></include>
 <include src="extension_list.js"></include>
 <include src="pack_extension_overlay.js"></include>
 <include src="extension_error_overlay.js"></include>
+<include src="extension_loader.js"></include>
 
 <if expr="chromeos">
 <include src="chromeos/kiosk_apps.js"></include>
@@ -86,6 +88,13 @@ cr.define('extensions', function() {
     __proto__: HTMLDivElement.prototype,
 
     /**
+     * Whether or not to try to display the Apps Developer Tools promotion.
+     * @type {boolean}
+     * @private
+     */
+    displayPromo_: false,
+
+    /**
      * Perform initial setup.
      */
     initialize: function() {
@@ -101,18 +110,29 @@ cr.define('extensions', function() {
       // back in returnExtensionsData.
       chrome.send('extensionSettingsRequestExtensionsData');
 
+      var extensionLoader = extensions.ExtensionLoader.getInstance();
+
       $('toggle-dev-on').addEventListener('change',
           this.handleToggleDevMode_.bind(this));
       $('dev-controls').addEventListener('webkitTransitionEnd',
           this.handleDevControlsTransitionEnd_.bind(this));
 
       // Set up the three dev mode buttons (load unpacked, pack and update).
-      $('load-unpacked').addEventListener('click',
-          this.handleLoadUnpackedExtension_.bind(this));
+      $('load-unpacked').addEventListener('click', function(e) {
+          extensionLoader.loadUnpacked();
+      });
       $('pack-extension').addEventListener('click',
           this.handlePackExtension_.bind(this));
       $('update-extensions-now').addEventListener('click',
           this.handleUpdateExtensionNow_.bind(this));
+
+      // Set up the close dialog for the apps developer tools promo.
+      $('apps-developer-tools-promo').querySelector('.close-button').
+          addEventListener('click', function(e) {
+        this.displayPromo_ = false;
+        this.updatePromoVisibility_();
+        chrome.send('extensionSettingsDismissADTPromo');
+      }.bind(this));
 
       if (!loadTimeData.getBoolean('offStoreInstallEnabled')) {
         this.dragWrapper_ = new cr.ui.DragWrapper(document.documentElement,
@@ -162,12 +182,23 @@ cr.define('extensions', function() {
     },
 
     /**
-     * Handles the Load Unpacked Extension button.
-     * @param {Event} e Change event.
+     * Updates the Chrome Apps and Extensions Developer Tools promotion's
+     * visibility.
      * @private
      */
-    handleLoadUnpackedExtension_: function(e) {
-      chrome.send('extensionSettingsLoadUnpackedExtension');
+    updatePromoVisibility_: function() {
+      var extensionSettings = $('extension-settings');
+      var visible = extensionSettings.classList.contains('dev-mode') &&
+                    this.displayPromo_;
+
+      var adtPromo = $('apps-developer-tools-promo');
+      var controls = adtPromo.querySelectorAll('a, button');
+      Array.prototype.forEach.call(controls, function(control) {
+        control[visible ? 'removeAttribute' : 'setAttribute']('tabindex', '-1');
+      });
+
+      adtPromo.setAttribute('aria-hidden', !visible);
+      extensionSettings.classList.toggle('adt-promo', visible);
     },
 
     /**
@@ -223,6 +254,7 @@ cr.define('extensions', function() {
       } else {
         $('extension-settings').classList.remove('dev-mode');
       }
+      window.setTimeout(this.updatePromoVisibility_.bind(this));
 
       chrome.send('extensionSettingsToggleDeveloperMode');
     },
@@ -296,6 +328,10 @@ cr.define('extensions', function() {
       pageDiv.classList.remove('dev-mode');
       $('toggle-dev-on').checked = false;
     }
+
+    ExtensionSettings.getInstance().displayPromo_ =
+        extensionsData.promoteAppsDevTools;
+    ExtensionSettings.getInstance().updatePromoVisibility_();
 
     $('load-unpacked').disabled = extensionsData.loadUnpackedDisabled;
 

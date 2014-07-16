@@ -4,6 +4,7 @@
 
 #include "chrome/browser/apps/app_launch_for_metro_restart_win.h"
 
+#include "apps/browser/api/app_runtime/app_runtime_api.h"
 #include "apps/launcher.h"
 #include "apps/pref_names.h"
 #include "base/bind.h"
@@ -13,13 +14,11 @@
 #include "base/prefs/pref_service.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/api/app_runtime/app_runtime_api.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "extensions/browser/extension_system.h"
-#include "win8/util/win8_util.h"
 
 using extensions::Extension;
 using extensions::ExtensionSystem;
@@ -40,7 +39,7 @@ void LaunchAppWithId(Profile* profile,
   if (!extension)
     return;
 
-  extensions::AppEventRouter::DispatchOnLaunchedEvent(profile, extension);
+  apps::AppEventRouter::DispatchOnLaunchedEvent(profile, extension);
 }
 
 }  // namespace
@@ -69,13 +68,6 @@ void HandleAppLaunchForMetroRestart(Profile* profile) {
     return;
 
   prefs->ClearPref(prefs::kAppLaunchForMetroRestart);
-
-  if (win8::IsSingleWindowMetroMode()) {
-    // In this case we have relaunched with the correct profile, but we are not
-    // in Desktop mode, so can not launch apps. Leave the preferences cleared so
-    // there are no surprises later.
-    return;
-  }
 
   const int kRestartAppLaunchDelayMs = 1000;
   base::MessageLoop::current()->PostDelayedTask(

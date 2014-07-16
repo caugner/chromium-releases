@@ -11,14 +11,14 @@
 namespace content {
 
 GpuMemoryBufferImplIOSurface::GpuMemoryBufferImplIOSurface(
-    gfx::Size size, unsigned internalformat)
+    const gfx::Size& size,
+    unsigned internalformat)
     : GpuMemoryBufferImpl(size, internalformat),
       io_surface_support_(IOSurfaceSupport::Initialize()) {
   CHECK(io_surface_support_);
 }
 
-GpuMemoryBufferImplIOSurface::~GpuMemoryBufferImplIOSurface() {
-}
+GpuMemoryBufferImplIOSurface::~GpuMemoryBufferImplIOSurface() {}
 
 // static
 bool GpuMemoryBufferImplIOSurface::IsFormatSupported(unsigned internalformat) {
@@ -28,6 +28,23 @@ bool GpuMemoryBufferImplIOSurface::IsFormatSupported(unsigned internalformat) {
     default:
       return false;
   }
+}
+
+// static
+bool GpuMemoryBufferImplIOSurface::IsUsageSupported(unsigned usage) {
+  switch (usage) {
+    case GL_IMAGE_MAP_CHROMIUM:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// static
+bool GpuMemoryBufferImplIOSurface::IsConfigurationSupported(
+    unsigned internalformat,
+    unsigned usage) {
+  return IsFormatSupported(internalformat) && IsUsageSupported(usage);
 }
 
 // static
@@ -41,8 +58,9 @@ uint32 GpuMemoryBufferImplIOSurface::PixelFormat(unsigned internalformat) {
   }
 }
 
-bool GpuMemoryBufferImplIOSurface::Initialize(
+bool GpuMemoryBufferImplIOSurface::InitializeFromHandle(
     gfx::GpuMemoryBufferHandle handle) {
+  DCHECK(IsFormatSupported(internalformat_));
   io_surface_.reset(io_surface_support_->IOSurfaceLookup(handle.io_surface_id));
   if (!io_surface_) {
     VLOG(1) << "IOSurface lookup failed";
@@ -52,11 +70,11 @@ bool GpuMemoryBufferImplIOSurface::Initialize(
   return true;
 }
 
-void GpuMemoryBufferImplIOSurface::Map(AccessMode mode, void** vaddr) {
+void* GpuMemoryBufferImplIOSurface::Map() {
   DCHECK(!mapped_);
   io_surface_support_->IOSurfaceLock(io_surface_, 0, NULL);
-  *vaddr = io_surface_support_->IOSurfaceGetBaseAddress(io_surface_);
   mapped_ = true;
+  return io_surface_support_->IOSurfaceGetBaseAddress(io_surface_);
 }
 
 void GpuMemoryBufferImplIOSurface::Unmap() {

@@ -27,7 +27,7 @@
 #include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
-#include "chrome/browser/translate/translate_ui_delegate.h"
+#include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
@@ -39,9 +39,6 @@
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_editor_controller.h"
-#import "chrome/browser/ui/cocoa/browser/avatar_base_controller.h"
-#import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
-#import "chrome/browser/ui/cocoa/browser/avatar_icon_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
@@ -57,6 +54,9 @@
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
+#import "chrome/browser/ui/cocoa/profiles/avatar_base_controller.h"
+#import "chrome/browser/ui/cocoa/profiles/avatar_button_controller.h"
+#import "chrome/browser/ui/cocoa/profiles/avatar_icon_controller.h"
 #import "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/overlayable_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
@@ -77,13 +77,13 @@
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/command.h"
-#include "chrome/common/profile_management_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/signin/core/common/profile_management_switches.h"
+#include "components/translate/core/browser/translate_ui_delegate.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -1541,7 +1541,7 @@ enum {
 }
 
 - (BOOL)shouldUseNewAvatarButton {
-  return switches::IsNewProfileManagement() &&
+  return switches::IsNewAvatarMenu() &&
       profiles::IsRegularOrGuestSession(browser_.get());
 }
 
@@ -1762,8 +1762,7 @@ enum {
 }
 
 - (void)showTranslateBubbleForWebContents:(content::WebContents*)contents
-                                     step:
-                                    (TranslateTabHelper::TranslateStep)step
+                                     step:(translate::TranslateStep)step
                                 errorType:(TranslateErrors::Type)errorType {
   // TODO(hajimehoshi): The similar logic exists at TranslateBubbleView::
   // ShowBubble. This should be unified.
@@ -1775,7 +1774,7 @@ enum {
         TranslateBubbleModel::VIEW_STATE_ADVANCED) {
       return;
     }
-    if (step != TranslateTabHelper::TRANSLATE_ERROR) {
+    if (step != translate::TRANSLATE_STEP_TRANSLATE_ERROR) {
       TranslateBubbleModel::ViewState viewState =
           TranslateBubbleModelImpl::TranslateStepToViewState(step);
       [translateBubbleController_ switchView:viewState];
@@ -1785,12 +1784,16 @@ enum {
     return;
   }
 
-  // TODO(hajimehoshi): Set the initial languages correctly.
-  std::string sourceLanguage = "xx";
-  std::string targetLanguage = "yy";
+  std::string sourceLanguage;
+  std::string targetLanguage;
+  TranslateTabHelper::GetTranslateLanguages(contents,
+                                            &sourceLanguage, &targetLanguage);
 
-  scoped_ptr<TranslateUIDelegate> uiDelegate(
-      new TranslateUIDelegate(contents, sourceLanguage, targetLanguage));
+  scoped_ptr<TranslateUIDelegate> uiDelegate(new TranslateUIDelegate(
+      TranslateTabHelper::FromWebContents(contents),
+      TranslateTabHelper::GetManagerFromWebContents(contents),
+      sourceLanguage,
+      targetLanguage));
   scoped_ptr<TranslateBubbleModel> model(
       new TranslateBubbleModelImpl(step, uiDelegate.Pass()));
   translateBubbleController_ = [[TranslateBubbleController alloc]
@@ -1861,41 +1864,6 @@ enum {
   // Ensure the command is valid first (ExecuteCommand() won't do that) and
   // then make it so.
   if (chrome::IsCommandEnabled(browser_.get(), command)) {
-    chrome::ExecuteCommandWithDisposition(
-        browser_.get(),
-        command,
-        ui::WindowOpenDispositionFromNSEvent(event));
-  }
-}
-
-// Called repeatedly during a pinch gesture, with incremental change values.
-- (void)magnifyWithEvent:(NSEvent*)event {
-  // The deltaZ difference necessary to trigger a zoom action. Derived from
-  // experimentation to find a value that feels reasonable.
-  const float kZoomStepValue = 0.6;
-
-  // Find the (absolute) thresholds on either side of the current zoom factor,
-  // then convert those to actual numbers to trigger a zoom in or out.
-  // This logic deliberately makes the range around the starting zoom value for
-  // the gesture twice as large as the other ranges (i.e., the notches are at
-  // ..., -3*step, -2*step, -step, step, 2*step, 3*step, ... but not at 0)
-  // so that it's easier to get back to your starting point than it is to
-  // overshoot.
-  float nextStep = (abs(currentZoomStepDelta_) + 1) * kZoomStepValue;
-  float backStep = abs(currentZoomStepDelta_) * kZoomStepValue;
-  float zoomInThreshold = (currentZoomStepDelta_ >= 0) ? nextStep : -backStep;
-  float zoomOutThreshold = (currentZoomStepDelta_ <= 0) ? -nextStep : backStep;
-
-  unsigned int command = 0;
-  totalMagnifyGestureAmount_ += [event magnification];
-  if (totalMagnifyGestureAmount_ > zoomInThreshold) {
-    command = IDC_ZOOM_PLUS;
-  } else if (totalMagnifyGestureAmount_ < zoomOutThreshold) {
-    command = IDC_ZOOM_MINUS;
-  }
-
-  if (command && chrome::IsCommandEnabled(browser_.get(), command)) {
-    currentZoomStepDelta_ += (command == IDC_ZOOM_PLUS) ? 1 : -1;
     chrome::ExecuteCommandWithDisposition(
         browser_.get(),
         command,

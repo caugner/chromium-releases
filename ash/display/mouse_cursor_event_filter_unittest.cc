@@ -15,7 +15,6 @@
 #include "ui/gfx/screen.h"
 
 namespace ash {
-namespace internal {
 
 class MouseCursorEventFilterTest : public test::AshTestBase {
  public:
@@ -369,12 +368,11 @@ TEST_F(MouseCursorEventFilterTest, CursorDeviceScaleFactor) {
   test::CursorManagerTestApi cursor_test_api(
       Shell::GetInstance()->cursor_manager());
 
-  EXPECT_EQ(1.0f, cursor_test_api.GetDisplay().device_scale_factor());
+  EXPECT_EQ(1.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
   WarpMouseCursorIfNecessary(root_windows[0], gfx::Point(399, 200));
-  EXPECT_EQ(2.0f, cursor_test_api.GetDisplay().device_scale_factor());
+  EXPECT_EQ(2.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
   WarpMouseCursorIfNecessary(root_windows[1], gfx::Point(400, 200));
-  EXPECT_EQ(1.0f, cursor_test_api.GetDisplay().device_scale_factor());
+  EXPECT_EQ(1.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
 }
 
-}  // namespace internal
 }  // namespace ash

@@ -8,9 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
@@ -22,6 +20,8 @@
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
@@ -128,12 +128,6 @@ void BookmarkContextMenuController::AddCheckboxItem(int id,
 void BookmarkContextMenuController::ExecuteCommand(int id, int event_flags) {
   if (delegate_)
     delegate_->WillExecuteCommand(id, selection_);
-
-  if (ExecutePlatformCommand(id, event_flags)) {
-    if (delegate_)
-      delegate_->DidExecuteCommand(id);
-    return;
-  }
 
   switch (id) {
     case IDC_BOOKMARK_BAR_OPEN_ALL:
@@ -323,10 +317,6 @@ bool BookmarkContextMenuController::IsCommandIdChecked(int command_id) const {
 }
 
 bool BookmarkContextMenuController::IsCommandIdEnabled(int command_id) const {
-  bool enabled = false;
-  if (IsPlatformCommandIdEnabled(command_id, &enabled))
-    return enabled;
-
   PrefService* prefs = profile_->GetPrefs();
 
   bool is_root_node = selection_.size() == 1 &&
@@ -399,21 +389,6 @@ bool BookmarkContextMenuController::GetAcceleratorForCommandId(
     ui::Accelerator* accelerator) {
   return false;
 }
-
-#if !defined(OS_WIN)
-bool BookmarkContextMenuController::IsPlatformCommandIdEnabled(
-    int command_id,
-    bool* enabled) const {
-  // By default, there are no platform-specific enabled or disabled commands.
-  return false;
-}
-
-bool BookmarkContextMenuController::ExecutePlatformCommand(int id,
-                                                           int event_flags) {
-  // By default, there are no platform-specific commands.
-  return false;
-}
-#endif  // OS_WIN
 
 void BookmarkContextMenuController::BookmarkModelChanged() {
   if (delegate_)

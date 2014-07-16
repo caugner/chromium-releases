@@ -19,7 +19,6 @@
 #include "sync/api/sync_change.h"
 #include "sync/api/syncable_service.h"
 
-class ExtensionErrorUI;
 class ExtensionSyncData;
 class Profile;
 
@@ -95,6 +94,9 @@ class ExtensionSyncService : public syncer::SyncableService,
       const extensions::ExtensionSyncData& extension_sync_data);
   bool ProcessAppSyncData(const extensions::AppSyncData& app_sync_data);
 
+  // Processes the bookmark app specific parts of an AppSyncData.
+  void ProcessBookmarkAppSyncData(const extensions::AppSyncData& app_sync_data);
+
   syncer::SyncChange PrepareToSyncUninstallExtension(
       const extensions::Extension* extension,
       bool extensions_ready);
@@ -142,7 +144,6 @@ class ExtensionSyncService : public syncer::SyncableService,
   extensions::PendingEnables pending_app_enables_;
   extensions::PendingEnables pending_extension_enables_;
 
-  scoped_ptr<ExtensionErrorUI> extension_error_ui_;
   // Sequenced task runner for extension related file operations.
   scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
 

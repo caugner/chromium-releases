@@ -15,7 +15,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -28,6 +28,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/history_index_restore_observer.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/bookmarks/core/test/bookmark_test_helpers.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_browser_thread.h"
@@ -189,7 +190,8 @@ void InMemoryURLIndexTest::SetUp() {
   // We cannot access the database until the backend has been loaded.
   ASSERT_TRUE(profile_.CreateHistoryService(true, false));
   profile_.CreateBookmarkModel(true);
-  test::WaitForBookmarkModelToLoad(&profile_);
+  test::WaitForBookmarkModelToLoad(
+      BookmarkModelFactory::GetForProfile(&profile_));
   profile_.BlockUntilHistoryProcessesPendingRequests();
   profile_.BlockUntilHistoryIndexIsRefreshed();
   history_service_ = HistoryServiceFactory::GetForProfile(
@@ -442,13 +444,7 @@ TEST_F(LimitedInMemoryURLIndexTest, Initialization) {
   EXPECT_EQ(17U, private_data.word_map_.size());
 }
 
-#if defined(OS_WIN)
-// Flaky on windows trybots: http://crbug.com/351500
-#define MAYBE_Retrieval DISABLED_Retrieval
-#else
-#define MAYBE_Retrieval Retrieval
-#endif
-TEST_F(InMemoryURLIndexTest, MAYBE_Retrieval) {
+TEST_F(InMemoryURLIndexTest, Retrieval) {
   // See if a very specific term gives a single result.
   ScoredHistoryMatches matches = url_index_->HistoryItemsForTerms(
       ASCIIToUTF16("DrudgeReport"), base::string16::npos);
@@ -674,13 +670,7 @@ TEST_F(InMemoryURLIndexTest, HugeResultSet) {
             private_data.post_scoring_item_count_);
 }
 
-#if defined(OS_WIN)
-// Flaky on windows trybots: http://crbug.com/351500
-#define MAYBE_TitleSearch DISABLED_TitleSearch
-#else
-#define MAYBE_TitleSearch TitleSearch
-#endif
-TEST_F(InMemoryURLIndexTest, MAYBE_TitleSearch) {
+TEST_F(InMemoryURLIndexTest, TitleSearch) {
   // Signal if someone has changed the test DB.
   EXPECT_EQ(29U, GetPrivateData()->history_info_map_.size());
 
@@ -770,8 +760,6 @@ TEST_F(InMemoryURLIndexTest, TypedCharacterCaching) {
   // Verify that match results for previously typed characters are retained
   // (in the term_char_word_set_cache_) and reused, if possible, in future
   // autocompletes.
-  typedef URLIndexPrivateData::SearchTermCacheMap::iterator CacheIter;
-  typedef URLIndexPrivateData::SearchTermCacheItem CacheItem;
 
   URLIndexPrivateData::SearchTermCacheMap& cache(
       GetPrivateData()->search_term_cache_);
@@ -1101,7 +1089,8 @@ TEST_F(InMemoryURLIndexTest, RebuildFromHistoryIfCacheOld) {
   // Overwrite the build time so that we'll think the data is too old
   // and rebuild the cache from history.
   const base::Time fake_rebuild_time =
-      base::Time::Now() - base::TimeDelta::FromDays(30);
+      private_data.last_time_rebuilt_from_history_ -
+      base::TimeDelta::FromDays(30);
   private_data.last_time_rebuilt_from_history_ = fake_rebuild_time;
 
   // Capture the current private data for later comparison to restored data.

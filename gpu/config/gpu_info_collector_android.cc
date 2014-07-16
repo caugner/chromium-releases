@@ -99,7 +99,8 @@ CollectInfoResult CollectBasicGraphicsInfo(GPUInfo* gpu_info) {
   gpu_info->can_lose_context = false;
   gpu_info->finalized = true;
 
-  gpu_info->machine_model = base::android::BuildInfo::GetInstance()->model();
+  gpu_info->machine_model_name =
+      base::android::BuildInfo::GetInstance()->model();
 
   // Create a short-lived context on the UI thread to collect the GL strings.
   // Make sure we restore the existing context if there is one.
@@ -109,7 +110,7 @@ CollectInfoResult CollectBasicGraphicsInfo(GPUInfo* gpu_info) {
 
 CollectInfoResult CollectDriverInfoGL(GPUInfo* gpu_info) {
   gpu_info->driver_version = GetDriverVersionFromString(
-      gpu_info->gl_version_string);
+      gpu_info->gl_version);
   gpu_info->gpu.vendor_string = gpu_info->gl_vendor;
   gpu_info->gpu.device_string = gpu_info->gl_renderer;
   return kCollectInfoSuccess;

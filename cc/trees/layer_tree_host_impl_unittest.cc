@@ -23,6 +23,7 @@
 #include "cc/layers/quad_sink.h"
 #include "cc/layers/render_surface_impl.h"
 #include "cc/layers/solid_color_layer_impl.h"
+#include "cc/layers/solid_color_scrollbar_layer_impl.h"
 #include "cc/layers/texture_layer_impl.h"
 #include "cc/layers/tiled_layer_impl.h"
 #include "cc/layers/video_layer_impl.h"
@@ -84,6 +85,7 @@ class LayerTreeHostImplTest : public testing::Test,
         did_notify_ready_to_activate_(false),
         did_request_commit_(false),
         did_request_redraw_(false),
+        did_request_animate_(false),
         did_request_manage_tiles_(false),
         did_upload_visible_tile_(false),
         reduce_memory_result_(true),
@@ -97,6 +99,7 @@ class LayerTreeHostImplTest : public testing::Test,
     settings.minimum_occlusion_tracking_size = gfx::Size();
     settings.impl_side_painting = true;
     settings.texture_id_allocation_chunk_size = 1;
+    settings.report_overscroll_only_for_scrollable_axes = true;
     return settings;
   }
 
@@ -108,9 +111,13 @@ class LayerTreeHostImplTest : public testing::Test,
 
   virtual void UpdateRendererCapabilitiesOnImplThread() OVERRIDE {}
   virtual void DidLoseOutputSurfaceOnImplThread() OVERRIDE {}
+  virtual void CommitVSyncParameters(base::TimeTicks timebase,
+                                     base::TimeDelta interval) OVERRIDE {}
+  virtual void SetEstimatedParentDrawTime(base::TimeDelta draw_time) OVERRIDE {}
+  virtual void SetMaxSwapsPendingOnImplThread(int max) OVERRIDE {}
   virtual void DidSwapBuffersOnImplThread() OVERRIDE {}
-  virtual void OnSwapBuffersCompleteOnImplThread() OVERRIDE {}
-  virtual void BeginImplFrame(const BeginFrameArgs& args) OVERRIDE {}
+  virtual void DidSwapBuffersCompleteOnImplThread() OVERRIDE {}
+  virtual void BeginFrame(const BeginFrameArgs& args) OVERRIDE {}
   virtual void OnCanDrawStateChanged(bool can_draw) OVERRIDE {
     on_can_draw_state_changed_called_ = true;
   }
@@ -124,6 +131,9 @@ class LayerTreeHostImplTest : public testing::Test,
   virtual void SetNeedsRedrawRectOnImplThread(
       const gfx::Rect& damage_rect) OVERRIDE {
     did_request_redraw_ = true;
+  }
+  virtual void SetNeedsAnimateOnImplThread() OVERRIDE {
+    did_request_animate_ = true;
   }
   virtual void SetNeedsManageTilesOnImplThread() OVERRIDE {
     did_request_manage_tiles_ = true;
@@ -145,8 +155,12 @@ class LayerTreeHostImplTest : public testing::Test,
   virtual void SendManagedMemoryStats() OVERRIDE {}
   virtual bool IsInsideDraw() OVERRIDE { return false; }
   virtual void RenewTreePriority() OVERRIDE {}
-  virtual void RequestScrollbarAnimationOnImplThread(base::TimeDelta delay)
-      OVERRIDE { requested_scrollbar_animation_delay_ = delay; }
+  virtual void PostDelayedScrollbarFadeOnImplThread(
+      const base::Closure& start_fade,
+      base::TimeDelta delay) OVERRIDE {
+    scrollbar_fade_start_ = start_fade;
+    requested_scrollbar_animation_delay_ = delay;
+  }
   virtual void DidActivatePendingTree() OVERRIDE {}
   virtual void DidManageTiles() OVERRIDE {}
 
@@ -390,9 +404,11 @@ class LayerTreeHostImplTest : public testing::Test,
   bool did_notify_ready_to_activate_;
   bool did_request_commit_;
   bool did_request_redraw_;
+  bool did_request_animate_;
   bool did_request_manage_tiles_;
   bool did_upload_visible_tile_;
   bool reduce_memory_result_;
+  base::Closure scrollbar_fade_start_;
   base::TimeDelta requested_scrollbar_animation_delay_;
   size_t current_limit_bytes_;
   int current_priority_cutoff_value_;
@@ -493,8 +509,14 @@ TEST_F(LayerTreeHostImplTest, ScrollRootCallsCommitAndRedraw) {
 
   EXPECT_EQ(InputHandler::ScrollStarted,
             host_impl_->ScrollBegin(gfx::Point(), InputHandler::Wheel));
+  EXPECT_TRUE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(),
+                                                      InputHandler::Wheel));
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, 10));
+  EXPECT_TRUE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(0, 10),
+                                                      InputHandler::Wheel));
   host_impl_->ScrollEnd();
+  EXPECT_FALSE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(),
+                                                       InputHandler::Wheel));
   EXPECT_TRUE(did_request_redraw_);
   EXPECT_TRUE(did_request_commit_);
 }
@@ -659,21 +681,35 @@ TEST_F(LayerTreeHostImplTest, NonFastScrollableRegionBasic) {
   EXPECT_EQ(InputHandler::ScrollOnMainThread,
             host_impl_->ScrollBegin(gfx::Point(25, 25),
                                     InputHandler::Wheel));
+  EXPECT_FALSE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(25, 25),
+                                                       InputHandler::Wheel));
   EXPECT_EQ(InputHandler::ScrollOnMainThread,
             host_impl_->ScrollBegin(gfx::Point(25, 25),
                                     InputHandler::Gesture));
+  EXPECT_FALSE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(25, 25),
+                                                       InputHandler::Gesture));
 
   // All scroll types outside this region should succeed.
   EXPECT_EQ(InputHandler::ScrollStarted,
             host_impl_->ScrollBegin(gfx::Point(75, 75),
                                     InputHandler::Wheel));
+  EXPECT_TRUE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(75, 75),
+                                                      InputHandler::Gesture));
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, 10));
+  EXPECT_FALSE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(25, 25),
+                                                       InputHandler::Gesture));
   host_impl_->ScrollEnd();
+  EXPECT_FALSE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(75, 75),
+                                                       InputHandler::Gesture));
   EXPECT_EQ(InputHandler::ScrollStarted,
             host_impl_->ScrollBegin(gfx::Point(75, 75),
                                     InputHandler::Gesture));
+  EXPECT_TRUE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(75, 75),
+                                                      InputHandler::Gesture));
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, 10));
   host_impl_->ScrollEnd();
+  EXPECT_FALSE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(75, 75),
+                                                       InputHandler::Gesture));
 }
 
 TEST_F(LayerTreeHostImplTest, NonFastScrollableRegionWithOffset) {
@@ -692,6 +728,8 @@ TEST_F(LayerTreeHostImplTest, NonFastScrollableRegionWithOffset) {
   EXPECT_EQ(InputHandler::ScrollStarted,
             host_impl_->ScrollBegin(gfx::Point(40, 10),
                                     InputHandler::Wheel));
+  EXPECT_TRUE(host_impl_->IsCurrentlyScrollingLayerAt(gfx::Point(40, 10),
+                                                      InputHandler::Wheel));
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, 1));
   host_impl_->ScrollEnd();
 
@@ -699,6 +737,32 @@ TEST_F(LayerTreeHostImplTest, NonFastScrollableRegionWithOffset) {
   EXPECT_EQ(InputHandler::ScrollOnMainThread,
             host_impl_->ScrollBegin(gfx::Point(10, 10),
                                     InputHandler::Wheel));
+}
+
+TEST_F(LayerTreeHostImplTest, ScrollHandlerNotPresent) {
+  LayerImpl* scroll_layer = SetupScrollAndContentsLayers(gfx::Size(200, 200));
+  EXPECT_FALSE(scroll_layer->have_scroll_event_handlers());
+  host_impl_->SetViewportSize(gfx::Size(50, 50));
+  DrawFrame();
+
+  EXPECT_FALSE(host_impl_->scroll_affects_scroll_handler());
+  host_impl_->ScrollBegin(gfx::Point(), InputHandler::Gesture);
+  EXPECT_FALSE(host_impl_->scroll_affects_scroll_handler());
+  host_impl_->ScrollEnd();
+  EXPECT_FALSE(host_impl_->scroll_affects_scroll_handler());
+}
+
+TEST_F(LayerTreeHostImplTest, ScrollHandlerPresent) {
+  LayerImpl* scroll_layer = SetupScrollAndContentsLayers(gfx::Size(200, 200));
+  scroll_layer->SetHaveScrollEventHandlers(true);
+  host_impl_->SetViewportSize(gfx::Size(50, 50));
+  DrawFrame();
+
+  EXPECT_FALSE(host_impl_->scroll_affects_scroll_handler());
+  host_impl_->ScrollBegin(gfx::Point(), InputHandler::Gesture);
+  EXPECT_TRUE(host_impl_->scroll_affects_scroll_handler());
+  host_impl_->ScrollEnd();
+  EXPECT_FALSE(host_impl_->scroll_affects_scroll_handler());
 }
 
 TEST_F(LayerTreeHostImplTest, ScrollByReturnsCorrectValue) {
@@ -872,6 +936,7 @@ TEST_F(LayerTreeHostImplTest, ImplPinchZoom) {
               scroll_layer->FixedContainerSizeDelta());
     host_impl_->PinchGestureEnd();
     host_impl_->ScrollEnd();
+    EXPECT_FALSE(did_request_animate_);
     EXPECT_TRUE(did_request_redraw_);
     EXPECT_TRUE(did_request_commit_);
     EXPECT_EQ(gfx::Size(50, 50), container_layer->bounds());
@@ -914,6 +979,61 @@ TEST_F(LayerTreeHostImplTest, ImplPinchZoom) {
   }
 }
 
+TEST_F(LayerTreeHostImplTest, MasksToBoundsDoesntClobberInnerContainerSize) {
+  SetupScrollAndContentsLayers(gfx::Size(100, 100));
+  host_impl_->SetViewportSize(gfx::Size(50, 50));
+  DrawFrame();
+
+  LayerImpl* scroll_layer = host_impl_->InnerViewportScrollLayer();
+  LayerImpl* container_layer = scroll_layer->scroll_clip_layer();
+  DCHECK(scroll_layer);
+
+  float min_page_scale = 1.f;
+  float max_page_scale = 4.f;
+  host_impl_->active_tree()->SetPageScaleFactorAndLimits(1.f,
+                                                         min_page_scale,
+                                                         max_page_scale);
+
+  // If the container's masks_to_bounds is false, the viewport size should
+  // overwrite the inner viewport container layer's size.
+  {
+    EXPECT_EQ(gfx::Size(50, 50),
+              container_layer->bounds());
+    container_layer->SetMasksToBounds(false);
+
+    container_layer->SetBounds(gfx::Size(30, 25));
+    EXPECT_EQ(gfx::Size(30, 25),
+              container_layer->bounds());
+
+    // This should cause a reset of the inner viewport container layer's bounds.
+    host_impl_->DidChangeTopControlsPosition();
+
+    EXPECT_EQ(gfx::Size(50, 50),
+              container_layer->bounds());
+  }
+
+  host_impl_->SetViewportSize(gfx::Size(50, 50));
+  container_layer->SetBounds(gfx::Size(50, 50));
+
+  // If the container's masks_to_bounds is true, the viewport size should
+  // *NOT* overwrite the inner viewport container layer's size.
+  {
+    EXPECT_EQ(gfx::Size(50, 50),
+              container_layer->bounds());
+    container_layer->SetMasksToBounds(true);
+
+    container_layer->SetBounds(gfx::Size(30, 25));
+    EXPECT_EQ(gfx::Size(30, 25),
+              container_layer->bounds());
+
+    // This should cause a reset of the inner viewport container layer's bounds.
+    host_impl_->DidChangeTopControlsPosition();
+
+    EXPECT_EQ(gfx::Size(30, 25),
+              container_layer->bounds());
+  }
+}
+
 TEST_F(LayerTreeHostImplTest, PinchGesture) {
   SetupScrollAndContentsLayers(gfx::Size(100, 100));
   host_impl_->SetViewportSize(gfx::Size(50, 50));
@@ -938,6 +1058,7 @@ TEST_F(LayerTreeHostImplTest, PinchGesture) {
     host_impl_->PinchGestureUpdate(page_scale_delta, gfx::Point(50, 50));
     host_impl_->PinchGestureEnd();
     host_impl_->ScrollEnd();
+    EXPECT_FALSE(did_request_animate_);
     EXPECT_TRUE(did_request_redraw_);
     EXPECT_TRUE(did_request_commit_);
 
@@ -1079,19 +1200,30 @@ TEST_F(LayerTreeHostImplTest, PageScaleAnimation) {
                                                            max_page_scale);
     scroll_layer->SetScrollOffset(gfx::Vector2d(50, 50));
 
-    host_impl_->StartPageScaleAnimation(gfx::Vector2d(), false, 2.f, duration);
     did_request_redraw_ = false;
+    did_request_animate_ = false;
+    host_impl_->StartPageScaleAnimation(gfx::Vector2d(), false, 2.f, duration);
+    EXPECT_FALSE(did_request_redraw_);
+    EXPECT_TRUE(did_request_animate_);
+
+    did_request_redraw_ = false;
+    did_request_animate_ = false;
     host_impl_->Animate(start_time);
     EXPECT_TRUE(did_request_redraw_);
+    EXPECT_TRUE(did_request_animate_);
 
     did_request_redraw_ = false;
+    did_request_animate_ = false;
     host_impl_->Animate(halfway_through_animation);
     EXPECT_TRUE(did_request_redraw_);
+    EXPECT_TRUE(did_request_animate_);
 
     did_request_redraw_ = false;
+    did_request_animate_ = false;
     did_request_commit_ = false;
     host_impl_->Animate(end_time);
     EXPECT_TRUE(did_request_commit_);
+    EXPECT_FALSE(did_request_animate_);
 
     scoped_ptr<ScrollAndScaleSet> scroll_info =
         host_impl_->ProcessScrollDeltas();
@@ -1106,16 +1238,25 @@ TEST_F(LayerTreeHostImplTest, PageScaleAnimation) {
                                                            max_page_scale);
     scroll_layer->SetScrollOffset(gfx::Vector2d(50, 50));
 
+    did_request_redraw_ = false;
+    did_request_animate_ = false;
     host_impl_->StartPageScaleAnimation(
         gfx::Vector2d(25, 25), true, min_page_scale, duration);
+    EXPECT_FALSE(did_request_redraw_);
+    EXPECT_TRUE(did_request_animate_);
+
     did_request_redraw_ = false;
+    did_request_animate_ = false;
     host_impl_->Animate(start_time);
     EXPECT_TRUE(did_request_redraw_);
+    EXPECT_TRUE(did_request_animate_);
 
     did_request_redraw_ = false;
     did_request_commit_ = false;
+    did_request_animate_ = false;
     host_impl_->Animate(end_time);
     EXPECT_TRUE(did_request_redraw_);
+    EXPECT_FALSE(did_request_animate_);
     EXPECT_TRUE(did_request_commit_);
 
     scoped_ptr<ScrollAndScaleSet> scroll_info =
@@ -1190,122 +1331,170 @@ class LayerTreeHostImplOverridePhysicalTime : public LayerTreeHostImpl {
   base::TimeTicks fake_current_physical_time_;
 };
 
+#define SETUP_LAYERS_FOR_SCROLLBAR_ANIMATION_TEST()                           \
+  gfx::Size viewport_size(10, 10);                                            \
+  gfx::Size content_size(100, 100);                                           \
+                                                                              \
+  LayerTreeHostImplOverridePhysicalTime* host_impl_override_time =            \
+      new LayerTreeHostImplOverridePhysicalTime(settings,                     \
+                                                this,                         \
+                                                &proxy_,                      \
+                                                shared_bitmap_manager_.get(), \
+                                                &stats_instrumentation_);     \
+  host_impl_ = make_scoped_ptr(host_impl_override_time);                      \
+  host_impl_->InitializeRenderer(CreateOutputSurface());                      \
+  host_impl_->SetViewportSize(viewport_size);                                 \
+                                                                              \
+  scoped_ptr<LayerImpl> root =                                                \
+      LayerImpl::Create(host_impl_->active_tree(), 1);                        \
+  root->SetBounds(viewport_size);                                             \
+                                                                              \
+  scoped_ptr<LayerImpl> scroll =                                              \
+      LayerImpl::Create(host_impl_->active_tree(), 2);                        \
+  scroll->SetScrollClipLayer(root->id());                                     \
+  scroll->SetScrollOffset(gfx::Vector2d());                                   \
+  root->SetBounds(viewport_size);                                             \
+  scroll->SetBounds(content_size);                                            \
+  scroll->SetContentBounds(content_size);                                     \
+  scroll->SetIsContainerForFixedPositionLayers(true);                         \
+                                                                              \
+  scoped_ptr<LayerImpl> contents =                                            \
+      LayerImpl::Create(host_impl_->active_tree(), 3);                        \
+  contents->SetDrawsContent(true);                                            \
+  contents->SetBounds(content_size);                                          \
+  contents->SetContentBounds(content_size);                                   \
+                                                                              \
+  scoped_ptr<SolidColorScrollbarLayerImpl> scrollbar =                        \
+      SolidColorScrollbarLayerImpl::Create(                                   \
+          host_impl_->active_tree(), 4, VERTICAL, 10, 0, false, true);        \
+  EXPECT_FLOAT_EQ(0.f, scrollbar->opacity());                                 \
+  scrollbar->SetScrollLayerById(2);                                           \
+  scrollbar->SetClipLayerById(1);                                             \
+                                                                              \
+  scroll->AddChild(contents.Pass());                                          \
+  root->AddChild(scroll.Pass());                                              \
+  root->AddChild(scrollbar.PassAs<LayerImpl>());                              \
+                                                                              \
+  host_impl_->active_tree()->SetRootLayer(root.Pass());                       \
+  host_impl_->active_tree()->SetViewportLayersFromIds(                        \
+      1, 2, Layer::INVALID_ID);                                               \
+  host_impl_->active_tree()->DidBecomeActive();                               \
+  DrawFrame();
+
 TEST_F(LayerTreeHostImplTest, ScrollbarLinearFadeScheduling) {
   LayerTreeSettings settings;
   settings.scrollbar_animator = LayerTreeSettings::LinearFade;
-  settings.scrollbar_linear_fade_delay_ms = 20;
-  settings.scrollbar_linear_fade_length_ms = 20;
+  settings.scrollbar_fade_delay_ms = 20;
+  settings.scrollbar_fade_duration_ms = 20;
 
-  gfx::Size viewport_size(10, 10);
-  gfx::Size content_size(100, 100);
-
-  LayerTreeHostImplOverridePhysicalTime* host_impl_override_time =
-      new LayerTreeHostImplOverridePhysicalTime(settings,
-                                                this,
-                                                &proxy_,
-                                                shared_bitmap_manager_.get(),
-                                                &stats_instrumentation_);
-  host_impl_ = make_scoped_ptr(host_impl_override_time);
-  host_impl_->InitializeRenderer(CreateOutputSurface());
-  host_impl_->SetViewportSize(viewport_size);
-
-  scoped_ptr<LayerImpl> root =
-      LayerImpl::Create(host_impl_->active_tree(), 1);
-  root->SetBounds(viewport_size);
-
-  scoped_ptr<LayerImpl> scroll =
-      LayerImpl::Create(host_impl_->active_tree(), 2);
-  scroll->SetScrollClipLayer(root->id());
-  scroll->SetScrollOffset(gfx::Vector2d());
-  root->SetBounds(viewport_size);
-  scroll->SetBounds(content_size);
-  scroll->SetContentBounds(content_size);
-  scroll->SetIsContainerForFixedPositionLayers(true);
-
-  scoped_ptr<LayerImpl> contents =
-      LayerImpl::Create(host_impl_->active_tree(), 3);
-  contents->SetDrawsContent(true);
-  contents->SetBounds(content_size);
-  contents->SetContentBounds(content_size);
-
-  scoped_ptr<PaintedScrollbarLayerImpl> scrollbar =
-      PaintedScrollbarLayerImpl::Create(host_impl_->active_tree(), 4, VERTICAL);
-  scrollbar->SetScrollLayerById(2);
-  scrollbar->SetClipLayerById(1);
-
-  scroll->AddChild(contents.Pass());
-  root->AddChild(scroll.Pass());
-  root->AddChild(scrollbar.PassAs<LayerImpl>());
-
-  host_impl_->active_tree()->SetRootLayer(root.Pass());
-  host_impl_->active_tree()->SetViewportLayersFromIds(1, 2, Layer::INVALID_ID);
-  host_impl_->active_tree()->DidBecomeActive();
-  DrawFrame();
+  SETUP_LAYERS_FOR_SCROLLBAR_ANIMATION_TEST();
 
   base::TimeTicks fake_now = gfx::FrameTime::Now();
-  host_impl_override_time->SetCurrentPhysicalTimeTicksForTest(fake_now);
 
-  // If no scroll happened recently, StartScrollbarAnimation should have no
-  // effect.
-  host_impl_->StartScrollbarAnimation();
   EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
   EXPECT_FALSE(did_request_redraw_);
 
-  // If no scroll happened during a scroll gesture, StartScrollbarAnimation
-  // should have no effect.
+  // If no scroll happened during a scroll gesture, it should have no effect.
   host_impl_->ScrollBegin(gfx::Point(), InputHandler::Wheel);
   host_impl_->ScrollEnd();
-  host_impl_->StartScrollbarAnimation();
   EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
   EXPECT_FALSE(did_request_redraw_);
+  EXPECT_TRUE(scrollbar_fade_start_.Equals(base::Closure()));
 
   // After a scroll, a fade animation should be scheduled about 20ms from now.
   host_impl_->ScrollBegin(gfx::Point(), InputHandler::Wheel);
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(5, 0));
   host_impl_->ScrollEnd();
   did_request_redraw_ = false;
-  host_impl_->StartScrollbarAnimation();
+  did_request_animate_ = false;
   EXPECT_LT(base::TimeDelta::FromMilliseconds(19),
             requested_scrollbar_animation_delay_);
   EXPECT_FALSE(did_request_redraw_);
+  EXPECT_FALSE(did_request_animate_);
   requested_scrollbar_animation_delay_ = base::TimeDelta();
+  scrollbar_fade_start_.Run();
+  host_impl_->Animate(fake_now);
 
   // After the fade begins, we should start getting redraws instead of a
   // scheduled animation.
   fake_now += base::TimeDelta::FromMilliseconds(25);
-  host_impl_override_time->SetCurrentPhysicalTimeTicksForTest(fake_now);
-  host_impl_->StartScrollbarAnimation();
   EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
-  EXPECT_TRUE(did_request_redraw_);
-  did_request_redraw_ = false;
-
-  // If no scroll happened recently, StartScrollbarAnimation should have no
-  // effect.
-  fake_now += base::TimeDelta::FromMilliseconds(25);
-  host_impl_override_time->SetCurrentPhysicalTimeTicksForTest(fake_now);
-  host_impl_->StartScrollbarAnimation();
-  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
-  EXPECT_FALSE(did_request_redraw_);
+  EXPECT_TRUE(did_request_animate_);
+  did_request_animate_ = false;
 
   // Setting the scroll offset outside a scroll should also cause the scrollbar
   // to appear and to schedule a fade.
   host_impl_->InnerViewportScrollLayer()->SetScrollOffset(gfx::Vector2d(5, 5));
-  host_impl_->StartScrollbarAnimation();
   EXPECT_LT(base::TimeDelta::FromMilliseconds(19),
             requested_scrollbar_animation_delay_);
   EXPECT_FALSE(did_request_redraw_);
+  EXPECT_FALSE(did_request_animate_);
+  requested_scrollbar_animation_delay_ = base::TimeDelta();
+}
+
+TEST_F(LayerTreeHostImplTest, ScrollbarFadePinchZoomScrollbars) {
+  LayerTreeSettings settings;
+  settings.scrollbar_animator = LayerTreeSettings::LinearFade;
+  settings.scrollbar_fade_delay_ms = 20;
+  settings.scrollbar_fade_duration_ms = 20;
+  settings.use_pinch_zoom_scrollbars = true;
+
+  SETUP_LAYERS_FOR_SCROLLBAR_ANIMATION_TEST();
+
+  base::TimeTicks fake_now = gfx::FrameTime::Now();
+
+  host_impl_->active_tree()->SetPageScaleFactorAndLimits(1.f, 1.f, 4.f);
+
+  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
+  EXPECT_FALSE(did_request_animate_);
+
+  // If no scroll happened during a scroll gesture, it should have no effect.
+  host_impl_->ScrollBegin(gfx::Point(), InputHandler::Wheel);
+  host_impl_->ScrollEnd();
+  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
+  EXPECT_FALSE(did_request_animate_);
+  EXPECT_TRUE(scrollbar_fade_start_.Equals(base::Closure()));
+
+  // After a scroll, no fade animation should be scheduled.
+  host_impl_->ScrollBegin(gfx::Point(), InputHandler::Wheel);
+  host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(5, 0));
+  host_impl_->ScrollEnd();
+  did_request_redraw_ = false;
+  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
+  EXPECT_FALSE(did_request_animate_);
   requested_scrollbar_animation_delay_ = base::TimeDelta();
 
-  // None of the above should have called CurrentFrameTimeTicks, so if we call
-  // it now we should get the current time.
-  fake_now += base::TimeDelta::FromMilliseconds(10);
-  host_impl_override_time->SetCurrentPhysicalTimeTicksForTest(fake_now);
-  EXPECT_EQ(fake_now, host_impl_->CurrentFrameTimeTicks());
+  // We should not see any draw requests.
+  fake_now += base::TimeDelta::FromMilliseconds(25);
+  EXPECT_EQ(base::TimeDelta(), requested_scrollbar_animation_delay_);
+  EXPECT_FALSE(did_request_animate_);
+
+  // Make page scale > min so that subsequent scrolls will trigger fades.
+  host_impl_->active_tree()->SetPageScaleDelta(1.1f);
+
+  // After a scroll, a fade animation should be scheduled about 20ms from now.
+  host_impl_->ScrollBegin(gfx::Point(), InputHandler::Wheel);
+  host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(5, 0));
+  host_impl_->ScrollEnd();
+  did_request_redraw_ = false;
+  EXPECT_LT(base::TimeDelta::FromMilliseconds(19),
+            requested_scrollbar_animation_delay_);
+  EXPECT_FALSE(did_request_animate_);
+  requested_scrollbar_animation_delay_ = base::TimeDelta();
+  scrollbar_fade_start_.Run();
+
+  // After the fade begins, we should start getting redraws instead of a
+  // scheduled animation.
+  fake_now += base::TimeDelta::FromMilliseconds(25);
+  host_impl_->Animate(fake_now);
+  EXPECT_TRUE(did_request_animate_);
 }
 
 void LayerTreeHostImplTest::SetupMouseMoveAtWithDeviceScale(
     float device_scale_factor) {
   LayerTreeSettings settings;
+  settings.scrollbar_fade_delay_ms = 500;
+  settings.scrollbar_fade_duration_ms = 300;
   settings.scrollbar_animator = LayerTreeSettings::Thinning;
 
   gfx::Size viewport_size(300, 200);
@@ -1342,6 +1531,7 @@ void LayerTreeHostImplTest::SetupMouseMoveAtWithDeviceScale(
   scrollbar->SetBounds(gfx::Size(15, viewport_size.height()));
   scrollbar->SetContentBounds(gfx::Size(15, viewport_size.height()));
   scrollbar->SetPosition(gfx::Point(285, 0));
+  scrollbar->SetClipLayerById(1);
   scrollbar->SetScrollLayerById(2);
 
   scroll->AddChild(contents.Pass());
@@ -1512,7 +1702,7 @@ class DidDrawCheckLayer : public TiledLayerImpl {
     scoped_ptr<LayerTilingData> tiler =
         LayerTilingData::Create(gfx::Size(100, 100),
                                 LayerTilingData::HAS_BORDER_TEXELS);
-    tiler->SetBounds(content_bounds());
+    tiler->SetTilingRect(gfx::Rect(content_bounds()));
     SetTilingData(*tiler.get());
   }
 
@@ -1723,7 +1913,7 @@ class MissingTextureAnimatingLayer : public DidDrawCheckLayer {
     scoped_ptr<LayerTilingData> tiling_data =
         LayerTilingData::Create(gfx::Size(10, 10),
                                 LayerTilingData::NO_BORDER_TEXELS);
-    tiling_data->SetBounds(bounds());
+    tiling_data->SetTilingRect(gfx::Rect(bounds()));
     SetTilingData(*tiling_data.get());
     set_skips_draw(skips_draw);
     if (!tile_missing) {
@@ -2986,19 +3176,16 @@ TEST_F(LayerTreeHostImplTest, OverscrollRoot) {
   host_impl_->active_tree()->SetPageScaleFactorAndLimits(1.f, 0.5f, 4.f);
   DrawFrame();
   EXPECT_EQ(gfx::Vector2dF(), host_impl_->accumulated_root_overscroll());
-  EXPECT_EQ(gfx::Vector2dF(), host_impl_->current_fling_velocity());
 
   // In-bounds scrolling does not affect overscroll.
   EXPECT_EQ(InputHandler::ScrollStarted,
             host_impl_->ScrollBegin(gfx::Point(), InputHandler::Wheel));
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, 10));
   EXPECT_EQ(gfx::Vector2dF(), host_impl_->accumulated_root_overscroll());
-  EXPECT_EQ(gfx::Vector2dF(), host_impl_->current_fling_velocity());
 
   // Overscroll events are reflected immediately.
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, 50));
   EXPECT_EQ(gfx::Vector2dF(0, 10), host_impl_->accumulated_root_overscroll());
-  EXPECT_EQ(gfx::Vector2dF(), host_impl_->current_fling_velocity());
 
   // In-bounds scrolling resets accumulated overscroll for the scrolled axes.
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, -50));
@@ -3026,15 +3213,6 @@ TEST_F(LayerTreeHostImplTest, OverscrollRoot) {
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, -20));
   EXPECT_EQ(gfx::Vector2dF(0, -10), host_impl_->accumulated_root_overscroll());
   host_impl_->ScrollEnd();
-
-  EXPECT_EQ(InputHandler::ScrollStarted,
-            host_impl_->ScrollBegin(gfx::Point(), InputHandler::Wheel));
-  // Fling velocity is reflected immediately.
-  host_impl_->NotifyCurrentFlingVelocity(gfx::Vector2dF(10, 0));
-  EXPECT_EQ(gfx::Vector2dF(10, 0), host_impl_->current_fling_velocity());
-  host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, -20));
-  EXPECT_EQ(gfx::Vector2dF(0, -20), host_impl_->accumulated_root_overscroll());
-  EXPECT_EQ(gfx::Vector2dF(10, 0), host_impl_->current_fling_velocity());
 }
 
 
@@ -3087,10 +3265,8 @@ TEST_F(LayerTreeHostImplTest, OverscrollChildWithoutBubbling) {
     host_impl_->ScrollEnd();
 
     // After scrolling the parent, another scroll on the opposite direction
-    // should scroll the child, resetting the fling velocity.
+    // should scroll the child.
     scroll_delta = gfx::Vector2d(0, 70);
-    host_impl_->NotifyCurrentFlingVelocity(gfx::Vector2dF(10, 0));
-    EXPECT_EQ(gfx::Vector2dF(10, 0), host_impl_->current_fling_velocity());
     EXPECT_EQ(InputHandler::ScrollStarted,
               host_impl_->ScrollBegin(gfx::Point(5, 5),
                                       InputHandler::NonBubblingGesture));
@@ -3098,7 +3274,6 @@ TEST_F(LayerTreeHostImplTest, OverscrollChildWithoutBubbling) {
     host_impl_->ScrollBy(gfx::Point(), scroll_delta);
     EXPECT_EQ(host_impl_->CurrentlyScrollingLayer(), grand_child_layer);
     EXPECT_EQ(gfx::Vector2dF(), host_impl_->accumulated_root_overscroll());
-    EXPECT_EQ(gfx::Vector2dF(), host_impl_->current_fling_velocity());
     host_impl_->ScrollEnd();
   }
 }
@@ -3152,14 +3327,51 @@ TEST_F(LayerTreeHostImplTest, OverscrollAlways) {
   host_impl_->active_tree()->SetPageScaleFactorAndLimits(1.f, 0.5f, 4.f);
   DrawFrame();
   EXPECT_EQ(gfx::Vector2dF(), host_impl_->accumulated_root_overscroll());
-  EXPECT_EQ(gfx::Vector2dF(), host_impl_->current_fling_velocity());
 
   // Even though the layer can't scroll the overscroll still happens.
   EXPECT_EQ(InputHandler::ScrollStarted,
             host_impl_->ScrollBegin(gfx::Point(), InputHandler::Wheel));
   host_impl_->ScrollBy(gfx::Point(), gfx::Vector2d(0, 10));
   EXPECT_EQ(gfx::Vector2dF(0, 10), host_impl_->accumulated_root_overscroll());
-  EXPECT_EQ(gfx::Vector2dF(), host_impl_->current_fling_velocity());
+}
+
+TEST_F(LayerTreeHostImplTest, NoOverscrollOnFractionalDeviceScale) {
+  gfx::Size surface_size(980, 1439);
+  gfx::Size content_size(980, 1438);
+  float device_scale_factor = 1.5f;
+  scoped_ptr<LayerImpl> root_clip =
+      LayerImpl::Create(host_impl_->active_tree(), 3);
+  scoped_ptr<LayerImpl> root =
+      CreateScrollableLayer(1, content_size, root_clip.get());
+  root->SetIsContainerForFixedPositionLayers(true);
+  scoped_ptr<LayerImpl> child =
+      CreateScrollableLayer(2, content_size, root_clip.get());
+  root->scroll_clip_layer()->SetBounds(gfx::Size(320, 469));
+  host_impl_->active_tree()->SetPageScaleFactorAndLimits(
+      0.326531f, 0.326531f, 5.f);
+  host_impl_->active_tree()->SetPageScaleDelta(1.f);
+  child->SetScrollClipLayer(Layer::INVALID_ID);
+  root->AddChild(child.Pass());
+  root_clip->AddChild(root.Pass());
+
+  host_impl_->SetViewportSize(surface_size);
+  host_impl_->SetDeviceScaleFactor(device_scale_factor);
+  host_impl_->active_tree()->SetRootLayer(root_clip.Pass());
+  host_impl_->active_tree()->SetViewportLayersFromIds(3, 1, Layer::INVALID_ID);
+  host_impl_->active_tree()->DidBecomeActive();
+  DrawFrame();
+  {
+    // Horizontal & Vertical GlowEffect should not be applied when
+    // content size is less then view port size. For Example Horizontal &
+    // vertical GlowEffect should not be applied in about:blank page.
+    EXPECT_EQ(InputHandler::ScrollStarted,
+              host_impl_->ScrollBegin(gfx::Point(0, 0), InputHandler::Wheel));
+    host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(0, -1));
+    EXPECT_EQ(gfx::Vector2dF().ToString(),
+              host_impl_->accumulated_root_overscroll().ToString());
+
+    host_impl_->ScrollEnd();
+  }
 }
 
 TEST_F(LayerTreeHostImplTest, NoOverscrollWhenNotAtEdge) {
@@ -3209,6 +3421,14 @@ TEST_F(LayerTreeHostImplTest, NoOverscrollWhenNotAtEdge) {
     EXPECT_EQ(gfx::Vector2dF(0.000000f, 17.699997f).ToString(),
               host_impl_->accumulated_root_overscroll().ToString());
     host_impl_->ScrollEnd();
+    // TestCase to check  kEpsilon, which prevents minute values to trigger
+    // gloweffect without reaching edge.
+    EXPECT_EQ(InputHandler::ScrollStarted,
+              host_impl_->ScrollBegin(gfx::Point(0, 0), InputHandler::Wheel));
+    host_impl_->ScrollBy(gfx::Point(), gfx::Vector2dF(-0.12f, 0.1f));
+    EXPECT_EQ(gfx::Vector2dF().ToString(),
+              host_impl_->accumulated_root_overscroll().ToString());
+    host_impl_->ScrollEnd();
   }
 }
 
@@ -3233,8 +3453,9 @@ class BlendStateCheckLayer : public LayerImpl {
       opaque_rect = opaque_content_rect_;
     gfx::Rect visible_quad_rect = quad_rect_;
 
-    SharedQuadState* shared_quad_state =
-        quad_sink->UseSharedQuadState(CreateSharedQuadState());
+    SharedQuadState* shared_quad_state = quad_sink->CreateSharedQuadState();
+    PopulateSharedQuadState(shared_quad_state);
+
     scoped_ptr<TileDrawQuad> test_blending_draw_quad = TileDrawQuad::Create();
     test_blending_draw_quad->SetNew(shared_quad_state,
                                     quad_rect_,
@@ -3247,7 +3468,7 @@ class BlendStateCheckLayer : public LayerImpl {
     test_blending_draw_quad->visible_rect = quad_visible_rect_;
     EXPECT_EQ(blend_, test_blending_draw_quad->ShouldDrawWithBlending());
     EXPECT_EQ(has_render_surface_, !!render_surface());
-    quad_sink->MaybeAppend(test_blending_draw_quad.PassAs<DrawQuad>());
+    quad_sink->Append(test_blending_draw_quad.PassAs<DrawQuad>());
   }
 
   void SetExpectation(bool blend, bool has_render_surface) {
@@ -4014,8 +4235,8 @@ class FakeLayerWithQuads : public LayerImpl {
 
   virtual void AppendQuads(QuadSink* quad_sink,
                            AppendQuadsData* append_quads_data) OVERRIDE {
-    SharedQuadState* shared_quad_state =
-        quad_sink->UseSharedQuadState(CreateSharedQuadState());
+    SharedQuadState* shared_quad_state = quad_sink->CreateSharedQuadState();
+    PopulateSharedQuadState(shared_quad_state);
 
     SkColor gray = SkColorSetRGB(100, 100, 100);
     gfx::Rect quad_rect(content_bounds());
@@ -4023,7 +4244,7 @@ class FakeLayerWithQuads : public LayerImpl {
     scoped_ptr<SolidColorDrawQuad> my_quad = SolidColorDrawQuad::Create();
     my_quad->SetNew(
         shared_quad_state, quad_rect, visible_quad_rect, gray, false);
-    quad_sink->MaybeAppend(my_quad.PassAs<DrawQuad>());
+    quad_sink->Append(my_quad.PassAs<DrawQuad>());
   }
 
  private:
@@ -5337,7 +5558,7 @@ class CompositorFrameMetadataTest : public LayerTreeHostImplTest {
   CompositorFrameMetadataTest()
       : swap_buffers_complete_(0) {}
 
-  virtual void OnSwapBuffersCompleteOnImplThread() OVERRIDE {
+  virtual void DidSwapBuffersCompleteOnImplThread() OVERRIDE {
     swap_buffers_complete_++;
   }
 
@@ -5355,7 +5576,7 @@ TEST_F(CompositorFrameMetadataTest, CompositorFrameAckCountsAsSwapComplete) {
   }
   CompositorFrameAck ack;
   host_impl_->ReclaimResources(&ack);
-  host_impl_->OnSwapBuffersComplete();
+  host_impl_->DidSwapBuffersComplete();
   EXPECT_EQ(swap_buffers_complete_, 1);
 }
 
@@ -5458,7 +5679,6 @@ class LayerTreeHostImplTestDeferredInitialize : public LayerTreeHostImplTest {
     SetupRootLayerImpl(root_layer.PassAs<LayerImpl>());
 
     onscreen_context_provider_ = TestContextProvider::Create();
-    offscreen_context_provider_ = TestContextProvider::Create();
   }
 
   virtual void UpdateRendererCapabilitiesOnImplThread() OVERRIDE {
@@ -5467,7 +5687,6 @@ class LayerTreeHostImplTestDeferredInitialize : public LayerTreeHostImplTest {
 
   FakeOutputSurface* output_surface_;
   scoped_refptr<TestContextProvider> onscreen_context_provider_;
-  scoped_refptr<TestContextProvider> offscreen_context_provider_;
   bool did_update_renderer_capabilities_;
 };
 
@@ -5477,16 +5696,13 @@ TEST_F(LayerTreeHostImplTestDeferredInitialize, Success) {
   DrawFrame();
 
   EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
 
   // DeferredInitialize and hardware draw.
   did_update_renderer_capabilities_ = false;
-  EXPECT_TRUE(output_surface_->InitializeAndSetContext3d(
-      onscreen_context_provider_, offscreen_context_provider_));
+  EXPECT_TRUE(
+      output_surface_->InitializeAndSetContext3d(onscreen_context_provider_));
   EXPECT_EQ(onscreen_context_provider_,
             host_impl_->output_surface()->context_provider());
-  EXPECT_EQ(offscreen_context_provider_,
-            host_impl_->offscreen_context_provider());
   EXPECT_TRUE(did_update_renderer_capabilities_);
 
   // Defer intialized GL draw.
@@ -5496,14 +5712,13 @@ TEST_F(LayerTreeHostImplTestDeferredInitialize, Success) {
   did_update_renderer_capabilities_ = false;
   output_surface_->ReleaseGL();
   EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
   EXPECT_TRUE(did_update_renderer_capabilities_);
 
   // Software draw again.
   DrawFrame();
 }
 
-TEST_F(LayerTreeHostImplTestDeferredInitialize, Fails_OnscreenContext_0) {
+TEST_F(LayerTreeHostImplTestDeferredInitialize, Fails) {
   // Software draw.
   DrawFrame();
 
@@ -5512,77 +5727,16 @@ TEST_F(LayerTreeHostImplTestDeferredInitialize, Fails_OnscreenContext_0) {
   onscreen_context_provider_->UnboundTestContext3d()->set_context_lost(true);
 
   EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
 
   // DeferredInitialize fails.
   did_update_renderer_capabilities_ = false;
-  EXPECT_FALSE(output_surface_->InitializeAndSetContext3d(
-      onscreen_context_provider_, offscreen_context_provider_));
+  EXPECT_FALSE(
+      output_surface_->InitializeAndSetContext3d(onscreen_context_provider_));
   EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
   EXPECT_FALSE(did_update_renderer_capabilities_);
 
   // Software draw again.
   DrawFrame();
-}
-
-// TODO(boliu): After r239415, fails_OnscreenContext_1 and 2 are exactly the
-// same as 0. They were supposed to test makeCurrent failing in the
-// OutputSurface, LayerTreeHostImpl, and GLRenderer respectively.
-TEST_F(LayerTreeHostImplTestDeferredInitialize, Fails_OnscreenContext_1) {
-  // Software draw.
-  DrawFrame();
-
-  EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
-
-  onscreen_context_provider_->UnboundTestContext3d()->set_context_lost(true);
-
-  EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  // DeferredInitialize fails.
-  did_update_renderer_capabilities_ = false;
-  EXPECT_FALSE(output_surface_->InitializeAndSetContext3d(
-      onscreen_context_provider_, offscreen_context_provider_));
-  EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
-  EXPECT_FALSE(did_update_renderer_capabilities_);
-}
-
-TEST_F(LayerTreeHostImplTestDeferredInitialize, Fails_OnscreenContext_2) {
-  // Software draw.
-  DrawFrame();
-
-  EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
-
-  onscreen_context_provider_->UnboundTestContext3d()->set_context_lost(true);
-
-  // DeferredInitialize fails.
-  did_update_renderer_capabilities_ = false;
-  EXPECT_FALSE(output_surface_->InitializeAndSetContext3d(
-      onscreen_context_provider_, offscreen_context_provider_));
-  EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
-  EXPECT_FALSE(did_update_renderer_capabilities_);
-}
-
-TEST_F(LayerTreeHostImplTestDeferredInitialize, Fails_OffscreenContext) {
-  // Software draw.
-  DrawFrame();
-
-  EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
-
-  // Fail initialization of the offscreen context.
-  onscreen_context_provider_->UnboundTestContext3d()->set_context_lost(true);
-
-  // DeferredInitialize fails.
-  did_update_renderer_capabilities_ = false;
-  EXPECT_FALSE(output_surface_->InitializeAndSetContext3d(
-      onscreen_context_provider_, offscreen_context_provider_));
-  EXPECT_FALSE(host_impl_->output_surface()->context_provider());
-  EXPECT_FALSE(host_impl_->offscreen_context_provider());
-  EXPECT_FALSE(did_update_renderer_capabilities_);
 }
 
 // Checks that we have a non-0 default allocation if we pass a context that
@@ -5607,14 +5761,15 @@ TEST_F(LayerTreeHostImplTest, MemoryPolicy) {
       456, gpu::MemoryAllocation::CUTOFF_ALLOW_EVERYTHING, 1000);
   int everything_cutoff_value = ManagedMemoryPolicy::PriorityCutoffToValue(
       gpu::MemoryAllocation::CUTOFF_ALLOW_EVERYTHING);
-  int required_only_cutoff_value = ManagedMemoryPolicy::PriorityCutoffToValue(
-      gpu::MemoryAllocation::CUTOFF_ALLOW_REQUIRED_ONLY);
+  int allow_nice_to_have_cutoff_value =
+      ManagedMemoryPolicy::PriorityCutoffToValue(
+          gpu::MemoryAllocation::CUTOFF_ALLOW_NICE_TO_HAVE);
   int nothing_cutoff_value = ManagedMemoryPolicy::PriorityCutoffToValue(
       gpu::MemoryAllocation::CUTOFF_ALLOW_NOTHING);
 
-  // GPU rasterization should be disabled by default.
-  EXPECT_EQ(LayerTreeSettings::CpuRasterization,
-            host_impl_->settings().rasterization_site);
+  // GPU rasterization should be disabled by default on the tree(s)
+  EXPECT_FALSE(host_impl_->active_tree()->use_gpu_rasterization());
+  EXPECT_TRUE(host_impl_->pending_tree() == NULL);
 
   host_impl_->SetVisible(true);
   host_impl_->SetMemoryPolicy(policy1);
@@ -5629,17 +5784,17 @@ TEST_F(LayerTreeHostImplTest, MemoryPolicy) {
   EXPECT_EQ(policy1.bytes_limit_when_visible, current_limit_bytes_);
   EXPECT_EQ(everything_cutoff_value, current_priority_cutoff_value_);
 
-  // Now enable GPU rasterization and test if we get required only cutoff,
+  // Now enable GPU rasterization and test if we get nice to have cutoff,
   // when visible.
   LayerTreeSettings settings;
-  settings.rasterization_site = LayerTreeSettings::GpuRasterization;
+  settings.gpu_rasterization_enabled = true;
   host_impl_ = LayerTreeHostImpl::Create(
       settings, this, &proxy_, &stats_instrumentation_, NULL, 0);
-
+  host_impl_->active_tree()->SetUseGpuRasterization(true);
   host_impl_->SetVisible(true);
   host_impl_->SetMemoryPolicy(policy1);
   EXPECT_EQ(policy1.bytes_limit_when_visible, current_limit_bytes_);
-  EXPECT_EQ(required_only_cutoff_value, current_priority_cutoff_value_);
+  EXPECT_EQ(allow_nice_to_have_cutoff_value, current_priority_cutoff_value_);
 
   host_impl_->SetVisible(false);
   EXPECT_EQ(0u, current_limit_bytes_);
@@ -6069,6 +6224,14 @@ TEST_F(LayerTreeHostImplWithTopControlsTest, NoIdleAnimations) {
   EXPECT_FALSE(did_request_redraw_);
 }
 
+TEST_F(LayerTreeHostImplWithTopControlsTest, TopControlsAnimationScheduling) {
+  SetupScrollAndContentsLayers(gfx::Size(100, 100))
+      ->SetScrollOffset(gfx::Vector2d(0, 10));
+  host_impl_->DidChangeTopControlsPosition();
+  EXPECT_TRUE(did_request_animate_);
+  EXPECT_TRUE(did_request_redraw_);
+}
+
 TEST_F(LayerTreeHostImplWithTopControlsTest, ScrollHandledByTopControls) {
   LayerImpl* scroll_layer = SetupScrollAndContentsLayers(gfx::Size(100, 200));
   host_impl_->SetViewportSize(gfx::Size(100, 100));
@@ -6239,7 +6402,6 @@ class LayerTreeHostImplWithImplicitLimitsTest : public LayerTreeHostImplTest {
  public:
   virtual void SetUp() OVERRIDE {
     LayerTreeSettings settings = DefaultSettings();
-    settings.max_unused_resource_memory_percentage = 50;
     settings.max_memory_for_prepaint_percentage = 50;
     CreateHostImpl(settings, CreateOutputSurface());
   }
@@ -6256,8 +6418,59 @@ TEST_F(LayerTreeHostImplWithImplicitLimitsTest, ImplicitMemoryLimits) {
             300u * 1024u * 1024u);
   EXPECT_EQ(host_impl_->global_tile_state().soft_memory_limit_in_bytes,
             150u * 1024u * 1024u);
-  EXPECT_EQ(host_impl_->global_tile_state().unused_memory_limit_in_bytes,
-            75u * 1024u * 1024u);
+}
+
+TEST_F(LayerTreeHostImplTest, UpdateTilesForMasksWithNoVisibleContent) {
+  gfx::Size bounds(100000, 100);
+
+  host_impl_->CreatePendingTree();
+
+  scoped_ptr<LayerImpl> root = LayerImpl::Create(host_impl_->pending_tree(), 1);
+
+  scoped_ptr<FakePictureLayerImpl> layer_with_mask =
+      FakePictureLayerImpl::Create(host_impl_->pending_tree(), 2);
+
+  layer_with_mask->SetBounds(bounds);
+
+  scoped_ptr<FakePictureLayerImpl> mask =
+      FakePictureLayerImpl::Create(host_impl_->pending_tree(), 3);
+
+  mask->SetIsMask(true);
+  mask->SetBounds(bounds);
+
+  FakePictureLayerImpl* pending_mask_content = mask.get();
+  layer_with_mask->SetMaskLayer(mask.PassAs<LayerImpl>());
+
+  scoped_ptr<FakePictureLayerImpl> child_of_layer_with_mask =
+      FakePictureLayerImpl::Create(host_impl_->pending_tree(), 4);
+
+  child_of_layer_with_mask->SetBounds(bounds);
+  child_of_layer_with_mask->SetDrawsContent(true);
+
+  layer_with_mask->AddChild(child_of_layer_with_mask.PassAs<LayerImpl>());
+
+  root->AddChild(layer_with_mask.PassAs<LayerImpl>());
+
+  host_impl_->pending_tree()->SetRootLayer(root.Pass());
+
+  gfx::Rect r1 = pending_mask_content->visible_rect_for_tile_priority();
+  ASSERT_EQ(0, r1.x());
+  ASSERT_EQ(0, r1.y());
+  ASSERT_EQ(0, r1.width());
+  ASSERT_EQ(0, r1.height());
+
+  host_impl_->ActivatePendingTree();
+
+  host_impl_->active_tree()->UpdateDrawProperties();
+
+  ASSERT_EQ(2u, host_impl_->active_tree()->RenderSurfaceLayerList().size());
+
+  FakePictureLayerImpl* active_mask_content =
+      static_cast<FakePictureLayerImpl*>(
+          host_impl_->active_tree()->root_layer()->children()[0]->mask_layer());
+  gfx::Rect r2 = active_mask_content->visible_rect_for_tile_priority();
+
+  ASSERT_TRUE(!r2.IsEmpty());
 }
 
 }  // namespace

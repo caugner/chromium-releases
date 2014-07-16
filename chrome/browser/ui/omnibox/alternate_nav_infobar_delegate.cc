@@ -9,9 +9,9 @@
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/infobars/core/infobar.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -40,7 +40,7 @@ AlternateNavInfoBarDelegate::AlternateNavInfoBarDelegate(
     const base::string16& text,
     const AutocompleteMatch& match,
     const GURL& search_url)
-    : InfoBarDelegate(),
+    : infobars::InfoBarDelegate(),
       profile_(profile),
       text_(text),
       match_(match),
@@ -82,9 +82,10 @@ bool AlternateNavInfoBarDelegate::LinkClicked(
 
   // Pretend the user typed this URL, so that navigating to it will be the
   // default action when it's typed again in the future.
-  web_contents()->OpenURL(content::OpenURLParams(
-      match_.destination_url, content::Referrer(), disposition,
-      content::PAGE_TRANSITION_TYPED, false));
+  InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
+      content::OpenURLParams(match_.destination_url, content::Referrer(),
+                             disposition, content::PAGE_TRANSITION_TYPED,
+                             false));
 
   // We should always close, even if the navigation did not occur within this
   // WebContents.
@@ -95,6 +96,7 @@ int AlternateNavInfoBarDelegate::GetIconID() const {
   return IDR_INFOBAR_ALT_NAV_URL;
 }
 
-InfoBarDelegate::Type AlternateNavInfoBarDelegate::GetInfoBarType() const {
+infobars::InfoBarDelegate::Type AlternateNavInfoBarDelegate::GetInfoBarType()
+    const {
   return PAGE_ACTION_TYPE;
 }

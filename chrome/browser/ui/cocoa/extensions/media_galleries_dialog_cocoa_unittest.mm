@@ -17,6 +17,24 @@ using ::testing::Return;
 using ::testing::ReturnPointee;
 using ::testing::ReturnRef;
 
+@interface MediaGalleryListEntry (testing)
+- (NSInteger)state;
+- (void)performClick:(id)sender;
+@end
+
+@implementation MediaGalleryListEntry (testing)
+
+- (NSInteger)state {
+  return [checkbox_ state];
+}
+
+- (void)performClick:(id)sender {
+  [checkbox_ performClick:sender];
+}
+
+@end
+
+
 MediaGalleryPrefInfo MakePrefInfoForTesting(MediaGalleryPrefId pref_id) {
   MediaGalleryPrefInfo gallery;
   gallery.pref_id = pref_id;
@@ -56,10 +74,10 @@ TEST_F(MediaGalleriesDialogTest, InitializeCheckboxes) {
   MediaGalleriesDialogController::GalleryPermissionsVector attached_permissions;
   attached_permissions.push_back(
       MediaGalleriesDialogController::GalleryPermission(
-          MakePrefInfoForTesting(1), true));
+          1, MakePrefInfoForTesting(10), true));
   attached_permissions.push_back(
       MediaGalleriesDialogController::GalleryPermission(
-          MakePrefInfoForTesting(2), false));
+          2, MakePrefInfoForTesting(20), false));
   EXPECT_CALL(controller, AttachedPermissions()).
       WillRepeatedly(Return(attached_permissions));
 
@@ -69,18 +87,20 @@ TEST_F(MediaGalleriesDialogTest, InitializeCheckboxes) {
       WillRepeatedly(Return(unattached_permissions));
 
   // Initializing checkboxes should not cause them to be toggled.
-  EXPECT_CALL(controller, DidToggleGalleryId(_, _)).
+  EXPECT_CALL(controller, DidToggleGallery(_, _)).
       Times(0);
 
   scoped_ptr<MediaGalleriesDialogCocoa> dialog(
       static_cast<MediaGalleriesDialogCocoa*>(
           MediaGalleriesDialog::Create(&controller)));
-  EXPECT_EQ(2U, [dialog->checkboxes_ count]);
+  EXPECT_EQ(2U, [[dialog->checkbox_container_ subviews] count]);
 
-  NSButton* checkbox1 = [dialog->checkboxes_ objectAtIndex:0];
+  NSButton* checkbox1 =
+      [[dialog->checkbox_container_ subviews] objectAtIndex:0];
   EXPECT_EQ([checkbox1 state], NSOnState);
 
-  NSButton* checkbox2 = [dialog->checkboxes_ objectAtIndex:1];
+  NSButton* checkbox2 =
+      [[dialog->checkbox_container_ subviews] objectAtIndex:1];
   EXPECT_EQ([checkbox2 state], NSOffState);
 }
 
@@ -91,7 +111,7 @@ TEST_F(MediaGalleriesDialogTest, ToggleCheckboxes) {
   MediaGalleriesDialogController::GalleryPermissionsVector attached_permissions;
   attached_permissions.push_back(
       MediaGalleriesDialogController::GalleryPermission(
-          MakePrefInfoForTesting(1), true));
+          1, MakePrefInfoForTesting(10), true));
   EXPECT_CALL(controller, AttachedPermissions()).
       WillRepeatedly(Return(attached_permissions));
 
@@ -103,16 +123,16 @@ TEST_F(MediaGalleriesDialogTest, ToggleCheckboxes) {
   scoped_ptr<MediaGalleriesDialogCocoa> dialog(
       static_cast<MediaGalleriesDialogCocoa*>(
           MediaGalleriesDialog::Create(&controller)));
-  EXPECT_EQ(1U, [dialog->checkboxes_ count]);
+  EXPECT_EQ(1U, [[dialog->checkbox_container_ subviews] count]);
 
-  NSButton* checkbox = [dialog->checkboxes_ objectAtIndex:0];
+  NSButton* checkbox = [[dialog->checkbox_container_ subviews] objectAtIndex:0];
   EXPECT_EQ([checkbox state], NSOnState);
 
-  EXPECT_CALL(controller, DidToggleGalleryId(1, false));
+  EXPECT_CALL(controller, DidToggleGallery(1, false));
   [checkbox performClick:nil];
   EXPECT_EQ([checkbox state], NSOffState);
 
-  EXPECT_CALL(controller, DidToggleGalleryId(1, true));
+  EXPECT_CALL(controller, DidToggleGallery(1, true));
   [checkbox performClick:nil];
   EXPECT_EQ([checkbox state], NSOnState);
 }
@@ -135,14 +155,14 @@ TEST_F(MediaGalleriesDialogTest, UpdateAdds) {
       static_cast<MediaGalleriesDialogCocoa*>(
           MediaGalleriesDialog::Create(&controller)));
 
-  EXPECT_EQ(0U, [dialog->checkboxes_ count]);
+  EXPECT_EQ(0U, [[dialog->checkbox_container_ subviews] count]);
   CGFloat old_container_height = NSHeight([dialog->checkbox_container_ frame]);
 
   attached_permissions.push_back(
       MediaGalleriesDialogController::GalleryPermission(
-          MakePrefInfoForTesting(1), true));
+          1, MakePrefInfoForTesting(10), true));
   dialog->UpdateGalleries();
-  EXPECT_EQ(1U, [dialog->checkboxes_ count]);
+  EXPECT_EQ(1U, [[dialog->checkbox_container_ subviews] count]);
 
   // The checkbox container should be taller.
   CGFloat new_container_height = NSHeight([dialog->checkbox_container_ frame]);
@@ -151,9 +171,9 @@ TEST_F(MediaGalleriesDialogTest, UpdateAdds) {
 
   attached_permissions.push_back(
       MediaGalleriesDialogController::GalleryPermission(
-          MakePrefInfoForTesting(2), true));
+          2, MakePrefInfoForTesting(20), true));
   dialog->UpdateGalleries();
-  EXPECT_EQ(2U, [dialog->checkboxes_ count]);
+  EXPECT_EQ(2U, [[dialog->checkbox_container_ subviews] count]);
 
   // The checkbox container should be taller.
   new_container_height = NSHeight([dialog->checkbox_container_ frame]);
@@ -162,7 +182,7 @@ TEST_F(MediaGalleriesDialogTest, UpdateAdds) {
 
   attached_permissions[1].allowed = false;
   dialog->UpdateGalleries();
-  EXPECT_EQ(2U, [dialog->checkboxes_ count]);
+  EXPECT_EQ(2U, [[dialog->checkbox_container_ subviews] count]);
 
   // The checkbox container height should not have changed.
   new_container_height = NSHeight([dialog->checkbox_container_ frame]);
@@ -188,19 +208,19 @@ TEST_F(MediaGalleriesDialogTest, ForgetDeletes) {
   // Add a couple of galleries.
   attached_permissions.push_back(
       MediaGalleriesDialogController::GalleryPermission(
-          MakePrefInfoForTesting(1), true));
+          1, MakePrefInfoForTesting(10), true));
   dialog->UpdateGalleries();
   attached_permissions.push_back(
       MediaGalleriesDialogController::GalleryPermission(
-          MakePrefInfoForTesting(2), true));
+          2, MakePrefInfoForTesting(20), true));
   dialog->UpdateGalleries();
-  EXPECT_EQ(2U, [dialog->checkboxes_ count]);
+  EXPECT_EQ(2U, [[dialog->checkbox_container_ subviews] count]);
   CGFloat old_container_height = NSHeight([dialog->checkbox_container_ frame]);
 
   // Remove a gallery.
   attached_permissions.erase(attached_permissions.begin());
   dialog->UpdateGalleries();
-  EXPECT_EQ(1U, [dialog->checkboxes_ count]);
+  EXPECT_EQ(1U, [[dialog->checkbox_container_ subviews] count]);
 
   // The checkbox container should be shorter.
   CGFloat new_container_height = NSHeight([dialog->checkbox_container_ frame]);

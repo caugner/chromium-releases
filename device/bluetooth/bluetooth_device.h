@@ -5,17 +5,23 @@
 #ifndef DEVICE_BLUETOOTH_BLUETOOTH_DEVICE_H_
 #define DEVICE_BLUETOOTH_BLUETOOTH_DEVICE_H_
 
+#include <map>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
+#include "device/bluetooth/bluetooth_uuid.h"
+#include "net/base/net_log.h"
 
 namespace device {
 
+class BluetoothGattService;
 class BluetoothProfile;
 class BluetoothSocket;
+class BluetoothUUID;
 
 struct BluetoothOutOfBandPairingData;
 
@@ -61,6 +67,9 @@ class BluetoothDevice {
     DEVICE_KEYBOARD_MOUSE_COMBO
   };
 
+  // The value returned if the RSSI or transmit power cannot be read.
+  static const int kUnknownPower = 127;
+
   // Possible errors passed back to an error callback function in case of a
   // failed call to Connect().
   enum ConnectErrorCode {
@@ -78,6 +87,18 @@ class BluetoothDevice {
   class Observer {
    public:
     virtual ~Observer() {}
+
+    // Called when a new GATT service |service| is added to the device |device|,
+    // as the service is received from the device. Don't cache |service|. Store
+    // its identifier instead (i.e. BluetoothGattService::GetIdentifier).
+    virtual void GattServiceAdded(BluetoothDevice* device,
+                                  BluetoothGattService* service) {}
+
+    // Called when the GATT service |service| is removed from the device
+    // |device|. This can happen if the attribute database of the remote device
+    // changes or when |device| gets removed.
+    virtual void GattServiceRemoved(BluetoothDevice* device,
+                                    BluetoothGattService* service) {}
 
     // TODO(keybuk): add observers for pairing and connection.
   };
@@ -169,11 +190,13 @@ class BluetoothDevice {
     virtual void AuthorizePairing(BluetoothDevice* device) = 0;
   };
 
-  // Returns true if uuid is in a a valid canonical format
-  // (see utils::CanonicalUuid).
-  static bool IsUUIDValid(const std::string& uuid);
-
   virtual ~BluetoothDevice();
+
+  // Adds and removes observers for events on this Bluetooth device. If
+  // monitoring multiple devices, check the |device| parameter of the observer
+  // methods to determine which device is issuing the event.
+  virtual void AddObserver(Observer* observer) = 0;
+  virtual void RemoveObserver(Observer* observer) = 0;
 
   // Returns the Bluetooth class of the device, used by GetDeviceType()
   // and metrics logging,
@@ -208,6 +231,28 @@ class BluetoothDevice {
   // DEVICE_PERIPHERAL.
   DeviceType GetDeviceType() const;
 
+  // Gets the "received signal strength indication" (RSSI) of the current
+  // connection to the device. The RSSI indicates the power present in the
+  // received radio signal, measured in dBm, to a resolution of 1dBm. Larger
+  // (typically, less negative) values indicate a stronger signal.
+  // If the device is not currently connected, then returns the RSSI read from
+  // the last inquiry that returned the device, where available. In case of an
+  // error, returns |kUnknownPower|. Otherwise, returns the connection's RSSI.
+  virtual int GetRSSI() const = 0;
+
+  // These two methods are used to read the current or maximum transmit power
+  // ("Tx power") of the current connection to the device. The transmit power
+  // indicates the strength of the signal broadcast from the host's Bluetooth
+  // antenna when communicating with the device, measured in dBm, to a
+  // resolution of 1dBm. Larger (typically, less negative) values
+  // indicate a stronger signal.
+  // It is only meaningful to call this method when there is a connection
+  // established to the device. If there is no connection, or in case of an
+  // error, returns |kUnknownPower|. Otherwise, returns the connection's
+  // transmit power.
+  virtual int GetCurrentHostTransmitPower() const = 0;
+  virtual int GetMaximumHostTransmitPower() const = 0;
+
   // Indicates whether the device is known to support pairing based on its
   // device class and address.
   bool IsPairable() const;
@@ -236,9 +281,7 @@ class BluetoothDevice {
   // devices this data is collected from both the EIR data and SDP tables,
   // for Low Energy devices this data is collected from AD and GATT primary
   // services, for dual mode devices this may be collected from both./
-  //
-  // All UUIDs are returned in the canonical 128-bit format.
-  typedef std::vector<std::string> UUIDList;
+  typedef std::vector<BluetoothUUID> UUIDList;
   virtual UUIDList GetUUIDs() const = 0;
 
   // The ErrorCallback is used for methods that can fail in which case it
@@ -261,12 +304,6 @@ class BluetoothDevice {
   // Indicates whether the device is currently pairing and expecting
   // confirmation of a displayed passkey.
   virtual bool ExpectingConfirmation() const = 0;
-
-  // SocketCallback is used by ConnectToService to return a BluetoothSocket to
-  // the caller, or NULL if there was an error.  The socket will remain open
-  // until the last reference to the returned BluetoothSocket is released.
-  typedef base::Callback<void(scoped_refptr<BluetoothSocket>)>
-      SocketCallback;
 
   // Initiates a connection to the device, pairing first if necessary.
   //
@@ -327,22 +364,32 @@ class BluetoothDevice {
   // before that callback would be called.
   virtual void Forget(const ErrorCallback& error_callback) = 0;
 
-  // Attempts to open a socket to a service matching |uuid| on this device.  If
-  // the connection is successful, |callback| is called with a BluetoothSocket.
-  // Otherwise |callback| is called with NULL.  The socket is closed as soon as
-  // all references to the BluetoothSocket are released.  Note that the
-  // BluetoothSocket object can outlive both this BluetoothDevice and the
-  // BluetoothAdapter for this device.
-  virtual void ConnectToService(const std::string& service_uuid,
-                                const SocketCallback& callback) = 0;
-
   // Attempts to initiate an outgoing connection to this device for the profile
   // identified by |profile|, on success the profile's connection callback
   // will be called as well as |callback|; on failure |error_callback| will be
   // called.
-  virtual void ConnectToProfile(BluetoothProfile* profile,
-                                const base::Closure& callback,
-                                const ErrorCallback& error_callback) = 0;
+  typedef base::Callback<void(const std::string&)>
+      ConnectToProfileErrorCallback;
+  virtual void ConnectToProfile(
+      BluetoothProfile* profile,
+      const base::Closure& callback,
+      const ConnectToProfileErrorCallback& error_callback) = 0;
+
+  // Attempts to initiate an outgoing L2CAP or RFCOMM connection to the
+  // advertised service on this device matching |uuid|, performing an SDP lookup
+  // if necessary to determine the correct protocol and channel for the
+  // connection. |callback| will be called on a successful connection with a
+  // BluetoothSocket instance that is to be owned by the receiver.
+  // |error_callback| will be called on failure with a message indicating the
+  // cause.
+  typedef base::Callback<void(scoped_refptr<BluetoothSocket>)>
+      ConnectToServiceCallback;
+  typedef base::Callback<void(const std::string& message)>
+      ConnectToServiceErrorCallback;
+  virtual void ConnectToService(
+      const BluetoothUUID& uuid,
+      const ConnectToServiceCallback& callback,
+      const ConnectToServiceErrorCallback& error_callback) = 0;
 
   // Sets the Out Of Band pairing data for this device to |data|.  Exactly one
   // of |callback| or |error_callback| will be run.
@@ -357,11 +404,30 @@ class BluetoothDevice {
       const base::Closure& callback,
       const ErrorCallback& error_callback) = 0;
 
+  // Starts monitoring the connection properties, RSSI and TX power. These
+  // properties will be tracked, and updated when their values change. Exactly
+  // one of |callback| or |error_callback| will be run.
+  virtual void StartConnectionMonitor(const base::Closure& callback,
+                                      const ErrorCallback& error_callback) = 0;
+
+  // Returns the list of discovered GATT services.
+  virtual std::vector<BluetoothGattService*> GetGattServices() const;
+
+  // Returns the GATT service with device-specific identifier |identifier|.
+  // Returns NULL, if no such service exists.
+  virtual BluetoothGattService* GetGattService(
+      const std::string& identifier) const;
+
  protected:
   BluetoothDevice();
 
   // Returns the internal name of the Bluetooth device, used by GetName().
   virtual std::string GetDeviceName() const = 0;
+
+  // Mapping from the platform-specific GATT service identifiers to
+  // BluetoothGattService objects.
+  typedef std::map<std::string, BluetoothGattService*> GattServiceMap;
+  GattServiceMap gatt_services_;
 
  private:
   // Returns a localized string containing the device's bluetooth address and

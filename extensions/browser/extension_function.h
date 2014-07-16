@@ -22,9 +22,7 @@
 #include "extensions/common/extension.h"
 #include "ipc/ipc_message.h"
 
-class ChromeRenderMessageFilter;
 class ExtensionFunction;
-class ExtensionFunctionDispatcher;
 class UIThreadExtensionFunction;
 class IOThreadExtensionFunction;
 
@@ -41,24 +39,28 @@ class WebContents;
 }
 
 namespace extensions {
+class ExtensionFunctionDispatcher;
+class ExtensionMessageFilter;
 class QuotaLimitHeuristic;
 }
 
 #ifdef NDEBUG
-#define EXTENSION_FUNCTION_VALIDATE(test) do { \
-    if (!(test)) { \
-      bad_message_ = true; \
-      return false; \
-    } \
+#define EXTENSION_FUNCTION_VALIDATE(test) \
+  do {                                    \
+    if (!(test)) {                        \
+      bad_message_ = true;                \
+      return ValidationFailure(this);     \
+    }                                     \
   } while (0)
 #else   // NDEBUG
 #define EXTENSION_FUNCTION_VALIDATE(test) CHECK(test)
 #endif  // NDEBUG
 
-#define EXTENSION_FUNCTION_ERROR(error) do { \
-    error_ = error; \
-    bad_message_ = true; \
-    return false; \
+#define EXTENSION_FUNCTION_ERROR(error) \
+  do {                                  \
+    error_ = error;                     \
+    bad_message_ = true;                \
+    return ValidationFailure(this);     \
   } while (0)
 
 // Declares a callable extension function with the given |name|. You must also
@@ -111,13 +113,41 @@ class ExtensionFunction
   // This will be run after the function has been set up but before Run().
   virtual bool HasPermission();
 
-  // Execute the API. Clients should initialize the ExtensionFunction using
-  // SetArgs(), set_request_id(), and the other setters before calling this
-  // method. Derived classes should be ready to return GetResultList() and
-  // GetError() before returning from this function.
-  // Note that once Run() returns, dispatcher() can be NULL, so be sure to
-  // NULL-check.
-  virtual void Run();
+  // The result of a function call.
+  //
+  // Use NoArguments(), SingleArgument(), MultipleArguments(), or Error()
+  // rather than this class directly.
+  class ResponseValueObject {
+   public:
+    virtual ~ResponseValueObject() {}
+
+    // Returns true for success, false for failure.
+    virtual bool Apply() = 0;
+  };
+  typedef scoped_ptr<ResponseValueObject> ResponseValue;
+
+  // The action to use when returning from RunAsync.
+  //
+  // Use RespondNow() or RespondLater() rather than this class directly.
+  class ResponseActionObject {
+   public:
+    virtual ~ResponseActionObject() {}
+
+    virtual void Execute() = 0;
+  };
+  typedef scoped_ptr<ResponseActionObject> ResponseAction;
+
+  // Runs the function and returns the action to take when the caller is ready
+  // to respond.
+  //
+  // Callers must call Execute() on the return ResponseAction at some point,
+  // exactly once.
+  //
+  // SyncExtensionFunction and AsyncExtensionFunction implement this in terms
+  // of SyncExtensionFunction::RunSync and AsyncExtensionFunction::RunAsync,
+  // but this is deprecated. ExtensionFunction implementations are encouraged
+  // to just implement Run.
+  virtual ResponseAction Run() WARN_UNUSED_RESULT = 0;
 
   // Gets whether quota should be applied to this individual function
   // invocation. This is different to GetQuotaLimitHeuristics which is only
@@ -145,14 +175,20 @@ class ExtensionFunction
   // Sets a single Value as the results of the function.
   void SetResult(base::Value* result);
 
+  // Sets multiple Values as the results of the function.
+  void SetResultList(scoped_ptr<base::ListValue> results);
+
   // Retrieves the results of the function as a ListValue.
-  const base::ListValue* GetResultList();
+  const base::ListValue* GetResultList() const;
 
   // Retrieves any error string from the function.
-  virtual const std::string GetError();
+  virtual std::string GetError() const;
 
   // Sets the function's error string.
   virtual void SetError(const std::string& error);
+
+  // Sets the function's bad message state.
+  void set_bad_message(bool bad_message) { bad_message_ = bad_message; }
 
   // Specifies the name of the function.
   void set_name(const std::string& name) { name_ = name; }
@@ -198,16 +234,45 @@ class ExtensionFunction
  protected:
   friend struct ExtensionFunctionDeleteTraits;
 
+  // ResponseValues.
+  //
+  // Success, no arguments to pass to caller
+  ResponseValue NoArguments();
+  // Success, a single argument |result| to pass to caller. TAKES OWNERSHIP.
+  ResponseValue SingleArgument(base::Value* result);
+  // Success, a list of arguments |results| to pass to caller. TAKES OWNERSHIP.
+  ResponseValue MultipleArguments(base::ListValue* results);
+  // Error. chrome.runtime.lastError.message will be set to |error|.
+  ResponseValue Error(const std::string& error);
+  // Bad message. A ResponseValue equivalent to EXTENSION_FUNCTION_VALIDATE().
+  ResponseValue BadMessage();
+
+  // ResponseActions.
+  //
+  // Respond to the extension immediately with |result|.
+  ResponseAction RespondNow(ResponseValue result);
+  // Don't respond now, but promise to call Respond() later.
+  ResponseAction RespondLater();
+
+  // This is the return value of the EXTENSION_FUNCTION_VALIDATE macro, which
+  // needs to work from Run(), RunAsync(), and RunSync(). The former of those
+  // has a different return type (ResponseAction) than the latter two (bool).
+  static ResponseAction ValidationFailure(ExtensionFunction* function);
+
+  // If RespondLater() was used, functions must at some point call Respond()
+  // with |result| as their result.
+  void Respond(ResponseValue result);
+
   virtual ~ExtensionFunction();
 
   // Helper method for ExtensionFunctionDeleteTraits. Deletes this object.
   virtual void Destruct() const = 0;
 
-  // Derived classes should implement this method to do their work and return
-  // success/failure.
-  virtual bool RunImpl() = 0;
-
-  // Sends the result back to the extension.
+  // Do not call this function directly, return the appropriate ResponseAction
+  // from Run() instead. If using RespondLater then call Respond().
+  //
+  // Call with true to indicate success, false to indicate failure, in which
+  // case please set |error_|.
   virtual void SendResponse(bool success) = 0;
 
   // Common implementation for SendResponse.
@@ -271,6 +336,8 @@ class ExtensionFunction
   int source_tab_id_;
 
  private:
+  void OnRespondingLater(ResponseValue response);
+
   DISALLOW_COPY_AND_ASSIGN(ExtensionFunction);
 };
 
@@ -316,11 +383,11 @@ class UIThreadExtensionFunction : public ExtensionFunction {
     return render_frame_host_;
   }
 
-  void set_dispatcher(
-      const base::WeakPtr<ExtensionFunctionDispatcher>& dispatcher) {
+  void set_dispatcher(const base::WeakPtr<
+      extensions::ExtensionFunctionDispatcher>& dispatcher) {
     dispatcher_ = dispatcher;
   }
-  ExtensionFunctionDispatcher* dispatcher() const {
+  extensions::ExtensionFunctionDispatcher* dispatcher() const {
     return dispatcher_.get();
   }
 
@@ -342,7 +409,7 @@ class UIThreadExtensionFunction : public ExtensionFunction {
   virtual void SendResponse(bool success) OVERRIDE;
 
   // The dispatcher that will service this extension function call.
-  base::WeakPtr<ExtensionFunctionDispatcher> dispatcher_;
+  base::WeakPtr<extensions::ExtensionFunctionDispatcher> dispatcher_;
 
   // The RenderViewHost we will send responses to.
   content::RenderViewHost* render_view_host_;
@@ -377,13 +444,14 @@ class IOThreadExtensionFunction : public ExtensionFunction {
 
   virtual IOThreadExtensionFunction* AsIOThreadExtensionFunction() OVERRIDE;
 
-  void set_ipc_sender(base::WeakPtr<ChromeRenderMessageFilter> ipc_sender,
-                      int routing_id) {
+  void set_ipc_sender(
+      base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender,
+      int routing_id) {
     ipc_sender_ = ipc_sender;
     routing_id_ = routing_id;
   }
 
-  base::WeakPtr<ChromeRenderMessageFilter> ipc_sender_weak() const {
+  base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender_weak() const {
     return ipc_sender_;
   }
 
@@ -408,7 +476,7 @@ class IOThreadExtensionFunction : public ExtensionFunction {
   virtual void SendResponse(bool success) OVERRIDE;
 
  private:
-  base::WeakPtr<ChromeRenderMessageFilter> ipc_sender_;
+  base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender_;
   int routing_id_;
 
   scoped_refptr<const extensions::InfoMap> extension_info_map_;
@@ -422,6 +490,19 @@ class AsyncExtensionFunction : public UIThreadExtensionFunction {
 
  protected:
   virtual ~AsyncExtensionFunction();
+
+  // Deprecated: Override UIThreadExtensionFunction and implement Run() instead.
+  //
+  // AsyncExtensionFunctions implement this method. Return true to indicate that
+  // nothing has gone wrong yet; SendResponse must be called later. Return true
+  // to respond immediately with an error.
+  virtual bool RunAsync() = 0;
+
+  // ValidationFailure override to match RunAsync().
+  static bool ValidationFailure(AsyncExtensionFunction* function);
+
+ private:
+  virtual ResponseAction Run() OVERRIDE;
 };
 
 // A SyncExtensionFunction is an ExtensionFunction that runs synchronously
@@ -435,20 +516,41 @@ class SyncExtensionFunction : public UIThreadExtensionFunction {
  public:
   SyncExtensionFunction();
 
-  virtual void Run() OVERRIDE;
-
  protected:
   virtual ~SyncExtensionFunction();
+
+  // Deprecated: Override UIThreadExtensionFunction and implement Run() instead.
+  //
+  // SyncExtensionFunctions implement this method. Return true to respond
+  // immediately with success, false to respond immediately with an error.
+  virtual bool RunSync() = 0;
+
+  // ValidationFailure override to match RunSync().
+  static bool ValidationFailure(SyncExtensionFunction* function);
+
+ private:
+  virtual ResponseAction Run() OVERRIDE;
 };
 
 class SyncIOThreadExtensionFunction : public IOThreadExtensionFunction {
  public:
   SyncIOThreadExtensionFunction();
 
-  virtual void Run() OVERRIDE;
-
  protected:
   virtual ~SyncIOThreadExtensionFunction();
+
+  // Deprecated: Override IOThreadExtensionFunction and implement Run() instead.
+  //
+  // SyncIOThreadExtensionFunctions implement this method. Return true to
+  // respond immediately with success, false to respond immediately with an
+  // error.
+  virtual bool RunSync() = 0;
+
+  // ValidationFailure override to match RunSync().
+  static bool ValidationFailure(SyncIOThreadExtensionFunction* function);
+
+ private:
+  virtual ResponseAction Run() OVERRIDE;
 };
 
 #endif  // EXTENSIONS_BROWSER_EXTENSION_FUNCTION_H_

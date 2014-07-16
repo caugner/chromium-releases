@@ -20,6 +20,7 @@
 #include "native_client/src/trusted/desc/nrd_all_modules.h"
 #include "native_client/src/trusted/desc/nrd_xfer.h"
 #include "native_client/src/trusted/service_runtime/nacl_error_code.h"
+#include "ppapi/nacl_irt/plugin_startup.h"
 
 namespace nacl {
 namespace nonsfi {

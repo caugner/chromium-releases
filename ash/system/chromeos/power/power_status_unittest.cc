@@ -15,8 +15,6 @@
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace ash {
-namespace internal {
-
 namespace {
 
 class TestObserver : public PowerStatus::Observer {
@@ -140,7 +138,18 @@ TEST_F(PowerStatusTest, SplitTimeIntoHoursAndMinutes) {
       base::TimeDelta::FromSeconds(2 * 3600 + 3 * 60 + 29), &hours, &minutes);
   EXPECT_EQ(2, hours);
   EXPECT_EQ(3, minutes);
+
+  // Check that times close to hour boundaries aren't incorrectly rounded such
+  // that they display 60 minutes: http://crbug.com/368261
+  PowerStatus::SplitTimeIntoHoursAndMinutes(
+      base::TimeDelta::FromSecondsD(3599.9), &hours, &minutes);
+  EXPECT_EQ(1, hours);
+  EXPECT_EQ(0, minutes);
+
+  PowerStatus::SplitTimeIntoHoursAndMinutes(
+      base::TimeDelta::FromSecondsD(3600.1), &hours, &minutes);
+  EXPECT_EQ(1, hours);
+  EXPECT_EQ(0, minutes);
 }
 
-}  // namespace internal
 }  // namespace ash

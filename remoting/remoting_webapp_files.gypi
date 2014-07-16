@@ -48,9 +48,11 @@
       'webapp/clipboard.js',
       'webapp/media_source_renderer.js',
       'webapp/session_connector.js',
+      'webapp/smart_reconnector.js',
     ],
     # Remoting core JavaScript files.
     'remoting_webapp_js_core_files': [
+      'webapp/base.js',
       'webapp/error.js',
       'webapp/event_handlers.js',
       'webapp/plugin_settings.js',
@@ -80,6 +82,10 @@
     'remoting_webapp_js_ui_files': [
       'webapp/butter_bar.js',
       'webapp/connection_stats.js',
+      'webapp/feedback.js',
+      'webapp/fullscreen.js',
+      'webapp/fullscreen_v1.js',
+      'webapp/fullscreen_v2.js',
       'webapp/l10n.js',
       'webapp/menu_button.js',
       'webapp/ui_mode.js',
@@ -114,12 +120,18 @@
     'remoting_webapp_js_gnubby_auth_files': [
       'webapp/gnubby_auth_handler.js',
     ],
+    # browser test JavaScript files.
+    'remoting_webapp_js_browser_test_files': [
+      'webapp/browser_test/browser_test.js',
+    ],
     # The JavaScript files required by main.html.
     'remoting_webapp_main_html_js_files': [
+      # Include the core files first as it is required by the other files.
+      # Otherwise, Jscompile will complain.
+      '<@(remoting_webapp_js_core_files)',
       '<@(remoting_webapp_js_auth_client2host_files)',
       '<@(remoting_webapp_js_auth_google_files)',
       '<@(remoting_webapp_js_client_files)',
-      '<@(remoting_webapp_js_core_files)',
       '<@(remoting_webapp_js_gnubby_auth_files)',
       '<@(remoting_webapp_js_host_files)',
       '<@(remoting_webapp_js_logging_files)',
@@ -127,6 +139,9 @@
       '<@(remoting_webapp_js_ui_host_control_files)',
       '<@(remoting_webapp_js_ui_host_display_files)',
       '<@(remoting_webapp_js_wcs_container_files)',
+      # Uncomment this line to include browser test files in the web app
+      # to expedite debugging or local development.
+      # '<@(remoting_webapp_js_browser_test_files)'
     ],
 
     # The JavaScript files required by wcs_sandbox.html.
@@ -153,6 +168,7 @@
       'resources/disclosure_arrow_right.webp',
       'resources/host_setup_instructions.webp',
       'resources/icon_cross.webp',
+      'resources/icon_help.webp',
       'resources/icon_host.webp',
       'resources/icon_pencil.webp',
       'resources/icon_warning.webp',

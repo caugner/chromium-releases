@@ -12,6 +12,7 @@
 #endif
 #include "base/strings/stringprintf.h"
 #include "base/test/trace_event_analyzer.h"
+#include "base/time/default_tick_clock.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -21,9 +22,6 @@
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/features/base_feature_provider.h"
-#include "chrome/common/extensions/features/complex_feature.h"
-#include "chrome/common/extensions/features/simple_feature.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/tracing.h"
@@ -31,7 +29,12 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/common/feature_switch.h"
+#include "extensions/common/features/base_feature_provider.h"
+#include "extensions/common/features/complex_feature.h"
 #include "extensions/common/features/feature.h"
+#include "extensions/common/features/simple_feature.h"
+#include "extensions/common/switches.h"
+#include "media/base/audio_bus.h"
 #include "media/base/video_frame.h"
 #include "media/cast/cast_config.h"
 #include "media/cast/cast_environment.h"
@@ -40,6 +43,7 @@
 #include "media/cast/test/utility/default_config.h"
 #include "media/cast/test/utility/in_process_receiver.h"
 #include "media/cast/test/utility/standalone_cast_environment.h"
+#include "media/cast/test/utility/udp_proxy.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
@@ -67,6 +71,32 @@ enum TestFlags {
   k24fps               = 1 << 3, // use 24 fps video
   k30fps               = 1 << 4, // use 30 fps video
   k60fps               = 1 << 5, // use 60 fps video
+  kProxyWifi           = 1 << 6, // Run UDP through UDPProxy wifi profile
+  kProxyEvil           = 1 << 7, // Run UDP through UDPProxy evil profile
+  kSlowClock           = 1 << 8, // Receiver clock is 10 seconds slow
+  kFastClock           = 1 << 9, // Receiver clock is 10 seconds fast
+};
+
+class SkewedTickClock : public base::DefaultTickClock {
+ public:
+  explicit SkewedTickClock(const base::TimeDelta& delta) : delta_(delta) {
+  }
+  virtual base::TimeTicks NowTicks() OVERRIDE {
+    return DefaultTickClock::NowTicks() + delta_;
+  }
+ private:
+  base::TimeDelta delta_;
+};
+
+class SkewedCastEnvironment : public media::cast::StandaloneCastEnvironment {
+ public:
+  explicit SkewedCastEnvironment(const base::TimeDelta& delta) :
+      StandaloneCastEnvironment() {
+    clock_.reset(new SkewedTickClock(delta));
+  }
+
+ protected:
+  virtual ~SkewedCastEnvironment() {}
 };
 
 // We log one of these for each call to OnAudioFrame/OnVideoFrame.
@@ -117,7 +147,7 @@ class MeanAndError {
                                          true);
     } else {
       LOG(ERROR) << "Not enough events for "
-                 << measurement << " " << modifier << " " << trace;
+                 << measurement << modifier << " " << trace;
     }
   }
 
@@ -209,24 +239,21 @@ class TestPatternReceiver : public media::cast::InProcessReceiver {
 
  private:
   // Invoked by InProcessReceiver for each received audio frame.
-  virtual void OnAudioFrame(scoped_ptr<media::cast::PcmAudioFrame> audio_frame,
-                            const base::TimeTicks& playout_time) OVERRIDE {
+  virtual void OnAudioFrame(scoped_ptr<media::AudioBus> audio_frame,
+                            const base::TimeTicks& playout_time,
+                            bool is_continuous) OVERRIDE {
     CHECK(cast_env()->CurrentlyOn(media::cast::CastEnvironment::MAIN));
 
-    if (audio_frame->samples.empty()) {
+    if (audio_frame->frames() <= 0) {
       NOTREACHED() << "OnAudioFrame called with no samples?!?";
       return;
     }
 
-    std::vector<int16> samples;
-    for (size_t i = 0;
-         i < audio_frame->samples.size();
-         i += audio_frame->channels) {
-      samples.push_back(audio_frame->samples[i]);
-    }
     // Note: This is the number of the video frame that this audio belongs to.
     uint16 frame_no;
-    if (media::cast::DecodeTimestamp(samples, &frame_no)) {
+    if (media::cast::DecodeTimestamp(audio_frame->channel(0),
+                                     audio_frame->frames(),
+                                     &frame_no)) {
       audio_events_.push_back(TimeData(frame_no, playout_time));
     } else {
       VLOG(0) << "Failed to decode audio timestamp!";
@@ -234,7 +261,8 @@ class TestPatternReceiver : public media::cast::InProcessReceiver {
   }
 
   virtual void OnVideoFrame(const scoped_refptr<media::VideoFrame>& video_frame,
-                            const base::TimeTicks& render_time) OVERRIDE {
+                            const base::TimeTicks& render_time,
+                            bool is_continuous) OVERRIDE {
     CHECK(cast_env()->CurrentlyOn(media::cast::CastEnvironment::MAIN));
 
     TRACE_EVENT_INSTANT1(
@@ -284,6 +312,14 @@ class CastV2PerformanceTest
       suffix += "_30fps";
     if (HasFlag(k60fps))
       suffix += "_60fps";
+    if (HasFlag(kProxyWifi))
+      suffix += "_wifi";
+    if (HasFlag(kProxyEvil))
+      suffix += "_evil";
+    if (HasFlag(kSlowClock))
+      suffix += "_slow";
+    if (HasFlag(kFastClock))
+      suffix += "_fast";
     return suffix;
   }
 
@@ -337,17 +373,15 @@ class CastV2PerformanceTest
       command_line->AppendSwitchASCII(switches::kWindowSize, "2000,1500");
     }
 
-    if (!HasFlag(kUseGpu)) {
+    if (!HasFlag(kUseGpu))
       command_line->AppendSwitch(switches::kDisableGpu);
-    } else {
-      command_line->AppendSwitch(switches::kForceCompositingMode);
-    }
 
     if (HasFlag(kDisableVsync))
       command_line->AppendSwitch(switches::kDisableGpuVsync);
 
-    command_line->AppendSwitchASCII(switches::kWhitelistedExtensionID,
-                                    kExtensionId);
+    command_line->AppendSwitchASCII(
+        extensions::switches::kWhitelistedExtensionID,
+        kExtensionId);
     ExtensionApiTest::SetUpCommandLine(command_line);
   }
 
@@ -359,7 +393,8 @@ class CastV2PerformanceTest
         (trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_BEGIN) ||
          trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_ASYNC_BEGIN) ||
          trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_FLOW_BEGIN) ||
-         trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_INSTANT));
+         trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_INSTANT) ||
+         trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_COMPLETE));
     analyzer->FindEvents(query, events);
   }
 
@@ -546,11 +581,39 @@ class CastV2PerformanceTest
 
     // Start the in-process receiver that examines audio/video for the expected
     // test patterns.
+    base::TimeDelta delta = base::TimeDelta::FromSeconds(0);
+    if (HasFlag(kFastClock)) {
+      delta = base::TimeDelta::FromSeconds(10);
+    }
+    if (HasFlag(kSlowClock)) {
+      delta = base::TimeDelta::FromSeconds(-10);
+    }
     scoped_refptr<media::cast::StandaloneCastEnvironment> cast_environment(
-        new media::cast::StandaloneCastEnvironment);
+        new SkewedCastEnvironment(delta));
     TestPatternReceiver* const receiver =
         new TestPatternReceiver(cast_environment, receiver_end_point);
     receiver->Start();
+
+    scoped_ptr<media::cast::test::UDPProxy> udp_proxy;
+    if (HasFlag(kProxyWifi) || HasFlag(kProxyEvil)) {
+      net::IPEndPoint proxy_end_point = GetFreeLocalPort();
+      if (HasFlag(kProxyWifi)) {
+        udp_proxy = media::cast::test::UDPProxy::Create(
+            proxy_end_point,
+            receiver_end_point,
+            media::cast::test::WifiNetwork().Pass(),
+            media::cast::test::WifiNetwork().Pass(),
+            NULL);
+      } else if (HasFlag(kProxyEvil)) {
+        udp_proxy = media::cast::test::UDPProxy::Create(
+            proxy_end_point,
+            receiver_end_point,
+            media::cast::test::EvilNetwork().Pass(),
+            media::cast::test::EvilNetwork().Pass(),
+            NULL);
+      }
+      receiver_end_point = proxy_end_point;
+    }
 
     std::string json_events;
     ASSERT_TRUE(tracing::BeginTracing("test_fps,mirroring,cast_perf_test"));
@@ -560,6 +623,8 @@ class CastV2PerformanceTest
         receiver_end_point.port());
     ASSERT_TRUE(RunExtensionSubtest("cast_streaming", page_url)) << message_;
     ASSERT_TRUE(tracing::EndTracing(&json_events));
+    receiver->Stop();
+
     // Stop all threads, removes the need for synchronization when analyzing
     // the data.
     cast_environment->Shutdown();
@@ -567,16 +632,9 @@ class CastV2PerformanceTest
     analyzer.reset(trace_analyzer::TraceAnalyzer::Create(json_events));
     analyzer->AssociateAsyncBeginEndEvents();
 
-    // Only one of these PrintResults should actually print something.
-    // The printed result will be the average time between frames in the
-    // browser window.
-    MeanAndError sw_frame_data = AnalyzeTraceDistance(analyzer.get(),
-                                                      "TestFrameTickSW");
-    MeanAndError frame_data = AnalyzeTraceDistance(analyzer.get(),
-                                                   "TestFrameTickGPU");
-    if (frame_data.num_values == 0) {
-      frame_data = sw_frame_data;
-    }
+    MeanAndError frame_data = AnalyzeTraceDistance(
+        analyzer.get(),
+        TRACE_DISABLED_BY_DEFAULT("OnSwapCompositorFrame"));
     EXPECT_GT(frame_data.num_values, 0UL);
     // Lower is better.
     frame_data.Print(test_name,
@@ -597,8 +655,6 @@ class CastV2PerformanceTest
     receiver->Analyze(test_name, GetSuffixForTestFlags());
 
     AnalyzeLatency(test_name, analyzer.get());
-
-    receiver->DestroySoon();
   }
 };
 
@@ -617,4 +673,8 @@ INSTANTIATE_TEST_CASE_P(
         kUseGpu | k24fps,
         kUseGpu | k30fps,
         kUseGpu | k60fps,
-        kDisableVsync | k24fps | kUseGpu));
+        kUseGpu | k24fps | kDisableVsync,
+        kUseGpu | k30fps | kProxyWifi,
+        kUseGpu | k30fps | kProxyEvil,
+        kUseGpu | k30fps | kSlowClock,
+        kUseGpu | k30fps | kFastClock));

@@ -39,7 +39,7 @@ public class AdapterInputConnectionTest extends ContentShellTestBase {
         EditorInfo info = new EditorInfo();
         mEditable = Editable.Factory.getInstance().newEditable("");
         mConnection = new AdapterInputConnection(
-                getActivity().getActiveContentView(), imeAdapter, mEditable, info);
+                getContentViewCore().getContainerView(), imeAdapter, mEditable, info);
     }
 
     @MediumTest
@@ -135,9 +135,6 @@ public class AdapterInputConnectionTest extends ContentShellTestBase {
     private static class TestImeAdapterDelegate implements ImeAdapterDelegate {
         @Override
         public void onImeEvent(boolean isFinish) {}
-
-        @Override
-        public void onSetFieldValue() {}
 
         @Override
         public void onDismissInput() {}

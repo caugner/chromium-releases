@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef EXTENSIONS_BROWSER_RENDER_PROCESS_HELPER_H_
-#define EXTENSIONS_BROWSER_RENDER_PROCESS_HELPER_H_
+#ifndef EXTENSIONS_BROWSER_RENDERER_STARTUP_HELPER_H_
+#define EXTENSIONS_BROWSER_RENDERER_STARTUP_HELPER_H_
 
 #include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
@@ -19,7 +19,7 @@ class RenderProcessHost;
 
 namespace extensions {
 
-// Informs renderers about extensions-related data (channel, available
+// Informs renderers about extensions-related data (loaded extensions, available
 // functions, etc.) when they start. Sends this information to both extension
 // and non-extension renderers, as the non-extension renderers may have content
 // scripts. Lives on the UI thread. Shared between incognito and non-incognito
@@ -71,4 +71,4 @@ class RendererStartupHelperFactory : public BrowserContextKeyedServiceFactory {
 
 }  // namespace extensions
 
-#endif  // EXTENSIONS_BROWSER_RENDER_PROCESS_HELPER_H_
+#endif  // EXTENSIONS_BROWSER_RENDERER_STARTUP_HELPER_H_

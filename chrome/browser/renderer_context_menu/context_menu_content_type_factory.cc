@@ -5,8 +5,8 @@
 #include "chrome/browser/renderer_context_menu/context_menu_content_type_factory.h"
 
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/guestview/webview/context_menu_content_type_webview.h"
-#include "chrome/browser/guestview/webview/webview_guest.h"
+#include "chrome/browser/guest_view/web_view/context_menu_content_type_web_view.h"
+#include "chrome/browser/guest_view/web_view/web_view_guest.h"
 #include "chrome/browser/renderer_context_menu/context_menu_content_type.h"
 #include "chrome/browser/renderer_context_menu/context_menu_content_type_app_mode.h"
 #include "chrome/browser/renderer_context_menu/context_menu_content_type_extension_popup.h"
@@ -26,24 +26,23 @@ ContextMenuContentTypeFactory::~ContextMenuContentTypeFactory() {
 // static.
 ContextMenuContentType* ContextMenuContentTypeFactory::Create(
     content::WebContents* web_contents,
-    content::RenderFrameHost* render_frame_host,
     const content::ContextMenuParams& params) {
   if (WebViewGuest::FromWebContents(web_contents))
-    return new ContextMenuContentTypeWebView(render_frame_host, params);
+    return new ContextMenuContentTypeWebView(web_contents, params);
 
   if (chrome::IsRunningInForcedAppMode())
-    return new ContextMenuContentTypeAppMode(render_frame_host, params);
+    return new ContextMenuContentTypeAppMode(web_contents, params);
 
   const extensions::ViewType view_type = extensions::GetViewType(web_contents);
 
   if (view_type == extensions::VIEW_TYPE_APP_WINDOW)
-    return new ContextMenuContentTypePlatformApp(render_frame_host, params);
+    return new ContextMenuContentTypePlatformApp(web_contents, params);
 
   if (view_type == extensions::VIEW_TYPE_EXTENSION_POPUP)
-    return new ContextMenuContentTypeExtensionPopup(render_frame_host, params);
+    return new ContextMenuContentTypeExtensionPopup(web_contents, params);
 
   if (view_type == extensions::VIEW_TYPE_PANEL)
-    return new ContextMenuContentTypePanel(render_frame_host, params);
+    return new ContextMenuContentTypePanel(web_contents, params);
 
-  return new ContextMenuContentType(render_frame_host, params, true);
+  return new ContextMenuContentType(web_contents, params, true);
 }

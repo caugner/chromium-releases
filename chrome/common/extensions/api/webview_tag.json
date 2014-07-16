@@ -8,7 +8,8 @@
     "description": "Use the <code>webview</code> tag to actively load live content from the web over the network and embed it in your Chrome App. Your app can control the appearance of the <code>webview</code> and interact with the web content, initiate navigations in an embedded web page, react to error events that happen within it, and more (see <a href=\"#usage\">Usage</a>).",
     "documentation_options": {
       "title": "<webview> Tag",
-      "namespace": "<webview>"
+      "namespace": "<webview>",
+      "documented_in": "tags/webview"
     },
     "types": [
       {
@@ -29,17 +30,10 @@
         "description": "A set of data types. Missing properties are interpreted as <code>false</code>.",
         "properties": {
           "appcache": { "type": "boolean", "optional": true, "description": "Websites' appcaches." },
-          "cache": { "type": "boolean", "optional": true, "description": "The partition's cache. Note: This clears the entire cache regardless of the age passed to <code>clearData</code>." },
           "cookies": { "type": "boolean", "optional": true, "description": "The partition's cookies." },
-          "downloads": { "type": "boolean", "optional": true, "description": "The partition's download list." },
           "fileSystems": { "type": "boolean", "optional": true, "description": "Websites' filesystems." },
-          "formData": { "type": "boolean", "optional": true, "description": "The partition's stored form data." },
-          "history": { "type": "boolean", "optional": true, "description": "The partition's history." },
           "indexedDB": { "type": "boolean", "optional": true, "description": "Websites' IndexedDB data." },
           "localStorage": { "type": "boolean", "optional": true, "description": "Websites' local storage data." },
-          "serverBoundCertificates": { "type": "boolean", "optional": true, "description": "Server-bound certificates." },
-          "pluginData": { "type": "boolean", "optional": true, "description": "Plugins' data." },
-          "passwords": { "type": "boolean", "optional": true, "description": "Stored passwords." },
           "webSQL": { "type": "boolean", "optional": true, "description": "Websites' WebSQL data." }
         }
       },
@@ -51,7 +45,7 @@
           "code": {
             "type": "string",
             "optional": true,
-            "description": "JavaScript or CSS code to inject."
+            "description": "JavaScript or CSS code to inject.<br><br><b>Warning:</b><br>Be careful using the <code>code</code> parameter. Incorrect use of it may open your app to <a href=\"https://en.wikipedia.org/wiki/Cross-site_scripting\">cross site scripting</a> attacks."
           },
           "file": {
             "type": "string",
@@ -335,7 +329,7 @@
       {
         "name": "executeScript",
         "type": "function",
-        "description": "<p>Injects JavaScript code into the guest page.</p><p>The following sample code uses script injection to set the guest page's background color to red:</p><pre>webview.executeScript({ code: \"document.body.bgColor = 'red'\" });</pre>",
+        "description": "<p>Injects JavaScript code into the guest page.</p><p>The following sample code uses script injection to set the guest page's background color to red:</p><pre>webview.executeScript({ code: \"document.body.style.backgroundColor = 'red'\" });</pre>",
         "parameters": [
           {
             "$ref": "InjectDetails",
@@ -412,6 +406,25 @@
         "parameters": []
       },
       {
+        "name": "getZoom",
+	"type": "function",
+        "description": "Gets the current zoom factor.",
+	"parameters": [
+	  {
+            "type": "function",
+            "name": "callback",
+            "description": "Called after the current zoom factor is retreived.",
+            "parameters": [
+              {
+                "type": "number",
+                "name": "zoomFactor",
+                "description": "The current zoom factor."
+              }
+            ]
+	  }
+        ]
+      },
+      {
         "name": "go",
         "type": "function",
         "description": "Navigates to a history entry using a history index relative to the current navigation. If the requested navigation is impossible, this method has no effect.",
@@ -463,6 +476,25 @@
             "type": "string",
             "description": "The user agent string to use."
           }
+        ]
+      },
+      {
+        "name": "setZoom",
+        "type": "function",
+        "description": "Changes the zoom factor of the page. This zoom will persist for the page's origin, even after navigation.",
+        "parameters": [
+          {
+            "type": "number",
+            "name": "zoomFactor",
+            "description" : "The new zoom factor."
+          },
+	  {
+            "type": "function",
+            "name": "callback",
+            "description": "Called after the page has been zoomed.",
+            "optional": true,
+            "parameters": []
+	  }
         ]
       },
       {
@@ -805,6 +837,23 @@
             "name": "processID",
             "description": "Chrome's internal ID of the process that has become unresponsive.",
             "type": "integer"
+          }
+        ]
+      },
+      {
+        "name": "zoomchange",
+        "options": { "supportsDom": true },
+        "description": "Fired when the page's zoom changes.",
+        "parameters": [
+          {
+            "name": "oldZoomFactor",
+            "type": "number",
+            "description": "The page's previous zoom factor."
+          },
+          {
+            "name": "newZoomFactor",
+            "type": "number",
+            "description": "The new zoom factor that the page was zoomed to."
           }
         ]
       }

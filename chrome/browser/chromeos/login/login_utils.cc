@@ -60,7 +60,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/rlz/rlz.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -78,6 +77,7 @@
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/ime/input_method_manager.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
@@ -357,6 +357,8 @@ void LoginUtilsImpl::DoBrowserLaunchOnLocaleLoadedImpl(
   if (login_host)
     login_host->Finalize();
   UserManager::Get()->SessionStarted();
+  chromeos::BootTimesLoader::Get()->LoginDone(
+      chromeos::UserManager::Get()->IsCurrentUserNew());
 }
 
 void LoginUtilsImpl::DoBrowserLaunch(Profile* profile,
@@ -456,7 +458,7 @@ void LoginUtilsImpl::InitProfilePreferences(Profile* user_profile,
 
     user_profile->GetPrefs()->SetString(prefs::kManagedUserId,
                                         managed_user_sync_id);
-  } else {
+  } else if (UserManager::Get()->IsLoggedInAsRegularUser()) {
     // Make sure that the google service username is properly set (we do this
     // on every sign in, not just the first login, to deal with existing
     // profiles that might not have it set yet).

@@ -8,9 +8,11 @@
 #include "base/message_loop/message_loop.h"
 #include "content/common/media/cdm_messages.h"
 #include "content/common/media/media_player_messages_android.h"
+#include "content/public/common/renderer_preferences.h"
 #include "content/renderer/media/android/proxy_media_keys.h"
 #include "content/renderer/media/android/renderer_media_player_manager.h"
 #include "content/renderer/media/android/webmediaplayer_android.h"
+#include "content/renderer/render_view_impl.h"
 #include "ui/gfx/rect_f.h"
 
 namespace content {
@@ -240,13 +242,20 @@ void RendererMediaPlayerManager::ExitFullscreen(int player_id) {
   Send(new MediaPlayerHostMsg_ExitFullscreen(routing_id(), player_id));
 }
 
+void RendererMediaPlayerManager::SetCdm(int player_id, int cdm_id) {
+  if (cdm_id == kInvalidCdmId)
+    return;
+  Send(new MediaPlayerHostMsg_SetCdm(routing_id(), player_id, cdm_id));
+}
+
 void RendererMediaPlayerManager::InitializeCdm(int cdm_id,
                                                ProxyMediaKeys* media_keys,
                                                const std::string& key_system,
-                                               const GURL& frame_url) {
+                                               const GURL& security_origin) {
+  DCHECK_NE(cdm_id, kInvalidCdmId);
   RegisterMediaKeys(cdm_id, media_keys);
   Send(new CdmHostMsg_InitializeCdm(
-      routing_id(), cdm_id, key_system, frame_url));
+      routing_id(), cdm_id, key_system, security_origin));
 }
 
 void RendererMediaPlayerManager::CreateSession(
@@ -254,6 +263,7 @@ void RendererMediaPlayerManager::CreateSession(
     uint32 session_id,
     CdmHostMsg_CreateSession_ContentType content_type,
     const std::vector<uint8>& init_data) {
+  DCHECK(GetMediaKeys(cdm_id)) << "|cdm_id| not registered.";
   Send(new CdmHostMsg_CreateSession(
       routing_id(), cdm_id, session_id, content_type, init_data));
 }
@@ -262,16 +272,20 @@ void RendererMediaPlayerManager::UpdateSession(
     int cdm_id,
     uint32 session_id,
     const std::vector<uint8>& response) {
+  DCHECK(GetMediaKeys(cdm_id)) << "|cdm_id| not registered.";
   Send(
       new CdmHostMsg_UpdateSession(routing_id(), cdm_id, session_id, response));
 }
 
 void RendererMediaPlayerManager::ReleaseSession(int cdm_id, uint32 session_id) {
+  DCHECK(GetMediaKeys(cdm_id)) << "|cdm_id| not registered.";
   Send(new CdmHostMsg_ReleaseSession(routing_id(), cdm_id, session_id));
 }
 
 void RendererMediaPlayerManager::DestroyCdm(int cdm_id) {
+  DCHECK(GetMediaKeys(cdm_id)) << "|cdm_id| not registered.";
   Send(new CdmHostMsg_DestroyCdm(routing_id(), cdm_id));
+  media_keys_.erase(cdm_id);
 }
 
 void RendererMediaPlayerManager::OnSessionCreated(
@@ -334,16 +348,10 @@ int RendererMediaPlayerManager::RegisterMediaPlayer(
 
 void RendererMediaPlayerManager::UnregisterMediaPlayer(int player_id) {
   media_players_.erase(player_id);
-  media_keys_.erase(player_id);
 }
 
 void RendererMediaPlayerManager::RegisterMediaKeys(int cdm_id,
                                                    ProxyMediaKeys* media_keys) {
-  // WebMediaPlayerAndroid must have already been registered for
-  // |cdm_id|. For now |cdm_id| is the same as player_id
-  // used in other methods.
-  DCHECK(media_players_.find(cdm_id) != media_players_.end());
-
   // Only allowed to register once.
   DCHECK(media_keys_.find(cdm_id) == media_keys_.end());
 
@@ -431,6 +439,13 @@ void RendererMediaPlayerManager::RetrieveGeometryChanges(
         (*changes)[player_it->first] = player->GetBoundaryRectangle();
     }
   }
+}
+
+bool
+RendererMediaPlayerManager::ShouldUseVideoOverlayForEmbeddedEncryptedVideo() {
+  const RendererPreferences& prefs = static_cast<RenderViewImpl*>(
+      render_view())->renderer_preferences();
+  return prefs.use_video_overlay_for_embedded_encrypted_video;
 }
 #endif  // defined(VIDEO_HOLE)
 

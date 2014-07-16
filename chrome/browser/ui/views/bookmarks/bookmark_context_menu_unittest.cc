@@ -12,17 +12,18 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_test_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/test/bookmark_test_helpers.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/test/test_browser_thread.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/events/platform/platform_event_source.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
@@ -58,6 +59,7 @@ class BookmarkContextMenuTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
+    event_source_ = ui::PlatformEventSource::CreateDefault();
     profile_.reset(new TestingProfile());
     profile_->CreateBookmarkModel(true);
 
@@ -73,12 +75,14 @@ class BookmarkContextMenuTest : public testing::Test {
     BrowserThread::GetBlockingPool()->FlushForTesting();
     // Flush the message loop to make application verifiers happy.
     message_loop_.RunUntilIdle();
+    event_source_.reset();
   }
 
  protected:
   base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
+  scoped_ptr<ui::PlatformEventSource> event_source_;
   scoped_ptr<TestingProfile> profile_;
   BookmarkModel* model_;
   TestingPageNavigator navigator_;

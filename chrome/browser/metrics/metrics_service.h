@@ -18,9 +18,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/user_metrics.h"
+#include "base/observer_list.h"
 #include "base/process/kill.h"
+#include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "chrome/browser/metrics/metrics_log.h"
+#include "chrome/browser/metrics/metrics_service_observer.h"
 #include "chrome/browser/metrics/tracking_synchronizer_observer.h"
 #include "chrome/common/metrics/metrics_service_base.h"
 #include "chrome/installer/util/google_update_settings.h"
@@ -36,6 +39,7 @@
 #include "chrome/browser/chromeos/external_metrics.h"
 #endif
 
+class ChromeBrowserMetricsServiceObserver;
 class MetricsReportingScheduler;
 class PrefService;
 class PrefRegistrySimple;
@@ -69,7 +73,7 @@ class MetricsPrivateGetIsCrashReportingEnabledFunction;
 }
 
 namespace metrics {
-class ClonedInstallDetector;
+class MetricsStateManager;
 }
 
 namespace net {
@@ -127,25 +131,26 @@ class MetricsService
     SHUTDOWN_COMPLETE = 700,
   };
 
-  enum ReportingState {
-    REPORTING_ENABLED,
-    REPORTING_DISABLED,
-  };
-
-  MetricsService();
+  // Creates the MetricsService with the given |state_manager|. Does not take
+  // ownership of |state_manager|, instead stores a weak pointer to it. Caller
+  // should ensure that |state_manager| is valid for the lifetime of this class.
+  explicit MetricsService(metrics::MetricsStateManager* state_manager);
   virtual ~MetricsService();
 
   // Initializes metrics recording state. Updates various bookkeeping values in
   // prefs and sets up the scheduler. This is a separate function rather than
   // being done by the constructor so that field trials could be created before
-  // this is run. Takes |reporting_state| parameter which specifies whether UMA
-  // is enabled.
-  void InitializeMetricsRecordingState(ReportingState reporting_state);
+  // this is run.
+  void InitializeMetricsRecordingState();
 
   // Starts the metrics system, turning on recording and uploading of metrics.
   // Should be called when starting up with metrics enabled, or when metrics
   // are turned on.
   void Start();
+
+  // If metrics reporting is enabled, starts the metrics service. Returns
+  // whether the metrics service was started.
+  bool StartIfMetricsReportingEnabled();
 
   // Starts the metrics system in a special test-only mode. Metrics won't ever
   // be uploaded or persisted in this mode, but metrics will be recorded in
@@ -169,23 +174,12 @@ class MetricsService
 
   // Returns the preferred entropy provider used to seed persistent activities
   // based on whether or not metrics reporting will be permitted on this client.
-  // The caller must determine if metrics reporting will be enabled for this
-  // client and pass that state in as |reporting_will_be_enabled|.
   //
-  // If |reporting_will_be_enabled| is true, this method returns an entropy
-  // provider that has a high source of entropy, partially based on the client
-  // ID. Otherwise, an entropy provider that is based on a low entropy source
-  // is returned.
-  //
-  // Note that this reporting state can not be checked by reporting_active()
-  // because this method may need to be called before the MetricsService needs
-  // to be started.
-  scoped_ptr<const base::FieldTrial::EntropyProvider> CreateEntropyProvider(
-      ReportingState reporting_state);
-
-  // Force the client ID to be generated. This is useful in case it's needed
-  // before recording.
-  void ForceClientIdCreation();
+  // If metrics reporting is enabled, this method returns an entropy provider
+  // that has a high source of entropy, partially based on the client ID.
+  // Otherwise, it returns an entropy provider that is based on a low entropy
+  // source.
+  scoped_ptr<const base::FieldTrial::EntropyProvider> CreateEntropyProvider();
 
   // At startup, prefs needs to be called with a list of all the pref names and
   // types we'll be using.
@@ -312,15 +306,6 @@ class MetricsService
     NEED_TO_SHUTDOWN = ~CLEANLY_SHUTDOWN
   };
 
-  // Designates which entropy source was returned from this MetricsService.
-  // This is used for testing to validate that we return the correct source
-  // depending on the state of the service.
-  enum EntropySourceReturned {
-    LAST_ENTROPY_NONE,
-    LAST_ENTROPY_LOW,
-    LAST_ENTROPY_HIGH,
-  };
-
   struct ChildProcessStats;
 
   typedef std::vector<SyntheticTrialGroup> SyntheticTrialGroups;
@@ -368,33 +353,6 @@ class MetricsService
                   base::TimeDelta* incremental_uptime,
                   base::TimeDelta* uptime);
 
-  // Reset the client id and low entropy source if the kMetricsResetMetricIDs
-  // pref is true.
-  void ResetMetricsIDsIfNecessary();
-
-  // Returns the low entropy source for this client. This is a random value
-  // that is non-identifying amongst browser clients. This method will
-  // generate the entropy source value if it has not been called before.
-  int GetLowEntropySource();
-
-  // Returns the first entropy source that was returned by this service since
-  // start up, or NONE if neither was returned yet. This is exposed for testing
-  // only.
-  EntropySourceReturned entropy_source_returned() const {
-    return entropy_source_returned_;
-  }
-
-  // When we start a new version of Chromium (different from our last run), we
-  // need to discard the old crash stats so that we don't attribute crashes etc.
-  // in the old version to the current version (via current logs).
-  // Without this, a common reason to finally start a new version is to crash
-  // the old version (after an autoupdate has arrived), and so we'd bias
-  // initial results towards showing crashes :-(.
-  static void DiscardOldStabilityStats(PrefService* local_state);
-#if defined(OS_ANDROID)
-  static void DiscardOldStabilityStatsAndroid(PrefService* local_state);
-#endif  // defined(OS_ANDROID)
-
   // Turns recording on or off.
   // DisableRecording() also forces a persistent save of logging state (if
   // anything has been recorded, or transmitted).
@@ -408,10 +366,12 @@ class MetricsService
   void HandleIdleSinceLastTransmission(bool in_idle);
 
   // Set up client ID, session ID, etc.
-  void InitializeMetricsState(ReportingState reporting_state);
+  void InitializeMetricsState();
 
-  // Generates a new client ID to use to identify self to metrics server.
-  static std::string GenerateClientID();
+  // Registers/unregisters |observer| to receive MetricsLog notifications.
+  void AddObserver(MetricsServiceObserver* observer);
+  void RemoveObserver(MetricsServiceObserver* observer);
+  void NotifyOnDidCreateMetricsLog();
 
   // Schedule the next save of LocalState information.  This is called
   // automatically by the task that performs each save to schedule the next one.
@@ -460,7 +420,7 @@ class MetricsService
 
   // Prepares the initial metrics log, which includes startup histograms and
   // profiler data, as well as incremental stability-related metrics.
-  void PrepareInitialMetricsLog(MetricsLog::LogType log_type);
+  void PrepareInitialMetricsLog();
 
   // Uploads the currently staged log (which must be non-null).
   void SendStagedLog();
@@ -523,6 +483,10 @@ class MetricsService
   void GetCurrentSyntheticFieldTrials(
       std::vector<chrome_variations::ActiveGroupId>* synthetic_trials);
 
+  // Used to manage various metrics reporting state prefs, such as client id,
+  // low entropy source and whether metrics reporting is enabled. Weak pointer.
+  metrics::MetricsStateManager* state_manager_;
+
   base::ActionCallback action_callback_;
 
   content::NotificationRegistrar registrar_;
@@ -574,12 +538,6 @@ class MetricsService
   // The HTTP pipelining test server.
   std::string http_pipelining_test_server_;
 
-  // The identifier that's sent to the server with the log reports.
-  std::string client_id_;
-
-  // The non-identifying low entropy source value.
-  int low_entropy_source_;
-
   // Whether the MetricsService object has received any notifications since
   // the last time a transmission was sent.
   bool idle_since_last_transmission_;
@@ -620,9 +578,6 @@ class MetricsService
   scoped_refptr<chromeos::ExternalMetrics> external_metrics_;
 #endif
 
-  // The last entropy source returned by this service, used for testing.
-  EntropySourceReturned entropy_source_returned_;
-
   // Stores the time of the first call to |GetUptimes()|.
   base::TimeTicks first_updated_time_;
 
@@ -639,29 +594,29 @@ class MetricsService
   // Field trial groups that map to Chrome configuration states.
   SyntheticTrialGroups synthetic_trial_groups_;
 
-  scoped_ptr<metrics::ClonedInstallDetector> cloned_install_detector_;
+  ObserverList<MetricsServiceObserver> observers_;
 
-  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ClientIdCorrectlyFormatted);
+  // Confirms single-threaded access to |observers_| in debug builds.
+  base::ThreadChecker thread_checker_;
+
+  friend class MetricsServiceHelper;
+
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, IsPluginProcess);
-  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, LowEntropySource0NotReset);
+  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, MetricsServiceObserver);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest,
                            PermutedEntropyCacheClearedWhenLowEntropyReset);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, RegisterSyntheticTrial);
-  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ResetMetricsIDs);
-  FRIEND_TEST_ALL_PREFIXES(MetricsServiceBrowserTest,
-                           CheckLowEntropySourceUsed);
-  FRIEND_TEST_ALL_PREFIXES(MetricsServiceReportingTest,
-                           CheckHighEntropySourceUsed);
 
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
 };
 
-// This class limits and documents access to the IsMetricsReportingEnabled() and
-// IsCrashReportingEnabled() methods. Since these methods are private, each user
-// has to be explicitly declared as a 'friend' below.
+// This class limits and documents access to metrics service helper methods.
+// Since these methods are private, each user has to be explicitly declared
+// as a 'friend' below.
 class MetricsServiceHelper {
  private:
   friend bool prerender::IsOmniboxEnabled(Profile* profile);
+  friend class ::ChromeBrowserMetricsServiceObserver;
   friend class ChromeRenderMessageFilter;
   friend class ::CrashesDOMHandler;
   friend class extensions::ExtensionDownloader;
@@ -673,12 +628,20 @@ class MetricsServiceHelper {
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, CrashReportingEnabled);
 
   // Returns true if prefs::kMetricsReportingEnabled is set.
+  // TODO(asvitkine): Consolidate the method in MetricsStateManager.
+  // TODO(asvitkine): This function does not report the correct value on
+  // Android and ChromeOS, see http://crbug.com/362192.
   static bool IsMetricsReportingEnabled();
 
   // Returns true if crash reporting is enabled.  This is set at the platform
   // level for Android and ChromeOS, and otherwise is the same as
   // IsMetricsReportingEnabled for desktop Chrome.
   static bool IsCrashReportingEnabled();
+
+  // Registers/unregisters |observer| to receive MetricsLog notifications
+  // from metrics service.
+  static void AddMetricsServiceObserver(MetricsServiceObserver* observer);
+  static void RemoveMetricsServiceObserver(MetricsServiceObserver* observer);
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(MetricsServiceHelper);
 };

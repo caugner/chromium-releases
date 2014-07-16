@@ -89,14 +89,14 @@ void RunTestFunction(DevToolsWindow* window, const char* test_name) {
   // files have been loaded) and has runTest method.
   ASSERT_TRUE(
       content::ExecuteScriptAndExtractString(
-          window->GetRenderViewHost(),
+          window->web_contents()->GetRenderViewHost(),
           "window.domAutomationController.send("
           "    '' + (window.uiTests && (typeof uiTests.runTest)));",
           &result));
 
   ASSERT_EQ("function", result) << "DevTools front-end is broken.";
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      window->GetRenderViewHost(),
+      window->web_contents()->GetRenderViewHost(),
       base::StringPrintf("uiTests.runTest('%s')", test_name),
       &result));
   EXPECT_EQ("[OK]", result);
@@ -348,7 +348,8 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
     size_t num_before = service->extensions()->size();
     {
       content::NotificationRegistrar registrar;
-      registrar.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+      registrar.Add(this,
+                    chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                     content::NotificationService::AllSources());
       base::CancelableClosure timeout(
           base::Bind(&TimeoutCallback, "Extension load timed out."));
@@ -399,7 +400,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
-      case chrome::NOTIFICATION_EXTENSION_LOADED:
+      case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED:
       case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING:
         base::MessageLoopForUI::current()->Quit();
         break;
@@ -538,7 +539,7 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
             worker_data->worker_process_id,
             worker_data->worker_route_id));
     window_ = DevToolsWindow::OpenDevToolsWindowForWorker(profile, agent_host);
-    RenderViewHost* client_rvh = window_->GetRenderViewHost();
+    RenderViewHost* client_rvh = window_->web_contents()->GetRenderViewHost();
     WebContents* client_contents = WebContents::FromRenderViewHost(client_rvh);
     content::WaitForLoadStop(client_contents);
   }
@@ -859,28 +860,10 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestDevToolsExternalNavigation) {
   CloseDevToolsWindow();
 }
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
-// Flakily times out: http://crbug.com/163411
-#define MAYBE_TestReattachAfterCrash DISABLED_TestReattachAfterCrash
-#else
-#define MAYBE_TestReattachAfterCrash TestReattachAfterCrash
-#endif
 // Tests that inspector will reattach to inspected page when it is reloaded
 // after a crash. See http://crbug.com/101952
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestReattachAfterCrash) {
-  OpenDevToolsWindow(kDebuggerTestPage, false);
-
-  content::CrashTab(GetInspectedTab());
-  content::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
-      content::Source<NavigationController>(
-          &browser()->tab_strip_model()->GetActiveWebContents()->
-              GetController()));
-  chrome::Reload(browser(), CURRENT_TAB);
-  observer.Wait();
-
-  RunTestFunction(window_, "testReattachAfterCrash");
-  CloseDevToolsWindow();
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestReattachAfterCrash) {
+  RunTest("testReattachAfterCrash", std::string());
 }
 
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestPageWithNoJavaScript) {
@@ -888,7 +871,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestPageWithNoJavaScript) {
   std::string result;
   ASSERT_TRUE(
       content::ExecuteScriptAndExtractString(
-          window_->GetRenderViewHost(),
+          window_->web_contents()->GetRenderViewHost(),
           "window.domAutomationController.send("
           "    '' + (window.uiTests && (typeof uiTests.runTest)));",
           &result));

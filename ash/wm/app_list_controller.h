@@ -16,6 +16,7 @@
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/rect.h"
+#include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/views/widget/widget_observer.h"
 
 namespace app_list {
@@ -33,8 +34,6 @@ namespace test {
 class AppListControllerTestApi;
 }
 
-namespace internal {
-
 // AppListController is a controller that manages app list UI for shell.
 // It creates AppListView and schedules showing/hiding animation.
 // While the UI is visible, it monitors things such as app list widget's
@@ -44,6 +43,7 @@ class AppListController : public ui::EventHandler,
                           public aura::WindowObserver,
                           public ui::ImplicitAnimationObserver,
                           public views::WidgetObserver,
+                          public keyboard::KeyboardControllerObserver,
                           public ShellObserver,
                           public ShelfIconObserver,
                           public app_list::PaginationModelObserver {
@@ -110,6 +110,9 @@ class AppListController : public ui::EventHandler,
   // views::WidgetObserver overrides:
   virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
+  // KeyboardControllerObserver overrides:
+  virtual void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) OVERRIDE;
+
   // ShellObserver overrides:
   virtual void OnShelfAlignmentChanged(aura::Window* root_window) OVERRIDE;
 
@@ -127,6 +130,9 @@ class AppListController : public ui::EventHandler,
   // Whether we should show or hide app list widget.
   bool is_visible_;
 
+  // Whether the app list should remain centered.
+  bool is_centered_;
+
   // The AppListView this class manages, owned by its widget.
   app_list::AppListView* view_;
 
@@ -139,7 +145,6 @@ class AppListController : public ui::EventHandler,
   DISALLOW_COPY_AND_ASSIGN(AppListController);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_WM_APP_LIST_CONTROLLER_H_

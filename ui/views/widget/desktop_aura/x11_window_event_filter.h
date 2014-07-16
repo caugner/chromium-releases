@@ -39,6 +39,8 @@ class VIEWS_EXPORT X11WindowEventFilter : public ui::EventHandler {
   virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
 
  private:
+  void ToggleMaximizedState();
+
   // Dispatches a _NET_WM_MOVERESIZE message to the window manager to tell it
   // to act as if a border or titlebar drag occurred.
   bool DispatchHostWindowDragMovement(int hittest,
@@ -57,6 +59,13 @@ class VIEWS_EXPORT X11WindowEventFilter : public ui::EventHandler {
 
   // True if |xwindow_| is the current _NET_ACTIVE_WINDOW.
   bool is_active_;
+
+  // The non-client component for the target of a MouseEvent. Mouse events can
+  // be destructive to the window tree, which can cause the component of a
+  // ui::EF_IS_DOUBLE_CLICK event to no longer be the same as that of the
+  // initial click. Acting on a double click should only occur for matching
+  // components.
+  int click_component_;
 
   DISALLOW_COPY_AND_ASSIGN(X11WindowEventFilter);
 };

@@ -20,14 +20,15 @@ class TimeLossAlgorithmTest : public ::testing::Test {
   TimeLossAlgorithmTest()
       : unacked_packets_() {
     rtt_stats_.UpdateRtt(QuicTime::Delta::FromMilliseconds(100),
-                         QuicTime::Delta::Zero());
+                         QuicTime::Delta::Zero(),
+                         clock_.Now());
   }
 
   void SendDataPacket(QuicPacketSequenceNumber sequence_number) {
     SerializedPacket packet(sequence_number, PACKET_1BYTE_SEQUENCE_NUMBER,
                             NULL, 0, new RetransmittableFrames());
     unacked_packets_.AddPacket(packet);
-    unacked_packets_.SetPending(sequence_number, clock_.Now(), 1000);
+    unacked_packets_.SetSent(sequence_number, clock_.Now(), 1000, true);
   }
 
   void VerifyLosses(QuicPacketSequenceNumber largest_observed,

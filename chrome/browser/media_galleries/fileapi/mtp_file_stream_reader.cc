@@ -24,7 +24,7 @@ namespace {
 // Called on the IO thread.
 MTPDeviceAsyncDelegate* GetMTPDeviceDelegate(
     const fileapi::FileSystemURL& url) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   return MTPDeviceMapService::GetInstance()->GetMTPDeviceAsyncDelegate(
       url.filesystem_id());
 }
@@ -67,12 +67,13 @@ MTPFileStreamReader::MTPFileStreamReader(
     fileapi::FileSystemContext* file_system_context,
     const fileapi::FileSystemURL& url,
     int64 initial_offset,
-    const base::Time& expected_modification_time)
+    const base::Time& expected_modification_time,
+    bool do_media_header_validation)
     : file_system_context_(file_system_context),
       url_(url),
       current_offset_(initial_offset),
       expected_modification_time_(expected_modification_time),
-      media_header_validated_(false),
+      media_header_validated_(!do_media_header_validation),
       weak_factory_(this) {
 }
 
@@ -81,7 +82,7 @@ MTPFileStreamReader::~MTPFileStreamReader() {
 
 int MTPFileStreamReader::Read(net::IOBuffer* buf, int buf_len,
                               const net::CompletionCallback& callback) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   MTPDeviceAsyncDelegate* delegate = GetMTPDeviceDelegate(url_);
   if (!delegate)
@@ -120,7 +121,7 @@ int MTPFileStreamReader::Read(net::IOBuffer* buf, int buf_len,
 
 int64 MTPFileStreamReader::GetLength(
     const net::Int64CompletionCallback& callback) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   MTPDeviceAsyncDelegate* delegate = GetMTPDeviceDelegate(url_);
   if (!delegate)
@@ -142,7 +143,7 @@ void MTPFileStreamReader::FinishValidateMediaHeader(
     const net::CompletionCallback& callback,
     const base::File::Info& file_info,
     int header_bytes_read) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   DCHECK_GE(header_bytes_read, 0);
   base::File::Error error = NativeMediaFileUtil::BufferIsMediaHeader(
       header_buf, header_bytes_read);
@@ -169,7 +170,7 @@ void MTPFileStreamReader::FinishValidateMediaHeader(
 void MTPFileStreamReader::FinishRead(const net::CompletionCallback& callback,
                                      const base::File::Info& file_info,
                                      int bytes_read) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   if (!VerifySnapshotTime(expected_modification_time_, file_info)) {
     callback.Run(net::ERR_UPLOAD_FILE_CHANGED);
@@ -184,7 +185,7 @@ void MTPFileStreamReader::FinishRead(const net::CompletionCallback& callback,
 void MTPFileStreamReader::FinishGetLength(
     const net::Int64CompletionCallback& callback,
     const base::File::Info& file_info) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   if (!VerifySnapshotTime(expected_modification_time_, file_info)) {
     callback.Run(net::ERR_UPLOAD_FILE_CHANGED);

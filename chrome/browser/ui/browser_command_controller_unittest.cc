@@ -8,6 +8,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/browser.h"
@@ -15,11 +16,12 @@
 #include "chrome/browser/ui/browser_window_state.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/profile_management_switches.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
@@ -130,6 +132,32 @@ TEST_F(BrowserCommandControllerTest, IsReservedCommandOrKeyIsApp) {
       IDC_FIND, content::NativeWebKeyboardEvent(
           ui::ET_KEY_PRESSED, false, ui::VKEY_F, ui::EF_CONTROL_DOWN, 0)));
 #endif  // USE_AURA
+}
+
+TEST_F(BrowserCommandControllerTest, IncognitoCommands) {
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_OPTIONS));
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_IMPORT_SETTINGS));
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_SHOW_SIGNIN));
+
+  TestingProfile* testprofile = browser()->profile()->AsTestingProfile();
+  EXPECT_TRUE(testprofile);
+  testprofile->SetGuestSession(true);
+  chrome::BrowserCommandController
+    ::UpdateSharedCommandsForIncognitoAvailability(
+      browser()->command_controller()->command_updater(), testprofile);
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_OPTIONS));
+  EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_IMPORT_SETTINGS));
+  EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_SHOW_SIGNIN));
+
+  testprofile->SetGuestSession(false);
+  IncognitoModePrefs::SetAvailability(browser()->profile()->GetPrefs(),
+                                      IncognitoModePrefs::FORCED);
+  chrome::BrowserCommandController
+    ::UpdateSharedCommandsForIncognitoAvailability(
+      browser()->command_controller()->command_updater(), testprofile);
+  EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_OPTIONS));
+  EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_IMPORT_SETTINGS));
+  EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_SHOW_SIGNIN));
 }
 
 TEST_F(BrowserCommandControllerTest, AppFullScreen) {
@@ -425,6 +453,15 @@ TEST_F(BrowserCommandControllerFullscreenTest,
   EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_ABOUT));
   EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_SHOW_APP_MENU));
   EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_FULLSCREEN));
+
+  // Guest Profiles disallow some options.
+  TestingProfile* testprofile = browser()->profile()->AsTestingProfile();
+  EXPECT_TRUE(testprofile);
+  testprofile->SetGuestSession(true);
+
+  browser()->command_controller()->FullscreenStateChanged();
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_OPTIONS));
+  EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_IMPORT_SETTINGS));
 }
 
 TEST_F(BrowserCommandControllerTest, IncognitoModeOnSigninAllowedPrefChange) {

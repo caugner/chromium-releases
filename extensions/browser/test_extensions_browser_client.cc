@@ -7,6 +7,7 @@
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_host_delegate.h"
+#include "extensions/browser/test_runtime_api_delegate.h"
 
 using content::BrowserContext;
 
@@ -83,10 +84,37 @@ bool TestExtensionsBrowserClient::CanExtensionCrossIncognito(
   return false;
 }
 
+bool TestExtensionsBrowserClient::IsWebViewRequest(
+    net::URLRequest* request) const {
+  return false;
+}
+
+net::URLRequestJob*
+TestExtensionsBrowserClient::MaybeCreateResourceBundleRequestJob(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
+    const base::FilePath& directory_path,
+    const std::string& content_security_policy,
+    bool send_cors_header) {
+  return NULL;
+}
+
+bool TestExtensionsBrowserClient::AllowCrossRendererResourceLoad(
+    net::URLRequest* request,
+    bool is_incognito,
+    const Extension* extension,
+    InfoMap* extension_info_map) {
+  return false;
+}
+
 PrefService* TestExtensionsBrowserClient::GetPrefServiceForContext(
     BrowserContext* context) {
   return NULL;
 }
+
+void TestExtensionsBrowserClient::GetEarlyExtensionPrefsObservers(
+    content::BrowserContext* context,
+    std::vector<ExtensionPrefsObserver*>* observers) const {}
 
 bool TestExtensionsBrowserClient::DeferLoadingBackgroundHosts(
     BrowserContext* context) const {
@@ -106,8 +134,6 @@ TestExtensionsBrowserClient::CreateExtensionHostDelegate() {
 bool TestExtensionsBrowserClient::DidVersionUpdate(BrowserContext* context) {
   return false;
 }
-
-void TestExtensionsBrowserClient::PermitExternalProtocolHandler() {}
 
 scoped_ptr<AppSorting> TestExtensionsBrowserClient::CreateAppSorting() {
   return scoped_ptr<AppSorting>();
@@ -129,5 +155,11 @@ TestExtensionsBrowserClient::GetExtensionSystemFactory() {
 
 void TestExtensionsBrowserClient::RegisterExtensionFunctions(
     ExtensionFunctionRegistry* registry) const {}
+
+scoped_ptr<RuntimeAPIDelegate>
+TestExtensionsBrowserClient::CreateRuntimeAPIDelegate(
+    content::BrowserContext* context) const {
+  return scoped_ptr<RuntimeAPIDelegate>(new TestRuntimeAPIDelegate());
+}
 
 }  // namespace extensions

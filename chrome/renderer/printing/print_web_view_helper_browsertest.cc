@@ -3,16 +3,18 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/run_loop.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/print_messages.h"
 #include "chrome/renderer/mock_printer.h"
 #include "chrome/renderer/printing/print_web_view_helper.h"
 #include "chrome/test/base/chrome_render_view_test.h"
 #include "content/public/renderer/render_view.h"
+#include "ipc/ipc_listener.h"
 #include "printing/print_job_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebRange.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
@@ -21,6 +23,7 @@
 #include "printing/image.h"
 
 using blink::WebFrame;
+using blink::WebLocalFrame;
 using blink::WebString;
 #endif
 
@@ -101,6 +104,24 @@ void CreatePrintSettingsDictionary(base::DictionaryValue* dict) {
 }
 #endif  // !defined(OS_CHROMEOS)
 
+class DidPreviewPageListener : public IPC::Listener {
+ public:
+  explicit DidPreviewPageListener(base::RunLoop* run_loop)
+      : run_loop_(run_loop) {}
+
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+    if (message.type() == PrintHostMsg_MetafileReadyForPrinting::ID ||
+        message.type() == PrintHostMsg_PrintPreviewFailed::ID ||
+        message.type() == PrintHostMsg_PrintPreviewCancelled::ID)
+      run_loop_->Quit();
+    return false;
+  }
+
+ private:
+  base::RunLoop* const run_loop_;
+  DISALLOW_COPY_AND_ASSIGN(DidPreviewPageListener);
+};
+
 }  // namespace
 
 class PrintWebViewHelperTestBase : public ChromeRenderViewTest {
@@ -174,8 +195,12 @@ class PrintWebViewHelperTestBase : public ChromeRenderViewTest {
   void OnPrintPreview(const base::DictionaryValue& dict) {
     PrintWebViewHelper* print_web_view_helper = PrintWebViewHelper::Get(view_);
     print_web_view_helper->OnInitiatePrintPreview(false);
+    base::RunLoop run_loop;
+    DidPreviewPageListener filter(&run_loop);
+    render_thread_->sink().AddFilter(&filter);
     print_web_view_helper->OnPrintPreview(dict);
-    ProcessPendingMessages();
+    run_loop.Run();
+    render_thread_->sink().RemoveFilter(&filter);
   }
 
   void OnPrintForPrintPreview(const base::DictionaryValue& dict) {

@@ -25,8 +25,6 @@
 #include "ui/views/painter.h"
 
 namespace ash {
-namespace internal {
-
 namespace {
 
 const int kLogoutButtonHorizontalExtraPadding = 7;
@@ -88,7 +86,7 @@ LogoutButton::LogoutButton(views::ButtonListener* listener)
   SetBorder(border.PassAs<views::Border>());
   set_animate_on_state_change(false);
 
-  set_min_size(gfx::Size(0, GetShelfItemHeight()));
+  set_min_size(gfx::Size(0, kShelfItemHeight));
 }
 
 LogoutButton::~LogoutButton() {
@@ -164,5 +162,4 @@ void LogoutButtonTray::UpdateVisibility() {
              login_status_ != user::LOGGED_IN_LOCKED);
 }
 
-}  // namespace internal
 }  // namespace ash

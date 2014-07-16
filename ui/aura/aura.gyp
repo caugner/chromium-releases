@@ -36,8 +36,6 @@
         'client/cursor_client.h',
         'client/cursor_client_observer.h',
         'client/cursor_client_observer.cc',
-        'client/default_activation_client.cc',
-        'client/default_activation_client.h',
         'client/default_capture_client.cc',
         'client/default_capture_client.h',
         'client/event_client.cc',
@@ -54,8 +52,6 @@
         'client/window_stacking_client.h',
         'client/window_tree_client.cc',
         'client/window_tree_client.h',
-        'device_list_updater_aurax11.cc',
-        'device_list_updater_aurax11.h',
         'env.cc',
         'env.h',
         'env_observer.h',
@@ -65,9 +61,8 @@
         'input_state_lookup_win.h',
         'layout_manager.cc',
         'layout_manager.h',
-        'remote_window_tree_host_win.cc',
+        'remote_window_tree_host_win.cc',	
         'remote_window_tree_host_win.h',
-        'root_window_transformer.h',
         'scoped_window_targeter.cc',
         'scoped_window_targeter.h',
         'window.cc',
@@ -119,7 +114,6 @@
         ['use_x11==1', {
           'dependencies': [
             '../../build/linux/system.gyp:x11',
-            '../../build/linux/system.gyp:xfixes',
             '../../build/linux/system.gyp:xrandr',
             '../../build/linux/system.gyp:xi',
           ],
@@ -147,13 +141,13 @@
         '../../skia/skia.gyp:skia',
         '../../testing/gtest.gyp:gtest',
         '../base/ui_base.gyp:ui_base',
+        '../base/ui_base.gyp:ui_base_test_support',
         '../compositor/compositor.gyp:compositor_test_support',
         '../events/events.gyp:events',
         '../events/events.gyp:events_base',
         '../events/events.gyp:events_test_support',
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
-        '../ui_unittests.gyp:ui_test_support',
         'aura',
       ],
       'include_dirs': [
@@ -164,6 +158,8 @@
         'test/aura_test_base.h',
         'test/aura_test_helper.cc',
         'test/aura_test_helper.h',
+        'test/aura_test_utils.cc',
+        'test/aura_test_utils.h',
         'test/env_test_helper.h',
         'test/event_generator.cc',
         'test/event_generator.h',
@@ -212,6 +208,13 @@
       'sources': [
         'demo/demo_main.cc',
       ],
+      'conditions': [
+        ['use_x11==1', {
+          'dependencies': [
+            '../gfx/gfx.gyp:gfx_x11',
+          ],
+        }],
+      ]
     },
     {
       'target_name': 'aura_bench',
@@ -238,6 +241,13 @@
       'sources': [
         'bench/bench_main.cc',
       ],
+      'conditions': [
+        ['use_x11==1', {
+          'dependencies': [
+            '../gfx/gfx.gyp:gfx_x11',
+          ],
+        }],
+      ]
     },
     {
       'target_name': 'aura_unittests',
@@ -247,14 +257,15 @@
         '../../skia/skia.gyp:skia',
         '../../testing/gtest.gyp:gtest',
         '../base/ui_base.gyp:ui_base',
+        '../base/ui_base.gyp:ui_base_test_support',
         '../compositor/compositor.gyp:compositor',
         '../compositor/compositor.gyp:compositor_test_support',
         '../events/events.gyp:events',
         '../events/events.gyp:events_base',
+        '../events/events.gyp:gesture_detection',
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
         '../gl/gl.gyp:gl',
-        '../ui_unittests.gyp:ui_test_support',
         'aura_test_support',
         'aura',
       ],
@@ -263,7 +274,6 @@
       ],
       'sources': [
         'gestures/gesture_recognizer_unittest.cc',
-        'window_tree_host_x11_unittest.cc',
         'window_event_dispatcher_unittest.cc',
         'test/run_all_unittests.cc',
         'window_targeter_unittest.cc',
@@ -276,8 +286,7 @@
             '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
           ],
         }],
-        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-        ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+        ['OS=="linux" and use_allocator!="none"', {
           'dependencies': [
            # See http://crbug.com/162998#c4 for why this is needed.
             '../../base/allocator/allocator.gyp:allocator',

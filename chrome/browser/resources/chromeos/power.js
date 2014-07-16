@@ -25,10 +25,10 @@
  */
 function plotLineGraph(
     plotCanvas, legendCanvas, tData, plots, yMin, yMax, yPrecision) {
-  var textFont = '12px Arial';
-  var textHeight = 12;
-  var padding = 5;  // Pixels
-  var errorOffsetPixels = 15;
+  var textFont = 12 * devicePixelRatio + 'px Arial';
+  var textHeight = 12 * devicePixelRatio;
+  var padding = 5 * devicePixelRatio;  // Pixels
+  var errorOffsetPixels = 15 * devicePixelRatio;
   var gridColor = '#ccc';
   var plotCtx = plotCanvas.getContext('2d');
   var size = tData.length;
@@ -69,7 +69,11 @@ function plotLineGraph(
     // For now, all text is drawn to the left of vertical lines, or centered.
     // Add a 2 pixel padding so that there is some spacing between the text
     // and the vertical line.
-    return Math.round(ctx.measureText(text).width) + 2;
+    return Math.round(ctx.measureText(text).width) + 2 * devicePixelRatio;
+  }
+
+  function getLegend(text) {
+    return ' ' + text + '    ';
   }
 
   function drawHighlightText(ctx, text, x, y, color) {
@@ -87,6 +91,7 @@ function plotLineGraph(
     ctx.moveTo(x1, y1);
     ctx.lineTo(x2, y2);
     ctx.strokeStyle = color;
+    ctx.lineWidth = 1 * devicePixelRatio;
     ctx.stroke();
     ctx.restore();
   }
@@ -95,10 +100,13 @@ function plotLineGraph(
   // rectangle with an offset origin and greater dimensions. Hence, use this
   // function to draw a rect at the desired location with desired dimensions.
   function drawRect(ctx, x, y, width, height, color) {
-    drawLine(ctx, x, y, x + width - 1, y, color);
-    drawLine(ctx, x, y, x, y + height - 1, color);
-    drawLine(ctx, x, y + height - 1, x + width - 1, y + height - 1, color);
-    drawLine(ctx, x + width - 1, y, x + width - 1, y + height - 1, color);
+    var offset = 1 * devicePixelRatio;
+    drawLine(ctx, x, y, x + width - offset, y, color);
+    drawLine(ctx, x, y, x, y + height - offset, color);
+    drawLine(ctx, x, y + height - offset, x + width - offset,
+        y + height - offset, color);
+    drawLine(ctx, x + width - offset, y, x + width - offset,
+        y + height - offset, color);
   }
 
   function drawLegend() {
@@ -115,8 +123,9 @@ function plotLineGraph(
       return;
     }
 
-    var padding = 2;
-    var legendSquareSide = 12;
+
+    var padding = 2 * devicePixelRatio;
+    var legendSquareSide = 12 * devicePixelRatio;
     var legendCtx = legendCanvas.getContext('2d');
     var xLoc = padding;
     var yLoc = padding;
@@ -125,12 +134,12 @@ function plotLineGraph(
       if (plots[i].name == null) {
         continue;
       }
-      var legendText = '  -  ' + plots[i].name;
+      var legendText = getLegend(plots[i].name);
       xLoc += legendSquareSide + getTextWidth(legendCtx, legendText) +
               2 * padding;
       if (i < plots.length - 1) {
         var xLocNext = xLoc +
-                       getTextWidth(legendCtx, '  -  ' + plots[i + 1].name) +
+                       getTextWidth(legendCtx, getLegend(plots[i + 1].name)) +
                        legendSquareSide;
         if (xLocNext >= legendCanvas.width) {
           xLoc = padding;
@@ -140,6 +149,8 @@ function plotLineGraph(
     }
 
     legendCanvas.height = yLoc + textHeight + padding;
+    legendCanvas.style.height =
+        legendCanvas.height / devicePixelRatio + 'px';
 
     xLoc = padding;
     yLoc = padding;
@@ -149,13 +160,13 @@ function plotLineGraph(
       legendCtx.fillRect(xLoc, yLoc, legendSquareSide, legendSquareSide);
       xLoc += legendSquareSide;
 
-      var legendText = '  -  ' + plots[i].name;
+      var legendText = getLegend(plots[i].name);
       drawText(legendCtx, legendText, xLoc, yLoc + textHeight - 1);
       xLoc += getTextWidth(legendCtx, legendText) + 2 * padding;
 
       if (i < plots.length - 1) {
         var xLocNext = xLoc +
-                       getTextWidth(legendCtx, '  -  ' + plots[i + 1].name) +
+                       getTextWidth(legendCtx, getLegend(plots[i + 1].name)) +
                        legendSquareSide;
         if (xLocNext >= legendCanvas.width) {
           xLoc = padding;
@@ -187,6 +198,7 @@ function plotLineGraph(
     width = size;
   }
   var height = plotCanvas.height - yOrigin - textHeight - padding;
+  var linePlotEndMarkerWidth = 3;
 
   function drawPlots() {
     // Start fresh.
@@ -232,6 +244,7 @@ function plotLineGraph(
       var plot = plots[count];
       var yData = plot.data;
       plotCtx.strokeStyle = plot.color;
+      plotCtx.lineWidth = 2;
       plotCtx.beginPath();
       var beginPath = true;
       for (var i = 0; i < size; i++) {
@@ -251,7 +264,10 @@ function plotLineGraph(
           // A simple move to does not print anything. Hence, draw a little
           // square here to mark a beginning.
           plotCtx.fillStyle = '#000';
-          plotCtx.fillRect(xPos - 1, yPos - 1, 2, 2);
+          plotCtx.fillRect(xPos - linePlotEndMarkerWidth,
+                           yPos - linePlotEndMarkerWidth,
+                           linePlotEndMarkerWidth * devicePixelRatio,
+                           linePlotEndMarkerWidth * devicePixelRatio);
           beginPath = false;
         } else {
           plotCtx.lineTo(xPos, yPos);
@@ -259,7 +275,10 @@ function plotLineGraph(
             // Draw a little square to mark an end to go with the start
             // markers from above.
             plotCtx.fillStyle = '#000';
-            plotCtx.fillRect(xPos - 1, yPos - 1, 2, 2);
+            plotCtx.fillRect(xPos - linePlotEndMarkerWidth,
+                             yPos - linePlotEndMarkerWidth,
+                             linePlotEndMarkerWidth * devicePixelRatio,
+                             linePlotEndMarkerWidth * devicePixelRatio);
           }
         }
       }
@@ -341,8 +360,8 @@ function plotLineGraph(
     drawPlots();
 
     var boundingRect = plotCanvas.getBoundingClientRect();
-    var x = Math.round(event.clientX - boundingRect.left);
-    var y = Math.round(event.clientY - boundingRect.top);
+    var x = Math.round((event.clientX - boundingRect.left) * devicePixelRatio);
+    var y = Math.round((event.clientY - boundingRect.top) * devicePixelRatio);
     if (x < xOrigin || x >= xOrigin + width ||
         y < yOrigin || y >= yOrigin + height) {
       return;
@@ -400,18 +419,18 @@ function addCanvases(headerArray, plotsDiv) {
     plotsDiv.appendChild(header);
 
     var legendCanvas = document.createElement('canvas');
-    legendCanvas.width = width;
-    legendCanvas.height = 5;
+    legendCanvas.width = width * devicePixelRatio;
+    legendCanvas.style.width = width + 'px';
     plotsDiv.appendChild(legendCanvas);
 
     var plotCanvasDiv = document.createElement('div');
     plotCanvasDiv.style.overflow = 'auto';
-    plotCanvasDiv.style.maxWidth = String(width) + 'px';
     plotsDiv.appendChild(plotCanvasDiv);
 
     plotCanvas = document.createElement('canvas');
-    plotCanvas.width = width;
-    plotCanvas.height = 200;
+    plotCanvas.width = width * devicePixelRatio;
+    plotCanvas.height = 200 * devicePixelRatio;
+    plotCanvas.style.height = '200px';
     plotCanvasDiv.appendChild(plotCanvas);
 
     canvases[headerArray[i]] = {plot: plotCanvas, legend: legendCanvas};
@@ -520,7 +539,7 @@ function showBatteryChargeData(powerSupplyArray, systemResumedArray) {
   var chargePlot = [
     {
       name: loadTimeData.getString('batteryChargePercentageHeader'),
-      color: '#0000FF',
+      color: 'Blue',
       data: []
     }
   ];
@@ -529,7 +548,17 @@ function showBatteryChargeData(powerSupplyArray, systemResumedArray) {
   var dischargeRatePlot = [
     {
       name: loadTimeData.getString('dischargeRateLegendText'),
-      color: '#FF0000',
+      color: 'Red',
+      data: []
+    },
+    {
+      name: loadTimeData.getString('movingAverageLegendText'),
+      color: 'Green',
+      data: []
+    },
+    {
+      name: loadTimeData.getString('binnedAverageLegendText'),
+      color: 'Blue',
       data: []
     }
   ];
@@ -547,12 +576,34 @@ function showBatteryChargeData(powerSupplyArray, systemResumedArray) {
                       systemResumedArray);
 
     var dischargeRate = powerSupplyArray[i].batteryDischargeRate;
+    var inputSampleCount = $('sample-count-input').value;
+
+    var movingAverage = 0;
+    var k = 0;
+    for (k = 0; k < inputSampleCount && i - k >= 0; k++) {
+      movingAverage += powerSupplyArray[i - k].batteryDischargeRate;
+    }
+    // |k| will be atleast 1 because the 'min' value of the input field is 1.
+    movingAverage /= k;
+
+    var binnedAverage = 0;
+    for (k = 0; k < inputSampleCount; k++) {
+      var currentSampleIndex = i - i % inputSampleCount + k;
+      if (currentSampleIndex >= powerSupplyArray.length) {
+        break;
+      }
+
+      binnedAverage +=
+          powerSupplyArray[currentSampleIndex].batteryDischargeRate;
+    }
+    binnedAverage /= k;
+
     minDischargeRate = Math.min(dischargeRate, minDischargeRate);
     maxDischargeRate = Math.max(dischargeRate, maxDischargeRate);
     addTimeDataSample(dischargeRatePlot,
                       dischargeRateTimeData,
                       dischargeRateAbsTime,
-                      [dischargeRate],
+                      [dischargeRate, movingAverage, binnedAverage],
                       powerSupplyArray[i].time,
                       powerSupplyArray[j].time,
                       systemResumedArray);
@@ -800,6 +851,7 @@ document.addEventListener('DOMContentLoaded', function() {
       'battery-charge-show-button',
       requestBatteryChargeData);
   $('battery-charge-reload-button').onclick = requestBatteryChargeData;
+  $('sample-count-input').onclick = requestBatteryChargeData;
 
   $('cpu-idle-section').hidden = true;
   $('cpu-idle-show-button').onclick = showHideCallback(

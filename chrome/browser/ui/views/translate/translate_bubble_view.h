@@ -40,7 +40,7 @@ class TranslateBubbleView : public views::BubbleDelegateView,
   // Shows the Translate bubble.
   static void ShowBubble(views::View* anchor_view,
                          content::WebContents* web_contents,
-                         TranslateTabHelper::TranslateStep step,
+                         translate::TranslateStep step,
                          TranslateErrors::Type error_type);
 
   // If true, the Translate bubble is being shown.
@@ -70,8 +70,7 @@ class TranslateBubbleView : public views::BubbleDelegateView,
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
   // content::WebContentsObserver method.
-  virtual void WebContentsDestroyed(content::WebContents* web_contents)
-      OVERRIDE;
+  virtual void WebContentsDestroyed() OVERRIDE;
 
   // Returns the current view state.
   TranslateBubbleModel::ViewState GetViewState() const;

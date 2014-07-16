@@ -6,7 +6,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "grit/generated_resources.h"
 #include "jni/TranslateInfoBarDelegate_jni.h"
@@ -16,9 +16,9 @@
 // TranslateInfoBarDelegate ---------------------------------------------------
 
 // static
-scoped_ptr<InfoBar> TranslateInfoBarDelegate::CreateInfoBar(
+scoped_ptr<infobars::InfoBar> TranslateInfoBarDelegate::CreateInfoBar(
     scoped_ptr<TranslateInfoBarDelegate> delegate) {
-  return scoped_ptr<InfoBar>(new TranslateInfoBar(delegate.Pass()));
+  return scoped_ptr<infobars::InfoBar>(new TranslateInfoBar(delegate.Pass()));
 }
 
 
@@ -26,7 +26,7 @@ scoped_ptr<InfoBar> TranslateInfoBarDelegate::CreateInfoBar(
 
 TranslateInfoBar::TranslateInfoBar(
     scoped_ptr<TranslateInfoBarDelegate> delegate)
-    : InfoBarAndroid(delegate.PassAs<InfoBarDelegate>()),
+    : InfoBarAndroid(delegate.PassAs<infobars::InfoBarDelegate>()),
       java_translate_delegate_() {
 }
 
@@ -74,7 +74,8 @@ void TranslateInfoBar::ProcessButton(int action,
 
 void TranslateInfoBar::PassJavaInfoBar(InfoBarAndroid* source) {
   TranslateInfoBarDelegate* delegate = GetDelegate();
-  DCHECK_NE(TranslateTabHelper::BEFORE_TRANSLATE, delegate->translate_step());
+  DCHECK_NE(translate::TRANSLATE_STEP_BEFORE_TRANSLATE,
+            delegate->translate_step());
 
   // Ask the former bar to transfer ownership to us.
   DCHECK(source != NULL);
@@ -103,9 +104,8 @@ void TranslateInfoBar::ApplyTranslateOptions(JNIEnv* env,
     delegate->ToggleSiteBlacklist();
 }
 
-void TranslateInfoBar::TransferOwnership(
-    TranslateInfoBar* destination,
-    TranslateTabHelper::TranslateStep new_type) {
+void TranslateInfoBar::TransferOwnership(TranslateInfoBar* destination,
+                                         translate::TranslateStep new_type) {
   int new_target_language = destination->GetDelegate()->target_language_index();
   JNIEnv* env = base::android::AttachCurrentThread();
   if (Java_TranslateInfoBarDelegate_changeTranslateInfoBarTypeAndPointer(
@@ -123,7 +123,8 @@ void TranslateInfoBar::SetJavaDelegate(jobject delegate) {
 
 bool TranslateInfoBar::ShouldDisplayNeverTranslateInfoBarOnCancel() {
   TranslateInfoBarDelegate* delegate = GetDelegate();
-  return (delegate->translate_step() == TranslateTabHelper::BEFORE_TRANSLATE) &&
+  return (delegate->translate_step() ==
+          translate::TRANSLATE_STEP_BEFORE_TRANSLATE) &&
          delegate->ShouldShowNeverTranslateShortcut();
 }
 

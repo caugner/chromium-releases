@@ -26,7 +26,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/view_type_utils.h"
 #include "net/base/net_errors.h"
 
@@ -647,10 +646,10 @@ void WebNavigationTabObserver::FrameDetached(
   navigation_state_.FrameDetached(frame_id);
 }
 
-void WebNavigationTabObserver::WebContentsDestroyed(content::WebContents* tab) {
-  g_tab_observer.Get().erase(tab);
+void WebNavigationTabObserver::WebContentsDestroyed() {
+  g_tab_observer.Get().erase(web_contents());
   registrar_.RemoveAll();
-  SendErrorEvents(tab, NULL, FrameNavigationState::FrameID());
+  SendErrorEvents(web_contents(), NULL, FrameNavigationState::FrameID());
 }
 
 void WebNavigationTabObserver::SendErrorEvents(
@@ -685,13 +684,13 @@ bool WebNavigationTabObserver::IsReferenceFragmentNavigation(
   if (existing_url == url)
     return false;
 
-  url_canon::Replacements<char> replacements;
+  url::Replacements<char> replacements;
   replacements.ClearRef();
   return existing_url.ReplaceComponents(replacements) ==
       url.ReplaceComponents(replacements);
 }
 
-bool WebNavigationGetFrameFunction::RunImpl() {
+bool WebNavigationGetFrameFunction::RunSync() {
   scoped_ptr<GetFrame::Params> params(GetFrame::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   int tab_id = params->details.tab_id;
@@ -748,7 +747,7 @@ bool WebNavigationGetFrameFunction::RunImpl() {
   return true;
 }
 
-bool WebNavigationGetAllFramesFunction::RunImpl() {
+bool WebNavigationGetAllFramesFunction::RunSync() {
   scoped_ptr<GetAllFrames::Params> params(GetAllFrames::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   int tab_id = params->details.tab_id;
@@ -801,8 +800,7 @@ bool WebNavigationGetAllFramesFunction::RunImpl() {
 
 WebNavigationAPI::WebNavigationAPI(content::BrowserContext* context)
     : browser_context_(context) {
-  EventRouter* event_router =
-      ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* event_router = EventRouter::Get(browser_context_);
   event_router->RegisterObserver(this,
                                  web_navigation::OnBeforeNavigate::kEventName);
   event_router->RegisterObserver(this, web_navigation::OnCommitted::kEventName);
@@ -825,8 +823,7 @@ WebNavigationAPI::~WebNavigationAPI() {
 }
 
 void WebNavigationAPI::Shutdown() {
-  ExtensionSystem::Get(browser_context_)->event_router()->UnregisterObserver(
-      this);
+  EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<WebNavigationAPI> >
@@ -841,8 +838,7 @@ WebNavigationAPI::GetFactoryInstance() {
 void WebNavigationAPI::OnListenerAdded(const EventListenerInfo& details) {
   web_navigation_event_router_.reset(new WebNavigationEventRouter(
       Profile::FromBrowserContext(browser_context_)));
-  ExtensionSystem::Get(browser_context_)->event_router()->UnregisterObserver(
-      this);
+  EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
 #endif  // OS_ANDROID

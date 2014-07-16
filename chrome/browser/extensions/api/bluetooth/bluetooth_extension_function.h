@@ -16,13 +16,12 @@ class BluetoothAdapter;
 }  // namespace device
 
 namespace extensions {
-
 namespace api {
 
 // Base class for bluetooth extension functions. This class initializes
-// bluetooth adapter and calls DoWork() implemented by individual bluetooth
-// extension functions.
-class BluetoothExtensionFunction : public UIThreadExtensionFunction {
+// bluetooth adapter and calls (on the UI thread) DoWork() implemented by
+// individual bluetooth extension functions.
+class BluetoothExtensionFunction : public AsyncExtensionFunction {
  public:
   BluetoothExtensionFunction();
 
@@ -30,20 +29,19 @@ class BluetoothExtensionFunction : public UIThreadExtensionFunction {
   virtual ~BluetoothExtensionFunction();
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void RunOnAdapterReady(scoped_refptr<device::BluetoothAdapter> adapter);
 
   // Implemented by individual bluetooth extension functions, called
-  // automatically once |adapter| has been initialized.
+  // automatically on the UI thread once |adapter| has been initialized.
   virtual bool DoWork(scoped_refptr<device::BluetoothAdapter> adapter) = 0;
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothExtensionFunction);
 };
 
 }  // namespace api
-
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_BLUETOOTH_BLUETOOTH_EXTENSION_FUNCTION_H_

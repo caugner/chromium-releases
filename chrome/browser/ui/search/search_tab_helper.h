@@ -28,8 +28,10 @@ struct LoadCommittedDetails;
 class GURL;
 class InstantPageTest;
 class InstantService;
+class OmniboxView;
 class Profile;
 class SearchIPCRouterTest;
+class SearchTabHelperDelegate;
 
 // Per-tab search "helper".  Acts as the owner and controller of the tab's
 // search UI model.
@@ -92,6 +94,8 @@ class SearchTabHelper : public content::WebContentsObserver,
   // Returns true if the underlying page is a search results page.
   bool IsSearchResultsPage();
 
+  void set_delegate(SearchTabHelperDelegate* delegate) { delegate_ = delegate; }
+
  private:
   friend class content::WebContentsUserData<SearchTabHelper>;
   friend class InstantPageTest;
@@ -111,6 +115,8 @@ class SearchTabHelper : public content::WebContentsObserver,
                            OnChromeIdentityCheckSignedOutMatch);
   FRIEND_TEST_ALL_PREFIXES(SearchTabHelperTest,
                            OnChromeIdentityCheckSignedOutMismatch);
+  FRIEND_TEST_ALL_PREFIXES(SearchTabHelperTest,
+                           OnChromeIdentityCheckMatchNotSyncing);
   FRIEND_TEST_ALL_PREFIXES(SearchTabHelperWindowTest,
                            OnProvisionalLoadFailRedirectNTPToLocal);
   FRIEND_TEST_ALL_PREFIXES(SearchTabHelperWindowTest,
@@ -211,6 +217,9 @@ class SearchTabHelper : public content::WebContentsObserver,
   // active tab is in mode SEARCH_SUGGESTIONS.
   bool IsInputInProgress() const;
 
+  // Returns the OmniboxView for |web_contents_| or NULL if not available.
+  OmniboxView* GetOmniboxView() const;
+
   const bool is_search_enabled_;
 
   // Model object for UI that cares about search state.
@@ -221,6 +230,11 @@ class SearchTabHelper : public content::WebContentsObserver,
   SearchIPCRouter ipc_router_;
 
   InstantService* instant_service_;
+
+  // Delegate for notifying our owner about the SearchTabHelper state. Not owned
+  // by us.
+  // NULL on iOS and Android because they don't use the Instant framework.
+  SearchTabHelperDelegate* delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchTabHelper);
 };

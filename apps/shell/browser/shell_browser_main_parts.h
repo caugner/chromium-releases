@@ -33,10 +33,13 @@ class NetLog;
 
 namespace apps {
 
-class ShellAppsClient;
 class ShellBrowserContext;
 class ShellDesktopController;
 class ShellExtensionsClient;
+
+#if defined(OS_CHROMEOS)
+class ShellNetworkController;
+#endif
 
 // Handles initialization of AppShell.
 class ShellBrowserMainParts : public content::BrowserMainParts,
@@ -62,6 +65,7 @@ class ShellBrowserMainParts : public content::BrowserMainParts,
   virtual void PreMainMessageLoopRun() OVERRIDE;
   virtual bool MainMessageLoopRun(int* result_code) OVERRIDE;
   virtual void PostMainMessageLoopRun() OVERRIDE;
+  virtual void PostDestroyThreads() OVERRIDE;
 
   // aura::WindowTreeHostObserver overrides:
   virtual void OnHostCloseRequested(const aura::WindowTreeHost* host) OVERRIDE;
@@ -70,12 +74,14 @@ class ShellBrowserMainParts : public content::BrowserMainParts,
   // Creates and initializes the ExtensionSystem.
   void CreateExtensionSystem();
 
+#if defined(OS_CHROMEOS)
+  scoped_ptr<ShellNetworkController> network_controller_;
+#endif
   scoped_ptr<ShellDesktopController> desktop_controller_;
   scoped_ptr<ShellBrowserContext> browser_context_;
   scoped_ptr<ShellExtensionsClient> extensions_client_;
   scoped_ptr<extensions::ShellExtensionsBrowserClient>
       extensions_browser_client_;
-  scoped_ptr<ShellAppsClient> apps_client_;
   scoped_ptr<net::NetLog> net_log_;
 
   scoped_ptr<content::ShellDevToolsDelegate> devtools_delegate_;
@@ -85,6 +91,10 @@ class ShellBrowserMainParts : public content::BrowserMainParts,
 
   // For running app browsertests.
   const content::MainFunctionParams parameters_;
+
+  // If true, indicates the main message loop should be run
+  // in MainMessageLoopRun. If false, it has already been run.
+  bool run_message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellBrowserMainParts);
 };

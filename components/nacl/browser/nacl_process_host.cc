@@ -27,6 +27,7 @@
 #include "base/win/windows_version.h"
 #include "build/build_config.h"
 #include "components/nacl/browser/nacl_browser.h"
+#include "components/nacl/browser/nacl_browser_delegate.h"
 #include "components/nacl/browser/nacl_host_message_filter.h"
 #include "components/nacl/common/nacl_cmd_line.h"
 #include "components/nacl/common/nacl_host_messages.h"
@@ -429,6 +430,29 @@ void NaClProcessHost::Launch(
     return;
   }
 
+  if (uses_nonsfi_mode_) {
+    bool nonsfi_mode_forced_by_command_line = false;
+    bool nonsfi_mode_allowed = false;
+#if defined(OS_LINUX)
+    nonsfi_mode_forced_by_command_line =
+        cmd->HasSwitch(switches::kEnableNaClNonSfiMode);
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
+    nonsfi_mode_allowed = NaClBrowser::GetDelegate()->IsNonSfiModeAllowed(
+        nacl_host_message_filter->profile_directory(), manifest_url_);
+#endif
+#endif
+    bool nonsfi_mode_enabled =
+        nonsfi_mode_forced_by_command_line || nonsfi_mode_allowed;
+
+    if (!nonsfi_mode_enabled) {
+      SendErrorToRenderer(
+          "NaCl non-SFI mode is not available for this platform"
+          " and NaCl module.");
+      delete this;
+      return;
+    }
+  }
+
   // Rather than creating a socket pair in the renderer, and passing
   // one side through the browser to sel_ldr, socket pairs are created
   // in the browser and then passed to the renderer and sel_ldr.
@@ -478,7 +502,7 @@ void NaClProcessHost::OnDebugExceptionHandlerLaunchedByBroker(bool success) {
 }
 #endif
 
-// Needed to handle sync messages in OnMessageRecieved.
+// Needed to handle sync messages in OnMessageReceived.
 bool NaClProcessHost::Send(IPC::Message* msg) {
   return process_->Send(msg);
 }
@@ -592,7 +616,9 @@ bool NaClProcessHost::LaunchSelLdr() {
   CopyNaClCommandLineArguments(cmd_line.get());
 
   cmd_line->AppendSwitchASCII(switches::kProcessType,
-                              switches::kNaClLoaderProcess);
+                              (uses_nonsfi_mode_ ?
+                               switches::kNaClLoaderNonSfiProcess :
+                               switches::kNaClLoaderProcess));
   cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
   if (NaClBrowser::GetDelegate()->DialogsAreSuppressed())
     cmd_line->AppendSwitch(switches::kNoErrorDialogs);
@@ -616,21 +642,33 @@ bool NaClProcessHost::LaunchSelLdr() {
 
 bool NaClProcessHost::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(NaClProcessHost, msg)
-    IPC_MESSAGE_HANDLER(NaClProcessMsg_QueryKnownToValidate,
-                        OnQueryKnownToValidate)
-    IPC_MESSAGE_HANDLER(NaClProcessMsg_SetKnownToValidate,
-                        OnSetKnownToValidate)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(NaClProcessMsg_ResolveFileToken,
-                                    OnResolveFileToken)
+  if (uses_nonsfi_mode_) {
+    // IPC messages relating to NaCl's validation cache must not be exposed
+    // in Non-SFI Mode, otherwise a Non-SFI nexe could use
+    // SetKnownToValidate to create a hole in the SFI sandbox.
+    IPC_BEGIN_MESSAGE_MAP(NaClProcessHost, msg)
+      IPC_MESSAGE_HANDLER(NaClProcessHostMsg_PpapiChannelsCreated,
+                          OnPpapiChannelsCreated)
+      IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_END_MESSAGE_MAP()
+  } else {
+    IPC_BEGIN_MESSAGE_MAP(NaClProcessHost, msg)
+      IPC_MESSAGE_HANDLER(NaClProcessMsg_QueryKnownToValidate,
+                          OnQueryKnownToValidate)
+      IPC_MESSAGE_HANDLER(NaClProcessMsg_SetKnownToValidate,
+                          OnSetKnownToValidate)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(NaClProcessMsg_ResolveFileToken,
+                                      OnResolveFileToken)
 #if defined(OS_WIN)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(NaClProcessMsg_AttachDebugExceptionHandler,
-                                    OnAttachDebugExceptionHandler)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(
+          NaClProcessMsg_AttachDebugExceptionHandler,
+          OnAttachDebugExceptionHandler)
 #endif
-    IPC_MESSAGE_HANDLER(NaClProcessHostMsg_PpapiChannelsCreated,
-                        OnPpapiChannelsCreated)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
+      IPC_MESSAGE_HANDLER(NaClProcessHostMsg_PpapiChannelsCreated,
+                          OnPpapiChannelsCreated)
+      IPC_MESSAGE_UNHANDLED(handled = false)
+    IPC_END_MESSAGE_MAP()
+  }
   return handled;
 }
 
@@ -652,7 +690,8 @@ void NaClProcessHost::OnResourcesReady() {
 
 bool NaClProcessHost::ReplyToRenderer(
     const IPC::ChannelHandle& ppapi_channel_handle,
-    const IPC::ChannelHandle& trusted_channel_handle) {
+    const IPC::ChannelHandle& trusted_channel_handle,
+    const IPC::ChannelHandle& manifest_service_channel_handle) {
 #if defined(OS_WIN)
   // If we are on 64-bit Windows, the NaCl process's sandbox is
   // managed by a different process from the renderer's sandbox.  We
@@ -698,6 +737,7 @@ bool NaClProcessHost::ReplyToRenderer(
       NaClLaunchResult(imc_handle_for_renderer,
                        ppapi_channel_handle,
                        trusted_channel_handle,
+                       manifest_service_channel_handle,
                        base::GetProcId(data.handle),
                        data.id),
       std::string() /* error_message */);
@@ -767,17 +807,18 @@ bool NaClProcessHost::StartNaClExecution() {
   NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
 
   NaClStartParams params;
-  params.validation_cache_enabled = nacl_browser->ValidationCacheIsEnabled();
-  params.validation_cache_key = nacl_browser->GetValidationCacheKey();
-  params.version = NaClBrowser::GetDelegate()->GetVersionString();
-  params.enable_exception_handling = enable_exception_handling_;
-  params.enable_debug_stub = enable_debug_stub_ &&
-      NaClBrowser::GetDelegate()->URLMatchesDebugPatterns(manifest_url_);
   // Enable PPAPI proxy channel creation only for renderer processes.
   params.enable_ipc_proxy = enable_ppapi_proxy();
-  params.uses_irt = uses_irt_;
-  params.enable_dyncode_syscalls = enable_dyncode_syscalls_;
-  params.uses_nonsfi_mode = uses_nonsfi_mode_;
+  if (!uses_nonsfi_mode_) {
+    params.validation_cache_enabled = nacl_browser->ValidationCacheIsEnabled();
+    params.validation_cache_key = nacl_browser->GetValidationCacheKey();
+    params.version = NaClBrowser::GetDelegate()->GetVersionString();
+    params.enable_exception_handling = enable_exception_handling_;
+    params.enable_debug_stub = enable_debug_stub_ &&
+        NaClBrowser::GetDelegate()->URLMatchesDebugPatterns(manifest_url_);
+    params.uses_irt = uses_irt_;
+    params.enable_dyncode_syscalls = enable_dyncode_syscalls_;
+  }
 
   const ChildProcessData& data = process_->GetData();
   if (!ShareHandleToSelLdr(data.handle,
@@ -787,11 +828,13 @@ bool NaClProcessHost::StartNaClExecution() {
   }
 
   if (params.uses_irt) {
-    base::PlatformFile irt_file = nacl_browser->IrtFile();
-    CHECK_NE(irt_file, base::kInvalidPlatformFileValue);
+    const base::File& irt_file = nacl_browser->IrtFile();
+    CHECK(irt_file.IsValid());
     // Send over the IRT file handle.  We don't close our own copy!
-    if (!ShareHandleToSelLdr(data.handle, irt_file, false, &params.handles))
+    if (!ShareHandleToSelLdr(data.handle, irt_file.GetPlatformFile(), false,
+                             &params.handles)) {
       return false;
+    }
   }
 
 #if defined(OS_MACOSX)
@@ -827,19 +870,6 @@ bool NaClProcessHost::StartNaClExecution() {
   }
 #endif
 
-  if (params.uses_nonsfi_mode) {
-#if defined(OS_LINUX)
-    const bool kNonSFIModeSupported = true;
-#else
-    const bool kNonSFIModeSupported = false;
-#endif
-    if (!kNonSFIModeSupported ||
-        !CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableNaClNonSfiMode)) {
-      return false;
-    }
-  }
-
   process_->Send(new NaClProcessMsg_Start(params));
 
   internal_->socket_for_sel_ldr = NACL_INVALID_HANDLE;
@@ -851,9 +881,12 @@ bool NaClProcessHost::StartNaClExecution() {
 void NaClProcessHost::OnPpapiChannelsCreated(
     const IPC::ChannelHandle& browser_channel_handle,
     const IPC::ChannelHandle& ppapi_renderer_channel_handle,
-    const IPC::ChannelHandle& trusted_renderer_channel_handle) {
+    const IPC::ChannelHandle& trusted_renderer_channel_handle,
+    const IPC::ChannelHandle& manifest_service_channel_handle) {
   if (!enable_ppapi_proxy()) {
-    ReplyToRenderer(IPC::ChannelHandle(), trusted_renderer_channel_handle);
+    ReplyToRenderer(IPC::ChannelHandle(),
+                    trusted_renderer_channel_handle,
+                    manifest_service_channel_handle);
     return;
   }
 
@@ -907,7 +940,8 @@ void NaClProcessHost::OnPpapiChannelsCreated(
 
     // Let the renderer know that the IPC channels are established.
     ReplyToRenderer(ppapi_renderer_channel_handle,
-                    trusted_renderer_channel_handle);
+                    trusted_renderer_channel_handle,
+                    manifest_service_channel_handle);
   } else {
     // Attempt to open more than 1 browser channel is not supported.
     // Shut down the NaCl process.
@@ -933,11 +967,13 @@ bool NaClProcessHost::StartWithLaunchedProcess() {
 
 void NaClProcessHost::OnQueryKnownToValidate(const std::string& signature,
                                              bool* result) {
+  CHECK(!uses_nonsfi_mode_);
   NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
   *result = nacl_browser->QueryKnownToValidate(signature, off_the_record_);
 }
 
 void NaClProcessHost::OnSetKnownToValidate(const std::string& signature) {
+  CHECK(!uses_nonsfi_mode_);
   NaClBrowser::GetInstance()->SetKnownToValidate(
       signature, off_the_record_);
 }
@@ -989,6 +1025,7 @@ void NaClProcessHost::OnResolveFileToken(uint64 file_token_lo,
   //
   // TODO(ncbray): track behavior with UMA. If entries are getting evicted or
   // bogus keys are getting queried, this would be good to know.
+  CHECK(!uses_nonsfi_mode_);
   base::FilePath file_path;
   if (!NaClBrowser::GetInstance()->GetFilePath(
         file_token_lo, file_token_hi, &file_path)) {
@@ -1020,6 +1057,7 @@ void NaClProcessHost::OnResolveFileToken(uint64 file_token_lo,
 #if defined(OS_WIN)
 void NaClProcessHost::OnAttachDebugExceptionHandler(const std::string& info,
                                                     IPC::Message* reply_msg) {
+  CHECK(!uses_nonsfi_mode_);
   if (!AttachDebugExceptionHandler(info, reply_msg)) {
     // Send failure message.
     NaClProcessMsg_AttachDebugExceptionHandler::WriteReplyParams(reply_msg,

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
 
 class GURL;
@@ -22,6 +23,7 @@ class ManifestPermissionSet;
 class PermissionMessage;
 class PermissionMessageProvider;
 class PermissionsProvider;
+class SimpleFeature;
 class URLPatternSet;
 
 // Sets up global state for the extensions system. Should be Set() once in each
@@ -37,17 +39,14 @@ class ExtensionsClient {
   // in-process.
   virtual void Initialize() = 0;
 
-  // Returns a PermissionsProvider to initialize the permissions system.
-  virtual const PermissionsProvider& GetPermissionsProvider() const = 0;
-
   // Returns the global PermissionMessageProvider to use to provide permission
   // warning strings.
   virtual const PermissionMessageProvider& GetPermissionMessageProvider()
       const = 0;
 
-  // Gets a feature provider for a specific feature type.
-  virtual FeatureProvider* GetFeatureProviderByName(const std::string& name)
-      const = 0;
+  // Create a FeatureProvider for a specific feature type, e.g. "permission".
+  virtual scoped_ptr<FeatureProvider> CreateFeatureProvider(
+      const std::string& name) const = 0;
 
   // Takes the list of all hosts and filters out those with special
   // permission strings. Adds the regular hosts to |new_hosts|,
@@ -78,6 +77,10 @@ class ExtensionsClient {
 
   // Gets the API schema named |name|.
   virtual base::StringPiece GetAPISchema(const std::string& name) const = 0;
+
+  // Determines if certain fatal extensions errors should be surpressed
+  // (i.e., only logged) or allowed (i.e., logged before crashing).
+  virtual bool ShouldSuppressFatalErrors() const = 0;
 
   // Return the extensions client.
   static ExtensionsClient* Get();

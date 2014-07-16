@@ -2,11 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// See c/c/e/features/* to understand this file, in particular feature.h,
-// simple_feature.h, and base_feature_provider.h.
+// This features file defines extension APIs implemented under src/chrome.
+// See extensions/common/features/* to understand this file, in particular
+// feature.h, simple_feature.h, and base_feature_provider.h.
 //
 // Note that specifying "web_page", "blessed_web_page", or "all" as a context
 // type will require manually updating chrome/renderer/resources/dispatcher.cc.
+
+// To add a new whitelisted ID, SHA-1 it and force it to uppercase. In Bash:
+//
+// $ echo -n "aaaabbbbccccddddeeeeffffgggghhhh" | \
+// sha1sum | tr '[:lower:]' '[:upper:]'
+// 9A0417016F345C934A1A88F55CA17C05014EEEBA  -
+//
+// Google employees: please update http://go/chrome-api-whitelist to map
+// hashes back to ids.
 
 {
   "accessibilityFeatures": [{
@@ -18,6 +28,10 @@
     "dependencies": ["permission:accessibilityFeatures.read"],
     "contexts": ["blessed_extension"]
   }],
+  "accessibilityPrivate": {
+    "dependencies": ["permission:accessibilityPrivate"],
+    "contexts": ["blessed_extension"]
+  },
   "activityLogPrivate": {
     "dependencies": ["permission:activityLogPrivate"],
     "contexts": ["blessed_extension"]
@@ -31,6 +45,11 @@
     "contexts": ["blessed_extension"]
   },
   "app": {
+    "blacklist": [
+      "2FC374607C2DF285634B67C64A2E356C607091C3",  // Quickoffice
+      "3727DD3E564B6055387425027AD74C58784ACC15",  // Quickoffice internal
+      "12E618C3C6E97495AAECF2AC12DEB082353241C6"   // QO component extension
+    ],
     "channel": "stable",
     "extension_types": ["hosted_app", "extension", "legacy_packaged_app"],
     "contexts": [
@@ -44,12 +63,23 @@
       "http://*/*", "https://*/*", "chrome-extension://*/*", "file://*/*"
     ]
   },
-  "app.runtime": {
+  "app.runtime": [{
     "channel": "stable",
     "contexts": ["blessed_extension"],
     "extension_types": ["platform_app"],
     "noparent": true
-  },
+  }, {
+    "channel": "stable",
+    "component_extensions_auto_granted": false,
+    "contexts": ["blessed_extension"],
+    "extension_types": ["extension"],
+    "noparent": true,
+    "whitelist": [
+      "2FC374607C2DF285634B67C64A2E356C607091C3",  // Quickoffice
+      "3727DD3E564B6055387425027AD74C58784ACC15",  // Quickoffice internal
+      "12E618C3C6E97495AAECF2AC12DEB082353241C6"   // QO component extension
+    ]
+  }],
   "app.window": {
     "channel": "stable",
     "contexts": ["blessed_extension"],
@@ -92,11 +122,11 @@
   },
   "automationInternal": {
     "internal": true,
-    "dependencies": ["permission:automation"],
+    "dependencies": ["manifest:automation"],
     "contexts": ["blessed_extension"]
   },
   "automation": {
-    "dependencies": ["permission:automation"],
+    "dependencies": ["manifest:automation"],
     "contexts": ["blessed_extension"]
   },
   "autotestPrivate": {
@@ -104,6 +134,18 @@
     "contexts": ["blessed_extension"]
   },
   "bluetooth": {
+    "dependencies": ["manifest:bluetooth"],
+    "contexts": ["blessed_extension"]
+  },
+  "bluetoothLowEnergy": {
+    "dependencies": ["manifest:bluetooth"],
+    "contexts": ["blessed_extension"]
+  },
+  "bluetoothPrivate": {
+    "dependencies": ["permission:bluetoothPrivate"],
+    "contexts": ["blessed_extension"]
+  },
+  "bluetoothSocket": {
     "dependencies": ["manifest:bluetooth"],
     "contexts": ["blessed_extension"]
   },
@@ -127,6 +169,10 @@
     "dependencies": ["permission:brailleDisplayPrivate"],
     "contexts": ["blessed_extension"]
   },
+  "browser": {
+    "dependencies": ["permission:browser"],
+    "contexts": ["blessed_extension"]
+  },
   "browserAction": {
     "dependencies": ["manifest:browser_action"],
     "contexts": ["blessed_extension"]
@@ -142,12 +188,11 @@
     "channel": "stable",
     "dependencies": ["manifest:browser_action"],
     "whitelist": [
-      "enhhojjnijigcajfphajepfemndkmdlo",  // Dev
-      "pkedcjkdefgpdelpbcmbmeomcjbeemfm",  // Trusted Tester
-      "fmfcbgogabcbclcofgocippekhfcmgfj",  // Staging
-      "hfaagokkkhdbgiakmmlclaapfelnkoah",  // Canary
-      "F155646B5D1CA545F7E1E4E20D573DFDD44C2540",  // Trusted Tester (public)
-      "16CA7A47AAE4BE49B1E75A6B960C3875E945B264"   // Release
+      "63ED55E43214C211F82122ED56407FF1A807F2A3",  // Dev
+      "FA01E0B81978950F2BC5A50512FD769725F57510",  // Beta
+      "B11A93E7E5B541F8010245EBDE2C74647D6C14B9",  // Canary
+      "F155646B5D1CA545F7E1E4E20D573DFDD44C2540",  // Google Cast Beta
+      "16CA7A47AAE4BE49B1E75A6B960C3875E945B264"   // Google Cast Stable
     ],
     "contexts": ["blessed_extension"]
   }],
@@ -246,10 +291,6 @@
     "dependencies": ["permission:dial"],
     "contexts": ["blessed_extension"]
   },
-  "dns": {
-    "dependencies": ["permission:dns"],
-    "contexts": ["blessed_extension"]
-  },
   "downloads": {
     "dependencies": ["permission:downloads"],
     "contexts": ["blessed_extension"]
@@ -275,10 +316,6 @@
     "extension_types": ["platform_app", "extension"],
     "contexts": "all",
     "matches": ["<all_urls>"]
-  },
-  "experimental.accessibility": {
-    "dependencies": ["permission:experimental"],
-    "contexts": ["blessed_extension"]
   },
   "experimental.devtools.audits": {
     "dependencies": ["permission:experimental", "manifest:devtools_page"],
@@ -329,6 +366,13 @@
   "extension.sendRequest": {
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
+  // This is not a real API, only here for documentation purposes.
+  // See http://crbug.com/275944 for background.
+  "extensionsManifestTypes": {
+    "internal": true,
+    "channel": "stable",
+    "contexts": ["blessed_extension"]
+  },
   "feedbackPrivate": {
     "dependencies": ["permission:feedbackPrivate"],
     "contexts": ["blessed_extension"]
@@ -345,7 +389,6 @@
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
   "screenlockPrivate": {
-    "platforms": ["chromeos"],
     "dependencies": ["permission:screenlockPrivate"],
     "extension_types": ["platform_app"],
     "contexts": ["blessed_extension", "unblessed_extension"]
@@ -360,6 +403,11 @@
     "contexts": ["blessed_extension"]
   },
   "fileSystemProvider": {
+    "dependencies": ["permission:fileSystemProvider"],
+    "contexts": ["blessed_extension"]
+  },
+  "fileSystemProviderInternal": {
+    "internal": true,
     "dependencies": ["permission:fileSystemProvider"],
     "contexts": ["blessed_extension"]
   },
@@ -443,6 +491,10 @@
     "extension_types": ["extension", "legacy_packaged_app"],
     "contexts": ["blessed_extension"]
   },
+  "webcamPrivate": {
+    "dependencies": ["permission:webcamPrivate"],
+    "contexts": ["blessed_extension"]
+  },
   "management": {
     "dependencies": ["permission:management"],
     "contexts": ["blessed_extension"]
@@ -456,6 +508,11 @@
     "dependencies": [],
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"]
+  },
+  "management.createAppShortcut": {
+    "dependencies": ["permission:management"],
+    "channel": "dev",
+    "contexts": ["blessed_extension"]
   },
   // This is not a real API, only here for documentation purposes.
   // See http://crbug.com/275944 for background.
@@ -565,49 +622,6 @@
     "dependencies": ["permission:rtcPrivate"],
     "contexts": ["blessed_extension"]
   },
-  "runtime": {
-    "channel": "stable",
-    "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
-    "contexts": ["blessed_extension"]
-  },
-  "runtime.connect": {
-    "contexts": "all",
-    "matches": ["<all_urls>"]
-  },
-  "runtime.getManifest": {
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
-  },
-  "runtime.getURL": {
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
-  },
-  "runtime.id": {
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
-  },
-  "runtime.lastError": {
-    "contexts": "all",
-    "extension_types": "all",
-    "matches": ["<all_urls>"]
-  },
-  "runtime.onConnect": {
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
-  },
-  "runtime.onMessage": {
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
-  },
-  "runtime.reload": {
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
-  },
-  "runtime.requestUpdateCheck": {
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
-  },
-  "runtime.sendMessage": {
-    "contexts": "all",
-    "matches": ["<all_urls>"]
-  },
-  "runtime.setUninstallURL": {
-    "channel": "dev",
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
-  },
   "scriptBadge": {
     "dependencies": ["manifest:script_badge"],
     "contexts": ["blessed_extension"]
@@ -623,26 +637,6 @@
   "signedInDevices": {
     "dependencies": ["permission:signedInDevices"],
     "contexts": ["blessed_extension"]
-  },
-  "socket": {
-    "dependencies": ["permission:socket"],
-    "contexts": ["blessed_extension"]
-  },
-  "sockets.tcp": {
-    "dependencies": ["manifest:sockets"],
-    "contexts": ["blessed_extension"]
-  },
-  "sockets.tcpServer": {
-    "dependencies": ["manifest:sockets"],
-    "contexts": ["blessed_extension"]
-  },
-  "sockets.udp": {
-    "dependencies": ["manifest:sockets"],
-    "contexts": ["blessed_extension"]
-  },
-  "storage": {
-    "dependencies": ["permission:storage"],
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
   "streamsPrivate": {
     "dependencies": ["permission:streamsPrivate"],
@@ -697,12 +691,6 @@
     "dependencies": ["permission:terminalPrivate"],
     "contexts": ["blessed_extension"]
   },
-  "test": {
-    "internal": true,
-    "channel": "stable",
-    "extension_types": "all",
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
-  },
   "topSites": {
     "dependencies": ["permission:topSites"],
     "contexts": ["blessed_extension"]
@@ -713,20 +701,6 @@
   },
   "ttsEngine": {
     "dependencies": ["permission:ttsEngine"],
-    "contexts": ["blessed_extension"]
-  },
-  "types": {
-    "channel": "stable",
-    "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
-    "contexts": ["blessed_extension"]
-  },
-  "types.private": {
-    "channel": "dev",
-    "extension_types": ["extension"],
-    "location": "component"
-  },
-  "usb": {
-    "dependencies": ["permission:usb"],
     "contexts": ["blessed_extension"]
   },
   "virtualKeyboardPrivate": {
@@ -755,7 +729,7 @@
   "webRequestInternal": {
     "internal": true,
     "channel": "stable",
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
+    "contexts": ["blessed_extension", "unblessed_extension"]
   },
   "webrtcAudioPrivate": {
     "dependencies": ["permission:webrtcAudioPrivate"],

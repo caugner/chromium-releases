@@ -8,7 +8,7 @@
 #include "ash/autoclick/autoclick_controller.h"
 #include "ash/high_contrast/high_contrast_controller.h"
 #include "ash/metrics/user_metrics_recorder.h"
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/sticky_keys/sticky_keys_controller.h"
 #include "ash/system/tray/system_tray_notifier.h"
@@ -35,7 +35,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/api/experimental_accessibility.h"
+#include "chrome/common/extensions/api/accessibility_private.h"
 #include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/audio/chromeos_sounds.h"
@@ -371,8 +371,17 @@ bool AccessibilityManager::ShouldShowAccessibilityMenu() {
 }
 
 bool AccessibilityManager::ShouldEnableCursorCompositing() {
-  // TODO(hshi): re-enable this on trunk after fixing issues. See
-  // http://crbug.com/362693, http://crosbug.com/p/28034.
+#if defined(OS_CHROMEOS)
+  if (!profile_)
+    return false;
+  PrefService* pref_service = profile_->GetPrefs();
+  // Enable cursor compositing when one or more of the listed accessibility
+  // features are turned on.
+  if (pref_service->GetBoolean(prefs::kLargeCursorEnabled) ||
+      pref_service->GetBoolean(prefs::kHighContrastEnabled) ||
+      pref_service->GetBoolean(prefs::kScreenMagnifierEnabled))
+    return true;
+#endif
   return false;
 }
 
@@ -533,6 +542,9 @@ void AccessibilityManager::LoadChromeVoxToUserScreen() {
       if (web_ui_login_view)
         login_web_ui = web_ui_login_view->GetWebUI();
     }
+
+    // Lock screen uses the signin progile.
+    chrome_vox_loaded_on_lock_screen_ = true;
   }
 
   LoadChromeVoxExtension(profile_, login_web_ui ?
@@ -726,9 +738,16 @@ void AccessibilityManager::UpdateVirtualKeyboardFromPref() {
 
 #if defined(USE_ASH)
   keyboard::SetAccessibilityKeyboardEnabled(enabled);
-  if (enabled)
+  // Note that there are two versions of the on-screen keyboard. A full layout
+  // is provided for accessibility, which includes sticky modifier keys to
+  // enable typing of hotkeys. A compact version is used in touchview mode
+  // to provide a layout with larger keys to facilitate touch typing. In the
+  // event that the a11y keyboard is being disabled, an on-screen keyboard might
+  // still be enabled and a forced reset is required to pick up the layout
+  // change.
+  if (keyboard::IsKeyboardEnabled())
     ash::Shell::GetInstance()->CreateKeyboard();
-  else if (!keyboard::IsKeyboardEnabled())
+  else
     ash::Shell::GetInstance()->DeactivateKeyboard();
 #endif
 }
@@ -961,12 +980,7 @@ void AccessibilityManager::Observe(
           // this as well.
           LoadChromeVoxToUserScreen();
         } else {
-          // Lock screen destroys its resources; no need for us to explicitly
-          // unload ChromeVox.
-          chrome_vox_loaded_on_lock_screen_ = false;
-
-          // However, if spoken feedback was enabled, also enable it on the user
-          // screen.
+          // If spoken feedback was enabled, also enable it on the user screen.
           LoadChromeVoxToUserScreen();
         }
       }

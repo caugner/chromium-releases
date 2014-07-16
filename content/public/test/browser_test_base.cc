@@ -40,6 +40,9 @@
 
 #if defined(USE_AURA)
 #include "content/browser/compositor/image_transport_factory.h"
+#if defined(USE_X11)
+#include "ui/aura/window_tree_host_x11.h"
+#endif
 #endif
 
 namespace content {
@@ -125,6 +128,10 @@ BrowserTestBase::BrowserTestBase()
   base::mac::SetOverrideAmIBundled(true);
 #endif
 
+#if defined(USE_AURA) && defined(USE_X11)
+  aura::test::SetUseOverrideRedirectWindowByDefault(true);
+#endif
+
 #if defined(OS_POSIX)
   handle_sigterm_ = true;
 #endif
@@ -159,7 +166,6 @@ void BrowserTestBase::SetUp() {
 
   if (use_software_compositing_) {
     command_line->AppendSwitch(switches::kDisableGpu);
-    command_line->AppendSwitch(switches::kEnableSoftwareCompositing);
 #if defined(USE_AURA)
     command_line->AppendSwitch(switches::kUIDisableThreadedCompositing);
 #endif
@@ -211,15 +217,8 @@ void BrowserTestBase::SetUp() {
     use_osmesa = false;
 #endif
 
-  if (command_line->HasSwitch(switches::kUseGL)) {
-    NOTREACHED() <<
-        "kUseGL should not be used with tests. Try kUseGpuInTests instead.";
-  }
-
-  if (use_osmesa && !use_software_compositing_) {
-    command_line->AppendSwitchASCII(
-        switches::kUseGL, gfx::kGLImplementationOSMesaName);
-  }
+  if (use_osmesa && !use_software_compositing_)
+    command_line->AppendSwitch(switches::kOverrideUseGLWithOSMesaForTests);
 
   scoped_refptr<net::HostResolverProc> local_resolver =
       new LocalHostResolverProc();

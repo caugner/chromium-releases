@@ -11,14 +11,14 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/common/net/url_fixer_upper.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
 #include "components/user_prefs/user_prefs.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -208,7 +208,7 @@ void BookmarkEditorView::ExecuteCommand(int command_id, int event_flags) {
     if (!node)
       return;
     if (node->value != 0) {
-      const BookmarkNode* b_node = bb_model_->GetNodeByID(node->value);
+      const BookmarkNode* b_node = GetBookmarkNodeByID(bb_model_, node->value);
       if (!b_node->empty() &&
           !chrome::ConfirmDeleteBookmarkNode(b_node,
             GetWidget()->GetNativeWindow())) {
@@ -249,12 +249,16 @@ void BookmarkEditorView::ShowContextMenuForView(
 
   context_menu_runner_.reset(new views::MenuRunner(GetMenuModel()));
 
-  if (context_menu_runner_->RunMenuAt(source->GetWidget()->GetTopLevelWidget(),
-        NULL, gfx::Rect(point, gfx::Size()), views::MenuItemView::TOPRIGHT,
-        source_type,
-        views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
-        views::MenuRunner::MENU_DELETED)
+  if (context_menu_runner_->RunMenuAt(
+          source->GetWidget()->GetTopLevelWidget(),
+          NULL,
+          gfx::Rect(point, gfx::Size()),
+          views::MENU_ANCHOR_TOPRIGHT,
+          source_type,
+          views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
+      views::MenuRunner::MENU_DELETED) {
     return;
+  }
 }
 
 void BookmarkEditorView::Init() {
@@ -372,10 +376,12 @@ void BookmarkEditorView::BookmarkNodeAdded(BookmarkModel* model,
   Reset();
 }
 
-void BookmarkEditorView::BookmarkNodeRemoved(BookmarkModel* model,
-                                             const BookmarkNode* parent,
-                                             int index,
-                                             const BookmarkNode* node) {
+void BookmarkEditorView::BookmarkNodeRemoved(
+    BookmarkModel* model,
+    const BookmarkNode* parent,
+    int index,
+    const BookmarkNode* node,
+    const std::set<GURL>& removed_urls) {
   if ((details_.type == EditDetails::EXISTING_NODE &&
        details_.existing_node->HasAncestor(node)) ||
       (parent_ && parent_->HasAncestor(node))) {
@@ -386,12 +392,15 @@ void BookmarkEditorView::BookmarkNodeRemoved(BookmarkModel* model,
   }
 }
 
-void BookmarkEditorView::BookmarkAllNodesRemoved(BookmarkModel* model) {
+void BookmarkEditorView::BookmarkAllNodesRemoved(
+    BookmarkModel* model,
+    const std::set<GURL>& removed_urls) {
   Reset();
 }
 
 void BookmarkEditorView::BookmarkNodeChildrenReordered(
-    BookmarkModel* model, const BookmarkNode* node) {
+    BookmarkModel* model,
+    const BookmarkNode* node) {
   Reset();
 }
 
@@ -608,8 +617,9 @@ void BookmarkEditorView::UpdateExpandedNodes(
   if (!tree_view_->IsExpanded(editor_node))
     return;
 
-  if (editor_node->value != 0)  // The root is 0
-    expanded_nodes->insert(bb_model_->GetNodeByID(editor_node->value));
+  if (editor_node->value != 0)  // The root is 0.
+    expanded_nodes->insert(GetBookmarkNodeByID(bb_model_, editor_node->value));
+
   for (int i = 0; i < editor_node->child_count(); ++i)
     UpdateExpandedNodes(editor_node->GetChild(i), expanded_nodes);
 }

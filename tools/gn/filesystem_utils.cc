@@ -165,8 +165,7 @@ bool FilesystemStringsEqual(const base::FilePath::StringType& a,
 
 }  // namespace
 
-SourceFileType GetSourceFileType(const SourceFile& file,
-                                 Settings::TargetOS os) {
+SourceFileType GetSourceFileType(const SourceFile& file) {
   base::StringPiece extension = FindExtension(&file.value());
   if (extension == "cc" || extension == "cpp" || extension == "cxx")
     return SOURCE_CC;
@@ -174,29 +173,16 @@ SourceFileType GetSourceFileType(const SourceFile& file,
     return SOURCE_H;
   if (extension == "c")
     return SOURCE_C;
-
-  switch (os) {
-    case Settings::MAC:
-      if (extension == "m")
-        return SOURCE_M;
-      if (extension == "mm")
-        return SOURCE_MM;
-      break;
-
-    case Settings::WIN:
-      if (extension == "rc")
-        return SOURCE_RC;
-      // TODO(brettw) asm files.
-      break;
-
-    default:
-      break;
-  }
-
-  if (os != Settings::WIN) {
-    if (extension == "S")
-      return SOURCE_S;
-  }
+  if (extension == "m")
+    return SOURCE_M;
+  if (extension == "mm")
+    return SOURCE_MM;
+  if (extension == "rc")
+    return SOURCE_RC;
+  if (extension == "S" || extension == "s")
+    return SOURCE_S;
+  if (extension == "o" || extension == "obj")
+    return SOURCE_O;
 
   return SOURCE_UNKNOWN;
 }
@@ -327,6 +313,23 @@ base::StringPiece FindDir(const std::string* path) {
   if (filename_offset == 0u)
     return base::StringPiece();
   return base::StringPiece(path->data(), filename_offset);
+}
+
+base::StringPiece FindLastDirComponent(const SourceDir& dir) {
+  const std::string& dir_string = dir.value();
+
+  if (dir_string.empty())
+    return base::StringPiece();
+  int cur = static_cast<int>(dir_string.size()) - 1;
+  DCHECK(dir_string[cur] == '/');
+  int end = cur;
+  cur--;  // Skip before the last slash.
+
+  for (; cur >= 0; cur--) {
+    if (dir_string[cur] == '/')
+      return base::StringPiece(&dir_string[cur + 1], end - cur - 1);
+  }
+  return base::StringPiece(&dir_string[0], end);
 }
 
 bool EnsureStringIsInOutputDir(const SourceDir& dir,
@@ -560,12 +563,6 @@ void ConvertPathToSystem(std::string* path) {
       (*path)[i] = '\\';
   }
 #endif
-}
-
-std::string PathToSystem(const std::string& path) {
-  std::string ret(path);
-  ConvertPathToSystem(&ret);
-  return ret;
 }
 
 std::string RebaseSourceAbsolutePath(const std::string& input,

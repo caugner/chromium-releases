@@ -15,8 +15,8 @@
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "webkit/common/webpreferences.h"
@@ -25,9 +25,9 @@ using blink::WebCanvas;
 using blink::WebCursorInfo;
 using blink::WebDragData;
 using blink::WebDragOperationsMask;
-using blink::WebFrame;
 using blink::WebImage;
 using blink::WebInputEvent;
+using blink::WebLocalFrame;
 using blink::WebMouseEvent;
 using blink::WebPlugin;
 using blink::WebPluginContainer;
@@ -45,7 +45,7 @@ WebViewPlugin::WebViewPlugin(WebViewPlugin::Delegate* delegate)
     : delegate_(delegate),
       container_(NULL),
       web_view_(WebView::create(this)),
-      web_frame_(WebFrame::create(this)),
+      web_frame_(WebLocalFrame::create(this)),
       finished_loading_(false),
       focused_(false) {
   web_view_->setMainFrame(web_frame_);
@@ -210,13 +210,17 @@ void WebViewPlugin::setToolTipText(const WebString& text,
     container_->element().setAttribute("title", text);
 }
 
-void WebViewPlugin::startDragging(WebFrame*,
+void WebViewPlugin::startDragging(WebLocalFrame*,
                                   const WebDragData&,
                                   WebDragOperationsMask,
                                   const WebImage&,
                                   const WebPoint&) {
   // Immediately stop dragging.
   web_view_->dragSourceSystemDragEnded();
+}
+
+bool WebViewPlugin::allowsBrokenNullLayerTreeView() const {
+  return true;
 }
 
 void WebViewPlugin::didInvalidateRect(const WebRect& rect) {
@@ -228,12 +232,12 @@ void WebViewPlugin::didChangeCursor(const WebCursorInfo& cursor) {
   current_cursor_ = cursor;
 }
 
-void WebViewPlugin::didClearWindowObject(WebFrame* frame, int world_id) {
+void WebViewPlugin::didClearWindowObject(WebLocalFrame* frame, int world_id) {
   if (delegate_)
     delegate_->BindWebFrame(frame);
 }
 
-void WebViewPlugin::didReceiveResponse(WebFrame* frame,
+void WebViewPlugin::didReceiveResponse(WebLocalFrame* frame,
                                        unsigned identifier,
                                        const WebURLResponse& response) {
   WebFrameClient::didReceiveResponse(frame, identifier, response);

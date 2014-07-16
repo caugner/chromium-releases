@@ -94,6 +94,8 @@ class RecordInfo {
   bool IsStackAllocated();
   bool IsNonNewable();
   bool IsOnlyPlacementNewable();
+  bool IsTreeShared();
+  clang::CXXMethodDecl* DeclaresNewOperator();
 
   bool RequiresTraceMethod();
   bool NeedsFinalization();

@@ -5,6 +5,7 @@
 #include "media/cast/test/utility/in_process_receiver.h"
 
 #include "base/bind_helpers.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/time/time.h"
 #include "media/base/video_frame.h"
 #include "media/cast/cast_config.h"
@@ -33,7 +34,7 @@ InProcessReceiver::InProcessReceiver(
       weak_factory_(this) {}
 
 InProcessReceiver::~InProcessReceiver() {
-  DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
+  Stop();
 }
 
 void InProcessReceiver::Start() {
@@ -43,11 +44,26 @@ void InProcessReceiver::Start() {
                                          base::Unretained(this)));
 }
 
-void InProcessReceiver::DestroySoon() {
-  cast_environment_->PostTask(
-      CastEnvironment::MAIN,
-      FROM_HERE,
-      base::Bind(&InProcessReceiver::WillDestroyReceiver, base::Owned(this)));
+void InProcessReceiver::Stop() {
+  base::WaitableEvent event(false, false);
+  if (cast_environment_->CurrentlyOn(CastEnvironment::MAIN)) {
+    StopOnMainThread(&event);
+  } else {
+    cast_environment_->PostTask(CastEnvironment::MAIN,
+                                FROM_HERE,
+                                base::Bind(&InProcessReceiver::StopOnMainThread,
+                                           base::Unretained(this),
+                                           &event));
+    event.Wait();
+  }
+}
+
+void InProcessReceiver::StopOnMainThread(base::WaitableEvent* event) {
+  DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
+  cast_receiver_.reset(NULL);
+  transport_.reset(NULL);
+  weak_factory_.InvalidateWeakPtrs();
+  event->Signal();
 }
 
 void InProcessReceiver::UpdateCastTransportStatus(CastTransportStatus status) {
@@ -77,49 +93,36 @@ void InProcessReceiver::StartOnMainThread() {
   PullNextVideoFrame();
 }
 
-void InProcessReceiver::GotAudioFrame(scoped_ptr<PcmAudioFrame> audio_frame,
-                                      const base::TimeTicks& playout_time) {
+void InProcessReceiver::GotAudioFrame(scoped_ptr<AudioBus> audio_frame,
+                                      const base::TimeTicks& playout_time,
+                                      bool is_continuous) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
-  OnAudioFrame(audio_frame.Pass(), playout_time);
-  // TODO(miu): Put this back here: PullNextAudioFrame();
+  if (audio_frame.get())
+    OnAudioFrame(audio_frame.Pass(), playout_time, is_continuous);
+  PullNextAudioFrame();
 }
 
 void InProcessReceiver::GotVideoFrame(
     const scoped_refptr<VideoFrame>& video_frame,
-    const base::TimeTicks& render_time) {
+    const base::TimeTicks& playout_time,
+    bool is_continuous) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
-  OnVideoFrame(video_frame, render_time);
+  if (video_frame)
+    OnVideoFrame(video_frame, playout_time, is_continuous);
   PullNextVideoFrame();
 }
 
 void InProcessReceiver::PullNextAudioFrame() {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
   cast_receiver_->frame_receiver()->GetRawAudioFrame(
-      1 /* 10 ms of samples */,
-      audio_config_.frequency,
       base::Bind(&InProcessReceiver::GotAudioFrame,
                  weak_factory_.GetWeakPtr()));
-  // TODO(miu): Fix audio decoder so that it never drops a request for the next
-  // frame of audio.  Once fixed, remove this, and add PullNextAudioFrame() to
-  // the end of GotAudioFrame(), so that it behaves just like GotVideoFrame().
-  // http://crbug.com/347361
-  cast_environment_->PostDelayedTask(
-      CastEnvironment::MAIN,
-      FROM_HERE,
-      base::Bind(&InProcessReceiver::PullNextAudioFrame,
-                 weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(10));
 }
 
 void InProcessReceiver::PullNextVideoFrame() {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
   cast_receiver_->frame_receiver()->GetRawVideoFrame(base::Bind(
       &InProcessReceiver::GotVideoFrame, weak_factory_.GetWeakPtr()));
-}
-
-// static
-void InProcessReceiver::WillDestroyReceiver(InProcessReceiver* receiver) {
-  DCHECK(receiver->cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
 }
 
 }  // namespace cast

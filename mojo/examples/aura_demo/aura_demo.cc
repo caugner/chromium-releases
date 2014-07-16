@@ -8,13 +8,13 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
-#include "mojo/examples/aura_demo/demo_screen.h"
-#include "mojo/examples/aura_demo/window_tree_host_mojo.h"
-#include "mojo/public/bindings/allocation_scope.h"
+#include "mojo/aura/screen_mojo.h"
+#include "mojo/aura/window_tree_host_mojo.h"
+#include "mojo/public/cpp/bindings/allocation_scope.h"
+#include "mojo/public/cpp/gles2/gles2.h"
+#include "mojo/public/cpp/shell/application.h"
 #include "mojo/public/cpp/system/core.h"
-#include "mojo/public/gles2/gles2_cpp.h"
-#include "mojo/public/shell/application.h"
-#include "mojo/public/shell/shell.mojom.h"
+#include "mojo/public/interfaces/shell/shell.mojom.h"
 #include "mojo/services/native_viewport/native_viewport.mojom.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/window_tree_client.h"
@@ -114,16 +114,14 @@ class DemoWindowTreeClient : public aura::client::WindowTreeClient {
 class AuraDemo : public Application {
  public:
   explicit AuraDemo(MojoHandle shell_handle) : Application(shell_handle) {
-    screen_.reset(DemoScreen::Create());
+    screen_.reset(ScreenMojo::Create());
     gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, screen_.get());
 
-    InterfacePipe<NativeViewport, AnyInterface> pipe;
+    NativeViewportPtr native_viewport;
+    ConnectTo("mojo:mojo_native_viewport_service", &native_viewport);
 
-    mojo::AllocationScope scope;
-    shell()->Connect("mojo:mojo_native_viewport_service",
-                     pipe.handle_to_peer.Pass());
     window_tree_host_.reset(new WindowTreeHostMojo(
-        pipe.handle_to_self.Pass(),
+        native_viewport.Pass(),
         gfx::Rect(800, 600),
         base::Bind(&AuraDemo::HostContextCreated, base::Unretained(this))));
   }
@@ -159,7 +157,7 @@ class AuraDemo : public Application {
     window_tree_host_->Show();
   }
 
-  scoped_ptr<DemoScreen> screen_;
+  scoped_ptr<ScreenMojo> screen_;
 
   scoped_ptr<DemoWindowTreeClient> window_tree_client_;
 
@@ -187,7 +185,7 @@ extern "C" AURA_DEMO_EXPORT MojoResult CDECL MojoMain(
   // TODO(beng): This crashes in a DCHECK on X11 because this thread's
   //             MessageLoop is not of TYPE_UI. I think we need a way to build
   //             Aura that doesn't define platform-specific stuff.
-  aura::Env::CreateInstance();
+  aura::Env::CreateInstance(true);
   mojo::examples::AuraDemo app(shell_handle);
   loop.Run();
 

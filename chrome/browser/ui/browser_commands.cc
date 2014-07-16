@@ -9,9 +9,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
@@ -19,7 +17,6 @@
 #include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/google/google_util.h"
@@ -35,7 +32,6 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/accelerator_utils.h"
-#include "chrome/browser/ui/bookmarks/bookmark_prompt_controller.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
@@ -63,6 +59,8 @@
 #include "chrome/common/content_restriction.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
@@ -73,18 +71,18 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
 #include "content/public/common/user_agent.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/extension_set.h"
 #include "net/base/escape.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/ui/metro_pin_tab_helper_win.h"
-#include "win8/util/win8_util.h"
 #endif
 
 #if defined(ENABLE_PRINTING)
@@ -140,15 +138,11 @@ bool GetBookmarkOverrideCommand(
 
   extensions::CommandService* command_service =
       extensions::CommandService::Get(profile);
-  ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  // Extension service may be NULL during test execution.
-  if (!extension_service)
-    return false;
-  const extensions::ExtensionSet* extension_set =
-      extension_service->extensions();
-  for (extensions::ExtensionSet::const_iterator i = extension_set->begin();
-       i != extension_set->end(); ++i) {
+  const extensions::ExtensionSet& extension_set =
+      extensions::ExtensionRegistry::Get(profile)->enabled_extensions();
+  for (extensions::ExtensionSet::const_iterator i = extension_set.begin();
+       i != extension_set.end();
+       ++i) {
     extensions::Command prospective_command;
     extensions::CommandService::ExtensionCommandType prospective_command_type;
     if (command_service->GetBoundExtensionCommand((*i)->id(),
@@ -165,7 +159,7 @@ bool GetBookmarkOverrideCommand(
   return false;
 }
 
-void BookmarkCurrentPageInternal(Browser* browser, bool from_star) {
+void BookmarkCurrentPageInternal(Browser* browser) {
   content::RecordAction(UserMetricsAction("Star"));
 
   BookmarkModel* model =
@@ -185,8 +179,6 @@ void BookmarkCurrentPageInternal(Browser* browser, bool from_star) {
     FaviconTabHelper::FromWebContents(web_contents)->SaveFavicon();
   }
   bookmark_utils::AddIfNotBookmarked(model, url, title);
-  if (from_star && !was_bookmarked)
-    BookmarkPromptController::AddedBookmark(browser, url);
   // Make sure the model actually added a bookmark before showing the star. A
   // bookmark isn't created if the url is invalid.
   if (browser->window()->IsActive() && model->IsBookmarked(url)) {
@@ -239,7 +231,7 @@ void ReloadInternal(Browser* browser,
   WebContents* new_tab = GetTabAndRevertIfNecessary(browser, disposition);
   new_tab->UserGestureDone();
   if (!new_tab->FocusLocationBarByDefault())
-    new_tab->GetView()->Focus();
+    new_tab->Focus();
   if (ignore_cache)
     new_tab->GetController().ReloadIgnoringCache(true);
   else
@@ -340,12 +332,11 @@ void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
           IncognitoModePrefs::DISABLED) {
       incognito = false;
     }
-  } else {
-    if (browser_defaults::kAlwaysOpenIncognitoWindow &&
-        IncognitoModePrefs::ShouldLaunchIncognito(
-            *CommandLine::ForCurrentProcess(), prefs)) {
-      incognito = true;
-    }
+  } else if (profile->IsGuestSession() ||
+      (browser_defaults::kAlwaysOpenIncognitoWindow &&
+      IncognitoModePrefs::ShouldLaunchIncognito(
+          *CommandLine::ForCurrentProcess(), prefs))) {
+    incognito = true;
   }
 
   if (incognito) {
@@ -465,13 +456,11 @@ void Home(Browser* browser, WindowOpenDisposition disposition) {
   // Streamlined hosted apps should return to their launch page when the home
   // button is pressed.
   if (browser->is_app()) {
-    const ExtensionService* service = browser->profile()->GetExtensionService();
-    if (!service)
-      return;
-
     const extensions::Extension* extension =
-        service->GetInstalledExtension(
-            web_app::GetExtensionIdFromApplicationName(browser->app_name()));
+        extensions::ExtensionRegistry::Get(browser->profile())
+            ->GetExtensionById(
+                web_app::GetExtensionIdFromApplicationName(browser->app_name()),
+                extensions::ExtensionRegistry::EVERYTHING);
     if (!extension)
       return;
 
@@ -526,7 +515,8 @@ void OpenCurrentURL(Browser* browser) {
 
   DCHECK(browser->profile()->GetExtensionService());
   const extensions::Extension* extension =
-      browser->profile()->GetExtensionService()->GetInstalledApp(url);
+      extensions::ExtensionRegistry::Get(browser->profile())
+          ->enabled_extensions().GetAppByURL(url);
   if (extension) {
     CoreAppLauncherHandler::RecordAppLaunchType(
         extension_misc::APP_LAUNCH_OMNIBOX_LOCATION,
@@ -539,7 +529,6 @@ void Stop(Browser* browser) {
   browser->tab_strip_model()->GetActiveWebContents()->Stop();
 }
 
-#if !defined(OS_WIN)
 void NewWindow(Browser* browser) {
   NewEmptyWindow(browser->profile()->GetOriginalProfile(),
                  browser->host_desktop_type());
@@ -549,7 +538,6 @@ void NewIncognitoWindow(Browser* browser) {
   NewEmptyWindow(browser->profile()->GetOffTheRecordProfile(),
                  browser->host_desktop_type());
 }
-#endif  // OS_WIN
 
 void CloseWindow(Browser* browser) {
   content::RecordAction(UserMetricsAction("CloseWindow"));
@@ -566,8 +554,7 @@ void NewTab(Browser* browser) {
 
   if (browser->is_type_tabbed()) {
     AddTabAt(browser, GURL(), -1, true);
-    browser->tab_strip_model()->GetActiveWebContents()->GetView()->
-        RestoreFocus();
+    browser->tab_strip_model()->GetActiveWebContents()->RestoreFocus();
   } else {
     ScopedTabbedBrowserDisplayer displayer(browser->profile(),
                                            browser->host_desktop_type());
@@ -577,7 +564,7 @@ void NewTab(Browser* browser) {
     // The call to AddBlankTabAt above did not set the focus to the tab as its
     // window was not active, so we have to do it explicitly.
     // See http://crbug.com/6380.
-    b->tab_strip_model()->GetActiveWebContents()->GetView()->RestoreFocus();
+    b->tab_strip_model()->GetActiveWebContents()->RestoreFocus();
   }
 }
 
@@ -666,11 +653,10 @@ WebContents* DuplicateTabAt(Browser* browser, int index) {
         index + 1, contents_dupe, add_types);
   } else {
     Browser* new_browser = NULL;
-    if (browser->is_app() &&
-        !browser->is_type_popup()) {
+    if (browser->is_app() && !browser->is_type_popup()) {
       new_browser = new Browser(
-          Browser::CreateParams::CreateForApp(browser->type(),
-                                              browser->app_name(),
+          Browser::CreateParams::CreateForApp(browser->app_name(),
+                                              browser->is_trusted_source(),
                                               gfx::Rect(),
                                               browser->profile(),
                                               browser->host_desktop_type()));
@@ -752,11 +738,7 @@ void BookmarkCurrentPage(Browser* browser) {
     };
   }
 
-  BookmarkCurrentPageInternal(browser, false);
-}
-
-void BookmarkCurrentPageFromStar(Browser* browser) {
-  BookmarkCurrentPageInternal(browser, true);
+  BookmarkCurrentPageInternal(browser);
 }
 
 bool CanBookmarkCurrentPage(const Browser* browser) {
@@ -782,15 +764,27 @@ void Translate(Browser* browser) {
   TranslateTabHelper* translate_tab_helper =
       TranslateTabHelper::FromWebContents(web_contents);
 
-  TranslateTabHelper::TranslateStep step = TranslateTabHelper::BEFORE_TRANSLATE;
+  translate::TranslateStep step = translate::TRANSLATE_STEP_BEFORE_TRANSLATE;
   if (translate_tab_helper) {
     if (translate_tab_helper->GetLanguageState().translation_pending())
-      step = TranslateTabHelper::TRANSLATING;
+      step = translate::TRANSLATE_STEP_TRANSLATING;
     else if (translate_tab_helper->GetLanguageState().IsPageTranslated())
-      step = TranslateTabHelper::AFTER_TRANSLATE;
+      step = translate::TRANSLATE_STEP_AFTER_TRANSLATE;
   }
   browser->window()->ShowTranslateBubble(
       web_contents, step, TranslateErrors::NONE);
+}
+
+void ManagePasswordsForPage(Browser* browser) {
+// TODO(mkwst): Implement this feature on Mac: http://crbug.com/261628
+#if !defined(OS_MACOSX)
+  if (!browser->window()->IsActive())
+    return;
+
+  WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
+  chrome::ShowManagePasswordsBubble(web_contents);
+#endif
 }
 
 void TogglePagePinnedToStartScreen(Browser* browser) {
@@ -1015,12 +1009,7 @@ void ToggleDevToolsWindow(Browser* browser, DevToolsToggleAction action) {
 
 bool CanOpenTaskManager() {
 #if defined(ENABLE_TASK_MANAGER)
-#if defined(OS_WIN)
-  // In metro we can't display the task manager, as it is a native window.
-  return !win8::IsSingleWindowMetroMode();
-#else
   return true;
-#endif
 #else
   return false;
 #endif
@@ -1073,12 +1062,9 @@ void OpenUpdateChromeDialog(Browser* browser) {
 }
 
 void ToggleSpeechInput(Browser* browser) {
-  WebContents* web_contents =
-      browser->tab_strip_model()->GetActiveWebContents();
-  web_contents->GetRenderViewHost()->ToggleSpeechInput();
-
   SearchTabHelper* search_tab_helper =
-      SearchTabHelper::FromWebContents(web_contents);
+      SearchTabHelper::FromWebContents(
+          browser->tab_strip_model()->GetActiveWebContents());
   // |search_tab_helper| can be null in unit tests.
   if (search_tab_helper)
     search_tab_helper->ToggleVoiceSearch();
@@ -1236,7 +1222,7 @@ void CreateApplicationShortcuts(Browser* browser) {
           CreateApplicationShortcuts();
 }
 
-void CreateHostedAppFromCurrentWebContents(Browser* browser) {
+void CreateBookmarkAppFromCurrentWebContents(Browser* browser) {
   content::RecordAction(UserMetricsAction("CreateHostedApp"));
   extensions::TabHelper::FromWebContents(
       browser->tab_strip_model()->GetActiveWebContents())->
@@ -1249,6 +1235,12 @@ bool CanCreateApplicationShortcuts(const Browser* browser) {
           CanCreateApplicationShortcuts();
 }
 
+bool CanCreateBookmarkApp(const Browser* browser) {
+  return extensions::TabHelper::FromWebContents(
+             browser->tab_strip_model()->GetActiveWebContents())
+      ->CanCreateBookmarkApp();
+}
+
 void ConvertTabToAppWindow(Browser* browser,
                            content::WebContents* contents) {
   const GURL& url = contents->GetController().GetActiveEntry()->GetURL();
@@ -1259,9 +1251,11 @@ void ConvertTabToAppWindow(Browser* browser,
     browser->tab_strip_model()->DetachWebContentsAt(index);
 
   Browser* app_browser = new Browser(
-      Browser::CreateParams::CreateForApp(
-          Browser::TYPE_POPUP, app_name, gfx::Rect(), browser->profile(),
-          browser->host_desktop_type()));
+      Browser::CreateParams::CreateForApp(app_name,
+                                          true /* trusted_source */,
+                                          gfx::Rect(),
+                                          browser->profile(),
+                                          browser->host_desktop_type()));
   app_browser->tab_strip_model()->AppendWebContents(contents, true);
 
   contents->GetMutableRendererPrefs()->can_accept_load_drops = false;

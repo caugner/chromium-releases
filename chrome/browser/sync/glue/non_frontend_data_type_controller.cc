@@ -8,10 +8,10 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "components/sync_driver/change_processor.h"
 #include "components/sync_driver/model_associator.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/api/sync_error.h"
@@ -429,7 +429,7 @@ AssociatorInterface* NonFrontendDataTypeController::associator() const {
   return model_associator_;
 }
 
-ChangeProcessor* NonFrontendDataTypeController::change_processor() const {
+ChangeProcessor* NonFrontendDataTypeController::GetChangeProcessor() const {
   return change_processor_;
 }
 
@@ -464,8 +464,6 @@ void NonFrontendDataTypeController::AssociationCallback(
   change_processor_ = result.change_processor;
   model_associator_ = result.model_associator;
 
-  profile_sync_service_->ActivateDataType(type(), model_safe_group(),
-                                          change_processor());
   StartDone(!result.sync_has_nodes ? OK_FIRST_RUN : OK,
             result.local_merge_result,
             result.syncer_merge_result);

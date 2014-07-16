@@ -220,7 +220,7 @@ void ChangePictureOptionsHandler::HandleDiscardPhoto(
 
 void ChangePictureOptionsHandler::HandlePhotoTaken(
     const base::ListValue* args) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::string image_url;
   if (!args || args->GetSize() != 1 || !args->GetString(0, &image_url))
     NOTREACHED();
@@ -269,13 +269,13 @@ void ChangePictureOptionsHandler::SendSelectedImage() {
   switch (previous_image_index_) {
     case User::kExternalImageIndex: {
       // User has image from camera/file, record it and add to the image list.
-      previous_image_ = user->image();
+      previous_image_ = user->GetImage();
       SendOldImage(webui::GetBitmapDataUrl(*previous_image_.bitmap()));
       break;
     }
     case User::kProfileImageIndex: {
       // User has his/her Profile image as the current image.
-      SendProfileImage(user->image(), true);
+      SendProfileImage(user->GetImage(), true);
       break;
     }
     default: {

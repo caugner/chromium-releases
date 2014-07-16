@@ -17,6 +17,7 @@ from telemetry.page import page_runner
 from telemetry.page import cloud_storage
 from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry.page import page_test_results
 from telemetry.page import test_expectations
 
 
@@ -78,7 +79,12 @@ class Test(command_line.Command):
 
     self._DownloadGeneratedProfileArchive(args)
 
-    results = page_runner.Run(test, ps, expectations, args)
+    results = page_test_results.PageTestResults()
+    try:
+      results = page_runner.Run(test, ps, expectations, args)
+    except page_test.TestNotSupportedOnPlatformFailure as failure:
+      logging.warning(str(failure))
+
     results.PrintSummary()
     return len(results.failures) + len(results.errors)
 
@@ -167,7 +173,7 @@ class Test(command_line.Command):
     if not hasattr(cls, 'page_set'):
       raise NotImplementedError('This test has no "page_set" attribute.')
     return page_set.PageSet.FromFile(
-        os.path.join(util.GetBaseDir(), cls.page_set))
+        file_path=os.path.join(util.GetBaseDir(), cls.page_set))
 
   @classmethod
   def CreateExpectations(cls, ps):  # pylint: disable=W0613

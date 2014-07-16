@@ -44,7 +44,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #endif
 
 #if defined(USE_X11)
@@ -166,7 +166,9 @@ int BrowserFrame::GetMinimizeButtonOffset() const {
 }
 
 gfx::Rect BrowserFrame::GetBoundsForTabStrip(views::View* tabstrip) const {
-  return browser_frame_view_->GetBoundsForTabStrip(tabstrip);
+  // This can be invoked before |browser_frame_view_| has been set.
+  return browser_frame_view_ ?
+      browser_frame_view_->GetBoundsForTabStrip(tabstrip) : gfx::Rect();
 }
 
 int BrowserFrame::GetTopInset() const {
@@ -187,6 +189,15 @@ views::View* BrowserFrame::GetFrameView() const {
 
 bool BrowserFrame::UseCustomFrame() const {
   return use_custom_frame_pref_.GetValue();
+}
+
+bool BrowserFrame::ShouldSaveWindowPlacement() const {
+  return native_browser_frame_->ShouldSaveWindowPlacement();
+}
+
+void BrowserFrame::GetWindowPlacement(gfx::Rect* bounds,
+                                      ui::WindowShowState* show_state) const {
+  return native_browser_frame_->GetWindowPlacement(bounds, show_state);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -254,12 +265,16 @@ void BrowserFrame::ShowContextMenuForView(views::View* source,
   int hit_test = non_client_view()->NonClientHitTest(point_in_view_coords);
   if (hit_test == HTCAPTION || hit_test == HTNOWHERE) {
     menu_runner_.reset(new views::MenuRunner(GetSystemMenuModel()));
-    if (menu_runner_->RunMenuAt(source->GetWidget(), NULL,
-          gfx::Rect(p, gfx::Size(0,0)), views::MenuItemView::TOPLEFT,
-          source_type,
-          views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
-        views::MenuRunner::MENU_DELETED)
+    if (menu_runner_->RunMenuAt(source->GetWidget(),
+                                NULL,
+                                gfx::Rect(p, gfx::Size(0, 0)),
+                                views::MENU_ANCHOR_TOPLEFT,
+                                source_type,
+                                views::MenuRunner::HAS_MNEMONICS |
+                                    views::MenuRunner::CONTEXT_MENU) ==
+        views::MenuRunner::MENU_DELETED) {
       return;
+    }
   }
 }
 
@@ -291,11 +306,9 @@ NewAvatarButton* BrowserFrame::GetNewAvatarMenuButton() {
   return browser_frame_view_->new_avatar_button();
 }
 
-#if !defined(OS_WIN) || defined(USE_AURA)
 bool BrowserFrame::ShouldLeaveOffsetNearTopBorder() {
   return !IsMaximized();
 }
-#endif  // OS_WIN
 
 void BrowserFrame::OnUseCustomChromeFrameChanged() {
   // Tell the window manager to add or remove system borders.

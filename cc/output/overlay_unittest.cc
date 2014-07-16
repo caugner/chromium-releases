@@ -17,6 +17,7 @@
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/test_context_provider.h"
+#include "cc/test/test_shared_bitmap_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -110,9 +111,8 @@ scoped_ptr<RenderPass> CreateRenderPass() {
                gfx::Transform(),
                has_transparent_background);
 
-  scoped_ptr<SharedQuadState> shared_state = SharedQuadState::Create();
+  SharedQuadState* shared_state = pass->CreateAndAppendSharedQuadState();
   shared_state->opacity = 1.f;
-  pass->shared_quad_state_list.push_back(shared_state.Pass());
   return pass.Pass();
 }
 
@@ -209,8 +209,10 @@ TEST(OverlayTest, OverlaysProcessorHasStrategy) {
   output_surface.InitWithSingleOverlayValidator();
   EXPECT_TRUE(output_surface.overlay_candidate_validator() != NULL);
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(&output_surface, NULL, 0, false, 1));
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      &output_surface, shared_bitmap_manager.get(), 0, false, 1, false));
 
   scoped_ptr<DefaultOverlayProcessor> overlay_processor(
       new DefaultOverlayProcessor(&output_surface, resource_provider.get()));
@@ -227,8 +229,10 @@ class SingleOverlayOnTopTest : public testing::Test {
     output_surface_->InitWithSingleOverlayValidator();
     EXPECT_TRUE(output_surface_->overlay_candidate_validator() != NULL);
 
-    resource_provider_ =
-        ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1);
+    shared_bitmap_manager_.reset(new TestSharedBitmapManager());
+    resource_provider_ = ResourceProvider::Create(
+        output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1,
+        false);
 
     overlay_processor_.reset(new SingleOverlayProcessor(
         output_surface_.get(), resource_provider_.get()));
@@ -238,6 +242,7 @@ class SingleOverlayOnTopTest : public testing::Test {
   scoped_refptr<TestContextProvider> provider_;
   scoped_ptr<OverlayOutputSurface> output_surface_;
   FakeOutputSurfaceClient client_;
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<SingleOverlayProcessor> overlay_processor_;
 };
@@ -492,7 +497,7 @@ class MockOverlayScheduler {
  public:
   MOCK_METHOD5(Schedule,
                void(int plane_z_order,
-                    unsigned plane_transform,
+                    gfx::OverlayTransform plane_transform,
                     unsigned overlay_texture_id,
                     const gfx::Rect& display_bounds,
                     const gfx::RectF& uv_rect));
@@ -505,7 +510,8 @@ class GLRendererWithOverlaysTest : public testing::Test {
     output_surface_.reset(new OverlayOutputSurface(provider_));
     CHECK(output_surface_->BindToClient(&output_surface_client_));
     resource_provider_ =
-        ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1);
+        ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1,
+        false);
 
     provider_->support()->SetScheduleOverlayPlaneCallback(base::Bind(
         &MockOverlayScheduler::Schedule, base::Unretained(&scheduler_)));
@@ -560,12 +566,11 @@ TEST_F(GLRendererWithOverlaysTest, OverlayQuadNotDrawn) {
   EXPECT_CALL(*renderer_, DoDrawQuad(_, _)).Times(2);
   EXPECT_CALL(scheduler_,
               Schedule(1,
-                       OverlayCandidate::NONE,
+                       gfx::OVERLAY_TRANSFORM_NONE,
                        _,
                        kOverlayRect,
                        BoundingRect(kUVTopLeft, kUVBottomRight))).Times(1);
-  renderer_->DrawFrame(
-      &pass_list, NULL, 1.f, viewport_rect, viewport_rect, false);
+  renderer_->DrawFrame(&pass_list, 1.f, viewport_rect, viewport_rect, false);
 
   SwapBuffers();
 
@@ -597,8 +602,7 @@ TEST_F(GLRendererWithOverlaysTest, OccludedQuadDrawn) {
   // 3 quads in the pass, all should draw.
   EXPECT_CALL(*renderer_, DoDrawQuad(_, _)).Times(3);
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(0);
-  renderer_->DrawFrame(
-      &pass_list, NULL, 1.f, viewport_rect, viewport_rect, false);
+  renderer_->DrawFrame(&pass_list, 1.f, viewport_rect, viewport_rect, false);
 
   SwapBuffers();
 
@@ -630,8 +634,7 @@ TEST_F(GLRendererWithOverlaysTest, NoValidatorNoOverlay) {
   // Should see no overlays.
   EXPECT_CALL(*renderer_, DoDrawQuad(_, _)).Times(3);
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(0);
-  renderer_->DrawFrame(
-      &pass_list, NULL, 1.f, viewport_rect, viewport_rect, false);
+  renderer_->DrawFrame(&pass_list, 1.f, viewport_rect, viewport_rect, false);
 
   SwapBuffers();
 

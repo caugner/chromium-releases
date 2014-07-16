@@ -43,6 +43,12 @@
 #include "chrome/browser/media_galleries/fileapi/iapps_finder_impl.h"
 #endif  // OS_MACOSX
 
+#if !defined(DISABLE_NACL)
+#include "base/command_line.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
+#include "ppapi/shared_impl/ppapi_switches.h"
+#endif
+
 using extensions::PlatformAppBrowserTest;
 using storage_monitor::StorageInfo;
 using storage_monitor::StorageMonitor;
@@ -195,7 +201,7 @@ class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
   // This function makes a single fake gallery. This is needed to test platforms
   // with no default media galleries, such as CHROMEOS. This fake gallery is
   // pre-populated with a test.jpg and test.txt.
-  void MakeSingleFakeGallery() {
+  void MakeSingleFakeGallery(MediaGalleryPrefId* pref_id) {
     ASSERT_FALSE(fake_gallery_temp_dir_.IsValid());
     ASSERT_TRUE(fake_gallery_temp_dir_.CreateUniqueTempDir());
 
@@ -204,15 +210,18 @@ class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
     MediaGalleryPrefInfo gallery_info;
     ASSERT_FALSE(preferences->LookUpGalleryByPath(fake_gallery_temp_dir_.path(),
                                                   &gallery_info));
-    preferences->AddGallery(gallery_info.device_id,
-                            gallery_info.path,
-                            MediaGalleryPrefInfo::kAutoDetected,
-                            gallery_info.volume_label,
-                            gallery_info.vendor_name,
-                            gallery_info.model_name,
-                            gallery_info.total_size_in_bytes,
-                            gallery_info.last_attach_time,
-                            0, 0, 0);
+    MediaGalleryPrefId id = preferences->AddGallery(
+        gallery_info.device_id,
+        gallery_info.path,
+        MediaGalleryPrefInfo::kAutoDetected,
+        gallery_info.volume_label,
+        gallery_info.vendor_name,
+        gallery_info.model_name,
+        gallery_info.total_size_in_bytes,
+        gallery_info.last_attach_time,
+        0, 0, 0);
+    if (pref_id)
+      *pref_id = id;
 
     content::RunAllPendingInMessageLoop();
 
@@ -369,6 +378,11 @@ class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
                          .AppendASCII("common");
   }
 
+  base::FilePath GetWallpaperTestDataDir() const {
+    return test_data_dir_.AppendASCII("api_test")
+                         .AppendASCII("wallpaper");
+  }
+
   int num_galleries() const {
     return ensure_media_directories_exists_->num_galleries();
   }
@@ -419,15 +433,70 @@ class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
   scoped_ptr<EnsureMediaDirectoriesExists> ensure_media_directories_exists_;
 };
 
-// Flaky on WinXP Tests(1): http://crbug.com/354425
-#if defined(OS_WIN) && defined(ARCH_CPU_X86)
+#if !defined(DISABLE_NACL)
+class MediaGalleriesPlatformAppPpapiTest
+    : public MediaGalleriesPlatformAppBrowserTest {
+ protected:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    MediaGalleriesPlatformAppBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnablePepperTesting);
+  }
+
+  virtual void SetUpOnMainThread() OVERRIDE {
+    MediaGalleriesPlatformAppBrowserTest::SetUpOnMainThread();
+
+    ASSERT_TRUE(PathService::Get(chrome::DIR_GEN_TEST_DATA, &app_dir_));
+    app_dir_ = app_dir_.AppendASCII("ppapi")
+                       .AppendASCII("tests")
+                       .AppendASCII("extensions")
+                       .AppendASCII("media_galleries")
+                       .AppendASCII("newlib");
+  }
+
+  const base::FilePath& app_dir() const {
+    return app_dir_;
+  }
+
+ private:
+  base::FilePath app_dir_;
+};
+
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppPpapiTest, SendFilesystem) {
+  RemoveAllGalleries();
+  MakeSingleFakeGallery(NULL);
+
+  const extensions::Extension* extension = LoadExtension(app_dir());
+  ASSERT_TRUE(extension);
+
+  ResultCatcher catcher;
+  AppLaunchParams params(browser()->profile(),
+                         extension,
+                         extensions::LAUNCH_CONTAINER_NONE,
+                         NEW_WINDOW);
+  params.command_line = *CommandLine::ForCurrentProcess();
+  OpenApplication(params);
+
+  bool result = true;
+  if (!catcher.GetNextResult()) {
+    message_ = catcher.message();
+    result = false;
+  }
+  content::RunAllPendingInMessageLoop();  // avoid race on exit in registry.
+  ASSERT_TRUE(result) << message_;
+}
+
+#endif  // !defined(DISABLE_NACL)
+
+// Test is flaky, it fails on certain bots, namely WinXP Tests(1) and Linux
+// (dbg)(1)(32).  See crbug.com/354425.
+#if (defined(ARCH_CPU_X86)) && (defined(OS_WIN) || defined(OS_LINUX))
 #define MAYBE_MediaGalleriesNoAccess DISABLED_MediaGalleriesNoAccess
 #else
 #define MAYBE_MediaGalleriesNoAccess MediaGalleriesNoAccess
 #endif
 IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
                        MAYBE_MediaGalleriesNoAccess) {
-  MakeSingleFakeGallery();
+  MakeSingleFakeGallery(NULL);
 
   base::ListValue custom_args;
   custom_args.AppendInteger(num_galleries() + 1);
@@ -448,7 +517,7 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
 IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
                        MediaGalleriesRead) {
   RemoveAllGalleries();
-  MakeSingleFakeGallery();
+  MakeSingleFakeGallery(NULL);
   base::ListValue custom_args;
   custom_args.AppendInteger(test_jpg_size());
 
@@ -456,9 +525,9 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
       << message_;
 }
 
-// Test is flaky, it fails only on a certain bot, namely WinXP Tests(1).
-// See crbug.com/354425 .
-#if defined(OS_WIN) && defined(ARCH_CPU_X86)
+// Test is flaky, it fails on certain bots, namely WinXP Tests(1) and Linux
+// (dbg)(1)(32).  See crbug.com/354425.
+#if (defined(ARCH_CPU_X86)) && (defined(OS_WIN) || defined(OS_LINUX))
 #define MAYBE_MediaGalleriesCopyTo DISABLED_MediaGalleriesCopyTo
 #else
 #define MAYBE_MediaGalleriesCopyTo MediaGalleriesCopyTo
@@ -466,13 +535,13 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
 IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
                        MAYBE_MediaGalleriesCopyTo) {
   RemoveAllGalleries();
-  MakeSingleFakeGallery();
+  MakeSingleFakeGallery(NULL);
   ASSERT_TRUE(RunMediaGalleriesTest("copy_to_access")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
                        MediaGalleriesDelete) {
-  MakeSingleFakeGallery();
+  MakeSingleFakeGallery(NULL);
   base::ListValue custom_args;
   custom_args.AppendInteger(num_galleries() + 1);
   ASSERT_TRUE(RunMediaGalleriesTestWithArg("delete_access", custom_args))
@@ -542,15 +611,7 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, CancelScan) {
   ASSERT_TRUE(RunMediaGalleriesTest("cancel_scan")) << message_;
 }
 
-// The scan result dialog is not implemented on GTK because it is going away
-// soon.
-#if defined (TOOLKIT_GTK)
-#define MAYBE_Scan DISABLED_Scan
-#else
-#define MAYBE_Scan Scan
-#endif  // defined (USE_AURA) || defined(OS_MACOSX)
-
-IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, MAYBE_Scan) {
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, Scan) {
   base::ScopedTempDir scan_root;
   ASSERT_TRUE(scan_root.CreateUniqueTempDir());
   std::vector<base::FilePath> roots;
@@ -559,7 +620,7 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, MAYBE_Scan) {
 
   // Override addScanResults so that the dialog is accepted as soon as it is
   // created.
-  ASSERT_TRUE(ExtensionFunctionDispatcher::OverrideFunction(
+  ASSERT_TRUE(extensions::ExtensionFunctionDispatcher::OverrideFunction(
       "mediaGalleries.addScanResults",
       &TestMediaGalleriesAddScanResultsFunction::Factory));
 
@@ -584,12 +645,26 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, MAYBE_Scan) {
   ASSERT_TRUE(RunMediaGalleriesTest("scan")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, ToURL) {
+  RemoveAllGalleries();
+  MediaGalleryPrefId pref_id;
+  MakeSingleFakeGallery(&pref_id);
+
+  base::ListValue custom_args;
+  custom_args.AppendInteger(base::checked_cast<int>(pref_id));
+  custom_args.AppendString(
+      browser()->profile()->GetPath().BaseName().MaybeAsASCII());
+
+  ASSERT_TRUE(RunMediaGalleriesTestWithArg("tourl", custom_args)) << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest, GetMetadata) {
   RemoveAllGalleries();
-  MakeSingleFakeGallery();
+  MakeSingleFakeGallery(NULL);
 
   AddFileToSingleFakeGallery(media::GetTestDataFilePath("90rotation.mp4"));
   AddFileToSingleFakeGallery(media::GetTestDataFilePath("id3_png_test.mp3"));
+  AddFileToSingleFakeGallery(GetWallpaperTestDataDir().AppendASCII("test.jpg"));
 
   base::ListValue custom_args;
 #if defined(USE_PROPRIETARY_CODECS)

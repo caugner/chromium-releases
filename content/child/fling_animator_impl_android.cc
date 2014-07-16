@@ -53,9 +53,7 @@ void FlingAnimatorImpl::StartFling(const gfx::PointF& velocity) {
                   INT_MAX,
                   INT_MIN,
                   INT_MAX,
-                  gfx::FrameTime::Now());
-  // TODO(jdduke): Initialize the fling at time 0 and use the monotonic
-  // time in |apply()| for updates, crbug.com/345459.
+                  base::TimeTicks());
 }
 
 void FlingAnimatorImpl::CancelFling() {
@@ -66,19 +64,20 @@ void FlingAnimatorImpl::CancelFling() {
   scroller_.AbortAnimation();
 }
 
-bool FlingAnimatorImpl::apply(double /* time */,
+bool FlingAnimatorImpl::apply(double time,
                               blink::WebGestureCurveTarget* target) {
-  // Historically, Android's Scroller used |currentAnimationTimeMillis()|,
-  // which is equivalent to gfx::FrameTime::Now().  In practice, this produces
-  // smoother results than using |time|, so continue using FrameTime::Now().
-  // TODO(jdduke): Use |time| upon resolution of crbug.com/345459.
-  if (!scroller_.ComputeScrollOffset(gfx::FrameTime::Now())) {
+  // If the fling has yet to start, simply return and report true to prevent
+  // fling termination.
+  if (time <= 0)
+    return true;
+
+  const base::TimeTicks time_ticks =
+      base::TimeTicks() + base::TimeDelta::FromMicroseconds(
+                              time * base::Time::kMicrosecondsPerSecond);
+  if (!scroller_.ComputeScrollOffset(time_ticks)) {
     is_active_ = false;
     return false;
   }
-
-  target->notifyCurrentFlingVelocity(blink::WebFloatSize(
-      scroller_.GetCurrVelocityX(), scroller_.GetCurrVelocityY()));
 
   gfx::PointF current_position(scroller_.GetCurrX(), scroller_.GetCurrY());
   gfx::Vector2dF scroll_amount(current_position - last_position_);
@@ -86,8 +85,9 @@ bool FlingAnimatorImpl::apply(double /* time */,
 
   // scrollBy() could delete this curve if the animation is over, so don't touch
   // any member variables after making that call.
-  target->scrollBy(blink::WebFloatSize(scroll_amount));
-  return true;
+  return target->scrollBy(blink::WebFloatSize(scroll_amount),
+                          blink::WebFloatSize(scroller_.GetCurrVelocityX(),
+                                              scroller_.GetCurrVelocityY()));
 }
 
 FlingAnimatorImpl* FlingAnimatorImpl::CreateAndroidGestureCurve(

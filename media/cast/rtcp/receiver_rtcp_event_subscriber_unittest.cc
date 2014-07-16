@@ -75,14 +75,14 @@ class ReceiverRtcpEventSubscriberTest : public ::testing::Test {
         /*max_packet_id*/ 10u, /*size*/ 128u);
 
     // Unrelated events
-    cast_environment_->Logging()->InsertFrameEvent(
-        testing_clock_->NowTicks(), kVideoFrameReceived, /*rtp_timestamp*/ 100u,
-        /*frame_id*/ 1u);
-    cast_environment_->Logging()->InsertFrameEvent(
-        testing_clock_->NowTicks(), kAudioFrameReceived, /*rtp_timestamp*/ 100u,
-        /*frame_id*/ 1u);
-    cast_environment_->Logging()->InsertGenericEvent(testing_clock_->NowTicks(),
-                                                     kRttMs, /*value*/ 100);
+    cast_environment_->Logging()->InsertFrameEvent(testing_clock_->NowTicks(),
+                                                   kVideoFrameCaptureEnd,
+                                                   /*rtp_timestamp*/ 100u,
+                                                   /*frame_id*/ 1u);
+    cast_environment_->Logging()->InsertFrameEvent(testing_clock_->NowTicks(),
+                                                   kAudioFrameCaptureEnd,
+                                                   /*rtp_timestamp*/ 100u,
+                                                   /*frame_id*/ 1u);
   }
 
   base::SimpleTestTickClock* testing_clock_;  // Owned by CastEnvironment.
@@ -95,14 +95,18 @@ TEST_F(ReceiverRtcpEventSubscriberTest, LogVideoEvents) {
   Init(ReceiverRtcpEventSubscriber::kVideoEventSubscriber);
 
   InsertEvents();
-  EXPECT_EQ(3u, event_subscriber_->get_rtcp_events().size());
+  ReceiverRtcpEventSubscriber::RtcpEventMultiMap rtcp_events;
+  event_subscriber_->GetRtcpEventsAndReset(&rtcp_events);
+  EXPECT_EQ(3u, rtcp_events.size());
 }
 
 TEST_F(ReceiverRtcpEventSubscriberTest, LogAudioEvents) {
   Init(ReceiverRtcpEventSubscriber::kAudioEventSubscriber);
 
   InsertEvents();
-  EXPECT_EQ(3u, event_subscriber_->get_rtcp_events().size());
+  ReceiverRtcpEventSubscriber::RtcpEventMultiMap rtcp_events;
+  event_subscriber_->GetRtcpEventsAndReset(&rtcp_events);
+  EXPECT_EQ(3u, rtcp_events.size());
 }
 
 TEST_F(ReceiverRtcpEventSubscriberTest, DropEventsWhenSizeExceeded) {
@@ -113,7 +117,10 @@ TEST_F(ReceiverRtcpEventSubscriberTest, DropEventsWhenSizeExceeded) {
         testing_clock_->NowTicks(), kVideoFrameDecoded,
         /*rtp_timestamp*/ i * 10, /*frame_id*/ i);
   }
-  EXPECT_EQ(10u, event_subscriber_->get_rtcp_events().size());
+
+  ReceiverRtcpEventSubscriber::RtcpEventMultiMap rtcp_events;
+  event_subscriber_->GetRtcpEventsAndReset(&rtcp_events);
+  EXPECT_EQ(10u, rtcp_events.size());
 }
 
 }  // namespace cast

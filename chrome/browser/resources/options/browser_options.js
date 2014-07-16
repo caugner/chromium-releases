@@ -84,22 +84,27 @@ cr.define('options', function() {
 
       window.addEventListener('message', this.handleWindowMessage_.bind(this));
 
-      $('advanced-settings-expander').onclick = function() {
-        self.toggleSectionWithAnimation_(
-            $('advanced-settings'),
-            $('advanced-settings-container'));
+      if (loadTimeData.getBoolean('allowAdvancedSettings')) {
+        $('advanced-settings-expander').onclick = function() {
+          self.toggleSectionWithAnimation_(
+              $('advanced-settings'),
+              $('advanced-settings-container'));
 
-        // If the link was focused (i.e., it was activated using the keyboard)
-        // and it was used to show the section (rather than hiding it), focus
-        // the first element in the container.
-        if (document.activeElement === $('advanced-settings-expander') &&
-                $('advanced-settings').style.height === '') {
-          var focusElement = $('advanced-settings-container').querySelector(
-              'button, input, list, select, a[href]');
-          if (focusElement)
-            focusElement.focus();
-        }
-      };
+          // If the link was focused (i.e., it was activated using the keyboard)
+          // and it was used to show the section (rather than hiding it), focus
+          // the first element in the container.
+          if (document.activeElement === $('advanced-settings-expander') &&
+                  $('advanced-settings').style.height === '') {
+            var focusElement = $('advanced-settings-container').querySelector(
+                'button, input, list, select, a[href]');
+            if (focusElement)
+              focusElement.focus();
+          }
+        };
+      } else {
+        $('advanced-settings-expander').hidden = true;
+        $('advanced-settings').hidden = true;
+      }
 
       $('advanced-settings').addEventListener('webkitTransitionEnd',
           this.updateAdvancedSettingsExpander_.bind(this));
@@ -168,6 +173,8 @@ cr.define('options', function() {
 
       $('change-home-page').onclick = function(event) {
         OptionsPage.navigateToPage('homePageOverlay');
+        chrome.send('coreOptionsUserMetricsAction',
+                    ['Options_Homepage_ShowSettings']);
       };
 
       chrome.send('requestHotwordAvailable');
@@ -175,11 +182,15 @@ cr.define('options', function() {
       if ($('set-wallpaper')) {
         $('set-wallpaper').onclick = function(event) {
           chrome.send('openWallpaperManager');
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_OpenWallpaperManager']);
         };
       }
 
       $('themes-gallery').onclick = function(event) {
         window.open(loadTimeData.getString('themesGalleryURL'));
+        chrome.send('coreOptionsUserMetricsAction',
+                    ['Options_ThemesGallery']);
       };
       $('themes-reset').onclick = function(event) {
         chrome.send('themesReset');
@@ -199,9 +210,13 @@ cr.define('options', function() {
       if (cr.isChromeOS) {
         $('keyboard-settings-button').onclick = function(evt) {
           OptionsPage.navigateToPage('keyboard-overlay');
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_ShowKeyboardSettings']);
         };
         $('pointer-settings-button').onclick = function(evt) {
           OptionsPage.navigateToPage('pointer-overlay');
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_ShowTouchpadSettings']);
         };
       }
 
@@ -285,6 +300,10 @@ cr.define('options', function() {
           };
         }
       }
+
+      // Date and time section (CrOS only).
+      if ($('set-time-button'))
+        $('set-time-button').onclick = this.handleSetTime_.bind(this);
 
       // Default browser section.
       if (!cr.isChromeOS) {
@@ -388,6 +407,15 @@ cr.define('options', function() {
         };
       }
 
+      // Security section.
+      if (cr.isChromeOS &&
+          loadTimeData.getBoolean('consumerManagementEnabled')) {
+        $('security-section').hidden = false;
+        $('consumer-management-enroll-button').onclick = function(event) {
+          chrome.send('enrollConsumerManagement');
+        };
+      }
+
       // Easy Unlock section.
       if (loadTimeData.getBoolean('easyUnlockEnabled')) {
         $('easy-unlock-section').hidden = false;
@@ -428,14 +456,13 @@ cr.define('options', function() {
       $('downloadLocationChangeButton').onclick = function(event) {
         chrome.send('selectDownloadLocation');
       };
-      if (!cr.isChromeOS) {
-        $('autoOpenFileTypesResetToDefault').onclick = function(event) {
-          chrome.send('autoOpenFileTypesAction');
-        };
-      } else {
+      if (cr.isChromeOS) {
         $('disable-drive-row').hidden =
             UIAccountTweaks.loggedInAsLocallyManagedUser();
       }
+      $('autoOpenFileTypesResetToDefault').onclick = function(event) {
+        chrome.send('autoOpenFileTypesAction');
+      };
 
       // HTTPS/SSL section.
       if (cr.isWindows || cr.isMac) {
@@ -450,29 +477,8 @@ cr.define('options', function() {
         };
       }
 
-      // Cloud Print section.
-      // 'cloudPrintProxyEnabled' is true for Chrome branded builds on
-      // certain platforms, or could be enabled by a lab.
-      if (!cr.isChromeOS) {
-        $('cloudPrintConnectorSetupButton').onclick = function(event) {
-          if ($('cloudPrintManageButton').style.display == 'none') {
-            // Disable the button, set its text to the intermediate state.
-            $('cloudPrintConnectorSetupButton').textContent =
-              loadTimeData.getString('cloudPrintConnectorEnablingButton');
-            $('cloudPrintConnectorSetupButton').disabled = true;
-            chrome.send('showCloudPrintSetupDialog');
-          } else {
-            chrome.send('disableCloudPrintConnector');
-          }
-        };
-      }
-      $('cloudPrintManageButton').onclick = function(event) {
-        chrome.send('showCloudPrintManagePage');
-      };
-
       if (loadTimeData.getBoolean('cloudPrintShowMDnsOptions')) {
         $('cloudprint-options-mdns').hidden = false;
-        $('cloudprint-options-nomdns').hidden = true;
         $('cloudPrintDevicesPageButton').onclick = function() {
           chrome.send('showCloudPrintDevicesPage');
         };
@@ -553,11 +559,17 @@ cr.define('options', function() {
 
       // Extension controlled UI.
       this.addExtensionControlledBox_('search-section-content',
-                                      'search-engine-controlled');
+                                      'search-engine-controlled',
+                                      true);
       this.addExtensionControlledBox_('extension-controlled-container',
-                                      'homepage-controlled');
+                                      'homepage-controlled',
+                                      true);
       this.addExtensionControlledBox_('startup-section-content',
-                                      'startpage-controlled');
+                                      'startpage-controlled',
+                                      false);
+      this.addExtensionControlledBox_('newtab-section-content',
+                                      'newtab-controlled',
+                                      false);
 
       document.body.addEventListener('click', function(e) {
         var button = findAncestor(e.target, function(el) {
@@ -715,7 +727,10 @@ cr.define('options', function() {
     scrollToSection_: function(section) {
       var advancedSettings = $('advanced-settings');
       var container = $('advanced-settings-container');
-      if (advancedSettings.hidden && section.parentNode == container) {
+      var expander = $('advanced-settings-expander');
+      if (!expander.hidden &&
+          advancedSettings.hidden &&
+          section.parentNode == container) {
         this.showSection_($('advanced-settings'),
                           $('advanced-settings-container'),
                           /* animate */ false);
@@ -869,8 +884,7 @@ cr.define('options', function() {
       // Disable the "sign in" button if we're currently signing in, or if we're
       // already signed in and signout is not allowed.
       var signInButton = $('start-stop-sync');
-      signInButton.disabled = syncData.setupInProgress ||
-                              !syncData.signoutAllowed;
+      signInButton.disabled = syncData.setupInProgress;
       this.signoutAllowed_ = syncData.signoutAllowed;
       if (!syncData.signoutAllowed)
         $('start-stop-sync-indicator').setAttribute('controlled-by', 'policy');
@@ -921,13 +935,6 @@ cr.define('options', function() {
       customizeSyncButton.disabled =
           syncData.hasUnrecoverableError ||
           (!syncData.setupCompleted && !$('sync-action-link').hidden);
-
-      // Move #enable-auto-login-checkbox to a different location on CrOS.
-      if (cr.isChromeOs) {
-        $('sync-general').insertBefore($('sync-status').nextSibling,
-                                       $('enable-auto-login-checkbox'));
-      }
-      $('enable-auto-login-checkbox').hidden = !syncData.autoLoginVisible;
     },
 
     /**
@@ -1204,7 +1211,8 @@ cr.define('options', function() {
      *         name: "Profile Name",
      *         iconURL: "chrome://path/to/icon/image",
      *         filePath: "/path/to/profile/data/on/disk",
-     *         isCurrentProfile: false
+     *         isCurrentProfile: false,
+     *         isManaged: false
      *       };
      * @private
      */
@@ -1292,6 +1300,15 @@ cr.define('options', function() {
              'There should always be a current profile, but none found.');
     },
 
+    /**
+     * Propmpts user to confirm deletion of the profile for this browser
+     * window.
+     * @private
+     */
+    deleteCurrentProfile_: function() {
+      ManageProfileOverlay.showDeleteDialog(this.getCurrentProfile_());
+    },
+
     setNativeThemeButtonEnabled_: function(enabled) {
       var button = $('themes-native-button');
       if (button)
@@ -1339,7 +1356,7 @@ cr.define('options', function() {
 
       // Create a synthetic pref change event decorated as
       // CoreOptionsHandler::CreateValueForPref() does.
-      var event = new Event('account-picture');
+      var event = new Event('wallpaper');
       if (managed)
         event.value = { controlledBy: 'policy' };
       else
@@ -1466,9 +1483,6 @@ cr.define('options', function() {
      * @private
      */
     setAutoOpenFileTypesDisplayed_: function(display) {
-      if (cr.isChromeOS)
-        return;
-
       if ($('advanced-settings').hidden) {
         // If the Advanced section is hidden, don't animate the transition.
         $('auto-open-file-types-section').hidden = !display;
@@ -1495,37 +1509,6 @@ cr.define('options', function() {
         $('proxiesLabel').textContent =
             loadTimeData.getString(extensionControlled ?
                 'proxiesLabelExtension' : 'proxiesLabelSystem');
-      }
-    },
-
-    /**
-     * Set the Cloud Print proxy UI to enabled, disabled, or processing.
-     * @private
-     */
-    setupCloudPrintConnectorSection_: function(disabled, label, allowed) {
-      if (!cr.isChromeOS) {
-        $('cloudPrintConnectorLabel').textContent = label;
-        if (disabled || !allowed) {
-          $('cloudPrintConnectorSetupButton').textContent =
-            loadTimeData.getString('cloudPrintConnectorDisabledButton');
-          $('cloudPrintManageButton').style.display = 'none';
-        } else {
-          $('cloudPrintConnectorSetupButton').textContent =
-            loadTimeData.getString('cloudPrintConnectorEnabledButton');
-          $('cloudPrintManageButton').style.display = 'inline';
-        }
-        $('cloudPrintConnectorSetupButton').disabled = !allowed;
-      }
-    },
-
-    /**
-     * @private
-     */
-    removeCloudPrintConnectorSection_: function() {
-     if (!cr.isChromeOS) {
-        var connectorSectionElm = $('cloud-print-connector-section');
-        if (connectorSectionElm)
-          connectorSectionElm.parentNode.removeChild(connectorSectionElm);
       }
     },
 
@@ -1566,13 +1549,17 @@ cr.define('options', function() {
      * extensions.
      * @param {string} parentDiv The div name to append the bubble to.
      * @param {string} bubbleId The ID to use for the bubble.
+     * @param {boolean} first Add as first node if true, otherwise last.
      * @private
      */
-    addExtensionControlledBox_: function(parentDiv, bubbleId) {
+    addExtensionControlledBox_: function(parentDiv, bubbleId, first) {
       var bubble = $('extension-controlled-warning-template').cloneNode(true);
       bubble.id = bubbleId;
       var parent = $(parentDiv);
-      parent.insertBefore(bubble, parent.firstChild);
+      if (first)
+        parent.insertBefore(bubble, parent.firstChild);
+      else
+        parent.appendChild(bubble);
     },
 
     /**
@@ -1608,49 +1595,31 @@ cr.define('options', function() {
     },
 
     /**
-     * Toggles the bubble that shows which extension is controlling the search
-     * engine.
-     * @param {string} extensionId The ID of the extension controlling the
-     *     default search engine setting.
-     * @param {string} extensionName The name of the extension.
+     * Toggles the warning boxes that show which extension is controlling
+     * various settings of Chrome.
+     * @param {object} details A dictionary of ID+name pairs for each of the
+     *     settings controlled by an extension.
      * @private
      */
-    toggleSearchEngineControlled_: function(extensionId, extensionName) {
+    toggleExtensionIndicators_: function(details) {
       this.toggleExtensionControlledBox_('search-section-content',
                                          'search-engine-controlled',
-                                         extensionId,
-                                         extensionName);
-    },
-
-    /**
-     * Toggles the bubble that shows which extension is controlling the home
-     * page.
-     * @param {string} extensionId The ID of the extension controlling the
-     *     home page setting.
-     * @param {string} extensionName The name of the extension.
-     * @private
-     */
-    toggleHomepageControlled_: function(extensionId, extensionName) {
+                                         details.searchEngine.id,
+                                         details.searchEngine.name);
       this.toggleExtensionControlledBox_('extension-controlled-container',
                                          'homepage-controlled',
-                                         extensionId,
-                                         extensionName);
-    },
-
-    /**
-     * Toggles the bubble that shows which extension is controlling the startup
-     * pages.
-     * @param {string} extensionId The ID of the extension controlling the
-     *     startup pages setting.
-     * @param {string} extensionName The name of the extension.
-     * @private
-     */
-    toggleStartupPagesControlled_: function(extensionId, extensionName) {
+                                         details.homePage.id,
+                                         details.homePage.name);
       this.toggleExtensionControlledBox_('startup-section-content',
                                          'startpage-controlled',
-                                         extensionId,
-                                         extensionName);
+                                         details.startUpPage.id,
+                                         details.startUpPage.name);
+      this.toggleExtensionControlledBox_('newtab-section-content',
+                                         'newtab-controlled',
+                                         details.newTabPage.id,
+                                         details.newTabPage.name);
     },
+
 
     /**
      * Show/hide touchpad-related settings.
@@ -1768,12 +1737,32 @@ cr.define('options', function() {
           $('profiles-section').hidden &&
           $('sync-section').hidden &&
           $('profiles-supervised-dashboard-tip').hidden;
-    }
+    },
+
+    /**
+     * Updates the date and time section with time sync information.
+     * @param {boolean} canSetTime Whether the system time can be set.
+     * @private
+     */
+    setCanSetTime_: function(canSetTime) {
+      // If the time has been network-synced, it cannot be set manually.
+      $('time-synced-explanation').hidden = canSetTime;
+      $('set-time').hidden = !canSetTime;
+    },
+
+    /**
+     * Handle the 'set date and time' button click.
+     * @private
+     */
+    handleSetTime_: function() {
+      chrome.send('showSetTime');
+    },
   };
 
   //Forward public APIs to private implementations.
   [
     'addBluetoothDevice',
+    'deleteCurrentProfile',
     'enableCertificateButton',
     'enableFactoryResetSection',
     'getCurrentProfile',
@@ -1781,12 +1770,12 @@ cr.define('options', function() {
     'hideBluetoothSettings',
     'notifyInitializationComplete',
     'removeBluetoothDevice',
-    'removeCloudPrintConnectorSection',
     'scrollToSection',
     'setAccountPictureManaged',
     'setWallpaperManaged',
     'setAutoOpenFileTypesDisplayed',
     'setBluetoothState',
+    'setCanSetTime',
     'setFontSize',
     'setNativeThemeButtonEnabled',
     'setHighContrastCheckboxState',
@@ -1796,7 +1785,6 @@ cr.define('options', function() {
     'setSpokenFeedbackCheckboxState',
     'setThemesResetButtonEnabled',
     'setVirtualKeyboardCheckboxState',
-    'setupCloudPrintConnectorSection',
     'setupPageZoomSelector',
     'setupProxySettingsSection',
     'showBluetoothSettings',
@@ -1808,9 +1796,7 @@ cr.define('options', function() {
     'showManagedUserImportSuccess',
     'showMouseControls',
     'showTouchpadControls',
-    'toggleHomepageControlled',
-    'toggleSearchEngineControlled',
-    'toggleStartupPagesControlled',
+    'toggleExtensionIndicators',
     'updateAccountPicture',
     'updateAutoLaunchState',
     'updateDefaultBrowserState',

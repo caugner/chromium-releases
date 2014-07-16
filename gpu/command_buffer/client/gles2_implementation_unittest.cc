@@ -392,22 +392,12 @@ class GLES2ImplementationTest : public testing::Test {
    public:
     TestContext() : commands_(NULL), token_(0) {}
 
-#if defined(OS_CHROMEOS)
     bool Initialize(ShareGroup* share_group,
                     bool bind_generates_resource,
                     bool lose_context_when_out_of_memory) {
-#else
-    void Initialize(ShareGroup* share_group,
-                    bool bind_generates_resource,
-                    bool lose_context_when_out_of_memory) {
-#endif
       command_buffer_.reset(new StrictMock<MockClientCommandBuffer>());
-#if defined(OS_CHROMEOS)
       if (!command_buffer_->Initialize())
         return false;
-#else
-      ASSERT_TRUE(command_buffer_->Initialize());
-#endif
 
       transfer_buffer_.reset(
           new MockTransferBuffer(command_buffer_.get(),
@@ -437,10 +427,8 @@ class GLES2ImplementationTest : public testing::Test {
       int_state.max_vertex_uniform_vectors = kMaxVertexUniformVectors;
       int_state.num_compressed_texture_formats = kNumCompressedTextureFormats;
       int_state.num_shader_binary_formats = kNumShaderBinaryFormats;
-#if defined(OS_CHROMEOS)
       int_state.bind_generates_resource_chromium =
           bind_generates_resource ? 1 : 0;
-#endif
 
       // This just happens to work for now because IntState has 1 GLint per
       // state.
@@ -464,18 +452,12 @@ class GLES2ImplementationTest : public testing::Test {
                                           bind_generates_resource,
                                           lose_context_when_out_of_memory,
                                           gpu_control_.get()));
-#if defined(OS_CHROMEOS)
+
         if (!gl_->Initialize(kTransferBufferSize,
                              kTransferBufferSize,
                              kTransferBufferSize,
                              GLES2Implementation::kNoLimit))
           return false;
-#else
-        ASSERT_TRUE(gl_->Initialize(kTransferBufferSize,
-                                    kTransferBufferSize,
-                                    kTransferBufferSize,
-                                    GLES2Implementation::kNoLimit));
-#endif
       }
 
       EXPECT_CALL(*command_buffer_, OnFlush()).Times(1).RetiresOnSaturation();
@@ -484,14 +466,12 @@ class GLES2ImplementationTest : public testing::Test {
 
       scoped_refptr<Buffer> ring_buffer = helper_->get_ring_buffer();
       commands_ = static_cast<CommandBufferEntry*>(ring_buffer->memory()) +
-                  command_buffer()->GetState().put_offset;
+                  command_buffer()->GetLastState().put_offset;
       ClearCommands();
       EXPECT_TRUE(transfer_buffer_->InSync());
 
       ::testing::Mock::VerifyAndClearExpectations(command_buffer());
-#if defined(OS_CHROMEOS)
       return true;
-#endif
     }
 
     void TearDown() {
@@ -544,16 +524,6 @@ class GLES2ImplementationTest : public testing::Test {
     return gl_->query_tracker_->GetQuery(id);
   }
 
-#if !defined(OS_CHROMEOS)
-  void Initialize(bool bind_generates_resource,
-                  bool lose_context_when_out_of_memory) {
-    share_group_ = new ShareGroup(bind_generates_resource);
-
-    for (int i = 0; i < kNumTestContexts; i++)
-      test_contexts_[i].Initialize(share_group_.get(),
-                                   bind_generates_resource,
-                                   lose_context_when_out_of_memory);
-#else
   struct ContextInitOptions {
     ContextInitOptions()
         : bind_generates_resource_client(true),
@@ -576,7 +546,6 @@ class GLES2ImplementationTest : public testing::Test {
               init_options.lose_context_when_out_of_memory))
         success = false;
     }
-#endif
 
     // Default to test context 0.
     gpu_control_ = test_contexts_[0].gpu_control_.get();
@@ -584,9 +553,7 @@ class GLES2ImplementationTest : public testing::Test {
     transfer_buffer_ = test_contexts_[0].transfer_buffer_.get();
     gl_ = test_contexts_[0].gl_.get();
     commands_ = test_contexts_[0].commands_;
-#if defined(OS_CHROMEOS)
     return success;
-#endif
   }
 
   MockClientCommandBuffer* command_buffer() const {
@@ -631,6 +598,10 @@ class GLES2ImplementationTest : public testing::Test {
     return gl_->GetError();
   }
 
+  const std::string& GetLastError() {
+    return gl_->GetLastError();
+  }
+
   bool GetBucketContents(uint32 bucket_id, std::vector<int8>* data) {
     return gl_->GetBucketContents(bucket_id, data);
   }
@@ -646,14 +617,8 @@ class GLES2ImplementationTest : public testing::Test {
 };
 
 void GLES2ImplementationTest::SetUp() {
-#if defined(OS_CHROMEOS)
   ContextInitOptions init_options;
   ASSERT_TRUE(Initialize(init_options));
-#else
-  bool bind_generates_resource = true;
-  bool lose_context_when_out_of_memory = false;
-  Initialize(bind_generates_resource, lose_context_when_out_of_memory);
-#endif
 }
 
 void GLES2ImplementationTest::TearDown() {
@@ -756,16 +721,10 @@ class GLES2ImplementationStrictSharedTest : public GLES2ImplementationTest {
 };
 
 void GLES2ImplementationStrictSharedTest::SetUp() {
-#if defined(OS_CHROMEOS)
   ContextInitOptions init_options;
   init_options.bind_generates_resource_client = false;
   init_options.bind_generates_resource_service = false;
   ASSERT_TRUE(Initialize(init_options));
-#else
-  bool bind_generates_resource = false;
-  bool lose_context_when_out_of_memory = false;
-  Initialize(bind_generates_resource, lose_context_when_out_of_memory);
-#endif
 }
 
 // GCC requires these declarations, but MSVC requires they not be present
@@ -2763,7 +2722,8 @@ TEST_F(GLES2ImplementationTest, GetString) {
   const char* expected_str =
       "foobar "
       "GL_CHROMIUM_flipy "
-      "GL_EXT_unpack_subimage";
+      "GL_EXT_unpack_subimage "
+      "GL_CHROMIUM_map_sub";
   const char kBad = 0x12;
   struct Cmds {
     cmd::SetBucketSize set_bucket_size1;
@@ -2951,9 +2911,6 @@ TEST_F(GLES2ImplementationTest, BeginEndQueryEXT) {
   EXPECT_TRUE(NoCommandsWritten());
   EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
 
-  // Test BeginQueryEXT fails if id not GENed.
-  // TODO(gman):
-
   // Test BeginQueryEXT inserts command.
   struct BeginCmds {
     cmds::BeginQueryEXT begin_query;
@@ -3041,7 +2998,6 @@ TEST_F(GLES2ImplementationTest, BeginEndQueryEXT) {
   // Test GetQueryObjectuivEXT CheckResultsAvailable
   ClearCommands();
   gl_->GetQueryObjectuivEXT(id1, GL_QUERY_RESULT_AVAILABLE_EXT, &available);
-  EXPECT_TRUE(NoCommandsWritten());
   EXPECT_EQ(0u, available);
 }
 
@@ -3182,25 +3138,121 @@ TEST_F(GLES2ImplementationTest, ProduceTextureCHROMIUM) {
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
+TEST_F(GLES2ImplementationTest, LimitSizeAndOffsetTo32Bit) {
+  GLsizeiptr size;
+  GLintptr offset;
+  if (sizeof(size) <= 4 || sizeof(offset) <= 4)
+    return;
+  // The below two casts should be no-op, as we return early if
+  // it's 32-bit system.
+  int64 value64 = 0x100000000;
+  size = static_cast<GLsizeiptr>(value64);
+  offset = static_cast<GLintptr>(value64);
+
+  const char kSizeOverflowMessage[] = "size more than 32-bit";
+  const char kOffsetOverflowMessage[] = "offset more than 32-bit";
+
+  const GLfloat buf[] = { 1.0, 1.0, 1.0, 1.0 };
+  const GLubyte indices[] = { 0 };
+
+  const GLuint kClientArrayBufferId = 0x789;
+  const GLuint kClientElementArrayBufferId = 0x790;
+  gl_->BindBuffer(GL_ARRAY_BUFFER, kClientArrayBufferId);
+  gl_->BindBuffer(GL_ELEMENT_ARRAY_BUFFER, kClientElementArrayBufferId);
+  EXPECT_EQ(GL_NO_ERROR, CheckError());
+
+  // Call BufferData() should succeed with legal paramaters.
+  gl_->BufferData(GL_ARRAY_BUFFER, sizeof(buf), buf, GL_DYNAMIC_DRAW);
+  gl_->BufferData(
+      GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW);
+  EXPECT_EQ(GL_NO_ERROR, CheckError());
+
+  // BufferData: size
+  gl_->BufferData(GL_ARRAY_BUFFER, size, buf, GL_DYNAMIC_DRAW);
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+  EXPECT_STREQ(kSizeOverflowMessage, GetLastError().c_str());
+
+  // Call BufferSubData() should succeed with legal paramaters.
+  gl_->BufferSubData(GL_ARRAY_BUFFER, 0, sizeof(buf[0]), buf);
+  EXPECT_EQ(GL_NO_ERROR, CheckError());
+
+  // BufferSubData: offset
+  gl_->BufferSubData(GL_ARRAY_BUFFER, offset, 1, buf);
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+  EXPECT_STREQ(kOffsetOverflowMessage, GetLastError().c_str());
+
+  // BufferSubData: size
+  EXPECT_EQ(GL_NO_ERROR, CheckError());
+  gl_->BufferSubData(GL_ARRAY_BUFFER, 0, size, buf);
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+  EXPECT_STREQ(kSizeOverflowMessage, GetLastError().c_str());
+
+  // Call MapBufferSubDataCHROMIUM() should succeed with legal paramaters.
+  EXPECT_TRUE(NULL != gl_->MapBufferSubDataCHROMIUM(
+      GL_ARRAY_BUFFER, 0, 1, GL_WRITE_ONLY));
+  EXPECT_EQ(GL_NO_ERROR, CheckError());
+
+  // MapBufferSubDataCHROMIUM: offset
+  EXPECT_TRUE(NULL == gl_->MapBufferSubDataCHROMIUM(
+      GL_ARRAY_BUFFER, offset, 1, GL_WRITE_ONLY));
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+  EXPECT_STREQ(kOffsetOverflowMessage, GetLastError().c_str());
+
+  // MapBufferSubDataCHROMIUM: size
+  EXPECT_EQ(GL_NO_ERROR, CheckError());
+  EXPECT_TRUE(NULL == gl_->MapBufferSubDataCHROMIUM(
+      GL_ARRAY_BUFFER, 0, size, GL_WRITE_ONLY));
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+  EXPECT_STREQ(kSizeOverflowMessage, GetLastError().c_str());
+
+  // Call DrawElements() should succeed with legal paramaters.
+  gl_->DrawElements(GL_POINTS, 1, GL_UNSIGNED_BYTE, NULL);
+  EXPECT_EQ(GL_NO_ERROR, CheckError());
+
+  // DrawElements: offset
+  gl_->DrawElements(
+      GL_POINTS, 1, GL_UNSIGNED_BYTE, reinterpret_cast<void*>(offset));
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+  EXPECT_STREQ(kOffsetOverflowMessage, GetLastError().c_str());
+
+  // Call DrawElementsInstancedANGLE() should succeed with legal paramaters.
+  gl_->DrawElementsInstancedANGLE(GL_POINTS, 1, GL_UNSIGNED_BYTE, NULL, 1);
+  EXPECT_EQ(GL_NO_ERROR, CheckError());
+
+  // DrawElementsInstancedANGLE: offset
+  gl_->DrawElementsInstancedANGLE(
+      GL_POINTS, 1, GL_UNSIGNED_BYTE, reinterpret_cast<void*>(offset), 1);
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+  EXPECT_STREQ(kOffsetOverflowMessage, GetLastError().c_str());
+
+  // Call VertexAttribPointer() should succeed with legal paramaters.
+  const GLuint kAttribIndex = 1;
+  const GLsizei kStride = 4;
+  gl_->VertexAttribPointer(
+      kAttribIndex, 1, GL_FLOAT, GL_FALSE, kStride, NULL);
+  EXPECT_EQ(GL_NO_ERROR, CheckError());
+
+  // VertexAttribPointer: offset
+  gl_->VertexAttribPointer(
+      kAttribIndex, 1, GL_FLOAT, GL_FALSE, kStride,
+      reinterpret_cast<void*>(offset));
+  EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
+  EXPECT_STREQ(kOffsetOverflowMessage, GetLastError().c_str());
+}
+
 TEST_F(GLES2ImplementationManualInitTest, LoseContextOnOOM) {
-#if defined(OS_CHROMEOS)
   ContextInitOptions init_options;
   init_options.lose_context_when_out_of_memory = true;
   ASSERT_TRUE(Initialize(init_options));
-#else
-  bool bind_generates_resource = false;
-  bool lose_context_when_out_of_memory = true;
-  Initialize(bind_generates_resource, lose_context_when_out_of_memory);
-#endif
 
   struct Cmds {
     cmds::LoseContextCHROMIUM cmd;
   };
 
   GLsizei max = std::numeric_limits<GLsizei>::max();
-  EXPECT_CALL(*gpu_control_, CreateGpuMemoryBuffer(max, max, _, _))
+  EXPECT_CALL(*gpu_control_, CreateGpuMemoryBuffer(max, max, _, _, _))
       .WillOnce(Return(static_cast<gfx::GpuMemoryBuffer*>(NULL)));
-  gl_->CreateImageCHROMIUM(max, max, 0);
+  gl_->CreateImageCHROMIUM(max, max, 0, GL_IMAGE_MAP_CHROMIUM);
   // The context should be lost.
   Cmds expected;
   expected.cmd.Init(GL_GUILTY_CONTEXT_RESET_ARB, GL_UNKNOWN_CONTEXT_RESET_ARB);
@@ -3208,27 +3260,21 @@ TEST_F(GLES2ImplementationManualInitTest, LoseContextOnOOM) {
 }
 
 TEST_F(GLES2ImplementationManualInitTest, NoLoseContextOnOOM) {
-#if defined(OS_CHROMEOS)
   ContextInitOptions init_options;
   ASSERT_TRUE(Initialize(init_options));
-#else
-  bool bind_generates_resource = false;
-  bool lose_context_when_out_of_memory = false;
-  Initialize(bind_generates_resource, lose_context_when_out_of_memory);
-#endif
+
   struct Cmds {
     cmds::LoseContextCHROMIUM cmd;
   };
 
   GLsizei max = std::numeric_limits<GLsizei>::max();
-  EXPECT_CALL(*gpu_control_, CreateGpuMemoryBuffer(max, max, _, _))
+  EXPECT_CALL(*gpu_control_, CreateGpuMemoryBuffer(max, max, _, _, _))
       .WillOnce(Return(static_cast<gfx::GpuMemoryBuffer*>(NULL)));
-  gl_->CreateImageCHROMIUM(max, max, 0);
+  gl_->CreateImageCHROMIUM(max, max, 0, GL_IMAGE_MAP_CHROMIUM);
   // The context should not be lost.
   EXPECT_TRUE(NoCommandsWritten());
 }
 
-#if defined(OS_CHROMEOS)
 TEST_F(GLES2ImplementationManualInitTest, FailInitOnBGRMismatch1) {
   ContextInitOptions init_options;
   init_options.bind_generates_resource_client = false;
@@ -3242,7 +3288,6 @@ TEST_F(GLES2ImplementationManualInitTest, FailInitOnBGRMismatch2) {
   init_options.bind_generates_resource_service = false;
   EXPECT_FALSE(Initialize(init_options));
 }
-#endif
 
 #include "gpu/command_buffer/client/gles2_implementation_unittest_autogen.h"
 

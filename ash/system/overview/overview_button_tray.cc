@@ -6,6 +6,7 @@
 
 #include "ash/shelf/shelf_types.h"
 #include "ash/shell.h"
+#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_utils.h"
 #include "ash/wm/overview/window_selector_controller.h"
 #include "grit/ash_resources.h"
@@ -28,10 +29,8 @@ const int kVerticalShelfVerticalPadding = 5;
 
 namespace ash {
 
-OverviewButtonTray::OverviewButtonTray(
-    internal::StatusAreaWidget* status_area_widget)
-    : TrayBackgroundView(status_area_widget),
-      icon_(NULL) {
+OverviewButtonTray::OverviewButtonTray(StatusAreaWidget* status_area_widget)
+    : TrayBackgroundView(status_area_widget), icon_(NULL) {
   SetContentsBackground();
 
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
@@ -41,7 +40,8 @@ OverviewButtonTray::OverviewButtonTray(
   SetIconBorderForShelfAlignment();
   tray_container()->AddChildView(icon_);
 
-  SetVisible(Shell::GetInstance()->IsMaximizeModeWindowManagerEnabled());
+  UpdateIconVisibility(Shell::GetInstance()->
+      IsMaximizeModeWindowManagerEnabled());
 
   Shell::GetInstance()->AddShellObserver(this);
 }
@@ -50,17 +50,25 @@ OverviewButtonTray::~OverviewButtonTray() {
   Shell::GetInstance()->RemoveShellObserver(this);
 }
 
+void OverviewButtonTray::UpdateAfterLoginStatusChange(
+    user::LoginStatus status) {
+  UpdateIconVisibility(Shell::GetInstance()->
+      IsMaximizeModeWindowManagerEnabled());
+}
+
 bool OverviewButtonTray::PerformAction(const ui::Event& event) {
   Shell::GetInstance()->window_selector_controller()->ToggleOverview();
   return true;
 }
 
 void OverviewButtonTray::OnMaximizeModeStarted() {
-  SetVisible(true);
+  // TODO(flackr): once maximize mode has been refactored remove this so that
+  // UpdateIconVisibility polls Shell for the status directly
+  UpdateIconVisibility(/* maximize_mode_enabled */ true);
 }
 
 void OverviewButtonTray::OnMaximizeModeEnded() {
-  SetVisible(false);
+  UpdateIconVisibility(/* maximize_mode_enabled */ false);
 }
 
 bool OverviewButtonTray::ClickedOutsideBubble() {
@@ -101,6 +109,11 @@ void OverviewButtonTray::SetIconBorderForShelfAlignment() {
         kVerticalShelfVerticalPadding,
         kVerticalShelfHorizontalPadding));
   }
+}
+
+void OverviewButtonTray::UpdateIconVisibility(bool maximize_mode_enabled) {
+  SetVisible(maximize_mode_enabled &&
+             Shell::GetInstance()->window_selector_controller()->CanSelect());
 }
 
 }  // namespace ash

@@ -8,7 +8,9 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/info_map.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/extension_messages.h"
 #include "ipc/ipc_message_macros.h"
@@ -22,8 +24,10 @@ ExtensionMessageFilter::ExtensionMessageFilter(int render_process_id,
                                                content::BrowserContext* context)
     : BrowserMessageFilter(ExtensionMsgStart),
       render_process_id_(render_process_id),
-      browser_context_(context) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+      browser_context_(context),
+      extension_info_map_(ExtensionSystem::Get(context)->info_map()),
+      weak_ptr_factory_(this) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 ExtensionMessageFilter::~ExtensionMessageFilter() {}
@@ -71,6 +75,8 @@ bool ExtensionMessageFilter::OnMessageReceived(const IPC::Message& message,
                         OnExtensionGenerateUniqueID)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_ResumeRequests,
                         OnExtensionResumeRequests);
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_RequestForIOThread,
+                        OnExtensionRequestForIOThread)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -82,7 +88,7 @@ void ExtensionMessageFilter::OnExtensionAddListener(
   RenderProcessHost* process = RenderProcessHost::FromID(render_process_id_);
   if (!process)
     return;
-  EventRouter* router = ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* router = EventRouter::Get(browser_context_);
   if (!router)
     return;
   router->AddEventListener(event_name, process, extension_id);
@@ -94,7 +100,7 @@ void ExtensionMessageFilter::OnExtensionRemoveListener(
   RenderProcessHost* process = RenderProcessHost::FromID(render_process_id_);
   if (!process)
     return;
-  EventRouter* router = ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* router = EventRouter::Get(browser_context_);
   if (!router)
     return;
   router->RemoveEventListener(event_name, process, extension_id);
@@ -102,7 +108,7 @@ void ExtensionMessageFilter::OnExtensionRemoveListener(
 
 void ExtensionMessageFilter::OnExtensionAddLazyListener(
     const std::string& extension_id, const std::string& event_name) {
-  EventRouter* router = ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* router = EventRouter::Get(browser_context_);
   if (!router)
     return;
   router->AddLazyEventListener(event_name, extension_id);
@@ -110,7 +116,7 @@ void ExtensionMessageFilter::OnExtensionAddLazyListener(
 
 void ExtensionMessageFilter::OnExtensionRemoveLazyListener(
     const std::string& extension_id, const std::string& event_name) {
-  EventRouter* router = ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* router = EventRouter::Get(browser_context_);
   if (!router)
     return;
   router->RemoveLazyEventListener(event_name, extension_id);
@@ -124,7 +130,7 @@ void ExtensionMessageFilter::OnExtensionAddFilteredListener(
   RenderProcessHost* process = RenderProcessHost::FromID(render_process_id_);
   if (!process)
     return;
-  EventRouter* router = ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* router = EventRouter::Get(browser_context_);
   if (!router)
     return;
   router->AddFilteredEventListener(
@@ -139,7 +145,7 @@ void ExtensionMessageFilter::OnExtensionRemoveFilteredListener(
   RenderProcessHost* process = RenderProcessHost::FromID(render_process_id_);
   if (!process)
     return;
-  EventRouter* router = ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* router = EventRouter::Get(browser_context_);
   if (!router)
     return;
   router->RemoveFilteredEventListener(
@@ -170,6 +176,19 @@ void ExtensionMessageFilter::OnExtensionGenerateUniqueID(int* unique_id) {
 void ExtensionMessageFilter::OnExtensionResumeRequests(int route_id) {
   content::ResourceDispatcherHost::Get()->ResumeBlockedRequestsForRoute(
       render_process_id_, route_id);
+}
+
+void ExtensionMessageFilter::OnExtensionRequestForIOThread(
+    int routing_id,
+    const ExtensionHostMsg_Request_Params& params) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  ExtensionFunctionDispatcher::DispatchOnIOThread(
+      extension_info_map_.get(),
+      browser_context_,
+      render_process_id_,
+      weak_ptr_factory_.GetWeakPtr(),
+      routing_id,
+      params);
 }
 
 }  // namespace extensions

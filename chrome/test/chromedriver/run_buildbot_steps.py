@@ -76,7 +76,9 @@ def _DownloadPrebuilts():
   util.MarkBuildStepStart('Download latest chromedriver')
 
   zip_path = os.path.join(util.MakeTempDir(), 'build.zip')
-  if gsutil_download.DownloadLatestFile(GS_PREBUILTS_URL, 'r', zip_path):
+  if gsutil_download.DownloadLatestFile(GS_PREBUILTS_URL,
+                                        GS_PREBUILTS_URL + '/r',
+                                        zip_path):
     util.MarkBuildStepError()
 
   util.Unzip(zip_path, chrome_paths.GetBuildDir(['host_forwarder']))
@@ -272,8 +274,18 @@ def _Release(build, version, platform):
   """Releases the given candidate build."""
   release_name = 'chromedriver_%s.zip' % platform
   util.MarkBuildStepStart('releasing %s' % release_name)
+  temp_dir = util.MakeTempDir()
+  slave_utils.GSUtilCopy(build, temp_dir)
+  zip_path = os.path.join(temp_dir, os.path.basename(build))
+
+  if util.IsLinux():
+    util.Unzip(zip_path, temp_dir)
+    server_path = os.path.join(temp_dir, 'chromedriver')
+    util.RunCommand(['strip', server_path])
+    zip_path = util.Zip(server_path)
+
   slave_utils.GSUtilCopy(
-      build, '%s/%s/%s' % (GS_CHROMEDRIVER_BUCKET, version, release_name))
+      zip_path, '%s/%s/%s' % (GS_CHROMEDRIVER_BUCKET, version, release_name))
 
   _MaybeUploadReleaseNotes(version)
   _MaybeUpdateLatestRelease(version)

@@ -20,6 +20,10 @@ namespace content {
 class DownloadManager;
 }
 
+namespace extensions {
+class ExtensionDownloadsEventRouter;
+}
+
 // Owning class for ChromeDownloadManagerDelegate.
 class DownloadService : public KeyedService {
  public:
@@ -35,7 +39,7 @@ class DownloadService : public KeyedService {
   DownloadHistory* GetDownloadHistory();
 
 #if !defined(OS_ANDROID)
-  ExtensionDownloadsEventRouter* GetExtensionEventRouter() {
+  extensions::ExtensionDownloadsEventRouter* GetExtensionEventRouter() {
     return extension_event_router_.get();
   }
 #endif
@@ -47,10 +51,13 @@ class DownloadService : public KeyedService {
   // service.
   int NonMaliciousDownloadCount() const;
 
+  // Cancels all in-progress downloads for this profile.
+  void CancelDownloads();
+
   // Number of non-malicious downloads associated with all profiles.
   static int NonMaliciousDownloadCountAllProfiles();
 
-  // Cancels all in-progress downloads.
+  // Cancels all in-progress downloads for all profiles.
   static void CancelAllDownloads();
 
   // Sets the DownloadManagerDelegate associated with this object and
@@ -94,7 +101,7 @@ class DownloadService : public KeyedService {
   // should be a separate EDER for on-record and off-record managers.
   // There does not appear to be a separate ExtensionSystem for on-record and
   // off-record profiles, so ExtensionSystem cannot own the EDER.
-  scoped_ptr<ExtensionDownloadsEventRouter> extension_event_router_;
+  scoped_ptr<extensions::ExtensionDownloadsEventRouter> extension_event_router_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(DownloadService);

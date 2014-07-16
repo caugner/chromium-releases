@@ -7,10 +7,10 @@
 
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
 #include "ui/base/ui_base_types.h"
 
 class Browser;
@@ -106,7 +106,7 @@ class BrowserWindowCocoa :
       const WebApplicationInfo& web_app_info,
       const std::string& extension_id) OVERRIDE;
   virtual void ShowTranslateBubble(content::WebContents* contents,
-                                   TranslateTabHelper::TranslateStep step,
+                                   translate::TranslateStep step,
                                    TranslateErrors::Type error_type) OVERRIDE;
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   virtual void ShowOneClickSigninBubble(

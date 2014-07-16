@@ -42,9 +42,9 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "sync/protocol/session_specifics.pb.h"
 
@@ -214,12 +214,57 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoredTabsShouldHaveRootWindow) {
   // Check the restored tabs have a root window.
   for (int i = 0; i < tabs; ++i) {
     content::WebContents* contents = tab_strip_model->GetWebContentsAt(i);
-    gfx::NativeView window = contents->GetView()->GetNativeView();
+    gfx::NativeView window = contents->GetNativeView();
     bool tab_has_root_window = !!window->GetRootWindow();
     EXPECT_TRUE(tab_has_root_window);
   }
 }
 #endif  // USE_AURA
+
+// Verify that restored tabs have correct disposition. Only one tab should
+// have "visible" visibility state, the rest should not.
+// (http://crbug.com/155365 http://crbug.com/118269)
+IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
+    RestoredTabsHaveCorrectVisibilityState) {
+  // Create tabs.
+  GURL test_page(ui_test_utils::GetTestUrl(base::FilePath(),
+      base::FilePath(FILE_PATH_LITERAL("tab-restore-visibilty.html"))));
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), test_page, NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), test_page, NEW_BACKGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+
+  // Restart and session restore the tabs.
+  content::DOMMessageQueue message_queue;
+  Browser* restored = QuitBrowserAndRestore(browser(), 3);
+  for (int i = 0; i < 2; ++i) {
+    std::string message;
+    EXPECT_TRUE(message_queue.WaitForMessage(&message));
+    EXPECT_EQ("\"READY\"", message);
+  }
+
+  // There should be 3 restored tabs in the new browser.
+  TabStripModel* tab_strip_model = restored->tab_strip_model();
+  const int tabs = tab_strip_model->count();
+  ASSERT_EQ(3, tabs);
+
+  // The middle tab only should have visible disposition.
+  for (int i = 0; i < tabs; ++i) {
+    content::WebContents* contents = tab_strip_model->GetWebContentsAt(i);
+    std::string document_visibility_state;
+    const char kGetStateJS[] = "window.domAutomationController.send("
+        "window.document.visibilityState);";
+    EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+        contents, kGetStateJS, &document_visibility_state));
+    if (i == 1) {
+      EXPECT_EQ("visible", document_visibility_state);
+    } else {
+      EXPECT_EQ("hidden", document_visibility_state);
+    }
+  }
+}
 
 #if defined(OS_CHROMEOS)
 // Verify that session restore does not occur when a user opens a browser window
@@ -299,9 +344,6 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, MaximizedApps) {
 // up with an extra tab.
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
                        MAYBE_RestoreOnNewWindowWithNoTabbedBrowsers) {
-  if (browser_defaults::kRestorePopups)
-    return;
-
   const base::FilePath::CharType* kTitle1File =
       FILE_PATH_LITERAL("title1.html");
   GURL url(ui_test_utils::GetTestUrl(base::FilePath(
@@ -628,6 +670,11 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreForeignSession) {
   }
   window.tabs.push_back(&tab2);
 
+  // Leave tab3 empty. Should have no effect on restored session, but simulates
+  // partially complete foreign session data.
+  SessionTab tab3;
+  window.tabs.push_back(&tab3);
+
   session.push_back(static_cast<const SessionWindow*>(&window));
   ui_test_utils::BrowserAddedObserver window_observer;
   std::vector<Browser*> browsers =
@@ -854,51 +901,6 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, ActiveIndexUpdatedAtInsert) {
   ASSERT_EQ(new_browser->tab_strip_model()->active_index(), 1);
 }
 
-// Creates a tabbed browser and popup and makes sure we restore both.
-IN_PROC_BROWSER_TEST_F(SessionRestoreTest, NormalAndPopup) {
-  if (!browser_defaults::kRestorePopups)
-    return;  // Test only applicable if restoring popups.
-
-  ui_test_utils::NavigateToURL(browser(), url1_);
-
-  // Make sure we have one window.
-  AssertOneWindowWithOneTab(browser());
-
-  // Open a popup.
-  Browser* popup = new Browser(
-      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile(),
-                            browser()->host_desktop_type()));
-  popup->window()->Show();
-  ASSERT_EQ(2u, active_browser_list_->size());
-
-  ui_test_utils::NavigateToURL(popup, url1_);
-
-  // Simulate an exit by shuting down the session service. If we don't do this
-  // the first window close is treated as though the user closed the window
-  // and won't be restored.
-  SessionServiceFactory::ShutdownForProfile(browser()->profile());
-
-  // Restart and make sure we have two windows.
-  QuitBrowserAndRestore(browser(), 1);
-
-  ASSERT_EQ(2u, active_browser_list_->size());
-
-  Browser* browser1 = active_browser_list_->get(0);
-  Browser* browser2 = active_browser_list_->get(1);
-
-  Browser::Type type1 = browser1->type();
-  Browser::Type type2 = browser2->type();
-
-  // The order of whether the normal window or popup is first depends upon
-  // activation order, which is not necessarily consistant across runs.
-  if (type1 == Browser::TYPE_TABBED) {
-    EXPECT_EQ(type2, Browser::TYPE_POPUP);
-  } else {
-    EXPECT_EQ(type1, Browser::TYPE_POPUP);
-    EXPECT_EQ(type2, Browser::TYPE_TABBED);
-  }
-}
-
 #if !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
 // This test doesn't apply to the Mac version; see GetCommandLineForRelaunch
 // for details. It was disabled for a long time so might never have worked on
@@ -923,7 +925,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
 
   ui_test_utils::BrowserAddedObserver window_observer;
 
-  base::LaunchProcess(app_launch_arguments, base::LaunchOptions(), NULL);
+  base::LaunchProcess(app_launch_arguments, base::LaunchOptionsForTest(), NULL);
 
   Browser* app_window = window_observer.WaitForSingleNewBrowser();
   ASSERT_EQ(2u, active_browser_list_->size());

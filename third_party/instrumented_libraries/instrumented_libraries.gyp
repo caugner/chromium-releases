@@ -4,10 +4,10 @@
 
 {
   # Default value for all libraries.
-  'custom_configure_flags': '',
-  'custom_c_compiler_flags': '',
-  'custom_cxx_compiler_flags': '',
-  'custom_linker_flags': '',
+  'extra_configure_flags': '',
+  'extra_cflags': '',
+  'extra_cxxflags': '',
+  'extra_ldflags': '',
   'run_before_build': '',
   'build_method': 'destdir',
 
@@ -21,17 +21,15 @@
   'conditions': [
     ['asan==1', {
       'sanitizer_type': 'asan',
+      'sanitizer_blacklist': '',
     }],
     ['msan==1', {
       'sanitizer_type': 'msan',
+      'sanitizer_blacklist': '<(msan_blacklist)',
     }],
     ['tsan==1', {
       'sanitizer_type': 'tsan',
-    }],
-    ['verbose_libraries_build==1', {
-      'verbose_libraries_build_flag': '--verbose',
-    }, {
-      'verbose_libraries_build_flag': '',
+      'sanitizer_blacklist': '<(tsan_blacklist)',
     }],
     ['use_goma==1', {
       'cc': '<(gomadir)/gomacc <!(cd <(DEPTH) && pwd -P)/<(make_clang_dir)/bin/clang',
@@ -87,6 +85,11 @@
         '<(_sanitizer_type)-libcap2',
         '<(_sanitizer_type)-libudev0',
         '<(_sanitizer_type)-libtasn1-3',
+        '<(_sanitizer_type)-libgnome-keyring0',
+        '<(_sanitizer_type)-libgtk2.0-0',
+        '<(_sanitizer_type)-libgdk-pixbuf2.0-0',
+        '<(_sanitizer_type)-libpci3',
+        '<(_sanitizer_type)-libdbusmenu-glib4',
       ],
       'conditions': [
         ['asan==1', {
@@ -115,18 +118,28 @@
           ],
         },
       ],
+      'direct_dependent_settings': {
+        'target_conditions': [
+          ['_toolset=="target"', {
+            'ldflags': [
+              # Add RPATH to result binary to make it linking instrumented libraries ($ORIGIN means relative RPATH)
+              '-Wl,-R,\$$ORIGIN/instrumented_libraries/<(_sanitizer_type)/lib/:\$$ORIGIN/instrumented_libraries/<(_sanitizer_type)/usr/lib/x86_64-linux-gnu/',
+              '-Wl,-z,origin',
+            ],
+          }],
+        ],
+      },
     },
     {
       'library_name': 'freetype',
       'dependencies=': [],
-      'custom_configure_flags': '',
       'run_before_build': 'freetype.sh',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
       'library_name': 'libcairo2',
       'dependencies=': [],
-      'custom_configure_flags': '--disable-gtk-doc',
+      'extra_configure_flags': '--disable-gtk-doc',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -141,7 +154,9 @@
       'dependencies=': [
         '<(_sanitizer_type)-libglib2.0-0',
       ],
-      'build_method': 'prefix',
+      # Use system dbus-binding-tool. The just-built one is instrumented but
+      # doesn't have the correct RPATH, and will crash.
+      'extra_configure_flags': '--with-dbus-binding-tool=dbus-binding-tool',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -159,26 +174,25 @@
       'dependencies=': [
         '<(_sanitizer_type)-freetype',
       ],
-      'custom_configure_flags': [
+      'extra_configure_flags': [
         '--disable-docs',
         '--sysconfdir=/etc/',
         # From debian/rules.
         '--with-add-fonts=/usr/X11R6/lib/X11/fonts,/usr/local/share/fonts',
       ],
       'run_before_build': 'libfontconfig.sh',
-      'destdir_build': 1,
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
       'library_name': 'libgcrypt11',
       'dependencies=': [],
-      'custom_linker_flags': '-Wl,-z,muldefs',
+      'extra_ldflags': '-Wl,-z,muldefs',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
       'library_name': 'libglib2.0-0',
       'dependencies=': [],
-      'custom_configure_flags': [
+      'extra_configure_flags': [
         '--disable-gtk-doc',
         '--disable-gtk-doc-html',
         '--disable-gtk-doc-pdf',
@@ -193,7 +207,7 @@
     {
       'library_name': 'libnspr4',
       'dependencies=': [],
-      'custom_configure_flags': '--enable-64bit',
+      'extra_configure_flags': '--enable-64bit',
       'run_before_build': 'libnspr4.sh',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
@@ -205,7 +219,7 @@
     {
       'library_name': 'libpcre3',
       'dependencies=': [],
-      'custom_configure_flags': [
+      'extra_configure_flags': [
         '--enable-utf8',
         '--enable-unicode-properties',
       ],
@@ -226,7 +240,7 @@
     {
       'library_name': 'libx11-6',
       'dependencies=': [],
-      'custom_configure_flags': '--disable-specs',
+      'extra_configure_flags': '--disable-specs',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -237,7 +251,7 @@
     {
       'library_name': 'libxcb1',
       'dependencies=': [],
-      'custom_configure_flags': '--disable-build-docs',
+      'extra_configure_flags': '--disable-build-docs',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -258,13 +272,13 @@
     {
       'library_name': 'libxdmcp6',
       'dependencies=': [],
-      'custom_configure_flags': '--disable-docs',
+      'extra_configure_flags': '--disable-docs',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
       'library_name': 'libxext6',
       'dependencies=': [],
-      'custom_configure_flags': '--disable-specs',
+      'extra_configure_flags': '--disable-specs',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -275,7 +289,7 @@
     {
       'library_name': 'libxi6',
       'dependencies=': [],
-      'custom_configure_flags': [
+      'extra_configure_flags': [
         '--disable-specs',
         '--disable-docs',
       ],
@@ -304,7 +318,7 @@
     {
       'library_name': 'libxtst6',
       'dependencies=': [],
-      'custom_configure_flags': '--disable-specs',
+      'extra_configure_flags': '--disable-specs',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -341,16 +355,31 @@
       'dependencies=': [],
       'run_before_build': 'libcups2.sh',
       'jobs': 1,
-      'custom_configure_flags': [
-        # Do not touch system-wide directories.
-        '--with-rcdir=no',
-        '--with-xinetd=no',
-        '--with-dbusdir=no',
-        '--with-menudir=no',
-        '--with-icondir=no',
-        '--with-docdir=no'
+      'extra_configure_flags': [
+        # All from debian/rules.
+        '--localedir=/usr/share/cups/locale',
+        '--enable-slp',
+        '--enable-libpaper',
+        '--enable-ssl',
+        '--enable-gnutls',
+        '--disable-openssl',
+        '--enable-threads',
+        '--enable-static',
+        '--enable-debug',
+        '--enable-dbus',
+        '--with-dbusdir=/etc/dbus-1',
+        '--enable-gssapi',
+        '--enable-avahi',
+        '--with-pdftops=/usr/bin/gs',
+        '--disable-launchd',
+        '--with-cups-group=lp',
+        '--with-system-groups=lpadmin',
+        '--with-printcap=/var/run/cups/printcap',
+        '--with-log-file-perm=0640',
+        '--with-local_protocols="CUPS dnssd"',
+        '--with-remote_protocols="CUPS dnssd"',
+        '--enable-libusb',
       ],
-      'build_method': 'prefix',
       'includes': ['standard_instrumented_library_target.gypi'],
     },
     {
@@ -358,7 +387,7 @@
       'dependencies=': [
         '<(_sanitizer_type)-libglib2.0-0',
       ],
-      'custom_configure_flags': [
+      'extra_configure_flags': [
         # Avoid https://bugs.gentoo.org/show_bug.cgi?id=425620
         '--enable-introspection=no',
       ],
@@ -374,7 +403,7 @@
     {
       'library_name': 'libudev0',
       'dependencies=': [],
-      'custom_configure_flags': [
+      'extra_configure_flags': [
           # Without this flag there's a linking step that doesn't honor LDFLAGS
           # and fails.
           # TODO(earthdok): find a better fix.
@@ -384,6 +413,67 @@
     },
     {
       'library_name': 'libtasn1-3',
+      'dependencies=': [],
+      'includes': ['standard_instrumented_library_target.gypi'],
+    },
+    {
+      'library_name': 'libgnome-keyring0',
+      'extra_configure_flags': [
+          # Build static libs (from debian/rules).
+          '--enable-static',
+          '--enable-tests=no',
+      ],
+      'extra_ldflags': '-Wl,--as-needed',
+      'dependencies=': [],
+      'includes': ['standard_instrumented_library_target.gypi'],
+    },
+    {
+      'library_name': 'libgtk2.0-0',
+      'extra_cflags': '-Wno-return-type',
+      'extra_configure_flags': [
+          # From debian/rules.
+          '--prefix=/usr',
+          '--sysconfdir=/etc',
+          '--enable-test-print-backend',
+          '--enable-introspection=no',
+          '--with-xinput=yes',
+      ],
+      'dependencies=': [],
+      'run_before_build': 'libgtk2.0-0.sh',
+      'includes': ['standard_instrumented_library_target.gypi'],
+    },
+    {
+      'library_name': 'libgdk-pixbuf2.0-0',
+      'extra_configure_flags': [
+          # From debian/rules.
+          '--with-libjasper',
+          '--with-x11',
+          # Make the build less problematic.
+          '--disable-introspection',
+      ],
+      'dependencies=': [],
+      'run_before_build': 'libgdk-pixbuf2.0-0.sh',
+      'includes': ['standard_instrumented_library_target.gypi'],
+    },
+    {
+      'library_name': 'libpci3',
+      'dependencies=': [],
+      'build_method': 'custom_libpci3',
+      'jobs': 1,
+      'includes': ['standard_instrumented_library_target.gypi'],
+    },
+    {
+      'library_name': 'libdbusmenu-glib4',
+      'extra_configure_flags': [
+          # From debian/rules.
+          '--disable-scrollkeeper',
+          '--enable-gtk-doc',
+          # --enable-introspection introduces a build step that attempts to run
+          # a just-built binary and crashes. Vala requires introspection.
+          # TODO(earthdok): find a better fix.
+          '--disable-introspection',
+          '--disable-vala',
+      ],
       'dependencies=': [],
       'includes': ['standard_instrumented_library_target.gypi'],
     },

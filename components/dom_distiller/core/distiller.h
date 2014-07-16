@@ -15,8 +15,8 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "components/dom_distiller/core/article_distillation_update.h"
+#include "components/dom_distiller/core/distiller_page.h"
 #include "components/dom_distiller/core/distiller_url_fetcher.h"
-#include "components/dom_distiller/core/page_distiller.h"
 #include "components/dom_distiller/core/proto/distilled_article.pb.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
@@ -41,6 +41,7 @@ class Distiller {
   // a distilled page is added and |finished_cb| will be invoked once
   // distillation is completed.
   virtual void DistillPage(const GURL& url,
+                           scoped_ptr<DistillerPage> distiller_page,
                            const DistillationFinishedCallback& finished_cb,
                            const DistillationUpdateCallback& update_cb) = 0;
 };
@@ -55,13 +56,11 @@ class DistillerFactory {
 class DistillerFactoryImpl : public DistillerFactory {
  public:
   DistillerFactoryImpl(
-      scoped_ptr<DistillerPageFactory> distiller_page_factory,
       scoped_ptr<DistillerURLFetcherFactory> distiller_url_fetcher_factory);
   virtual ~DistillerFactoryImpl();
   virtual scoped_ptr<Distiller> CreateDistiller() OVERRIDE;
 
  private:
-  scoped_ptr<DistillerPageFactory> distiller_page_factory_;
   scoped_ptr<DistillerURLFetcherFactory> distiller_url_fetcher_factory_;
 };
 
@@ -69,18 +68,14 @@ class DistillerFactoryImpl : public DistillerFactory {
 class DistillerImpl : public Distiller {
  public:
   DistillerImpl(
-      const DistillerPageFactory& distiller_page_factory,
       const DistillerURLFetcherFactory& distiller_url_fetcher_factory);
   virtual ~DistillerImpl();
 
-  // Creates an execution context. This must be called once before any calls are
-  // made to distill the page.
-  virtual void Init();
-
-  virtual void DistillPage(const GURL& url,
-                           const DistillationFinishedCallback& finished_cb,
-                           const DistillationUpdateCallback& update_cb)
-      OVERRIDE;
+  virtual void DistillPage(
+      const GURL& url,
+      scoped_ptr<DistillerPage> distiller_page,
+      const DistillationFinishedCallback& finished_cb,
+      const DistillationUpdateCallback& update_cb) OVERRIDE;
 
   void SetMaxNumPagesInArticle(size_t max_num_pages);
 
@@ -152,7 +147,7 @@ class DistillerImpl : public Distiller {
   const ArticleDistillationUpdate CreateDistillationUpdate() const;
 
   const DistillerURLFetcherFactory& distiller_url_fetcher_factory_;
-  scoped_ptr<PageDistiller> page_distiller_;
+  scoped_ptr<DistillerPage> distiller_page_;
   DistillationFinishedCallback finished_cb_;
   DistillationUpdateCallback update_cb_;
 

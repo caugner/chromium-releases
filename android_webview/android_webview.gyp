@@ -5,13 +5,6 @@
   'variables': {
     'chromium_code': 1,
   },
-  'conditions': [
-    ['android_webview_build==0', {
-      'includes': [
-        'android_webview_tests.gypi',
-      ],
-    }],
-  ],
   'targets': [
     {
       'target_name': 'libwebviewchromium',
@@ -25,6 +18,28 @@
         # android_webview_build==1 by using a different name prefix.
         [ 'android_webview_build==0', {
           'product_prefix': 'libstandalone',
+        }],
+        [ 'android_webview_build==1', {
+          # When building inside the android tree we also need to depend on all
+          # the java sources generated from templates which will be needed by
+          # android_webview_java in android_webview/Android.mk.
+          'dependencies': [
+            '../base/base.gyp:base_java_application_state',
+            '../base/base.gyp:base_java_memory_pressure_level_list',
+            '../content/content.gyp:gesture_event_type_java',
+            '../content/content.gyp:page_transition_types_java',
+            '../content/content.gyp:popup_item_type_java',
+            '../content/content.gyp:result_codes_java',
+            '../content/content.gyp:screen_orientation_values_java',
+            '../content/content.gyp:speech_recognition_error_java',
+            '../media/media.gyp:media_android_imageformat_list',
+            '../net/net.gyp:certificate_mime_types_java',
+            '../net/net.gyp:cert_verify_status_android_java',
+            '../net/net.gyp:net_errors_java',
+            '../net/net.gyp:private_key_types_java',
+            '../ui/android/ui_android.gyp:window_open_disposition_java',
+            '../ui/android/ui_android.gyp:bitmap_format_java',
+          ],
         }],
         [ 'android_webview_build==1 and use_system_skia==0', {
           # When not using the system skia there are linker warnings about
@@ -75,6 +90,9 @@
         '../android_webview/native/webview_native.gyp:webview_native',
         '../components/components.gyp:auto_login_parser',
         '../components/components.gyp:autofill_content_renderer',
+        '../components/components.gyp:cdm_browser',
+        '../components/components.gyp:cdm_renderer',
+        '../components/components.gyp:data_reduction_proxy_browser',
         '../components/components.gyp:navigation_interception',
         '../components/components.gyp:visitedlink_browser',
         '../components/components.gyp:visitedlink_renderer',
@@ -82,6 +100,7 @@
         '../content/content.gyp:content_app_both',
         '../gpu/gpu.gyp:command_buffer_service',
         '../gpu/gpu.gyp:gles2_implementation',
+        '../media/media.gyp:media',
         '../printing/printing.gyp:printing',
         '../skia/skia.gyp:skia',
         '../third_party/WebKit/public/blink.gyp:blink',
@@ -135,8 +154,13 @@
         'browser/browser_view_renderer.cc',
         'browser/browser_view_renderer.h',
         'browser/browser_view_renderer_client.h',
+        'browser/deferred_gpu_command_service.cc',
+        'browser/deferred_gpu_command_service.h',
         'browser/find_helper.cc',
         'browser/find_helper.h',
+        'browser/global_tile_manager.cc',
+        'browser/global_tile_manager.h',
+        'browser/global_tile_manager_client.h',
         'browser/gpu_memory_buffer_factory_impl.cc',
         'browser/gpu_memory_buffer_factory_impl.h',
         'browser/hardware_renderer.cc',
@@ -210,19 +234,28 @@
         'renderer/print_web_view_helper_linux.cc',
       ],
     },
-    {
-      'target_name': 'android_webview_java',
-      'type': 'none',
-      'dependencies': [
-        '../components/components.gyp:navigation_interception_java',
-        '../components/components.gyp:web_contents_delegate_android_java',
-        '../content/content.gyp:content_java',
-        '../ui/android/ui_android.gyp:ui_java',
+  ],
+  'conditions': [
+    ['android_webview_build==0', {
+      'includes': [
+        'android_webview_tests.gypi',
       ],
-      'variables': {
-        'java_in_dir': '../android_webview/java',
-      },
-      'includes': [ '../build/java.gypi' ],
-    },
+      'targets': [
+        {
+          'target_name': 'android_webview_java',
+          'type': 'none',
+          'dependencies': [
+            '../components/components.gyp:navigation_interception_java',
+            '../components/components.gyp:web_contents_delegate_android_java',
+            '../content/content.gyp:content_java',
+            '../ui/android/ui_android.gyp:ui_java',
+          ],
+          'variables': {
+            'java_in_dir': '../android_webview/java',
+          },
+          'includes': [ '../build/java.gypi' ],
+        },
+      ],
+    }],
   ],
 }

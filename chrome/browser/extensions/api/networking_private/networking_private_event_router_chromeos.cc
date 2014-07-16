@@ -6,6 +6,7 @@
 
 #include "base/json/json_writer.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chrome/browser/extensions/api/networking_private/networking_private_api.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,6 +23,7 @@
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 using chromeos::NetworkHandler;
+using chromeos::NetworkPortalDetector;
 using chromeos::NetworkState;
 using chromeos::NetworkStateHandler;
 
@@ -29,7 +31,8 @@ namespace extensions {
 
 class NetworkingPrivateEventRouterImpl
     : public NetworkingPrivateEventRouter,
-      public chromeos::NetworkStateHandlerObserver {
+      public chromeos::NetworkStateHandlerObserver,
+      public NetworkPortalDetector::Observer {
  public:
   explicit NetworkingPrivateEventRouterImpl(Profile* profile);
   virtual ~NetworkingPrivateEventRouterImpl();
@@ -45,6 +48,11 @@ class NetworkingPrivateEventRouterImpl
   // NetworkStateHandlerObserver overrides:
   virtual void NetworkListChanged() OVERRIDE;
   virtual void NetworkPropertiesUpdated(const NetworkState* network) OVERRIDE;
+
+  // NetworkPortalDetector::Observer overrides:
+  virtual void OnPortalDetectionCompleted(
+      const NetworkState* network,
+      const NetworkPortalDetector::CaptivePortalState& state) OVERRIDE;
 
  private:
   // Decide if we should listen for network changes or not. If there are any
@@ -66,12 +74,14 @@ NetworkingPrivateEventRouterImpl::NetworkingPrivateEventRouterImpl(
   // our events. We first check and see if there *is* an event router, because
   // some unit tests try to create all profile services, but don't initialize
   // the event router first.
-  EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
+  EventRouter* event_router = EventRouter::Get(profile_);
   if (event_router) {
     event_router->RegisterObserver(
         this, api::networking_private::OnNetworksChanged::kEventName);
     event_router->RegisterObserver(
         this, api::networking_private::OnNetworkListChanged::kEventName);
+    event_router->RegisterObserver(
+        this, api::networking_private::OnPortalDetectionCompleted::kEventName);
     StartOrStopListeningForNetworkChanges();
   }
 }
@@ -84,7 +94,7 @@ void NetworkingPrivateEventRouterImpl::Shutdown() {
   // Unregister with the event router. We first check and see if there *is* an
   // event router, because some unit tests try to shutdown all profile services,
   // but didn't initialize the event router first.
-  EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
+  EventRouter* event_router = EventRouter::Get(profile_);
   if (event_router)
     event_router->UnregisterObserver(this);
 
@@ -109,25 +119,29 @@ void NetworkingPrivateEventRouterImpl::OnListenerRemoved(
 }
 
 void NetworkingPrivateEventRouterImpl::StartOrStopListeningForNetworkChanges() {
-  EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
+  EventRouter* event_router = EventRouter::Get(profile_);
   bool should_listen =
       event_router->HasEventListener(
           api::networking_private::OnNetworksChanged::kEventName) ||
       event_router->HasEventListener(
-          api::networking_private::OnNetworkListChanged::kEventName);
+          api::networking_private::OnNetworkListChanged::kEventName) ||
+      event_router->HasEventListener(
+          api::networking_private::OnPortalDetectionCompleted::kEventName);
 
   if (should_listen && !listening_) {
     NetworkHandler::Get()->network_state_handler()->AddObserver(
         this, FROM_HERE);
+    NetworkPortalDetector::Get()->AddObserver(this);
   } else if (!should_listen && listening_) {
     NetworkHandler::Get()->network_state_handler()->RemoveObserver(
         this, FROM_HERE);
+    NetworkPortalDetector::Get()->RemoveObserver(this);
   }
   listening_ = should_listen;
 }
 
 void NetworkingPrivateEventRouterImpl::NetworkListChanged() {
-  EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
+  EventRouter* event_router = EventRouter::Get(profile_);
   NetworkStateHandler::NetworkStateList networks;
   NetworkHandler::Get()->network_state_handler()->GetNetworkList(&networks);
   if (!event_router->HasEventListener(
@@ -160,7 +174,7 @@ void NetworkingPrivateEventRouterImpl::NetworkListChanged() {
 
 void NetworkingPrivateEventRouterImpl::NetworkPropertiesUpdated(
     const NetworkState* network) {
-  EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
+  EventRouter* event_router = EventRouter::Get(profile_);
   if (!event_router->HasEventListener(
            api::networking_private::OnNetworksChanged::kEventName)) {
     NET_LOG_EVENT("NetworkingPrivate.NetworkPropertiesUpdated: No Listeners",
@@ -174,6 +188,53 @@ void NetworkingPrivateEventRouterImpl::NetworkPropertiesUpdated(
           std::vector<std::string>(1, network->path())));
   scoped_ptr<Event> extension_event(new Event(
       api::networking_private::OnNetworksChanged::kEventName, args.Pass()));
+  event_router->BroadcastEvent(extension_event.Pass());
+}
+
+void NetworkingPrivateEventRouterImpl::OnPortalDetectionCompleted(
+    const NetworkState* network,
+    const NetworkPortalDetector::CaptivePortalState& state) {
+  const std::string path = network ? network->path() : std::string();
+
+  EventRouter* event_router = EventRouter::Get(profile_);
+  if (!event_router->HasEventListener(
+          api::networking_private::OnPortalDetectionCompleted::kEventName)) {
+    NET_LOG_EVENT("NetworkingPrivate.OnPortalDetectionCompleted: No Listeners",
+                  path);
+    return;
+  }
+  NET_LOG_EVENT("NetworkingPrivate.OnPortalDetectionCompleted", path);
+
+  api::networking_private::CaptivePortalStatus status =
+      api::networking_private::CAPTIVE_PORTAL_STATUS_UNKNOWN;
+  switch (state.status) {
+    case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN:
+      status = api::networking_private::CAPTIVE_PORTAL_STATUS_UNKNOWN;
+      break;
+    case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_OFFLINE:
+      status = api::networking_private::CAPTIVE_PORTAL_STATUS_OFFLINE;
+      break;
+    case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE:
+      status = api::networking_private::CAPTIVE_PORTAL_STATUS_ONLINE;
+      break;
+    case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL:
+      status = api::networking_private::CAPTIVE_PORTAL_STATUS_PORTAL;
+      break;
+    case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED:
+      status =
+          api::networking_private::CAPTIVE_PORTAL_STATUS_PROXYAUTHREQUIRED;
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+
+  scoped_ptr<base::ListValue> args(
+      api::networking_private::OnPortalDetectionCompleted::Create(
+          path, status));
+  scoped_ptr<Event> extension_event(
+      new Event(api::networking_private::OnPortalDetectionCompleted::kEventName,
+                args.Pass()));
   event_router->BroadcastEvent(extension_event.Pass());
 }
 

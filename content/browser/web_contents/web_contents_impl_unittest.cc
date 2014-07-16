@@ -2201,13 +2201,11 @@ TEST_F(WebContentsImplTest, NoJSMessageOnInterstitials) {
   // While the interstitial is showing, let's simulate the hidden page
   // attempting to show a JS message.
   IPC::Message* dummy_message = new IPC::Message;
-  bool did_suppress_message = false;
-  contents()->RunJavaScriptMessage(contents()->GetRenderViewHost(),
+  contents()->RunJavaScriptMessage(contents()->GetMainFrame(),
       base::ASCIIToUTF16("This is an informative message"),
       base::ASCIIToUTF16("OK"),
-      kGURL, JAVASCRIPT_MESSAGE_TYPE_ALERT, dummy_message,
-      &did_suppress_message);
-  EXPECT_TRUE(did_suppress_message);
+      kGURL, JAVASCRIPT_MESSAGE_TYPE_ALERT, dummy_message);
+  EXPECT_TRUE(contents()->last_dialog_suppressed_);
 }
 
 // Makes sure that if the source passed to CopyStateFromAndPrune has an
@@ -2432,22 +2430,21 @@ TEST_F(WebContentsImplTest, HandleWheelEvent) {
   contents()->SetDelegate(delegate.get());
 
   int modifiers = 0;
-  float dy = 1;
   // Verify that normal mouse wheel events do nothing to change the zoom level.
   blink::WebMouseWheelEvent event =
-      SyntheticWebMouseWheelEventBuilder::Build(0, dy, modifiers, false);
+      SyntheticWebMouseWheelEventBuilder::Build(0, 1, modifiers, false);
   EXPECT_FALSE(contents()->HandleWheelEvent(event));
   EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
 
   modifiers = WebInputEvent::ShiftKey | WebInputEvent::AltKey;
-  event = SyntheticWebMouseWheelEventBuilder::Build(0, dy, modifiers, false);
+  event = SyntheticWebMouseWheelEventBuilder::Build(0, 1, modifiers, false);
   EXPECT_FALSE(contents()->HandleWheelEvent(event));
   EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
 
   // But whenever the ctrl modifier is applied, they can increase/decrease zoom.
   // Except on MacOS where we never want to adjust zoom with mousewheel.
   modifiers = WebInputEvent::ControlKey;
-  event = SyntheticWebMouseWheelEventBuilder::Build(0, dy, modifiers, false);
+  event = SyntheticWebMouseWheelEventBuilder::Build(0, 1, modifiers, false);
   bool handled = contents()->HandleWheelEvent(event);
 #if defined(OS_MACOSX)
   EXPECT_FALSE(handled);
@@ -2460,8 +2457,7 @@ TEST_F(WebContentsImplTest, HandleWheelEvent) {
 
   modifiers = WebInputEvent::ControlKey | WebInputEvent::ShiftKey |
       WebInputEvent::AltKey;
-  dy = -5;
-  event = SyntheticWebMouseWheelEventBuilder::Build(2, dy, modifiers, false);
+  event = SyntheticWebMouseWheelEventBuilder::Build(2, -5, modifiers, false);
   handled = contents()->HandleWheelEvent(event);
 #if defined(OS_MACOSX)
   EXPECT_FALSE(handled);
@@ -2473,9 +2469,66 @@ TEST_F(WebContentsImplTest, HandleWheelEvent) {
 #endif
 
   // Unless there is no vertical movement.
-  dy = 0;
-  event = SyntheticWebMouseWheelEventBuilder::Build(2, dy, modifiers, false);
+  event = SyntheticWebMouseWheelEventBuilder::Build(2, 0, modifiers, false);
   EXPECT_FALSE(contents()->HandleWheelEvent(event));
+  EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
+
+  // Events containing precise scrolling deltas also shouldn't result in the
+  // zoom being adjusted, to avoid accidental adjustments caused by
+  // two-finger-scrolling on a touchpad.
+  modifiers = WebInputEvent::ControlKey;
+  event = SyntheticWebMouseWheelEventBuilder::Build(0, 5, modifiers, true);
+  EXPECT_FALSE(contents()->HandleWheelEvent(event));
+  EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
+
+  // Ensure pointers to the delegate aren't kept beyond its lifetime.
+  contents()->SetDelegate(NULL);
+}
+
+// Tests that trackpad GesturePinchUpdate events get turned into browser zoom.
+TEST_F(WebContentsImplTest, HandleGestureEvent) {
+  using blink::WebGestureEvent;
+  using blink::WebInputEvent;
+
+  scoped_ptr<ContentsZoomChangedDelegate> delegate(
+      new ContentsZoomChangedDelegate());
+  contents()->SetDelegate(delegate.get());
+
+  const float kZoomStepValue = 0.6f;
+  blink::WebGestureEvent event = SyntheticWebGestureEventBuilder::Build(
+      WebInputEvent::GesturePinchUpdate, WebGestureEvent::Touchpad);
+
+  // A pinch less than the step value doesn't change the zoom level.
+  event.data.pinchUpdate.scale = 1.0f + kZoomStepValue * 0.8f;
+  EXPECT_TRUE(contents()->HandleGestureEvent(event));
+  EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
+
+  // But repeating the event so the combined scale is greater does.
+  EXPECT_TRUE(contents()->HandleGestureEvent(event));
+  EXPECT_EQ(1, delegate->GetAndResetContentsZoomChangedCallCount());
+  EXPECT_TRUE(delegate->last_zoom_in());
+
+  // Pinching back out one step goes back to 100%.
+  event.data.pinchUpdate.scale = 1.0f - kZoomStepValue;
+  EXPECT_TRUE(contents()->HandleGestureEvent(event));
+  EXPECT_EQ(1, delegate->GetAndResetContentsZoomChangedCallCount());
+  EXPECT_FALSE(delegate->last_zoom_in());
+
+  // Pinching out again doesn't zoom (step is twice as large around 100%).
+  EXPECT_TRUE(contents()->HandleGestureEvent(event));
+  EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
+
+  // And again now it zooms once per step.
+  EXPECT_TRUE(contents()->HandleGestureEvent(event));
+  EXPECT_EQ(1, delegate->GetAndResetContentsZoomChangedCallCount());
+  EXPECT_FALSE(delegate->last_zoom_in());
+
+  // No other type of gesture event is handled by WebContentsImpl (for example
+  // a touchscreen pinch gesture).
+  event = SyntheticWebGestureEventBuilder::Build(
+      WebInputEvent::GesturePinchUpdate, WebGestureEvent::Touchscreen);
+  event.data.pinchUpdate.scale = 1.0f + kZoomStepValue * 3;
+  EXPECT_FALSE(contents()->HandleGestureEvent(event));
   EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
 
   // Ensure pointers to the delegate aren't kept beyond it's lifetime.

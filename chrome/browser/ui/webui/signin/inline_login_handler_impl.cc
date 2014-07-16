@@ -13,8 +13,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/about_signin_internals_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_oauth_helper.h"
 #include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -24,8 +24,10 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/signin/core/browser/about_signin_internals.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
+#include "components/signin/core/browser/signin_oauth_helper.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -103,6 +105,10 @@ void InlineSigninHelper::OnSigninOAuthInformationAvailable(
     browser = handler_->GetDesktopBrowser();
   }
 
+  AboutSigninInternals* about_signin_internals =
+    AboutSigninInternalsFactory::GetForProfile(profile_);
+  about_signin_internals->OnRefreshTokenReceived("Successful");
+
   signin::Source source = signin::GetSourceForPromoURL(current_url_);
   if (source == signin::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT) {
     ProfileOAuth2TokenServiceFactory::GetForProfile(profile_)->
@@ -156,6 +162,7 @@ void InlineSigninHelper::OnSigninOAuthInformationAvailable(
           start_mode,
           contents,
           confirmation_required,
+          signin::GetNextPageURLForPromoURL(current_url_),
           base::Bind(&InlineLoginHandlerImpl::SyncStarterCallback, handler_));
     }
   }
@@ -168,6 +175,10 @@ void InlineSigninHelper::OnSigninOAuthInformationFailure(
   if (handler_)
     handler_->HandleLoginError(error.ToString());
 
+  AboutSigninInternals* about_signin_internals =
+    AboutSigninInternalsFactory::GetForProfile(profile_);
+  about_signin_internals->OnRefreshTokenReceived("Failure");
+
   base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
@@ -175,8 +186,7 @@ void InlineSigninHelper::OnSigninOAuthInformationFailure(
 
 InlineLoginHandlerImpl::InlineLoginHandlerImpl()
       : weak_factory_(this),
-        choose_what_to_sync_(false),
-        complete_login_triggered_(false) {
+        choose_what_to_sync_(false) {
 }
 
 InlineLoginHandlerImpl::~InlineLoginHandlerImpl() {}
@@ -194,7 +204,6 @@ void InlineLoginHandlerImpl::SetExtraInitParams(base::DictionaryValue& params) {
 
   const GURL& current_url = web_ui()->GetWebContents()->GetURL();
   signin::Source source = signin::GetSourceForPromoURL(current_url);
-  DCHECK(source != signin::SOURCE_UNKNOWN);
   if (source == signin::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT ||
       source == signin::SOURCE_AVATAR_BUBBLE_SIGN_IN) {
     // Drop the leading slash in the path.
@@ -256,18 +265,6 @@ void InlineLoginHandlerImpl::HandleSwitchToFullTabMessage(
 }
 
 void InlineLoginHandlerImpl::CompleteLogin(const base::ListValue* args) {
-  if (complete_login_triggered_) {
-    // Gaia is supposed to trigger CompleteLogin by sending a completelogin
-    // message to Chrome, since Gaia does not always do this, Chrome injects
-    // some code into the Gaia page to handle that. This may result in duplicate
-    // completelogin messages when Gaia does send the message.
-    // TODO(guohui): coordinate with Gaia team to only send the completeLogin
-    // message on Chrome versions that do not inject similar code into Gaia.
-    VLOG(1) << "InlineLoginHandlerImpl::CompleteLogin called more than once";
-    return;
-  }
-  complete_login_triggered_ = true;
-
   content::WebContents* contents = web_ui()->GetWebContents();
   const GURL& current_url = contents->GetURL();
 
@@ -334,6 +331,11 @@ void InlineLoginHandlerImpl::CompleteLogin(const base::ListValue* args) {
     return;
   }
 
+  AboutSigninInternals* about_signin_internals =
+      AboutSigninInternalsFactory::GetForProfile(Profile::FromWebUI(web_ui()));
+  about_signin_internals->OnAuthenticationResultReceived(
+      "GAIA Auth Successful");
+
   content::StoragePartition* partition =
       content::BrowserContext::GetStoragePartitionForSite(
           contents->GetBrowserContext(),
@@ -389,7 +391,6 @@ void InlineLoginHandlerImpl::SyncStarterCallback(
 
   const GURL& current_url = contents->GetLastCommittedURL();
   signin::Source source = signin::GetSourceForPromoURL(current_url);
-  DCHECK(source != signin::SOURCE_UNKNOWN);
   bool auto_close = signin::IsAutoCloseEnabledInURL(current_url);
 
   if (result == OneClickSigninSyncStarter::SYNC_SETUP_FAILURE) {

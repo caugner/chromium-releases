@@ -80,7 +80,7 @@ class FirstRunHelperTest : public AshTestBase,
   void CheckContainersAreVisible() const {
     aura::Window* root_window = Shell::GetInstance()->GetPrimaryRootWindow();
     std::vector<int> containers_to_check =
-        internal::DesktopCleaner::GetContainersToHideForTest();
+        DesktopCleaner::GetContainersToHideForTest();
     for (size_t i = 0; i < containers_to_check.size(); ++i) {
       aura::Window* container =
           Shell::GetContainer(root_window, containers_to_check[i]);
@@ -91,7 +91,7 @@ class FirstRunHelperTest : public AshTestBase,
   void CheckContainersAreHidden() const {
     aura::Window* root_window = Shell::GetInstance()->GetPrimaryRootWindow();
     std::vector<int> containers_to_check =
-        internal::DesktopCleaner::GetContainersToHideForTest();
+        DesktopCleaner::GetContainersToHideForTest();
     for (size_t i = 0; i < containers_to_check.size(); ++i) {
       aura::Window* container =
           Shell::GetContainer(root_window, containers_to_check[i]);
@@ -137,10 +137,12 @@ TEST_F(FirstRunHelperTest, ModalWindowDoesNotBlock) {
   overlay_window->Focus();
   EXPECT_TRUE(overlay_window->HasFocus());
   int mouse_events;
-  overlay_window->SetEventFilter(new CountingEventHandler(&mouse_events));
+  CountingEventHandler handler(&mouse_events);
+  overlay_window->AddPreTargetHandler(&handler);
   GetEventGenerator().PressLeftButton();
   GetEventGenerator().ReleaseLeftButton();
   EXPECT_EQ(mouse_events, 2);
+  overlay_window->RemovePreTargetHandler(&handler);
 }
 
 }  // namespace test

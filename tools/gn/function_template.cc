@@ -12,6 +12,8 @@
 namespace functions {
 
 const char kTemplate[] = "template";
+const char kTemplate_HelpShort[] =
+    "template: Define a template rule.";
 const char kTemplate_Help[] =
     "template: Define a template rule.\n"
     "\n"
@@ -165,8 +167,7 @@ Value RunTemplate(Scope* scope,
     return Value();
   }
 
-  scope->AddTemplate(template_name,
-                     scoped_ptr<Template>(new Template(scope, function)));
+  scope->AddTemplate(template_name, new Template(scope, function));
   return Value();
 }
 

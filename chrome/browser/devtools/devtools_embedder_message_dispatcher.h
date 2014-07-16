@@ -35,6 +35,7 @@ class DevToolsEmbedderMessageDispatcher {
     virtual void SetContentsResizingStrategy(
         const gfx::Insets& insets, const gfx::Size& min_size) = 0;
     virtual void InspectElementCompleted() = 0;
+    virtual void InspectedURLChanged(const std::string& url) = 0;
     virtual void MoveWindow(int x, int y) = 0;
     virtual void SetIsDocked(bool is_docked) = 0;
     virtual void OpenInNewTab(const std::string& url) = 0;
@@ -54,9 +55,15 @@ class DevToolsEmbedderMessageDispatcher {
     virtual void SearchInPath(int request_id,
                               const std::string& file_system_path,
                               const std::string& query) = 0;
+    virtual void SetWhitelistedShortcuts(const std::string& message) = 0;
     virtual void ZoomIn() = 0;
     virtual void ZoomOut() = 0;
     virtual void ResetZoom() = 0;
+    virtual void OpenUrlOnRemoteDeviceAndInspect(const std::string& browser_id,
+                                                 const std::string& url) = 0;
+    virtual void StartRemoteDevicesListener() = 0;
+    virtual void StopRemoteDevicesListener() = 0;
+    virtual void EnableRemoteDeviceCounter(bool enable) = 0;
   };
 
   virtual ~DevToolsEmbedderMessageDispatcher() {}

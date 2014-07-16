@@ -10,6 +10,7 @@
 #include "chrome/browser/themes/custom_theme_supplier.h"
 #include "chrome/common/pref_names.h"
 #include "ui/gfx/image/image.h"
+#include "ui/native_theme/native_theme_aura.h"
 #include "ui/views/linux_ui/linux_ui.h"
 
 namespace {
@@ -42,10 +43,15 @@ NativeThemeX11::NativeThemeX11(PrefService* pref_service)
 
 void NativeThemeX11::StartUsingTheme() {
   pref_service_->SetBoolean(prefs::kUsesSystemTheme, true);
+  // Have the former theme notify its observers of change.
+  ui::NativeThemeAura::instance()->NotifyObservers();
 }
 
 void NativeThemeX11::StopUsingTheme() {
   pref_service_->SetBoolean(prefs::kUsesSystemTheme, false);
+  // Have the former theme notify its observers of change.
+  if (linux_ui_)
+    linux_ui_->GetNativeTheme(NULL)->NotifyObservers();
 }
 
 bool NativeThemeX11::GetColor(int id, SkColor* color) const {
@@ -64,17 +70,9 @@ NativeThemeX11::~NativeThemeX11() {}
 
 }  // namespace
 
-ThemeServiceAuraX11::ThemeServiceAuraX11() {
-  views::LinuxUI* linux_ui = views::LinuxUI::instance();
-  if (linux_ui)
-    linux_ui->AddNativeThemeChangeObserver(this);
-}
+ThemeServiceAuraX11::ThemeServiceAuraX11() {}
 
-ThemeServiceAuraX11::~ThemeServiceAuraX11() {
-  views::LinuxUI* linux_ui = views::LinuxUI::instance();
-  if (linux_ui)
-    linux_ui->RemoveNativeThemeChangeObserver(this);
-}
+ThemeServiceAuraX11::~ThemeServiceAuraX11() {}
 
 bool ThemeServiceAuraX11::ShouldInitWithNativeTheme() const {
   return profile()->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme);
@@ -92,9 +90,4 @@ bool ThemeServiceAuraX11::UsingNativeTheme() const {
   const CustomThemeSupplier* theme_supplier = get_theme_supplier();
   return theme_supplier &&
          theme_supplier->get_theme_type() == CustomThemeSupplier::NATIVE_X11;
-}
-
-void ThemeServiceAuraX11::OnNativeThemeChanged() {
-  if (UsingNativeTheme())
-    NotifyThemeChanged();
 }

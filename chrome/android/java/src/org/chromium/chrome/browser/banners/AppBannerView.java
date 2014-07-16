@@ -31,7 +31,7 @@ import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
-import org.chromium.content.browser.ContentView;
+import org.chromium.content.browser.ContentViewCore;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.base.WindowAndroid.IntentCallback;
@@ -152,18 +152,19 @@ public class AppBannerView extends SwipableOverlayView
     private int mInstallState;
 
     /**
-     * Creates a BannerView and adds it to the given ContentView.
-     * @param contentView ContentView to display the AppBannerView for.
+     * Creates a BannerView and adds it to the given ContentViewCore.
+     * @param contentViewCore ContentViewCore to display the AppBannerView for.
      * @param observer    Class that is alerted for AppBannerView events.
      * @param data        Data about the app.
      * @return            The created banner.
      */
-    public static AppBannerView create(ContentView contentView, Observer observer, AppData data) {
-        Context context = contentView.getContext().getApplicationContext();
+    public static AppBannerView create(
+            ContentViewCore contentViewCore, Observer observer,AppData data) {
+        Context context = contentViewCore.getContext().getApplicationContext();
         AppBannerView banner =
                 (AppBannerView) LayoutInflater.from(context).inflate(BANNER_LAYOUT, null);
         banner.initialize(observer, data);
-        banner.addToView(contentView);
+        banner.addToView(contentViewCore);
         return banner;
     }
 
@@ -248,7 +249,7 @@ public class AppBannerView extends SwipableOverlayView
         mTouchSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
 
         // Set up the install button.
-        updateButtonAppearance();
+        updateButtonStatus();
     }
 
     /**
@@ -271,6 +272,11 @@ public class AppBannerView extends SwipableOverlayView
         }
 
         if (view == mInstallButtonView) {
+            // Check that nothing happened in the background to change the install state of the app.
+            int previousState = mInstallState;
+            updateButtonStatus();
+            if (mInstallState != previousState) return;
+
             // Ignore button clicks when the app is installing.
             if (mInstallState == INSTALL_STATE_INSTALLING) return;
 
@@ -292,13 +298,11 @@ public class AppBannerView extends SwipableOverlayView
                 }
             } else if (mInstallState == INSTALL_STATE_INSTALLED) {
                 // The app is installed. Open it.
-                String packageName = mAppData.packageName();
-                PackageManager packageManager = getContext().getPackageManager();
-                Intent appIntent = packageManager.getLaunchIntentForPackage(packageName);
                 try {
+                    Intent appIntent = getAppLaunchIntent();
                     if (appIntent != null) getContext().startActivity(appIntent);
                 } catch (ActivityNotFoundException e) {
-                    Log.e(TAG, "Failed to find app package: " + packageName);
+                    Log.e(TAG, "Failed to find app package: " + mAppData.packageName());
                 }
 
                 dismiss(AppBannerMetricsIds.DISMISS_APP_OPEN);
@@ -357,7 +361,7 @@ public class AppBannerView extends SwipableOverlayView
             mInstallTask.start();
             mInstallState = INSTALL_STATE_INSTALLING;
         }
-        updateButtonAppearance();
+        updateButtonStatus();
     }
 
 
@@ -369,7 +373,7 @@ public class AppBannerView extends SwipableOverlayView
             // Let the user open the app from here.
             mObserver.onBannerInstallEvent(this, AppBannerMetricsIds.INSTALL_COMPLETED);
             mInstallState = INSTALL_STATE_INSTALLED;
-            updateButtonAppearance();
+            updateButtonStatus();
         } else {
             dismiss(AppBannerMetricsIds.DISMISS_INSTALL_TIMEOUT);
         }
@@ -422,11 +426,23 @@ public class AppBannerView extends SwipableOverlayView
     }
 
     /**
-     * Updates the text and color of the button displayed on the button.
+     * Updates the install button (install state, text, color, etc.).
      */
-    void updateButtonAppearance() {
+    void updateButtonStatus() {
         if (mInstallButtonView == null) return;
 
+        // Determine if the saved install status of the app is out of date.
+        // It is not easily possible to detect if an app is in the process of being installed, so we
+        // can't properly transition to that state from here.
+        if (getAppLaunchIntent() == null) {
+            if (mInstallState == INSTALL_STATE_INSTALLED) {
+                mInstallState = INSTALL_STATE_NOT_INSTALLED;
+            }
+        } else {
+            mInstallState = INSTALL_STATE_INSTALLED;
+        }
+
+        // Update what the button looks like.
         Resources res = getResources();
         int fgColor;
         String text;
@@ -537,6 +553,20 @@ public class AppBannerView extends SwipableOverlayView
         }
         initializeControls();
         requestLayout();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasWindowFocus) {
+        if (hasWindowFocus) updateButtonStatus();
+    }
+
+    /**
+     * @return Intent to launch the app that is being promoted.
+     */
+    private Intent getAppLaunchIntent() {
+        String packageName = mAppData.packageName();
+        PackageManager packageManager = getContext().getPackageManager();
+        return packageManager.getLaunchIntentForPackage(packageName);
     }
 
     /**

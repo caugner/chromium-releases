@@ -25,7 +25,6 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -53,6 +52,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/find_in_page_observer.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
 #include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -64,14 +64,18 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/geoposition.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
-#include "net/base/net_util.h"
+#include "net/base/filename_util.h"
+#include "net/cookies/cookie_constants.h"
+#include "net/cookies/cookie_monster.h"
+#include "net/cookies/cookie_store.h"
 #include "net/test/python_utils.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/size.h"
@@ -414,6 +418,48 @@ Browser* GetBrowserNotInSet(std::set<Browser*> excluded_browsers) {
       return *it;
   }
   return NULL;
+}
+
+namespace {
+
+void GetCookiesCallback(base::WaitableEvent* event,
+                        std::string* cookies,
+                        const std::string& cookie_line) {
+  *cookies = cookie_line;
+  event->Signal();
+}
+
+void GetCookiesOnIOThread(
+    const GURL& url,
+    const scoped_refptr<net::URLRequestContextGetter>& context_getter,
+    base::WaitableEvent* event,
+    std::string* cookies) {
+  context_getter->GetURLRequestContext()->cookie_store()->
+      GetCookiesWithOptionsAsync(
+          url, net::CookieOptions(),
+          base::Bind(&GetCookiesCallback, event, cookies));
+}
+
+}  // namespace
+
+void GetCookies(const GURL& url,
+                WebContents* contents,
+                int* value_size,
+                std::string* value) {
+  *value_size = -1;
+  if (url.is_valid() && contents) {
+    scoped_refptr<net::URLRequestContextGetter> context_getter =
+        contents->GetBrowserContext()->GetRequestContextForRenderProcess(
+            contents->GetRenderProcessHost()->GetID());
+    base::WaitableEvent event(true /* manual reset */,
+                              false /* not initially signaled */);
+    CHECK(content::BrowserThread::PostTask(
+        content::BrowserThread::IO, FROM_HERE,
+        base::Bind(&GetCookiesOnIOThread, url, context_getter, &event, value)));
+    event.Wait();
+
+    *value_size = static_cast<int>(value->size());
+  }
 }
 
 WindowedTabAddedNotificationObserver::WindowedTabAddedNotificationObserver(

@@ -53,6 +53,7 @@ AutocompleteMatch::Type GetTypeForShortcut(AutocompleteMatch::Type type) {
   switch (type) {
     case AutocompleteMatchType::URL_WHAT_YOU_TYPED:
     case AutocompleteMatchType::NAVSUGGEST:
+    case AutocompleteMatchType::NAVSUGGEST_PERSONALIZED:
       return AutocompleteMatchType::HISTORY_URL;
 
     case AutocompleteMatchType::SEARCH_OTHER_ENGINE:
@@ -180,11 +181,13 @@ void ShortcutsBackend::Observe(int type,
   DCHECK_EQ(chrome::NOTIFICATION_HISTORY_URLS_DELETED, type);
   const history::URLsDeletedDetails* deleted_details =
       content::Details<const history::URLsDeletedDetails>(details).ptr();
-  if (deleted_details->all_history)
+  if (deleted_details->all_history) {
     DeleteAllShortcuts();
+    return;
+  }
+
   const history::URLRows& rows(deleted_details->rows);
   history::ShortcutsDatabase::ShortcutIDs shortcut_ids;
-
   for (GuidMap::const_iterator it(guid_map_.begin()); it != guid_map_.end();
         ++it) {
     if (std::find_if(

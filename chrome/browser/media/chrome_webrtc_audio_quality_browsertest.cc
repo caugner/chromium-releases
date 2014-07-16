@@ -20,38 +20,31 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "chrome/test/ui/ui_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/perf/perf_test.h"
 
+// These are relative to the reference file dir defined by
+// webrtc_browsertest_common.h (i.e. chrome/test/data/webrtc/resources).
 static const base::FilePath::CharType kReferenceFile[] =
 #if defined (OS_WIN)
-    FILE_PATH_LITERAL("pyauto_private/webrtc/human-voice-win.wav");
+    FILE_PATH_LITERAL("human-voice-win.wav");
 #else
-    FILE_PATH_LITERAL("pyauto_private/webrtc/human-voice-linux.wav");
+    FILE_PATH_LITERAL("human-voice-linux.wav");
 #endif
 
 // The javascript will load the reference file relative to its location,
-// which is in /webrtc on the web server. Therefore, prepend a '..' traversal.
+// which is in /webrtc on the web server. The files we are looking for are in
+// webrtc/resources in the chrome/test/data folder.
 static const char kReferenceFileRelativeUrl[] =
 #if defined (OS_WIN)
-    "../pyauto_private/webrtc/human-voice-win.wav";
+    "resources/human-voice-win.wav";
 #else
-    "../pyauto_private/webrtc/human-voice-linux.wav";
+    "resources/human-voice-linux.wav";
 #endif
-
-static const base::FilePath::CharType kToolsPath[] =
-    FILE_PATH_LITERAL("pyauto_private/media/tools");
 
 static const char kMainWebrtcTestHtmlPage[] =
     "/webrtc/webrtc_audio_quality_test.html";
-
-static base::FilePath GetTestDataDir() {
-  base::FilePath source_dir;
-  PathService::Get(chrome::DIR_TEST_DATA, &source_dir);
-  return source_dir;
-}
 
 // Test we can set up a WebRTC call and play audio through it.
 //
@@ -94,7 +87,6 @@ class WebRtcAudioQualityBrowserTest : public WebRtcTestBase,
  public:
   WebRtcAudioQualityBrowserTest() {}
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    PeerConnectionServerRunner::KillAllPeerConnectionServersOnCurrentSystem();
     DetectErrorsInJavaScript();  // Look for errors in our rather complex js.
   }
 
@@ -111,16 +103,6 @@ class WebRtcAudioQualityBrowserTest : public WebRtcTestBase,
       command_line->AppendSwitch(switches::kEnableAudioTrackProcessing);
   }
 
-  bool HasAllRequiredResources() {
-    base::FilePath reference_file = GetTestDataDir().Append(kReferenceFile);
-    if (!base::PathExists(reference_file)) {
-      LOG(ERROR) << "Cannot find the reference file to be used for audio "
-          << "quality comparison: " << reference_file.value();
-      return false;
-    }
-    return true;
-  }
-
   void AddAudioFile(const std::string& input_file_relative_url,
                     content::WebContents* tab_contents) {
     EXPECT_EQ("ok-added", ExecuteJavascript(
@@ -131,18 +113,6 @@ class WebRtcAudioQualityBrowserTest : public WebRtcTestBase,
     EXPECT_EQ("ok-playing", ExecuteJavascript("playAudioFile()", tab_contents));
   }
 
-  void EstablishCall(content::WebContents* from_tab,
-                     content::WebContents* to_tab) {
-    EXPECT_EQ("ok-negotiating",
-              ExecuteJavascript("negotiateCall()", from_tab));
-
-    // Ensure the call gets up on both sides.
-    EXPECT_TRUE(PollingWaitUntil("getPeerConnectionReadyState()",
-                                 "active", from_tab));
-    EXPECT_TRUE(PollingWaitUntil("getPeerConnectionReadyState()",
-                                 "active", to_tab));
-  }
-
   base::FilePath CreateTemporaryWaveFile() {
     base::FilePath filename;
     EXPECT_TRUE(base::CreateTemporaryFile(&filename));
@@ -151,8 +121,6 @@ class WebRtcAudioQualityBrowserTest : public WebRtcTestBase,
     EXPECT_TRUE(base::Move(filename, wav_filename));
     return wav_filename;
   }
-
-  PeerConnectionServerRunner peerconnection_server_;
 };
 
 class AudioRecorder {
@@ -228,7 +196,7 @@ class AudioRecorder {
 
 bool ForceMicrophoneVolumeTo100Percent() {
 #if defined(OS_WIN)
-  CommandLine command_line(GetTestDataDir().Append(kToolsPath).Append(
+  CommandLine command_line(test::GetReferenceFilesDir().Append(
       FILE_PATH_LITERAL("force_mic_volume_max.exe")));
   VLOG(0) << "Running " << command_line.GetCommandLineString();
   std::string result;
@@ -276,7 +244,7 @@ bool RemoveSilence(const base::FilePath& input_file,
   const char* kTreshold = "5%";
 
 #if defined(OS_WIN)
-  CommandLine command_line(GetTestDataDir().Append(kToolsPath).Append(
+  CommandLine command_line(test::GetReferenceFilesDir().Append(
       FILE_PATH_LITERAL("sox.exe")));
 #else
   CommandLine command_line(base::FilePath(FILE_PATH_LITERAL("sox")));
@@ -325,10 +293,10 @@ bool RunPesq(const base::FilePath& reference_file,
 
 #if defined(OS_WIN)
   base::FilePath pesq_path =
-      GetTestDataDir().Append(kToolsPath).Append(FILE_PATH_LITERAL("pesq.exe"));
+      test::GetReferenceFilesDir().Append(FILE_PATH_LITERAL("pesq.exe"));
 #else
   base::FilePath pesq_path =
-      GetTestDataDir().Append(kToolsPath).Append(FILE_PATH_LITERAL("pesq"));
+      test::GetReferenceFilesDir().Append(FILE_PATH_LITERAL("pesq"));
 #endif
 
   if (!base::PathExists(pesq_path)) {
@@ -388,9 +356,8 @@ IN_PROC_BROWSER_TEST_P(WebRtcAudioQualityBrowserTest,
     return;
   }
 #endif
-  ASSERT_TRUE(HasAllRequiredResources());
+  ASSERT_TRUE(test::HasReferenceFilesInCheckout());
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
-  ASSERT_TRUE(peerconnection_server_.Start());
 
   ASSERT_TRUE(ForceMicrophoneVolumeTo100Percent());
 
@@ -405,21 +372,22 @@ IN_PROC_BROWSER_TEST_P(WebRtcAudioQualityBrowserTest,
   ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
 
-  ConnectToPeerConnectionServer("peer 1", left_tab);
-  ConnectToPeerConnectionServer("peer 2", right_tab);
-
+  // Prepare the peer connections manually in this test since we don't add
+  // getUserMedia-derived media streams in this test like the other tests.
   EXPECT_EQ("ok-peerconnection-created",
             ExecuteJavascript("preparePeerConnection()", left_tab));
+  EXPECT_EQ("ok-peerconnection-created",
+            ExecuteJavascript("preparePeerConnection()", right_tab));
 
   AddAudioFile(kReferenceFileRelativeUrl, left_tab);
 
-  EstablishCall(left_tab, right_tab);
+  NegotiateCall(left_tab, right_tab);
 
   // Note: the media flow isn't necessarily established on the connection just
   // because the ready state is ok on both sides. We sleep a bit between call
   // establishment and playing to avoid cutting of the beginning of the audio
   // file.
-  SleepInJavascript(left_tab, 2000);
+  test::SleepInJavascript(left_tab, 2000);
 
   base::FilePath recording = CreateTemporaryWaveFile();
 
@@ -435,8 +403,6 @@ IN_PROC_BROWSER_TEST_P(WebRtcAudioQualityBrowserTest,
   VLOG(0) << "Done recording to " << recording.value() << std::endl;
 
   HangUp(left_tab);
-  WaitUntilHangupVerified(left_tab);
-  WaitUntilHangupVerified(right_tab);
 
   base::FilePath trimmed_recording = CreateTemporaryWaveFile();
 
@@ -446,7 +412,7 @@ IN_PROC_BROWSER_TEST_P(WebRtcAudioQualityBrowserTest,
   std::string raw_mos;
   std::string mos_lqo;
   base::FilePath reference_file_in_test_dir =
-      GetTestDataDir().Append(kReferenceFile);
+      test::GetReferenceFilesDir().Append(kReferenceFile);
   ASSERT_TRUE(RunPesq(reference_file_in_test_dir, trimmed_recording, 16000,
                       &raw_mos, &mos_lqo));
 
@@ -455,6 +421,4 @@ IN_PROC_BROWSER_TEST_P(WebRtcAudioQualityBrowserTest,
 
   EXPECT_TRUE(base::DeleteFile(recording, false));
   EXPECT_TRUE(base::DeleteFile(trimmed_recording, false));
-
-  ASSERT_TRUE(peerconnection_server_.Stop());
 }

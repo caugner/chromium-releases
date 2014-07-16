@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 
+#include "apps/browser/file_handler_util.h"
 #include "base/file_util.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
@@ -19,6 +20,8 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #endif
+
+using apps::file_handler_util::GrantedFileEntry;
 
 namespace extensions {
 
@@ -175,7 +178,7 @@ void WritableFileChecker::Check() {
 WritableFileChecker::~WritableFileChecker() {}
 
 void WritableFileChecker::TaskDone() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (--outstanding_tasks_ == 0) {
     if (error_path_.empty())
       on_success_.Run();
@@ -193,7 +196,7 @@ void WritableFileChecker::Error(const base::FilePath& error_path) {
 }
 
 void WritableFileChecker::CheckLocalWritableFiles() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
   std::string error;
   for (std::vector<base::FilePath>::const_iterator it = paths_.begin();
        it != paths_.end();
@@ -347,8 +350,6 @@ void CheckWritableFiles(
       paths, profile, is_directory, on_success, on_failure));
   checker->Check();
 }
-
-GrantedFileEntry::GrantedFileEntry() {}
 
 bool HasFileSystemWritePermission(const Extension* extension) {
   return extension->HasAPIPermission(APIPermission::kFileSystemWrite);

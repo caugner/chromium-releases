@@ -28,12 +28,12 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/net/client_hints.h"
 #include "chrome/browser/net/connect_interceptor.h"
-#include "chrome/browser/net/spdyproxy/data_saving_metrics.h"
 #include "chrome/browser/performance_monitor/performance_monitor.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_metrics.h"
 #include "components/domain_reliability/monitor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
@@ -64,6 +64,7 @@
 #endif
 
 #if defined(OS_ANDROID)
+#include "chrome/browser/io_thread.h"
 #include "components/precache/content/precache_manager.h"
 #include "components/precache/content/precache_manager_factory.h"
 #endif
@@ -224,7 +225,7 @@ void ForwardRequestStatus(
 void UpdateContentLengthPrefs(
     int received_content_length,
     int original_content_length,
-    spdyproxy::DataReductionRequestType data_reduction_type,
+    data_reduction_proxy::DataReductionProxyRequestType request_type,
     Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_GE(received_content_length, 0);
@@ -248,33 +249,32 @@ void UpdateContentLengthPrefs(
   // the browser preference will be taken.
   bool with_data_reduction_proxy_enabled =
       ProfileManager::GetActiveUserProfile()->GetPrefs()->GetBoolean(
-          prefs::kSpdyProxyAuthEnabled);
+          data_reduction_proxy::prefs::kDataReductionProxyEnabled);
 #else
   bool with_data_reduction_proxy_enabled = false;
 #endif
 
-  spdyproxy::UpdateContentLengthPrefs(received_content_length,
-                                      original_content_length,
-                                      with_data_reduction_proxy_enabled,
-                                      data_reduction_type, prefs);
+  data_reduction_proxy::UpdateContentLengthPrefs(received_content_length,
+                                         original_content_length,
+                                         with_data_reduction_proxy_enabled,
+                                         request_type, prefs);
 }
 
 void StoreAccumulatedContentLength(
     int received_content_length,
     int original_content_length,
-    spdyproxy::DataReductionRequestType data_reduction_type,
+    data_reduction_proxy::DataReductionProxyRequestType request_type,
     Profile* profile) {
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
       base::Bind(&UpdateContentLengthPrefs,
                  received_content_length, original_content_length,
-                 data_reduction_type, profile));
+                 request_type, profile));
 }
 
 void RecordContentLengthHistograms(
     int64 received_content_length,
     int64 original_content_length,
     const base::TimeDelta& freshness_lifetime) {
-#if defined(OS_ANDROID)
   // Add the current resource to these histograms only when a valid
   // X-Original-Content-Length header is present.
   if (original_content_length >= 0) {
@@ -312,7 +312,6 @@ void RecordContentLengthHistograms(
     return;
   UMA_HISTOGRAM_COUNTS("Net.HttpContentLengthCacheable24Hours",
                        received_content_length);
-#endif  // defined(OS_ANDROID)
 }
 
 #if defined(OS_ANDROID)
@@ -335,6 +334,14 @@ void RecordPrecacheStatsOnUIThread(const GURL& url,
 
   precache_manager->RecordStatsForFetch(url, fetch_time, size, was_cached);
 }
+
+void RecordIOThreadToRequestStartOnUIThread(
+    const base::TimeTicks& request_start) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  base::TimeDelta request_lag = request_start -
+      g_browser_process->io_thread()->creation_time();
+  UMA_HISTOGRAM_TIMES("Net.IOThreadCreationToHTTPRequestStart", request_lag);
+}
 #endif  // defined(OS_ANDROID)
 
 }  // namespace
@@ -350,7 +357,8 @@ ChromeNetworkDelegate::ChromeNetworkDelegate(
       url_blacklist_manager_(NULL),
       domain_reliability_monitor_(NULL),
       received_content_length_(0),
-      original_content_length_(0) {
+      original_content_length_(0),
+      first_request_(true) {
   DCHECK(event_router);
   DCHECK(enable_referrers);
 }
@@ -414,8 +422,10 @@ void ChromeNetworkDelegate::AllowAccessToAllFiles() {
 base::Value* ChromeNetworkDelegate::HistoricNetworkStatsInfoToValue() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   PrefService* prefs = g_browser_process->local_state();
-  int64 total_received = prefs->GetInt64(prefs::kHttpReceivedContentLength);
-  int64 total_original = prefs->GetInt64(prefs::kHttpOriginalContentLength);
+  int64 total_received = prefs->GetInt64(
+      data_reduction_proxy::prefs::kHttpReceivedContentLength);
+  int64 total_original = prefs->GetInt64(
+      data_reduction_proxy::prefs::kHttpOriginalContentLength);
 
   base::DictionaryValue* dict = new base::DictionaryValue();
   // Use strings to avoid overflow.  base::Value only supports 32-bit integers.
@@ -440,18 +450,39 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     GURL* new_url) {
+#if defined(OS_ANDROID)
+  // This UMA tracks the time to the first user-initiated request start, so
+  // only non-null profiles are considered.
+  if (first_request_ && profile_) {
+    bool record_timing = true;
+#if defined(DATA_REDUCTION_PROXY_PROBE_URL)
+    record_timing = (request->url() != GURL(DATA_REDUCTION_PROXY_PROBE_URL));
+#endif
+    if (record_timing) {
+      first_request_ = false;
+      net::LoadTimingInfo timing_info;
+      request->GetLoadTimingInfo(&timing_info);
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::Bind(&RecordIOThreadToRequestStartOnUIThread,
+                     timing_info.request_start));
+    }
+  }
+#endif  // defined(OS_ANDROID)
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // TODO(joaodasilva): This prevents extensions from seeing URLs that are
   // blocked. However, an extension might redirect the request to another URL,
   // which is not blocked.
+  int error = net::ERR_BLOCKED_BY_ADMINISTRATOR;
   if (url_blacklist_manager_ &&
-      url_blacklist_manager_->IsRequestBlocked(*request)) {
+      url_blacklist_manager_->IsRequestBlocked(*request, &error)) {
     // URL access blocked by policy.
     request->net_log().AddEvent(
         net::NetLog::TYPE_CHROME_POLICY_ABORTED_REQUEST,
         net::NetLog::StringCallback("url",
                                     &request->url().possibly_invalid_spec()));
-    return net::ERR_BLOCKED_BY_ADMINISTRATOR;
+    return error;
   }
 #endif
 
@@ -586,19 +617,19 @@ void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
       int64 original_content_length =
           request->response_info().headers->GetInt64HeaderValue(
               "x-original-content-length");
-      spdyproxy::DataReductionRequestType data_reduction_type =
-          spdyproxy::GetDataReductionRequestType(request);
+      data_reduction_proxy::DataReductionProxyRequestType request_type =
+          data_reduction_proxy::GetDataReductionProxyRequestType(request);
 
       base::TimeDelta freshness_lifetime =
           request->response_info().headers->GetFreshnessLifetime(
               request->response_info().response_time);
       int64 adjusted_original_content_length =
-          spdyproxy::GetAdjustedOriginalContentLength(
-              data_reduction_type, original_content_length,
+          data_reduction_proxy::GetAdjustedOriginalContentLength(
+              request_type, original_content_length,
               received_content_length);
       AccumulateContentLength(received_content_length,
                               adjusted_original_content_length,
-                              data_reduction_type);
+                              request_type);
       RecordContentLengthHistograms(received_content_length,
                                     original_content_length,
                                     freshness_lifetime);
@@ -735,6 +766,7 @@ bool ChromeNetworkDelegate::OnCanAccessFile(const net::URLRequest& request,
   static const char* const kLocalAccessWhiteList[] = {
       "/home/chronos/user/Downloads",
       "/home/chronos/user/log",
+      "/home/chronos/user/WebRTC Logs",
       "/media",
       "/opt/oem",
       "/usr/share/chromeos-assets",
@@ -825,12 +857,12 @@ int ChromeNetworkDelegate::OnBeforeSocketStreamConnect(
 void ChromeNetworkDelegate::AccumulateContentLength(
     int64 received_content_length,
     int64 original_content_length,
-    spdyproxy::DataReductionRequestType data_reduction_type) {
+    data_reduction_proxy::DataReductionProxyRequestType request_type) {
   DCHECK_GE(received_content_length, 0);
   DCHECK_GE(original_content_length, 0);
   StoreAccumulatedContentLength(received_content_length,
                                 original_content_length,
-                                data_reduction_type,
+                                request_type,
                                 reinterpret_cast<Profile*>(profile_));
   received_content_length_ += received_content_length;
   original_content_length_ += original_content_length;

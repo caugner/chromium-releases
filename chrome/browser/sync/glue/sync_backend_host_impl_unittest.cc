@@ -17,7 +17,9 @@
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/synced_device_tracker.h"
+#include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/testing_profile_manager.h"
 #include "components/sync_driver/sync_frontend.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "components/user_prefs/pref_registry_syncable.h"
@@ -30,6 +32,9 @@
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 #include "sync/internal_api/public/http_bridge_network_resources.h"
 #include "sync/internal_api/public/network_resources.h"
+#include "sync/internal_api/public/sessions/commit_counters.h"
+#include "sync/internal_api/public/sessions/status_counters.h"
+#include "sync/internal_api/public/sessions/update_counters.h"
 #include "sync/internal_api/public/sync_manager_factory.h"
 #include "sync/internal_api/public/test/fake_sync_manager.h"
 #include "sync/internal_api/public/util/experiments.h"
@@ -51,6 +56,8 @@ using ::testing::_;
 namespace browser_sync {
 
 namespace {
+
+const char kTestProfileName[] = "test-profile";
 
 ACTION_P(Signal, event) {
   event->Signal();
@@ -83,6 +90,12 @@ class MockSyncFrontend : public SyncFrontend {
   MOCK_METHOD0(OnEncryptionComplete, void());
   MOCK_METHOD1(OnMigrationNeededForTypes, void(syncer::ModelTypeSet));
   MOCK_METHOD1(OnProtocolEvent, void(const syncer::ProtocolEvent&));
+  MOCK_METHOD2(OnDirectoryTypeCommitCounterUpdated,
+               void(syncer::ModelType, const syncer::CommitCounters&));
+  MOCK_METHOD2(OnDirectoryTypeUpdateCounterUpdated,
+               void(syncer::ModelType, const syncer::UpdateCounters&));
+  MOCK_METHOD2(OnDirectoryTypeStatusCounterUpdated,
+               void(syncer::ModelType, const syncer::StatusCounters&));
   MOCK_METHOD1(OnExperimentsChanged,
       void(const syncer::Experiments&));
   MOCK_METHOD1(OnActionableError,
@@ -130,16 +143,18 @@ class SyncBackendHostTest : public testing::Test {
  protected:
   SyncBackendHostTest()
       : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD),
+        profile_manager_(TestingBrowserProcess::GetGlobal()),
         fake_manager_(NULL) {}
 
   virtual ~SyncBackendHostTest() {}
 
   virtual void SetUp() OVERRIDE {
-    profile_.reset(new TestingProfile());
+    ASSERT_TRUE(profile_manager_.SetUp());
+    profile_ = profile_manager_.CreateTestingProfile(kTestProfileName);
     sync_prefs_.reset(new sync_driver::SyncPrefs(profile_->GetPrefs()));
     backend_.reset(new SyncBackendHostImpl(
         profile_->GetDebugName(),
-        profile_.get(),
+        profile_,
         sync_prefs_->AsWeakPtr()));
     credentials_.email = "user@example.com";
     credentials_.sync_token = "sync_token";
@@ -170,7 +185,8 @@ class SyncBackendHostTest : public testing::Test {
     }
     backend_.reset();
     sync_prefs_.reset();
-    profile_.reset();
+    profile_ = NULL;
+    profile_manager_.DeleteTestingProfile(kTestProfileName);
     // Pump messages posted by the sync thread (which may end up
     // posting on the IO thread).
     base::RunLoop().RunUntilIdle();
@@ -238,7 +254,7 @@ class SyncBackendHostTest : public testing::Test {
 
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
-        content::Source<Profile>(profile_.get()),
+        content::Source<Profile>(profile_),
         content::Details<syncer::ModelTypeSet>(&types));
   }
 
@@ -255,7 +271,8 @@ class SyncBackendHostTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;
   StrictMock<MockSyncFrontend> mock_frontend_;
   syncer::SyncCredentials credentials_;
-  scoped_ptr<TestingProfile> profile_;
+  TestingProfileManager profile_manager_;
+  TestingProfile* profile_;
   scoped_ptr<sync_driver::SyncPrefs> sync_prefs_;
   scoped_ptr<SyncBackendHost> backend_;
   scoped_ptr<FakeSyncManagerFactory> fake_manager_factory_;

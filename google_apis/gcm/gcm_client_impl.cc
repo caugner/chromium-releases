@@ -11,13 +11,15 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/time/default_clock.h"
 #include "google_apis/gcm/base/mcs_message.h"
 #include "google_apis/gcm/base/mcs_util.h"
 #include "google_apis/gcm/engine/checkin_request.h"
 #include "google_apis/gcm/engine/connection_factory_impl.h"
 #include "google_apis/gcm/engine/gcm_store_impl.h"
-#include "google_apis/gcm/engine/mcs_client.h"
+#include "google_apis/gcm/monitoring/gcm_stats_recorder.h"
 #include "google_apis/gcm/protocol/mcs.pb.h"
 #include "net/http/http_network_session.h"
 #include "net/url_request/url_request_context.h"
@@ -65,6 +67,20 @@ enum MessageType {
   DATA_MESSAGE,      // Regular data message.
   DELETED_MESSAGES,  // Messages were deleted on the server.
   SEND_ERROR,        // Error sending a message.
+};
+
+enum OutgoingMessageTTLCategory {
+  TTL_ZERO,
+  TTL_LESS_THAN_OR_EQUAL_TO_ONE_MINUTE,
+  TTL_LESS_THAN_OR_EQUAL_TO_ONE_HOUR,
+  TTL_LESS_THAN_OR_EQUAL_TO_ONE_DAY,
+  TTL_LESS_THAN_OR_EQUAL_TO_ONE_WEEK,
+  TTL_MORE_THAN_ONE_WEEK,
+  TTL_MAXIMUM,
+  // NOTE: always keep this entry at the end. Add new TTL category only
+  // immediately above this line. Make sure to update the corresponding
+  // histogram enum accordingly.
+  TTL_CATEGORY_COUNT
 };
 
 // MCS endpoints. SSL Key pinning is done automatically due to the *.google.com
@@ -115,6 +131,29 @@ MessageType DecodeMessageType(const std::string& value) {
   return UNKNOWN;
 }
 
+void RecordOutgoingMessageToUMA(
+    const gcm::GCMClient::OutgoingMessage& message) {
+  OutgoingMessageTTLCategory ttl_category;
+  if (message.time_to_live == 0)
+    ttl_category = TTL_ZERO;
+  else if (message.time_to_live <= 60 )
+    ttl_category = TTL_LESS_THAN_OR_EQUAL_TO_ONE_MINUTE;
+  else if (message.time_to_live <= 60 * 60)
+    ttl_category = TTL_LESS_THAN_OR_EQUAL_TO_ONE_HOUR;
+  else if (message.time_to_live <= 24 * 60 * 60)
+    ttl_category = TTL_LESS_THAN_OR_EQUAL_TO_ONE_DAY;
+  else if (message.time_to_live <= 7 * 24 * 60 * 60)
+    ttl_category = TTL_LESS_THAN_OR_EQUAL_TO_ONE_WEEK;
+  else if (message.time_to_live < gcm::GCMClient::OutgoingMessage::kMaximumTTL)
+    ttl_category = TTL_MORE_THAN_ONE_WEEK;
+  else
+    ttl_category = TTL_MAXIMUM;
+
+  UMA_HISTOGRAM_ENUMERATION("GCM.GCMOutgoingMessageTTLCategory",
+                            ttl_category,
+                            TTL_CATEGORY_COUNT);
+}
+
 }  // namespace
 
 GCMInternalsBuilder::GCMInternalsBuilder() {}
@@ -128,24 +167,28 @@ scoped_ptr<MCSClient> GCMInternalsBuilder::BuildMCSClient(
     const std::string& version,
     base::Clock* clock,
     ConnectionFactory* connection_factory,
-    GCMStore* gcm_store) {
+    GCMStore* gcm_store,
+    GCMStatsRecorder* recorder) {
   return make_scoped_ptr<MCSClient>(
       new MCSClient(version,
                     clock,
                     connection_factory,
-                    gcm_store));
+                    gcm_store,
+                    recorder));
 }
 
 scoped_ptr<ConnectionFactory> GCMInternalsBuilder::BuildConnectionFactory(
       const std::vector<GURL>& endpoints,
       const net::BackoffEntry::Policy& backoff_policy,
       scoped_refptr<net::HttpNetworkSession> network_session,
-      net::NetLog* net_log) {
+      net::NetLog* net_log,
+      GCMStatsRecorder* recorder) {
   return make_scoped_ptr<ConnectionFactory>(
       new ConnectionFactoryImpl(endpoints,
                                 backoff_policy,
                                 network_session,
-                                net_log));
+                                net_log,
+                                recorder));
 }
 
 GCMClientImpl::GCMClientImpl(scoped_ptr<GCMInternalsBuilder> internals_builder)
@@ -156,6 +199,7 @@ GCMClientImpl::GCMClientImpl(scoped_ptr<GCMInternalsBuilder> internals_builder)
       pending_registration_requests_deleter_(&pending_registration_requests_),
       pending_unregistration_requests_deleter_(
           &pending_unregistration_requests_),
+      periodic_checkin_ptr_factory_(this),
       weak_ptr_factory_(this) {
 }
 
@@ -184,7 +228,7 @@ void GCMClientImpl::Initialize(
   chrome_build_proto_.CopyFrom(chrome_build_proto);
   account_ids_ = account_ids;
 
-  gcm_store_.reset(new GCMStoreImpl(false, path, blocking_task_runner));
+  gcm_store_.reset(new GCMStoreImpl(path, blocking_task_runner));
 
   delegate_ = delegate;
 
@@ -209,18 +253,21 @@ void GCMClientImpl::OnLoadCompleted(scoped_ptr<GCMStore::LoadResult> result) {
   }
 
   registrations_ = result->registrations;
-
   device_checkin_info_.android_id = result->device_android_id;
   device_checkin_info_.secret = result->device_security_token;
+  last_checkin_time_ = result->last_checkin_time;
+  gservices_settings_.UpdateFromLoadResult(*result);
   InitializeMCSClient(result.Pass());
-  if (!device_checkin_info_.IsValid()) {
-    device_checkin_info_.Reset();
-    state_ = INITIAL_DEVICE_CHECKIN;
-    StartCheckin(device_checkin_info_);
+
+  if (device_checkin_info_.IsValid()) {
+    SchedulePeriodicCheckin();
+    OnReady();
     return;
   }
 
-  OnReady();
+  state_ = INITIAL_DEVICE_CHECKIN;
+  device_checkin_info_.Reset();
+  StartCheckin();
 }
 
 void GCMClientImpl::InitializeMCSClient(
@@ -232,12 +279,14 @@ void GCMClientImpl::InitializeMCSClient(
       endpoints,
       kDefaultBackoffPolicy,
       network_session_,
-      net_log_.net_log());
+      net_log_.net_log(),
+      &recorder_);
   mcs_client_ = internals_builder_->BuildMCSClient(
       chrome_build_proto_.chrome_version(),
       clock_.get(),
       connection_factory_.get(),
-      gcm_store_.get()).Pass();
+      gcm_store_.get(),
+      &recorder_).Pass();
 
   mcs_client_->Initialize(
       base::Bind(&GCMClientImpl::OnMCSError, weak_ptr_factory_.GetWeakPtr()),
@@ -281,44 +330,103 @@ void GCMClientImpl::ResetState() {
   // TODO(fgorski): reset all of the necessart objects and start over.
 }
 
-void GCMClientImpl::StartCheckin(const CheckinInfo& checkin_info) {
+void GCMClientImpl::StartCheckin() {
+  // Make sure no checkin is in progress.
+  if (checkin_request_.get())
+    return;
+
+  CheckinRequest::RequestInfo request_info(device_checkin_info_.android_id,
+                                           device_checkin_info_.secret,
+                                           gservices_settings_.digest(),
+                                           account_ids_,
+                                           chrome_build_proto_);
   checkin_request_.reset(
-      new CheckinRequest(base::Bind(&GCMClientImpl::OnCheckinCompleted,
-                                    weak_ptr_factory_.GetWeakPtr()),
+      new CheckinRequest(gservices_settings_.checkin_url(),
+                         request_info,
                          kDefaultBackoffPolicy,
-                         chrome_build_proto_,
-                         checkin_info.android_id,
-                         checkin_info.secret,
-                         account_ids_,
-                         url_request_context_getter_));
+                         base::Bind(&GCMClientImpl::OnCheckinCompleted,
+                                    weak_ptr_factory_.GetWeakPtr()),
+                         url_request_context_getter_,
+                         &recorder_));
   checkin_request_->Start();
 }
 
-void GCMClientImpl::OnCheckinCompleted(uint64 android_id,
-                                       uint64 security_token) {
+void GCMClientImpl::OnCheckinCompleted(
+    const checkin_proto::AndroidCheckinResponse& checkin_response) {
   checkin_request_.reset();
 
-  CheckinInfo checkin_info;
-  checkin_info.android_id = android_id;
-  checkin_info.secret = security_token;
-
-  if (!checkin_info.IsValid()) {
-    // TODO(fgorski): I don't think a retry here will help, we should probalby
+  if (!checkin_response.has_android_id() ||
+      !checkin_response.has_security_token()) {
+    // TODO(fgorski): I don't think a retry here will help, we should probably
     // start over. By checking in with (0, 0).
     return;
   }
 
+  CheckinInfo checkin_info;
+  checkin_info.android_id = checkin_response.android_id();
+  checkin_info.secret = checkin_response.security_token();
+
   if (state_ == INITIAL_DEVICE_CHECKIN) {
     OnFirstTimeDeviceCheckinCompleted(checkin_info);
   } else {
+    // checkin_info is not expected to change after a periodic checkin as it
+    // would invalidate the registratoin IDs.
     DCHECK_EQ(READY, state_);
-    if (device_checkin_info_.android_id != checkin_info.android_id ||
-        device_checkin_info_.secret != checkin_info.secret) {
-      ResetState();
-    } else {
-      // TODO(fgorski): Reset the checkin timer.
-    }
+    DCHECK_EQ(device_checkin_info_.android_id, checkin_info.android_id);
+    DCHECK_EQ(device_checkin_info_.secret, checkin_info.secret);
   }
+
+  if (device_checkin_info_.IsValid()) {
+    // First update G-services settings, as something might have changed.
+    if (gservices_settings_.UpdateFromCheckinResponse(checkin_response)) {
+      gcm_store_->SetGServicesSettings(
+          gservices_settings_.GetSettingsMap(),
+          gservices_settings_.digest(),
+          base::Bind(&GCMClientImpl::SetGServicesSettingsCallback,
+                     weak_ptr_factory_.GetWeakPtr()));
+    }
+
+    last_checkin_time_ = clock_->Now();
+    gcm_store_->SetLastCheckinTime(
+        last_checkin_time_,
+        base::Bind(&GCMClientImpl::SetLastCheckinTimeCallback,
+                   weak_ptr_factory_.GetWeakPtr()));
+    SchedulePeriodicCheckin();
+  }
+}
+
+void GCMClientImpl::SetGServicesSettingsCallback(bool success) {
+  DCHECK(success);
+}
+
+void GCMClientImpl::SchedulePeriodicCheckin() {
+  // Make sure no checkin is in progress.
+  if (checkin_request_.get())
+    return;
+
+  // There should be only one periodic checkin pending at a time. Removing
+  // pending periodic checkin to schedule a new one.
+  periodic_checkin_ptr_factory_.InvalidateWeakPtrs();
+
+  base::TimeDelta time_to_next_checkin = GetTimeToNextCheckin();
+  if (time_to_next_checkin < base::TimeDelta())
+    time_to_next_checkin = base::TimeDelta();
+
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&GCMClientImpl::StartCheckin,
+                 periodic_checkin_ptr_factory_.GetWeakPtr()),
+      time_to_next_checkin);
+}
+
+base::TimeDelta GCMClientImpl::GetTimeToNextCheckin() const {
+  return last_checkin_time_ + gservices_settings_.checkin_interval() -
+         clock_->Now();
+}
+
+void GCMClientImpl::SetLastCheckinTimeCallback(bool success) {
+  // TODO(fgorski): This is one of the signals that store needs a rebuild.
+  DCHECK(success);
 }
 
 void GCMClientImpl::SetDeviceCredentialsCallback(bool success) {
@@ -370,14 +478,16 @@ void GCMClientImpl::Register(const std::string& app_id,
   DCHECK_EQ(0u, pending_registration_requests_.count(app_id));
 
   RegistrationRequest* registration_request =
-      new RegistrationRequest(request_info,
+      new RegistrationRequest(gservices_settings_.registration_url(),
+                              request_info,
                               kDefaultBackoffPolicy,
                               base::Bind(&GCMClientImpl::OnRegisterCompleted,
                                          weak_ptr_factory_.GetWeakPtr(),
                                          app_id,
                                          sender_ids),
                               kMaxRegistrationRetries,
-                              url_request_context_getter_);
+                              url_request_context_getter_,
+                              &recorder_);
   pending_registration_requests_[app_id] = registration_request;
   registration_request->Start();
 }
@@ -444,12 +554,14 @@ void GCMClientImpl::Unregister(const std::string& app_id) {
 
   UnregistrationRequest* unregistration_request =
       new UnregistrationRequest(
+          gservices_settings_.registration_url(),
           request_info,
           kDefaultBackoffPolicy,
           base::Bind(&GCMClientImpl::OnUnregisterCompleted,
                      weak_ptr_factory_.GetWeakPtr(),
                      app_id),
-          url_request_context_getter_);
+          url_request_context_getter_,
+          &recorder_);
   pending_unregistration_requests_[app_id] = unregistration_request;
   unregistration_request->Start();
 }
@@ -481,6 +593,8 @@ void GCMClientImpl::Send(const std::string& app_id,
                          const std::string& receiver_id,
                          const OutgoingMessage& message) {
   DCHECK_EQ(state_, READY);
+
+  RecordOutgoingMessageToUMA(message);
 
   mcs_proto::DataMessageStanza stanza;
   stanza.set_ttl(message.time_to_live);
@@ -522,16 +636,33 @@ std::string GCMClientImpl::GetStateString() const {
   }
 }
 
+void GCMClientImpl::SetRecording(bool recording) {
+  recorder_.SetRecording(recording);
+}
+
+void GCMClientImpl::ClearActivityLogs() {
+  recorder_.Clear();
+}
+
 GCMClient::GCMStatistics GCMClientImpl::GetStatistics() const {
   GCMClient::GCMStatistics stats;
-  stats.gcm_client_state = GCMClientImpl::GetStateString();
+  stats.gcm_client_created = true;
+  stats.is_recording = recorder_.is_recording();
+  stats.gcm_client_state = GetStateString();
   stats.connection_client_created = mcs_client_.get() != NULL;
   if (mcs_client_.get()) {
     stats.connection_state = mcs_client_->GetStateString();
-    // TODO(juyik): add more statistics such as message metadata list, etc.
+    stats.send_queue_size = mcs_client_->GetSendQueueSize();
+    stats.resend_queue_size = mcs_client_->GetResendQueueSize();
   }
   if (device_checkin_info_.android_id > 0)
     stats.android_id = device_checkin_info_.android_id;
+  recorder_.CollectActivities(&stats.recorded_activities);
+
+  for (RegistrationInfoMap::const_iterator it = registrations_.begin();
+       it != registrations_.end(); ++it) {
+    stats.registered_app_ids.push_back(it->first);
+  }
   return stats;
 }
 
@@ -610,6 +741,11 @@ void GCMClientImpl::HandleIncomingMessage(const gcm::MCSMessage& message) {
       HandleIncomingDataMessage(data_message_stanza, message_data);
       break;
     case DELETED_MESSAGES:
+      recorder_.RecordDataMessageReceived(data_message_stanza.category(),
+                                          data_message_stanza.from(),
+                                          data_message_stanza.ByteSize(),
+                                          true,
+                                          GCMStatsRecorder::DELETED_MESSAGES);
       delegate_->OnMessagesDeleted(data_message_stanza.category());
       break;
     case SEND_ERROR:
@@ -631,10 +767,15 @@ void GCMClientImpl::HandleIncomingDataMessage(
   // Drop the message when the app is not registered for the sender of the
   // message.
   RegistrationInfoMap::iterator iter = registrations_.find(app_id);
-  if (iter == registrations_.end() ||
+  bool not_registered =
+      iter == registrations_.end() ||
       std::find(iter->second->sender_ids.begin(),
                 iter->second->sender_ids.end(),
-                data_message_stanza.from()) == iter->second->sender_ids.end()) {
+                data_message_stanza.from()) == iter->second->sender_ids.end();
+  recorder_.RecordDataMessageReceived(app_id, data_message_stanza.from(),
+      data_message_stanza.ByteSize(), !not_registered,
+      GCMStatsRecorder::DATA_MESSAGE);
+  if (not_registered) {
     return;
   }
 
@@ -660,6 +801,10 @@ void GCMClientImpl::HandleIncomingSendError(
     send_error_details.additional_data.erase(iter);
   }
 
+  recorder_.RecordIncomingSendError(
+      data_message_stanza.category(),
+      data_message_stanza.to(),
+      data_message_stanza.id());
   delegate_->OnMessageSendError(data_message_stanza.category(),
                                 send_error_details);
 }

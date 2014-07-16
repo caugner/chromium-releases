@@ -8,15 +8,16 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
+#include "base/time/time.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/owner_key_util.h"
 #include "chrome/browser/chromeos/settings/session_manager_operation.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "crypto/rsa_private_key.h"
-#include "policy/proto/device_management_backend.pb.h"
 
 namespace em = enterprise_management;
 
@@ -127,13 +128,48 @@ void DeviceSettingsService::Load() {
 void DeviceSettingsService::SignAndStore(
     scoped_ptr<em::ChromeDeviceSettingsProto> new_settings,
     const base::Closure& callback) {
+  scoped_ptr<em::PolicyData> new_policy = AssemblePolicy(*new_settings);
+  if (!new_policy) {
+    HandleError(STORE_POLICY_ERROR, callback);
+    return;
+  }
+
   Enqueue(
       new SignAndStoreSettingsOperation(
           base::Bind(&DeviceSettingsService::HandleCompletedOperation,
                      weak_factory_.GetWeakPtr(),
                      callback),
-          new_settings.Pass(),
-          username_));
+          new_policy.Pass()));
+}
+
+void DeviceSettingsService::SetManagementSettings(
+    em::PolicyData::ManagementMode management_mode,
+    const std::string& request_token,
+    const std::string& device_id,
+    const base::Closure& callback) {
+  if (!CheckManagementModeTransition(management_mode)) {
+    LOG(ERROR) << "Invalid management mode transition: current mode = "
+               << GetManagementMode() << ", new mode = " << management_mode;
+    HandleError(STORE_POLICY_ERROR, callback);
+    return;
+  }
+
+  scoped_ptr<em::PolicyData> policy = AssemblePolicy(*device_settings_);
+  if (!policy) {
+    HandleError(STORE_POLICY_ERROR, callback);
+    return;
+  }
+
+  policy->set_management_mode(management_mode);
+  policy->set_request_token(request_token);
+  policy->set_device_id(device_id);
+
+  Enqueue(
+      new SignAndStoreSettingsOperation(
+          base::Bind(&DeviceSettingsService::HandleCompletedOperation,
+                     weak_factory_.GetWeakPtr(),
+                     callback),
+          policy.Pass()));
 }
 
 void DeviceSettingsService::Store(scoped_ptr<em::PolicyFetchResponse> policy,
@@ -316,6 +352,10 @@ void DeviceSettingsService::HandleCompletedOperation(
             FROM_HERE,
             base::Bind(&DeviceSettingsService::Load, base::Unretained(this)),
             base::TimeDelta::FromMilliseconds(kLoadRetryDelayMs));
+      } else {
+        // Once we've given up retrying, the validation error is not temporary
+        // anymore.
+        store_status_ = STORE_VALIDATION_ERROR;
       }
     }
   }
@@ -359,6 +399,79 @@ void DeviceSettingsService::HandleCompletedOperation(
   delete operation;
 
   StartNextOperation();
+}
+
+void DeviceSettingsService::HandleError(Status status,
+                                        const base::Closure& callback) {
+  store_status_ = status;
+
+  LOG(ERROR) << "Session manager operation failed: " << status;
+
+  FOR_EACH_OBSERVER(Observer, observers_, DeviceSettingsUpdated());
+
+  // The completion callback happens after the notification so clients can
+  // filter self-triggered updates.
+  if (!callback.is_null())
+    callback.Run();
+}
+
+scoped_ptr<em::PolicyData> DeviceSettingsService::AssemblePolicy(
+    const em::ChromeDeviceSettingsProto& settings) const {
+  scoped_ptr<em::PolicyData> policy(new em::PolicyData());
+  if (policy_data_) {
+    // Preserve management settings.
+    if (policy_data_->has_management_mode())
+      policy->set_management_mode(policy_data_->management_mode());
+    if (policy_data_->has_request_token())
+      policy->set_request_token(policy_data_->request_token());
+    if (policy_data_->has_device_id())
+      policy->set_device_id(policy_data_->device_id());
+  } else {
+    // If there's no previous policy data, this is the first time the device
+    // setting is set. We set the management mode to NOT_MANAGED initially.
+    policy->set_management_mode(em::PolicyData::NOT_MANAGED);
+  }
+  policy->set_policy_type(policy::dm_protocol::kChromeDevicePolicyType);
+  policy->set_timestamp((base::Time::Now() - base::Time::UnixEpoch()).
+                        InMilliseconds());
+  policy->set_username(username_);
+  if (!settings.SerializeToString(policy->mutable_policy_value()))
+    return scoped_ptr<em::PolicyData>();
+
+  return policy.Pass();
+}
+
+em::PolicyData::ManagementMode DeviceSettingsService::GetManagementMode()
+    const {
+  if (policy_data_ && policy_data_->has_management_mode())
+    return policy_data_->management_mode();
+  return em::PolicyData::NOT_MANAGED;
+}
+
+bool DeviceSettingsService::CheckManagementModeTransition(
+    em::PolicyData::ManagementMode new_mode) const {
+  em::PolicyData::ManagementMode current_mode = GetManagementMode();
+
+  // Mode is not changed.
+  if (current_mode == new_mode)
+    return true;
+
+  switch (current_mode) {
+    case em::PolicyData::NOT_MANAGED:
+      // For consumer management enrollment.
+      return new_mode == em::PolicyData::CONSUMER_MANAGED;
+
+    case em::PolicyData::ENTERPRISE_MANAGED:
+      // Management mode cannot be set when it is currently ENTERPRISE_MANAGED.
+      return false;
+
+    case em::PolicyData::CONSUMER_MANAGED:
+      // For consumer management unenrollment.
+      return new_mode == em::PolicyData::NOT_MANAGED;
+  }
+
+  NOTREACHED();
+  return false;
 }
 
 ScopedTestDeviceSettingsService::ScopedTestDeviceSettingsService() {

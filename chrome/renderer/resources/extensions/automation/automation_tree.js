@@ -4,23 +4,25 @@
 
 var Event = require('event_bindings').Event;
 var AutomationNode = require('automationNode').AutomationNode;
+var utils = require('utils');
 
 // Maps an attribute to its default value in an invalidated node.
 // These attributes are taken directly from the Automation idl.
 var AutomationAttributeDefaults = {
   'id': -1,
   'role': '',
-  'state': {}
+  'state': {},
+  'location': { left: 0, top: 0, width: 0, height: 0 }
 };
 
 
 var AutomationAttributeTypes = [
-  'bool_attributes',
-  'float_attributes',
-  'html_attributes',
-  'int_attributes',
-  'intlist_attributes',
-  'string_attributes'
+  'boolAttributes',
+  'floatAttributes',
+  'htmlAttributes',
+  'intAttributes',
+  'intlistAttributes',
+  'stringAttributes'
 ];
 
 
@@ -37,60 +39,25 @@ var AutomationAttributeTypes = [
  * AutomationNode object.
  * Thus, tree traversals amount to a lookup in our hash.
  *
+ * The tree itself is identified by the process id and routing id of the
+ * renderer widget host.
  * @constructor
  */
-var AutomationTree = function(routingId) {
-  privates(this).impl = new AutomationTreeImpl(routingId);
-
-  /**
-   * Event fired when a tree update occurs.
-   * @deprecated TODO(aboxhall/dtseng): remove this event; it should not be
-   * exposed in the public API. Replace with EventListener style API which
-   * allows listening for events in the AXEvent enum.
-   */
-  this.onUpdate = new Event();
-};
-
-
-AutomationTree.prototype = {
-  /**
-   * The root of this automation tree.
-   * @type {Object}
-   */
-  get root() {
-    return privates(this).impl.root;
-  }
-};
-
-
-var AutomationTreeImpl = function(routingId) {
-  this.routingId = routingId;
-
-  /**
-   * Our cache of the native AXTree.
-   * @type {!Object.<number, Object>}
-   * @private
-   */
+var AutomationTreeImpl = function(processID, routingID) {
+  this.processID = processID;
+  this.routingID = routingID;
+  this.listeners = {};
+  this.root = new AutomationNode(this);
   this.axNodeDataCache_ = {};
 };
 
 AutomationTreeImpl.prototype = {
   root: null,
 
-  /**
-   * Looks up AXNodeData from backing AXTree.
-   * We assume this cache is complete at the time a client requests a node.
-   * @param {number} id The id of the AXNode to retrieve.
-   * @return {AutomationNode} The data, if it exists.
-   */
   get: function(id) {
     return this.axNodeDataCache_[id];
   },
 
-  /**
-   * Invalidates a subtree rooted at |node|.
-   * @param {AutomationNode} id The node to invalidate.
-   */
   invalidate: function(node) {
     if (!node)
       return;
@@ -102,17 +69,32 @@ AutomationTreeImpl.prototype = {
 
     var id = node.id;
     for (var key in AutomationAttributeDefaults) {
-      node[key] = AutomationAttributeDefaults[key];
+      privates(node).impl[key] = AutomationAttributeDefaults[key];
     }
-    node.id = id;
+    privates(node).impl.loaded = false;
+    privates(node).impl.id = id;
     this.axNodeDataCache_[id] = undefined;
   },
 
-  /**
-   * Send an update to this tree.
-   * @param {Object} data The update.
-   * @return {boolean} Whether any changes to the tree occurred.
-   */
+  // TODO(aboxhall): make AutomationTree inherit from AutomationNode (or a
+  // mutual ancestor) and remove this code.
+  addEventListener: function(eventType, callback, capture) {
+    this.removeEventListener(eventType, callback);
+    if (!this.listeners[eventType])
+      this.listeners[eventType] = [];
+    this.listeners[eventType].push({callback: callback, capture: capture});
+  },
+
+  removeEventListener: function(eventType, callback) {
+    if (this.listeners[eventType]) {
+      var listeners = this.listeners[eventType];
+      for (var i = 0; i < listeners.length; i++) {
+        if (callback === listeners[i].callback)
+          listeners.splice(i, 1);
+      }
+    }
+  },
+
   update: function(data) {
     var didUpdateRoot = false;
 
@@ -127,62 +109,79 @@ AutomationTreeImpl.prototype = {
       }
 
       // Update children.
-      var old_child_ids = privates(node).impl.child_ids;
-      var new_child_ids = nodeData.child_ids || [];
-      var new_child_ids_hash = {};
+      var oldChildIDs = privates(node).impl.childIds;
+      var newChildIDs = nodeData.childIds || [];
+      var newChildIDsHash = {};
 
-      for (var j = 0, newId; newId = new_child_ids[j]; j++) {
+      for (var j = 0, newId; newId = newChildIDs[j]; j++) {
         // Hash the new child ids for faster lookup.
-        new_child_ids_hash[newId] = newId;
+        newChildIDsHash[newId] = newId;
 
-        // We need to update all new children's parent_id regardless.
+        // We need to update all new children's parent id regardless.
         var childNode = this.get(newId);
         if (!childNode) {
           childNode = new AutomationNode(this);
           this.axNodeDataCache_[newId] = childNode;
-          childNode.id = newId;
+          privates(childNode).impl.id = newId;
         }
-        privates(childNode).impl.index_in_parent = j;
-        privates(childNode).impl.parent_id = nodeData.id;
+        privates(childNode).impl.indexInParent = j;
+        privates(childNode).impl.parentID = nodeData.id;
       }
 
-      for (var k = 0, oldId; oldId = old_child_ids[k]; k++) {
+      for (var k = 0, oldId; oldId = oldChildIDs[k]; k++) {
         // However, we must invalidate all old child ids that are no longer
         // children.
-        if (!new_child_ids_hash[oldId]) {
+        if (!newChildIDsHash[oldId]) {
           this.invalidate(this.get(oldId));
         }
       }
 
-      if (nodeData.role == 'root_web_area') {
+      if (nodeData.role == 'root_web_area' || nodeData.role == 'desktop') {
         this.root = node;
         didUpdateRoot = true;
       }
       for (var key in AutomationAttributeDefaults) {
-        // This assumes that we sometimes don't get specific attributes (i.e. in
-        // tests). Better safe than sorry.
-        if (nodeData[key]) {
-          node[key] = nodeData[key];
-        } else {
-          node[key] = AutomationAttributeDefaults[key];
-        }
+        if (key in nodeData)
+          privates(node).impl[key] = nodeData[key];
+        else
+          privates(node).impl[key] = AutomationAttributeDefaults[key];
       }
-      node.attributes = {};
       for (var attributeTypeIndex = 0;
            attributeTypeIndex < AutomationAttributeTypes.length;
            attributeTypeIndex++) {
-        var attribute_type = AutomationAttributeTypes[attributeTypeIndex];
-        for (var attribute_id in nodeData[attribute_type]) {
-          node.attributes[attribute_id] =
-              nodeData[attribute_type][attribute_id];
+        var attributeType = AutomationAttributeTypes[attributeTypeIndex];
+        for (var attributeID in nodeData[attributeType]) {
+          privates(node).impl.attributes[attributeID] =
+              nodeData[attributeType][attributeID];
         }
       }
-      privates(node).impl.child_ids = new_child_ids;
+      privates(node).impl.childIds = newChildIDs;
+      privates(node).impl.loaded = true;
       this.axNodeDataCache_[node.id] = node;
     }
+    var node = this.get(data.targetID);
+    if (node)
+      privates(node).impl.dispatchEvent(data.eventType);
     return true;
+  },
+
+  toString: function() {
+    function toStringInternal(node, indent) {
+      if (!node)
+        return '';
+      var output =
+          new Array(indent).join(' ') + privates(node).impl.toString() + '\n';
+      indent += 2;
+      for (var i = 0; i < node.children().length; i++)
+        output += toStringInternal(node.children()[i], indent);
+      return output;
+    }
+    return toStringInternal(this.root, 0);
   }
 };
 
-
-exports.AutomationTree = AutomationTree;
+exports.AutomationTree = utils.expose('AutomationTree',
+                                      AutomationTreeImpl,
+                                      { functions: ['addEventListener',
+                                                    'removeEventListener'],
+                                        readonly: ['root'] });

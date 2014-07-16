@@ -21,6 +21,7 @@ import org.chromium.chrome.browser.JavascriptAppModalDialog;
 import org.chromium.chrome.shell.ChromeShellTestBase;
 import org.chromium.chrome.test.util.TabUtils;
 import org.chromium.chrome.test.util.TabUtils.TestCallbackHelperContainerForTab;
+import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
@@ -186,7 +187,7 @@ public class ModalDialogTest extends ChromeShellTestBase {
                 "Stay on this page");
         clickCancel(jsDialog);
 
-        assertEquals(BEFORE_UNLOAD_URL, getActivity().getActiveContentView().getUrl());
+        assertEquals(BEFORE_UNLOAD_URL, getActivity().getActiveContentViewCore().getUrl());
         executeJavaScriptAndWaitForDialog("history.back();");
 
         jsDialog = getCurrentDialog();
@@ -200,7 +201,7 @@ public class ModalDialogTest extends ChromeShellTestBase {
         int callCount = onPageLoaded.getCallCount();
         clickOk(jsDialog);
         onPageLoaded.waitForCallback(callCount);
-        assertEquals(EMPTY_PAGE, getActivity().getActiveContentView().getUrl());
+        assertEquals(EMPTY_PAGE, getActivity().getActiveContentViewCore().getUrl());
     }
 
     /**
@@ -265,7 +266,7 @@ public class ModalDialogTest extends ChromeShellTestBase {
         clickCancel(jsDialog);
         scriptEvent.waitUntilHasValue();
 
-        scriptEvent.evaluateJavaScript(getActivity().getActiveContentView().getContentViewCore(),
+        scriptEvent.evaluateJavaScript(getActivity().getActiveContentViewCore(),
                 "alert('Android');");
         assertTrue("No further dialog boxes should be shown.", scriptEvent.waitUntilHasValue());
     }
@@ -281,7 +282,7 @@ public class ModalDialogTest extends ChromeShellTestBase {
             throws InterruptedException, TimeoutException, ExecutionException {
         executeJavaScriptAndWaitForDialog("alert('Android')");
 
-        final TestCallbackHelperContainerForTab.OnCloseTabHelper onTabClosed =
+        final CallbackHelper onTabClosed =
                 getActiveTabTestCallbackHelperContainer().getOnCloseTabHelper();
         int callCount = onTabClosed.getCallCount();
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -305,9 +306,7 @@ public class ModalDialogTest extends ChromeShellTestBase {
      */
     private OnEvaluateJavaScriptResultHelper executeJavaScriptAndWaitForDialog(String script)
             throws InterruptedException {
-        final OnEvaluateJavaScriptResultHelper helper =
-                getActiveTabTestCallbackHelperContainer().getOnEvaluateJavaScriptResultHelper();
-        return executeJavaScriptAndWaitForDialog(helper, script);
+        return executeJavaScriptAndWaitForDialog(new OnEvaluateJavaScriptResultHelper(), script);
     }
 
     /**
@@ -317,7 +316,7 @@ public class ModalDialogTest extends ChromeShellTestBase {
     private OnEvaluateJavaScriptResultHelper executeJavaScriptAndWaitForDialog(
             final OnEvaluateJavaScriptResultHelper helper, String script)
             throws InterruptedException {
-        helper.evaluateJavaScript(getActivity().getActiveContentView().getContentViewCore(),
+        helper.evaluateJavaScript(getActivity().getActiveContentViewCore(),
                 script);
         boolean criteriaSatisfied = CriteriaHelper.pollForCriteria(
                 new JavascriptAppModalDialogShownCriteria(true));

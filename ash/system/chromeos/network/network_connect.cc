@@ -4,7 +4,7 @@
 
 #include "ash/system/chromeos/network/network_connect.h"
 
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/system/chromeos/network/network_state_notifier.h"
 #include "ash/system/system_notifier.h"
@@ -118,7 +118,7 @@ bool GetNetworkProfilePath(bool shared, std::string* profile_path) {
     return true;
   }
 
-  if (!chromeos::LoginState::Get()->IsUserAuthenticated()) {
+  if (!chromeos::LoginState::Get()->UserHasNetworkProfile()) {
     NET_LOG_ERROR("User profile specified before login", "");
     return false;
   }

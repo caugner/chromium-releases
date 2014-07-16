@@ -11,8 +11,8 @@
 #include <X11/Xutil.h>
 
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/debug/trace_event.h"
-#include "base/message_loop/message_pump_x11.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "third_party/skia/include/core/SkPath.h"
@@ -25,6 +25,8 @@
 #include "ui/base/hit_test.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/events/event_utils.h"
+#include "ui/events/platform/platform_event_source.h"
+#include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/events/x/device_data_manager.h"
 #include "ui/events/x/device_list_cache_x.h"
 #include "ui/events/x/touch_factory_x11.h"
@@ -39,6 +41,7 @@
 #include "ui/views/ime/input_method.h"
 #include "ui/views/linux_ui/linux_ui.h"
 #include "ui/views/views_delegate.h"
+#include "ui/views/views_switches.h"
 #include "ui/views/widget/desktop_aura/desktop_dispatcher_client.h"
 #include "ui/views/widget/desktop_aura/desktop_drag_drop_client_aurax11.h"
 #include "ui/views/widget/desktop_aura/desktop_native_cursor_manager.h"
@@ -73,7 +76,7 @@ const char* kAtomsToCache[] = {
   "UTF8_STRING",
   "WM_DELETE_WINDOW",
   "WM_PROTOCOLS",
-  "WM_S0",
+  "_NET_WM_CM_S0",
   "_NET_WM_ICON",
   "_NET_WM_NAME",
   "_NET_WM_PID",
@@ -130,6 +133,7 @@ DesktopWindowTreeHostX11::DesktopWindowTreeHostX11(
       is_fullscreen_(false),
       is_always_on_top_(false),
       use_native_frame_(false),
+      use_argb_visual_(false),
       drag_drop_client_(NULL),
       current_cursor_(ui::kCursorNull),
       native_widget_delegate_(native_widget_delegate),
@@ -246,6 +250,8 @@ void DesktopWindowTreeHostX11::OnNativeWidgetCreated(
   x11_window_move_client_.reset(new X11DesktopWindowMoveClient);
   aura::client::SetWindowMoveClient(window(), x11_window_move_client_.get());
 
+  SetWindowTransparency();
+
   native_widget_delegate_->OnNativeWidgetCreated(true);
 }
 
@@ -312,7 +318,8 @@ void DesktopWindowTreeHostX11::CloseNow() {
 
   open_windows().remove(xwindow_);
   // Actually free our native resources.
-  base::MessagePumpX11::Current()->RemoveDispatcherForWindow(xwindow_);
+  if (ui::PlatformEventSource::GetInstance())
+    ui::PlatformEventSource::GetInstance()->RemovePlatformEventDispatcher(this);
   XDestroyWindow(xdisplay_, xwindow_);
   xwindow_ = None;
 
@@ -393,7 +400,7 @@ void DesktopWindowTreeHostX11::CenterWindow(const gfx::Size& size) {
 void DesktopWindowTreeHostX11::GetWindowPlacement(
     gfx::Rect* bounds,
     ui::WindowShowState* show_state) const {
-  *bounds = bounds_;
+  *bounds = GetRestoredBounds();
 
   if (IsFullscreen()) {
     *show_state = ui::SHOW_STATE_FULLSCREEN;
@@ -763,12 +770,17 @@ bool DesktopWindowTreeHostX11::IsAnimatingClosed() const {
 ////////////////////////////////////////////////////////////////////////////////
 // DesktopWindowTreeHostX11, aura::WindowTreeHost implementation:
 
+ui::EventSource* DesktopWindowTreeHostX11::GetEventSource() {
+  return this;
+}
+
 gfx::AcceleratedWidget DesktopWindowTreeHostX11::GetAcceleratedWidget() {
   return xwindow_;
 }
 
 void DesktopWindowTreeHostX11::Show() {
   ShowWindowWithState(ui::SHOW_STATE_NORMAL);
+  native_widget_delegate_->OnNativeWidgetVisibilityChanged(true);
 }
 
 void DesktopWindowTreeHostX11::Hide() {
@@ -776,10 +788,7 @@ void DesktopWindowTreeHostX11::Hide() {
     XWithdrawWindow(xdisplay_, xwindow_, 0);
     window_mapped_ = false;
   }
-}
-
-void DesktopWindowTreeHostX11::ToggleFullScreen() {
-  NOTIMPLEMENTED();
+  native_widget_delegate_->OnNativeWidgetVisibilityChanged(false);
 }
 
 gfx::Rect DesktopWindowTreeHostX11::GetBounds() const {
@@ -822,16 +831,7 @@ void DesktopWindowTreeHostX11::SetBounds(const gfx::Rect& bounds) {
   if (size_changed) {
     OnHostResized(bounds.size());
     ResetWindowRegion();
-  } else {
-    compositor()->ScheduleRedrawRect(gfx::Rect(bounds.size()));
   }
-}
-
-gfx::Insets DesktopWindowTreeHostX11::GetInsets() const {
-  return gfx::Insets();
-}
-
-void DesktopWindowTreeHostX11::SetInsets(const gfx::Insets& insets) {
 }
 
 gfx::Point DesktopWindowTreeHostX11::GetLocationOnNativeScreen() const {
@@ -857,41 +857,6 @@ void DesktopWindowTreeHostX11::SetCapture() {
 void DesktopWindowTreeHostX11::ReleaseCapture() {
   if (g_current_capture == this)
     g_current_capture->OnCaptureReleased();
-}
-
-bool DesktopWindowTreeHostX11::QueryMouseLocation(
-    gfx::Point* location_return) {
-  aura::client::CursorClient* cursor_client =
-      aura::client::GetCursorClient(window());
-  if (cursor_client && !cursor_client->IsMouseEventsEnabled()) {
-    *location_return = gfx::Point(0, 0);
-    return false;
-  }
-
-  ::Window root_return, child_return;
-  int root_x_return, root_y_return, win_x_return, win_y_return;
-  unsigned int mask_return;
-  XQueryPointer(xdisplay_,
-                xwindow_,
-                &root_return,
-                &child_return,
-                &root_x_return, &root_y_return,
-                &win_x_return, &win_y_return,
-                &mask_return);
-  *location_return = gfx::Point(
-      std::max(0, std::min(bounds_.width(), win_x_return)),
-      std::max(0, std::min(bounds_.height(), win_y_return)));
-  return (win_x_return >= 0 && win_x_return < bounds_.width() &&
-          win_y_return >= 0 && win_y_return < bounds_.height());
-}
-
-bool DesktopWindowTreeHostX11::ConfineCursorToRootWindow() {
-  NOTIMPLEMENTED();
-  return false;
-}
-
-void DesktopWindowTreeHostX11::UnConfineCursor() {
-  NOTIMPLEMENTED();
 }
 
 void DesktopWindowTreeHostX11::SetCursorNative(gfx::NativeCursor cursor) {
@@ -986,18 +951,45 @@ void DesktopWindowTreeHostX11::InitX11Window(
   if (swa.override_redirect)
     attribute_mask |= CWOverrideRedirect;
 
+  // Detect whether we're running inside a compositing manager. If so, try to
+  // use the ARGB visual. Otherwise, just use our parent's visual.
+  Visual* visual = CopyFromParent;
+  int depth = CopyFromParent;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableTransparentVisuals) &&
+      XGetSelectionOwner(xdisplay_,
+                         atom_cache_.GetAtom("_NET_WM_CM_S0")) != None) {
+    Visual* rgba_visual = GetARGBVisual();
+    if (rgba_visual) {
+      visual = rgba_visual;
+      depth = 32;
+
+      attribute_mask |= CWColormap;
+      swa.colormap = XCreateColormap(xdisplay_, x_root_window_, visual,
+                                     AllocNone);
+
+      // x.org will BadMatch if we don't set a border when the depth isn't the
+      // same as the parent depth.
+      attribute_mask |= CWBorderPixel;
+      swa.border_pixel = 0;
+
+      use_argb_visual_ = true;
+    }
+  }
+
   bounds_ = params.bounds;
   xwindow_ = XCreateWindow(
       xdisplay_, x_root_window_,
       bounds_.x(), bounds_.y(),
       bounds_.width(), bounds_.height(),
       0,               // border width
-      CopyFromParent,  // depth
+      depth,
       InputOutput,
-      CopyFromParent,  // visual
+      visual,
       attribute_mask,
       &swa);
-  base::MessagePumpX11::Current()->AddDispatcherForWindow(this, xwindow_);
+  if (ui::PlatformEventSource::GetInstance())
+    ui::PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
   open_windows().push_back(xwindow_);
 
   // TODO(erg): Maybe need to set a ViewProp here like in RWHL::RWHL().
@@ -1116,11 +1108,27 @@ void DesktopWindowTreeHostX11::InitX11Window(
   CreateCompositor(GetAcceleratedWidget());
 }
 
-bool DesktopWindowTreeHostX11::IsWindowManagerPresent() {
-  // Per ICCCM 2.8, "Manager Selections", window managers should take ownership
-  // of WM_Sn selections (where n is a screen number).
-  return XGetSelectionOwner(
-      xdisplay_, atom_cache_.GetAtom("WM_S0")) != None;
+void DesktopWindowTreeHostX11::UpdateWMUserTime(
+    const ui::PlatformEvent& event) {
+  if (!IsActive())
+    return;
+
+  ui::EventType type = ui::EventTypeFromNative(event);
+  if (type == ui::ET_MOUSE_PRESSED ||
+      type == ui::ET_KEY_PRESSED ||
+      type == ui::ET_TOUCH_PRESSED) {
+    unsigned long wm_user_time_ms = static_cast<unsigned long>(
+        ui::EventTimeFromNative(event).InMilliseconds());
+    XChangeProperty(xdisplay_,
+                    xwindow_,
+                    atom_cache_.GetAtom("_NET_WM_USER_TIME"),
+                    XA_CARDINAL,
+                    32,
+                    PropModeReplace,
+                    reinterpret_cast<const unsigned char *>(&wm_user_time_ms),
+                    1);
+    X11DesktopHandler::get()->set_wm_user_time_ms(wm_user_time_ms);
+  }
 }
 
 void DesktopWindowTreeHostX11::SetWMSpecState(bool enabled,
@@ -1275,6 +1283,39 @@ void DesktopWindowTreeHostX11::SerializeImageRepresentation(
       data->push_back(bitmap.getColor(x, y));
 }
 
+Visual* DesktopWindowTreeHostX11::GetARGBVisual() {
+  XVisualInfo visual_template;
+  visual_template.screen = 0;
+  Visual* to_return = NULL;
+
+  int visuals_len;
+  XVisualInfo* visual_list = XGetVisualInfo(xdisplay_,
+                                            VisualScreenMask,
+                                            &visual_template, &visuals_len);
+  for (int i = 0; i < visuals_len; ++i) {
+    // Why support only 8888 ARGB? Because it's all that GTK+ supports. In
+    // gdkvisual-x11.cc, they look for this specific visual and use it for all
+    // their alpha channel using needs.
+    //
+    // TODO(erg): While the following does find a valid visual, some GL drivers
+    // don't believe that this has an alpha channel. According to marcheu@,
+    // this should work on open source driver though. (It doesn't work with
+    // NVidia's binaries currently.) http://crbug.com/369209
+    if (visual_list[i].depth == 32 &&
+        visual_list[i].visual->red_mask == 0xff0000 &&
+        visual_list[i].visual->green_mask == 0x00ff00 &&
+        visual_list[i].visual->blue_mask == 0x0000ff) {
+      to_return = visual_list[i].visual;
+      break;
+    }
+  }
+
+  if (visual_list)
+    XFree(visual_list);
+
+  return to_return;
+}
+
 std::list<XID>& DesktopWindowTreeHostX11::open_windows() {
   if (!open_windows_)
     open_windows_ = new std::list<XID>();
@@ -1300,22 +1341,17 @@ void DesktopWindowTreeHostX11::MapWindow(ui::WindowShowState show_state) {
   // If SHOW_STATE_INACTIVE, tell the window manager not to focus the window
   // when mapping. This is done by setting the _NET_WM_USER_TIME to 0. See e.g.
   // http://standards.freedesktop.org/wm-spec/latest/ar01s05.html
-  if (show_state == ui::SHOW_STATE_INACTIVE) {
-    unsigned long value = 0;
+  unsigned long wm_user_time_ms = (show_state == ui::SHOW_STATE_INACTIVE) ?
+      0 : X11DesktopHandler::get()->wm_user_time_ms();
+  if (show_state == ui::SHOW_STATE_INACTIVE || wm_user_time_ms != 0) {
     XChangeProperty(xdisplay_,
                     xwindow_,
                     atom_cache_.GetAtom("_NET_WM_USER_TIME"),
                     XA_CARDINAL,
                     32,
                     PropModeReplace,
-                    reinterpret_cast<const unsigned char *>(&value),
+                    reinterpret_cast<const unsigned char *>(&wm_user_time_ms),
                     1);
-  } else {
-    // TODO(piman): if this window was created in response to an X event, we
-    // should set the time to the server time of the event that caused this.
-    // https://crbug.com/355667
-    XDeleteProperty(
-        xdisplay_, xwindow_, atom_cache_.GetAtom("_NET_WM_USER_TIME"));
   }
 
   XMapWindow(xdisplay_, xwindow_);
@@ -1323,18 +1359,35 @@ void DesktopWindowTreeHostX11::MapWindow(ui::WindowShowState show_state) {
   // We now block until our window is mapped. Some X11 APIs will crash and
   // burn if passed |xwindow_| before the window is mapped, and XMapWindow is
   // asynchronous.
-  base::MessagePumpX11::Current()->BlockUntilWindowMapped(xwindow_);
+  if (ui::X11EventSource::GetInstance())
+    ui::X11EventSource::GetInstance()->BlockUntilWindowMapped(xwindow_);
   window_mapped_ = true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// DesktopWindowTreeHostX11, MessagePumpDispatcher implementation:
+void DesktopWindowTreeHostX11::SetWindowTransparency() {
+  compositor()->SetHostHasTransparentBackground(use_argb_visual_);
+  window()->SetTransparent(use_argb_visual_);
+  content_window_->SetTransparent(use_argb_visual_);
+}
 
-uint32_t DesktopWindowTreeHostX11::Dispatch(const base::NativeEvent& event) {
+////////////////////////////////////////////////////////////////////////////////
+// DesktopWindowTreeHostX11, ui::PlatformEventDispatcher implementation:
+
+bool DesktopWindowTreeHostX11::CanDispatchEvent(
+    const ui::PlatformEvent& event) {
+  return event->xany.window == xwindow_ ||
+         (event->type == GenericEvent &&
+          static_cast<XIDeviceEvent*>(event->xcookie.data)->event == xwindow_);
+}
+
+uint32_t DesktopWindowTreeHostX11::DispatchEvent(
+    const ui::PlatformEvent& event) {
   XEvent* xev = event;
 
   TRACE_EVENT1("views", "DesktopWindowTreeHostX11::Dispatch",
                "event->type", event->type);
+
+  UpdateWMUserTime(event);
 
   // May want to factor CheckXEventForConsistency(xev); into a common location
   // since it is called here.
@@ -1620,7 +1673,7 @@ uint32_t DesktopWindowTreeHostX11::Dispatch(const base::NativeEvent& event) {
       break;
     }
   }
-  return POST_DISPATCH_NONE;
+  return ui::POST_DISPATCH_STOP_PROPAGATION;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1638,7 +1691,7 @@ DesktopWindowTreeHost* DesktopWindowTreeHost::Create(
 ui::NativeTheme* DesktopWindowTreeHost::GetNativeTheme(aura::Window* window) {
   const views::LinuxUI* linux_ui = views::LinuxUI::instance();
   if (linux_ui) {
-    ui::NativeTheme* native_theme = linux_ui->GetNativeTheme();
+    ui::NativeTheme* native_theme = linux_ui->GetNativeTheme(window);
     if (native_theme)
       return native_theme;
   }

@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="extension_commands_overlay.css">
 <link rel="stylesheet" href="extension_error.css">
 <link rel="stylesheet" href="extension_error_overlay.css">
+<link rel="stylesheet" href="extension_load_error.css">
 <link rel="stylesheet" href="pack_extension_overlay.css">
 <link rel="stylesheet" href="chrome://resources/css/alert_overlay.css">
 <link rel="stylesheet" href="chrome://resources/css/chrome_shared.css">
@@ -88,7 +89,18 @@
       <button id="update-extensions-now"
           i18n-content="extensionSettingsUpdateButton"></button>
     </div>
+    <div id="apps-developer-tools-promo">
+      <img></img>
+      <span id="apps-developer-tools-promo-text"
+          i18n-values=".innerHTML:extensionSettingsAppsDevToolsPromoHTML">
+      </span>
+      <div id="apps-developer-tools-promo-close-wrapper">
+        <button i18n-values="title:extensionSettingsAppDevToolsPromoClose"
+            class="custom-appearance close-button"></button>
+      </div>
+    </div>
   </div>
+  <include src="extension_load_error.html">
   <div id="extension-settings-list" class="empty-extension-list"></div>
   <div id="no-extensions">
     <span id="no-extensions-message"
@@ -136,7 +148,15 @@
             <span i18n-content="extensionSettingsSuspiciousInstall"></span>
             <a target="_blank" class="learn-more-link"
                 i18n-values="href:extensionSettingsSuspiciousInstallHelpUrl"
-                i18n-content="extensionSettingsSuspiciousInstallLearnMore"
+                i18n-content="extensionSettingsLearnMore"
+                href="#">
+            </a>
+          </div>
+          <div class="corrupt-install-message" hidden>
+            <span i18n-content="extensionSettingsCorruptInstall"></span>
+            <a target="_blank" class="learn-more-link"
+                i18n-values="href:extensionSettingsCorruptInstallHelpUrl"
+                i18n-content="extensionSettingsLearnMore"
                 href="#">
             </a>
           </div>
@@ -167,10 +187,19 @@
         <div class="optional-controls">
           <button class="show-button"
               i18n-content="extensionSettingsShowButton" hidden></button>
-          <div class="checkbox"><label class="incognito-control">
-            <input type="checkbox">
-            <span i18n-content="extensionSettingsEnableIncognito"></span>
-          </label></div>
+          <div class="checkbox">
+            <label class="incognito-control">
+              <input type="checkbox">
+              <span i18n-content="extensionSettingsEnableIncognito"></span>
+            </label>
+          </div>
+          <div class="checkbox error-collection-control" hidden>
+            <label>
+              <input type="checkbox">
+              <span i18n-content="extensionSettingsEnableErrorCollection">
+              </span>
+            </label>
+          </div>
           <span class="optional-controls-disableable">
             <label class="file-access-control" hidden>
               <input type="checkbox">

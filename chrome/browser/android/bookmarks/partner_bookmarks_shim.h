@@ -5,16 +5,17 @@
 #ifndef CHROME_BROWSER_ANDROID_BOOKMARKS_PARTNER_BOOKMARKS_SHIM_H_
 #define CHROME_BROWSER_ANDROID_BOOKMARKS_PARTNER_BOOKMARKS_SHIM_H_
 
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/supports_user_data.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
 #include "url/gurl.h"
 
 class PrefService;
 
 namespace content {
+class BrowserContext;
 class WebContents;
 }
 

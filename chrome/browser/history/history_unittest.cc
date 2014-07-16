@@ -60,6 +60,8 @@
 #include "content/public/browser/notification_source.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
+#include "sync/api/attachments/attachment_id.h"
+#include "sync/api/attachments/attachment_service_proxy_for_test.h"
 #include "sync/api/fake_sync_change_processor.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_change_processor.h"
@@ -1633,8 +1635,12 @@ TEST_F(HistoryTest, ProcessGlobalIdDeleteDirective) {
       .ToInternalValue());
   global_id_directive->set_start_time_usec(3);
   global_id_directive->set_end_time_usec(10);
-  directives.push_back(
-      syncer::SyncData::CreateRemoteData(1, entity_specs, base::Time()));
+  directives.push_back(syncer::SyncData::CreateRemoteData(
+      1,
+      entity_specs,
+      base::Time(),
+      syncer::AttachmentIdList(),
+      syncer::AttachmentServiceProxyForTest::Create()));
 
   // 2nd directive.
   global_id_directive->Clear();
@@ -1643,8 +1649,12 @@ TEST_F(HistoryTest, ProcessGlobalIdDeleteDirective) {
       .ToInternalValue());
   global_id_directive->set_start_time_usec(13);
   global_id_directive->set_end_time_usec(19);
-  directives.push_back(
-      syncer::SyncData::CreateRemoteData(2, entity_specs, base::Time()));
+  directives.push_back(syncer::SyncData::CreateRemoteData(
+      2,
+      entity_specs,
+      base::Time(),
+      syncer::AttachmentIdList(),
+      syncer::AttachmentServiceProxyForTest::Create()));
 
   syncer::FakeSyncChangeProcessor change_processor;
   EXPECT_FALSE(
@@ -1683,9 +1693,9 @@ TEST_F(HistoryTest, ProcessGlobalIdDeleteDirective) {
   const syncer::SyncChangeList& sync_changes = change_processor.changes();
   ASSERT_EQ(2u, sync_changes.size());
   EXPECT_EQ(syncer::SyncChange::ACTION_DELETE, sync_changes[0].change_type());
-  EXPECT_EQ(1, sync_changes[0].sync_data().GetRemoteId());
+  EXPECT_EQ(1, syncer::SyncDataRemote(sync_changes[0].sync_data()).GetId());
   EXPECT_EQ(syncer::SyncChange::ACTION_DELETE, sync_changes[1].change_type());
-  EXPECT_EQ(2, sync_changes[1].sync_data().GetRemoteId());
+  EXPECT_EQ(2, syncer::SyncDataRemote(sync_changes[1].sync_data()).GetId());
 }
 
 // Create delete directives for time ranges.  The expected entries should be
@@ -1713,17 +1723,23 @@ TEST_F(HistoryTest, ProcessTimeRangeDeleteDirective) {
           ->mutable_time_range_directive();
   time_range_directive->set_start_time_usec(2);
   time_range_directive->set_end_time_usec(5);
-  directives.push_back(syncer::SyncData::CreateRemoteData(1,
-                                                          entity_specs,
-                                                          base::Time()));
+  directives.push_back(syncer::SyncData::CreateRemoteData(
+      1,
+      entity_specs,
+      base::Time(),
+      syncer::AttachmentIdList(),
+      syncer::AttachmentServiceProxyForTest::Create()));
 
   // 2nd directive.
   time_range_directive->Clear();
   time_range_directive->set_start_time_usec(8);
   time_range_directive->set_end_time_usec(10);
-  directives.push_back(syncer::SyncData::CreateRemoteData(2,
-                                                          entity_specs,
-                                                          base::Time()));
+  directives.push_back(syncer::SyncData::CreateRemoteData(
+      2,
+      entity_specs,
+      base::Time(),
+      syncer::AttachmentIdList(),
+      syncer::AttachmentServiceProxyForTest::Create()));
 
   syncer::FakeSyncChangeProcessor change_processor;
   EXPECT_FALSE(
@@ -1758,9 +1774,9 @@ TEST_F(HistoryTest, ProcessTimeRangeDeleteDirective) {
   const syncer::SyncChangeList& sync_changes = change_processor.changes();
   ASSERT_EQ(2u, sync_changes.size());
   EXPECT_EQ(syncer::SyncChange::ACTION_DELETE, sync_changes[0].change_type());
-  EXPECT_EQ(1, sync_changes[0].sync_data().GetRemoteId());
+  EXPECT_EQ(1, syncer::SyncDataRemote(sync_changes[0].sync_data()).GetId());
   EXPECT_EQ(syncer::SyncChange::ACTION_DELETE, sync_changes[1].change_type());
-  EXPECT_EQ(2, sync_changes[1].sync_data().GetRemoteId());
+  EXPECT_EQ(2, syncer::SyncDataRemote(sync_changes[1].sync_data()).GetId());
 }
 
 TEST_F(HistoryBackendDBTest, MigratePresentations) {

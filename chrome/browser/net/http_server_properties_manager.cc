@@ -49,6 +49,9 @@ const int kMaxAlternateProtocolHostsToPersist = 200;
 // Persist 200 MRU SpdySettingsHostPortPairs.
 const int kMaxSpdySettingsHostsToPersist = 200;
 
+// Persist 300 MRU SupportsSpdyServerHostPortPairs.
+const int kMaxSupportsSpdyServerHostsToPersist = 300;
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -139,7 +142,7 @@ void HttpServerPropertiesManager::Clear(const base::Closure& completion) {
 }
 
 bool HttpServerPropertiesManager::SupportsSpdy(
-    const net::HostPortPair& server) const {
+    const net::HostPortPair& server) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   return http_server_properties_impl_->SupportsSpdy(server);
 }
@@ -180,6 +183,20 @@ void HttpServerPropertiesManager::SetBrokenAlternateProtocol(
     const net::HostPortPair& server) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   http_server_properties_impl_->SetBrokenAlternateProtocol(server);
+  ScheduleUpdatePrefsOnIO();
+}
+
+bool HttpServerPropertiesManager::WasAlternateProtocolRecentlyBroken(
+    const net::HostPortPair& server) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  return http_server_properties_impl_->WasAlternateProtocolRecentlyBroken(
+      server);
+}
+
+void HttpServerPropertiesManager::ConfirmAlternateProtocol(
+    const net::HostPortPair& server) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  http_server_properties_impl_->ConfirmAlternateProtocol(server);
   ScheduleUpdatePrefsOnIO();
 }
 
@@ -317,13 +334,6 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnUI() {
   if (!http_server_properties_dict.GetDictionaryWithoutPathExpansion(
       "servers", &servers_dict)) {
     DVLOG(1) << "Malformed http_server_properties for servers.";
-    return;
-  }
-
-  // TODO(rtenneti): Mark entries with an LRU sequence number (date of access?),
-  // and then truncate down deleting old stuff.
-  if (version != kVersionNumber && servers_dict->size() > 300) {
-    DVLOG(1) << "Size is too large. Clearing all properties.";
     return;
   }
 
@@ -518,7 +528,8 @@ void HttpServerPropertiesManager::UpdatePrefsFromCacheOnIO(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   base::ListValue* spdy_server_list = new base::ListValue;
-  http_server_properties_impl_->GetSpdyServerList(spdy_server_list);
+  http_server_properties_impl_->GetSpdyServerList(
+      spdy_server_list, kMaxSupportsSpdyServerHostsToPersist);
 
   net::SpdySettingsMap* spdy_settings_map =
       new net::SpdySettingsMap(kMaxSpdySettingsHostsToPersist);
@@ -591,8 +602,6 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
     net::PipelineCapabilityMap* pipeline_capability_map,
     const base::Closure& completion) {
 
-  // TODO(rtenneti): Fix ServerPrefMap to preserve MRU order of
-  // spdy_settings_map, alternate_protocol_map and pipeline_capability_map.
   typedef std::map<net::HostPortPair, ServerPref> ServerPrefMap;
   ServerPrefMap server_pref_map;
 
@@ -678,7 +687,8 @@ void HttpServerPropertiesManager::UpdatePrefsOnUI(
     base::DictionaryValue* server_pref_dict = new base::DictionaryValue;
 
     // Save supports_spdy.
-    server_pref_dict->SetBoolean("supports_spdy", server_pref.supports_spdy);
+    if (server_pref.supports_spdy)
+      server_pref_dict->SetBoolean("supports_spdy", server_pref.supports_spdy);
 
     // Save SPDY settings.
     if (server_pref.settings_map) {

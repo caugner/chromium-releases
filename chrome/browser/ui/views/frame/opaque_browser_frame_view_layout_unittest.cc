@@ -7,8 +7,8 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ui/views/avatar_label.h"
-#include "chrome/browser/ui/views/avatar_menu_button.h"
+#include "chrome/browser/ui/views/profiles/avatar_label.h"
+#include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/common/chrome_switches.h"
@@ -126,10 +126,6 @@ class TestLayoutDelegate : public OpaqueBrowserFrameViewLayoutDelegate {
 
   virtual int GetTabStripHeight() const OVERRIDE {
     return IsTabStripVisible() ? Tab::GetMinimumUnselectedSize().height() : 0;
-  }
-
-  virtual int GetAdditionalReservedSpaceInTabStrip() const OVERRIDE {
-    return 0;
   }
 
   virtual gfx::Size GetTabstripPreferredSize() const OVERRIDE {

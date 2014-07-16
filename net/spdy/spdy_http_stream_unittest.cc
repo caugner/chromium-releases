@@ -131,8 +131,7 @@ INSTANTIATE_TEST_CASE_P(
     NextProto,
     SpdyHttpStreamTest,
     testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4a2,
-                    kProtoHTTP2Draft04));
+                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
 
 // SpdyHttpStream::GetUploadProgress() should still work even before the
 // stream is initialized.
@@ -143,7 +142,7 @@ TEST_P(SpdyHttpStreamTest, GetUploadProgressBeforeInitialization) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
-                     kPrivacyModeDisabled);
+                     PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), NULL, 0, key);
 
   SpdyHttpStream stream(session_, false);
@@ -169,7 +168,7 @@ TEST_P(SpdyHttpStreamTest, SendRequest) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
-                     kPrivacyModeDisabled);
+                     PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
   HttpRequestInfo request;
@@ -244,7 +243,7 @@ TEST_P(SpdyHttpStreamTest, LoadTimingTwoRequests) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
-                     kPrivacyModeDisabled);
+                     PRIVACY_MODE_DISABLED);
   InitSessionDeterministic(reads, arraysize(reads),
                            writes, arraysize(writes),
                            key);
@@ -333,7 +332,7 @@ TEST_P(SpdyHttpStreamTest, SendChunkedPost) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
-                     kPrivacyModeDisabled);
+                     PRIVACY_MODE_DISABLED);
   InitSession(vector_as_array(&reads), reads.size(),
               vector_as_array(&writes), writes.size(),
               key);
@@ -409,7 +408,7 @@ TEST_P(SpdyHttpStreamTest, DelayedSendChunkedPost) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
-                     kPrivacyModeDisabled);
+                     PRIVACY_MODE_DISABLED);
   InitSessionDeterministic(reads, arraysize(reads),
                            writes, arraysize(writes),
                            key);
@@ -503,7 +502,7 @@ TEST_P(SpdyHttpStreamTest, SpdyURLTest) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
-                     kPrivacyModeDisabled);
+                     PRIVACY_MODE_DISABLED);
   InitSession(reads, arraysize(reads), writes, arraysize(writes), key);
 
   HttpRequestInfo request;
@@ -562,7 +561,7 @@ TEST_P(SpdyHttpStreamTest, DelayedSendChunkedPostWithWindowUpdate) {
 
   HostPortPair host_port_pair("www.google.com", 80);
   SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
-                     kPrivacyModeDisabled);
+                     PRIVACY_MODE_DISABLED);
 
   InitSessionDeterministic(reads, arraysize(reads),
                            writes, arraysize(writes),

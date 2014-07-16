@@ -14,7 +14,7 @@
         '../../../base/base.gyp:base',
         '../../../chrome/chrome.gyp:common',
         '../../../ipc/ipc.gyp:ipc',
-        '../../../media/cast/transport/cast_transport.gyp:cast_transport',
+        '../../../media/cast/cast.gyp:cast_transport',
         '../../../ppapi/ppapi_internal.gyp:ppapi_ipc',
         '../../../skia/skia.gyp:skia',
         '../../../third_party/libjingle/libjingle.gyp:libjingle',
@@ -26,6 +26,15 @@
         'mutate.cc',
         'rand_util.h',
         'rand_util.cc',
+      ],
+      'conditions': [
+        ['asan==1', {
+          'cflags!': [
+            # Compiling mutate.cc with ASan takes too long, see
+            # http://crbug.com/360158.
+            '-fsanitize=address',
+          ],
+        }],
       ],
       'include_dirs': [
         '../../..',
@@ -41,7 +50,7 @@
         '../../../base/base.gyp:base',
         '../../../chrome/chrome.gyp:common',
         '../../../ipc/ipc.gyp:ipc',
-        '../../../media/cast/transport/cast_transport.gyp:cast_transport',
+        '../../../media/cast/cast.gyp:cast_transport',
         '../../../ppapi/ppapi_internal.gyp:ppapi_ipc',
         '../../../skia/skia.gyp:skia',
         '../../../third_party/libjingle/libjingle.gyp:libjingle',
@@ -53,6 +62,15 @@
         'generate.cc',
         'rand_util.h',
         'rand_util.cc',
+      ],
+      'conditions': [
+        ['asan==1', {
+          'cflags!': [
+            # Compiling generate.cc with ASan takes too long, see
+            # http://crbug.com/360158.
+            '-fsanitize=address',
+          ],
+        }],
       ],
       'include_dirs': [
         '../../..',

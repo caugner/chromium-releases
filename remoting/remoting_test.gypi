@@ -121,6 +121,7 @@
         'jingle_glue/iq_sender_unittest.cc',
         'jingle_glue/mock_objects.cc',
         'jingle_glue/mock_objects.h',
+        'jingle_glue/network_settings_unittest.cc',
         'protocol/authenticator_test_base.cc',
         'protocol/authenticator_test_base.h',
         'protocol/buffered_socket_writer_unittest.cc',
@@ -141,6 +142,7 @@
         'protocol/jingle_session_unittest.cc',
         'protocol/message_decoder_unittest.cc',
         'protocol/message_reader_unittest.cc',
+        'protocol/monitored_video_stub_unittest.cc',
         'protocol/mouse_input_filter_unittest.cc',
         'protocol/negotiating_authenticator_unittest.cc',
         'protocol/pairing_registry_unittest.cc',
@@ -228,13 +230,24 @@
             ['exclude', '^base/resources_unittest\\.cc$'],
           ]
         }],
-        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-        [ 'OS == "linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+        [ 'OS == "linux" and use_allocator!="none"', {
           'dependencies': [
             '../base/allocator/allocator.gyp:allocator',
           ],
         }],
       ],  # end of 'conditions'
     },  # end of target 'remoting_unittests'
+    {
+      'target_name': 'remoting_browser_test_resources',
+      'type': 'none',
+      'copies': [
+        {
+          'destination': '<(PRODUCT_DIR)',
+            'files': [
+              '<@(remoting_webapp_js_browser_test_files)',
+            ],
+        },
+      ], #end of copies
+    },  # end of target 'remoting_browser_test_resources'
   ],  # end of targets
 }

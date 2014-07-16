@@ -238,7 +238,7 @@ class ScreenEventGeneratorDelegate : public aura::test::EventGeneratorDelegate {
 
 #endif
 
-#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS)
 
 // Following classes verify a crash scenario. Specifically on Windows when focus
 // changes it can trigger capture being lost. This was causing a crash in tab
@@ -590,7 +590,7 @@ void DragToSeparateWindowStep2(DetachToBrowserTabDragControllerTest* test,
 
 }  // namespace
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 // TODO(sky,sad): Disabled as it fails due to resize locks with a real
 // compositor. crbug.com/331924
 #define MAYBE_DragToSeparateWindow DISABLED_DragToSeparateWindow
@@ -669,7 +669,7 @@ bool HasUserChangedWindowPositionOrSize(gfx::NativeWindow window) {
 
 }  // namespace
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 // TODO(sky,sad): Disabled as it fails due to resize locks with a real
 // compositor. crbug.com/331924
 #define MAYBE_DetachToOwnWindow DISABLED_DetachToOwnWindow
@@ -731,7 +731,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   EXPECT_FALSE(tab_strip2->GetWidget()->HasCapture());
 }
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 // TODO(sky,sad): Disabled as it fails due to resize locks with a real
 // compositor. crbug.com/331924
 #define MAYBE_DetachToOwnWindowFromMaximizedWindow \
@@ -1023,7 +1023,7 @@ void DragAllStep2(DetachToBrowserTabDragControllerTest* test,
 
 }  // namespace
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 // TODO(sky,sad): Disabled as it fails due to resize locks with a real
 // compositor. crbug.com/331924
 #define MAYBE_DragAll DISABLED_DragAll
@@ -1084,7 +1084,7 @@ void DragAllToSeparateWindowStep2(DetachToBrowserTabDragControllerTest* test,
 
 }  // namespace
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 // TODO(sky,sad): Disabled as it fails due to resize locks with a real
 // compositor. crbug.com/331924
 #define MAYBE_DragAllToSeparateWindow DISABLED_DragAllToSeparateWindow
@@ -1157,7 +1157,7 @@ void DragAllToSeparateWindowAndCancelStep2(
 
 }  // namespace
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 // TODO(sky,sad): Disabled as it fails due to resize locks with a real
 // compositor. crbug.com/331924
 #define MAYBE_DragAllToSeparateWindowAndCancel \
@@ -1214,7 +1214,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   EXPECT_FALSE(browser2->window()->IsMaximized());
 }
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 // TODO(sky,sad): Disabled as it fails due to resize locks with a real
 // compositor. crbug.com/331924
 #define MAYBE_DragDirectlyToSecondWindow DISABLED_DragDirectlyToSecondWindow
@@ -1269,7 +1269,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   EXPECT_FALSE(browser2->window()->IsMaximized());
 }
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
 // TODO(sky,sad): Disabled as it fails due to resize locks with a real
 // compositor. crbug.com/331924
 #define MAYBE_DragSingleTabToSeparateWindow \
@@ -1783,7 +1783,8 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserInSeparateDisplayTabDragControllerTest,
   EXPECT_FALSE(browser2->window()->IsMaximized());
 }
 
-// Immersive fullscreen is ChromeOS only.
+// Immersive fullscreen is Ash only.  However, Windows Ash does not support
+// multiple displays.
 #if defined(OS_CHROMEOS)
 // TODO(sky,sad): Disabled as it fails due to resize locks with a real
 // compositor. crbug.com/331924
@@ -1884,7 +1885,7 @@ class DifferentDeviceScaleFactorDisplayTabDragControllerTest
   float GetCursorDeviceScaleFactor() const {
     ash::test::CursorManagerTestApi cursor_test_api(
         ash::Shell::GetInstance()->cursor_manager());
-    return cursor_test_api.GetDisplay().device_scale_factor();
+    return cursor_test_api.GetCurrentCursor().device_scale_factor();
   }
 
  private:
@@ -2018,7 +2019,7 @@ void CancelDragTabToWindowInSeparateDisplayStep3(
   ASSERT_EQ(2u, browser_list->size());
 
   // Switching display mode should cancel the drag operation.
-  ash::internal::DisplayManager* display_manager =
+  ash::DisplayManager* display_manager =
       ash::Shell::GetInstance()->display_manager();
   display_manager->AddRemoveDisplay();
 }

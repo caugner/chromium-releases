@@ -6,14 +6,12 @@
 
 namespace cc {
 
-bool FakeOutputSurfaceClient::DeferredInitialize(
-    scoped_refptr<ContextProvider> offscreen_context_provider) {
+void FakeOutputSurfaceClient::DeferredInitialize() {
   deferred_initialize_called_ = true;
-  return deferred_initialize_result_;
 }
 
-void FakeOutputSurfaceClient::BeginImplFrame(const BeginFrameArgs& args) {
-  begin_impl_frame_count_++;
+void FakeOutputSurfaceClient::BeginFrame(const BeginFrameArgs& args) {
+  begin_frame_count_++;
 }
 
 void FakeOutputSurfaceClient::DidLoseOutputSurface() {

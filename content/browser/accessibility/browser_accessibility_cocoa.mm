@@ -49,7 +49,7 @@ typedef std::map<ui::AXRole, NSString*> RoleMap;
 // GetState checks the bitmask used in AXNodeData to check
 // if the given state was set on the accessibility object.
 bool GetState(BrowserAccessibility* accessibility, ui::AXState state) {
-  return ((accessibility->state() >> state) & 1);
+  return ((accessibility->GetState() >> state) & 1);
 }
 
 RoleMap BuildRoleMap() {
@@ -90,6 +90,7 @@ RoleMap BuildRoleMap() {
     { ui::AX_ROLE_HEADING, @"AXHeading" },
     { ui::AX_ROLE_HELP_TAG, NSAccessibilityHelpTagRole },
     { ui::AX_ROLE_HORIZONTAL_RULE, NSAccessibilityGroupRole },
+    { ui::AX_ROLE_IFRAME, NSAccessibilityGroupRole },
     { ui::AX_ROLE_IGNORED, NSAccessibilityUnknownRole },
     { ui::AX_ROLE_IMAGE, NSAccessibilityImageRole },
     { ui::AX_ROLE_IMAGE_MAP, NSAccessibilityGroupRole },
@@ -306,12 +307,9 @@ NSDictionary* attributeToMethodNameMap = nil;
   dict = nil;
 }
 
-- (id)initWithObject:(BrowserAccessibility*)accessibility
-            delegate:(id<BrowserAccessibilityDelegateCocoa>)delegate {
-  if ((self = [super init])) {
+- (id)initWithObject:(BrowserAccessibility*)accessibility {
+  if ((self = [super init]))
     browserAccessibility_ = accessibility;
-    delegate_ = delegate;
-  }
   return self;
 }
 
@@ -372,7 +370,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     for (uint32 i = 0; i < indirectChildIds.size(); ++i) {
       int32 child_id = indirectChildIds[i];
       BrowserAccessibility* child =
-          browserAccessibility_->manager()->GetFromRendererID(child_id);
+          browserAccessibility_->manager()->GetFromID(child_id);
 
       // This only became necessary as a result of crbug.com/93095. It should be
       // a DCHECK in the future.
@@ -390,7 +388,7 @@ NSDictionary* attributeToMethodNameMap = nil;
   if (![self isIgnored]) {
     children_.reset();
   } else {
-    [browserAccessibility_->parent()->ToBrowserAccessibilityCocoa()
+    [browserAccessibility_->GetParent()->ToBrowserAccessibilityCocoa()
        childrenChanged];
   }
 }
@@ -408,8 +406,8 @@ NSDictionary* attributeToMethodNameMap = nil;
   for (size_t i = 0; i < uniqueCellIds.size(); ++i) {
     int id = uniqueCellIds[i];
     BrowserAccessibility* cell =
-        browserAccessibility_->manager()->GetFromRendererID(id);
-    if (cell && cell->role() == ui::AX_ROLE_COLUMN_HEADER)
+        browserAccessibility_->manager()->GetFromID(id);
+    if (cell && cell->GetRole() == ui::AX_ROLE_COLUMN_HEADER)
       [ret addObject:cell->ToBrowserAccessibilityCocoa()];
   }
   return ret;
@@ -536,7 +534,7 @@ NSDictionary* attributeToMethodNameMap = nil;
 
   if (headerElementId > 0) {
     BrowserAccessibility* headerObject =
-        browserAccessibility_->manager()->GetFromRendererID(headerElementId);
+        browserAccessibility_->manager()->GetFromID(headerElementId);
     if (headerObject)
       return headerObject->ToBrowserAccessibilityCocoa();
   }
@@ -586,7 +584,7 @@ NSDictionary* attributeToMethodNameMap = nil;
       browserAccessibility_->GetIntListAttribute(attribute);
   for (size_t i = 0; i < attributeValues.size(); ++i) {
     BrowserAccessibility* element =
-        browserAccessibility_->manager()->GetFromRendererID(attributeValues[i]);
+        browserAccessibility_->manager()->GetFromID(attributeValues[i]);
     if (element)
       [outArray addObject:element->ToBrowserAccessibilityCocoa()];
   }
@@ -650,9 +648,9 @@ NSDictionary* attributeToMethodNameMap = nil;
 
 - (id)parent {
   // A nil parent means we're the root.
-  if (browserAccessibility_->parent()) {
+  if (browserAccessibility_->GetParent()) {
     return NSAccessibilityUnignoredAncestor(
-        browserAccessibility_->parent()->ToBrowserAccessibilityCocoa());
+        browserAccessibility_->GetParent()->ToBrowserAccessibilityCocoa());
   } else {
     // Hook back up to RenderWidgetHostViewCocoa.
     BrowserAccessibilityManagerMac* manager =
@@ -665,8 +663,7 @@ NSDictionary* attributeToMethodNameMap = nil;
 - (NSValue*)position {
   NSPoint origin = [self origin];
   NSSize size = [[self size] sizeValue];
-  NSPoint pointInScreen =
-      [delegate_ accessibilityPointInScreen:origin size:size];
+  NSPoint pointInScreen = [self pointInScreen:origin size:size];
   return [NSValue valueWithPoint:pointInScreen];
 }
 
@@ -677,7 +674,23 @@ NSDictionary* attributeToMethodNameMap = nil;
 
 // Returns an enum indicating the role from browserAccessibility_.
 - (ui::AXRole)internalRole {
-  return static_cast<ui::AXRole>(browserAccessibility_->role());
+  return static_cast<ui::AXRole>(browserAccessibility_->GetRole());
+}
+
+- (content::BrowserAccessibilityDelegate*)delegate {
+  return browserAccessibility_->manager() ?
+      browserAccessibility_->manager()->delegate() :
+      nil;
+}
+
+- (NSPoint)pointInScreen:(NSPoint)origin
+                    size:(NSSize)size {
+  if (!browserAccessibility_)
+    return NSZeroPoint;
+
+  gfx::Rect bounds(origin.x, origin.y, size.width, size.height);
+  gfx::Point point = [self delegate]->AccessibilityOriginInScreen(bounds);
+  return NSMakePoint(point.x(), point.y());
 }
 
 // Returns a string indicating the NSAccessibility role of this object.
@@ -769,8 +782,8 @@ NSDictionary* attributeToMethodNameMap = nil;
   for (size_t i = 0; i < uniqueCellIds.size(); ++i) {
     int id = uniqueCellIds[i];
     BrowserAccessibility* cell =
-        browserAccessibility_->manager()->GetFromRendererID(id);
-    if (cell && cell->role() == ui::AX_ROLE_ROW_HEADER)
+        browserAccessibility_->manager()->GetFromID(id);
+    if (cell && cell->GetRole() == ui::AX_ROLE_ROW_HEADER)
       [ret addObject:cell->ToBrowserAccessibilityCocoa()];
   }
   return ret;
@@ -807,7 +820,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     for (uint32 i = 0; i < indirectChildIds.size(); ++i) {
       int id = indirectChildIds[i];
       BrowserAccessibility* rowElement =
-          browserAccessibility_->manager()->GetFromRendererID(id);
+          browserAccessibility_->manager()->GetFromID(id);
       if (rowElement)
         [ret addObject:rowElement->ToBrowserAccessibilityCocoa()];
     }
@@ -834,11 +847,10 @@ NSDictionary* attributeToMethodNameMap = nil;
       browserAccessibility_, ui::AX_ATTR_HTML_TAG);
 
   if (browserAccessibilityRole == ui::AX_ROLE_LIST) {
-    if ([htmlTag isEqualToString:@"ul"] ||
-        [htmlTag isEqualToString:@"ol"]) {
-      return @"AXContentList";
-    } else if ([htmlTag isEqualToString:@"dl"]) {
+    if ([htmlTag isEqualToString:@"dl"]) {
       return @"AXDescriptionList";
+    } else {
+      return @"AXContentList";
     }
   }
 
@@ -871,7 +883,7 @@ NSDictionary* attributeToMethodNameMap = nil;
   if (browserAccessibility_->GetIntAttribute(
           ui::AX_ATTR_TITLE_UI_ELEMENT, &titleElementId)) {
     BrowserAccessibility* titleElement =
-        browserAccessibility_->manager()->GetFromRendererID(titleElementId);
+        browserAccessibility_->manager()->GetFromID(titleElementId);
     if (titleElement)
       return titleElement->ToBrowserAccessibilityCocoa();
   }
@@ -879,7 +891,7 @@ NSDictionary* attributeToMethodNameMap = nil;
       browserAccessibility_->GetIntListAttribute(ui::AX_ATTR_LABELLEDBY_IDS);
   if (labelledby_ids.size() == 1) {
     BrowserAccessibility* titleElement =
-        browserAccessibility_->manager()->GetFromRendererID(labelledby_ids[0]);
+        browserAccessibility_->manager()->GetFromID(labelledby_ids[0]);
     if (titleElement)
       return titleElement->ToBrowserAccessibilityCocoa();
   }
@@ -887,12 +899,17 @@ NSDictionary* attributeToMethodNameMap = nil;
   return nil;
 }
 
-- (NSString*)url {
+- (NSURL*)url {
   StringAttribute urlAttribute =
       [[self role] isEqualToString:@"AXWebArea"] ?
           ui::AX_ATTR_DOC_URL :
           ui::AX_ATTR_URL;
-  return NSStringForStringAttribute(browserAccessibility_, urlAttribute);
+
+  std::string urlStr = browserAccessibility_->GetStringAttribute(urlAttribute);
+  if (urlStr.empty())
+    return nil;
+
+  return [NSURL URLWithString:(base::SysUTF8ToNSString(urlStr))];
 }
 
 - (id)value {
@@ -978,7 +995,7 @@ NSDictionary* attributeToMethodNameMap = nil;
   for (size_t i = 0; i < uniqueCellIds.size(); ++i) {
     int id = uniqueCellIds[i];
     BrowserAccessibility* cell =
-        browserAccessibility_->manager()->GetFromRendererID(id);
+        browserAccessibility_->manager()->GetFromID(id);
     if (cell)
       [ret addObject:cell->ToBrowserAccessibilityCocoa()];
   }
@@ -999,7 +1016,13 @@ NSDictionary* attributeToMethodNameMap = nil;
 }
 
 - (id)window {
-  return [delegate_ window];
+  if (!browserAccessibility_)
+    return nil;
+
+  BrowserAccessibilityManagerMac* manager =
+      static_cast<BrowserAccessibilityManagerMac*>(
+          browserAccessibility_->manager());
+  return [manager->parent_view() window];
 }
 
 - (NSString*)methodNameForAttribute:(NSString*)attribute {
@@ -1114,7 +1137,7 @@ NSDictionary* attributeToMethodNameMap = nil;
          i < browserAccessibility_->PlatformChildCount();
          ++i) {
       BrowserAccessibility* child = browserAccessibility_->PlatformGetChild(i);
-      if (child->role() != ui::AX_ROLE_ROW)
+      if (child->GetRole() != ui::AX_ROLE_ROW)
         continue;
       int rowIndex;
       if (!child->GetIntAttribute(
@@ -1129,7 +1152,7 @@ NSDictionary* attributeToMethodNameMap = nil;
            j < child->PlatformChildCount();
            ++j) {
         BrowserAccessibility* cell = child->PlatformGetChild(j);
-        if (cell->role() != ui::AX_ROLE_CELL)
+        if (cell->GetRole() != ui::AX_ROLE_CELL)
           continue;
         int colIndex;
         if (!cell->GetIntAttribute(
@@ -1155,8 +1178,7 @@ NSDictionary* attributeToMethodNameMap = nil;
         range.location, range.length);
     NSPoint origin = NSMakePoint(rect.x(), rect.y());
     NSSize size = NSMakeSize(rect.width(), rect.height());
-    NSPoint pointInScreen =
-        [delegate_ accessibilityPointInScreen:origin size:size];
+    NSPoint pointInScreen = [self pointInScreen:origin size:size];
     NSRect nsrect = NSMakeRect(
         pointInScreen.x, pointInScreen.y, rect.width(), rect.height());
     return [NSValue valueWithRect:nsrect];
@@ -1286,7 +1308,6 @@ NSDictionary* attributeToMethodNameMap = nil;
       NSAccessibilityTopLevelUIElementAttribute,
       NSAccessibilityValueAttribute,
       NSAccessibilityWindowAttribute,
-      NSAccessibilityURLAttribute,
       @"AXAccessKey",
       @"AXInvalid",
       @"AXRequired",
@@ -1353,9 +1374,9 @@ NSDictionary* attributeToMethodNameMap = nil;
         NSAccessibilityDisclosedRowsAttribute,
         nil]];
   } else if ([role isEqualToString:NSAccessibilityRowRole]) {
-    if (browserAccessibility_->parent()) {
+    if (browserAccessibility_->GetParent()) {
       base::string16 parentRole;
-      browserAccessibility_->parent()->GetHtmlAttribute(
+      browserAccessibility_->GetParent()->GetHtmlAttribute(
           "role", &parentRole);
       const base::string16 treegridRole(base::ASCIIToUTF16("treegrid"));
       if (parentRole == treegridRole) {
@@ -1371,6 +1392,13 @@ NSDictionary* attributeToMethodNameMap = nil;
             nil]];
       }
     }
+  }
+
+  // Add the url attribute only if it has a valid url.
+  if ([self url] != nil) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+        NSAccessibilityURLAttribute,
+        nil]];
   }
 
   // Live regions.
@@ -1454,11 +1482,13 @@ NSDictionary* attributeToMethodNameMap = nil;
   if (!browserAccessibility_)
     return;
 
-  // TODO(feldstein): Support more actions.
-  if ([action isEqualToString:NSAccessibilityPressAction])
-    [delegate_ doDefaultAction:browserAccessibility_->renderer_id()];
-  else if ([action isEqualToString:NSAccessibilityShowMenuAction])
-    [delegate_ performShowMenuAction:self];
+  // TODO(dmazzoni): Support more actions.
+  if ([action isEqualToString:NSAccessibilityPressAction]) {
+    [self delegate]->AccessibilityDoDefaultAction(
+        browserAccessibility_->GetId());
+  } else if ([action isEqualToString:NSAccessibilityShowMenuAction]) {
+    [self delegate]->AccessibilityShowMenu(browserAccessibility_->GetId());
+  }
 }
 
 // Returns the description of the given action.
@@ -1484,15 +1514,14 @@ NSDictionary* attributeToMethodNameMap = nil;
   if ([attribute isEqualToString:NSAccessibilityFocusedAttribute]) {
     NSNumber* focusedNumber = value;
     BOOL focused = [focusedNumber intValue];
-    [delegate_ setAccessibilityFocus:focused
-                     accessibilityId:browserAccessibility_->renderer_id()];
+    if (focused)
+      [self delegate]->AccessibilitySetFocus(browserAccessibility_->GetId());
   }
   if ([attribute isEqualToString:NSAccessibilitySelectedTextRangeAttribute]) {
     NSRange range = [(NSValue*)value rangeValue];
-    [delegate_
-        accessibilitySetTextSelection:browserAccessibility_->renderer_id()
-        startOffset:range.location
-        endOffset:range.location + range.length];
+    [self delegate]->AccessibilitySetTextSelection(
+        browserAccessibility_->GetId(),
+        range.location, range.location + range.length);
   }
 }
 
@@ -1535,7 +1564,7 @@ NSDictionary* attributeToMethodNameMap = nil;
   // Potentially called during dealloc.
   if (!browserAccessibility_)
     return [super hash];
-  return browserAccessibility_->renderer_id();
+  return browserAccessibility_->GetId();
 }
 
 - (BOOL)accessibilityShouldUseUniqueId {

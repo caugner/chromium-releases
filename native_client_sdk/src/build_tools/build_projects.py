@@ -94,6 +94,26 @@ def ValidateToolchains(toolchains):
     buildbot_common.ErrorExit('Invalid toolchain(s): %s' % (
         ', '.join(invalid_toolchains)))
 
+def GetDeps(projects):
+  out = {}
+
+  # Build list of all project names
+  localtargets = [proj['NAME'] for proj in projects]
+
+  # For each project
+  for proj in projects:
+    deplist = []
+    # generate a list of dependencies
+    for targ in proj.get('TARGETS', []):
+      deplist.extend(targ.get('DEPS', []) + targ.get('LIBS', []))
+
+    # and add dependencies to targets built in this subtree
+    localdeps = [dep for dep in deplist if dep in localtargets]
+    if localdeps:
+      out[proj['NAME']] = localdeps
+
+  return out
+
 
 def UpdateProjects(pepperdir, project_tree, toolchains,
                    clobber=False, configs=None, first_toolchain=False):
@@ -123,11 +143,12 @@ def UpdateProjects(pepperdir, project_tree, toolchains,
       buildbot_common.RemoveDir(dirpath)
     buildbot_common.MakeDir(dirpath)
     targets = [desc['NAME'] for desc in projects]
+    deps = GetDeps(projects)
 
     # Generate master make for this branch of projects
     generate_make.GenerateMasterMakefile(pepperdir,
                                          os.path.join(pepperdir, branch),
-                                         targets)
+                                         targets, deps)
 
     if branch.startswith('examples') and not landing_page:
       landing_page = LandingPage()
@@ -156,7 +177,7 @@ def UpdateProjects(pepperdir, project_tree, toolchains,
   branch_name = 'examples'
   generate_make.GenerateMasterMakefile(pepperdir,
                                        os.path.join(pepperdir, branch_name),
-                                       targets)
+                                       targets, {})
 
 
 def BuildProjectsBranch(pepperdir, branch, deps, clean, config, args=None):
@@ -185,6 +206,10 @@ def BuildProjectsBranch(pepperdir, branch, deps, clean, config, args=None):
   make_cmd = [make, '-j', jobs]
 
   make_cmd.append('CONFIG='+config)
+  # We always ENABLE_BIONIC in case we need it.  If neither --bionic nor
+  # -t bionic have been provided on the command line, then VALID_TOOLCHAINS
+  # will not contain a bionic target.
+  make_cmd.append('ENABLE_BIONIC=1')
   if not deps:
     make_cmd.append('IGNORE_DEPS=1')
 
@@ -224,6 +249,8 @@ def main(argv):
   parser.add_option('--config',
       help='Choose configuration to build (Debug or Release).  Builds both '
            'by default')
+  parser.add_option('--bionic',
+      help='Enable bionic projects', action='store_true')
   parser.add_option('-x', '--experimental',
       help='Build experimental projects', action='store_true')
   parser.add_option('-t', '--toolchain',
@@ -259,7 +286,7 @@ def main(argv):
     # e.g. If an example supports newlib and glibc, then the default will be
     # newlib.
     options.toolchain = ['pnacl', 'newlib', 'glibc', 'host']
-    if options.experimental:
+    if options.experimental or options.bionic:
       options.toolchain.append('bionic')
 
   if 'host' in options.toolchain:

@@ -13,16 +13,17 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_pump_x11.h"
 #include "base/stl_util.h"
-#include "ui/display/chromeos/native_display_observer.h"
 #include "ui/display/chromeos/x11/display_mode_x11.h"
 #include "ui/display/chromeos/x11/display_snapshot_x11.h"
 #include "ui/display/chromeos/x11/display_util_x11.h"
 #include "ui/display/chromeos/x11/native_display_event_dispatcher_x11.h"
-#include "ui/display/x11/edid_parser_x11.h"
+#include "ui/display/types/chromeos/native_display_observer.h"
+#include "ui/display/util/x11/edid_parser_x11.h"
+#include "ui/events/platform/platform_event_observer.h"
+#include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/x/x11_error_tracker.h"
+#include "ui/gfx/x/x11_types.h"
 
 namespace ui {
 
@@ -85,7 +86,7 @@ class NativeDisplayDelegateX11::HelperDelegateX11
       OVERRIDE {
     XRRUpdateConfiguration(event);
   }
-  virtual const std::vector<DisplaySnapshot*>& GetCachedOutputs() const
+  virtual const std::vector<DisplaySnapshot*>& GetCachedDisplays() const
       OVERRIDE {
     return delegate_->cached_outputs_.get();
   }
@@ -101,34 +102,33 @@ class NativeDisplayDelegateX11::HelperDelegateX11
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-// NativeDisplayDelegateX11::MessagePumpObserverX11
+// NativeDisplayDelegateX11::PlatformEventObserverX11
 
-class NativeDisplayDelegateX11::MessagePumpObserverX11
-    : public base::MessagePumpObserver {
+class NativeDisplayDelegateX11::PlatformEventObserverX11
+    : public PlatformEventObserver {
  public:
-  MessagePumpObserverX11(HelperDelegate* delegate);
-  virtual ~MessagePumpObserverX11();
+  PlatformEventObserverX11(HelperDelegate* delegate);
+  virtual ~PlatformEventObserverX11();
 
-  // base::MessagePumpObserver overrides:
-  virtual base::EventStatus WillProcessEvent(const base::NativeEvent& event)
-      OVERRIDE;
-  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
+  // PlatformEventObserverX11:
+  virtual void WillProcessEvent(const ui::PlatformEvent& event) OVERRIDE;
+  virtual void DidProcessEvent(const ui::PlatformEvent& event) OVERRIDE;
 
  private:
   HelperDelegate* delegate_;  // Not owned.
 
-  DISALLOW_COPY_AND_ASSIGN(MessagePumpObserverX11);
+  DISALLOW_COPY_AND_ASSIGN(PlatformEventObserverX11);
 };
 
-NativeDisplayDelegateX11::MessagePumpObserverX11::MessagePumpObserverX11(
+NativeDisplayDelegateX11::PlatformEventObserverX11::PlatformEventObserverX11(
     HelperDelegate* delegate)
     : delegate_(delegate) {}
 
-NativeDisplayDelegateX11::MessagePumpObserverX11::~MessagePumpObserverX11() {}
+NativeDisplayDelegateX11::PlatformEventObserverX11::
+    ~PlatformEventObserverX11() {}
 
-base::EventStatus
-NativeDisplayDelegateX11::MessagePumpObserverX11::WillProcessEvent(
-    const base::NativeEvent& event) {
+void NativeDisplayDelegateX11::PlatformEventObserverX11::WillProcessEvent(
+    const ui::PlatformEvent& event) {
   // XI_HierarchyChanged events are special. There is no window associated with
   // these events. So process them directly from here.
   if (event->type == GenericEvent &&
@@ -138,26 +138,27 @@ NativeDisplayDelegateX11::MessagePumpObserverX11::WillProcessEvent(
     // This also takes care of same event being received twice.
     delegate_->NotifyDisplayObservers();
   }
-
-  return base::EVENT_CONTINUE;
 }
 
-void NativeDisplayDelegateX11::MessagePumpObserverX11::DidProcessEvent(
-    const base::NativeEvent& event) {}
+void NativeDisplayDelegateX11::PlatformEventObserverX11::DidProcessEvent(
+    const ui::PlatformEvent& event) {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeDisplayDelegateX11 implementation:
 
 NativeDisplayDelegateX11::NativeDisplayDelegateX11()
-    : display_(base::MessagePumpX11::GetDefaultXDisplay()),
+    : display_(gfx::GetXDisplay()),
       window_(DefaultRootWindow(display_)),
       screen_(NULL),
       background_color_argb_(0) {}
 
 NativeDisplayDelegateX11::~NativeDisplayDelegateX11() {
-  base::MessagePumpX11::Current()->RemoveDispatcherForRootWindow(
-      message_pump_dispatcher_.get());
-  base::MessagePumpX11::Current()->RemoveObserver(message_pump_observer_.get());
+  if (ui::PlatformEventSource::GetInstance()) {
+    ui::PlatformEventSource::GetInstance()->RemovePlatformEventDispatcher(
+        platform_event_dispatcher_.get());
+    ui::PlatformEventSource::GetInstance()->RemovePlatformEventObserver(
+        platform_event_observer_.get());
+  }
 
   STLDeleteContainerPairSecondPointers(modes_.begin(), modes_.end());
 }
@@ -168,16 +169,20 @@ void NativeDisplayDelegateX11::Initialize() {
   XRRQueryExtension(display_, &xrandr_event_base, &error_base_ignored);
 
   helper_delegate_.reset(new HelperDelegateX11(this));
-  message_pump_dispatcher_.reset(new NativeDisplayEventDispatcherX11(
+  platform_event_dispatcher_.reset(new NativeDisplayEventDispatcherX11(
       helper_delegate_.get(), xrandr_event_base));
-  message_pump_observer_.reset(
-      new MessagePumpObserverX11(helper_delegate_.get()));
+  platform_event_observer_.reset(
+      new PlatformEventObserverX11(helper_delegate_.get()));
 
-  base::MessagePumpX11::Current()->AddDispatcherForRootWindow(
-      message_pump_dispatcher_.get());
-  // We can't do this with a root window listener because XI_HierarchyChanged
-  // messages don't have a target window.
-  base::MessagePumpX11::Current()->AddObserver(message_pump_observer_.get());
+  if (ui::PlatformEventSource::GetInstance()) {
+    ui::PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(
+        platform_event_dispatcher_.get());
+
+    // We can't do this with a root window listener because XI_HierarchyChanged
+    // messages don't have a target window.
+    ui::PlatformEventSource::GetInstance()->AddPlatformEventObserver(
+        platform_event_observer_.get());
+  }
 }
 
 void NativeDisplayDelegateX11::GrabServer() {
@@ -207,7 +212,7 @@ void NativeDisplayDelegateX11::ForceDPMSOn() {
   CHECK(DPMSForceLevel(display_, DPMSModeOn));
 }
 
-std::vector<DisplaySnapshot*> NativeDisplayDelegateX11::GetOutputs() {
+std::vector<DisplaySnapshot*> NativeDisplayDelegateX11::GetDisplays() {
   CHECK(screen_) << "Server not grabbed";
 
   cached_outputs_.clear();
@@ -237,7 +242,7 @@ void NativeDisplayDelegateX11::AddMode(const DisplaySnapshot& output,
       static_cast<const DisplaySnapshotX11&>(output);
   RRMode mode_id = static_cast<const DisplayModeX11*>(mode)->mode_id();
 
-  VLOG(1) << "AddOutputMode: output=" << x11_output.output()
+  VLOG(1) << "AddDisplayMode: output=" << x11_output.output()
           << " mode=" << mode_id;
   XRRAddOutputMode(display_, x11_output.output(), mode_id);
 }
@@ -292,7 +297,7 @@ void NativeDisplayDelegateX11::CreateFrameBuffer(const gfx::Size& size) {
   VLOG(1) << "CreateFrameBuffer: new=" << size.width() << "x" << size.height()
           << " current=" << current_width << "x" << current_height;
 
-  DestroyUnusedCrtcs();
+  DestroyUnusedCrtcs(size);
 
   if (size.width() == current_width && size.height() == current_height)
     return;
@@ -351,15 +356,18 @@ DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
   bool has_display_id = GetDisplayId(
       id, static_cast<uint8_t>(index), &display_id);
 
-  OutputType type = GetOutputTypeFromName(info->name);
-  if (type == OUTPUT_TYPE_UNKNOWN)
+  bool has_overscan = false;
+  GetOutputOverscanFlag(id, &has_overscan);
+
+  DisplayConnectionType type = GetDisplayConnectionTypeFromName(info->name);
+  if (type == DISPLAY_CONNECTION_TYPE_UNKNOWN)
     LOG(ERROR) << "Unknown link type: " << info->name;
 
   // Use the index as a valid display ID even if the internal
   // display doesn't have valid EDID because the index
   // will never change.
   if (!has_display_id) {
-    if (type == OUTPUT_TYPE_INTERNAL)
+    if (type == DISPLAY_CONNECTION_TYPE_INTERNAL)
       has_display_id = true;
 
     // Fallback to output index.
@@ -411,6 +419,8 @@ DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
                              gfx::Size(info->mm_width, info->mm_height),
                              type,
                              IsOutputAspectPreservingScaling(id),
+                             has_overscan,
+                             GetDisplayName(id),
                              display_modes,
                              current_mode,
                              native_mode,
@@ -512,7 +522,7 @@ bool NativeDisplayDelegateX11::SetHDCPState(const DisplaySnapshot& output,
   }
 }
 
-void NativeDisplayDelegateX11::DestroyUnusedCrtcs() {
+void NativeDisplayDelegateX11::DestroyUnusedCrtcs(const gfx::Size& new_size) {
   CHECK(screen_) << "Server not grabbed";
   // Setting the screen size will fail if any CRTC doesn't fit afterwards.
   // At the same time, turning CRTCs off and back on uses up a lot of time.
@@ -545,12 +555,15 @@ void NativeDisplayDelegateX11::DestroyUnusedCrtcs() {
 
     if (mode_info) {
       mode = static_cast<const DisplayModeX11*>(mode_info)->mode_id();
-      // In case our CRTC doesn't fit in our current framebuffer, disable it.
+      // In case our CRTC doesn't fit in common area of our current and about
+      // to be resized framebuffer, disable it.
       // It'll get reenabled after we resize the framebuffer.
-      int current_width = DisplayWidth(display_, DefaultScreen(display_));
-      int current_height = DisplayHeight(display_, DefaultScreen(display_));
-      if (mode_info->size().width() > current_width ||
-          mode_info->size().height() > current_height) {
+      int max_width = std::min(DisplayWidth(display_,
+                               DefaultScreen(display_)), new_size.width());
+      int max_height = std::min(DisplayHeight(display_,
+                                DefaultScreen(display_)), new_size.height());
+      if (mode_info->size().width() > max_width ||
+          mode_info->size().height() > max_height) {
         mode = None;
         output = None;
         mode_info = NULL;

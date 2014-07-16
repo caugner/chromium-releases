@@ -6,17 +6,18 @@
 
 #include <android/bitmap.h>
 #include <android/native_window_jni.h>
-#include <map>
 
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/hash_tables.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_checker.h"
 #include "cc/base/switches.h"
 #include "cc/input/input_handler.h"
 #include "cc/layers/layer.h"
@@ -26,6 +27,7 @@
 #include "cc/resources/scoped_ui_resource.h"
 #include "cc/resources/ui_resource_bitmap.h"
 #include "cc/trees/layer_tree_host.h"
+#include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/common/gpu/client/command_buffer_proxy_impl.h"
@@ -34,6 +36,7 @@
 #include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
+#include "content/common/host_shared_bitmap_manager.h"
 #include "content/public/browser/android/compositor_client.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/khronos/GLES2/gl2.h"
@@ -43,6 +46,8 @@
 #include "ui/gfx/android/device_display_info.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/frame_time.h"
+#include "ui/gl/android/surface_texture.h"
+#include "ui/gl/android/surface_texture_tracker.h"
 #include "webkit/common/gpu/context_provider_in_process.h"
 #include "webkit/common/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 
@@ -51,23 +56,6 @@ class JavaBitmap;
 }
 
 namespace {
-
-// Used for drawing directly to the screen. Bypasses resizing and swaps.
-class DirectOutputSurface : public cc::OutputSurface {
- public:
-  DirectOutputSurface(
-      const scoped_refptr<cc::ContextProvider>& context_provider)
-      : cc::OutputSurface(context_provider) {
-    capabilities_.adjust_deadline_for_parent = false;
-  }
-
-  virtual void Reshape(const gfx::Size& size, float scale_factor) OVERRIDE {
-    surface_size_ = size;
-  }
-  virtual void SwapBuffers(cc::CompositorFrame*) OVERRIDE {
-    context_provider_->ContextGL()->ShallowFlushCHROMIUM();
-  }
-};
 
 // Used to override capabilities_.adjust_deadline_for_parent to false
 class OutputSurfaceWithoutParent : public cc::OutputSurface {
@@ -131,17 +119,77 @@ class TransientUIResource : public cc::ScopedUIResource {
   bool retrieved_;
 };
 
+class SurfaceTextureTrackerImpl : public gfx::SurfaceTextureTracker {
+ public:
+  SurfaceTextureTrackerImpl() : next_surface_texture_id_(1) {
+    thread_checker_.DetachFromThread();
+  }
+
+  // Overridden from gfx::SurfaceTextureTracker:
+  virtual scoped_refptr<gfx::SurfaceTexture> AcquireSurfaceTexture(
+      int primary_id,
+      int secondary_id) OVERRIDE {
+    base::AutoLock lock(surface_textures_lock_);
+    SurfaceTextureMapKey key(primary_id, secondary_id);
+    SurfaceTextureMap::iterator it = surface_textures_.find(key);
+    if (it == surface_textures_.end())
+      return scoped_refptr<gfx::SurfaceTexture>();
+    scoped_refptr<gfx::SurfaceTexture> surface_texture = it->second;
+    surface_textures_.erase(it);
+    return surface_texture;
+  }
+
+  int AddSurfaceTexture(gfx::SurfaceTexture* surface_texture,
+                        int child_process_id) {
+    DCHECK(thread_checker_.CalledOnValidThread());
+    int surface_texture_id = next_surface_texture_id_++;
+    if (next_surface_texture_id_ == INT_MAX)
+      next_surface_texture_id_ = 1;
+
+    base::AutoLock lock(surface_textures_lock_);
+    SurfaceTextureMapKey key(surface_texture_id, child_process_id);
+    DCHECK(surface_textures_.find(key) == surface_textures_.end());
+    surface_textures_[key] = surface_texture;
+    content::RegisterChildProcessSurfaceTexture(
+        surface_texture_id,
+        child_process_id,
+        surface_texture->j_surface_texture().obj());
+    return surface_texture_id;
+  }
+
+  void RemoveAllSurfaceTextures(int child_process_id) {
+    DCHECK(thread_checker_.CalledOnValidThread());
+    base::AutoLock lock(surface_textures_lock_);
+    SurfaceTextureMap::iterator it = surface_textures_.begin();
+    while (it != surface_textures_.end()) {
+      if (it->first.second == child_process_id) {
+        content::UnregisterChildProcessSurfaceTexture(it->first.first,
+                                                      it->first.second);
+        surface_textures_.erase(it++);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+ private:
+  typedef std::pair<int, int> SurfaceTextureMapKey;
+  typedef base::hash_map<SurfaceTextureMapKey,
+                         scoped_refptr<gfx::SurfaceTexture> >
+      SurfaceTextureMap;
+  SurfaceTextureMap surface_textures_;
+  mutable base::Lock surface_textures_lock_;
+  int next_surface_texture_id_;
+  base::ThreadChecker thread_checker_;
+};
+base::LazyInstance<SurfaceTextureTrackerImpl> g_surface_texture_tracker =
+    LAZY_INSTANCE_INITIALIZER;
+
 static bool g_initialized = false;
 
 } // anonymous namespace
 
 namespace content {
-
-typedef std::map<int, base::android::ScopedJavaGlobalRef<jobject> >
-    SurfaceMap;
-static base::LazyInstance<SurfaceMap>
-    g_surface_map = LAZY_INSTANCE_INITIALIZER;
-static base::LazyInstance<base::Lock> g_surface_map_lock;
 
 // static
 Compositor* Compositor::Create(CompositorClient* client,
@@ -152,6 +200,9 @@ Compositor* Compositor::Create(CompositorClient* client,
 // static
 void Compositor::Initialize() {
   DCHECK(!CompositorImpl::IsInitialized());
+  // SurfaceTextureTracker instance must be set before we create a GPU thread
+  // that could be using it to initialize GLImage instances.
+  gfx::SurfaceTextureTracker::InitInstance(g_surface_texture_tracker.Pointer());
   g_initialized = true;
 }
 
@@ -161,14 +212,22 @@ bool CompositorImpl::IsInitialized() {
 }
 
 // static
-jobject CompositorImpl::GetSurface(int surface_id) {
-  base::AutoLock lock(g_surface_map_lock.Get());
-  SurfaceMap* surfaces = g_surface_map.Pointer();
-  SurfaceMap::iterator it = surfaces->find(surface_id);
-  jobject jsurface = it == surfaces->end() ? NULL : it->second.obj();
+int CompositorImpl::CreateSurfaceTexture(int child_process_id) {
+  // Note: this needs to be 0 as the surface texture implemenation will take
+  // ownership of the texture and call glDeleteTextures when the GPU service
+  // attaches the surface texture to a real texture id. glDeleteTextures
+  // silently ignores 0.
+  const int kDummyTextureId = 0;
+  scoped_refptr<gfx::SurfaceTexture> surface_texture =
+      gfx::SurfaceTexture::Create(kDummyTextureId);
+  return g_surface_texture_tracker.Pointer()->AddSurfaceTexture(
+      surface_texture.get(), child_process_id);
+}
 
-  LOG_IF(WARNING, !jsurface) << "No surface for surface id " << surface_id;
-  return jsurface;
+// static
+void CompositorImpl::DestroyAllSurfaceTextures(int child_process_id) {
+  g_surface_texture_tracker.Pointer()->RemoveAllSurfaceTextures(
+      child_process_id);
 }
 
 CompositorImpl::CompositorImpl(CompositorClient* client,
@@ -200,7 +259,8 @@ void CompositorImpl::Composite() {
 
 void CompositorImpl::SetRootLayer(scoped_refptr<cc::Layer> root_layer) {
   root_layer_->RemoveAllChildren();
-  root_layer_->AddChild(root_layer);
+  if (root_layer)
+    root_layer_->AddChild(root_layer);
 }
 
 void CompositorImpl::SetWindowSurface(ANativeWindow* window) {
@@ -230,25 +290,23 @@ void CompositorImpl::SetSurface(jobject surface) {
   base::android::ScopedJavaLocalRef<jobject> j_surface(env, surface);
 
   // First, cleanup any existing surface references.
-  if (surface_id_) {
-    DCHECK(g_surface_map.Get().find(surface_id_) !=
-           g_surface_map.Get().end());
-    base::AutoLock lock(g_surface_map_lock.Get());
-    g_surface_map.Get().erase(surface_id_);
-  }
+  if (surface_id_)
+    content::UnregisterViewSurface(surface_id_);
   SetWindowSurface(NULL);
 
   // Now, set the new surface if we have one.
   ANativeWindow* window = NULL;
-  if (surface)
+  if (surface) {
+    // Note: This ensures that any local references used by
+    // ANativeWindow_fromSurface are released immediately. This is needed as a
+    // workaround for https://code.google.com/p/android/issues/detail?id=68174
+    base::android::ScopedJavaLocalFrame scoped_local_reference_frame(env);
     window = ANativeWindow_fromSurface(env, surface);
+  }
   if (window) {
     SetWindowSurface(window);
     ANativeWindow_release(window);
-    {
-      base::AutoLock lock(g_surface_map_lock.Get());
-      g_surface_map.Get().insert(std::make_pair(surface_id_, j_surface));
-    }
+    content::RegisterViewSurface(surface_id_, j_surface.obj());
   }
 }
 
@@ -264,14 +322,16 @@ void CompositorImpl::SetVisible(bool visible) {
     settings.allow_antialiasing = false;
     settings.calculate_top_controls_position = false;
     settings.top_controls_height = 0.f;
-    settings.use_memory_management = false;
     settings.highp_threshold_min = 2048;
 
     CommandLine* command_line = CommandLine::ForCurrentProcess();
     settings.initial_debug_state.SetRecordRenderingStats(
         command_line->HasSwitch(cc::switches::kEnableGpuBenchmarking));
+    settings.initial_debug_state.show_fps_counter =
+        command_line->HasSwitch(cc::switches::kUIShowFPSCounter);
 
-    host_ = cc::LayerTreeHost::CreateSingleThreaded(this, this, NULL, settings);
+    host_ = cc::LayerTreeHost::CreateSingleThreaded(
+        this, this, HostSharedBitmapManager::current(), settings);
     host_->SetRootLayer(root_layer_);
 
     host_->SetVisible(true);
@@ -397,18 +457,12 @@ CreateGpuProcessViewContext(
   limits.max_transfer_buffer_size = std::min(
       3 * full_screen_texture_size_in_bytes, kDefaultMaxTransferBufferSize);
   limits.mapped_memory_reclaim_limit = 2 * 1024 * 1024;
-#if !defined(OS_CHROMEOS)
-  bool bind_generates_resource = false;
-#endif
   bool lose_context_when_out_of_memory = true;
   return make_scoped_ptr(
       new WebGraphicsContext3DCommandBufferImpl(surface_id,
                                                 url,
                                                 gpu_channel_host.get(),
                                                 attributes,
-#if !defined(OS_CHROMEOS)
-                                                bind_generates_resource,
-#endif
                                                 lose_context_when_out_of_memory,
                                                 limits,
                                                 NULL));
@@ -437,14 +491,6 @@ scoped_ptr<cc::OutputSurface> CompositorImpl::CreateOutputSurface(
 
 void CompositorImpl::OnLostResources() {
   client_->DidLoseResources();
-}
-
-scoped_refptr<cc::ContextProvider> CompositorImpl::OffscreenContextProvider() {
-  // There is no support for offscreen contexts, or compositor filters that
-  // would require them in this compositor instance. If they are needed,
-  // then implement a context provider that provides contexts from
-  // ImageTransportSurfaceAndroid.
-  return NULL;
 }
 
 void CompositorImpl::DidCompleteSwapBuffers() {

@@ -96,7 +96,7 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
   @decorators.Cache
   def _platform_backend(self):
     return android_platform_backend.AndroidPlatformBackend(
-        self._backend_settings.adb.Adb(),
+        self._backend_settings.adb.device(),
         self.finder_options.no_performance_mode)
 
   def Create(self):
@@ -118,6 +118,7 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
   def HaveLocalAPK(self):
     return self._local_apk and os.path.exists(self._local_apk)
 
+  @decorators.Cache
   def UpdateExecutableIfNeeded(self):
     if self.HaveLocalAPK():
       real_logging.warn(
@@ -218,7 +219,8 @@ def FindAllAvailableBrowsers(finder_options, logging=real_logging):
       # flake out during the test. We skip this if Telemetry is running under a
       # buildbot because build/android/test_runner.py wrapper already took care
       # of it before starting the shards.
-      adb_commands.CleanupLeftoverProcesses()
+      adb.RestartAdbdOnDevice()
+      adb.WaitForDevicePm()
 
   packages = adb.RunShellCommand('pm list packages')
   possible_browsers = []

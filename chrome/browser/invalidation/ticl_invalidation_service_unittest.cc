@@ -4,43 +4,114 @@
 
 #include "chrome/browser/invalidation/ticl_invalidation_service.h"
 
-#include "base/prefs/pref_service.h"
-#include "chrome/browser/invalidation/invalidation_service_factory.h"
+#include "base/bind.h"
+#include "base/files/file_path.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/invalidation/gcm_invalidation_bridge.h"
 #include "chrome/browser/invalidation/invalidation_service_test_template.h"
-#include "chrome/browser/invalidation/profile_invalidation_auth_provider.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
-#include "chrome/browser/signin/fake_signin_manager.h"
-#include "chrome/browser/signin/signin_manager.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_profile.h"
-#include "sync/notifier/fake_invalidation_handler.h"
+#include "chrome/browser/services/gcm/gcm_service.h"
+#include "google_apis/gaia/fake_identity_provider.h"
+#include "google_apis/gaia/fake_oauth2_token_service.h"
+#include "net/url_request/url_request_context_getter.h"
+#include "sync/notifier/fake_invalidation_state_tracker.h"
 #include "sync/notifier/fake_invalidator.h"
-#include "sync/notifier/invalidation_util.h"
+#include "sync/notifier/invalidation_state_tracker.h"
+#include "sync/notifier/invalidator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace invalidation {
 
+namespace {
+
+class FakeTiclSettingsProvider : public TiclSettingsProvider {
+ public:
+  FakeTiclSettingsProvider();
+  virtual ~FakeTiclSettingsProvider();
+
+  // TiclSettingsProvider:
+  virtual bool UseGCMChannel() const OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FakeTiclSettingsProvider);
+};
+
+class FakeGCMService : public gcm::GCMService {
+ public:
+  explicit FakeGCMService(OAuth2TokenService* token_service);
+  virtual ~FakeGCMService();
+
+ protected:
+  // gcm::GCMService:
+  virtual bool ShouldStartAutomatically() const OVERRIDE;
+  virtual base::FilePath GetStorePath() const OVERRIDE;
+  virtual scoped_refptr<net::URLRequestContextGetter>
+      GetURLRequestContextGetter() const OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FakeGCMService);
+};
+
+FakeTiclSettingsProvider::FakeTiclSettingsProvider() {
+}
+
+FakeTiclSettingsProvider::~FakeTiclSettingsProvider() {
+}
+
+bool FakeTiclSettingsProvider::UseGCMChannel() const {
+  return false;
+}
+
+FakeGCMService::FakeGCMService(OAuth2TokenService* token_service)
+    : GCMService(scoped_ptr<IdentityProvider>(
+          new FakeIdentityProvider(token_service))) {
+}
+
+FakeGCMService::~FakeGCMService() {
+}
+
+bool FakeGCMService::ShouldStartAutomatically() const {
+  return false;
+}
+
+base::FilePath FakeGCMService::GetStorePath() const {
+  return base::FilePath();
+}
+
+scoped_refptr<net::URLRequestContextGetter>
+FakeGCMService::GetURLRequestContextGetter() const {
+  return NULL;
+}
+
+}  // namespace
+
 class TiclInvalidationServiceTestDelegate {
  public:
-  TiclInvalidationServiceTestDelegate() { }
+  TiclInvalidationServiceTestDelegate() {}
 
   ~TiclInvalidationServiceTestDelegate() {
     DestroyInvalidationService();
   }
 
   void CreateInvalidationService() {
-    fake_invalidator_ = new syncer::FakeInvalidator();
-    profile_.reset(new TestingProfile());
-    token_service_.reset(new FakeProfileOAuth2TokenService);
+    CreateUninitializedInvalidationService();
+    InitializeInvalidationService();
+  }
+
+  void CreateUninitializedInvalidationService() {
+    gcm_service_.reset(new FakeGCMService(&token_service_));
     invalidation_service_.reset(new TiclInvalidationService(
-        scoped_ptr<InvalidationAuthProvider>(
-            new ProfileInvalidationAuthProvider(
-                SigninManagerFactory::GetForProfile(profile_.get()),
-                token_service_.get(),
-                NULL)),
-        profile_.get()));
-    invalidation_service_->InitForTest(fake_invalidator_);
+        scoped_ptr<IdentityProvider>(new FakeIdentityProvider(&token_service_)),
+        scoped_ptr<TiclSettingsProvider>(new FakeTiclSettingsProvider),
+        gcm_service_.get(),
+        NULL));
+  }
+
+  void InitializeInvalidationService() {
+    fake_invalidator_ = new syncer::FakeInvalidator();
+    invalidation_service_->InitForTest(
+        scoped_ptr<syncer::InvalidationStateTracker>(
+            new syncer::FakeInvalidationStateTracker),
+        fake_invalidator_);
   }
 
   InvalidationService* GetInvalidationService() {
@@ -60,9 +131,10 @@ class TiclInvalidationServiceTestDelegate {
     fake_invalidator_->EmitOnIncomingInvalidation(invalidation_map);
   }
 
-  syncer::FakeInvalidator* fake_invalidator_;  // owned by the service.
-  scoped_ptr<TestingProfile> profile_;
-  scoped_ptr<FakeProfileOAuth2TokenService> token_service_;
+  FakeOAuth2TokenService token_service_;
+  scoped_ptr<gcm::GCMService> gcm_service_;
+  syncer::FakeInvalidator* fake_invalidator_;  // Owned by the service.
+
   scoped_ptr<TiclInvalidationService> invalidation_service_;
 };
 
@@ -70,80 +142,45 @@ INSTANTIATE_TYPED_TEST_CASE_P(
     TiclInvalidationServiceTest, InvalidationServiceTest,
     TiclInvalidationServiceTestDelegate);
 
-class TiclInvalidationServiceChannelTest : public ::testing::Test {
- public:
-  TiclInvalidationServiceChannelTest() {}
-  virtual ~TiclInvalidationServiceChannelTest() {}
+namespace internal {
 
-  virtual void SetUp() OVERRIDE {
-    TestingProfile::Builder builder;
-    builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
-                              FakeSigninManagerBase::Build);
-    profile_ = builder.Build();
-    fake_signin_manager_ = static_cast<SigninManagerBase*>(
-        SigninManagerFactory::GetForProfile(profile_.get()));
-    token_service_.reset(new FakeProfileOAuth2TokenService);
+class FakeCallbackContainer {
+  public:
+    FakeCallbackContainer() : called_(false),
+                              weak_ptr_factory_(this) {}
 
-    scoped_ptr<InvalidationAuthProvider> auth_provider(
-        new ProfileInvalidationAuthProvider(
-            fake_signin_manager_, token_service_.get(), NULL));
-    invalidation_service_.reset(
-        new TiclInvalidationService(auth_provider.Pass(), profile_.get()));
-    invalidation_service_->Init();
-  }
+    void FakeCallback(const base::DictionaryValue& value) {
+      called_ = true;
+    }
 
-  virtual void TearDown() OVERRIDE {
-    invalidation_service_->Shutdown();
-  }
-
-  TiclInvalidationService::InvalidationNetworkChannel GetNetworkChannel() {
-    return invalidation_service_->network_channel_type_;
-  }
-
- protected:
-  scoped_ptr<TestingProfile> profile_;
-  SigninManagerBase* fake_signin_manager_;
-  scoped_ptr<FakeProfileOAuth2TokenService> token_service_;
-  scoped_ptr<TiclInvalidationService> invalidation_service_;
+    bool called_;
+    base::WeakPtrFactory<FakeCallbackContainer> weak_ptr_factory_;
 };
 
-TEST_F(TiclInvalidationServiceChannelTest, ChannelSelectionTest) {
-  EXPECT_EQ(TiclInvalidationService::PUSH_CLIENT_CHANNEL, GetNetworkChannel());
+}  // namespace internal
 
-  // If stars allign use GCM channel.
-  profile_->GetPrefs()->SetBoolean(prefs::kGCMChannelEnabled, true);
-  profile_->GetPrefs()->SetBoolean(prefs::kInvalidationServiceUseGCMChannel,
-                                   true);
-  EXPECT_EQ(TiclInvalidationService::GCM_NETWORK_CHANNEL, GetNetworkChannel());
+// Test that requesting for detailed status doesn't crash even if the
+// underlying invalidator is not initialized.
+TEST(TiclInvalidationServiceLoggingTest, DetailedStatusCallbacksWork) {
+  scoped_ptr<TiclInvalidationServiceTestDelegate> delegate (
+      new TiclInvalidationServiceTestDelegate());
 
-  // If Invalidation channel setting is not set or says false fall back to push
-  // channel.
-  profile_->GetPrefs()->SetBoolean(prefs::kGCMChannelEnabled, true);
+  delegate->CreateUninitializedInvalidationService();
+  invalidation::InvalidationService* const invalidator =
+      delegate->GetInvalidationService();
 
-  profile_->GetPrefs()->ClearPref(prefs::kInvalidationServiceUseGCMChannel);
-  EXPECT_EQ(TiclInvalidationService::PUSH_CLIENT_CHANNEL, GetNetworkChannel());
+  internal::FakeCallbackContainer fake_container;
+  invalidator->RequestDetailedStatus(
+      base::Bind(&internal::FakeCallbackContainer::FakeCallback,
+                 fake_container.weak_ptr_factory_.GetWeakPtr()));
+  EXPECT_FALSE(fake_container.called_);
 
-  profile_->GetPrefs()->SetBoolean(prefs::kInvalidationServiceUseGCMChannel,
-                                   false);
-  EXPECT_EQ(TiclInvalidationService::PUSH_CLIENT_CHANNEL, GetNetworkChannel());
+  delegate->InitializeInvalidationService();
 
-  // If invalidation channel setting says use GCM but GCM is not ALWAYS_ENABLED
-  // then fall back to push channel.
-  profile_->GetPrefs()->SetBoolean(prefs::kInvalidationServiceUseGCMChannel,
-                                   false);
-
-  profile_->GetPrefs()->ClearPref(prefs::kGCMChannelEnabled);
-  EXPECT_EQ(TiclInvalidationService::PUSH_CLIENT_CHANNEL, GetNetworkChannel());
-
-  profile_->GetPrefs()->SetBoolean(prefs::kGCMChannelEnabled, false);
-  EXPECT_EQ(TiclInvalidationService::PUSH_CLIENT_CHANNEL, GetNetworkChannel());
-
-  // If first invalidation setting gets enabled and after that gcm setting gets
-  // enabled then should still switch to GCM channel.
-  profile_->GetPrefs()->SetBoolean(prefs::kInvalidationServiceUseGCMChannel,
-                                   true);
-  profile_->GetPrefs()->SetBoolean(prefs::kGCMChannelEnabled, true);
-  EXPECT_EQ(TiclInvalidationService::GCM_NETWORK_CHANNEL, GetNetworkChannel());
+  invalidator->RequestDetailedStatus(
+      base::Bind(&internal::FakeCallbackContainer::FakeCallback,
+                 fake_container.weak_ptr_factory_.GetWeakPtr()));
+  EXPECT_TRUE(fake_container.called_);
 }
 
 }  // namespace invalidation

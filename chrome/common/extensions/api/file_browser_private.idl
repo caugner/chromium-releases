@@ -9,7 +9,7 @@
 namespace fileBrowserPrivate {
 // Type of the mounted volume.
 enum VolumeType { drive, downloads, removable, archive, cloud_device, provided,
-                  testing };
+                  mtp, testing };
 
 // Device type. Available if this is removable volume.
 enum DeviceType { usb, sd, optical, mobile, unknown };
@@ -93,6 +93,8 @@ enum DeviceEventType {
   scan_canceled,
   // Device is removed.
   removed,
+  // Device is hard unplugged.
+  hard_unplugged,
   // Format started.
   format_start,
   // Format succeeded.
@@ -132,6 +134,14 @@ enum DriveShareType {
   can_view
 };
 
+// ImageSet that represents multi-scale images.
+dictionary ImageSet {
+  // 1x scale URL.
+  DOMString scale1xUrl;
+  // 2x scale URL.
+  DOMString scale2xUrl;
+};
+
 // A file task represents an action that the file manager can perform over the
 // currently selected files. See
 // chrome/browser/chromeos/extensions/file_manager/file_tasks.h for details
@@ -152,6 +162,12 @@ dictionary FileTask {
 
 // Drive file properties.
 dictionary DriveEntryProperties {
+  // Size of this file.
+  double? fileSize;
+
+  // Timestamp of entry update time, in milliseconds past the epoch.
+  double? lastModifiedTime;
+
   // URL to the Drive thumbnail image for this file.
   DOMString? thumbnailUrl;
 
@@ -209,8 +225,8 @@ dictionary ProfileInfo {
   // multi-profile suuport.
   boolean isCurrentProfile;
 
-  // Data URI of profile image;
-  DOMString? imageUri;
+  // Image set of profile image.
+  ImageSet? profileImage;
 };
 
 // Mounted disk volume metadata.
@@ -429,9 +445,9 @@ callback RemoveFileWatchCallback = void(optional boolean success);
 // |the caller has no appropriate permissions.
 callback RequestFileSystemCallback = void(optional object fileSystem);
 
-// |fileProperties| A dictionary containing properties of the requested entry.
+// |fileProperties| A dictionary containing properties of the requested entries.
 callback GetDriveEntryPropertiesCallback =
-    void(DriveEntryProperties fileProperties);
+    void(DriveEntryProperties[] entryProperties);
 
 // |localFilePaths| An array of the local file paths for the requested files,
 // one entry for each file in fileUrls.
@@ -575,11 +591,12 @@ interface Functions {
                          boolean shouldReturnLocalPath,
                          SimpleCallback callback);
 
-  // Requests Drive file properties for a file.
-  // |fileUrl| URL of a file
+  // Requests Drive file properties for files.
+  // |fileUrls| list of URLs of files
   // |callback|
-  static void getDriveEntryProperties(DOMString fileUrl,
-                                      GetDriveEntryPropertiesCallback callback);
+  static void getDriveEntryProperties(
+      DOMString[] fileUrls,
+      GetDriveEntryPropertiesCallback callback);
 
   // Pins/unpins a Drive file in the cache.
   // |fileUrl| URL of a file to pin/unpin.

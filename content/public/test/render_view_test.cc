@@ -14,18 +14,20 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/renderer/content_renderer_client.h"
-#include "content/public/renderer/history_item_serialization.h"
+#include "content/renderer/history_controller.h"
+#include "content/renderer/history_serialization.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
+#include "content/test/frame_load_waiter.h"
 #include "content/test/mock_render_process.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebHistoryItem.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebKit.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -35,8 +37,8 @@
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
-using blink::WebFrame;
 using blink::WebInputEvent;
+using blink::WebLocalFrame;
 using blink::WebMouseEvent;
 using blink::WebScriptSource;
 using blink::WebString;
@@ -89,8 +91,8 @@ void RenderViewTest::ProcessPendingMessages() {
   msg_loop_.Run();
 }
 
-WebFrame* RenderViewTest::GetMainFrame() {
-  return view_->GetWebView()->mainFrame();
+WebLocalFrame* RenderViewTest::GetMainFrame() {
+  return view_->GetWebView()->mainFrame()->toWebLocalFrame();
 }
 
 void RenderViewTest::ExecuteJavaScript(const char* js) {
@@ -116,20 +118,24 @@ void RenderViewTest::LoadHTML(const char* html) {
   std::string url_str = "data:text/html;charset=utf-8,";
   url_str.append(html);
   GURL url(url_str);
-
   GetMainFrame()->loadRequest(WebURLRequest(url));
-
   // The load actually happens asynchronously, so we pump messages to process
   // the pending continuation.
-  ProcessPendingMessages();
+  FrameLoadWaiter(view_->GetMainRenderFrame()).Wait();
 }
 
-void RenderViewTest::GoBack(const blink::WebHistoryItem& item) {
-  GoToOffset(-1, item);
+void RenderViewTest::GoBack(const PageState& state) {
+  GoToOffset(-1, state);
 }
 
-void RenderViewTest::GoForward(const blink::WebHistoryItem& item) {
-  GoToOffset(1, item);
+void RenderViewTest::GoForward(const PageState& state) {
+  GoToOffset(1, state);
+}
+
+void RenderViewTest::GoBackToPrevious() {
+  RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
+  GoBack(HistoryEntryToPageState(
+      impl->history_controller()->GetPreviousEntry()));
 }
 
 void RenderViewTest::SetUp() {
@@ -179,6 +185,7 @@ void RenderViewTest::SetUp() {
   // This needs to pass the mock render thread to the view.
   RenderViewImpl* view =
       RenderViewImpl::Create(kOpenerId,
+                             false,  // window_was_created_with_opener
                              RendererPreferences(),
                              WebPreferences(),
                              kRouteId,
@@ -189,6 +196,7 @@ void RenderViewTest::SetUp() {
                              false,  // is_renderer_created
                              false,  // swapped_out
                              false,  // hidden
+                             false,  // never_visible
                              1,      // next_page_id
                              blink::WebScreenInfo(),
                              AccessibilityModeOff);
@@ -259,14 +267,15 @@ const char* const kGetCoordinatesScript =
     "    var parent_coordinates = GetCoordinates(elem.offsetParent);"
     "    coordinates[0] += parent_coordinates[0];"
     "    coordinates[1] += parent_coordinates[1];"
-    "    return coordinates;"
+    "    return [ Math.round(coordinates[0]),"
+    "             Math.round(coordinates[1])];"
     "  };"
     "  var elem = document.getElementById('$1');"
     "  if (!elem)"
     "    return null;"
     "  var bounds = GetCoordinates(elem);"
-    "  bounds[2] = elem.offsetWidth;"
-    "  bounds[3] = elem.offsetHeight;"
+    "  bounds[2] = Math.round(elem.offsetWidth);"
+    "  bounds[3] = Math.round(elem.offsetHeight);"
     "  return bounds;"
     "})();";
 gfx::Rect RenderViewTest::GetElementBounds(const std::string& element_id) {
@@ -332,6 +341,7 @@ void RenderViewTest::Reload(const GURL& url) {
   params.navigation_type = FrameMsg_Navigate_Type::RELOAD;
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
   impl->main_render_frame()->OnNavigate(params);
+  FrameLoadWaiter(impl->main_render_frame()).Wait();
 }
 
 uint32 RenderViewTest::GetNavigationIPCType() {
@@ -357,10 +367,16 @@ bool RenderViewTest::OnMessageReceived(const IPC::Message& msg) {
   return impl->OnMessageReceived(msg);
 }
 
-void RenderViewTest::DidNavigateWithinPage(blink::WebFrame* frame,
+void RenderViewTest::DidNavigateWithinPage(blink::WebLocalFrame* frame,
                                            bool is_new_navigation) {
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  impl->didNavigateWithinPage(frame, is_new_navigation);
+  blink::WebHistoryItem item;
+  item.initialize();
+  impl->main_render_frame()->didNavigateWithinPage(
+      frame,
+      item,
+      is_new_navigation ? blink::WebStandardCommit
+                        : blink::WebHistoryInertCommit);
 }
 
 void RenderViewTest::SendContentStateImmediately() {
@@ -386,8 +402,7 @@ ContentRendererClient* RenderViewTest::CreateContentRendererClient() {
   return new ContentRendererClient;
 }
 
-void RenderViewTest::GoToOffset(int offset,
-                                const blink::WebHistoryItem& history_item) {
+void RenderViewTest::GoToOffset(int offset, const PageState& state) {
   RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
 
   int history_list_length = impl->historyBackListCount() +
@@ -401,7 +416,7 @@ void RenderViewTest::GoToOffset(int offset,
   navigate_params.current_history_list_offset = impl->history_list_offset();
   navigate_params.pending_history_list_offset = pending_offset;
   navigate_params.page_id = impl->GetPageId() + offset;
-  navigate_params.page_state = HistoryItemToPageState(history_item);
+  navigate_params.page_state = state;
   navigate_params.request_time = base::Time::Now();
 
   FrameMsg_Navigate navigate_message(impl->main_render_frame()->GetRoutingID(),
@@ -410,7 +425,7 @@ void RenderViewTest::GoToOffset(int offset,
 
   // The load actually happens asynchronously, so we pump messages to process
   // the pending continuation.
-  ProcessPendingMessages();
+  FrameLoadWaiter(view_->GetMainRenderFrame()).Wait();
 }
 
 }  // namespace content

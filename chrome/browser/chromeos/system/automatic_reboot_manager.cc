@@ -12,7 +12,6 @@
 #include <string>
 
 #include "ash/shell.h"
-#include "ash/wm/user_activity_detector.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
@@ -44,6 +43,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "ui/wm/core/user_activity_detector.h"
 
 namespace chromeos {
 namespace system {
@@ -216,7 +216,7 @@ void AutomaticRebootManager::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-void AutomaticRebootManager::SystemResumed(
+void AutomaticRebootManager::SuspendDone(
     const base::TimeDelta& sleep_duration) {
   MaybeReboot(true);
 }

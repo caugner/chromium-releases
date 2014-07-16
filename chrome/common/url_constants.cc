@@ -119,6 +119,7 @@ const char kChromeUIOobeURL[] = "chrome://oobe/";
 const char kChromeUIOSCreditsURL[] = "chrome://os-credits/";
 const char kChromeUIProxySettingsURL[] = "chrome://proxy-settings/";
 const char kChromeUIScreenlockIconURL[] = "chrome://screenlock-icon/";
+const char kChromeUISetTimeURL[] = "chrome://set-time/";
 const char kChromeUISimUnlockURL[] = "chrome://sim-unlock/";
 const char kChromeUISlideshowURL[] = "chrome://slideshow/";
 const char kChromeUISlowURL[] = "chrome://slow/";
@@ -282,6 +283,7 @@ const char kChromeUIPowerHost[] = "power";
 const char kChromeUIProxySettingsHost[] = "proxy-settings";
 const char kChromeUIRotateHost[] = "rotate";
 const char kChromeUIScreenlockIconHost[] = "screenlock-icon";
+const char kChromeUISetTimeHost[] = "set-time";
 const char kChromeUISimUnlockHost[] = "sim-unlock";
 const char kChromeUISlideshowHost[] = "slideshow";
 const char kChromeUISlowHost[] = "slow";
@@ -352,7 +354,7 @@ const char kPasswordManagerLearnMoreURL[] =
     "https://support.google.com/chrome/?p=settings_password";
 #endif
 
-const char kSettingsApiLearnMoreURL[] =
+const char kExtensionControlledSettingLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ui_settings_api_extension";
 
 const char kChromeHelpViaKeyboardURL[] =
@@ -491,9 +493,6 @@ const char kOutdatedPluginLearnMoreURL[] =
 const char kBlockedPluginLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ib_blocked_plugin";
 
-const char kSpeechInputAboutURL[] =
-    "https://support.google.com/chrome/?p=ui_speech_input";
-
 const char kHotwordLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ui_hotword_search";
 
@@ -535,9 +534,6 @@ const char kSyncEncryptionHelpURL[] =
 const char kSyncErrorsHelpURL[] =
     "https://support.google.com/chrome/?p=settings_sync_error";
 
-const char kEnterpriseManagedAccountHelpURL[] =
-    "https://support.google.com/chromebook/answer/1331549";
-
 #if defined(OS_CHROMEOS)
 const char kNaturalScrollHelpURL[] =
     "https://support.google.com/chromeos/?p=simple_scrolling";
@@ -551,6 +547,9 @@ const char kLearnMoreEnterpriseURL[] =
 const char kRemoveNonCWSExtensionURL[] =
     "https://support.google.com/chrome/answer/2811969?"
     "p=ui_remove_non_cws_extensions&rd=1";
+
+const char kCorruptExtensionURL[] =
+    "https://support.google.com/chrome/?p=settings_corrupt_extension";
 
 const char kNotificationsHelpURL[] =
     "https://support.google.com/chrome/?p=ui_notifications";

@@ -15,18 +15,20 @@
 
 namespace domain_reliability {
 
-class DOMAIN_RELIABILITY_EXPORT DomainReliabilityUtil {
- public:
-  // Attempts to convert a net error and an HTTP response code into the status
-  // string that should be recorded in a beacon. Returns true if it could.
-  static bool GetBeaconStatus(
-      int net_error,
-      int http_response_code,
-      std::string* beacon_status_out);
-};
+// Attempts to convert a net error and an HTTP response code into the status
+// string that should be recorded in a beacon. Returns true if it could.
+//
+// N.B.: This functions as the whitelist of "safe" errors to report; network-
+//       local errors are purposefully not converted to avoid revealing
+//       information about the local network to the remote server.
+bool GetDomainReliabilityBeaconStatus(
+    int net_error,
+    int http_response_code,
+    std::string* beacon_status_out);
 
 // Mockable wrapper around TimeTicks::Now and Timer. Mock version is in
 // test_util.h.
+// TODO(ttuttle): Rename to Time{Provider,Source,?}.
 class DOMAIN_RELIABILITY_EXPORT MockableTime {
  public:
   // Mockable wrapper around (a subset of) base::Timer.
@@ -46,8 +48,10 @@ class DOMAIN_RELIABILITY_EXPORT MockableTime {
 
   virtual ~MockableTime();
 
+  // Returns base::Time::Now() or a mocked version thereof.
+  virtual base::Time Now() = 0;
   // Returns base::TimeTicks::Now() or a mocked version thereof.
-  virtual base::TimeTicks Now() = 0;
+  virtual base::TimeTicks NowTicks() = 0;
   // Returns a new Timer, or a mocked version thereof.
   virtual scoped_ptr<MockableTime::Timer> CreateTimer() = 0;
 
@@ -58,15 +62,17 @@ class DOMAIN_RELIABILITY_EXPORT MockableTime {
   DISALLOW_COPY_AND_ASSIGN(MockableTime);
 };
 
-// Implementation of MockableTime that passes through to base::TimeTicks::Now()
-// and base::Timer.
+// Implementation of MockableTime that passes through to
+// base::Time{,Ticks}::Now() and base::Timer.
 class DOMAIN_RELIABILITY_EXPORT ActualTime : public MockableTime {
  public:
   ActualTime();
+
   virtual ~ActualTime();
 
   // MockableTime implementation:
-  virtual base::TimeTicks Now() OVERRIDE;
+  virtual base::Time Now() OVERRIDE;
+  virtual base::TimeTicks NowTicks() OVERRIDE;
   virtual scoped_ptr<MockableTime::Timer> CreateTimer() OVERRIDE;
 };
 

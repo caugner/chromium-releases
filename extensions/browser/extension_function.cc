@@ -5,8 +5,6 @@
 #include "extensions/browser/extension_function.h"
 
 #include "base/logging.h"
-#include "base/metrics/sparse_histogram.h"
-#include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
@@ -14,6 +12,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/extension_function_dispatcher.h"
+#include "extensions/browser/extension_message_filter.h"
 #include "extensions/common/extension_api.h"
 #include "extensions/common/extension_messages.h"
 
@@ -22,6 +21,77 @@ using content::RenderViewHost;
 using content::WebContents;
 using extensions::ExtensionAPI;
 using extensions::Feature;
+
+namespace {
+
+class MultipleArgumentsResponseValue
+    : public ExtensionFunction::ResponseValueObject {
+ public:
+  MultipleArgumentsResponseValue(ExtensionFunction* function,
+                                 base::ListValue* result) {
+    if (function->GetResultList()) {
+      DCHECK_EQ(function->GetResultList(), result);
+    } else {
+      function->SetResultList(make_scoped_ptr(result));
+    }
+    // It would be nice to DCHECK(error.empty()) but some legacy extension
+    // function implementations... I'm looking at chrome.input.ime... do this
+    // for some reason.
+  }
+
+  virtual ~MultipleArgumentsResponseValue() {}
+
+  virtual bool Apply() OVERRIDE { return true; }
+};
+
+class ErrorResponseValue : public ExtensionFunction::ResponseValueObject {
+ public:
+  ErrorResponseValue(ExtensionFunction* function, const std::string& error) {
+    // It would be nice to DCHECK(!error.empty()) but too many legacy extension
+    // function implementations don't set error but signal failure.
+    function->SetError(error);
+  }
+
+  virtual ~ErrorResponseValue() {}
+
+  virtual bool Apply() OVERRIDE { return false; }
+};
+
+class BadMessageResponseValue : public ExtensionFunction::ResponseValueObject {
+ public:
+  explicit BadMessageResponseValue(ExtensionFunction* function) {
+    function->set_bad_message(true);
+    NOTREACHED() << function->name() << ": bad message";
+  }
+
+  virtual ~BadMessageResponseValue() {}
+
+  virtual bool Apply() OVERRIDE { return false; }
+};
+
+class RespondNowAction : public ExtensionFunction::ResponseActionObject {
+ public:
+  typedef base::Callback<void(bool)> SendResponseCallback;
+  RespondNowAction(ExtensionFunction::ResponseValue result,
+                   const SendResponseCallback& send_response)
+      : result_(result.Pass()), send_response_(send_response) {}
+  virtual ~RespondNowAction() {}
+
+  virtual void Execute() OVERRIDE { send_response_.Run(result_->Apply()); }
+
+ private:
+  ExtensionFunction::ResponseValue result_;
+  SendResponseCallback send_response_;
+};
+
+class RespondLaterAction : public ExtensionFunction::ResponseActionObject {
+ public:
+  virtual ~RespondLaterAction() {}
+
+  virtual void Execute() OVERRIDE {}
+};
+
+}  // namespace
 
 // static
 void ExtensionFunctionDeleteTraits::Destruct(const ExtensionFunction* x) {
@@ -113,11 +183,15 @@ void ExtensionFunction::SetResult(base::Value* result) {
   results_->Append(result);
 }
 
-const base::ListValue* ExtensionFunction::GetResultList() {
+void ExtensionFunction::SetResultList(scoped_ptr<base::ListValue> results) {
+  results_ = results.Pass();
+}
+
+const base::ListValue* ExtensionFunction::GetResultList() const {
   return results_.get();
 }
 
-const std::string ExtensionFunction::GetError() {
+std::string ExtensionFunction::GetError() const {
   return error_;
 }
 
@@ -125,11 +199,50 @@ void ExtensionFunction::SetError(const std::string& error) {
   error_ = error;
 }
 
-void ExtensionFunction::Run() {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Extensions.FunctionCalls", histogram_value());
+ExtensionFunction::ResponseValue ExtensionFunction::NoArguments() {
+  return MultipleArguments(new base::ListValue());
+}
 
-  if (!RunImpl())
-    SendResponse(false);
+ExtensionFunction::ResponseValue ExtensionFunction::SingleArgument(
+    base::Value* arg) {
+  base::ListValue* args = new base::ListValue();
+  args->Append(arg);
+  return MultipleArguments(args);
+}
+
+ExtensionFunction::ResponseValue ExtensionFunction::MultipleArguments(
+    base::ListValue* args) {
+  return scoped_ptr<ResponseValueObject>(
+      new MultipleArgumentsResponseValue(this, args));
+}
+
+ExtensionFunction::ResponseValue ExtensionFunction::Error(
+    const std::string& error) {
+  return scoped_ptr<ResponseValueObject>(new ErrorResponseValue(this, error));
+}
+
+ExtensionFunction::ResponseValue ExtensionFunction::BadMessage() {
+  return scoped_ptr<ResponseValueObject>(new BadMessageResponseValue(this));
+}
+
+ExtensionFunction::ResponseAction ExtensionFunction::RespondNow(
+    ResponseValue result) {
+  return ResponseAction(new RespondNowAction(
+      result.Pass(), base::Bind(&ExtensionFunction::SendResponse, this)));
+}
+
+ExtensionFunction::ResponseAction ExtensionFunction::RespondLater() {
+  return ResponseAction(new RespondLaterAction());
+}
+
+// static
+ExtensionFunction::ResponseAction ExtensionFunction::ValidationFailure(
+    ExtensionFunction* function) {
+  return function->RespondNow(function->BadMessage());
+}
+
+void ExtensionFunction::Respond(ResponseValue result) {
+  SendResponse(result->Apply());
 }
 
 bool ExtensionFunction::ShouldSkipQuotaLimiting() const {
@@ -155,6 +268,10 @@ void ExtensionFunction::SendResponseImpl(bool success) {
     results_.reset(new base::ListValue());
 
   response_callback_.Run(type, *results_, GetError());
+}
+
+void ExtensionFunction::OnRespondingLater(ResponseValue value) {
+  SendResponse(value->Apply());
 }
 
 UIThreadExtensionFunction::UIThreadExtensionFunction()
@@ -249,14 +366,30 @@ AsyncExtensionFunction::AsyncExtensionFunction() {
 AsyncExtensionFunction::~AsyncExtensionFunction() {
 }
 
+ExtensionFunction::ResponseAction AsyncExtensionFunction::Run() {
+  return RunAsync() ? RespondLater() : RespondNow(Error(error_));
+}
+
+// static
+bool AsyncExtensionFunction::ValidationFailure(
+    AsyncExtensionFunction* function) {
+  return false;
+}
+
 SyncExtensionFunction::SyncExtensionFunction() {
 }
 
 SyncExtensionFunction::~SyncExtensionFunction() {
 }
 
-void SyncExtensionFunction::Run() {
-  SendResponse(RunImpl());
+ExtensionFunction::ResponseAction SyncExtensionFunction::Run() {
+  return RespondNow(RunSync() ? MultipleArguments(results_.get())
+                              : Error(error_));
+}
+
+// static
+bool SyncExtensionFunction::ValidationFailure(SyncExtensionFunction* function) {
+  return false;
 }
 
 SyncIOThreadExtensionFunction::SyncIOThreadExtensionFunction() {
@@ -265,6 +398,13 @@ SyncIOThreadExtensionFunction::SyncIOThreadExtensionFunction() {
 SyncIOThreadExtensionFunction::~SyncIOThreadExtensionFunction() {
 }
 
-void SyncIOThreadExtensionFunction::Run() {
-  SendResponse(RunImpl());
+ExtensionFunction::ResponseAction SyncIOThreadExtensionFunction::Run() {
+  return RespondNow(RunSync() ? MultipleArguments(results_.get())
+                              : Error(error_));
+}
+
+// static
+bool SyncIOThreadExtensionFunction::ValidationFailure(
+    SyncIOThreadExtensionFunction* function) {
+  return false;
 }

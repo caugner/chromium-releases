@@ -3,14 +3,14 @@
 // found in the LICENSE file.
 
 #include "base/time/time.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/renderer/translate/translate_helper.h"
 #include "chrome/test/base/chrome_render_view_test.h"
+#include "components/translate/content/common/translate_messages.h"
 #include "components/translate/core/common/translate_constants.h"
 #include "content/public/renderer/render_view.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/web/WebHistoryItem.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 
 using testing::AtLeast;
 using testing::Return;
@@ -470,7 +470,7 @@ TEST_F(ChromeRenderViewTest, BackToTranslatablePage) {
   EXPECT_EQ("fr", params.a.adopted_language);
   render_thread_->sink().ClearMessages();
 
-  GoBack(GetMainFrame()->previousHistoryItem());
+  GoBackToPrevious();
 
   message = render_thread_->sink().GetUniqueMessageMatching(
       ChromeViewHostMsg_TranslateLanguageDetermined::ID);

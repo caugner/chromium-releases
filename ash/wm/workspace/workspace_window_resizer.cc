@@ -84,32 +84,26 @@ scoped_ptr<WindowResizer> CreateWindowResizer(
   window_state->CreateDragDetails(window, point_in_parent, window_component,
       source);
   if (window->parent() &&
-      (window->parent()->id() == internal::kShellWindowId_DefaultContainer ||
-       window->parent()->id() == internal::kShellWindowId_DockedContainer ||
-       window->parent()->id() == internal::kShellWindowId_PanelContainer)) {
-    window_resizer = internal::WorkspaceWindowResizer::Create(
-        window_state,
-        std::vector<aura::Window*>());
+      (window->parent()->id() == kShellWindowId_DefaultContainer ||
+       window->parent()->id() == kShellWindowId_DockedContainer ||
+       window->parent()->id() == kShellWindowId_PanelContainer)) {
+    window_resizer = WorkspaceWindowResizer::Create(
+        window_state, std::vector<aura::Window*>());
   } else {
     window_resizer = DefaultWindowResizer::Create(window_state);
   }
-  window_resizer = internal::DragWindowResizer::Create(window_resizer,
-                                                       window_state);
+  window_resizer = DragWindowResizer::Create(window_resizer, window_state);
   if (window->type() == ui::wm::WINDOW_TYPE_PANEL)
     window_resizer = PanelWindowResizer::Create(window_resizer, window_state);
-  if (switches::UseDockedWindows() &&
-      window_resizer && window->parent() &&
+  if (switches::UseDockedWindows() && window_resizer && window->parent() &&
       !::wm::GetTransientParent(window) &&
-      (window->parent()->id() == internal::kShellWindowId_DefaultContainer ||
-       window->parent()->id() == internal::kShellWindowId_DockedContainer ||
-       window->parent()->id() == internal::kShellWindowId_PanelContainer)) {
-    window_resizer = internal::DockedWindowResizer::Create(window_resizer,
-                                                           window_state);
+      (window->parent()->id() == kShellWindowId_DefaultContainer ||
+       window->parent()->id() == kShellWindowId_DockedContainer ||
+       window->parent()->id() == kShellWindowId_PanelContainer)) {
+    window_resizer = DockedWindowResizer::Create(window_resizer, window_state);
   }
   return make_scoped_ptr<WindowResizer>(window_resizer);
 }
-
-namespace internal {
 
 namespace {
 
@@ -917,7 +911,11 @@ void WorkspaceWindowResizer::UpdateSnapPhantomWindow(const gfx::Point& location,
     }
   }
 
-  const bool can_dock = dock_layout_->CanDockWindow(GetTarget(), snap_type_) &&
+  DCHECK(snap_type_ == SNAP_LEFT || snap_type_ == SNAP_RIGHT);
+  DockedAlignment desired_alignment = (snap_type_ == SNAP_LEFT) ?
+      DOCKED_ALIGNMENT_LEFT : DOCKED_ALIGNMENT_RIGHT;
+  const bool can_dock =
+      dock_layout_->CanDockWindow(GetTarget(), desired_alignment) &&
       dock_layout_->GetAlignmentOfWindow(GetTarget()) != DOCKED_ALIGNMENT_NONE;
   if (!can_dock) {
     // If the window cannot be docked, undock the window. This may change the
@@ -996,7 +994,7 @@ void WorkspaceWindowResizer::RestackWindows() {
   }
 }
 
-SnapType WorkspaceWindowResizer::GetSnapType(
+WorkspaceWindowResizer::SnapType WorkspaceWindowResizer::GetSnapType(
     const gfx::Point& location) const {
   // TODO: this likely only wants total display area, not the area of a single
   // display.
@@ -1047,5 +1045,4 @@ bool WorkspaceWindowResizer::AreBoundsValidSnappedBounds(
   return bounds_in_parent == snapped_bounds;
 }
 
-}  // namespace internal
 }  // namespace ash

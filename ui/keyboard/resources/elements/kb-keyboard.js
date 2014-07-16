@@ -424,7 +424,8 @@ Polymer('kb-keyboard', {
       return;
     }
     // Triggers swipe hintText if it's a purely vertical swipe.
-    if (!(direction & (SwipeDirection.LEFT | SwipeDirection.RIGHT))) {
+    if (this.activeKeyset.flick &&
+        !(direction & (SwipeDirection.LEFT | SwipeDirection.RIGHT))) {
       // Check if event is relevant to us.
       if ((!detail.endSwipe) || (detail.isComplex))
         return;
@@ -770,7 +771,7 @@ Polymer('kb-keyboard', {
    * @param {Sound} sound The id of the audio tag.
    */
   playSound: function(sound) {
-    if (!sound || sound == Sound.NONE)
+    if (!SOUND_ENABLED || !sound || sound == Sound.NONE)
       return;
     var pool = this.sounds[sound];
     if (!pool) {

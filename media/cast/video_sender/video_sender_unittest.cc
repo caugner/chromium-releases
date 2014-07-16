@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stdint.h>
+
 #include <vector>
 
 #include "base/bind.h"
@@ -25,7 +27,7 @@ namespace media {
 namespace cast {
 
 namespace {
-static const int64 kStartMillisecond = GG_INT64_C(12345678900000);
+static const int64 kStartMillisecond = INT64_C(12345678900000);
 static const uint8 kPixelValue = 123;
 static const int kWidth = 320;
 static const int kHeight = 240;
@@ -55,8 +57,9 @@ class TestPacketSender : public transport::PacketSender {
   TestPacketSender() : number_of_rtp_packets_(0), number_of_rtcp_packets_(0) {}
 
   // A singular packet implies a RTCP packet.
-  virtual bool SendPacket(const Packet& packet) OVERRIDE {
-    if (Rtcp::IsRtcpPacket(&packet[0], packet.size())) {
+  virtual bool SendPacket(transport::PacketRef packet,
+                          const base::Closure& cb) OVERRIDE {
+    if (Rtcp::IsRtcpPacket(&packet->data[0], packet->data.size())) {
       ++number_of_rtcp_packets_;
     } else {
       ++number_of_rtp_packets_;
@@ -106,7 +109,6 @@ class VideoSenderTest : public ::testing::Test {
                             task_runner_,
                             task_runner_,
                             task_runner_);
-    transport::CastTransportVideoConfig transport_config;
     net::IPEndPoint dummy_endpoint;
     transport_sender_.reset(new transport::CastTransportSenderImpl(
         NULL,
@@ -117,7 +119,6 @@ class VideoSenderTest : public ::testing::Test {
         base::TimeDelta(),
         task_runner_,
         &transport_));
-    transport_sender_->InitializeVideo(transport_config);
   }
 
   virtual ~VideoSenderTest() {}
@@ -133,7 +134,7 @@ class VideoSenderTest : public ::testing::Test {
 
   void InitEncoder(bool external) {
     VideoSenderConfig video_config;
-    video_config.sender_ssrc = 1;
+    video_config.rtp_config.ssrc = 1;
     video_config.incoming_feedback_ssrc = 2;
     video_config.rtcp_c_name = "video_test@10.1.1.1";
     video_config.rtp_config.payload_type = 127;
@@ -151,7 +152,7 @@ class VideoSenderTest : public ::testing::Test {
 
     if (external) {
       scoped_ptr<VideoEncodeAccelerator> fake_vea(
-          new test::FakeVideoEncodeAccelerator());
+          new test::FakeVideoEncodeAccelerator(task_runner_));
       video_sender_.reset(
           new PeerVideoSender(cast_environment_,
                               video_config,

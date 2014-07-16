@@ -11,6 +11,7 @@
 #include "content/renderer/render_view_impl.h"
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_sync_message.h"
+#include "ipc/message_filter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebScriptController.h"
 
@@ -27,21 +28,10 @@ MockRenderThread::MockRenderThread()
 
 MockRenderThread::~MockRenderThread() {
   while (!filters_.empty()) {
-    scoped_refptr<IPC::ChannelProxy::MessageFilter> filter = filters_.back();
+    scoped_refptr<IPC::MessageFilter> filter = filters_.back();
     filters_.pop_back();
     filter->OnFilterRemoved();
   }
-}
-
-void MockRenderThread::VerifyRunJavaScriptMessageSend(
-    const base::string16& expected_alert_message) {
-  const IPC::Message* alert_msg =
-      sink_.GetUniqueMessageMatching(ViewHostMsg_RunJavaScriptMessage::ID);
-  ASSERT_TRUE(alert_msg);
-  PickleIterator iter = IPC::SyncMessage::GetDataIterator(alert_msg);
-  ViewHostMsg_RunJavaScriptMessage::SendParam alert_param;
-  ASSERT_TRUE(IPC::ReadParam(alert_msg, &iter, &alert_param));
-  EXPECT_EQ(expected_alert_message, alert_param.a);
 }
 
 // Called by the Widget. Used to send messages to the browser.
@@ -104,14 +94,14 @@ int MockRenderThread::GenerateRoutingID() {
   return MSG_ROUTING_NONE;
 }
 
-void MockRenderThread::AddFilter(IPC::ChannelProxy::MessageFilter* filter) {
+void MockRenderThread::AddFilter(IPC::MessageFilter* filter) {
   filter->OnFilterAdded(&sink());
   // Add this filter to a vector so the MockRenderThread::RemoveFilter function
   // can check if this filter is added.
   filters_.push_back(make_scoped_refptr(filter));
 }
 
-void MockRenderThread::RemoveFilter(IPC::ChannelProxy::MessageFilter* filter) {
+void MockRenderThread::RemoveFilter(IPC::MessageFilter* filter) {
   // Emulate the IPC::ChannelProxy::OnRemoveFilter function.
   for (size_t i = 0; i < filters_.size(); ++i) {
     if (filters_[i].get() == filter) {

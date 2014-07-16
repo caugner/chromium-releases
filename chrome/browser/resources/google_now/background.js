@@ -16,8 +16,7 @@
  * 3. Showing the received cards as notifications.
  */
 
-// TODO(vadimt): Decide what to do in incognito mode.
-// TODO(vadimt): Figure out the final values of the constants.
+// TODO(robliao): Decide what to do in incognito mode.
 
 /**
  * Standard response code for successful HTTP requests. This is the only success
@@ -55,14 +54,14 @@ var MAXIMUM_POLLING_PERIOD_SECONDS = 60 * 60;  // 1 hour
  * Initial period for polling for Google Now optin notification after push
  * messaging indicates Google Now is enabled.
  */
-var INITIAL_OPTIN_POLLING_PERIOD_SECONDS = 60;  // 1 minute
+var INITIAL_OPTIN_RECHECK_PERIOD_SECONDS = 60;  // 1 minute
 
 /**
  * Maximum period for polling for Google Now optin notification after push
  * messaging indicates Google Now is enabled. It is expected that the alarm
  * will be stopped after this.
  */
-var MAXIMUM_OPTIN_POLLING_PERIOD_SECONDS = 16 * 60;  // 16 minutes
+var MAXIMUM_OPTIN_RECHECK_PERIOD_SECONDS = 16 * 60;  // 16 minutes
 
 /**
  * Initial period for retrying the server request for dismissing cards.
@@ -206,6 +205,7 @@ wrapper.instrumentChromeApiFunction(
     'notifications.onShowSettings.addListener', 0);
 wrapper.instrumentChromeApiFunction('permissions.contains', 1);
 wrapper.instrumentChromeApiFunction('pushMessaging.onMessage.addListener', 0);
+wrapper.instrumentChromeApiFunction('storage.onChanged.addListener', 0);
 wrapper.instrumentChromeApiFunction('runtime.onInstalled.addListener', 0);
 wrapper.instrumentChromeApiFunction('runtime.onStartup.addListener', 0);
 wrapper.instrumentChromeApiFunction('tabs.create', 1);
@@ -215,11 +215,16 @@ var updateCardsAttempts = buildAttemptManager(
     requestCards,
     INITIAL_POLLING_PERIOD_SECONDS,
     MAXIMUM_POLLING_PERIOD_SECONDS);
-var optInCheckAttempts = buildAttemptManager(
+var optInPollAttempts = buildAttemptManager(
     'optin',
-    pollOptedIn,
-    INITIAL_OPTIN_POLLING_PERIOD_SECONDS,
-    MAXIMUM_OPTIN_POLLING_PERIOD_SECONDS);
+    pollOptedInNoImmediateRecheck,
+    INITIAL_POLLING_PERIOD_SECONDS,
+    MAXIMUM_POLLING_PERIOD_SECONDS);
+var optInRecheckAttempts = buildAttemptManager(
+    'optin-recheck',
+    pollOptedInWithRecheck,
+    INITIAL_OPTIN_RECHECK_PERIOD_SECONDS,
+    MAXIMUM_OPTIN_RECHECK_PERIOD_SECONDS);
 var dismissalAttempts = buildAttemptManager(
     'dismiss',
     retryPendingDismissals,
@@ -314,61 +319,66 @@ function checkAuthenticationStatus(token) {
  * @param {string} handlerName Server handler to send the request to.
  * @param {string=} opt_contentType Value for the Content-type header.
  * @return {Promise} A promise to issue a request to the server.
- *     The promise rejects if there is a client-side authentication issue.
+ *     The promise rejects if the response is not within the HTTP 200 range.
  */
 function requestFromServer(method, handlerName, opt_contentType) {
   return authenticationManager.getAuthToken().then(function(token) {
     var request = buildServerRequest(method, handlerName, opt_contentType);
     request.setRequestHeader('Authorization', 'Bearer ' + token);
-    var requestPromise = new Promise(function(resolve) {
+    var requestPromise = new Promise(function(resolve, reject) {
       request.addEventListener('loadend', function() {
-        resolve(request);
+        if ((200 <= request.status) && (request.status < 300)) {
+          resolve(request);
+        } else {
+          reject(request);
+        }
       }, false);
       request.send();
     });
-    requestPromise.then(checkAuthenticationStatus(token));
+    requestPromise.catch(checkAuthenticationStatus(token));
     return requestPromise;
   });
 }
 
 /**
- * Shows parsed and combined cards as notifications.
+ * Shows the notification groups as notification cards.
  * @param {Object.<string, StoredNotificationGroup>} notificationGroups Map from
  *     group name to group information.
- * @param {Object.<ChromeNotificationId, CombinedCard>} cards Map from
- *     chromeNotificationId to the combined card, containing cards to show.
- * @param {function()} onSuccess Called on success.
- * @param {function(ReceivedNotification)=} onCardShown Optional parameter
+ * @param {function(ReceivedNotification)=} opt_onCardShown Optional parameter
  *     called when each card is shown.
+ * @return {Promise} A promise to show the notification groups as cards.
  */
-function showNotificationCards(
-    notificationGroups, cards, onSuccess, onCardShown) {
-  console.log('showNotificationCards ' + JSON.stringify(cards));
+function showNotificationGroups(notificationGroups, opt_onCardShown) {
+  /** @type {Object.<ChromeNotificationId, CombinedCard>} */
+  var cards = combineCardsFromGroups(notificationGroups);
+  console.log('showNotificationGroups ' + JSON.stringify(cards));
 
-  instrumented.notifications.getAll(function(notifications) {
-    console.log('showNotificationCards-getAll ' +
-        JSON.stringify(notifications));
-    notifications = notifications || {};
+  return new Promise(function(resolve) {
+    instrumented.notifications.getAll(function(notifications) {
+      console.log('showNotificationGroups-getAll ' +
+          JSON.stringify(notifications));
+      notifications = notifications || {};
 
-    // Mark notifications that didn't receive an update as having received
-    // an empty update.
-    for (var chromeNotificationId in notifications) {
-      cards[chromeNotificationId] = cards[chromeNotificationId] || [];
-    }
+      // Mark notifications that didn't receive an update as having received
+      // an empty update.
+      for (var chromeNotificationId in notifications) {
+        cards[chromeNotificationId] = cards[chromeNotificationId] || [];
+      }
 
-    /** @type {Object.<string, NotificationDataEntry>} */
-    var notificationsData = {};
+      /** @type {Object.<ChromeNotificationId, NotificationDataEntry>} */
+      var notificationsData = {};
 
-    // Create/update/delete notifications.
-    for (var chromeNotificationId in cards) {
-      notificationsData[chromeNotificationId] = cardSet.update(
-          chromeNotificationId,
-          cards[chromeNotificationId],
-          notificationGroups,
-          onCardShown);
-    }
-    chrome.storage.local.set({notificationsData: notificationsData});
-    onSuccess();
+      // Create/update/delete notifications.
+      for (var chromeNotificationId in cards) {
+        notificationsData[chromeNotificationId] = cardSet.update(
+            chromeNotificationId,
+            cards[chromeNotificationId],
+            notificationGroups,
+            opt_onCardShown);
+      }
+      chrome.storage.local.set({notificationsData: notificationsData});
+      resolve();
+    });
   });
 }
 
@@ -421,103 +431,106 @@ function combineGroup(combinedCards, storedGroup) {
 }
 
 /**
- * Schedules next cards poll.
+ * Calculates the soonest poll time from a map of groups as an absolute time.
  * @param {Object.<string, StoredNotificationGroup>} groups Map from group name
  *     to group information.
- * @param {boolean} isOptedIn True if the user is opted in to Google Now.
+ * @return {number} The next poll time based off of the groups.
  */
-function scheduleNextPoll(groups, isOptedIn) {
-  if (isOptedIn) {
-    var nextPollTime = null;
+function calculateNextPollTimeMilliseconds(groups) {
+  var nextPollTime = null;
 
-    for (var groupName in groups) {
-      var group = groups[groupName];
-      if (group.nextPollTime !== undefined) {
-        nextPollTime = nextPollTime == null ?
-            group.nextPollTime : Math.min(group.nextPollTime, nextPollTime);
-      }
+  for (var groupName in groups) {
+    var group = groups[groupName];
+    if (group.nextPollTime !== undefined) {
+      nextPollTime = nextPollTime == null ?
+          group.nextPollTime : Math.min(group.nextPollTime, nextPollTime);
     }
-
-    // At least one of the groups must have nextPollTime.
-    verify(nextPollTime != null, 'scheduleNextPoll: nextPollTime is null');
-
-    var nextPollDelaySeconds = Math.max(
-        (nextPollTime - Date.now()) / MS_IN_SECOND,
-        MINIMUM_POLLING_PERIOD_SECONDS);
-    updateCardsAttempts.start(nextPollDelaySeconds);
-  } else {
-    instrumented.metricsPrivate.getVariationParams(
-        'GoogleNow', function(params) {
-      var optinPollPeriodSeconds =
-          parseInt(params && params.optinPollPeriodSeconds, 10) ||
-          DEFAULT_OPTIN_CHECK_PERIOD_SECONDS;
-      updateCardsAttempts.start(optinPollPeriodSeconds);
-    });
   }
+
+  // At least one of the groups must have nextPollTime.
+  verify(nextPollTime != null, 'calculateNextPollTime: nextPollTime is null');
+  return nextPollTime;
 }
 
 /**
- * Combines notification groups into a set of Chrome notifications and shows
- * them.
+ * Schedules next cards poll.
+ * @param {Object.<string, StoredNotificationGroup>} groups Map from group name
+ *     to group information.
+ */
+function scheduleNextCardsPoll(groups) {
+  var nextPollTimeMs = calculateNextPollTimeMilliseconds(groups);
+
+  var nextPollDelaySeconds = Math.max(
+      (nextPollTimeMs - Date.now()) / MS_IN_SECOND,
+      MINIMUM_POLLING_PERIOD_SECONDS);
+  updateCardsAttempts.start(nextPollDelaySeconds);
+}
+
+/**
+ * Schedules the next opt-in check poll.
+ */
+function scheduleOptInCheckPoll() {
+  instrumented.metricsPrivate.getVariationParams(
+      'GoogleNow', function(params) {
+    var optinPollPeriodSeconds =
+        parseInt(params && params.optinPollPeriodSeconds, 10) ||
+        DEFAULT_OPTIN_CHECK_PERIOD_SECONDS;
+    optInPollAttempts.start(optinPollPeriodSeconds);
+  });
+}
+
+/**
+ * Combines notification groups into a set of Chrome notifications.
  * @param {Object.<string, StoredNotificationGroup>} notificationGroups Map from
  *     group name to group information.
- * @param {function()} onSuccess Called on success.
- * @param {function(ReceivedNotification)=} onCardShown Optional parameter
- *     called when each card is shown.
+ * @return {Object.<ChromeNotificationId, CombinedCard>} Cards to show.
  */
-function combineAndShowNotificationCards(
-    notificationGroups, onSuccess, onCardShown) {
-  console.log('combineAndShowNotificationCards ' +
-      JSON.stringify(notificationGroups));
+function combineCardsFromGroups(notificationGroups) {
+  console.log('combineCardsFromGroups ' + JSON.stringify(notificationGroups));
   /** @type {Object.<ChromeNotificationId, CombinedCard>} */
   var combinedCards = {};
 
   for (var groupName in notificationGroups)
     combineGroup(combinedCards, notificationGroups[groupName]);
 
-  showNotificationCards(
-      notificationGroups, combinedCards, onSuccess, onCardShown);
+  return combinedCards;
 }
 
 /**
- * Based on a response from the notification server, shows notifications and
- * schedules next update.
+ * Processes a server response for consumption by showNotificationGroups.
  * @param {ServerResponse} response Server response.
- * @param {function(ReceivedNotification)=} onCardShown Optional parameter
- *     called when each card is shown.
+ * @return {Promise} A promise to process the server response and provide
+ *     updated groups. Rejects if the server response shouldn't be processed.
  */
-function processServerResponse(response, onCardShown) {
+function processServerResponse(response) {
   console.log('processServerResponse ' + JSON.stringify(response));
 
   if (response.googleNowDisabled) {
     chrome.storage.local.set({googleNowEnabled: false});
-    // TODO(vadimt): Remove the line below once the server stops sending groups
-    // with 'googleNowDisabled' responses.
-    response.groups = {};
-    // Google Now was enabled; now it's disabled. This is a state change.
-    onStateChange();
+    // Stop processing now. The state change will clear the cards.
+    return Promise.reject();
   }
 
   var receivedGroups = response.groups;
 
-  fillFromChromeLocalStorage({
+  return fillFromChromeLocalStorage({
     /** @type {Object.<string, StoredNotificationGroup>} */
     notificationGroups: {},
-    /** @type {Object.<NotificationId, number>} */
+    /** @type {Object.<ServerNotificationId, number>} */
     recentDismissals: {}
   }).then(function(items) {
     console.log('processServerResponse-get ' + JSON.stringify(items));
 
     // Build a set of non-expired recent dismissals. It will be used for
     // client-side filtering of cards.
-    /** @type {Object.<NotificationId, number>} */
+    /** @type {Object.<ServerNotificationId, number>} */
     var updatedRecentDismissals = {};
     var now = Date.now();
-    for (var notificationId in items.recentDismissals) {
-      var dismissalAge = now - items.recentDismissals[notificationId];
+    for (var serverNotificationId in items.recentDismissals) {
+      var dismissalAge = now - items.recentDismissals[serverNotificationId];
       if (dismissalAge < DISMISS_RETENTION_TIME_MS) {
-        updatedRecentDismissals[notificationId] =
-            items.recentDismissals[notificationId];
+        updatedRecentDismissals[serverNotificationId] =
+            items.recentDismissals[serverNotificationId];
       }
     }
 
@@ -572,17 +585,11 @@ function processServerResponse(response, onCardShown) {
       updatedGroups[groupName] = storedGroup;
     }
 
-    scheduleNextPoll(updatedGroups, !response.googleNowDisabled);
-    combineAndShowNotificationCards(
-        updatedGroups,
-        function() {
-          chrome.storage.local.set({
-            notificationGroups: updatedGroups,
-            recentDismissals: updatedRecentDismissals
-          });
-          recordEvent(GoogleNowEvent.CARDS_PARSE_SUCCESS);
-        },
-        onCardShown);
+    scheduleNextCardsPoll(updatedGroups);
+    return {
+      updatedGroups: updatedGroups,
+      recentDismissals: updatedRecentDismissals
+    };
   });
 }
 
@@ -594,11 +601,23 @@ function countExplanatoryCard() {
 }
 
 /**
+ * Determines if cards should have an explanation link.
+ * @return {boolean} true if an explanatory card should be shown.
+ */
+function shouldShowExplanatoryCard() {
+  var isBelowThreshold =
+      localStorage['explanatoryCardsShown'] < EXPLANATORY_CARDS_LINK_THRESHOLD;
+  return isBelowThreshold;
+}
+
+/**
  * Requests notification cards from the server for specified groups.
  * @param {Array.<string>} groupNames Names of groups that need to be refreshed.
+ * @return {Promise} A promise to request the specified notification groups.
  */
-function requestNotificationGroups(groupNames) {
-  console.log('requestNotificationGroups from ' + NOTIFICATION_CARDS_URL +
+function requestNotificationGroupsFromServer(groupNames) {
+  console.log(
+      'requestNotificationGroupsFromServer from ' + NOTIFICATION_CARDS_URL +
       ', groupNames=' + JSON.stringify(groupNames));
 
   recordEvent(GoogleNowEvent.REQUEST_FOR_CARDS_TOTAL);
@@ -606,12 +625,8 @@ function requestNotificationGroups(groupNames) {
   var requestParameters = '?timeZoneOffsetMs=' +
     (-new Date().getTimezoneOffset() * MS_IN_MINUTE);
 
-  var cardShownCallback = undefined;
-  var belowExplanatoryThreshold =
-      localStorage['explanatoryCardsShown'] < EXPLANATORY_CARDS_LINK_THRESHOLD;
-  if (belowExplanatoryThreshold) {
+  if (shouldShowExplanatoryCard()) {
     requestParameters += '&cardExplanation=true';
-    cardShownCallback = countExplanatoryCard;
   }
 
   groupNames.forEach(function(groupName) {
@@ -620,60 +635,70 @@ function requestNotificationGroups(groupNames) {
 
   requestParameters += '&uiLocale=' + navigator.language;
 
-  console.log('requestNotificationGroups: request=' + requestParameters);
+  console.log(
+      'requestNotificationGroupsFromServer: request=' + requestParameters);
 
-  requestFromServer('GET', 'notifications' + requestParameters).then(
+  return requestFromServer('GET', 'notifications' + requestParameters).then(
     function(request) {
-      console.log('requestNotificationGroups-received ' + request.status);
+      console.log(
+          'requestNotificationGroupsFromServer-received ' + request.status);
       if (request.status == HTTP_OK) {
         recordEvent(GoogleNowEvent.REQUEST_FOR_CARDS_SUCCESS);
-        processServerResponse(
-            JSON.parse(request.responseText), cardShownCallback);
+        return JSON.parse(request.responseText);
       }
     });
 }
 
 /**
- * Requests the account opted-in state from the server.
- * @param {function()} optedInCallback Function that will be called if
- *     opted-in state is 'true'.
+ * Performs an opt-in poll without an immediate recheck.
+ * If the response is not opted-in, schedule an opt-in check poll.
  */
-function requestOptedIn(optedInCallback) {
+function pollOptedInNoImmediateRecheck() {
+  requestAndUpdateOptedIn()
+      .then(function(optedIn) {
+        if (!optedIn) {
+          // Request a repoll if we're not opted in.
+          return Promise.reject();
+        }
+      })
+      .catch(function() {
+        scheduleOptInCheckPoll();
+      });
+}
+
+/**
+ * Requests the account opted-in state from the server and updates any
+ * state as necessary.
+ * @return {Promise} A promise to request and update the opted-in state.
+ *     The promise resolves with the opt-in state.
+ */
+function requestAndUpdateOptedIn() {
   console.log('requestOptedIn from ' + NOTIFICATION_CARDS_URL);
 
-  requestFromServer('GET', 'settings/optin').then(function(request) {
+  return requestFromServer('GET', 'settings/optin').then(function(request) {
     console.log(
         'requestOptedIn-received ' + request.status + ' ' + request.response);
     if (request.status == HTTP_OK) {
       var parsedResponse = JSON.parse(request.responseText);
-      if (parsedResponse.value) {
-        chrome.storage.local.set({googleNowEnabled: true});
-        optedInCallback();
-        // Google Now was disabled, now it's enabled. This is a state change.
-        onStateChange();
-      } else {
-        scheduleNextPoll({}, false);
-      }
+      return parsedResponse.value;
     }
+  }).then(function(optedIn) {
+    chrome.storage.local.set({googleNowEnabled: optedIn});
+    return optedIn;
   });
 }
 
 /**
- * Requests notification cards from the server.
+ * Determines the groups that need to be requested right now.
+ * @return {Promise} A promise to determine the groups to request.
  */
-function requestNotificationCards() {
-  console.log('requestNotificationCards');
-
-  fillFromChromeLocalStorage({
+function getGroupsToRequest() {
+  return fillFromChromeLocalStorage({
     /** @type {Object.<string, StoredNotificationGroup>} */
-    notificationGroups: {},
-    googleNowEnabled: false
+    notificationGroups: {}
   }).then(function(items) {
-    console.log(
-        'requestNotificationCards-storage-get ' + JSON.stringify(items));
-
+    console.log('getGroupsToRequest-storage-get ' + JSON.stringify(items));
     var groupsToRequest = [];
-
     var now = Date.now();
 
     for (var groupName in items.notificationGroups) {
@@ -681,15 +706,33 @@ function requestNotificationCards() {
       if (group.nextPollTime !== undefined && group.nextPollTime <= now)
         groupsToRequest.push(groupName);
     }
-
-    if (items.googleNowEnabled) {
-      requestNotificationGroups(groupsToRequest);
-    } else {
-      requestOptedIn(function() {
-        requestNotificationGroups(groupsToRequest);
-      });
-    }
+    return groupsToRequest;
   });
+}
+
+/**
+ * Requests notification cards from the server.
+ * @return {Promise} A promise to request the notification cards.
+ *     Rejects if the cards won't be requested.
+ */
+function requestNotificationCards() {
+  console.log('requestNotificationCards');
+  return getGroupsToRequest()
+      .then(requestNotificationGroupsFromServer)
+      .then(processServerResponse)
+      .then(function(processedResponse) {
+        var onCardShown =
+            shouldShowExplanatoryCard() ? countExplanatoryCard : undefined;
+        return showNotificationGroups(
+            processedResponse.updatedGroups, onCardShown).then(function() {
+              chrome.storage.local.set({
+                notificationGroups: processedResponse.updatedGroups,
+                recentDismissals: processedResponse.updatedRecentDismissals
+              });
+              recordEvent(GoogleNowEvent.CARDS_PARSE_SUCCESS);
+            }
+          );
+      });
 }
 
 /**
@@ -705,10 +748,10 @@ function requestCards() {
     console.log('requestCards-task-begin');
     updateCardsAttempts.isRunning(function(running) {
       if (running) {
-        updateCardsAttempts.planForNext(function() {
-          // The cards are requested only if there are no unsent dismissals.
-          processPendingDismissals().then(requestNotificationCards);
-        });
+        // The cards are requested only if there are no unsent dismissals.
+        processPendingDismissals()
+            .then(requestNotificationCards)
+            .catch(updateCardsAttempts.scheduleRetry);
       }
     });
   });
@@ -754,10 +797,14 @@ function requestCardDismissal(
 
     // A dismissal doesn't require further retries if it was successful or
     // doesn't have a chance for successful completion.
-    var done = request.status == HTTP_NOCONTENT ||
-        request.status == HTTP_BAD_REQUEST ||
-        request.status == HTTP_METHOD_NOT_ALLOWED;
-    return done ? Promise.resolve() : Promise.reject();
+    return (request.status == HTTP_NOCONTENT) ?
+           Promise.resolve() :
+           Promise.reject();
+  }).catch(function(request) {
+    return (request.status == HTTP_BAD_REQUEST ||
+           request.status == HTTP_METHOD_NOT_ALLOWED) ?
+           Promise.resolve() :
+           Promise.reject();
   });
 }
 
@@ -770,7 +817,7 @@ function processPendingDismissals() {
   return fillFromChromeLocalStorage({
     /** @type {Array.<PendingDismissal>} */
     pendingDismissals: [],
-    /** @type {Object.<NotificationId, number>} */
+    /** @type {Object.<ServerNotificationId, number>} */
     recentDismissals: {}
   }).then(function(items) {
     console.log(
@@ -821,9 +868,7 @@ function processPendingDismissals() {
  */
 function retryPendingDismissals() {
   tasks.add(RETRY_DISMISS_TASK_NAME, function() {
-    dismissalAttempts.planForNext(function() {
-      processPendingDismissals();
-     });
+    processPendingDismissals().catch(dismissalAttempts.scheduleRetry);
   });
 }
 
@@ -850,7 +895,7 @@ function openUrl(url) {
  */
 function onNotificationClicked(chromeNotificationId, selector) {
   fillFromChromeLocalStorage({
-    /** @type {Object.<string, NotificationDataEntry>} */
+    /** @type {Object.<ChromeNotificationId, NotificationDataEntry>} */
     notificationsData: {}
   }).then(function(items) {
     /** @type {(NotificationDataEntry|undefined)} */
@@ -885,7 +930,7 @@ function onNotificationClosed(chromeNotificationId, byUser) {
     fillFromChromeLocalStorage({
       /** @type {Array.<PendingDismissal>} */
       pendingDismissals: [],
-      /** @type {Object.<string, NotificationDataEntry>} */
+      /** @type {Object.<ChromeNotificationId, NotificationDataEntry>} */
       notificationsData: {},
       /** @type {Object.<string, StoredNotificationGroup>} */
       notificationGroups: {}
@@ -932,7 +977,6 @@ function startPollingCards() {
   // Create an update timer for a case when for some reason requesting
   // cards gets stuck.
   updateCardsAttempts.start(MAXIMUM_POLLING_PERIOD_SECONDS);
-
   requestCards();
 }
 
@@ -942,10 +986,10 @@ function startPollingCards() {
 function stopPollingCards() {
   console.log('stopPollingCards');
   updateCardsAttempts.stop();
-  removeAllCards();
-  // Mark the Google Now as disabled to start with checking the opt-in state
-  // next time startPollingCards() is called.
-  chrome.storage.local.set({googleNowEnabled: false});
+  // Since we're stopping everything, clear all runtime storage.
+  // We don't clear localStorage since those values are still relevant
+  // across Google Now start-stop events.
+  chrome.storage.local.clear();
 }
 
 /**
@@ -957,7 +1001,7 @@ function initialize() {
 }
 
 /**
- * Starts or stops the polling of cards.
+ * Starts or stops the main pipeline for polling cards.
  * @param {boolean} shouldPollCardsRequest true to start and
  *     false to stop polling cards.
  */
@@ -972,6 +1016,28 @@ function setShouldPollCards(shouldPollCardsRequest) {
     } else {
       console.log(
           'Action Ignored setShouldPollCards=' + shouldPollCardsRequest);
+    }
+  });
+}
+
+/**
+ * Starts or stops the optin check.
+ * @param {boolean} shouldPollOptInStatus true to start and false to stop
+ *     polling the optin status.
+ */
+function setShouldPollOptInStatus(shouldPollOptInStatus) {
+  optInPollAttempts.isRunning(function(currentValue) {
+    if (shouldPollOptInStatus != currentValue) {
+      console.log(
+          'Action Taken setShouldPollOptInStatus=' + shouldPollOptInStatus);
+      if (shouldPollOptInStatus) {
+        pollOptedInNoImmediateRecheck();
+      } else {
+        optInPollAttempts.stop();
+      }
+    } else {
+      console.log(
+          'Action Ignored setShouldPollOptInStatus=' + shouldPollOptInStatus);
     }
   });
 }
@@ -1037,13 +1103,13 @@ function updateRunningState(
       'googleNowEnabled=' + googleNowEnabled);
 
   var shouldPollCards = false;
+  var shouldPollOptInStatus = false;
   var shouldSetBackground = false;
 
   if (signedIn && notificationEnabled) {
-    if (canEnableBackground && googleNowEnabled)
-      shouldSetBackground = true;
-
-    shouldPollCards = true;
+    shouldPollCards = googleNowEnabled;
+    shouldPollOptInStatus = !googleNowEnabled;
+    shouldSetBackground = canEnableBackground && googleNowEnabled;
   } else {
     recordEvent(GoogleNowEvent.STOPPED);
   }
@@ -1052,10 +1118,15 @@ function updateRunningState(
 
   console.log(
       'Requested Actions shouldSetBackground=' + shouldSetBackground + ' ' +
-      'setShouldPollCards=' + shouldPollCards);
+      'setShouldPollCards=' + shouldPollCards + ' ' +
+      'shouldPollOptInStatus=' + shouldPollOptInStatus);
 
   setBackgroundEnable(shouldSetBackground);
   setShouldPollCards(shouldPollCards);
+  setShouldPollOptInStatus(shouldPollOptInStatus);
+  if (!shouldPollCards) {
+    removeAllCards();
+  }
 }
 
 /**
@@ -1119,41 +1190,39 @@ function isGoogleNowEnabled() {
  * Sometimes we get the response to the opted in result too soon during
  * push messaging. We'll recheck the optin state a few times before giving up.
  */
-function pollOptedIn() {
+function pollOptedInWithRecheck() {
   /**
    * Cleans up any state used to recheck the opt-in poll.
    */
   function clearPollingState() {
     localStorage.removeItem('optedInCheckCount');
-    optInCheckAttempts.stop();
-  }
-
-  /**
-   * Performs the actual work for checking the opt-in state and requesting cards
-   * on opted-in.
-   */
-  function checkOptedIn() {
-    // Limit retries to 5.
-    if (localStorage.optedInCheckCount < 5) {
-      console.log(new Date() +
-          ' checkOptedIn Attempt ' + localStorage.optedInCheckCount);
-      localStorage.optedInCheckCount++;
-      requestOptedIn(function() {
-        clearPollingState();
-        requestCards();
-      });
-    } else {
-      clearPollingState();
-    }
+    optInRecheckAttempts.stop();
   }
 
   if (localStorage.optedInCheckCount === undefined) {
     localStorage.optedInCheckCount = 0;
-    optInCheckAttempts.start();
-    checkOptedIn();
-  } else {
-    optInCheckAttempts.planForNext(checkOptedIn);
+    optInRecheckAttempts.start();
   }
+
+  console.log(new Date() +
+      ' checkOptedIn Attempt ' + localStorage.optedInCheckCount);
+
+  requestAndUpdateOptedIn().then(function(optedIn) {
+    if (optedIn) {
+      clearPollingState();
+      return Promise.resolve();
+    } else {
+      // If we're not opted in, reject to retry.
+      return Promise.reject();
+    }
+  }).catch(function() {
+    if (localStorage.optedInCheckCount < 5) {
+      localStorage.optedInCheckCount++;
+      optInRecheckAttempts.scheduleRetry();
+    } else {
+      clearPollingState();
+    }
+  });
 }
 
 instrumented.runtime.onInstalled.addListener(function(details) {
@@ -1176,7 +1245,7 @@ instrumented.runtime.onStartup.addListener(function() {
     }).then(function(items) {
       console.log('onStartup-get ' + JSON.stringify(items));
 
-      combineAndShowNotificationCards(items.notificationGroups, function() {
+      showNotificationGroups(items.notificationGroups).then(function() {
         chrome.storage.local.set(items);
       });
     });
@@ -1233,6 +1302,15 @@ instrumented.notifications.onShowSettings.addListener(function() {
   openUrl(SETTINGS_URL);
 });
 
+// Handles state change notifications for the Google Now enabled bit.
+instrumented.storage.onChanged.addListener(function(changes, areaName) {
+  if (areaName === 'local') {
+    if ('googleNowEnabled' in changes) {
+      onStateChange();
+    }
+  }
+});
+
 instrumented.pushMessaging.onMessage.addListener(function(message) {
   // message.payload will be '' when the extension first starts.
   // Each time after signing in, we'll get latest payload for all channels.
@@ -1262,7 +1340,7 @@ instrumented.pushMessaging.onMessage.addListener(function(message) {
             notificationGroups: items.notificationGroups
           });
 
-          pollOptedIn();
+          pollOptedInWithRecheck();
         }
       });
     });

@@ -54,7 +54,7 @@ void AuraTestBase::SetUp() {
   ui::GestureConfiguration::set_min_rail_break_velocity(200);
   ui::GestureConfiguration::set_min_scroll_delta_squared(5 * 5);
   ui::GestureConfiguration::
-      set_min_touch_down_duration_in_seconds_for_click(0.01);
+      set_min_touch_down_duration_in_seconds_for_click(0.0005);
   ui::GestureConfiguration::set_points_buffered_for_velocity(10);
   ui::GestureConfiguration::set_rail_break_proportion(15);
   ui::GestureConfiguration::set_rail_start_proportion(2);
@@ -69,6 +69,7 @@ void AuraTestBase::SetUp() {
   ui::GestureConfiguration::set_fling_acceleration_curve_coefficients(
       3, 0.8f);
   ui::GestureConfiguration::set_fling_velocity_cap(15000.0f);
+  ui::GestureConfiguration::set_min_swipe_speed(10);
 
   // The ContextFactory must exist before any Compositors are created.
   bool enable_pixel_output = false;

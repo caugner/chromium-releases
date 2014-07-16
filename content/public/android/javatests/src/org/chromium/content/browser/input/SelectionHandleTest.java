@@ -5,7 +5,6 @@
 package org.chromium.content.browser.input;
 
 import android.graphics.Point;
-import android.graphics.PointF;
 import android.graphics.Rect;
 import android.os.SystemClock;
 import android.test.FlakyTest;
@@ -13,16 +12,15 @@ import android.test.suitebuilder.annotation.MediumTest;
 import android.text.Editable;
 import android.text.Selection;
 import android.view.MotionEvent;
+import android.view.ViewGroup;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.RenderCoordinates;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content.browser.test.util.TestInputMethodManagerWrapper;
 import org.chromium.content.browser.test.util.TestTouchUtils;
 import org.chromium.content.browser.test.util.TouchCommon;
@@ -30,10 +28,6 @@ import org.chromium.content_shell_apk.ContentShellTestBase;
 
 import java.util.concurrent.Callable;
 
-/**
- * Tests for the selection handles that allow to select text in both editable and non-editable
- * elements.
- */
 public class SelectionHandleTest extends ContentShellTestBase {
     private static final String META_DISABLE_ZOOM =
         "<meta name=\"viewport\" content=\"" +
@@ -157,76 +151,6 @@ public class SelectionHandleTest extends ContentShellTestBase {
         doSelectionHandleTest(TestPageType.EDITABLE);
     }
 
-    /**
-     * Verifies that the visibility of handles is correct when visible clipping
-     * rectangle is set.
-     */
-    @MediumTest
-    @Feature({ "TextSelection" })
-    public void testEditableSelectionHandlesStartNotVisibleEndVisible() throws Throwable {
-        doSelectionHandleTestVisibility(TestPageType.EDITABLE, false, true, new PointF(.5f, .5f),
-                new PointF(0,1));
-    }
-
-    @MediumTest
-    @Feature({ "TextSelection" })
-    public void testEditableSelectionHandlesStartVisibleEndNotVisible() throws Throwable {
-        doSelectionHandleTestVisibility(TestPageType.EDITABLE, true, false, new PointF(1,0),
-                new PointF(.5f, .5f));
-    }
-
-    @MediumTest
-    @Feature({ "TextSelection" })
-    public void testEditableSelectionHandlesStartVisibleEndVisible() throws Throwable {
-        doSelectionHandleTestVisibility(TestPageType.EDITABLE, true, true, new PointF(1, 0),
-                new PointF(0,1));
-    }
-
-    @MediumTest
-    @Feature({ "TextSelection" })
-    public void testEditableSelectionHandlesStartNotVisibleEndNotVisible() throws Throwable {
-        doSelectionHandleTestVisibility(TestPageType.EDITABLE, false, false, new PointF(1,0),
-                new PointF(1, 0));
-    }
-
-    private void doSelectionHandleTestVisibility(TestPageType pageType,
-            boolean startHandleVisible, boolean endHandleVisible,
-            PointF affineTopLeft, PointF affineBottomRight) throws Throwable {
-        launchWithUrl(pageType.dataUrl);
-
-        clickNodeToShowSelectionHandles(pageType.nodeId);
-        assertWaitForSelectionEditableEquals(pageType.selectionShouldBeEditable);
-
-        HandleView startHandle = getStartHandle();
-        HandleView endHandle = getEndHandle();
-
-        Rect nodeWindowBounds = getNodeBoundsPix(pageType.nodeId);
-
-        int visibleBoundsLeftX = Math.round(affineTopLeft.x * nodeWindowBounds.left
-                + affineTopLeft.y * nodeWindowBounds.right);
-        int visibleBoundsTopY = Math.round(affineTopLeft.x * nodeWindowBounds.top
-                + affineTopLeft.y * nodeWindowBounds.bottom);
-
-        int visibleBoundsRightX = Math.round(affineBottomRight.x * nodeWindowBounds.left
-                + affineBottomRight.y * nodeWindowBounds.right);
-        int visibleBoundsBottomY = Math.round(affineBottomRight.x * nodeWindowBounds.top
-                + affineBottomRight.y * nodeWindowBounds.bottom);
-
-        getContentViewCore().getSelectionHandleControllerForTest().setVisibleClippingRectangle(
-                visibleBoundsLeftX, visibleBoundsTopY, visibleBoundsRightX, visibleBoundsBottomY);
-
-        int leftX = (nodeWindowBounds.left + nodeWindowBounds.centerX()) / 2;
-        int rightX = (nodeWindowBounds.right + nodeWindowBounds.centerX()) / 2;
-
-        int topY = (nodeWindowBounds.top + nodeWindowBounds.centerY()) / 2;
-        int bottomY = (nodeWindowBounds.bottom + nodeWindowBounds.centerY()) / 2;
-
-        dragHandleAndCheckSelectionChange(startHandle, leftX, topY, -1, 0, startHandleVisible);
-        dragHandleAndCheckSelectionChange(endHandle, rightX, bottomY, 0, 1, endHandleVisible);
-
-        clickToDismissHandles();
-    }
-
     private void doSelectionHandleTest(TestPageType pageType) throws Throwable {
         launchWithUrl(pageType.dataUrl);
 
@@ -247,25 +171,23 @@ public class SelectionHandleTest extends ContentShellTestBase {
         int bottomY = (nodeWindowBounds.bottom + nodeWindowBounds.centerY()) / 2;
 
         // Drag start handle up and to the left. The selection start should decrease.
-        dragHandleAndCheckSelectionChange(startHandle, leftX, topY, -1, 0, true);
+        dragHandleAndCheckSelectionChange(startHandle, leftX, topY, -1, 0);
         // Drag end handle down and to the right. The selection end should increase.
-        dragHandleAndCheckSelectionChange(endHandle, rightX, bottomY, 0, 1, true);
+        dragHandleAndCheckSelectionChange(endHandle, rightX, bottomY, 0, 1);
         // Drag start handle back to the middle. The selection start should increase.
-        dragHandleAndCheckSelectionChange(startHandle, centerX, centerY, 1, 0, true);
+        dragHandleAndCheckSelectionChange(startHandle, centerX, centerY, 1, 0);
         // Drag end handle up and to the left past the start handle. Both selection start and end
         // should decrease.
-        dragHandleAndCheckSelectionChange(endHandle, leftX, topY, -1, -1, true);
+        dragHandleAndCheckSelectionChange(endHandle, leftX, topY, -1, -1);
         // Drag start handle down and to the right past the end handle. Both selection start and end
         // should increase.
-        dragHandleAndCheckSelectionChange(startHandle, rightX, bottomY, 1, 1, true);
+        dragHandleAndCheckSelectionChange(startHandle, rightX, bottomY, 1, 1);
 
         clickToDismissHandles();
     }
 
-    private void dragHandleAndCheckSelectionChange(final HandleView handle,
-            final int dragToX, final int dragToY,
-            final int expectedStartChange, final int expectedEndChange,
-            final boolean expectedHandleVisible) throws Throwable {
+    private void dragHandleAndCheckSelectionChange(HandleView handle, int dragToX, int dragToY,
+            final int expectedStartChange, final int expectedEndChange) throws Throwable {
         String initialText = getContentViewCore().getSelectedText();
         final int initialSelectionEnd = getSelectionEnd();
         final int initialSelectionStart = getSelectionStart();
@@ -288,8 +210,6 @@ public class SelectionHandleTest extends ContentShellTestBase {
                     if (expectedEndChange != 0) {
                         if ((int) Math.signum(endChange) != expectedEndChange) return false;
                     }
-
-                    if (expectedHandleVisible != handle.isPositionVisible()) return false;
 
                     return true;
                 }
@@ -404,7 +324,6 @@ public class SelectionHandleTest extends ContentShellTestBase {
 
     private void dragHandleTo(final HandleView handle, final int dragToX, final int dragToY,
             final int steps) throws Throwable {
-        ContentView view = getContentView();
         assertTrue(ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
             @Override
             public Boolean call() {
@@ -416,7 +335,7 @@ public class SelectionHandleTest extends ContentShellTestBase {
                 int realDragToX = dragToX + (realX - adjustedX);
                 int realDragToY = dragToY + (realY - adjustedY);
 
-                ContentView view = getContentView();
+                ViewGroup view = getContentViewCore().getContainerView();
                 int[] fromLocation = TestTouchUtils.getAbsoluteLocationFromRelative(
                         view, realX, realY);
                 int[] toLocation = TestTouchUtils.getAbsoluteLocationFromRelative(
@@ -449,12 +368,11 @@ public class SelectionHandleTest extends ContentShellTestBase {
     }
 
     private Rect getNodeBoundsPix(String nodeId) throws Throwable {
-        Rect nodeBounds = DOMUtils.getNodeBounds(getContentView(),
-                new TestCallbackHelperContainer(getContentView()), nodeId);
+        Rect nodeBounds = DOMUtils.getNodeBounds(getContentViewCore(), nodeId);
 
-        RenderCoordinates renderCoordinates = getContentView().getRenderCoordinates();
-        int offsetX = getContentView().getContentViewCore().getViewportSizeOffsetWidthPix();
-        int offsetY = getContentView().getContentViewCore().getViewportSizeOffsetHeightPix();
+        RenderCoordinates renderCoordinates = getContentViewCore().getRenderCoordinates();
+        int offsetX = getContentViewCore().getViewportSizeOffsetWidthPix();
+        int offsetY = getContentViewCore().getViewportSizeOffsetHeightPix();
 
         int left = (int) renderCoordinates.fromLocalCssToPix(nodeBounds.left) + offsetX;
         int right = (int) renderCoordinates.fromLocalCssToPix(nodeBounds.right) + offsetX;
@@ -470,7 +388,7 @@ public class SelectionHandleTest extends ContentShellTestBase {
         TouchCommon touchCommon = new TouchCommon(this);
         int centerX = nodeWindowBounds.centerX();
         int centerY = nodeWindowBounds.centerY();
-        touchCommon.longPressView(getContentView(), centerX, centerY);
+        touchCommon.longPressView(getContentViewCore().getContainerView(), centerX, centerY);
 
         assertWaitForHandlesShowingEquals(true);
         assertWaitForHandleViewStopped(getStartHandle());
@@ -482,7 +400,7 @@ public class SelectionHandleTest extends ContentShellTestBase {
 
     private void clickToDismissHandles() throws Throwable {
         TestTouchUtils.sleepForDoubleTapTimeout(getInstrumentation());
-        new TouchCommon(this).singleClickView(getContentView(), 0, 0);
+        new TouchCommon(this).singleClickView(getContentViewCore().getContainerView(), 0, 0);
         assertWaitForHandlesShowingEquals(false);
     }
 

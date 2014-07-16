@@ -7,7 +7,7 @@
 
 #include <jni.h>
 
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 #include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
@@ -80,8 +80,8 @@ class TabAndroid : public CoreTabHelperDelegate,
   // Return the tab url.
   GURL GetURL() const;
 
-  // Restore the tab if it was unloaded from memory.
-  bool RestoreIfNeeded();
+  // Load the tab if it was unloaded from memory.
+  bool LoadIfNeeded();
 
   // Helper methods to make it easier to access objects from the associated
   // WebContents.  Can return NULL.
@@ -97,24 +97,6 @@ class TabAndroid : public CoreTabHelperDelegate,
   virtual void OnReceivedHttpAuthRequest(jobject auth_handler,
                                          const base::string16& host,
                                          const base::string16& realm);
-
-  // Called when context menu option to create the bookmark shortcut on
-  // homescreen is called.
-  virtual void AddShortcutToBookmark(const GURL& url,
-                                     const base::string16& title,
-                                     const SkBitmap& skbitmap,
-                                     int r_value,
-                                     int g_value,
-                                     int b_value);
-
-  // Called when a bookmark node should be edited.
-  virtual void EditBookmark(int64 node_id,
-                            const base::string16& node_title,
-                            bool is_folder,
-                            bool is_partner_bookmark);
-
-  // Called to notify that the new tab page has completely rendered.
-  virtual void OnNewTabPageReady();
 
   // Called to determine if chrome://welcome should contain links to the terms
   // of service and the privacy notice.
@@ -157,7 +139,8 @@ class TabAndroid : public CoreTabHelperDelegate,
                                 jbyteArray j_post_data,
                                 jint page_transition,
                                 jstring j_referrer_url,
-                                jint referrer_policy);
+                                jint referrer_policy,
+                                jboolean is_renderer_initiated);
   ToolbarModel::SecurityLevel GetSecurityLevel(JNIEnv* env, jobject obj);
   void SetActiveNavigationEntryTitleForUrl(JNIEnv* env,
                                            jobject obj,

@@ -13,7 +13,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -24,12 +23,12 @@
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "components/infobars/core/infobar.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/webplugininfo.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -272,7 +271,7 @@ void PluginObserver::RenderFrameCreated(
   // where we have instances on both Ash and Native desktop.
 
   // We will do both tests. Both have some factor of unreliability.
-  aura::Window* window = web_contents()->GetView()->GetNativeView();
+  aura::Window* window = web_contents()->GetNativeView();
   if (chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH ||
       chrome::GetHostDesktopTypeForNativeView(window) ==
       chrome::HOST_DESKTOP_TYPE_ASH) {

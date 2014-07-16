@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/password_manager_internals/password_manager_internals_ui.h"
 
+#include <algorithm>
 #include <set>
 
 #include "base/strings/string16.h"
@@ -22,6 +23,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "grit/password_manager_internals_resources.h"
+#include "net/base/escape.h"
 
 using content::BrowserContext;
 using content::WebContents;
@@ -53,7 +55,9 @@ void InsertWebContentsIfProfileMatches(
 }  // namespace
 
 PasswordManagerInternalsUI::PasswordManagerInternalsUI(content::WebUI* web_ui)
-    : WebUIController(web_ui) {
+    : WebUIController(web_ui),
+      WebContentsObserver(web_ui->GetWebContents()),
+      did_stop_loading_(false) {
   // Set up the chrome://password-manager-internals/ source.
   content::WebUIDataSource::Add(Profile::FromWebUI(web_ui),
                                 CreatePasswordManagerInternalsHTMLSource());
@@ -64,9 +68,27 @@ PasswordManagerInternalsUI::~PasswordManagerInternalsUI() {
   NotifyAllPasswordManagerClients(PAGE_CLOSED);
 }
 
+void PasswordManagerInternalsUI::DidStopLoading(
+    content::RenderViewHost* /* render_view_host */) {
+  did_stop_loading_ = true;
+  if (log_buffer_.empty())
+    return;
+  LogInternal(log_buffer_);
+  log_buffer_.clear();
+}
+
 void PasswordManagerInternalsUI::LogSavePasswordProgress(
     const std::string& text) {
-  base::StringValue text_string_value(text);
+  if (did_stop_loading_)
+    LogInternal(text);
+  else
+    log_buffer_.append(text);
+}
+
+void PasswordManagerInternalsUI::LogInternal(const std::string& text) {
+  std::string no_quotes(text);
+  std::replace(no_quotes.begin(), no_quotes.end(), '"', ' ');
+  base::StringValue text_string_value(net::EscapeForHTML(no_quotes));
   web_ui()->CallJavascriptFunction("addSavePasswordProgressLog",
                                    text_string_value);
 }

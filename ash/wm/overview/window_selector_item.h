@@ -6,10 +6,16 @@
 #define ASH_WM_OVERVIEW_WINDOW_SELECTOR_ITEM_H_
 
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/strings/string16.h"
 #include "ui/gfx/rect.h"
 
 namespace aura {
 class Window;
+}
+
+namespace views {
+class Widget;
 }
 
 namespace ash {
@@ -21,6 +27,10 @@ class WindowSelectorItem {
  public:
   WindowSelectorItem();
   virtual ~WindowSelectorItem();
+
+  // The time for the close buttons and labels to fade in when initially shown
+  // on entering overview mode.
+  static const int kFadeInMilliseconds;
 
   // Returns the root window on which this item is shown.
   virtual aura::Window* GetRootWindow() = 0;
@@ -55,7 +65,8 @@ class WindowSelectorItem {
   // Sets the bounds of this window selector item to |target_bounds| in the
   // |root_window| root window.
   void SetBounds(aura::Window* root_window,
-                 const gfx::Rect& target_bounds);
+                 const gfx::Rect& target_bounds,
+                 bool animate);
 
   // Recomputes the positions for the windows in this selection item. This is
   // dispatched when the bounds of a window change.
@@ -75,6 +86,13 @@ class WindowSelectorItem {
   void set_bounds(const gfx::Rect& bounds) { bounds_ = bounds; }
 
  private:
+  friend class WindowSelectorTest;
+
+  // Creates a label to display under the window selector item.
+  void UpdateWindowLabels(const gfx::Rect& target_bounds,
+                          aura::Window* root_window,
+                          bool animate);
+
   // The root window this item is being displayed on.
   aura::Window* root_window_;
 
@@ -89,6 +107,9 @@ class WindowSelectorItem {
   // the bounds update when calling ::wm::RecreateWindowLayers to copy
   // a window layer for display on another monitor.
   bool in_bounds_update_;
+
+  // Label under the window displaying its active tab name.
+  scoped_ptr<views::Widget> window_label_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowSelectorItem);
 };

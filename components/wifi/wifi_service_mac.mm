@@ -47,13 +47,6 @@ enum CWChannelBand {
 
 namespace wifi {
 
-const char kErrorAssociateToNetwork[] = "Error.AssociateToNetwork";
-const char kErrorInvalidData[] = "Error.InvalidData";
-const char kErrorNotConnected[] = "Error.NotConnected";
-const char kErrorNotFound[] = "Error.NotFound";
-const char kErrorNotImplemented[] = "Error.NotImplemented";
-const char kErrorScanForNetworksWithName[] = "Error.ScanForNetworksWithName";
-
 // Implementation of WiFiService for Mac OS X.
 class WiFiServiceMac : public WiFiService {
  public:
@@ -242,8 +235,16 @@ void WiFiServiceMac::SetProperties(
     const std::string& network_guid,
     scoped_ptr<base::DictionaryValue> properties,
     std::string* error) {
-  network_properties_.SetWithoutPathExpansion(network_guid,
-                                              properties.release());
+  base::DictionaryValue* existing_properties;
+  // If the network properties already exist, don't override previously set
+  // properties, unless they are set in |properties|.
+  if (network_properties_.GetDictionaryWithoutPathExpansion(
+          network_guid, &existing_properties)) {
+    existing_properties->MergeDictionary(properties.get());
+  } else {
+    network_properties_.SetWithoutPathExpansion(network_guid,
+                                                properties.release());
+  }
 }
 
 void WiFiServiceMac::CreateNetwork(

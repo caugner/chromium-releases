@@ -5,9 +5,9 @@
 #include "chrome/browser/ui/startup/obsolete_system_infobar_delegate.h"
 
 #include "base/cpu.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/common/url_constants.h"
+#include "components/infobars/core/infobar.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -81,14 +81,16 @@ base::string16 ObsoleteSystemInfoBarDelegate::GetLinkText() const {
 
 bool ObsoleteSystemInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  web_contents()->OpenURL(content::OpenURLParams(
+  InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
+      content::OpenURLParams(
 #if defined(OS_MACOSX)
-      GURL(chrome::kMac32BitDeprecationURL),
+          GURL(chrome::kMac32BitDeprecationURL),
 #else
-      GURL("http://www.google.com/support/chrome/bin/answer.py?answer=95411"),
+          GURL("http://www.google.com/support/chrome/bin/"
+               "answer.py?answer=95411"),
 #endif
-      content::Referrer(),
-      (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-      content::PAGE_TRANSITION_LINK, false));
+          content::Referrer(),
+          (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+          content::PAGE_TRANSITION_LINK, false));
   return false;
 }

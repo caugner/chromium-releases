@@ -36,7 +36,7 @@ IPC_STRUCT_TRAITS_BEGIN(media::DemuxerConfigs)
   IPC_STRUCT_TRAITS_MEMBER(is_video_encrypted)
   IPC_STRUCT_TRAITS_MEMBER(video_extra_data)
 
-  IPC_STRUCT_TRAITS_MEMBER(duration_ms)
+  IPC_STRUCT_TRAITS_MEMBER(duration)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(media::DemuxerData)
@@ -249,6 +249,11 @@ IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_EnterFullscreen, int /* player_id */)
 
 // Requests the player to exit fullscreen.
 IPC_MESSAGE_ROUTED1(MediaPlayerHostMsg_ExitFullscreen, int /* player_id */)
+
+// Requests the player with |player_id| to use the CDM with |cdm_id|.
+IPC_MESSAGE_ROUTED2(MediaPlayerHostMsg_SetCdm,
+                    int /* player_id */,
+                    int /* cdm_id */);
 
 // Sent after the renderer demuxer has seeked.
 IPC_MESSAGE_CONTROL2(MediaPlayerHostMsg_DemuxerSeekDone,

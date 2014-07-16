@@ -45,11 +45,9 @@ class AVFoundationInternal {
         {&AVCaptureSessionDidStopRunningNotification_,
          "AVCaptureSessionDidStopRunningNotification"},
         {&AVCaptureSessionErrorKey_, "AVCaptureSessionErrorKey"},
-        {&AVCaptureSessionPreset320x240_, "AVCaptureSessionPreset320x240"},
-        {&AVCaptureSessionPreset640x480_, "AVCaptureSessionPreset640x480"},
-        {&AVCaptureSessionPreset1280x720_, "AVCaptureSessionPreset1280x720"},
         {&AVVideoScalingModeKey_, "AVVideoScalingModeKey"},
-        {&AVVideoScalingModeResizeAspect_, "AVVideoScalingModeResizeAspect"},
+        {&AVVideoScalingModeResizeAspectFill_,
+         "AVVideoScalingModeResizeAspectFill"},
     };
     for (size_t i = 0; i < arraysize(av_strings); ++i) {
       *av_strings[i].loaded_string = *reinterpret_cast<NSString**>(
@@ -79,18 +77,9 @@ class AVFoundationInternal {
   NSString* AVCaptureSessionErrorKey() const {
     return AVCaptureSessionErrorKey_;
   }
-  NSString* AVCaptureSessionPreset320x240() const {
-    return AVCaptureSessionPreset320x240_;
-  }
-  NSString* AVCaptureSessionPreset640x480() const {
-    return AVCaptureSessionPreset640x480_;
-  }
-  NSString* AVCaptureSessionPreset1280x720() const {
-    return AVCaptureSessionPreset1280x720_;
-  }
   NSString* AVVideoScalingModeKey() const { return AVVideoScalingModeKey_; }
-  NSString* AVVideoScalingModeResizeAspect() const {
-    return AVVideoScalingModeResizeAspect_;
+  NSString* AVVideoScalingModeResizeAspectFill() const {
+    return AVVideoScalingModeResizeAspectFill_;
   }
 
  private:
@@ -105,11 +94,8 @@ class AVFoundationInternal {
   NSString* AVCaptureSessionRuntimeErrorNotification_;
   NSString* AVCaptureSessionDidStopRunningNotification_;
   NSString* AVCaptureSessionErrorKey_;
-  NSString* AVCaptureSessionPreset320x240_;
-  NSString* AVCaptureSessionPreset640x480_;
-  NSString* AVCaptureSessionPreset1280x720_;
   NSString* AVVideoScalingModeKey_;
-  NSString* AVVideoScalingModeResizeAspect_;
+  NSString* AVVideoScalingModeResizeAspectFill_;
 
   DISALLOW_COPY_AND_ASSIGN(AVFoundationInternal);
 };
@@ -122,11 +108,13 @@ static base::LazyInstance<AVFoundationInternal> g_avfoundation_handle =
 bool AVFoundationGlue::IsAVFoundationSupported() {
   // DeviceMonitorMac will initialize this static bool from the main UI thread
   // once, during Chrome startup so this construction is thread safe.
+  // Use AVFoundation if possible, enabled, and QTKit is not explicitly forced.
+  static CommandLine* command_line = CommandLine::ForCurrentProcess();
   static bool is_av_foundation_supported = base::mac::IsOSLionOrLater() &&
-      (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableAVFoundation) ||
-          base::FieldTrialList::FindFullName("AVFoundationMacVideoCapture")
-              == "Enabled") && [AVFoundationBundle() load];
+      ((command_line->HasSwitch(switches::kEnableAVFoundation) &&
+      !command_line->HasSwitch(switches::kForceQTKit)) ||
+      base::FieldTrialList::FindFullName("AVFoundationMacVideoCapture")
+          == "Enabled") && [AVFoundationBundle() load];
   return is_av_foundation_supported;
 }
 
@@ -172,24 +160,12 @@ NSString* AVFoundationGlue::AVCaptureSessionErrorKey() {
   return g_avfoundation_handle.Get().AVCaptureSessionErrorKey();
 }
 
-NSString* AVFoundationGlue::AVCaptureSessionPreset320x240() {
-  return g_avfoundation_handle.Get().AVCaptureSessionPreset320x240();
-}
-
-NSString* AVFoundationGlue::AVCaptureSessionPreset640x480() {
-  return g_avfoundation_handle.Get().AVCaptureSessionPreset640x480();
-}
-
-NSString* AVFoundationGlue::AVCaptureSessionPreset1280x720() {
-  return g_avfoundation_handle.Get().AVCaptureSessionPreset1280x720();
-}
-
 NSString* AVFoundationGlue::AVVideoScalingModeKey() {
   return g_avfoundation_handle.Get().AVVideoScalingModeKey();
 }
 
-NSString* AVFoundationGlue::AVVideoScalingModeResizeAspect() {
-  return g_avfoundation_handle.Get().AVVideoScalingModeResizeAspect();
+NSString* AVFoundationGlue::AVVideoScalingModeResizeAspectFill() {
+  return g_avfoundation_handle.Get().AVVideoScalingModeResizeAspectFill();
 }
 
 Class AVFoundationGlue::AVCaptureSessionClass() {

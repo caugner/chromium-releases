@@ -16,6 +16,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/sys_info.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
@@ -33,7 +34,9 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/extension_ime_util.h"
-#include "chromeos/ime/input_method_manager.h"
+#include "chromeos/network/network_handler.h"
+#include "chromeos/network/network_state_handler.h"
+#include "chromeos/network/shill_property_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -108,6 +111,7 @@ NetworkScreenHandler::NetworkScreenHandler(CoreOobeActor* core_oobe_actor)
 
   input_method::InputMethodManager* manager =
       input_method::InputMethodManager::Get();
+  manager->AddObserver(this);
   manager->GetComponentExtensionIMEManager()->AddObserver(this);
 }
 
@@ -115,9 +119,10 @@ NetworkScreenHandler::~NetworkScreenHandler() {
   if (screen_)
     screen_->OnActorDestroyed(this);
 
-  input_method::InputMethodManager::Get()
-      ->GetComponentExtensionIMEManager()
-      ->RemoveObserver(this);
+  input_method::InputMethodManager* manager =
+      input_method::InputMethodManager::Get();
+  manager->RemoveObserver(this);
+  manager->GetComponentExtensionIMEManager()->RemoveObserver(this);
 }
 
 // NetworkScreenHandler, NetworkScreenActor implementation: --------------------
@@ -144,10 +149,31 @@ void NetworkScreenHandler::Show() {
     HandleOnLanguageChanged(startup_manifest->initial_locale_default());
   }
 
+  PrefService* prefs = g_browser_process->local_state();
+  if (prefs->GetBoolean(prefs::kFactoryResetRequested)) {
+    if (core_oobe_actor_)
+      core_oobe_actor_->ShowDeviceResetScreen();
+    return;
+  }
+
+  // Make sure all our network technologies are turned on. On OOBE, the user
+  // should be able to select any of the available networks on the device.
+  NetworkStateHandler* handler = NetworkHandler::Get()->network_state_handler();
+  handler->SetTechnologyEnabled(NetworkTypePattern::NonVirtual(),
+                                true,
+                                chromeos::network_handler::ErrorCallback());
   ShowScreen(OobeUI::kScreenOobeNetwork, NULL);
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableDemoMode))
     return;
+  if (base::SysInfo::IsRunningOnChromeOS()) {
+    std::string track;
+    // We're running on an actual device; if we cannot find our release track
+    // value or if the track contains "testimage", don't start demo mode.
+    if (!base::SysInfo::GetLsbReleaseValue("CHROMEOS_RELEASE_TRACK", &track) ||
+        track.find("testimage") != std::string::npos)
+      return;
+  }
 
   if (IsDerelict())
     StartIdleDetection();
@@ -285,6 +311,12 @@ void NetworkScreenHandler::OnLanguageChangedCallback(
   }
 
   self->ReloadLocalizedContent();
+
+  // We still do not have device owner, so owner settings are not applied.
+  // But Guest session can be started before owner is created, so we need to
+  // save locale settings directly here.
+  g_browser_process->local_state()->SetString(prefs::kApplicationLocale,
+                                              self->selected_language_code_);
 
   AccessibilityManager::Get()->OnLocaleChanged();
 }
@@ -484,6 +516,11 @@ void NetworkScreenHandler::OnImeComponentExtensionInitialized() {
     ReloadLocalizedContent();
   else
     should_reinitialize_language_keyboard_list_ = true;
+}
+
+void NetworkScreenHandler::InputMethodChanged(
+    input_method::InputMethodManager* manager, bool show_message) {
+  CallJS("setInputMethod", manager->GetCurrentInputMethod().id());
 }
 
 void NetworkScreenHandler::ReloadLocalizedContent() {

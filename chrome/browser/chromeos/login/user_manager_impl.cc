@@ -35,12 +35,13 @@
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
-#include "chrome/browser/chromeos/login/multi_profile_first_run_notification.h"
 #include "chrome/browser/chromeos/login/multi_profile_user_controller.h"
 #include "chrome/browser/chromeos/login/remove_user_delegate.h"
 #include "chrome/browser/chromeos/login/supervised_user_manager_impl.h"
 #include "chrome/browser/chromeos/login/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/net/network_portal_detector.h"
+#include "chrome/browser/chromeos/net/network_portal_detector_strategy.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/profiles/multiprofiles_session_aborted_dialog.h"
@@ -212,9 +213,7 @@ UserManagerImpl::UserManagerImpl()
       is_current_user_ephemeral_regular_user_(false),
       ephemeral_users_enabled_(false),
       supervised_user_manager_(new SupervisedUserManagerImpl(this)),
-      manager_creation_time_(base::TimeTicks::Now()),
-      multi_profile_first_run_notification_(
-          new MultiProfileFirstRunNotification) {
+      manager_creation_time_(base::TimeTicks::Now()) {
   UpdateNumberOfUsers();
   // UserManager instance should be used only on UI thread.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -427,9 +426,9 @@ void UserManagerImpl::UserLoggedIn(const std::string& user_id,
     lru_logged_in_users_.push_back(user);
     // Reset the new user flag if the user already exists.
     is_current_user_new_ = false;
-    // Set active user wallpaper back.
-    WallpaperManager::Get()->SetUserWallpaperNow(active_user_->email());
     NotifyUserAddedToSession(user);
+    // Remember that we need to switch to this user as soon as profile ready.
+    pending_user_switch_ = user_id;
     return;
   }
 
@@ -953,7 +952,6 @@ void UserManagerImpl::Observe(int type,
               AuthSyncObserverFactory::GetInstance()->GetForProfile(profile);
           sync_observer->StartObserving();
           multi_profile_user_controller_->StartObserving(profile);
-          multi_profile_first_run_notification_->UserProfilePrepared(profile);
         }
       }
 
@@ -975,7 +973,18 @@ void UserManagerImpl::Observe(int type,
       User* user = GetUserByProfile(profile);
       if (user != NULL)
         user->set_profile_is_created();
-
+      // If there is pending user switch, do it now.
+      if (!pending_user_switch_.empty()) {
+        // Call SwitchActiveUser async because otherwise it may cause
+        // ProfileManager::GetProfile before the profile gets registered
+        // in ProfileManager. It happens in case of sync profile load when
+        // NOTIFICATION_PROFILE_CREATED is called synchronously.
+        base::MessageLoop::current()->PostTask(FROM_HERE,
+          base::Bind(&UserManagerImpl::SwitchActiveUser,
+                     base::Unretained(this),
+                     pending_user_switch_));
+        pending_user_switch_.clear();
+      }
       break;
     }
     default:
@@ -1521,6 +1530,11 @@ void UserManagerImpl::DemoAccountLoggedIn() {
   active_user_->SetStubImage(User::kInvalidImageIndex, false);
   WallpaperManager::Get()->SetUserWallpaperNow(DemoAppLauncher::kDemoUserName);
 
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  command_line->AppendSwitch(::switches::kForceAppMode);
+  command_line->AppendSwitchASCII(::switches::kAppId,
+                                  DemoAppLauncher::kDemoAppId);
+
   // Disable window animation since the demo app runs in a single full screen
   // window and window animation causes start-up janks.
   CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -1558,6 +1572,11 @@ void UserManagerImpl::NotifyOnLogin() {
     // Indicate to DeviceSettingsService that the owner key may have become
     // available.
     DeviceSettingsService::Get()->SetUsername(active_user_->email());
+
+    if (NetworkPortalDetector::IsInitialized()) {
+      NetworkPortalDetector::Get()->SetStrategy(
+          PortalDetectorStrategy::STRATEGY_ID_SESSION);
+    }
   }
 }
 

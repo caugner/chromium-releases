@@ -44,6 +44,7 @@ var remoting = remoting || {};
  * @param {string} clientPairedSecret For paired Me2Me connections, the
  *     paired secret for this client, as issued by the host.
  * @constructor
+ * @extends {base.EventSource}
  */
 remoting.ClientSession = function(accessCode, fetchPin, fetchThirdPartyToken,
                                   authenticationMethods,
@@ -89,9 +90,6 @@ remoting.ClientSession = function(accessCode, fetchPin, fetchThirdPartyToken,
   /** @private */
   this.hasReceivedFrame_ = false;
   this.logToServer = new remoting.LogToServer();
-  /** @type {?function(remoting.ClientSession.State,
-                       remoting.ClientSession.State):void} */
-  this.onStateChange_ = null;
 
   /** @type {number?} @private */
   this.notifyClientResolutionTimer_ = null;
@@ -113,7 +111,10 @@ remoting.ClientSession = function(accessCode, fetchPin, fetchThirdPartyToken,
   /** @private */
   this.callSetScreenMode_ = this.onSetScreenMode_.bind(this);
   /** @private */
-  this.callToggleFullScreen_ = this.toggleFullScreen_.bind(this);
+  this.callToggleFullScreen_ = remoting.fullscreen.toggle.bind(
+      remoting.fullscreen);
+  /** @private */
+  this.callOnFullScreenChanged_ = this.onFullScreenChanged_.bind(this)
 
   /** @private */
   this.screenOptionsMenu_ = new remoting.MenuButton(
@@ -151,17 +152,15 @@ remoting.ClientSession = function(accessCode, fetchPin, fetchThirdPartyToken,
       'click', this.callSetScreenMode_, false);
   this.fullScreenButton_.addEventListener(
       'click', this.callToggleFullScreen_, false);
-  document.addEventListener(
-      'webkitfullscreenchange', this.onFullScreenChanged_.bind(this), false);
+  this.defineEvents(Object.keys(remoting.ClientSession.Events));
 };
 
-/**
- * @param {?function(remoting.ClientSession.State,
-                     remoting.ClientSession.State):void} onStateChange
- *     The callback to invoke when the session changes state.
- */
-remoting.ClientSession.prototype.setOnStateChange = function(onStateChange) {
-  this.onStateChange_ = onStateChange;
+base.extend(remoting.ClientSession, base.EventSource);
+
+/** @enum {string} */
+remoting.ClientSession.Events = {
+  stateChanged: 'stateChanged',
+  videoChannelStateChanged: 'videoChannelStateChanged'
 };
 
 /**
@@ -228,7 +227,20 @@ remoting.ClientSession.State.fromString = function(state) {
     throw "Invalid ClientSession.State: " + state;
   }
   return remoting.ClientSession.State[state];
-}
+};
+
+/**
+  @constructor
+  @param {remoting.ClientSession.State} current
+  @param {remoting.ClientSession.State} previous
+*/
+remoting.ClientSession.StateEvent = function(current, previous) {
+  /** @type {remoting.ClientSession.State} */
+  this.previous = previous
+
+  /** @type {remoting.ClientSession.State} */
+  this.current = current;
+};
 
 /** @enum {number} */
 remoting.ClientSession.ConnectionError = {
@@ -376,7 +388,11 @@ remoting.ClientSession.prototype.pluginLostFocus_ = function() {
     this.plugin_.releaseAllKeys();
     if (this.plugin_.element()) {
       // Focus should stay on the element, not (for example) the toolbar.
-      this.plugin_.element().focus();
+      // Due to crbug.com/246335, we can't restore the focus immediately,
+      // otherwise the plugin gets confused about whether or not it has focus.
+      window.setTimeout(
+          this.plugin_.element().focus.bind(this.plugin_.element()),
+          0);
     }
   }
 };
@@ -544,8 +560,14 @@ remoting.ClientSession.prototype.removePlugin = function() {
   this.fullScreenButton_.removeEventListener(
       'click', this.callToggleFullScreen_, false);
 
-  // In case the user had selected full-screen mode, cancel it now.
-  document.webkitCancelFullScreen();
+  // Leave full-screen mode, and stop listening for related events.
+  var listener = this.callOnFullScreenChanged_;
+  remoting.fullscreen.syncWithMaximize(false);
+  remoting.fullscreen.activate(
+      false,
+      function() {
+        remoting.fullscreen.removeListener(listener);
+      });
 
   // Remove mediasource-rendering class from video-contained - this will also
   // hide the <video> element.
@@ -554,19 +576,32 @@ remoting.ClientSession.prototype.removePlugin = function() {
 };
 
 /**
- * Deletes the <embed> element from the container and disconnects.
+ * Disconnect the current session with a particular |error|.  The session will
+ * raise a |stateChanged| event in response to it.  The caller should then call
+ * |cleanup| to remove and destroy the <embed> element.
  *
- * @param {boolean} isUserInitiated True for user-initiated disconnects, False
- *     for disconnects due to connection failures.
+ * @param {remoting.Error} error The reason for the disconnection.  Use
+ *    remoting.Error.NONE if there is no error.
  * @return {void} Nothing.
  */
-remoting.ClientSession.prototype.disconnect = function(isUserInitiated) {
-  if (isUserInitiated) {
-    // The plugin won't send a state change notification, so we explicitly log
-    // the fact that the connection has closed.
-    this.logToServer.logClientSessionStateChange(
-        remoting.ClientSession.State.CLOSED, remoting.Error.NONE, this.mode_);
-  }
+remoting.ClientSession.prototype.disconnect = function(error) {
+  var state = (error == remoting.Error.NONE) ?
+                  remoting.ClientSession.State.CLOSED :
+                  remoting.ClientSession.State.FAILED;
+
+  // The plugin won't send a state change notification, so we explicitly log
+  // the fact that the connection has closed.
+  this.logToServer.logClientSessionStateChange(state, error, this.mode_);
+  this.error_ = error;
+  this.setState_(state);
+};
+
+/**
+ * Deletes the <embed> element from the container and disconnects.
+ *
+ * @return {void} Nothing.
+ */
+remoting.ClientSession.prototype.cleanup = function() {
   remoting.wcsSandbox.setOnIq(null);
   this.sendIq_(
       '<cli:iq ' +
@@ -922,6 +957,9 @@ remoting.ClientSession.prototype.onConnectionStatusUpdate_ =
                                          window.innerHeight,
                                          window.devicePixelRatio);
     }
+    // Start listening for full-screen related events.
+    remoting.fullscreen.addListener(this.callOnFullScreenChanged_);
+    remoting.fullscreen.syncWithMaximize(true);
   } else if (status == remoting.ClientSession.State.FAILED) {
     switch (error) {
       case remoting.ClientSession.ConnectionError.HOST_IS_OFFLINE:
@@ -959,6 +997,9 @@ remoting.ClientSession.prototype.onConnectionReady_ = function(ready) {
   } else {
     this.plugin_.element().classList.remove("session-client-inactive");
   }
+
+  this.raiseEvent(remoting.ClientSession.Events.videoChannelStateChanged,
+                  ready);
 };
 
 /**
@@ -1012,9 +1053,10 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
   if (this.state_ == remoting.ClientSession.State.CONNECTED) {
     this.createGnubbyAuthHandler_();
   }
-  if (this.onStateChange_) {
-    this.onStateChange_(oldState, newState);
-  }
+
+  this.raiseEvent(remoting.ClientSession.Events.stateChanged,
+    new remoting.ClientSession.StateEvent(newState, oldState)
+  );
 };
 
 /**
@@ -1061,9 +1103,9 @@ remoting.ClientSession.prototype.onResize = function() {
  */
 remoting.ClientSession.prototype.pauseVideo = function(pause) {
   if (this.plugin_) {
-    this.plugin_.pauseVideo(pause)
+    this.plugin_.pauseVideo(pause);
   }
-}
+};
 
 /**
  * Requests that the host pause or resume audio.
@@ -1138,7 +1180,7 @@ remoting.ClientSession.prototype.updateDimensions = function() {
 
     // If we're running full-screen then try to handle common side-by-side
     // multi-monitor combinations more intelligently.
-    if (document.webkitIsFullScreen) {
+    if (remoting.fullscreen.isActive()) {
       // If the host has two monitors each the same size as the client then
       // scale-to-fit will have the desktop occupy only 50% of the client area,
       // in which case it would be preferable to down-scale less and let the
@@ -1225,29 +1267,22 @@ remoting.ClientSession.prototype.requestPairing = function(clientName, onDone) {
 };
 
 /**
- * Toggles between full-screen and windowed mode.
- * @return {void} Nothing.
+ * Called when the full-screen status has changed, either via the
+ * remoting.Fullscreen class, or via a system event such as the Escape key
+ *
+ * @param {boolean} fullscreen True if the app is entering full-screen mode;
+ *     false if it is leaving it.
  * @private
  */
-remoting.ClientSession.prototype.toggleFullScreen_ = function() {
-  if (document.webkitIsFullScreen) {
-    document.webkitCancelFullScreen();
-  } else {
-    document.body.webkitRequestFullScreen(Element.ALLOW_KEYBOARD_INPUT);
-  }
-};
-
-remoting.ClientSession.prototype.onFullScreenChanged_ = function () {
+remoting.ClientSession.prototype.onFullScreenChanged_ = function (fullscreen) {
   var htmlNode = /** @type {HTMLElement} */ (document.documentElement);
-  var isFullScreen = document.webkitIsFullScreen;
-  this.enableBumpScroll_(isFullScreen);
-  if (isFullScreen) {
+  this.enableBumpScroll_(fullscreen);
+  if (fullscreen) {
     htmlNode.classList.add('full-screen');
   } else {
     htmlNode.classList.remove('full-screen');
   }
 };
-
 
 /**
  * Updates the options menu to reflect the current scale-to-fit and full-screen
@@ -1259,7 +1294,7 @@ remoting.ClientSession.prototype.onShowOptionsMenu_ = function() {
   remoting.MenuButton.select(this.resizeToClientButton_, this.resizeToClient_);
   remoting.MenuButton.select(this.shrinkToFitButton_, this.shrinkToFit_);
   remoting.MenuButton.select(this.fullScreenButton_,
-      document.webkitIsFullScreen);
+                             remoting.fullscreen.isActive());
 };
 
 /**
@@ -1309,9 +1344,11 @@ remoting.ClientSession.prototype.scroll_ = function(dx, dy) {
 };
 
 remoting.ClientSession.prototype.resetScroll_ = function() {
-  var plugin = this.plugin_.element();
-  plugin.style.marginTop = '0px';
-  plugin.style.marginLeft = '0px';
+  if (this.plugin_) {
+    var plugin = this.plugin_.element();
+    plugin.style.marginTop = '0px';
+    plugin.style.marginLeft = '0px';
+  }
 };
 
 /**

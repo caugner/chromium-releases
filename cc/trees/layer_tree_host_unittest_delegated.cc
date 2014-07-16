@@ -99,7 +99,8 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
                       root_damage_rect,
                       gfx::Transform());
 
-    scoped_ptr<SharedQuadState> shared_quad_state = SharedQuadState::Create();
+    SharedQuadState* shared_quad_state =
+        root_pass->CreateAndAppendSharedQuadState();
 
     gfx::Rect rect = root_output_rect;
     gfx::Rect opaque_rect = root_output_rect;
@@ -114,7 +115,7 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
     bool flipped = false;
 
     scoped_ptr<TextureDrawQuad> invalid_draw_quad = TextureDrawQuad::Create();
-    invalid_draw_quad->SetNew(shared_quad_state.get(),
+    invalid_draw_quad->SetNew(shared_quad_state,
                               rect,
                               opaque_rect,
                               visible_rect,
@@ -126,8 +127,6 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
                               vertex_opacity,
                               flipped);
     root_pass->quad_list.push_back(invalid_draw_quad.PassAs<DrawQuad>());
-
-    root_pass->shared_quad_state_list.push_back(shared_quad_state.Pass());
 
     frame->render_pass_list.push_back(root_pass.Pass());
     return frame.Pass();
@@ -148,10 +147,11 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
 
   void AddTextureQuad(DelegatedFrameData* frame,
                       ResourceProvider::ResourceId resource_id) {
-    scoped_ptr<SharedQuadState> sqs = SharedQuadState::Create();
+    SharedQuadState* sqs =
+        frame->render_pass_list[0]->CreateAndAppendSharedQuadState();
     scoped_ptr<TextureDrawQuad> quad = TextureDrawQuad::Create();
     float vertex_opacity[4] = { 1.f, 1.f, 1.f, 1.f };
-    quad->SetNew(sqs.get(),
+    quad->SetNew(sqs,
                  gfx::Rect(0, 0, 10, 10),
                  gfx::Rect(0, 0, 10, 10),
                  gfx::Rect(0, 0, 10, 10),
@@ -162,7 +162,6 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
                  SK_ColorTRANSPARENT,
                  vertex_opacity,
                  false);
-    frame->render_pass_list[0]->shared_quad_state_list.push_back(sqs.Pass());
     frame->render_pass_list[0]->quad_list.push_back(quad.PassAs<DrawQuad>());
   }
 
@@ -182,10 +181,11 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
                  gfx::Transform());
     frame->render_pass_list.push_back(pass.Pass());
 
-    scoped_ptr<SharedQuadState> sqs = SharedQuadState::Create();
+    SharedQuadState* sqs =
+        frame->render_pass_list[0]->CreateAndAppendSharedQuadState();
     scoped_ptr<RenderPassDrawQuad> quad = RenderPassDrawQuad::Create();
 
-    quad->SetNew(sqs.get(),
+    quad->SetNew(sqs,
                  output_rect,
                  output_rect,
                  id,
@@ -195,7 +195,6 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
                  gfx::Rect(0, 0, 1, 1),  // mask_uv_rect
                  filters,
                  background_filters);
-    frame->render_pass_list[0]->shared_quad_state_list.push_back(sqs.Pass());
     frame->render_pass_list[0]->quad_list.push_back(quad.PassAs<DrawQuad>());
   }
 
@@ -240,7 +239,6 @@ class LayerTreeHostDelegatedTest : public LayerTreeTest {
     for (size_t i = 0; i < resources_to_return.size(); ++i)
       output_surface()->ReturnResource(resources_to_return[i], &ack);
     host_impl->ReclaimResources(&ack);
-    host_impl->OnSwapBuffersComplete();
   }
 };
 
@@ -257,7 +255,7 @@ class LayerTreeHostDelegatedTestCaseSingleDelegatedLayer
   virtual void SetupTree() OVERRIDE {
     root_ = Layer::Create();
     root_->SetAnchorPoint(gfx::PointF());
-    root_->SetBounds(gfx::Size(10, 10));
+    root_->SetBounds(gfx::Size(15, 15));
 
     layer_tree_host()->SetRootLayer(root_);
     LayerTreeHostDelegatedTest::SetupTree();
@@ -406,7 +404,7 @@ class LayerTreeHostDelegatedTestInvalidFrameAfterContextLost
     SetFrameData(frame1.Pass());
   }
 
-  virtual void DidInitializeOutputSurface(bool succeeded) OVERRIDE {
+  virtual void DidInitializeOutputSurface() OVERRIDE {
     if (!num_output_surfaces_initialized_++)
       return;
 
@@ -467,126 +465,6 @@ class LayerTreeHostDelegatedTestInvalidFrameAfterContextLost
 
 SINGLE_AND_MULTI_THREAD_TEST_F(
     LayerTreeHostDelegatedTestInvalidFrameAfterContextLost);
-
-class LayerTreeHostDelegatedTestOffscreenContext_NoFilters
-    : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
- protected:
-  virtual void BeginTest() OVERRIDE {
-    scoped_ptr<DelegatedFrameData> frame =
-        CreateFrameData(gfx::Rect(0, 0, 1, 1),
-                        gfx::Rect(0, 0, 1, 1));
-    SetFrameData(frame.Pass());
-
-    PostSetNeedsCommitToMainThread();
-  }
-
-  virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    EXPECT_FALSE(host_impl->offscreen_context_provider());
-    EndTest();
-  }
-};
-
-SINGLE_AND_MULTI_THREAD_TEST_F(
-    LayerTreeHostDelegatedTestOffscreenContext_NoFilters);
-
-class LayerTreeHostDelegatedTestOffscreenContext_Filters
-    : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
- protected:
-  virtual void BeginTest() OVERRIDE {
-    scoped_ptr<DelegatedFrameData> frame =
-        CreateFrameData(gfx::Rect(0, 0, 1, 1),
-                        gfx::Rect(0, 0, 1, 1));
-
-    FilterOperations filters;
-    filters.Append(FilterOperation::CreateGrayscaleFilter(0.5f));
-    AddRenderPass(frame.get(),
-                  RenderPass::Id(2, 1),
-                  gfx::Rect(0, 0, 1, 1),
-                  gfx::Rect(0, 0, 1, 1),
-                  filters,
-                  FilterOperations());
-    SetFrameData(frame.Pass());
-
-    PostSetNeedsCommitToMainThread();
-  }
-
-  virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    bool expect_context = !delegating_renderer();
-    EXPECT_EQ(expect_context, !!host_impl->offscreen_context_provider());
-    EndTest();
-  }
-};
-
-SINGLE_AND_MULTI_THREAD_TEST_F(
-    LayerTreeHostDelegatedTestOffscreenContext_Filters);
-
-class LayerTreeHostDelegatedTestOffscreenContext_BackgroundFilters
-    : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
- protected:
-  virtual void BeginTest() OVERRIDE {
-    scoped_ptr<DelegatedFrameData> frame =
-        CreateFrameData(gfx::Rect(0, 0, 1, 1),
-                        gfx::Rect(0, 0, 1, 1));
-
-    FilterOperations filters;
-    filters.Append(FilterOperation::CreateGrayscaleFilter(0.5f));
-    AddRenderPass(frame.get(),
-                  RenderPass::Id(2, 1),
-                  gfx::Rect(0, 0, 1, 1),
-                  gfx::Rect(0, 0, 1, 1),
-                  FilterOperations(),
-                  filters);
-    SetFrameData(frame.Pass());
-
-    PostSetNeedsCommitToMainThread();
-  }
-
-  virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    bool expect_context = !delegating_renderer();
-    EXPECT_EQ(expect_context, !!host_impl->offscreen_context_provider());
-    EndTest();
-  }
-};
-
-SINGLE_AND_MULTI_THREAD_TEST_F(
-    LayerTreeHostDelegatedTestOffscreenContext_BackgroundFilters);
-
-class LayerTreeHostDelegatedTestOffscreenContext_Filters_AddedToTree
-    : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
- protected:
-  virtual void BeginTest() OVERRIDE {
-    scoped_ptr<DelegatedFrameData> frame_no_filters =
-        CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
-
-    scoped_ptr<DelegatedFrameData> frame_with_filters =
-        CreateFrameData(gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1));
-
-    FilterOperations filters;
-    filters.Append(FilterOperation::CreateGrayscaleFilter(0.5f));
-    AddRenderPass(frame_with_filters.get(),
-                  RenderPass::Id(2, 1),
-                  gfx::Rect(0, 0, 1, 1),
-                  gfx::Rect(0, 0, 1, 1),
-                  filters,
-                  FilterOperations());
-
-    SetFrameData(frame_no_filters.Pass());
-    delegated_->RemoveFromParent();
-    SetFrameData(frame_with_filters.Pass());
-    layer_tree_host()->root_layer()->AddChild(delegated_);
-
-    PostSetNeedsCommitToMainThread();
-  }
-
-  virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    bool expect_context = !delegating_renderer();
-    EXPECT_EQ(expect_context, !!host_impl->offscreen_context_provider());
-    EndTest();
-  }
-};
-
-SINGLE_AND_MULTI_THREAD_TEST_F(
-    LayerTreeHostDelegatedTestOffscreenContext_Filters_AddedToTree);
 
 class LayerTreeHostDelegatedTestLayerUsesFrameDamage
     : public LayerTreeHostDelegatedTestCaseSingleDelegatedLayer {
@@ -720,7 +598,7 @@ class LayerTreeHostDelegatedTestLayerUsesFrameDamage
     if (!first_draw_for_source_frame_)
       return draw_result;
 
-    gfx::RectF damage_rect;
+    gfx::Rect damage_rect;
     if (!frame->has_no_damage) {
       damage_rect = frame->render_passes.back()->damage_rect;
     } else {
@@ -731,85 +609,66 @@ class LayerTreeHostDelegatedTestLayerUsesFrameDamage
     switch (host_impl->active_tree()->source_frame_number()) {
       case 0:
         // First frame is damaged because of viewport resize.
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 10.f, 10.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(15, 15).ToString(), damage_rect.ToString());
         break;
       case 1:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 10.f, 10.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(10, 10).ToString(), damage_rect.ToString());
         break;
       case 2:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 10.f, 10.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(10, 10).ToString(), damage_rect.ToString());
         break;
       case 3:
-        EXPECT_EQ(gfx::RectF(1.f, 1.f, 5.f, 3.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(1, 1, 5, 3).ToString(), damage_rect.ToString());
         break;
       case 4:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 0.f, 0.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect().ToString(), damage_rect.ToString());
         break;
       case 5:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 10.f, 10.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(10, 10).ToString(), damage_rect.ToString());
         break;
       case 6:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 0.f, 0.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect().ToString(), damage_rect.ToString());
         break;
       case 7:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 6.f, 6.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(6, 6).ToString(), damage_rect.ToString());
         break;
       case 8:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 0.f, 0.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect().ToString(), damage_rect.ToString());
         break;
       case 9:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 6.f, 6.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(6, 6).ToString(), damage_rect.ToString());
         break;
       case 10:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 0.f, 0.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect().ToString(), damage_rect.ToString());
         break;
       case 11:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 10.f, 10.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(10, 10).ToString(), damage_rect.ToString());
         break;
       case 12:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 0.f, 0.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect().ToString(), damage_rect.ToString());
         break;
       case 13:
-        EXPECT_EQ(gfx::RectF(2.f, 2.f, 4.f, 4.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(2, 2, 4, 4).ToString(), damage_rect.ToString());
         break;
       case 14:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 0.f, 0.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect().ToString(), damage_rect.ToString());
         break;
       case 15:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 10.f, 10.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(10, 10).ToString(), damage_rect.ToString());
         break;
       case 16:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 10.f, 10.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(10, 10).ToString(), damage_rect.ToString());
         break;
       case 17:
-        EXPECT_EQ(gfx::RectF(0.f, 0.f, 10.f, 10.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(10, 10).ToString(), damage_rect.ToString());
         break;
       case 18:
-        EXPECT_EQ(gfx::UnionRects(gfx::RectF(5.f, 0.f, 10.f, 10.f),
-                                  gfx::RectF(4.f, 0.f, 1.f, 1.f)).ToString(),
+        EXPECT_EQ(gfx::UnionRects(gfx::Rect(5, 0, 10, 10),
+                                  gfx::Rect(4, 0, 1, 1)).ToString(),
                   damage_rect.ToString());
         break;
       case 19:
-        EXPECT_EQ(gfx::RectF(3.f, 3.f, 6.f, 1.f).ToString(),
-                  damage_rect.ToString());
+        EXPECT_EQ(gfx::Rect(3, 3, 6, 1).ToString(), damage_rect.ToString());
         EndTest();
         break;
     }
@@ -1667,7 +1526,6 @@ class LayerTreeHostDelegatedTestResourceSentToParent
     CompositorFrameAck ack;
     output_surface()->ReturnResource(map.find(999)->second, &ack);
     host_impl->ReclaimResources(&ack);
-    host_impl->OnSwapBuffersComplete();
   }
 
   virtual void UnusedResourcesAreAvailable() OVERRIDE {

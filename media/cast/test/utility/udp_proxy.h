@@ -10,6 +10,8 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/single_thread_task_runner.h"
+#include "media/cast/transport/cast_transport_config.h"
 #include "net/base/ip_endpoint.h"
 
 namespace net {
@@ -20,29 +22,19 @@ namespace media {
 namespace cast {
 namespace test {
 
-// A single UDP packet.
-// Technically, our UDP proxy should really chop UDP packets
-// into MTU-sized chunks and then do all the horribly things it
-// does to those chunks, but since cast *should* normally only
-// send packets that are sized below the MTU limit, we should
-// be able to ignore that.
-struct Packet : public base::RefCountedThreadSafe<Packet> {
-  explicit Packet(size_t size);
-  std::vector<unsigned char> data;
- private:
-  friend class base::RefCountedThreadSafe<Packet>;
-  ~Packet();
-};
-
 class PacketPipe {
  public:
   PacketPipe();
   virtual ~PacketPipe();
-  virtual void Send(scoped_refptr<Packet> packet) = 0;
-  virtual void InitOnIOThread();
+  virtual void Send(scoped_ptr<transport::Packet> packet) = 0;
+  // Allows injection of fake test runner for testing.
+  virtual void InitOnIOThread(
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
   virtual void AppendToPipe(scoped_ptr<PacketPipe> pipe);
  protected:
   scoped_ptr<PacketPipe> pipe_;
+  // Allows injection of fake task runner for testing.
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 };
 
 // A UDPProxy will set up a UDP socket and bind to |local_port|.
@@ -97,15 +89,19 @@ scoped_ptr<PacketPipe> NewRandomSortedDelay(double random_delay,
 scoped_ptr<PacketPipe> NewNetworkGlitchPipe(double average_work_time,
                                             double average_outage_time);
 
-
 // This method builds a stack of PacketPipes to emulate a reasonably
 // good wifi network. ~5mbit, 1% packet loss, ~3ms latency.
 scoped_ptr<PacketPipe> WifiNetwork();
 
+// This method builds a stack of PacketPipes to emulate a
+// bad wifi network. ~2mbit, 5% packet loss, ~7ms latency
+// 40ms dropouts every ~2 seconds. Can reorder packets.
+scoped_ptr<PacketPipe> BadNetwork();
+
 // This method builds a stack of PacketPipes to emulate a crappy wifi network.
 // ~1mbit, 20% packet loss, ~40ms latency and packets can get reordered.
+// 300ms drouputs every ~2 seconds.
 scoped_ptr<PacketPipe> EvilNetwork();
-
 
 }  // namespace test
 }  // namespace cast

@@ -114,7 +114,6 @@ void FakeSessionManagerClient::StoreDevicePolicy(
 void FakeSessionManagerClient::StorePolicyForUser(
     const std::string& username,
     const std::string& policy_blob,
-    const std::string& policy_key,
     const StorePolicyCallback& callback) {
   user_policies_[username] = policy_blob;
   base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(callback, true));
@@ -131,6 +130,12 @@ void FakeSessionManagerClient::StoreDeviceLocalAccountPolicy(
 void FakeSessionManagerClient::SetFlagsForUser(
     const std::string& username,
     const std::vector<std::string>& flags) {
+}
+
+void FakeSessionManagerClient::GetServerBackedStateKeys(
+    const StateKeysCallback& callback) {
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(callback, server_backed_state_keys_));
 }
 
 const std::string& FakeSessionManagerClient::device_policy() const {

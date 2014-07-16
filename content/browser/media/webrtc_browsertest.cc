@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/platform_thread.h"
 #include "base/values.h"
 #include "content/browser/media/webrtc_internals.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -18,6 +20,14 @@
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
+#endif
+
+#if defined (OS_ANDROID) || defined(THREAD_SANITIZER)
+// Just do the bare minimum of audio checking on Android and under TSAN since
+// it's a bit sensitive to device performance.
+static const char kUseLenientAudioChecking[] = "true";
+#else
+static const char kUseLenientAudioChecking[] = "false";
 #endif
 
 namespace content {
@@ -36,6 +46,18 @@ class WebRtcBrowserTest : public WebRtcContentBrowserTest,
       command_line->AppendSwitch(switches::kEnableAudioTrackProcessing);
   }
 
+  virtual void TearDownOnMainThread() OVERRIDE {
+#if defined(OS_ANDROID)
+    // TODO(phoglund): this is a ugly workaround to let the IO thread
+    // finish its work. The reason we need this on Android is that
+    // content_browsertests tearDown logic is broken with respect
+    // to threading, which causes the IO thread to compete with the
+    // teardown. See http://crbug.com/362852. I also tried with 2
+    // seconds, but that isn't enough.
+    base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(5));
+#endif
+  }
+
   // Convenience function since most peerconnection-call.html tests just load
   // the page, kick off some javascript and wait for the title to change to OK.
   void MakeTypicalPeerConnectionCall(const std::string& javascript) {
@@ -49,7 +71,7 @@ class WebRtcBrowserTest : public WebRtcContentBrowserTest,
   }
 
   void DisableOpusIfOnAndroid() {
-#if defined (OS_ANDROID)
+#if defined(OS_ANDROID)
     // Always force iSAC 16K on Android for now (Opus is broken).
     EXPECT_EQ("isac-forced",
               ExecuteJavascriptAndReturnResult("forceIsac16KInSdp();"));
@@ -111,6 +133,9 @@ IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest,
 // Below 2 test will make a complete PeerConnection-based call between pc1 and
 // pc2, and then use the remote stream to setup a call between pc3 and pc4, and
 // then verify that video is received on pc3 and pc4.
+// The stream sent from pc3 to pc4 is the stream received on pc1.
+// The stream sent from pc4 to pc3 is cloned from stream the stream received
+// on pc2.
 // Flaky on win xp. http://crbug.com/304775
 #if defined(OS_WIN)
 #define MAYBE_CanForwardRemoteStream DISABLED_CanForwardRemoteStream
@@ -120,13 +145,27 @@ IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest,
 #define MAYBE_CanForwardRemoteStream720p CanForwardRemoteStream720p
 #endif
 IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest, MAYBE_CanForwardRemoteStream) {
+#if defined (OS_ANDROID)
+  // This test fails on Nexus 5 devices.
+  // TODO: see http://crbug.com/362437 and http://crbug.com/359389
+  // for details.
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisableWebRtcHWDecoding);
+#endif
   MakeTypicalPeerConnectionCall(
       "callAndForwardRemoteStream({video: true, audio: false});");
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest, MAYBE_CanForwardRemoteStream720p) {
+#if defined (OS_ANDROID)
+  // This test fails on Nexus 5 devices.
+  // TODO: see http://crbug.com/362437 and http://crbug.com/359389
+  // for details.
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisableWebRtcHWDecoding);
+#endif
   const std::string javascript = GenerateGetUserMediaCall(
-      "callAndForwardRemoteStream", 1280, 1280, 720, 720, 30, 30);
+      "callAndForwardRemoteStream", 1280, 1280, 720, 720, 10, 30);
   MakeTypicalPeerConnectionCall(javascript);
 }
 
@@ -149,29 +188,13 @@ IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest,
 
 // This test will modify the SDP offer to an unsupported codec, which should
 // cause SetLocalDescription to fail.
-#if defined(USE_OZONE)
-// Disabled for Ozone, see http://crbug.com/315392#c15
-#define MAYBE_NegotiateUnsupportedVideoCodec\
-    DISABLED_NegotiateUnsupportedVideoCodec
-#else
-#define MAYBE_NegotiateUnsupportedVideoCodec NegotiateUnsupportedVideoCodec
-#endif
-
-IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest,
-                       MAYBE_NegotiateUnsupportedVideoCodec) {
+IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest, NegotiateUnsupportedVideoCodec) {
   MakeTypicalPeerConnectionCall("negotiateUnsupportedVideoCodec();");
 }
 
 // This test will modify the SDP offer to use no encryption, which should
 // cause SetLocalDescription to fail.
-#if defined(USE_OZONE)
-// Disabled for Ozone, see http://crbug.com/315392#c15
-#define MAYBE_NegotiateNonCryptoCall DISABLED_NegotiateNonCryptoCall
-#else
-#define MAYBE_NegotiateNonCryptoCall NegotiateNonCryptoCall
-#endif
-
-IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest, MAYBE_NegotiateNonCryptoCall) {
+IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest, NegotiateNonCryptoCall) {
   MakeTypicalPeerConnectionCall("negotiateNonCryptoCall();");
 }
 
@@ -291,16 +314,14 @@ IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest,
           << "Must run with fake devices since the test will explicitly look "
           << "for the fake device signal.";
 
-  MakeTypicalPeerConnectionCall("callAndEnsureAudioIsPlaying();");
+  MakeTypicalPeerConnectionCall(base::StringPrintf(
+      "callAndEnsureAudioIsPlaying(%s);", kUseLenientAudioChecking));
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest,
                        EstablishAudioVideoCallAndVerifyMutingWorks) {
   if (!media::AudioManager::Get()->HasAudioOutputDevices()) {
-    // Bots with no output devices will force the audio code into a different
-    // path where it doesn't manage to set either the low or high latency path.
-    // This test will compute useless values in that case, so skip running on
-    // such bots (see crbug.com/326338).
+    // See comment on EstablishAudioVideoCallAndMeasureOutputLevel.
     LOG(INFO) << "Missing output devices: skipping test...";
     return;
   }
@@ -310,13 +331,14 @@ IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest,
           << "Must run with fake devices since the test will explicitly look "
           << "for the fake device signal.";
 
-  MakeTypicalPeerConnectionCall("callAndEnsureAudioTrackMutingWorks();");
+  MakeTypicalPeerConnectionCall(base::StringPrintf(
+      "callAndEnsureAudioTrackMutingWorks(%s);", kUseLenientAudioChecking));
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest,
                        EstablishAudioVideoCallAndVerifyUnmutingWorks) {
   if (!media::AudioManager::Get()->HasAudioOutputDevices()) {
-    // See comment on EstablishAudioVideoCallAndVerifyMutingWorks.
+    // See comment on EstablishAudioVideoCallAndMeasureOutputLevel.
     LOG(INFO) << "Missing output devices: skipping test...";
     return;
   }
@@ -326,7 +348,8 @@ IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest,
           << "Must run with fake devices since the test will explicitly look "
           << "for the fake device signal.";
 
-  MakeTypicalPeerConnectionCall("callAndEnsureAudioTrackUnmutingWorks();");
+  MakeTypicalPeerConnectionCall(base::StringPrintf(
+      "callAndEnsureAudioTrackUnmutingWorks(%s);", kUseLenientAudioChecking));
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest, CallAndVerifyVideoMutingWorks) {
@@ -342,11 +365,10 @@ IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest, CallAndVerifyVideoMutingWorks) {
 
 // This tests will make a complete PeerConnection-based call, verify that
 // video is playing for the call, and verify that a non-empty AEC dump file
-// exists. The AEC dump is enabled through webrtc-internals, in contrast to
-// using a command line flag (tested in webrtc_aecdump_browsertest.cc). The HTML
-// and Javascript is bypassed since it would trigger a file picker dialog.
-// Instead, the dialog callback FileSelected() is invoked directly. In fact,
-// there's never a webrtc-internals page opened at all since that's not needed.
+// exists. The AEC dump is enabled through webrtc-internals. The HTML and
+// Javascript is bypassed since it would trigger a file picker dialog. Instead,
+// the dialog callback FileSelected() is invoked directly. In fact, there's
+// never a webrtc-internals page opened at all since that's not needed.
 IN_PROC_BROWSER_TEST_P(WebRtcBrowserTest, MAYBE_CallWithAecDump) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 

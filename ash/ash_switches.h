@@ -24,13 +24,10 @@ ASH_EXPORT extern const char kAshDebugShortcuts[];
 ASH_EXPORT extern const char kAshDefaultWallpaperIsOem[];
 ASH_EXPORT extern const char kAshDefaultWallpaperLarge[];
 ASH_EXPORT extern const char kAshDefaultWallpaperSmall[];
-ASH_EXPORT extern const char kAshDisableAlternateFrameCaptionButtonStyle[];
-ASH_EXPORT extern const char kAshDisableAlternateShelfLayout[];
 ASH_EXPORT extern const char kAshDisableDockedWindows[];
-ASH_EXPORT extern const char kAshEnableAlternateFrameCaptionButtonStyle[];
+ASH_EXPORT extern const char kAshEnableTouchExplorationMode[];
 #if defined(OS_CHROMEOS)
 ASH_EXPORT extern const char kAshEnableMagnifierKeyScroller[];
-ASH_EXPORT extern const char kAshEnableMultiUserTray[];
 #endif
 ASH_EXPORT extern const char kAshEnableSoftwareMirroring[];
 ASH_EXPORT extern const char kAshEnableSystemSounds[];
@@ -42,19 +39,11 @@ ASH_EXPORT extern const char kAshHideNotificationsForFactory[];
 ASH_EXPORT extern const char kAshHostWindowBounds[];
 ASH_EXPORT extern const char kAshSecondaryDisplayLayout[];
 ASH_EXPORT extern const char kAshTouchHud[];
-ASH_EXPORT extern const char kAshUseAlternateShelfLayout[];
 ASH_EXPORT extern const char kAshUseFirstDisplayAsInternal[];
 ASH_EXPORT extern const char kAuraLegacyPowerButton[];
 #if defined(OS_WIN)
 ASH_EXPORT extern const char kForceAshToDesktop[];
 #endif
-
-// Returns true if the alternate visual style for the caption buttons (minimize,
-// maximize, restore, close) should be used.
-ASH_EXPORT bool UseAlternateFrameCaptionButtonStyle();
-
-// Returns true if the alternate shelf layout should be used.
-ASH_EXPORT bool UseAlternateShelfLayout();
 
 // Returns true if items can be dragged off the shelf to unpin.
 ASH_EXPORT bool UseDragOffShelf();

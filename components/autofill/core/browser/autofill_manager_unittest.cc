@@ -35,7 +35,7 @@
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/forms_seen_state.h"
-#include "grit/component_strings.h"
+#include "grit/components_strings.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -2857,8 +2857,11 @@ class MockAutofillManagerDelegate : public TestAutofillManagerDelegate {
   virtual void ShowRequestAutocompleteDialog(
       const FormData& form,
       const GURL& source_url,
-      const base::Callback<void(const FormStructure*)>& callback) OVERRIDE {
-    callback.Run(user_supplied_data_.get());
+      const ResultCallback& callback) OVERRIDE {
+    callback.Run(user_supplied_data_ ? AutocompleteResultSuccess :
+                                       AutocompleteResultErrorDisabled,
+                 base::string16(),
+                 user_supplied_data_.get());
   }
 
   void SetUserSuppliedData(scoped_ptr<FormStructure> user_supplied_data) {
@@ -2868,7 +2871,7 @@ class MockAutofillManagerDelegate : public TestAutofillManagerDelegate {
  private:
   scoped_ptr<FormStructure> user_supplied_data_;
 
- DISALLOW_COPY_AND_ASSIGN(MockAutofillManagerDelegate);
+  DISALLOW_COPY_AND_ASSIGN(MockAutofillManagerDelegate);
 };
 
 }  // namespace

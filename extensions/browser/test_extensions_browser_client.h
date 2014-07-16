@@ -42,8 +42,23 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
   virtual bool CanExtensionCrossIncognito(
       const extensions::Extension* extension,
       content::BrowserContext* context) const OVERRIDE;
+  virtual bool IsWebViewRequest(net::URLRequest* request) const OVERRIDE;
+  virtual net::URLRequestJob* MaybeCreateResourceBundleRequestJob(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const base::FilePath& directory_path,
+      const std::string& content_security_policy,
+      bool send_cors_header) OVERRIDE;
+  virtual bool AllowCrossRendererResourceLoad(net::URLRequest* request,
+                                              bool is_incognito,
+                                              const Extension* extension,
+                                              InfoMap* extension_info_map)
+      OVERRIDE;
   virtual PrefService* GetPrefServiceForContext(
       content::BrowserContext* context) OVERRIDE;
+  virtual void GetEarlyExtensionPrefsObservers(
+      content::BrowserContext* context,
+      std::vector<ExtensionPrefsObserver*>* observers) const OVERRIDE;
   virtual bool DeferLoadingBackgroundHosts(
       content::BrowserContext* context) const OVERRIDE;
   virtual bool IsBackgroundPageAllowed(content::BrowserContext* context) const
@@ -51,7 +66,6 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
   virtual scoped_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate()
       OVERRIDE;
   virtual bool DidVersionUpdate(content::BrowserContext* context) OVERRIDE;
-  virtual void PermitExternalProtocolHandler() OVERRIDE;
   virtual scoped_ptr<AppSorting> CreateAppSorting() OVERRIDE;
   virtual bool IsRunningInForcedAppMode() OVERRIDE;
   virtual ApiActivityMonitor* GetApiActivityMonitor(
@@ -59,6 +73,8 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
   virtual ExtensionSystemProvider* GetExtensionSystemFactory() OVERRIDE;
   virtual void RegisterExtensionFunctions(
       ExtensionFunctionRegistry* registry) const OVERRIDE;
+  virtual scoped_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
+      content::BrowserContext* context) const OVERRIDE;
 
  private:
   content::BrowserContext* main_context_;       // Not owned.

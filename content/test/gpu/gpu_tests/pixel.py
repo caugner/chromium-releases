@@ -47,9 +47,6 @@ def _DidTestSucceed(tab):
   return tab.EvaluateJavaScript('domAutomationController._succeeded')
 
 class _PixelValidator(cloud_storage_test_base.ValidatorBase):
-  def __init__(self):
-    super(_PixelValidator, self).__init__('ValidatePage')
-
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--enable-gpu-benchmarking')
 
@@ -135,7 +132,7 @@ class _PixelValidator(cloud_storage_test_base.ValidatorBase):
 
 class Pixel(cloud_storage_test_base.TestBase):
   test = _PixelValidator
-  page_set = 'page_sets/pixel_tests.json'
+  page_set = 'page_sets/pixel_tests.py'
 
   @classmethod
   def AddTestCommandLineArgs(cls, group):

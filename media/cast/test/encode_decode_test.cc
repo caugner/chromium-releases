@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 // transport layer, and are targeted at validating the bit stream.
 
 #include <gtest/gtest.h>
+#include <stdint.h>
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
@@ -20,7 +21,7 @@
 namespace media {
 namespace cast {
 
-static const int64 kStartMillisecond = GG_INT64_C(1245);
+static const int64 kStartMillisecond = INT64_C(1245);
 static const int kWidth = 1280;
 static const int kHeight = 720;
 static const int kStartbitrate = 4000000;
@@ -83,7 +84,6 @@ class EncodeDecodeTest : public ::testing::Test {
     testing_clock_->Advance(
         base::TimeDelta::FromMilliseconds(kStartMillisecond));
     encoder_config_.max_number_of_video_buffers_used = 1;
-    encoder_config_.number_of_cores = 1;
     encoder_config_.width = kWidth;
     encoder_config_.height = kHeight;
     encoder_config_.start_bitrate = kStartbitrate;
@@ -123,7 +123,7 @@ TEST_F(EncodeDecodeTest, BasicEncodeDecode) {
   encoder_->Initialize();
   // Encode frame.
   encoder_->Encode(video_frame_, &encoded_frame);
-  EXPECT_GT(encoded_frame.data.size(), GG_UINT64_C(0));
+  EXPECT_GT(encoded_frame.data.size(), UINT64_C(0));
   // Decode frame.
   decoder_->Decode(&encoded_frame,
                    base::TimeTicks(),

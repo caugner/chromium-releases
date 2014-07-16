@@ -14,9 +14,24 @@
 #include "base/stl_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "device/bluetooth/bluetooth_device_win.h"
+#include "device/bluetooth/bluetooth_socket_thread.h"
 #include "device/bluetooth/bluetooth_task_manager_win.h"
 
 namespace device {
+
+// static
+base::WeakPtr<BluetoothAdapter> BluetoothAdapter::CreateAdapter(
+    const InitCallback& init_callback) {
+  return BluetoothAdapterWin::CreateAdapter(init_callback);
+}
+
+// static
+base::WeakPtr<BluetoothAdapter> BluetoothAdapterWin::CreateAdapter(
+    const InitCallback& init_callback) {
+  BluetoothAdapterWin* adapter = new BluetoothAdapterWin(init_callback);
+  adapter->Init();
+  return adapter->weak_ptr_factory_.GetWeakPtr();
+}
 
 BluetoothAdapterWin::BluetoothAdapterWin(const InitCallback& init_callback)
     : BluetoothAdapter(),
@@ -185,7 +200,8 @@ void BluetoothAdapterWin::DevicesDiscovered(
        ++iter) {
     if (discovered_devices_.find((*iter)->address) ==
         discovered_devices_.end()) {
-      BluetoothDeviceWin device_win(**iter);
+      BluetoothDeviceWin device_win(
+          **iter, ui_task_runner_, socket_thread_, NULL, net::NetLog::Source());
       FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
                         DeviceAdded(this, &device_win));
       discovered_devices_.insert((*iter)->address);
@@ -200,7 +216,8 @@ void BluetoothAdapterWin::DevicesUpdated(
            devices.begin();
        iter != devices.end();
        ++iter) {
-    devices_[(*iter)->address] = new BluetoothDeviceWin(**iter);
+    devices_[(*iter)->address] = new BluetoothDeviceWin(
+        **iter, ui_task_runner_, socket_thread_, NULL, net::NetLog::Source());
   }
 }
 
@@ -232,6 +249,7 @@ void BluetoothAdapterWin::RemoveDiscoverySession(
 
 void BluetoothAdapterWin::Init() {
   ui_task_runner_ = base::ThreadTaskRunnerHandle::Get();
+  socket_thread_ = BluetoothSocketThread::Get();
   task_manager_ =
       new BluetoothTaskManagerWin(ui_task_runner_);
   task_manager_->AddObserver(this);

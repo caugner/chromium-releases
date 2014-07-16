@@ -26,11 +26,16 @@
         {
           'target_name': 'remoting_host',
           'type': 'static_library',
-          'variables': { 'enable_wexit_time_destructors': 1, },
+          'variables': {
+            'enable_wexit_time_destructors': 1,
+            'host_bundle_name': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_HOST_BUNDLE_NAME@")',
+            'prefpane_bundle_name': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_PREFPANE_BUNDLE_NAME@")',
+          },
           'dependencies': [
             'remoting_base',
             'remoting_protocol',
             'remoting_resources',
+            '../base/base.gyp:base_i18n',
             '../crypto/crypto.gyp:crypto',
             '../google_apis/google_apis.gyp:google_apis',
             '../ipc/ipc.gyp:ipc',
@@ -38,6 +43,8 @@
             '../ui/events/events.gyp:dom4_keycode_converter',
           ],
           'defines': [
+            'HOST_BUNDLE_NAME="<(host_bundle_name)"',
+            'PREFPANE_BUNDLE_NAME="<(prefpane_bundle_name)"',
             'VERSION=<(version_full)',
           ],
           'sources': [
@@ -745,8 +752,7 @@
                 }],  # mac_breakpad==1
               ],  # conditions
             }],  # OS=mac
-            # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-            ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+            ['OS=="linux" and use_allocator!="none"', {
               'dependencies': [
                 '../base/allocator/allocator.gyp:allocator',
               ],
@@ -777,8 +783,7 @@
             'host/setup/me2me_native_messaging_host_main.h',
           ],
           'conditions': [
-            # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-            ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+            ['OS=="linux" and use_allocator!="none"', {
               'dependencies': [
                 '../base/allocator/allocator.gyp:allocator',
               ],
@@ -870,8 +875,7 @@
                 '../build/linux/system.gyp:gtk',
               ],
             }],
-            # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-            ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+            ['OS=="linux" and use_allocator!="none"', {
               'dependencies': [
                 '../base/allocator/allocator.gyp:allocator',
               ],

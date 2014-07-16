@@ -35,6 +35,8 @@ public class AwTestContainerView extends FrameLayout {
         super(context);
         mInternalAccessDelegate = new InternalAccessAdapter();
         setOverScrollMode(View.OVER_SCROLL_ALWAYS);
+        setFocusable(true);
+        setFocusableInTouchMode(true);
     }
 
     public void initialize(AwContents awContents) {
@@ -252,12 +254,7 @@ public class AwTestContainerView extends FrameLayout {
         }
 
         @Override
-        public boolean requestDrawGL(Canvas canvas) {
-            return false;
-        }
-
-        @Override
-        public boolean executeHardwareAction(Runnable action) {
+        public boolean requestDrawGL(Canvas canvas, boolean waitForCompletion) {
             return false;
         }
     }

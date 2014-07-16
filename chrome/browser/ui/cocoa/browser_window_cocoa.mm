@@ -26,8 +26,6 @@
 #include "chrome/browser/ui/browser_commands_mac.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
-#import "chrome/browser/ui/cocoa/browser/avatar_base_controller.h"
-#import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser/password_generation_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -38,12 +36,14 @@
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
+#import "chrome/browser/ui/cocoa/profiles/avatar_base_controller.h"
+#import "chrome/browser/ui/cocoa/profiles/avatar_menu_bubble_controller.h"
 #include "chrome/browser/ui/cocoa/restart_browser.h"
 #include "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #import "chrome/browser/ui/cocoa/web_dialog_window_controller.h"
-#import "chrome/browser/ui/cocoa/website_settings_bubble_controller.h"
+#import "chrome/browser/ui/cocoa/website_settings/website_settings_bubble_controller.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
@@ -54,7 +54,6 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -74,7 +73,7 @@ namespace {
 NSPoint GetPointForBubble(content::WebContents* web_contents,
                           int x_offset,
                           int y_offset) {
-  NSView* view = web_contents->GetView()->GetNativeView();
+  NSView* view = web_contents->GetNativeView();
   NSRect bounds = [view bounds];
   NSPoint point;
   point.x = NSMinX(bounds) + x_offset;
@@ -491,10 +490,9 @@ void BrowserWindowCocoa::ShowBookmarkAppBubble(
   NOTIMPLEMENTED();
 }
 
-void BrowserWindowCocoa::ShowTranslateBubble(
-    content::WebContents* contents,
-    TranslateTabHelper::TranslateStep step,
-    TranslateErrors::Type error_type) {
+void BrowserWindowCocoa::ShowTranslateBubble(content::WebContents* contents,
+                                             translate::TranslateStep step,
+                                             TranslateErrors::Type error_type) {
   TranslateTabHelper* translate_tab_helper =
       TranslateTabHelper::FromWebContents(contents);
   LanguageState& language_state = translate_tab_helper->GetLanguageState();

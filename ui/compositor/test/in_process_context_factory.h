@@ -30,18 +30,16 @@ class InProcessContextFactory : public ContextFactory {
       Layer* mirroring_layer) OVERRIDE;
   virtual void RemoveReflector(scoped_refptr<Reflector> reflector) OVERRIDE;
 
-  virtual scoped_refptr<cc::ContextProvider>
-      OffscreenCompositorContextProvider() OVERRIDE;
   virtual scoped_refptr<cc::ContextProvider> SharedMainThreadContextProvider()
       OVERRIDE;
   virtual void RemoveCompositor(Compositor* compositor) OVERRIDE;
   virtual bool DoesCreateTestContexts() OVERRIDE;
+  virtual cc::SharedBitmapManager* GetSharedBitmapManager() OVERRIDE;
 
  private:
   scoped_refptr<webkit::gpu::ContextProviderInProcess>
-      offscreen_compositor_contexts_;
-  scoped_refptr<webkit::gpu::ContextProviderInProcess>
       shared_main_thread_contexts_;
+  scoped_ptr<cc::SharedBitmapManager> shared_bitmap_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessContextFactory);
 };

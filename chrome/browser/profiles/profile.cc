@@ -14,6 +14,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/pref_names.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_prefs.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_service.h"
@@ -158,14 +159,7 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
 #if defined(OS_ANDROID) || defined(OS_IOS)
-  registry->RegisterBooleanPref(
-      prefs::kSpdyProxyAuthEnabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kSpdyProxyAuthWasEnabledBefore,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  data_reduction_proxy::RegisterSyncableProfilePrefs(registry);
 #endif  // defined(OS_ANDROID) || defined(OS_IOS)
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_IOS)
   // Preferences related to the avatar bubble and user manager tutorials.
@@ -225,4 +219,11 @@ void Profile::MaybeSendDestroyedNotification() {
         content::Source<Profile>(this),
         content::NotificationService::NoDetails());
   }
+}
+
+bool ProfileCompare::operator()(Profile* a, Profile* b) const {
+  DCHECK(a && b);
+  if (a->IsSameProfile(b))
+    return false;
+  return a->GetOriginalProfile() < b->GetOriginalProfile();
 }

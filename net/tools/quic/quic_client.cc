@@ -12,11 +12,12 @@
 #include <unistd.h>
 
 #include "base/logging.h"
+#include "net/quic/congestion_control/tcp_receiver.h"
 #include "net/quic/crypto/quic_random.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_data_reader.h"
 #include "net/quic/quic_protocol.h"
-#include "net/quic/quic_session_key.h"
+#include "net/quic/quic_server_id.h"
 #include "net/tools/balsa/balsa_headers.h"
 #include "net/tools/quic/quic_epoll_connection_helper.h"
 #include "net/tools/quic/quic_socket_utils.h"
@@ -32,11 +33,12 @@ namespace tools {
 const int kEpollFlags = EPOLLIN | EPOLLOUT | EPOLLET;
 
 QuicClient::QuicClient(IPEndPoint server_address,
-                       const QuicSessionKey& server_key,
+                       const QuicServerId& server_id,
                        const QuicVersionVector& supported_versions,
-                       bool print_response)
+                       bool print_response,
+                       uint32 initial_flow_control_window)
     : server_address_(server_address),
-      server_key_(server_key),
+      server_id_(server_id),
       local_port_(0),
       fd_(-1),
       helper_(CreateQuicConnectionHelper()),
@@ -44,16 +46,18 @@ QuicClient::QuicClient(IPEndPoint server_address,
       packets_dropped_(0),
       overflow_supported_(false),
       supported_versions_(supported_versions),
-      print_response_(print_response) {
+      print_response_(print_response),
+      initial_flow_control_window_(initial_flow_control_window) {
   config_.SetDefaults();
 }
 
 QuicClient::QuicClient(IPEndPoint server_address,
-                       const QuicSessionKey& server_key,
+                       const QuicServerId& server_id,
                        const QuicConfig& config,
-                       const QuicVersionVector& supported_versions)
+                       const QuicVersionVector& supported_versions,
+                       uint32 initial_flow_control_window)
     : server_address_(server_address),
-      server_key_(server_key),
+      server_id_(server_id),
       config_(config),
       local_port_(0),
       fd_(-1),
@@ -62,7 +66,8 @@ QuicClient::QuicClient(IPEndPoint server_address,
       packets_dropped_(0),
       overflow_supported_(false),
       supported_versions_(supported_versions),
-      print_response_(false) {
+      print_response_(false),
+      initial_flow_control_window_(initial_flow_control_window) {
 }
 
 QuicClient::~QuicClient() {
@@ -92,6 +97,16 @@ bool QuicClient::Initialize() {
     DLOG(WARNING) << "Socket overflow detection not supported";
   } else {
     overflow_supported_ = true;
+  }
+
+  if (!QuicSocketUtils::SetReceiveBufferSize(fd_,
+                                             TcpReceiver::kReceiveWindowTCP)) {
+    return false;
+  }
+
+  if (!QuicSocketUtils::SetSendBufferSize(fd_,
+                                          TcpReceiver::kReceiveWindowTCP)) {
+    return false;
   }
 
   int get_local_ip = 1;
@@ -163,10 +178,11 @@ bool QuicClient::StartConnect() {
   }
 
   session_.reset(new QuicClientSession(
-      server_key_,
+      server_id_,
       config_,
       new QuicConnection(GenerateConnectionId(), server_address_, helper_.get(),
-                         writer_.get(), false, supported_versions_),
+                         writer_.get(), false, supported_versions_,
+                         initial_flow_control_window_),
       &crypto_config_));
   return session_->CryptoConnect();
 }
@@ -295,6 +311,15 @@ QuicPacketWriter* QuicClient::CreateQuicPacketWriter() {
   return new QuicDefaultPacketWriter(fd_);
 }
 
+int QuicClient::ReadPacket(char* buffer,
+                           int buffer_len,
+                           IPEndPoint* server_address,
+                           IPAddressNumber* client_ip) {
+  return QuicSocketUtils::ReadPacket(
+      fd_, buffer, buffer_len, overflow_supported_ ? &packets_dropped_ : NULL,
+      client_ip, server_address);
+}
+
 bool QuicClient::ReadAndProcessPacket() {
   // Allocate some extra space so we can send an error if the server goes over
   // the limit.
@@ -303,9 +328,7 @@ bool QuicClient::ReadAndProcessPacket() {
   IPEndPoint server_address;
   IPAddressNumber client_ip;
 
-  int bytes_read = QuicSocketUtils::ReadPacket(
-      fd_, buf, arraysize(buf), overflow_supported_ ? &packets_dropped_ : NULL,
-      &client_ip, &server_address);
+  int bytes_read = ReadPacket(buf, arraysize(buf), &server_address, &client_ip);
 
   if (bytes_read < 0) {
     return false;

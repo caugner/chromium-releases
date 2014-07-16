@@ -4,12 +4,10 @@
 
 package org.chromium.content.browser;
 
-import android.test.suitebuilder.annotation.SmallTest;
-
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.JavaScriptUtils;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content_shell_apk.ContentShellActivity;
 import org.chromium.content_shell_apk.ContentShellTestBase;
 
@@ -25,7 +23,7 @@ public class ScreenOrientationIntegrationTest extends ContentShellTestBase {
             "<body onorientationchange='changes++;'>foo</body>" +
             "</html>");
 
-    private ContentView mContentView;
+    private ContentViewCore mContentViewCore;
 
     /**
      * Returns the screen orientation as seen by |window.orientation|.
@@ -34,8 +32,7 @@ public class ScreenOrientationIntegrationTest extends ContentShellTestBase {
             throws InterruptedException, TimeoutException {
         return Integer.parseInt(
             JavaScriptUtils.executeJavaScriptAndWaitForResult(
-                    mContentView,
-                    new TestCallbackHelperContainer(mContentView),
+                    mContentViewCore,
                     "window.orientation"));
     }
 
@@ -47,8 +44,7 @@ public class ScreenOrientationIntegrationTest extends ContentShellTestBase {
             throws InterruptedException, TimeoutException {
         return Integer.parseInt(
             JavaScriptUtils.executeJavaScriptAndWaitForResult(
-                    mContentView,
-                    new TestCallbackHelperContainer(mContentView),
+                    mContentViewCore,
                     "changes"));
     }
 
@@ -56,7 +52,7 @@ public class ScreenOrientationIntegrationTest extends ContentShellTestBase {
      * Simulate a screen orientation change for the web content.
      */
     private void updateScreenOrientationForContent(int orientation) {
-        mContentView.getContentViewCore().sendOrientationChangeEvent(orientation);
+        mContentViewCore.sendOrientationChangeEvent(orientation);
     }
 
     @Override
@@ -66,16 +62,26 @@ public class ScreenOrientationIntegrationTest extends ContentShellTestBase {
         ContentShellActivity activity = launchContentShellWithUrl(DEFAULT_URL);
         waitForActiveShellToBeDoneLoading();
 
-        mContentView = activity.getActiveContentView();
+        mContentViewCore = activity.getActiveContentViewCore();
     }
 
-    @SmallTest
+    /*
+     * Broken by http://src.chromium.org/viewvc/blink?revision=173532&view=revision
+     * crbug.com/371144
+     * @SmallTest
+     */
+    @DisabledTest
     @Feature({"ScreenOrientation"})
     public void testNoOp() throws Throwable {
         assertEquals(0, getWindowOrientationChangeCount());
     }
 
-    @SmallTest
+    /*
+     * Broken by http://src.chromium.org/viewvc/blink?revision=173532&view=revision
+     * crbug.com/371144
+     * @SmallTest
+     */
+    @DisabledTest
     @Feature({"ScreenOrientation"})
     public void testExpectedValues() throws Throwable {
         int[] values = { 90, -90, 180, 0, 90 };
@@ -92,7 +98,12 @@ public class ScreenOrientationIntegrationTest extends ContentShellTestBase {
 
     // We can't test unexpected value because it is branching to a NOTREACHED().
 
-    @SmallTest
+    /*
+     * Broken by http://src.chromium.org/viewvc/blink?revision=173532&view=revision
+     * crbug.com/371144
+     * @SmallTest
+     */
+    @DisabledTest
     @Feature({"ScreenOrientation"})
     public void testNoChange() throws Throwable {
         // The target angle for that test should depend on the current orientation.

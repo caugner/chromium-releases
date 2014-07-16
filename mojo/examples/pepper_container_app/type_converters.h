@@ -5,7 +5,7 @@
 #ifndef MOJO_EXAMPLES_PEPPER_CONTAINER_APP_TYPE_CONVERTERS_H_
 #define MOJO_EXAMPLES_PEPPER_CONTAINER_APP_TYPE_CONVERTERS_H_
 
-#include "mojo/public/bindings/type_converter.h"
+#include "mojo/public/cpp/bindings/type_converter.h"
 #include "mojo/services/native_viewport/native_viewport.mojom.h"
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_rect.h"
@@ -27,6 +27,8 @@ class TypeConverter<Point, PP_Point> {
     return PP_MakePoint(static_cast<int32_t>(input.x()),
                         static_cast<int32_t>(input.y()));
   }
+
+  MOJO_ALLOW_IMPLICIT_TYPE_CONVERSION();
 };
 
 template <>
@@ -43,6 +45,8 @@ class TypeConverter<Size, PP_Size> {
     return PP_MakeSize(static_cast<int32_t>(input.width()),
                        static_cast<int32_t>(input.height()));
   }
+
+  MOJO_ALLOW_IMPLICIT_TYPE_CONVERSION();
 };
 
 template <>
@@ -60,6 +64,8 @@ class TypeConverter<Rect, PP_Rect> {
                      input.size().To<PP_Size>() };
     return rect;
   }
+
+  MOJO_ALLOW_IMPLICIT_TYPE_CONVERSION();
 };
 
 }  // namespace mojo

@@ -32,8 +32,6 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/character_encoding.h"
@@ -59,6 +57,7 @@
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -131,10 +130,10 @@
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
 #include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/browser/ui/validation_message_bubble.h"
-#include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
@@ -150,6 +149,8 @@
 #include "chrome/common/profiling.h"
 #include "chrome/common/search_types.h"
 #include "chrome/common/url_constants.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_manager.h"
@@ -168,7 +169,6 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/renderer_preferences.h"
@@ -182,7 +182,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#include "net/base/net_util.h"
+#include "net/base/filename_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
@@ -252,7 +252,7 @@ Browser::CreateParams::CreateParams(Profile* profile,
     : type(TYPE_TABBED),
       profile(profile),
       host_desktop_type(host_desktop_type),
-      app_type(APP_TYPE_HOST),
+      trusted_source(false),
       initial_show_state(ui::SHOW_STATE_DEFAULT),
       is_session_restore(false),
       window(NULL) {
@@ -264,7 +264,7 @@ Browser::CreateParams::CreateParams(Type type,
     : type(type),
       profile(profile),
       host_desktop_type(host_desktop_type),
-      app_type(APP_TYPE_HOST),
+      trusted_source(false),
       initial_show_state(ui::SHOW_STATE_DEFAULT),
       is_session_restore(false),
       window(NULL) {
@@ -272,17 +272,16 @@ Browser::CreateParams::CreateParams(Type type,
 
 // static
 Browser::CreateParams Browser::CreateParams::CreateForApp(
-    Type type,
     const std::string& app_name,
+    bool trusted_source,
     const gfx::Rect& window_bounds,
     Profile* profile,
     chrome::HostDesktopType host_desktop_type) {
-  DCHECK(type != TYPE_TABBED);
   DCHECK(!app_name.empty());
 
-  CreateParams params(type, profile, host_desktop_type);
+  CreateParams params(TYPE_POPUP, profile, host_desktop_type);
   params.app_name = app_name;
-  params.app_type = APP_TYPE_CHILD;
+  params.trusted_source = trusted_source;
   params.initial_bounds = window_bounds;
 
   return params;
@@ -294,6 +293,7 @@ Browser::CreateParams Browser::CreateParams::CreateForDevTools(
     chrome::HostDesktopType host_desktop_type) {
   CreateParams params(TYPE_POPUP, profile, host_desktop_type);
   params.app_name = DevToolsWindow::kDevToolsApp;
+  params.trusted_source = true;
   return params;
 }
 
@@ -334,7 +334,7 @@ Browser::Browser(const CreateParams& params)
       tab_strip_model_(new TabStripModel(tab_strip_model_delegate_.get(),
                                          params.profile)),
       app_name_(params.app_name),
-      app_type_(params.app_type),
+      is_trusted_source_(params.trusted_source),
       cancel_download_confirmation_state_(NOT_PROMPTED),
       override_bounds_(params.initial_bounds),
       initial_show_state_(params.initial_show_state),
@@ -375,7 +375,8 @@ Browser::Browser(const CreateParams& params)
   search_model_.reset(new SearchModel());
   search_delegate_.reset(new SearchDelegate(search_model_.get()));
 
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
@@ -774,12 +775,6 @@ void Browser::VisibleSSLStateChanged(content::WebContents* web_contents) {
     UpdateToolbar(false);
 }
 
-void Browser::OnWebContentsInstantSupportDisabled(
-    const content::WebContents* web_contents) {
-  DCHECK(web_contents);
-  if (tab_strip_model_->GetActiveWebContents() == web_contents)
-    UpdateToolbar(false);
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Browser, Assorted browser commands:
@@ -884,7 +879,7 @@ void Browser::UpdateUIForNavigationInTab(WebContents* contents,
   ScheduleUIUpdate(contents, content::INVALIDATE_TYPE_URL);
 
   if (contents_is_selected)
-    contents->GetView()->SetInitialFocus();
+    contents->SetInitialFocus();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1136,6 +1131,16 @@ bool Browser::CanOverscrollContent() const {
 #endif
 }
 
+bool Browser::ShouldPreserveAbortedURLs(WebContents* source) {
+  // Allow failed URLs to stick around in the omnibox on the NTP, but not when
+  // other pages have committed.
+  Profile* profile = Profile::FromBrowserContext(source->GetBrowserContext());
+  if (!profile || !source->GetController().GetLastCommittedEntry())
+    return false;
+  GURL committed_url(source->GetController().GetLastCommittedEntry()->GetURL());
+  return chrome::IsNTPURL(committed_url, profile);
+}
+
 bool Browser::PreHandleKeyboardEvent(content::WebContents* source,
                                      const NativeWebKeyboardEvent& event,
                                      bool* is_keyboard_shortcut) {
@@ -1150,7 +1155,14 @@ bool Browser::PreHandleKeyboardEvent(content::WebContents* source,
 
 void Browser::HandleKeyboardEvent(content::WebContents* source,
                                   const NativeWebKeyboardEvent& event) {
-  window()->HandleKeyboardEvent(event);
+  DevToolsWindow* devtools_window =
+      DevToolsWindow::GetInstanceForInspectedWebContents(source);
+  bool handled = false;
+  if (devtools_window)
+    handled = devtools_window->ForwardKeyboardEvent(event);
+
+  if (!handled)
+    window()->HandleKeyboardEvent(event);
 }
 
 bool Browser::TabsNeedBeforeUnloadFired() {
@@ -1278,7 +1290,8 @@ WebContents* Browser::OpenURLFromTab(WebContents* source,
   FillNavigateParamsFromOpenURLParams(&nav_params, params);
   nav_params.source_contents = source;
   nav_params.tabstrip_add_types = TabStripModel::ADD_NONE;
-  nav_params.window_action = chrome::NavigateParams::SHOW_WINDOW;
+  if (params.user_gesture)
+    nav_params.window_action = chrome::NavigateParams::SHOW_WINDOW;
   nav_params.user_gesture = params.user_gesture;
 
   PopupBlockerTabHelper* popup_blocker_helper = NULL;
@@ -1548,7 +1561,8 @@ void Browser::RendererResponsive(WebContents* source) {
 
 void Browser::WorkerCrashed(WebContents* source) {
   SimpleAlertInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(source), InfoBarDelegate::kNoIconID,
+      InfoBarService::FromWebContents(source),
+      infobars::InfoBarDelegate::kNoIconID,
       l10n_util::GetStringUTF16(IDS_WEBWORKER_CRASHED_PROMPT), true);
 }
 
@@ -1585,12 +1599,8 @@ void Browser::EnumerateDirectory(WebContents* web_contents,
 }
 
 bool Browser::EmbedsFullscreenWidget() const {
-#if defined(TOOLKIT_GTK)
-  return false;
-#else
   return !CommandLine::ForCurrentProcess()->
       HasSwitch(switches::kDisableFullscreenWithinTab);
-#endif
 }
 
 void Browser::ToggleFullscreenModeForTab(WebContents* web_contents,
@@ -1706,12 +1716,11 @@ bool Browser::RequestPpapiBrokerPermission(
   return true;
 }
 
-gfx::Size Browser::GetSizeForNewRenderView(
-    const WebContents* web_contents) const {
+gfx::Size Browser::GetSizeForNewRenderView(WebContents* web_contents) const {
   // When navigating away from NTP with unpinned bookmark bar, the bookmark bar
   // would disappear on non-NTP pages, resulting in a bigger size for the new
   // render view.
-  gfx::Size size = web_contents->GetView()->GetContainerSize();
+  gfx::Size size = web_contents->GetContainerBounds().size();
   // Don't change render view size if bookmark bar is currently not detached,
   // or there's no pending entry, or navigating to a NTP page.
   if (size.IsEmpty() || bookmark_bar_state_ != BookmarkBar::DETACHED)
@@ -1755,6 +1764,51 @@ void Browser::ConfirmAddSearchProvider(TemplateURL* template_url,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Browser, SearchTabHelperDelegate implementation:
+
+void Browser::NavigateOnThumbnailClick(const GURL& url,
+                                       WindowOpenDisposition disposition,
+                                       content::WebContents* source_contents) {
+  DCHECK(source_contents);
+  // We're guaranteed that AUTO_BOOKMARK is the right transition since this only
+  // gets called to handle clicks in the new tab page (to navigate to most
+  // visited item URLs) and in the search results page (to navigate to
+  // privileged destinations (e.g. chrome://URLs)).
+  //
+  // TODO(kmadhusu): Page transitions to privileged destinations should be
+  // marked as "LINK" instead of "AUTO_BOOKMARK"?
+  chrome::NavigateParams params(this, url,
+                                content::PAGE_TRANSITION_AUTO_BOOKMARK);
+  params.referrer = content::Referrer();
+  params.source_contents = source_contents;
+  params.disposition = disposition;
+  params.is_renderer_initiated = false;
+  params.initiating_profile = profile_;
+  chrome::Navigate(&params);
+}
+
+void Browser::OnWebContentsInstantSupportDisabled(
+    const content::WebContents* web_contents) {
+  DCHECK(web_contents);
+  if (tab_strip_model_->GetActiveWebContents() == web_contents)
+    UpdateToolbar(false);
+}
+
+OmniboxView* Browser::GetOmniboxView() {
+  return window_->GetLocationBar()->GetOmniboxView();
+}
+
+std::set<std::string> Browser::GetOpenUrls() {
+  history::TopSites* top_sites = profile_->GetTopSites();
+  if (!top_sites)  // NULL for Incognito profiles.
+    return std::set<std::string>();
+
+  std::set<std::string> open_urls;
+  chrome::GetOpenUrls(*tab_strip_model_, *top_sites, &open_urls);
+  return open_urls;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Browser, web_modal::WebContentsModalDialogManagerDelegate implementation:
 
 void Browser::SetWebContentsBlocked(content::WebContents* web_contents,
@@ -1766,7 +1820,7 @@ void Browser::SetWebContentsBlocked(content::WebContents* web_contents,
   }
   tab_strip_model_->SetTabBlocked(index, blocked);
   if (!blocked && tab_strip_model_->GetActiveWebContents() == web_contents)
-    web_contents->GetView()->Focus();
+    web_contents->Focus();
 }
 
 web_modal::WebContentsModalDialogHost*
@@ -1876,7 +1930,7 @@ void Browser::Observe(int type,
       break;
     }
 
-    case chrome::NOTIFICATION_EXTENSION_LOADED:
+    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED:
       chrome::UpdateCommandEnabled(
           this,
           IDC_BOOKMARK_PAGE,
@@ -2137,6 +2191,7 @@ void Browser::SetAsDelegate(WebContents* web_contents, Browser* delegate) {
       SetDelegate(delegate);
   CoreTabHelper::FromWebContents(web_contents)->set_delegate(delegate);
   SearchEngineTabHelper::FromWebContents(web_contents)->set_delegate(delegate);
+  SearchTabHelper::FromWebContents(web_contents)->set_delegate(delegate);
   ZoomController::FromWebContents(web_contents)->set_observer(delegate);
   TranslateTabHelper* translate_tab_helper =
       TranslateTabHelper::FromWebContents(web_contents);
@@ -2187,32 +2242,30 @@ void Browser::TabDetachedAtImpl(content::WebContents* contents,
 }
 
 bool Browser::ShouldShowLocationBar() const {
-  if (!is_app()) {
-    // Hide the URL for singleton settings windows.
-    // TODO(stevenjb): We could avoid this check by setting a Browser
-    // property for "system" windows, possibly shared with hosted app windows.
-    // crbug.com/350128.
-    if (chrome::IsSettingsWindow(this))
-      return false;
+  // Tabbed browser always show a location bar.
+  if (is_type_tabbed())
     return true;
+
+  if (is_app()) {
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableStreamlinedHostedApps)) {
+      // If kEnableStreamlinedHostedApps is true, show the location bar for
+      // bookmark apps.
+      ExtensionService* service =
+          extensions::ExtensionSystem::Get(profile_)->extension_service();
+      const extensions::Extension* extension =
+          service ? service->GetInstalledExtension(
+                        web_app::GetExtensionIdFromApplicationName(app_name()))
+                  : NULL;
+      return (!extension || extension->from_bookmark()) &&
+             app_name() != DevToolsWindow::kDevToolsApp;
+    } else {
+      return false;
+    }
   }
 
-  // Normally apps do not show a location bar.
-  if (app_type() != APP_TYPE_HOST ||
-      app_name() == DevToolsWindow::kDevToolsApp ||
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableStreamlinedHostedApps))
-    return false;
-
-  // If kEnableStreamlinedHostedApps is true, show the locaiton bar for non
-  // legacy packaged apps.
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile_)->extension_service();
-  const extensions::Extension* extension =
-      service ? service->GetInstalledExtension(
-                    web_app::GetExtensionIdFromApplicationName(app_name()))
-              : NULL;
-  return (!extension || !extension->is_legacy_packaged_app());
+  // Trusted app windows and system windows never show a location bar.
+  return !is_trusted_source();
 }
 
 bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
@@ -2242,8 +2295,11 @@ bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
 
 void Browser::UpdateBookmarkBarState(BookmarkBarStateChangeReason reason) {
   BookmarkBar::State state;
-  // The bookmark bar is hidden in fullscreen mode, unless on the new tab page.
-  if (browser_defaults::bookmarks_enabled &&
+  // The bookmark bar is always hidden for Guest Sessions and in fullscreen
+  // mode, unless on the new tab page.
+  if (profile_->IsGuestSession()) {
+    state = BookmarkBar::HIDDEN;
+  } else if (browser_defaults::bookmarks_enabled &&
       profile_->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar) &&
       !ShouldHideUIForFullscreen()) {
     state = BookmarkBar::SHOW;

@@ -17,7 +17,7 @@
 #include "net/quic/crypto/quic_decrypter.h"
 #include "net/quic/crypto/quic_encrypter.h"
 #include "net/quic/quic_http_stream.h"
-#include "net/quic/quic_session_key.h"
+#include "net/quic/quic_server_id.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/mock_crypto_client_stream_factory.h"
 #include "net/quic/test_tools/mock_random.h"
@@ -48,17 +48,17 @@ class QuicStreamFactoryPeer {
   static bool HasActiveSession(QuicStreamFactory* factory,
                                const HostPortPair& host_port_pair,
                                bool is_https) {
-    QuicSessionKey server_key(host_port_pair, is_https, kPrivacyModeDisabled);
-    return factory->HasActiveSession(server_key);
+    QuicServerId server_id(host_port_pair, is_https, PRIVACY_MODE_DISABLED);
+    return factory->HasActiveSession(server_id);
   }
 
   static QuicClientSession* GetActiveSession(
       QuicStreamFactory* factory,
       const HostPortPair& host_port_pair,
       bool is_https) {
-    QuicSessionKey server_key(host_port_pair, is_https, kPrivacyModeDisabled);
-    DCHECK(factory->HasActiveSession(server_key));
-    return factory->active_sessions_[server_key];
+    QuicServerId server_id(host_port_pair, is_https, PRIVACY_MODE_DISABLED);
+    DCHECK(factory->HasActiveSession(server_id));
+    return factory->active_sessions_[server_id];
   }
 
   static scoped_ptr<QuicHttpStream> CreateIfSessionExists(
@@ -66,16 +66,16 @@ class QuicStreamFactoryPeer {
       const HostPortPair& host_port_pair,
       bool is_https,
       const BoundNetLog& net_log) {
-    QuicSessionKey server_key(host_port_pair, is_https, kPrivacyModeDisabled);
-    return factory->CreateIfSessionExists(server_key, net_log);
+    QuicServerId server_id(host_port_pair, is_https, PRIVACY_MODE_DISABLED);
+    return factory->CreateIfSessionExists(server_id, net_log);
   }
 
   static bool IsLiveSession(QuicStreamFactory* factory,
                             QuicClientSession* session) {
-    for (QuicStreamFactory::SessionSet::iterator it =
+    for (QuicStreamFactory::SessionIdMap::iterator it =
              factory->all_sessions_.begin();
          it != factory->all_sessions_.end(); ++it) {
-      if (*it == session)
+      if (it->first == session)
         return true;
     }
     return false;
@@ -94,10 +94,10 @@ class QuicStreamFactoryTest : public ::testing::TestWithParam<QuicVersion> {
                  cert_verifier_.get(),
                  &crypto_client_stream_factory_,
                  &random_generator_, clock_, kDefaultMaxPacketSize,
-                 SupportedVersions(GetParam()), true, true),
+                 SupportedVersions(GetParam()), true, true, true),
         host_port_pair_(kDefaultServerHostName, kDefaultServerPort),
         is_https_(false),
-        privacy_mode_(kPrivacyModeDisabled) {
+        privacy_mode_(PRIVACY_MODE_DISABLED) {
     factory_.set_require_confirmation(false);
   }
 
@@ -170,7 +170,9 @@ class QuicStreamFactoryTest : public ::testing::TestWithParam<QuicVersion> {
 
   scoped_ptr<QuicEncryptedPacket> ConstructRstPacket() {
     QuicStreamId stream_id = 5;
-    return maker_.MakeRstPacket(1, true, stream_id, QUIC_STREAM_NO_ERROR);
+    return maker_.MakeRstPacket(
+        1, true, stream_id,
+        AdjustErrorForVersion(QUIC_RST_FLOW_CONTROL_ACCOUNTING, GetParam()));
   }
 
   MockHostResolver host_resolver_;
@@ -825,8 +827,7 @@ TEST_P(QuicStreamFactoryTest, CloseAllSessions) {
   };
   scoped_ptr<QuicEncryptedPacket> rst(ConstructRstPacket());
   std::vector<MockWrite> writes;
-  if (GetParam() > QUIC_VERSION_13)
-    writes.push_back(MockWrite(ASYNC, rst->data(), rst->length(), 1));
+  writes.push_back(MockWrite(ASYNC, rst->data(), rst->length(), 1));
   DeterministicSocketData socket_data(reads, arraysize(reads),
                                       writes.empty() ? NULL  : &writes[0],
                                       writes.size());
@@ -889,8 +890,7 @@ TEST_P(QuicStreamFactoryTest, OnIPAddressChanged) {
   };
   scoped_ptr<QuicEncryptedPacket> rst(ConstructRstPacket());
   std::vector<MockWrite> writes;
-  if (GetParam() > QUIC_VERSION_13)
-    writes.push_back(MockWrite(ASYNC, rst->data(), rst->length(), 1));
+  writes.push_back(MockWrite(ASYNC, rst->data(), rst->length(), 1));
   DeterministicSocketData socket_data(reads, arraysize(reads),
                                       writes.empty() ? NULL  : &writes[0],
                                       writes.size());
@@ -954,8 +954,7 @@ TEST_P(QuicStreamFactoryTest, OnCertAdded) {
   };
   scoped_ptr<QuicEncryptedPacket> rst(ConstructRstPacket());
   std::vector<MockWrite> writes;
-  if (GetParam() > QUIC_VERSION_13)
-    writes.push_back(MockWrite(ASYNC, rst->data(), rst->length(), 1));
+  writes.push_back(MockWrite(ASYNC, rst->data(), rst->length(), 1));
   DeterministicSocketData socket_data(reads, arraysize(reads),
                                       writes.empty() ? NULL  : &writes[0],
                                       writes.size());
@@ -1019,8 +1018,7 @@ TEST_P(QuicStreamFactoryTest, OnCACertChanged) {
   };
   scoped_ptr<QuicEncryptedPacket> rst(ConstructRstPacket());
   std::vector<MockWrite> writes;
-  if (GetParam() > QUIC_VERSION_13)
-    writes.push_back(MockWrite(ASYNC, rst->data(), rst->length(), 1));
+  writes.push_back(MockWrite(ASYNC, rst->data(), rst->length(), 1));
   DeterministicSocketData socket_data(reads, arraysize(reads),
                                       writes.empty() ? NULL  : &writes[0],
                                       writes.size());
@@ -1092,9 +1090,9 @@ TEST_P(QuicStreamFactoryTest, SharedCryptoConfig) {
     HostPortPair host_port_pair1(r1_host_name, 80);
     QuicCryptoClientConfig* crypto_config =
         QuicStreamFactoryPeer::GetCryptoConfig(&factory_);
-    QuicSessionKey server_key1(host_port_pair1, is_https_, privacy_mode_);
+    QuicServerId server_id1(host_port_pair1, is_https_, privacy_mode_);
     QuicCryptoClientConfig::CachedState* cached1 =
-        crypto_config->LookupOrCreate(server_key1);
+        crypto_config->LookupOrCreate(server_id1);
     EXPECT_FALSE(cached1->proof_valid());
     EXPECT_TRUE(cached1->source_address_token().empty());
 
@@ -1104,9 +1102,9 @@ TEST_P(QuicStreamFactoryTest, SharedCryptoConfig) {
     cached1->SetProofValid();
 
     HostPortPair host_port_pair2(r2_host_name, 80);
-    QuicSessionKey server_key2(host_port_pair2, is_https_, privacy_mode_);
+    QuicServerId server_id2(host_port_pair2, is_https_, privacy_mode_);
     QuicCryptoClientConfig::CachedState* cached2 =
-        crypto_config->LookupOrCreate(server_key2);
+        crypto_config->LookupOrCreate(server_id2);
     EXPECT_EQ(cached1->source_address_token(), cached2->source_address_token());
     EXPECT_TRUE(cached2->proof_valid());
   }
@@ -1126,9 +1124,9 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigWhenProofIsInvalid) {
     HostPortPair host_port_pair1(r3_host_name, 80);
     QuicCryptoClientConfig* crypto_config =
         QuicStreamFactoryPeer::GetCryptoConfig(&factory_);
-    QuicSessionKey server_key1(host_port_pair1, is_https_, privacy_mode_);
+    QuicServerId server_id1(host_port_pair1, is_https_, privacy_mode_);
     QuicCryptoClientConfig::CachedState* cached1 =
-        crypto_config->LookupOrCreate(server_key1);
+        crypto_config->LookupOrCreate(server_id1);
     EXPECT_FALSE(cached1->proof_valid());
     EXPECT_TRUE(cached1->source_address_token().empty());
 
@@ -1138,9 +1136,9 @@ TEST_P(QuicStreamFactoryTest, CryptoConfigWhenProofIsInvalid) {
     cached1->SetProofInvalid();
 
     HostPortPair host_port_pair2(r4_host_name, 80);
-    QuicSessionKey server_key2(host_port_pair2, is_https_, privacy_mode_);
+    QuicServerId server_id2(host_port_pair2, is_https_, privacy_mode_);
     QuicCryptoClientConfig::CachedState* cached2 =
-        crypto_config->LookupOrCreate(server_key2);
+        crypto_config->LookupOrCreate(server_id2);
     EXPECT_NE(cached1->source_address_token(), cached2->source_address_token());
     EXPECT_TRUE(cached2->source_address_token().empty());
     EXPECT_FALSE(cached2->proof_valid());

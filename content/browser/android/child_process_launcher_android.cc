@@ -81,6 +81,7 @@ static void OnChildProcessStarted(JNIEnv*,
 
 void StartChildProcess(
     const CommandLine::StringVector& argv,
+    int child_process_id,
     const std::vector<content::FileDescriptorInfo>& files_to_register,
     const StartChildProcessCallback& callback) {
   JNIEnv* env = AttachCurrentThread();
@@ -119,6 +120,7 @@ void StartChildProcess(
   Java_ChildProcessLauncher_start(env,
       base::android::GetApplicationContext(),
       j_argv.obj(),
+      child_process_id,
       j_file_ids.obj(),
       j_file_fds.obj(),
       j_file_auto_close.obj(),
@@ -138,6 +140,14 @@ bool IsChildProcessOomProtected(base::ProcessHandle handle) {
       static_cast<jint>(handle));
 }
 
+void SetChildProcessInForeground(base::ProcessHandle handle,
+    bool in_foreground) {
+  JNIEnv* env = AttachCurrentThread();
+  DCHECK(env);
+  return Java_ChildProcessLauncher_setInForeground(env,
+      static_cast<jint>(handle), static_cast<jboolean>(in_foreground));
+}
+
 void EstablishSurfacePeer(
     JNIEnv* env, jclass clazz,
     jint pid, jobject surface, jint primary_id, jint secondary_id) {
@@ -151,12 +161,33 @@ void EstablishSurfacePeer(
       &SetSurfacePeer, jsurface, pid, primary_id, secondary_id));
 }
 
-jobject GetViewSurface(JNIEnv* env, jclass clazz, jint surface_id) {
-  // This is a synchronous call from the GPU process and is expected to be
-  // handled on a binder thread. Handling this on the UI thread will lead
-  // to deadlocks.
-  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return CompositorImpl::GetSurface(surface_id);
+void RegisterViewSurface(int surface_id, jobject j_surface) {
+  JNIEnv* env = AttachCurrentThread();
+  DCHECK(env);
+  Java_ChildProcessLauncher_registerViewSurface(env, surface_id, j_surface);
+}
+
+void UnregisterViewSurface(int surface_id) {
+  JNIEnv* env = AttachCurrentThread();
+  DCHECK(env);
+  Java_ChildProcessLauncher_unregisterViewSurface(env, surface_id);
+}
+
+void RegisterChildProcessSurfaceTexture(int surface_texture_id,
+                                        int child_process_id,
+                                        jobject j_surface_texture) {
+  JNIEnv* env = AttachCurrentThread();
+  DCHECK(env);
+  Java_ChildProcessLauncher_registerSurfaceTexture(
+      env, surface_texture_id, child_process_id, j_surface_texture);
+}
+
+void UnregisterChildProcessSurfaceTexture(int surface_texture_id,
+                                          int child_process_id) {
+  JNIEnv* env = AttachCurrentThread();
+  DCHECK(env);
+  Java_ChildProcessLauncher_unregisterSurfaceTexture(
+      env, surface_texture_id, child_process_id);
 }
 
 jboolean IsSingleProcess(JNIEnv* env, jclass clazz) {

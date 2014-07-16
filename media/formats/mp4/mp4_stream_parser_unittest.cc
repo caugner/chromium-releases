@@ -58,11 +58,10 @@ class MP4StreamParserTest : public testing::Test {
     return true;
   }
 
-  void InitF(bool init_ok,
-             base::TimeDelta duration,
-             bool auto_update_timestamp_offset) {
-    DVLOG(1) << "InitF: ok=" << init_ok << ", dur=" << duration.InMilliseconds()
-             << ", autoTimestampOffset=" << auto_update_timestamp_offset;
+  void InitF(bool init_ok, const StreamParser::InitParameters& params) {
+    DVLOG(1) << "InitF: ok=" << init_ok
+             << ", dur=" << params.duration.InMilliseconds()
+             << ", autoTimestampOffset=" << params.auto_update_timestamp_offset;
   }
 
   bool NewConfigF(const AudioDecoderConfig& ac,
@@ -204,6 +203,23 @@ TEST_F(MP4StreamParserTest, NoMoovAfterFlush) {
   EXPECT_TRUE(AppendDataInPieces(buffer->data() + kFirstMoofOffset,
                                  buffer->data_size() - kFirstMoofOffset,
                                  512));
+}
+
+// Test an invalid file where there are encrypted samples, but
+// SampleAuxiliaryInformation{Sizes|Offsets}Box (saiz|saio) are missing.
+// The parser should fail instead of crash. See http://crbug.com/361347
+TEST_F(MP4StreamParserTest, MissingSampleAuxInfo) {
+  InitializeParser();
+
+  scoped_refptr<DecoderBuffer> buffer =
+      ReadTestDataFile("bear-1280x720-a_frag-cenc_missing-saiz-saio.mp4");
+  EXPECT_FALSE(AppendDataInPieces(buffer->data(), buffer->data_size(), 512));
+}
+
+// Test a file where all video samples start with an Access Unit
+// Delimiter (AUD) NALU.
+TEST_F(MP4StreamParserTest, VideoSamplesStartWithAUDs) {
+  ParseMP4File("bear-1280x720-av_with-aud-nalus_frag.mp4", 512);
 }
 
 // TODO(strobe): Create and test media which uses CENC auxiliary info stored

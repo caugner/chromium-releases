@@ -17,9 +17,12 @@ import android.webkit.GeolocationPermissions;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 
+import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.WebContentsObserverAndroid;
 import org.chromium.net.NetError;
+
+import java.security.Principal;
 
 /**
  * Base-class that an AwContents embedder derives from to receive callbacks.
@@ -165,6 +168,12 @@ public abstract class AwContentsClient {
 
     public abstract void onReceivedSslError(ValueCallback<Boolean> callback, SslError error);
 
+    // TODO(sgurun): Make abstract once this has rolled in downstream.
+    public void onReceivedClientCertRequest(
+            final AwContentsClientBridge.ClientCertificateRequestCallback callback,
+            final String[] keyTypes, final Principal[] principals, final String host,
+            final int port) { }
+
     public abstract void onReceivedLoginRequest(String realm, String account, String args);
 
     public abstract void onFormResubmission(Message dontResend, Message resend);
@@ -180,6 +189,13 @@ public abstract class AwContentsClient {
             GeolocationPermissions.Callback callback);
 
     public abstract void onGeolocationPermissionsHidePrompt();
+
+    // TODO(michaelbai): Change the abstract once merged
+    public /*abstract*/ void onPermissionRequest(AwPermissionRequest awPermissionRequest) {}
+
+    // TODO(michaelbai): Change the abstract once merged
+    public /*abstract*/ void onPermissionRequestCanceled(
+            AwPermissionRequest awPermissionRequest) {}
 
     public abstract void onScaleChangedScaled(float oldScale, float newScale);
 

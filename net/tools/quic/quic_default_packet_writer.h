@@ -30,9 +30,13 @@ class QuicDefaultPacketWriter : public QuicPacketWriter {
   virtual bool IsWriteBlocked() const OVERRIDE;
   virtual void SetWritable() OVERRIDE;
 
+  void set_fd(int fd) { fd_ = fd; }
+
  private:
   int fd_;
   bool write_blocked_;
+
+  DISALLOW_COPY_AND_ASSIGN(QuicDefaultPacketWriter);
 };
 
 }  // namespace tools

@@ -9,7 +9,10 @@
   'targets': [
     {
       # The full library, which PNaCl uses for offline .pexe -> .nexe.
-      'target_name': 'pnacl_irt_shim_aot',
+      # We keep the target names in this file short to avoid having really long
+      # path names on Windows.
+      # https://code.google.com/p/nativeclient/issues/detail?id=3846
+      'target_name': 'shim_aot',
       'type': 'none',
       'variables': {
         'nlib_target': 'libpnacl_irt_shim.a',
@@ -17,6 +20,7 @@
         'out_pnacl_newlib_x86_32': '>(tc_lib_dir_pnacl_translate)/lib-x86-32/>(nlib_target)',
         'out_pnacl_newlib_x86_64': '>(tc_lib_dir_pnacl_translate)/lib-x86-64/>(nlib_target)',
         'out_pnacl_newlib_mips': '>(tc_lib_dir_pnacl_translate)/lib-mips32/>(nlib_target)',
+        'out_pnacl_newlib_x86_32_nonsfi': '>(tc_lib_dir_pnacl_translate)/lib-x86-32-nonsfi/>(nlib_target)',
         'build_glibc': 0,
         'build_newlib': 0,
         'build_pnacl_newlib': 1,
@@ -25,6 +29,7 @@
         'enable_x86_64': 1,
         'enable_arm': 1,
         'enable_mips': 1,
+        'enable_x86_32_nonsfi': 1,
         'sources': [
           'irt_shim_ppapi.c',
           'pnacl_shim.c',
@@ -48,10 +53,10 @@
     # If we ever change that hook interface or change the in-IRT shim's ABI,
     # we would need to clear the translation cache to match the new IRT.
     {
-      'target_name': 'pnacl_irt_shim_browser',
+      'target_name': 'shim_browser',
       'type': 'none',
       'variables': {
-        # Same name as pnacl_irt_shim_aot, so that we don't need to change
+        # Same output file name as shim_aot, so that we don't need to change
         # the linker commandlines, but output to the "for_browser" directory,
         # and have the pnacl_support_extension copy from that directory.
         'nlib_target': 'libpnacl_irt_shim.a',
@@ -83,7 +88,7 @@
       # Second half of shim library for PNaCl in-browser translation.
       # This half goes into the IRT and is returned by the unstable
       # IRT hook interface.
-      'target_name': 'pnacl_irt_shim_for_irt',
+      'target_name': 'shim_for_irt',
       'type': 'none',
       'variables': {
         'nlib_target': 'libpnacl_irt_shim_for_irt.a',

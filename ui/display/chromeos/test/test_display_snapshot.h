@@ -5,7 +5,8 @@
 #ifndef UI_DISPLAY_CHROMEOS_TEST_TEST_DISPLAY_SNAPSHOT_H_
 #define UI_DISPLAY_CHROMEOS_TEST_TEST_DISPLAY_SNAPSHOT_H_
 
-#include "ui/display/chromeos/display_snapshot.h"
+#include "ui/display/display_export.h"
+#include "ui/display/types/chromeos/display_snapshot.h"
 
 namespace ui {
 
@@ -16,14 +17,14 @@ class DISPLAY_EXPORT TestDisplaySnapshot : public DisplaySnapshot {
                       bool has_proper_display_id,
                       const gfx::Point& origin,
                       const gfx::Size& physical_size,
-                      OutputType type,
+                      DisplayConnectionType type,
                       bool is_aspect_preserving_scaling,
                       const std::vector<const DisplayMode*>& modes,
                       const DisplayMode* current_mode,
                       const DisplayMode* native_mode);
   virtual ~TestDisplaySnapshot();
 
-  void set_type(OutputType type) { type_ = type; }
+  void set_type(DisplayConnectionType type) { type_ = type; }
   void set_modes(const std::vector<const DisplayMode*>& modes) {
     modes_ = modes;
   }
@@ -38,8 +39,6 @@ class DISPLAY_EXPORT TestDisplaySnapshot : public DisplaySnapshot {
   }
 
   // DisplaySnapshot overrides:
-  virtual std::string GetDisplayName() OVERRIDE;
-  virtual bool GetOverscanFlag() OVERRIDE;
   virtual std::string ToString() const OVERRIDE;
 
  private:

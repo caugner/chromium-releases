@@ -13,9 +13,11 @@
 namespace chromeos {
 
 class AppLaunchSplashScreenActor;
+class CoreOobeActor;
 class EnrollmentScreenActor;
 class ErrorScreenActor;
 class EulaScreenActor;
+class HIDDetectionScreenActor;
 class KioskAutolaunchScreenActor;
 class KioskEnableScreenActor;
 class NetworkScreenActor;
@@ -34,7 +36,8 @@ class LocallyManagedUserCreationScreenHandler;
 class OobeDisplay {
  public:
   enum Screen {
-    SCREEN_OOBE_NETWORK = 0,
+    SCREEN_OOBE_HID_DETECTION = 0,
+    SCREEN_OOBE_NETWORK,
     SCREEN_OOBE_EULA,
     SCREEN_OOBE_UPDATE,
     SCREEN_OOBE_ENROLLMENT,
@@ -67,6 +70,7 @@ class OobeDisplay {
 
   // Pointers to actors which should be used by the specific screens. Actors
   // must be owned by the OobeDisplay implementation.
+  virtual CoreOobeActor* GetCoreOobeActor() = 0;
   virtual UpdateScreenActor* GetUpdateScreenActor() = 0;
   virtual NetworkScreenActor* GetNetworkScreenActor() = 0;
   virtual EulaScreenActor* GetEulaScreenActor() = 0;
@@ -78,6 +82,7 @@ class OobeDisplay {
   virtual UserImageScreenActor* GetUserImageScreenActor() = 0;
   virtual ErrorScreenActor* GetErrorScreenActor() = 0;
   virtual WrongHWIDScreenActor* GetWrongHWIDScreenActor() = 0;
+  virtual HIDDetectionScreenActor* GetHIDDetectionScreenActor() = 0;
   virtual LocallyManagedUserCreationScreenHandler*
       GetLocallyManagedUserCreationScreenActor() = 0;
   virtual AppLaunchSplashScreenActor* GetAppLaunchSplashScreenActor() = 0;

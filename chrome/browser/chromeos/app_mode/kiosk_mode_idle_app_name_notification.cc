@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_mode_idle_app_name_notification.h"
 
 #include "ash/shell.h"
-#include "ash/wm/user_activity_detector.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
@@ -16,6 +15,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "extensions/browser/extension_system.h"
+#include "ui/wm/core/user_activity_detector.h"
 
 namespace chromeos {
 
@@ -89,7 +89,7 @@ void KioskModeIdleAppNameNotification::OnUserActivity(const ui::Event* event) {
   ResetTimer();
 }
 
-void KioskModeIdleAppNameNotification::SystemResumed(
+void KioskModeIdleAppNameNotification::SuspendDone(
     const base::TimeDelta& sleep_duration) {
   // When we come back from a system resume we stop the timer and show the
   // message.

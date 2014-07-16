@@ -20,6 +20,7 @@
 #include "mojo/system/message_pipe.h"
 #include "mojo/system/message_pipe_dispatcher.h"
 #include "mojo/system/proxy_message_pipe_endpoint.h"
+#include "mojo/system/raw_channel.h"
 #include "mojo/system/test_utils.h"
 #include "mojo/system/waiter.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -109,7 +110,7 @@ class RemoteMessagePipeTest : public testing::Test {
 
     channels_[channel_index] = new Channel();
     CHECK(channels_[channel_index]->Init(
-        platform_handles_[channel_index].Pass()));
+        RawChannel::Create(platform_handles_[channel_index].Pass())));
   }
 
   void ConnectMessagePipesOnIOThread(scoped_refptr<MessagePipe> mp0,
@@ -126,8 +127,8 @@ class RemoteMessagePipeTest : public testing::Test {
     MessageInTransit::EndpointId local_id1 =
         channels_[1]->AttachMessagePipeEndpoint(mp1, 0);
 
-    channels_[0]->RunMessagePipeEndpoint(local_id0, local_id1);
-    channels_[1]->RunMessagePipeEndpoint(local_id1, local_id0);
+    CHECK(channels_[0]->RunMessagePipeEndpoint(local_id0, local_id1));
+    CHECK(channels_[1]->RunMessagePipeEndpoint(local_id1, local_id0));
   }
 
   void BootstrapMessagePipeOnIOThread(unsigned channel_index,
@@ -137,12 +138,15 @@ class RemoteMessagePipeTest : public testing::Test {
 
     unsigned port = channel_index ^ 1u;
 
-    // Important: If we don't boot
     CreateAndInitChannel(channel_index);
-    CHECK_EQ(channels_[channel_index]->AttachMessagePipeEndpoint(mp, port),
-             Channel::kBootstrapEndpointId);
-    channels_[channel_index]->RunMessagePipeEndpoint(
-        Channel::kBootstrapEndpointId, Channel::kBootstrapEndpointId);
+    MessageInTransit::EndpointId endpoint_id =
+        channels_[channel_index]->AttachMessagePipeEndpoint(mp, port);
+    if (endpoint_id == MessageInTransit::kInvalidEndpointId)
+      return;
+
+    CHECK_EQ(endpoint_id, Channel::kBootstrapEndpointId);
+    CHECK(channels_[channel_index]->RunMessagePipeEndpoint(
+        Channel::kBootstrapEndpointId, Channel::kBootstrapEndpointId));
   }
 
   void RestoreInitialStateOnIOThread() {
@@ -365,6 +369,11 @@ TEST_F(RemoteMessagePipeTest, Multiplex) {
                              MOJO_READ_MESSAGE_FLAG_NONE));
   EXPECT_EQ(sizeof(world), static_cast<size_t>(buffer_size));
   EXPECT_STREQ(world, buffer);
+
+  mp0->Close(0);
+  mp1->Close(1);
+  mp2->Close(0);
+  mp3->Close(1);
 }
 
 TEST_F(RemoteMessagePipeTest, CloseBeforeConnect) {
@@ -474,7 +483,7 @@ TEST_F(RemoteMessagePipeTest, HandlePassing) {
   // Read from MP 1, port 1.
   char read_buffer[100] = { 0 };
   uint32_t read_buffer_size = static_cast<uint32_t>(sizeof(read_buffer));
-  std::vector<scoped_refptr<Dispatcher> > read_dispatchers;
+  DispatcherVector read_dispatchers;
   uint32_t read_num_dispatchers = 10;  // Maximum to get.
   EXPECT_EQ(MOJO_RESULT_OK,
             mp1->ReadMessage(1, read_buffer, &read_buffer_size,
@@ -555,7 +564,8 @@ TEST_F(RemoteMessagePipeTest, HandlePassing) {
 TEST_F(RemoteMessagePipeTest, RacingClosesStress) {
   base::TimeDelta delay = base::TimeDelta::FromMilliseconds(5);
 
-  for (unsigned i = 0u; i < 256u; i++) {
+  for (unsigned i = 0; i < 256; i++) {
+    DVLOG(2) << "---------------------------------------- " << i;
     scoped_refptr<MessagePipe> mp0(new MessagePipe(
         scoped_ptr<MessagePipeEndpoint>(new LocalMessagePipeEndpoint()),
         scoped_ptr<MessagePipeEndpoint>(new ProxyMessagePipeEndpoint())));

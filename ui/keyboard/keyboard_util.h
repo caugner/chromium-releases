@@ -38,9 +38,21 @@ enum KeyboardControlEvent {
   KEYBOARD_CONTROL_MAX,
 };
 
+// An enumeration of keyboard overscroll override value.
+enum KeyboardOverscrolOverride {
+  KEYBOARD_OVERSCROLL_OVERRIDE_DISABLED = 0,
+  KEYBOARD_OVERSCROLL_OVERRIDE_ENABLED,
+  KEYBOARD_OVERSCROLL_OVERRIDE_NONE,
+};
+
 // Gets the default keyboard bounds from |window_bounds|.
 KEYBOARD_EXPORT gfx::Rect DefaultKeyboardBoundsFromWindowBounds(
     const gfx::Rect& window_bounds);
+
+// Gets the caculated keyboard bounds from |window_bounds|. The keyboard height
+// is specified by |keyboard_height|.
+KEYBOARD_EXPORT gfx::Rect KeyboardBoundsFromWindowBounds(
+    const gfx::Rect& window_bounds, int keyboard_height);
 
 // Sets the state of the a11y onscreen keyboard.
 KEYBOARD_EXPORT void SetAccessibilityKeyboardEnabled(bool enabled);
@@ -62,6 +74,13 @@ KEYBOARD_EXPORT bool IsKeyboardEnabled();
 
 // Returns true if the keyboard usability test is enabled.
 KEYBOARD_EXPORT bool IsKeyboardUsabilityExperimentEnabled();
+
+// Returns true if keyboard overscroll mode is enabled.
+KEYBOARD_EXPORT bool IsKeyboardOverscrollEnabled();
+
+// Sets temporary keyboard overscroll override.
+KEYBOARD_EXPORT void SetKeyboardOverscrollOverride(
+    KeyboardOverscrolOverride override);
 
 // Returns true if an IME extension can specify a custom input view for the
 // virtual keyboard window.

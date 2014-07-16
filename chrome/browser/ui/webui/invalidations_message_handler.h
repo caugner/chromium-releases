@@ -9,7 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
-#include "chrome/browser/invalidation/invalidation_logger_observer.h"
+#include "components/invalidation/invalidation_logger_observer.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "sync/notifier/invalidation_util.h"
 
@@ -34,10 +34,11 @@ class InvalidationsMessageHandler
   // Implementation of InvalidationLoggerObserver.
   virtual void OnRegistrationChange(
       const std::multiset<std::string>& registered_handlers) OVERRIDE;
-  virtual void OnStateChange(const syncer::InvalidatorState& new_state)
+  virtual void OnStateChange(const syncer::InvalidatorState& new_state,
+                             const base::Time& last_change_timestamp)
       OVERRIDE;
   virtual void OnUpdateIds(const std::string& handler_name,
-                           const syncer::ObjectIdSet& ids_set) OVERRIDE;
+                           const syncer::ObjectIdCountMap& ids_set) OVERRIDE;
   virtual void OnDebugMessage(const base::DictionaryValue& details) OVERRIDE;
   virtual void OnInvalidation(
       const syncer::ObjectIdInvalidationMap& new_invalidations) OVERRIDE;

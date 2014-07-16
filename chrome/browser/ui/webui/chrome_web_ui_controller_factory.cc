@@ -12,7 +12,6 @@
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -38,7 +37,6 @@
 #include "chrome/browser/ui/webui/invalidations_ui.h"
 #include "chrome/browser/ui/webui/memory_internals/memory_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
-#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/webui/password_manager_internals/password_manager_internals_ui.h"
@@ -58,18 +56,22 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/profile_management_switches.h"
 #include "chrome/common/url_constants.h"
 #include "components/dom_distiller/core/dom_distiller_constants.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/dom_distiller/webui/dom_distiller_ui.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_utils.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/feature_switch.h"
+#include "extensions/common/manifest.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
 #include "url/gurl.h"
@@ -93,6 +95,7 @@
 #if defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/welcome_ui_android.h"
 #else
+#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/suggestions_internals/suggestions_internals_ui.h"
 #include "chrome/browser/ui/webui/sync_file_system_internals/sync_file_system_internals_ui.h"
 #include "chrome/browser/ui/webui/system_info_ui.h"
@@ -120,6 +123,7 @@
 #include "chrome/browser/ui/webui/chromeos/power_ui.h"
 #include "chrome/browser/ui/webui/chromeos/proxy_settings_ui.h"
 #include "chrome/browser/ui/webui/chromeos/salsa_ui.h"
+#include "chrome/browser/ui/webui/chromeos/set_time_ui.h"
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_trace_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_ui.h"
@@ -209,8 +213,16 @@ WebUIController* NewWebUI<dom_distiller::DomDistillerUi>(WebUI* web_ui,
 // Only create ExtensionWebUI for URLs that are allowed extension bindings,
 // hosted by actual tabs.
 bool NeedsExtensionWebUI(Profile* profile, const GURL& url) {
-  ExtensionService* service = profile ? profile->GetExtensionService() : NULL;
-  return service && service->ExtensionBindingsAllowed(url);
+  if (!profile)
+    return false;
+
+  const extensions::Extension* extension =
+      extensions::ExtensionRegistry::Get(profile)->enabled_extensions().
+          GetExtensionOrAppByURL(url);
+  // Allow bindings for all packaged extensions and component hosted apps.
+  return extension &&
+      (!extension->is_hosted_app() ||
+       extension->location() == extensions::Manifest::COMPONENT);
 }
 
 // Returns a function that can be used to create the right type of WebUI for a
@@ -287,7 +299,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<OmniboxUI>;
   if (url.host() == chrome::kChromeUIPasswordManagerInternalsHost &&
       CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnablePasswordManagerInternalsUI)) {
+          password_manager::switches::kEnablePasswordManagerInternalsUI)) {
     return &NewWebUI<PasswordManagerInternalsUI>;
   }
   if (url.host() == chrome::kChromeUIPredictorsHost)
@@ -326,7 +338,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #else
   // AppLauncherPage is not needed on Android.
   if (url.host() == chrome::kChromeUIAppLauncherPageHost &&
-      profile && profile->GetExtensionService()) {
+      profile && extensions::ExtensionSystem::Get(profile)->
+          extension_service()) {
     return &NewWebUI<AppLauncherPageUI>;
   }
   // Bookmarks are part of NTP on Android.
@@ -418,6 +431,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::ProxySettingsUI>;
   if (url.host() == chrome::kChromeUISalsaHost)
     return &NewWebUI<SalsaUI>;
+  if (url.host() == chrome::kChromeUISetTimeHost)
+    return &NewWebUI<chromeos::SetTimeUI>;
   if (url.host() == chrome::kChromeUISimUnlockHost)
     return &NewWebUI<chromeos::SimUnlockUI>;
   if (url.host() == chrome::kChromeUISlowHost)
@@ -508,7 +523,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 
 void RunFaviconCallbackAsync(
     const FaviconService::FaviconResultsCallback& callback,
-    const std::vector<chrome::FaviconBitmapResult>* results) {
+    const std::vector<favicon_base::FaviconBitmapResult>* results) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
       base::Bind(&FaviconService::FaviconResultsCallbackRunner,
@@ -567,23 +582,23 @@ void ChromeWebUIControllerFactory::GetFaviconForURL(
 #if defined(ENABLE_EXTENSIONS)
     ExtensionWebUI::GetFaviconForURL(profile, url, callback);
 #else
-    RunFaviconCallbackAsync(callback,
-                            new std::vector<chrome::FaviconBitmapResult>());
+    RunFaviconCallbackAsync(
+        callback, new std::vector<favicon_base::FaviconBitmapResult>());
 #endif
     return;
   }
 
-  std::vector<chrome::FaviconBitmapResult>* favicon_bitmap_results =
-      new std::vector<chrome::FaviconBitmapResult>();
+  std::vector<favicon_base::FaviconBitmapResult>* favicon_bitmap_results =
+      new std::vector<favicon_base::FaviconBitmapResult>();
 
   for (size_t i = 0; i < scale_factors.size(); ++i) {
     scoped_refptr<base::RefCountedMemory> bitmap(GetFaviconResourceBytes(
           url, scale_factors[i]));
     if (bitmap.get() && bitmap->size()) {
-      chrome::FaviconBitmapResult bitmap_result;
+      favicon_base::FaviconBitmapResult bitmap_result;
       bitmap_result.bitmap_data = bitmap;
       // Leave |bitmap_result|'s icon URL as the default of GURL().
-      bitmap_result.icon_type = chrome::FAVICON;
+      bitmap_result.icon_type = favicon_base::FAVICON;
       favicon_bitmap_results->push_back(bitmap_result);
 
       // Assume that |bitmap| is |gfx::kFaviconSize| x |gfx::kFaviconSize|

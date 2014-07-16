@@ -29,7 +29,6 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -39,11 +38,13 @@
 #include "chrome/common/extensions/api/managed_mode_private/managed_mode_handler.h"
 #include "chrome/common/pref_names.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension_set.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -57,17 +58,13 @@
 #endif
 
 using base::DictionaryValue;
+using base::UserMetricsAction;
 using content::BrowserThread;
 
 const char kManagedUserAccessRequestKeyPrefix[] =
     "X-ManagedUser-AccessRequests";
 const char kManagedUserAccessRequestTime[] = "timestamp";
 const char kManagedUserName[] = "name";
-const char kOpenManagedProfileKeyPrefix[] = "X-ManagedUser-Events-OpenProfile";
-const char kQuitBrowserKeyPrefix[] = "X-ManagedUser-Events-QuitBrowser";
-const char kSwitchFromManagedProfileKeyPrefix[] =
-    "X-ManagedUser-Events-SwitchProfile";
-const char kEventTimestamp[] = "timestamp";
 
 // Key for the notification setting of the custodian. This is a shared setting
 // so we can include the setting in the access request data that is used to
@@ -153,7 +150,7 @@ ManagedUserService::~ManagedUserService() {
 void ManagedUserService::Shutdown() {
   did_shutdown_ = true;
   if (ProfileIsManaged()) {
-    RecordProfileAndBrowserEventsHelper(kQuitBrowserKeyPrefix);
+    content::RecordAction(UserMetricsAction("ManagedUsers_QuitBrowser"));
 #if !defined(OS_ANDROID)
     // TODO(bauerb): Get rid of the platform-specific #ifdef here.
     // http://crbug.com/313377
@@ -349,7 +346,7 @@ void ManagedUserService::Observe(int type,
                           const content::NotificationSource& source,
                           const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_LOADED: {
+    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED: {
       const extensions::Extension* extension =
           content::Details<extensions::Extension>(details).ptr();
       if (!extensions::ManagedModeInfo::GetContentPackSiteList(
@@ -472,7 +469,8 @@ void ManagedUserService::AddAccessRequest(const GURL& url) {
   // TODO(sergiu): Use sane time here when it's ready.
   dict->SetDouble(kManagedUserAccessRequestTime, base::Time::Now().ToJsTime());
 
-  dict->SetString(kManagedUserName, profile_->GetProfileName());
+  dict->SetString(kManagedUserName,
+                  profile_->GetPrefs()->GetString(prefs::kProfileName));
 
   // Copy the notification setting of the custodian.
   std::string managed_user_id =
@@ -481,7 +479,10 @@ void ManagedUserService::AddAccessRequest(const GURL& url) {
       ManagedUserSharedSettingsServiceFactory::GetForBrowserContext(profile_)
           ->GetValue(managed_user_id, kNotificationSetting);
   bool notifications_enabled = false;
-  if (value) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableAccessRequestNotifications)) {
+    notifications_enabled = true;
+  } else if (value) {
     bool success = value->GetAsBoolean(&notifications_enabled);
     DCHECK(success);
   }
@@ -575,7 +576,8 @@ void ManagedUserService::Init() {
   if (management_policy)
     extension_system->management_policy()->RegisterProvider(this);
 
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile_));
@@ -695,23 +697,9 @@ void ManagedUserService::UpdateManualURLs() {
 void ManagedUserService::OnBrowserSetLastActive(Browser* browser) {
   bool profile_became_active = profile_->IsSameProfile(browser->profile());
   if (!is_profile_active_ && profile_became_active)
-    RecordProfileAndBrowserEventsHelper(kOpenManagedProfileKeyPrefix);
+    content::RecordAction(UserMetricsAction("ManagedUsers_OpenProfile"));
   else if (is_profile_active_ && !profile_became_active)
-    RecordProfileAndBrowserEventsHelper(kSwitchFromManagedProfileKeyPrefix);
+    content::RecordAction(UserMetricsAction("ManagedUsers_SwitchProfile"));
 
   is_profile_active_ = profile_became_active;
-}
-
-void ManagedUserService::RecordProfileAndBrowserEventsHelper(
-    const char* key_prefix) {
-  std::string key = ManagedUserSettingsService::MakeSplitSettingKey(
-      key_prefix,
-      base::Int64ToString(base::TimeTicks::Now().ToInternalValue()));
-
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
-
-  // TODO(bauerb): Use sane time when ready.
-  dict->SetDouble(kEventTimestamp, base::Time::Now().ToJsTime());
-
-  GetSettingsService()->UploadItem(key, dict.PassAs<base::Value>());
 }

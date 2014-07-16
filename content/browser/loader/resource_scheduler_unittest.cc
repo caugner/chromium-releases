@@ -189,13 +189,15 @@ class ResourceSchedulerTest : public testing::Test {
   }
 
   void ChangeRequestPriority(TestRequest* request,
-                             net::RequestPriority new_priority) {
+                             net::RequestPriority new_priority,
+                             int intra_priority = 0) {
     scoped_refptr<FakeResourceMessageFilter> filter(
         new FakeResourceMessageFilter(kChildId));
     const ResourceRequestInfoImpl* info = ResourceRequestInfoImpl::ForRequest(
         request->url_request());
     const GlobalRequestID& id = info->GetGlobalRequestID();
-    ResourceHostMsg_DidChangePriority msg(id.request_id, new_priority);
+    ResourceHostMsg_DidChangePriority msg(id.request_id, new_priority,
+                                          intra_priority);
     bool ok = false;
     rdh_.OnMessageReceived(msg, filter.get(), &ok);
     EXPECT_TRUE(ok);
@@ -454,6 +456,28 @@ TEST_F(ResourceSchedulerTest, ReprioritizedRequestGoesToBackOfQueue) {
   EXPECT_FALSE(idle->started());
 }
 
+TEST_F(ResourceSchedulerTest, HigherIntraPriorityGoesToFrontOfQueue) {
+  // Dummies to enforce scheduling.
+  scoped_ptr<TestRequest> high(NewRequest("http://host/high", net::HIGHEST));
+  scoped_ptr<TestRequest> low(NewRequest("http://host/high", net::LOWEST));
+
+  const int kMaxNumDelayableRequestsPerClient = 10;  // Should match the .cc.
+  ScopedVector<TestRequest> lows;
+  for (int i = 0; i < kMaxNumDelayableRequestsPerClient; ++i) {
+    string url = "http://host/low" + base::IntToString(i);
+    lows.push_back(NewRequest(url.c_str(), net::IDLE));
+  }
+
+  scoped_ptr<TestRequest> request(NewRequest("http://host/req", net::IDLE));
+  EXPECT_FALSE(request->started());
+
+  ChangeRequestPriority(request.get(), net::IDLE, 1);
+  EXPECT_FALSE(request->started());
+
+  scheduler_.OnWillInsertBody(kChildId, kRouteId);
+  EXPECT_TRUE(request->started());
+}
+
 TEST_F(ResourceSchedulerTest, NonHTTPSchedulesImmediately) {
   // Dummies to enforce scheduling.
   scoped_ptr<TestRequest> high(NewRequest("http://host/high", net::HIGHEST));
@@ -476,6 +500,37 @@ TEST_F(ResourceSchedulerTest, SpdyProxySchedulesImmediately) {
 
   scoped_ptr<TestRequest> after(NewRequest("http://host/after", net::IDLE));
   EXPECT_TRUE(after->started());
+}
+
+TEST_F(ResourceSchedulerTest, NewSpdyHostInDelayableRequests) {
+  scheduler_.OnWillInsertBody(kChildId, kRouteId);
+  const int kMaxNumDelayableRequestsPerClient = 10;  // Should match the .cc.
+
+  scoped_ptr<TestRequest> low1_spdy(
+      NewRequest("http://spdyhost1:8080/low", net::LOWEST));
+  // Cancel a request after we learn the server supports SPDY.
+  ScopedVector<TestRequest> lows;
+  for (int i = 0; i < kMaxNumDelayableRequestsPerClient - 1; ++i) {
+    string url = "http://host" + base::IntToString(i) + "/low";
+    lows.push_back(NewRequest(url.c_str(), net::LOWEST));
+  }
+  scoped_ptr<TestRequest> low1(NewRequest("http://host/low", net::LOWEST));
+  EXPECT_FALSE(low1->started());
+  http_server_properties_.SetSupportsSpdy(
+      net::HostPortPair("spdyhost1", 8080), true);
+  low1_spdy.reset();
+  EXPECT_TRUE(low1->started());
+
+  low1.reset();
+  scoped_ptr<TestRequest> low2_spdy(
+      NewRequest("http://spdyhost2:8080/low", net::IDLE));
+  // Reprioritize a request after we learn the server supports SPDY.
+  EXPECT_TRUE(low2_spdy->started());
+  http_server_properties_.SetSupportsSpdy(
+      net::HostPortPair("spdyhost2", 8080), true);
+  ChangeRequestPriority(low2_spdy.get(), net::LOWEST);
+  scoped_ptr<TestRequest> low2(NewRequest("http://host/low", net::LOWEST));
+  EXPECT_TRUE(low2->started());
 }
 
 }  // unnamed namespace

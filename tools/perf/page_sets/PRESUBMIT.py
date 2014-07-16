@@ -118,9 +118,20 @@ def _VerifyFilesInCloud(input_api, output_api):
   return results
 
 
+def _IsNewJsonPageSet(affected_file):
+  return (affected_file.Action() == 'A' and
+          'page_sets/data/' not in affected_file.AbsoluteLocalPath()
+          and affected_file.AbsoluteLocalPath().endswith('.json'))
+
+
+def _GetNewJsonPageSets(input_api):
+  return input_api.AffectedFiles(file_filter=_IsNewJsonPageSet)
+
 def CheckChangeOnUpload(input_api, output_api):
-  return _SyncFilesToCloud(input_api, output_api)
+  results = _SyncFilesToCloud(input_api, output_api)
+  return results
 
 
 def CheckChangeOnCommit(input_api, output_api):
-  return _VerifyFilesInCloud(input_api, output_api)
+  results = _VerifyFilesInCloud(input_api, output_api)
+  return results

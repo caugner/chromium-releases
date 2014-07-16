@@ -16,6 +16,10 @@ namespace base {
 class ListValue;
 }
 
+namespace gfx {
+class Rect;
+}
+
 namespace chromeos {
 
 class HelpAppLauncher;
@@ -76,6 +80,10 @@ class CoreOobeHandler : public BaseScreenHandler,
   virtual void SetTpmPassword(const std::string& tmp_password) OVERRIDE;
   virtual void ClearErrors() OVERRIDE;
   virtual void ReloadContent(const base::DictionaryValue& dictionary) OVERRIDE;
+  virtual void ShowControlBar(bool show) OVERRIDE;
+  virtual void SetKeyboardState(bool shown, const gfx::Rect& bounds) OVERRIDE;
+  virtual void SetClientAreaSize(int width, int height) OVERRIDE;
+  virtual void ShowDeviceResetScreen() OVERRIDE;
 
   // Handlers for JS WebUI messages.
   void HandleEnableLargeCursor(bool enabled);
@@ -90,6 +98,8 @@ class CoreOobeHandler : public BaseScreenHandler,
   void HandleScreenAssetsLoaded(const std::string& screen_async_load_id);
   void HandleSkipToLoginForTesting(const base::ListValue* args);
   void HandleLaunchHelpApp(double help_topic_id);
+  void HandleToggleResetScreen();
+  void HandleHeaderBarVisible();
 
   // Updates a11y menu state based on the current a11y features state(on/off).
   void UpdateA11yState();
@@ -102,6 +112,12 @@ class CoreOobeHandler : public BaseScreenHandler,
 
   // Updates the device requisition string on the UI side.
   void UpdateDeviceRequisition();
+
+  // Updates virtual keyboard state.
+  void UpdateKeyboardState();
+
+  // Updates client area size based on the primary screen size.
+  void UpdateClientAreaSize();
 
   // Notification of a change in the accessibility settings.
   void OnAccessibilityStatusChanged(

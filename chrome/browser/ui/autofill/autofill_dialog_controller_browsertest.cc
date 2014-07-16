@@ -83,7 +83,9 @@ using testing::Return;
 using testing::_;
 using ::i18n::addressinput::AddressValidator;
 
-void MockCallback(const FormStructure*) {}
+void MockCallback(AutofillManagerDelegate::RequestAutocompleteResult,
+                  const base::string16& message,
+                  const FormStructure*) {}
 
 class MockAutofillMetrics : public AutofillMetrics {
  public:
@@ -352,6 +354,10 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
     field.autocomplete_attribute = "shipping tel";
     form.fields.push_back(field);
 
+    FormFieldData cc;
+    cc.autocomplete_attribute = "cc-number";
+    form.fields.push_back(cc);
+
     test_generated_bubble_controller_ =
         new testing::NiceMock<TestGeneratedCreditCardBubbleController>(
             GetActiveWebContents());
@@ -408,6 +414,11 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
           "<body>"
             "<form>" + form_inner_html + "</form>"
             "<script>"
+              "var invalidEvents = [];"
+              "function recordInvalid(e) {"
+                "if (e.type != 'invalid') throw 'only invalid events allowed';"
+                "invalidEvents.push(e);"
+              "}"
               "function send(msg) {"
                 "domAutomationController.setAutomationId(0);"
                 "domAutomationController.send(msg);"
@@ -419,6 +430,10 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
                 "send('success');"
               "};"
               "window.onclick = function() {"
+                "var inputs = document.forms[0].querySelectorAll('input');"
+                "for (var i = 0; i < inputs.length; ++i) {"
+                  "inputs[i].oninvalid = recordInvalid;"
+                "}"
                 "document.forms[0].requestAutocomplete();"
                 "send('clicked');"
               "};"
@@ -652,6 +667,8 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, CloseDuringSignin) {
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillInputFromAutofill) {
   AutofillProfile full_profile(test::GetFullProfile());
+  const base::string16 formatted_phone(ASCIIToUTF16("+1 (310) 555 1234"));
+  full_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, formatted_phone);
   controller()->GetTestingManager()->AddTestingProfile(&full_profile);
 
   // Select "Add new shipping address...".
@@ -674,8 +691,12 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillInputFromAutofill) {
   // All inputs should be filled.
   AutofillProfileWrapper wrapper(&full_profile);
   for (size_t i = 0; i < inputs.size(); ++i) {
-    EXPECT_EQ(wrapper.GetInfo(AutofillType(inputs[i].type)),
+    EXPECT_EQ(wrapper.GetInfoForDisplay(AutofillType(inputs[i].type)),
               view->GetTextContentsOfInput(inputs[i].type));
+
+    // Double check the correct formatting is used for the phone number.
+    if (inputs[i].type == PHONE_HOME_WHOLE_NUMBER)
+      EXPECT_EQ(formatted_phone, view->GetTextContentsOfInput(inputs[i].type));
   }
 
   // Now simulate some user edits and try again.
@@ -691,7 +712,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillInputFromAutofill) {
     // Empty inputs should be filled, others should be left alone.
     base::string16 expectation =
         inputs[i].type == triggering_type || users_input.empty() ?
-        wrapper.GetInfo(AutofillType(inputs[i].type)) :
+        wrapper.GetInfoForDisplay(AutofillType(inputs[i].type)) :
         users_input;
     expectations.push_back(expectation);
   }
@@ -747,7 +768,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
   AutofillProfileWrapper wrapper(
       &full_profile, AutofillType(NAME_BILLING_FULL), 1);
   for (size_t i = 0; i < inputs.size(); ++i) {
-    EXPECT_EQ(wrapper.GetInfo(AutofillType(inputs[i].type)),
+    EXPECT_EQ(wrapper.GetInfoForDisplay(AutofillType(inputs[i].type)),
               view->GetTextContentsOfInput(inputs[i].type));
   }
 
@@ -951,8 +972,8 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
 
   const CreditCard& credit_card = test::GetVerifiedCreditCard();
   ASSERT_TRUE(
-    credit_card.GetRawInfo(CREDIT_CARD_NAME).find(ASCIIToUTF16("zebra")) ==
-        base::string16::npos);
+      credit_card.GetRawInfo(CREDIT_CARD_NAME).find(ASCIIToUTF16("zebra")) ==
+          base::string16::npos);
   AddCreditcardToProfile(controller->profile(), credit_card);
   AddAutofillProfileToProfile(controller->profile(),
                               test::GetVerifiedProfile());
@@ -963,6 +984,18 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
   view->SetTextContentsOfSuggestionInput(SECTION_CC, ASCIIToUTF16("123"));
   view->SubmitForTesting();
   ExpectDomMessage("error: invalid");
+
+  int invalid_count = -1;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractInt(
+      GetRenderViewHost(), "send(invalidEvents.length);", &invalid_count));
+  EXPECT_EQ(1, invalid_count);
+
+  std::string invalid_type;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractString(
+      GetRenderViewHost(),
+      "send(invalidEvents[0].target.autocomplete);",
+      &invalid_type));
+  EXPECT_EQ("cc-name", invalid_type);
 }
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,

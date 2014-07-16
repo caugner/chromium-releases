@@ -24,18 +24,19 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/geolocation/simple_geolocation_provider.h"
 #include "chrome/browser/chromeos/login/enrollment/auto_enrollment_check_step.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
-#include "chrome/browser/chromeos/login/login_location_monitor.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/managed/locally_managed_user_creation_screen.h"
 #include "chrome/browser/chromeos/login/oobe_display.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
 #include "chrome/browser/chromeos/login/screens/eula_screen.h"
+#include "chrome/browser/chromeos/login/screens/hid_detection_screen.h"
 #include "chrome/browser/chromeos/login/screens/kiosk_autolaunch_screen.h"
 #include "chrome/browser/chromeos/login/screens/kiosk_enable_screen.h"
 #include "chrome/browser/chromeos/login/screens/network_screen.h"
@@ -60,6 +61,7 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/chromeos_constants.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/network/network_state.h"
@@ -69,7 +71,6 @@
 #include "components/breakpad/app/breakpad_linux.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/common/geoposition.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -84,6 +85,13 @@ static int kShowDelayMs = 400;
 
 // Total timezone resolving process timeout.
 const unsigned int kResolveTimeZoneTimeoutSeconds = 60;
+
+// Checks flag for HID-detection screen show.
+bool CanShowHIDDetectionScreen() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      chromeos::switches::kEnableHIDDetectionOnOOBE);
+}
+
 }  // namespace
 
 namespace chromeos {
@@ -104,6 +112,7 @@ const char WizardController::kLocallyManagedUserCreationScreenName[] =
   "locally-managed-user-creation-flow";
 const char WizardController::kAppLaunchSplashScreenName[] =
   "app-launch-splash";
+const char WizardController::kHIDDetectionScreenName[] = "hid-detection";
 
 // static
 const int WizardController::kMinAudibleOutputVolumePercent = 10;
@@ -142,7 +151,6 @@ WizardController::WizardController(chromeos::LoginDisplayHost* host,
       host_(host),
       oobe_display_(oobe_display),
       usage_statistics_reporting_(true),
-      skip_update_enroll_after_eula_(false),
       login_screen_started_(false),
       user_image_screen_return_to_previous_hack_(false),
       weak_factory_(this) {
@@ -158,7 +166,6 @@ WizardController::WizardController(chromeos::LoginDisplayHost* host,
 WizardController::~WizardController() {
   if (default_controller_ == this) {
     default_controller_ = NULL;
-    LoginLocationMonitor::RemoveLocationCallback();
   } else {
     NOTREACHED() << "More than one controller are alive.";
   }
@@ -303,9 +310,20 @@ chromeos::LocallyManagedUserCreationScreen*
   return locally_managed_user_creation_screen_.get();
 }
 
+chromeos::HIDDetectionScreen* WizardController::GetHIDDetectionScreen() {
+  if (!hid_detection_screen_.get()) {
+    hid_detection_screen_.reset(
+        new chromeos::HIDDetectionScreen(
+            this, oobe_display_->GetHIDDetectionScreenActor()));
+  }
+  return hid_detection_screen_.get();
+}
+
 void WizardController::ShowNetworkScreen() {
   VLOG(1) << "Showing network screen.";
-  SetStatusAreaVisible(false);
+  // Hide the status area initially; it only appears after OOBE first animates
+  // in. Keep it visible if the user goes back to the existing network screen.
+  SetStatusAreaVisible(network_screen_.get());
   SetCurrentScreen(GetNetworkScreen());
 }
 
@@ -369,11 +387,13 @@ void WizardController::ShowUserImageScreen() {
 
 void WizardController::ShowEulaScreen() {
   VLOG(1) << "Showing EULA screen.";
-  SetStatusAreaVisible(false);
+  SetStatusAreaVisible(true);
   SetCurrentScreen(GetEulaScreen());
 }
 
 void WizardController::ShowEnrollmentScreen() {
+  VLOG(1) << "Showing enrollment screen.";
+
   SetStatusAreaVisible(true);
 
   bool is_auto_enrollment = false;
@@ -443,12 +463,23 @@ void WizardController::ShowLocallyManagedUserCreationScreen() {
   SetCurrentScreen(screen);
 }
 
+void WizardController::ShowHIDDetectionScreen() {
+  VLOG(1) << "Showing HID discovery screen.";
+  SetStatusAreaVisible(true);
+  SetCurrentScreen(GetHIDDetectionScreen());
+}
+
 void WizardController::SkipToLoginForTesting(
     const LoginScreenContext& context) {
+  VLOG(1) << "SkipToLoginForTesting.";
   StartupUtils::MarkEulaAccepted();
   PerformPostEulaActions();
   PerformOOBECompletedActions();
-  ShowLoginScreen(context);
+  if (ShouldAutoStartEnrollment()) {
+    ShowEnrollmentScreen();
+  } else {
+    ShowLoginScreen(context);
+  }
 }
 
 void WizardController::AddObserver(Observer* observer) {
@@ -463,12 +494,12 @@ void WizardController::OnSessionStart() {
   FOR_EACH_OBSERVER(Observer, observer_list_, OnSessionStart());
 }
 
-void WizardController::SkipUpdateEnrollAfterEula() {
-  skip_update_enroll_after_eula_ = true;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // WizardController, ExitHandlers:
+void WizardController::OnHIDDetectionCompleted() {
+  ShowNetworkScreen();
+}
+
 void WizardController::OnNetworkConnected() {
   if (is_official_build_) {
     if (!StartupUtils::IsEulaAccepted()) {
@@ -515,13 +546,7 @@ void WizardController::OnEulaAccepted() {
 #endif
   }
 
-  if (skip_update_enroll_after_eula_) {
-    PerformPostEulaActions();
-    PerformOOBECompletedActions();
-    ShowEnrollmentScreen();
-  } else {
-    InitiateOOBEUpdate();
-  }
+  InitiateOOBEUpdate();
 }
 
 void WizardController::OnUpdateErrorCheckingForUpdate() {
@@ -584,10 +609,11 @@ void WizardController::OnEnrollmentDone() {
 }
 
 void WizardController::OnResetCanceled() {
-  if (previous_screen_)
+  if (previous_screen_) {
     SetCurrentScreen(previous_screen_);
-  else
+  } else {
     ShowLoginScreen(LoginScreenContext());
+  }
 }
 
 void WizardController::OnKioskAutolaunchCanceled() {
@@ -642,15 +668,24 @@ void WizardController::InitiateOOBEUpdate() {
   GetUpdateScreen()->StartNetworkCheck();
 }
 
-void WizardController::StartTimezoneResolve() const {
-  LoginLocationMonitor::InstallLocationCallback(
-      base::TimeDelta::FromSeconds(kResolveTimeZoneTimeoutSeconds));
+void WizardController::StartTimezoneResolve() {
+  geolocation_provider_.reset(new SimpleGeolocationProvider(
+      g_browser_process->system_request_context(),
+      SimpleGeolocationProvider::DefaultGeolocationProviderURL()));
+  geolocation_provider_->RequestGeolocation(
+      base::TimeDelta::FromSeconds(kResolveTimeZoneTimeoutSeconds),
+      base::Bind(&WizardController::OnLocationResolved,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void WizardController::PerformPostEulaActions() {
   DelayNetworkCall(
       base::Bind(&WizardController::StartTimezoneResolve,
                  weak_factory_.GetWeakPtr()),
+      base::TimeDelta::FromMilliseconds(kDefaultNetworkRetryDelayMS));
+  DelayNetworkCall(
+      ServicesCustomizationDocument::GetInstance()
+          ->EnsureCustomizationAppliedClosure(),
       base::TimeDelta::FromMilliseconds(kDefaultNetworkRetryDelayMS));
 
   // Now that EULA has been accepted (for official builds), enable portal check.
@@ -714,13 +749,6 @@ void WizardController::SetStatusAreaVisible(bool visible) {
   host_->SetStatusAreaVisible(visible);
 }
 
-void WizardController::AdvanceToScreenWithParams(
-    const std::string& screen_name,
-    base::DictionaryValue* screen_parameters) {
-  screen_parameters_.reset(screen_parameters);
-  AdvanceToScreen(screen_name);
-}
-
 void WizardController::AdvanceToScreen(const std::string& screen_name) {
   if (screen_name == kNetworkScreenName) {
     ShowNetworkScreen();
@@ -748,9 +776,14 @@ void WizardController::AdvanceToScreen(const std::string& screen_name) {
     ShowLocallyManagedUserCreationScreen();
   } else if (screen_name == kAppLaunchSplashScreenName) {
     AutoLaunchKioskApp();
+  } else if (screen_name == kHIDDetectionScreenName) {
+    ShowHIDDetectionScreen();
   } else if (screen_name != kTestNoScreenName) {
     if (is_out_of_box_) {
-      ShowNetworkScreen();
+      if (CanShowHIDDetectionScreen())
+        ShowHIDDetectionScreen();
+      else
+        ShowNetworkScreen();
     } else {
       ShowLoginScreen(LoginScreenContext());
     }
@@ -762,6 +795,9 @@ void WizardController::AdvanceToScreen(const std::string& screen_name) {
 void WizardController::OnExit(ExitCodes exit_code) {
   VLOG(1) << "Wizard screen exit code: " << exit_code;
   switch (exit_code) {
+    case HID_DETECTION_COMPLETED:
+      OnHIDDetectionCompleted();
+      break;
     case NETWORK_CONNECTED:
       OnNetworkConnected();
       break;
@@ -944,38 +980,6 @@ PrefService* WizardController::GetLocalState() {
   return g_browser_process->local_state();
 }
 
-// static
-void WizardController::OnLocationUpdated(const content::Geoposition& position,
-                                         const base::TimeDelta elapsed) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  const base::TimeDelta timeout =
-      base::TimeDelta::FromSeconds(kResolveTimeZoneTimeoutSeconds);
-  if (elapsed >= timeout) {
-    LOG(WARNING) << "Resolve TimeZone: got location after timeout ("
-                 << elapsed.InSecondsF() << " seconds elapsed). Ignored.";
-    return;
-  }
-
-  WizardController* self = default_controller();
-
-  if (self == NULL) {
-    LOG(WARNING) << "Resolve TimeZone: got location after WizardController "
-                 << "has finished. (" << elapsed.InSecondsF() << " seconds "
-                 << "elapsed). Ignored.";
-    return;
-  }
-
-  // WizardController owns TimezoneProvider, so timezone request is silently
-  // cancelled on destruction.
-  self->GetTimezoneProvider()->RequestTimezone(
-      position,
-      false,  // sensor
-      timeout - elapsed,
-      base::Bind(&WizardController::OnTimezoneResolved,
-                 base::Unretained(self)));
-}
-
 void WizardController::OnTimezoneResolved(
     scoped_ptr<TimeZoneResponseData> timezone,
     bool server_error) {
@@ -1022,6 +1026,33 @@ TimeZoneProvider* WizardController::GetTimezoneProvider() {
                              DefaultTimezoneProviderURL()));
   }
   return timezone_provider_.get();
+}
+
+void WizardController::OnLocationResolved(const Geoposition& position,
+                                          bool server_error,
+                                          const base::TimeDelta elapsed) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  const base::TimeDelta timeout =
+      base::TimeDelta::FromSeconds(kResolveTimeZoneTimeoutSeconds);
+  // Ignore invalid position.
+  if (!position.Valid())
+    return;
+
+  if (elapsed >= timeout) {
+    LOG(WARNING) << "Resolve TimeZone: got location after timeout ("
+                 << elapsed.InSecondsF() << " seconds elapsed). Ignored.";
+    return;
+  }
+
+  // WizardController owns TimezoneProvider, so timezone request is silently
+  // cancelled on destruction.
+  GetTimezoneProvider()->RequestTimezone(
+      position,
+      false,  // sensor
+      timeout - elapsed,
+      base::Bind(&WizardController::OnTimezoneResolved,
+                 base::Unretained(this)));
 }
 
 }  // namespace chromeos

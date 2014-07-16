@@ -16,7 +16,6 @@
 #include "ppapi/c/dev/ppb_file_chooser_dev.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
 #include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
-#include "ppapi/c/dev/ppb_graphics_2d_dev.h"
 #include "ppapi/c/dev/ppb_ime_input_event_dev.h"
 #include "ppapi/c/dev/ppb_memory_dev.h"
 #include "ppapi/c/dev/ppb_opengles2ext_dev.h"
@@ -32,7 +31,6 @@
 #include "ppapi/c/dev/ppb_view_dev.h"
 #include "ppapi/c/dev/ppb_widget_dev.h"
 #include "ppapi/c/dev/ppb_zoom_dev.h"
-#include "ppapi/c/extensions/dev/ppb_ext_socket_dev.h"
 #include "ppapi/c/ppb_audio.h"
 #include "ppapi/c/ppb_audio_buffer.h"
 #include "ppapi/c/ppb_audio_config.h"
@@ -114,26 +112,26 @@
 #endif
 
 bool IsSupportedPepperInterface(const char* name) {
-  // TODO(brettw) put these in a hash map for better performance.
-  #define PROXIED_IFACE(iface_str, iface_struct) \
-      if (strcmp(name, iface_str) == 0) \
-        return true;
+// TODO(brettw) put these in a hash map for better performance.
+#define PROXIED_IFACE(iface_str, iface_struct) \
+  if (strcmp(name, iface_str) == 0)            \
+    return true;
 
-  #include "ppapi/thunk/interfaces_ppb_private.h"
-  #include "ppapi/thunk/interfaces_ppb_private_flash.h"
-  #include "ppapi/thunk/interfaces_ppb_private_no_permissions.h"
-  #include "ppapi/thunk/interfaces_ppb_public_dev.h"
-  #include "ppapi/thunk/interfaces_ppb_public_dev_channel.h"
-  #include "ppapi/thunk/interfaces_ppb_public_stable.h"
+#include "ppapi/thunk/interfaces_ppb_private.h"
+#include "ppapi/thunk/interfaces_ppb_private_flash.h"
+#include "ppapi/thunk/interfaces_ppb_private_no_permissions.h"
+#include "ppapi/thunk/interfaces_ppb_public_dev.h"
+#include "ppapi/thunk/interfaces_ppb_public_dev_channel.h"
+#include "ppapi/thunk/interfaces_ppb_public_stable.h"
 
-  #undef PROXIED_IFACE
+#undef PROXIED_IFACE
 
-  #define LEGACY_IFACE(iface_str, dummy) \
-      if (strcmp(name, iface_str) == 0) \
-        return true;
+#define LEGACY_IFACE(iface_str, dummy) \
+  if (strcmp(name, iface_str) == 0)    \
+    return true;
 
-  #include "ppapi/thunk/interfaces_legacy.h"
+#include "ppapi/thunk/interfaces_legacy.h"
 
-  #undef LEGACY_IFACE
+#undef LEGACY_IFACE
   return false;
 }

@@ -15,6 +15,7 @@
 #include "chrome/browser/chromeos/drive/test_util.h"
 #include "chrome/browser/drive/event_logger.h"
 #include "chrome/browser/drive/fake_drive_service.h"
+#include "chrome/browser/drive/test_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/drive/test_util.h"
 
@@ -66,10 +67,7 @@ void OperationTestBase::SetUp() {
   logger_.reset(new EventLogger);
 
   fake_drive_service_.reset(new FakeDriveService);
-  fake_drive_service_->LoadResourceListForWapi(
-      "gdata/root_feed.json");
-  fake_drive_service_->LoadAccountMetadataForWapi(
-      "gdata/account_metadata.json");
+  ASSERT_TRUE(test_util::SetUpTestEntries(fake_drive_service_.get()));
 
   scheduler_.reset(new JobScheduler(
       pref_service_.get(),

@@ -4,6 +4,8 @@
 
 #include "media/cast/rtcp/rtcp_sender.h"
 
+#include <stdint.h>
+
 #include <algorithm>
 #include <vector>
 
@@ -21,37 +23,7 @@ namespace {
 
 // Max delta is 4095 milliseconds because we need to be able to encode it in
 // 12 bits.
-const int64 kMaxWireFormatTimeDeltaMs = GG_INT64_C(0xfff);
-
-// Converts a log event type to an integer value.
-// NOTE: We have only allocated 4 bits to represent the type of event over the
-// wire. Therefore, this function can only return values from 0 to 15.
-int ConvertEventTypeToWireFormat(const CastLoggingEvent& event) {
-  switch (event) {
-    case kAudioAckSent:
-      return 1;
-    case kAudioPlayoutDelay:
-      return 2;
-    case kAudioFrameDecoded:
-      return 3;
-    case kAudioPacketReceived:
-      return 4;
-    case kVideoAckSent:
-      return 5;
-    case kVideoFrameDecoded:
-      return 6;
-    case kVideoRenderDelay:
-      return 7;
-    case kVideoPacketReceived:
-      return 8;
-    case kDuplicateAudioPacketReceived:
-      return 9;
-    case kDuplicateVideoPacketReceived:
-      return 10;
-    default:
-      return 0;  // Not an interesting event.
-  }
-}
+const int64 kMaxWireFormatTimeDeltaMs = INT64_C(0xfff);
 
 uint16 MergeEventTypeAndTimestampForWireFormat(
     const CastLoggingEvent& event,
@@ -75,88 +47,31 @@ bool EventTimestampLessThan(const RtcpReceiverEventLogMessage& lhs,
   return lhs.event_timestamp < rhs.event_timestamp;
 }
 
-bool BuildRtcpReceiverLogMessage(
-    const ReceiverRtcpEventSubscriber::RtcpEventMultiMap& rtcp_events,
-    size_t start_size,
+void AddReceiverLog(
+    const RtcpReceiverLogMessage& redundancy_receiver_log_message,
     RtcpReceiverLogMessage* receiver_log_message,
+    size_t* remaining_space,
     size_t* number_of_frames,
-    size_t* total_number_of_messages_to_send,
-    size_t* rtcp_log_size) {
-  size_t remaining_space =
-      std::min(kMaxReceiverLogBytes, kMaxIpPacketSize - start_size);
-  if (remaining_space < kRtcpCastLogHeaderSize + kRtcpReceiverFrameLogSize +
-                            kRtcpReceiverEventLogSize) {
-    return false;
-  }
-
-  // We use this to do event timestamp sorting and truncating for events of
-  // a single frame.
-  std::vector<RtcpReceiverEventLogMessage> sorted_log_messages;
-
-  // Account for the RTCP header for an application-defined packet.
-  remaining_space -= kRtcpCastLogHeaderSize;
-
-  ReceiverRtcpEventSubscriber::RtcpEventMultiMap::const_reverse_iterator rit =
-      rtcp_events.rbegin();
-
-  while (rit != rtcp_events.rend() &&
-         remaining_space >=
+    size_t* total_number_of_messages_to_send) {
+  RtcpReceiverLogMessage::const_iterator it =
+      redundancy_receiver_log_message.begin();
+  while (it != redundancy_receiver_log_message.end() &&
+         *remaining_space >=
              kRtcpReceiverFrameLogSize + kRtcpReceiverEventLogSize) {
-    const RtpTimestamp rtp_timestamp = rit->first;
-    RtcpReceiverFrameLogMessage frame_log(rtp_timestamp);
-    remaining_space -= kRtcpReceiverFrameLogSize;
+    receiver_log_message->push_front(*it);
+    size_t num_event_logs = (*remaining_space - kRtcpReceiverFrameLogSize) /
+                            kRtcpReceiverEventLogSize;
+    RtcpReceiverEventLogMessages& event_log_messages =
+        receiver_log_message->front().event_log_messages_;
+    if (num_event_logs < event_log_messages.size())
+      event_log_messages.resize(num_event_logs);
+
+    *remaining_space -= kRtcpReceiverFrameLogSize +
+                        event_log_messages.size() * kRtcpReceiverEventLogSize;
     ++*number_of_frames;
-
-    // Get all events of a single frame.
-    sorted_log_messages.clear();
-    do {
-      RtcpReceiverEventLogMessage event_log_message;
-      event_log_message.type = rit->second.type;
-      event_log_message.event_timestamp = rit->second.timestamp;
-      event_log_message.delay_delta = rit->second.delay_delta;
-      event_log_message.packet_id = rit->second.packet_id;
-      sorted_log_messages.push_back(event_log_message);
-      ++rit;
-    } while (rit != rtcp_events.rend() && rit->first == rtp_timestamp);
-
-    std::sort(sorted_log_messages.begin(),
-              sorted_log_messages.end(),
-              &EventTimestampLessThan);
-
-    // From |sorted_log_messages|, only take events that are no greater than
-    // |kMaxWireFormatTimeDeltaMs| seconds away from the latest event. Events
-    // older than that cannot be encoded over the wire.
-    std::vector<RtcpReceiverEventLogMessage>::reverse_iterator sorted_rit =
-        sorted_log_messages.rbegin();
-    base::TimeTicks first_event_timestamp = sorted_rit->event_timestamp;
-    int events_in_frame = 0;
-    while (sorted_rit != sorted_log_messages.rend() &&
-           events_in_frame < kRtcpMaxReceiverLogMessages &&
-           remaining_space >= kRtcpReceiverEventLogSize) {
-      base::TimeDelta delta(first_event_timestamp -
-                            sorted_rit->event_timestamp);
-      if (delta.InMilliseconds() > kMaxWireFormatTimeDeltaMs)
-        break;
-      frame_log.event_log_messages_.push_front(*sorted_rit);
-      ++events_in_frame;
-      ++*total_number_of_messages_to_send;
-      remaining_space -= kRtcpReceiverEventLogSize;
-      ++sorted_rit;
-    }
-
-    receiver_log_message->push_front(frame_log);
+    *total_number_of_messages_to_send += event_log_messages.size();
+    ++it;
   }
-
-  *rtcp_log_size =
-      kRtcpCastLogHeaderSize + *number_of_frames * kRtcpReceiverFrameLogSize +
-      *total_number_of_messages_to_send * kRtcpReceiverEventLogSize;
-  DCHECK_GE(kMaxIpPacketSize, start_size + *rtcp_log_size)
-      << "Not enough buffer space.";
-
-  VLOG(3) << "number of frames: " << *number_of_frames;
-  VLOG(3) << "total messages to send: " << *total_number_of_messages_to_send;
-  VLOG(3) << "rtcp log size: " << *rtcp_log_size;
-  return *number_of_frames > 0;
 }
 
 // A class to build a string representing the NACK list in Cast message.
@@ -245,17 +160,12 @@ RtcpSender::RtcpSender(scoped_refptr<CastEnvironment> cast_environment,
 
 RtcpSender::~RtcpSender() {}
 
-// static
-bool RtcpSender::IsReceiverEvent(const CastLoggingEvent& event) {
-  return ConvertEventTypeToWireFormat(event) != 0;
-}
-
 void RtcpSender::SendRtcpFromRtpReceiver(
     uint32 packet_type_flags,
     const transport::RtcpReportBlock* report_block,
     const RtcpReceiverReferenceTimeReport* rrtr,
     const RtcpCastMessage* cast_message,
-    const ReceiverRtcpEventSubscriber* event_subscriber,
+    const ReceiverRtcpEventSubscriber::RtcpEventMultiMap* rtcp_events,
     uint16 target_delay_ms) {
   if (packet_type_flags & transport::kRtcpSr ||
       packet_type_flags & transport::kRtcpDlrr ||
@@ -269,35 +179,35 @@ void RtcpSender::SendRtcpFromRtpReceiver(
     // Implement these for webrtc interop.
     NOTIMPLEMENTED();
   }
-  Packet packet;
-  packet.reserve(kMaxIpPacketSize);
+  transport::PacketRef packet(new base::RefCountedData<Packet>);
+  packet->data.reserve(kMaxIpPacketSize);
 
   if (packet_type_flags & transport::kRtcpRr) {
-    BuildRR(report_block, &packet);
+    BuildRR(report_block, &packet->data);
     if (!c_name_.empty()) {
-      BuildSdec(&packet);
+      BuildSdec(&packet->data);
     }
   }
   if (packet_type_flags & transport::kRtcpBye) {
-    BuildBye(&packet);
+    BuildBye(&packet->data);
   }
   if (packet_type_flags & transport::kRtcpRrtr) {
     DCHECK(rrtr) << "Invalid argument";
-    BuildRrtr(rrtr, &packet);
+    BuildRrtr(rrtr, &packet->data);
   }
   if (packet_type_flags & transport::kRtcpCast) {
     DCHECK(cast_message) << "Invalid argument";
-    BuildCast(cast_message, target_delay_ms, &packet);
+    BuildCast(cast_message, target_delay_ms, &packet->data);
   }
   if (packet_type_flags & transport::kRtcpReceiverLog) {
-    DCHECK(event_subscriber) << "Invalid argument";
-    BuildReceiverLog(event_subscriber->get_rtcp_events(), &packet);
+    DCHECK(rtcp_events) << "Invalid argument";
+    BuildReceiverLog(*rtcp_events, &packet->data);
   }
 
-  if (packet.empty())
+  if (packet->data.empty())
     return;  // Sanity don't send empty packets.
 
-  transport_->SendRtcpPacket(packet);
+  transport_->SendRtcpPacket(ssrc_, packet);
 }
 
 void RtcpSender::BuildRR(const transport::RtcpReportBlock* report_block,
@@ -517,9 +427,6 @@ void RtcpSender::BuildRemb(const RtcpRembMessage* remb, Packet* packet) const {
   for (; it != remb->remb_ssrcs.end(); ++it) {
     big_endian_writer.WriteU32(*it);
   }
-  base::TimeTicks now = cast_environment_->Clock()->NowTicks();
-  cast_environment_->Logging()->InsertGenericEvent(
-      now, kRembBitrate, remb->remb_bitrate);
 }
 
 void RtcpSender::BuildNack(const RtcpNackMessage* nack, Packet* packet) const {
@@ -714,7 +621,7 @@ void RtcpSender::BuildCast(const RtcpCastMessage* cast,
 
 void RtcpSender::BuildReceiverLog(
     const ReceiverRtcpEventSubscriber::RtcpEventMultiMap& rtcp_events,
-    Packet* packet) const {
+    Packet* packet) {
   const size_t packet_start_size = packet->size();
   size_t number_of_frames = 0;
   size_t total_number_of_messages_to_send = 0;
@@ -803,7 +710,121 @@ void RtcpSender::BuildReceiverLog(
       receiver_log_message.pop_front();
     }
   }
-  DCHECK_EQ(total_number_of_messages_to_send, 0);
+  DCHECK_EQ(total_number_of_messages_to_send, 0u);
+}
+
+bool RtcpSender::BuildRtcpReceiverLogMessage(
+    const ReceiverRtcpEventSubscriber::RtcpEventMultiMap& rtcp_events,
+    size_t start_size,
+    RtcpReceiverLogMessage* receiver_log_message,
+    size_t* number_of_frames,
+    size_t* total_number_of_messages_to_send,
+    size_t* rtcp_log_size) {
+  size_t remaining_space =
+      std::min(kMaxReceiverLogBytes, kMaxIpPacketSize - start_size);
+  if (remaining_space < kRtcpCastLogHeaderSize + kRtcpReceiverFrameLogSize +
+                            kRtcpReceiverEventLogSize) {
+    return false;
+  }
+
+  // We use this to do event timestamp sorting and truncating for events of
+  // a single frame.
+  std::vector<RtcpReceiverEventLogMessage> sorted_log_messages;
+
+  // Account for the RTCP header for an application-defined packet.
+  remaining_space -= kRtcpCastLogHeaderSize;
+
+  ReceiverRtcpEventSubscriber::RtcpEventMultiMap::const_reverse_iterator rit =
+      rtcp_events.rbegin();
+
+  while (rit != rtcp_events.rend() &&
+         remaining_space >=
+             kRtcpReceiverFrameLogSize + kRtcpReceiverEventLogSize) {
+    const RtpTimestamp rtp_timestamp = rit->first;
+    RtcpReceiverFrameLogMessage frame_log(rtp_timestamp);
+    remaining_space -= kRtcpReceiverFrameLogSize;
+    ++*number_of_frames;
+
+    // Get all events of a single frame.
+    sorted_log_messages.clear();
+    do {
+      RtcpReceiverEventLogMessage event_log_message;
+      event_log_message.type = rit->second.type;
+      event_log_message.event_timestamp = rit->second.timestamp;
+      event_log_message.delay_delta = rit->second.delay_delta;
+      event_log_message.packet_id = rit->second.packet_id;
+      sorted_log_messages.push_back(event_log_message);
+      ++rit;
+    } while (rit != rtcp_events.rend() && rit->first == rtp_timestamp);
+
+    std::sort(sorted_log_messages.begin(),
+              sorted_log_messages.end(),
+              &EventTimestampLessThan);
+
+    // From |sorted_log_messages|, only take events that are no greater than
+    // |kMaxWireFormatTimeDeltaMs| seconds away from the latest event. Events
+    // older than that cannot be encoded over the wire.
+    std::vector<RtcpReceiverEventLogMessage>::reverse_iterator sorted_rit =
+        sorted_log_messages.rbegin();
+    base::TimeTicks first_event_timestamp = sorted_rit->event_timestamp;
+    size_t events_in_frame = 0;
+    while (sorted_rit != sorted_log_messages.rend() &&
+           events_in_frame < kRtcpMaxReceiverLogMessages &&
+           remaining_space >= kRtcpReceiverEventLogSize) {
+      base::TimeDelta delta(first_event_timestamp -
+                            sorted_rit->event_timestamp);
+      if (delta.InMilliseconds() > kMaxWireFormatTimeDeltaMs)
+        break;
+      frame_log.event_log_messages_.push_front(*sorted_rit);
+      ++events_in_frame;
+      ++*total_number_of_messages_to_send;
+      remaining_space -= kRtcpReceiverEventLogSize;
+      ++sorted_rit;
+    }
+
+    receiver_log_message->push_front(frame_log);
+  }
+
+  rtcp_events_history_.push_front(*receiver_log_message);
+
+  // We don't try to match RTP timestamps of redundancy frame logs with those
+  // from the newest set (which would save the space of an extra RTP timestamp
+  // over the wire). Unless the redundancy frame logs are very recent, it's
+  // unlikely there will be a match anyway.
+  if (rtcp_events_history_.size() > kFirstRedundancyOffset) {
+    // Add first redundnacy messages, if enough space remaining
+    AddReceiverLog(rtcp_events_history_[kFirstRedundancyOffset],
+                   receiver_log_message,
+                   &remaining_space,
+                   number_of_frames,
+                   total_number_of_messages_to_send);
+  }
+
+  if (rtcp_events_history_.size() > kSecondRedundancyOffset) {
+    // Add second redundancy messages, if enough space remaining
+    AddReceiverLog(rtcp_events_history_[kSecondRedundancyOffset],
+                   receiver_log_message,
+                   &remaining_space,
+                   number_of_frames,
+                   total_number_of_messages_to_send);
+  }
+
+  if (rtcp_events_history_.size() > kReceiveLogMessageHistorySize) {
+    rtcp_events_history_.pop_back();
+  }
+
+  DCHECK_LE(rtcp_events_history_.size(), kReceiveLogMessageHistorySize);
+
+  *rtcp_log_size =
+      kRtcpCastLogHeaderSize + *number_of_frames * kRtcpReceiverFrameLogSize +
+      *total_number_of_messages_to_send * kRtcpReceiverEventLogSize;
+  DCHECK_GE(kMaxIpPacketSize, start_size + *rtcp_log_size)
+      << "Not enough buffer space.";
+
+  VLOG(3) << "number of frames: " << *number_of_frames;
+  VLOG(3) << "total messages to send: " << *total_number_of_messages_to_send;
+  VLOG(3) << "rtcp log size: " << *rtcp_log_size;
+  return *number_of_frames > 0;
 }
 
 }  // namespace cast

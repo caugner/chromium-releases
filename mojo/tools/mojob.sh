@@ -18,7 +18,8 @@ Usage: $(basename "$0") [command|option ...]
 command should be one of:
   build - Build.
   test - Run unit tests (does not build).
-  perftest - Run Release and Debug perf tests (does not build).
+  perftest - Run perf tests (does not build).
+  pytest - Run Python unit tests.
   gyp - Run gyp for mojo (does not sync), with clang.
   sync - Sync using gclient (does not run gyp).
   show-bash-alias - Outputs an appropriate bash alias for mojob. In bash do:
@@ -50,20 +51,17 @@ do_build() {
 
 do_unittests() {
   echo "Running unit tests in out/$1 ..."
-  "out/$1/mojo_common_unittests" || exit 1
-  "out/$1/mojo_apps_js_unittests" || exit 1
-  "out/$1/mojo_js_unittests" || exit 1
-  "out/$1/mojo_public_bindings_unittests" || exit 1
-  "out/$1/mojo_public_environment_unittests" || exit 1
-  "out/$1/mojo_public_system_unittests" || exit 1
-  "out/$1/mojo_public_utility_unittests" || exit 1
-  "out/$1/mojo_service_manager_unittests" || exit 1
-  "out/$1/mojo_system_unittests" || exit 1
+  mojo/tools/test_runner.py mojo/tools/data/unittests "out/$1" \
+      mojob_test_successes || exit 1
 }
 
 do_perftests() {
   echo "Running perf tests in out/$1 ..."
   "out/$1/mojo_public_system_perftests" || exit 1
+}
+
+do_pytests() {
+  python mojo/tools/run_mojo_python_tests.py || exit 1
 }
 
 do_gyp() {
@@ -90,9 +88,6 @@ should_do_Release() {
 COMPILER=clang
 # Valid values: shared or static.
 COMPONENT=shared
-# TODO(vtl): Remove this. crbug.com/353602
-# Valid values: enabled or disabled.
-USE_MOJO=enabled
 make_gyp_defines() {
   local options=()
   # Always include these options.
@@ -111,14 +106,6 @@ make_gyp_defines() {
       ;;
     static)
       options+=("component=static_library")
-      ;;
-  esac
-  case "$USE_MOJO" in
-    enabled)
-      options+=("use_mojo=1")
-      ;;
-    disabled)
-      options+=("use_mojo=0")
       ;;
   esac
   echo ${options[*]}
@@ -150,6 +137,9 @@ for arg in "$@"; do
     perftest)
       should_do_Debug && do_perftests Debug
       should_do_Release && do_perftests Release
+      ;;
+    pytest)
+      do_pytests
       ;;
     gyp)
       do_gyp
@@ -187,12 +177,6 @@ for arg in "$@"; do
       ;;
     --static)
       COMPONENT=static
-      ;;
-    --use-mojo)
-      USE_MOJO=enabled
-      ;;
-    --no-use-mojo)
-      USE_MOJO=disabled
       ;;
     *)
       echo "Unknown command \"${arg}\". Try \"$(basename "$0") help\"."

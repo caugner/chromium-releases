@@ -9,17 +9,25 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "extensions/browser/extension_prefs_observer.h"
 
 class ExtensionFunctionRegistry;
 class PrefService;
 
 namespace base {
 class CommandLine;
+class FilePath;
 }
 
 namespace content {
 class BrowserContext;
 class WebContents;
+}
+
+namespace net {
+class NetworkDelegate;
+class URLRequest;
+class URLRequestJob;
 }
 
 namespace extensions {
@@ -28,8 +36,11 @@ class ApiActivityMonitor;
 class AppSorting;
 class Extension;
 class ExtensionHostDelegate;
+class ExtensionPrefsObserver;
 class ExtensionSystem;
 class ExtensionSystemProvider;
+class InfoMap;
+class RuntimeAPIDelegate;
 
 // Interface to allow the extensions module to make browser-process-specific
 // queries of the embedder. Should be Set() once in the browser process.
@@ -86,9 +97,40 @@ class ExtensionsBrowserClient {
       const extensions::Extension* extension,
       content::BrowserContext* context) const = 0;
 
+  // Returns true if |request| corresponds to a resource request from a
+  // <webview>.
+  virtual bool IsWebViewRequest(net::URLRequest* request) const = 0;
+
+  // Returns an URLRequestJob to load an extension resource from the embedder's
+  // resource bundle (.pak) files. Returns NULL if the request is not for a
+  // resource bundle resource or if the embedder does not support this feature.
+  // Used for component extensions. Called on the IO thread.
+  virtual net::URLRequestJob* MaybeCreateResourceBundleRequestJob(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const base::FilePath& directory_path,
+      const std::string& content_security_policy,
+      bool send_cors_header) = 0;
+
+  // Returns true if the embedder wants to allow a chrome-extension:// resource
+  // request coming from renderer A to access a resource in an extension running
+  // in renderer B. For example, Chrome overrides this to provide support for
+  // webview and dev tools. Called on the IO thread.
+  virtual bool AllowCrossRendererResourceLoad(net::URLRequest* request,
+                                              bool is_incognito,
+                                              const Extension* extension,
+                                              InfoMap* extension_info_map) = 0;
+
   // Returns the PrefService associated with |context|.
   virtual PrefService* GetPrefServiceForContext(
       content::BrowserContext* context) = 0;
+
+  // Populates a list of ExtensionPrefs observers to be attached to each
+  // BrowserContext's ExtensionPrefs upon construction. These observers
+  // are not owned by ExtensionPrefs.
+  virtual void GetEarlyExtensionPrefsObservers(
+      content::BrowserContext* context,
+      std::vector<ExtensionPrefsObserver*>* observers) const = 0;
 
   // Returns true if loading background pages should be deferred.
   virtual bool DeferLoadingBackgroundHosts(
@@ -105,10 +147,6 @@ class ExtensionsBrowserClient {
   // implementation may wish to use the BrowserContext to record the current
   // version for later comparison.
   virtual bool DidVersionUpdate(content::BrowserContext* context) = 0;
-
-  // Permits an external protocol handler to be launched. See
-  // ExternalProtocolHandler::PermitLaunchUrl() in Chrome.
-  virtual void PermitExternalProtocolHandler() = 0;
 
   // Creates a new AppSorting instance.
   virtual scoped_ptr<AppSorting> CreateAppSorting() = 0;
@@ -128,6 +166,12 @@ class ExtensionsBrowserClient {
   // Registers extension functions not belonging to the core extensions APIs.
   virtual void RegisterExtensionFunctions(
       ExtensionFunctionRegistry* registry) const = 0;
+
+  // Creates a RuntimeAPIDelegate responsible for handling extensions
+  // management-related events such as update and installation on behalf of the
+  // core runtime API implementation.
+  virtual scoped_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
+      content::BrowserContext* context) const = 0;
 
   // Returns the single instance of |this|.
   static ExtensionsBrowserClient* Get();

@@ -6,6 +6,7 @@
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
     'about_credits_file': '<(SHARED_INTERMEDIATE_DIR)/about_credits.html',
     'additional_modules_list_file': '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/internal/additional_modules_list.txt',
+    'omnibox_mojom_file': '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/ui/webui/omnibox/omnibox.mojom.js',
   },
   'targets': [
     {
@@ -115,6 +116,7 @@
         ['chromeos==1 and disable_nacl==0 and disable_nacl_untrusted==0', {
           'dependencies': [
             '../chrome/third_party/chromevox/chromevox.gyp:chromevox_resources',
+            'chromevox_strings',
           ],
         }],
       ],
@@ -161,6 +163,7 @@
       'dependencies': [
         'about_credits',
         'chrome_internal_resources_gen',
+        'chrome_web_ui_mojo_bindings.gyp:web_ui_mojo_bindings',
       ],
       'actions': [
         # Data resources.
@@ -171,6 +174,7 @@
             'grit_additional_defines': [
               '-E', 'about_credits_file=<(about_credits_file)',
               '-E', 'additional_modules_list_file=<(additional_modules_list_file)',
+              '-E', 'omnibox_mojom_file=<(omnibox_mojom_file)',
             ],
           },
           'includes': [ '../build/grit_action.gypi' ],
@@ -385,6 +389,7 @@
           'dependencies': [
             '<(DEPTH)/content/content_resources.gyp:content_resources',
             '<(DEPTH)/device/bluetooth/bluetooth_strings.gyp:device_bluetooth_strings',
+            '<(DEPTH)/extensions/extensions_strings.gyp:extensions_strings',
             '<(DEPTH)/webkit/webkit_resources.gyp:webkit_resources',
             '<(DEPTH)/webkit/webkit_resources.gyp:webkit_strings',
           ],
@@ -498,6 +503,24 @@
                      '<(about_credits_file)',
           ],
           'message': 'Generating about:credits',
+        },
+      ],
+    },
+    {
+      'target_name': 'chromevox_strings',
+      'type': 'none',
+      'actions': [
+        {
+          'action_name': 'chromevox_strings',
+          'variables': {
+            'grit_grd_file': 'browser/resources/chromeos/chromevox/strings/chromevox_strings.grd',
+            # TODO(plundblad): Change to use PRODUCT_DIR when we have
+            # translations.
+            'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/resources/chromeos/chromevox',
+            # We don't generate any RC files, so no resource_ds file is needed.
+            'grit_resource_ids': '',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
         },
       ],
     },

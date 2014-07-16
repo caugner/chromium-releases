@@ -26,10 +26,10 @@ namespace media {
 class FFmpegAudioDecoderTest : public testing::Test {
  public:
   FFmpegAudioDecoderTest()
-      : decoder_(new FFmpegAudioDecoder(message_loop_.message_loop_proxy())),
+      : decoder_(new FFmpegAudioDecoder(message_loop_.message_loop_proxy(),
+                                        LogCB())),
         pending_decode_(false),
-        pending_reset_(false),
-        pending_stop_(false) {
+        pending_reset_(false) {
     FFmpegGlue::InitializeFFmpeg();
 
     vorbis_extradata_ = ReadTestDataFile("vorbis-extradata");
@@ -58,7 +58,6 @@ class FFmpegAudioDecoderTest : public testing::Test {
   virtual ~FFmpegAudioDecoderTest() {
     EXPECT_FALSE(pending_decode_);
     EXPECT_FALSE(pending_reset_);
-    EXPECT_FALSE(pending_stop_);
   }
 
   void Initialize() {
@@ -96,9 +95,7 @@ class FFmpegAudioDecoderTest : public testing::Test {
   }
 
   void Stop() {
-    pending_stop_ = true;
-    decoder_->Stop(base::Bind(
-        &FFmpegAudioDecoderTest::StopFinished, base::Unretained(this)));
+    decoder_->Stop();
     base::RunLoop().RunUntilIdle();
   }
 
@@ -116,22 +113,13 @@ class FFmpegAudioDecoderTest : public testing::Test {
     decoded_audio_.push_back(buffer);
 
     // If we hit a NULL buffer or have a pending reset, we expect an abort.
-    if (buffer.get() == NULL || pending_stop_ || pending_reset_) {
+    if (buffer.get() == NULL || pending_reset_) {
       EXPECT_TRUE(buffer.get() == NULL);
       EXPECT_EQ(status, AudioDecoder::kAborted);
       return;
     }
 
     EXPECT_EQ(status, AudioDecoder::kOk);
-  }
-
-  void StopFinished() {
-    EXPECT_TRUE(pending_stop_);
-    // Stop should always finish after Decode and Reset.
-    EXPECT_FALSE(pending_decode_);
-    EXPECT_FALSE(pending_reset_);
-
-    pending_stop_ = false;
   }
 
   void ResetFinished() {
@@ -158,7 +146,6 @@ class FFmpegAudioDecoderTest : public testing::Test {
   scoped_ptr<FFmpegAudioDecoder> decoder_;
   bool pending_decode_;
   bool pending_reset_;
-  bool pending_stop_;
 
   scoped_refptr<DecoderBuffer> vorbis_extradata_;
 
@@ -189,7 +176,7 @@ TEST_F(FFmpegAudioDecoderTest, ProduceAudioSamples) {
   ASSERT_EQ(3u, decoded_audio_.size());
   ExpectDecodedAudio(0, 0, 2902);
   ExpectDecodedAudio(1, 2902, 13061);
-  ExpectDecodedAudio(2, 15963, 23220);
+  ExpectDecodedAudio(2, 15963, 23219);
 
   // Call one more time to trigger EOS.
   Decode();
@@ -212,7 +199,6 @@ TEST_F(FFmpegAudioDecoderTest, PendingDecode_Stop) {
   Decode();
   Stop();
   SatisfyPendingDecode();
-  Stop();
 }
 
 TEST_F(FFmpegAudioDecoderTest, PendingDecode_Reset) {

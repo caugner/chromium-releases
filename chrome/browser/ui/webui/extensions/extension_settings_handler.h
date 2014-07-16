@@ -24,7 +24,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "extensions/browser/extension_prefs.h"
-#include "ui/shell_dialogs/select_file_dialog.h"
+#include "extensions/browser/extension_prefs_observer.h"
 #include "url/gurl.h"
 
 class ExtensionService;
@@ -67,10 +67,9 @@ class ExtensionSettingsHandler
     : public content::WebUIMessageHandler,
       public content::NotificationObserver,
       public content::WebContentsObserver,
-      public ui::SelectFileDialog::Listener,
       public ErrorConsole::Observer,
       public ExtensionInstallPrompt::Delegate,
-      public ExtensionPrefs::Observer,
+      public ExtensionPrefsObserver,
       public ExtensionUninstallDialog::Delegate,
       public ExtensionWarningService::Observer,
       public base::SupportsWeakPtr<ExtensionSettingsHandler> {
@@ -108,29 +107,6 @@ class ExtensionSettingsHandler
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
-  // Loads an unpacked extension from |path|.
-  void LoadUnpackedExtension(const base::FilePath& path);
-
-  // Returns the index of the given FilePath in the vector of currently loading
-  // extensions. Returns -1 if not found.
-  int IndexOfLoadingPath(const base::FilePath& path);
-
-  // Adds |path| to the vector of currently loading extensions. Registers
-  // for the load retry notification if vector is empty before call.
-  void AddLoadingPath(const base::FilePath& path);
-
-  // Removes |path| from the vector of currently loading extensions. Unregisters
-  // for the load retry notification if vector is empty after call.
-  void RemoveLoadingPath(const base::FilePath& path);
-
-  // SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const base::FilePath& path,
-                            int index,
-                            void* params) OVERRIDE;
-  virtual void MultiFilesSelected(
-      const std::vector<base::FilePath>& files, void* params) OVERRIDE;
-  virtual void FileSelectionCanceled(void* params) OVERRIDE;
-
   // ErrorConsole::Observer implementation.
   virtual void OnErrorAdded(const ExtensionError* error) OVERRIDE;
 
@@ -139,7 +115,7 @@ class ExtensionSettingsHandler
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // ExtensionPrefs::Observer implementation.
+  // ExtensionPrefsObserver implementation.
   virtual void OnExtensionDisableReasonsChanged(const std::string& extension_id,
                                                 int disable_reasons) OVERRIDE;
 
@@ -179,6 +155,9 @@ class ExtensionSettingsHandler
   // Callback for "enableIncognito" message.
   void HandleEnableIncognitoMessage(const base::ListValue* args);
 
+  // Callback for "enableErrorCollection" message.
+  void HandleEnableErrorCollectionMessage(const base::ListValue* args);
+
   // Callback for "allowFileAcces" message.
   void HandleAllowFileAccessMessage(const base::ListValue* args);
 
@@ -197,8 +176,8 @@ class ExtensionSettingsHandler
   // Callback for "autoupdate" message.
   void HandleAutoUpdateMessage(const base::ListValue* args);
 
-  // Callback for "loadUnpackedExtension" message.
-  void HandleLoadUnpackedExtensionMessage(const base::ListValue* args);
+  // Callback for the "dismissADTPromo" message.
+  void HandleDismissADTPromoMessage(const base::ListValue* args);
 
   // Utility for calling JavaScript window.alert in the page.
   void ShowAlert(const std::string& message);
@@ -247,17 +226,6 @@ class ExtensionSettingsHandler
   // A convenience member, filled once the extension_service_ is known.
   ManagementPolicy* management_policy_;
 
-  // Used to pick the directory when loading an extension.
-  scoped_refptr<ui::SelectFileDialog> load_extension_dialog_;
-
-  // Used to start the |load_extension_dialog_| in the last directory that was
-  // loaded.
-  base::FilePath last_unpacked_directory_;
-
-  // Used to keep track of FilePaths for all extensions in the process of
-  // loading for the purpose of retrying on load failure.
-  std::vector<base::FilePath> loading_extension_directories_;
-
   // Used to show confirmation UI for uninstalling extensions in incognito mode.
   scoped_ptr<ExtensionUninstallDialog> extension_uninstall_dialog_;
 
@@ -305,7 +273,7 @@ class ExtensionSettingsHandler
 
   // An observer to listen for notable changes in the ExtensionPrefs, like
   // a change in Disable Reasons.
-  ScopedObserver<ExtensionPrefs, ExtensionPrefs::Observer>
+  ScopedObserver<ExtensionPrefs, ExtensionPrefsObserver>
       extension_prefs_observer_;
 
   // Whether we found any DISABLE_NOT_VERIFIED extensions and want to kick off

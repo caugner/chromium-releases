@@ -40,6 +40,7 @@ if util.IsLinux():
   from pylib import constants
   from pylib import forwarder
   from pylib import valgrind_tools
+  from pylib.device import device_utils
 
 
 _NEGATIVE_FILTER = [
@@ -179,18 +180,18 @@ class ChromeDriverTest(ChromeDriverBaseTest):
         chrome_paths.GetTestData())
     ChromeDriverTest._sync_server = webserver.SyncWebServer()
     if _ANDROID_PACKAGE_KEY:
-      ChromeDriverTest._adb = android_commands.AndroidCommands(
+      ChromeDriverTest._device = device_utils.DeviceUtils(
           android_commands.GetAttachedDevices()[0])
       http_host_port = ChromeDriverTest._http_server._server.server_port
       sync_host_port = ChromeDriverTest._sync_server._server.server_port
       forwarder.Forwarder.Map(
           [(http_host_port, http_host_port), (sync_host_port, sync_host_port)],
-          ChromeDriverTest._adb)
+          ChromeDriverTest._device)
 
   @staticmethod
   def GlobalTearDown():
     if _ANDROID_PACKAGE_KEY:
-      forwarder.Forwarder.UnmapAllDevicePorts(ChromeDriverTest._adb)
+      forwarder.Forwarder.UnmapAllDevicePorts(ChromeDriverTest._device)
     ChromeDriverTest._http_server.Shutdown()
 
   @staticmethod
@@ -321,6 +322,18 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     self.assertTrue(self._driver.ExecuteScript('return window.top == window'))
     self._driver.SwitchToFrame(self._driver.FindElement('tag name', 'iframe'))
     self.assertTrue(self._driver.ExecuteScript('return window.top != window'))
+
+  def testSwitchToParentFrame(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/nested.html'))
+    self.assertTrue('One' in self._driver.GetPageSource())
+    self._driver.SwitchToFrameByIndex(0)
+    self.assertTrue('Two' in self._driver.GetPageSource())
+    self._driver.SwitchToFrameByIndex(0)
+    self.assertTrue('Three' in self._driver.GetPageSource())
+    self._driver.SwitchToParentFrame()
+    self.assertTrue('Two' in self._driver.GetPageSource())
+    self._driver.SwitchToParentFrame()
+    self.assertTrue('One' in self._driver.GetPageSource())
 
   def testExecuteInRemovedFrame(self):
     self._driver.ExecuteScript(
@@ -755,11 +768,16 @@ class ChromeExtensionsCapabilityTest(ChromeDriverBaseTest):
     return base64.b64encode(open(ext_path, 'rb').read())
 
   def testExtensionsInstall(self):
-    """Checks that chromedriver can take the extensions."""
+    """Checks that chromedriver can take the extensions in crx format."""
     crx_1 = os.path.join(_TEST_DATA_DIR, 'ext_test_1.crx')
     crx_2 = os.path.join(_TEST_DATA_DIR, 'ext_test_2.crx')
     self.CreateDriver(chrome_extensions=[self._PackExtension(crx_1),
                                          self._PackExtension(crx_2)])
+
+  def testExtensionsInstallZip(self):
+    """Checks that chromedriver can take the extensions in zip format."""
+    zip_1 = os.path.join(_TEST_DATA_DIR, 'ext_test_1.zip')
+    self.CreateDriver(chrome_extensions=[self._PackExtension(zip_1)])
 
   def testWaitsForExtensionToLoad(self):
     did_load_event = threading.Event()

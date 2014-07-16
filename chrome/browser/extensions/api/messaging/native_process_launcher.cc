@@ -8,6 +8,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
@@ -99,7 +100,7 @@ NativeProcessLauncherImpl::Core::~Core() {
 }
 
 void NativeProcessLauncherImpl::Core::Detach() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   detached_ = true;
 }
 
@@ -172,6 +173,17 @@ void NativeProcessLauncherImpl::Core::DoLaunchOnThreadPool(
 #endif  // !defined(OS_WIN)
   }
 
+  // In case when the manifest file is there, but the host binary doesn't exist
+  // report the NOT_FOUND error.
+  if (!base::PathExists(host_path)) {
+    LOG(ERROR)
+        << "Found manifest, but not the binary for native messaging host "
+        << native_host_name << ". Host path specified in the manifest: "
+        << host_path.AsUTF8Unsafe();
+    PostErrorResult(callback, RESULT_NOT_FOUND);
+    return;
+  }
+
   CommandLine command_line(host_path);
   command_line.AppendArg(origin.spec());
 
@@ -199,7 +211,7 @@ void NativeProcessLauncherImpl::Core::CallCallbackOnIOThread(
     base::ProcessHandle process_handle,
     base::File read_file,
     base::File write_file) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   if (detached_)
     return;
 

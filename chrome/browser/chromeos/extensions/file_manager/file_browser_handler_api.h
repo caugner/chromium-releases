@@ -110,14 +110,11 @@ class FileBrowserHandlerInternalSelectFileFunction
 
   // AsyncExtensionFunction implementation.
   // Runs the extension function implementation.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
-  // Grants file access permissions for the created file to the caller.
-  // Inside this method,
-  void GrantPermissions(
-      const base::FilePath& full_path,
-      const file_manager::util::FileDefinition& file_definition,
+  // Respond to the API with selected entry definition.
+  void RespondEntryDefinition(
       const file_manager::util::EntryDefinition& entry_definition);
 
   // Creates dictionary value that will be used to as the extension function's

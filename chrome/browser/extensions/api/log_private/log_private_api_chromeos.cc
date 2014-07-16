@@ -13,7 +13,6 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/log_private/filter_handler.h"
 #include "chrome/browser/extensions/api/log_private/log_parser.h"
 #include "chrome/browser/extensions/api/log_private/syslog_parser.h"
@@ -22,11 +21,9 @@
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/log_private.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_registry.h"
 
 using content::BrowserThread;
 
@@ -72,11 +69,10 @@ LogPrivateAPI* LogPrivateAPI::Get(content::BrowserContext* context) {
 }
 
 LogPrivateAPI::LogPrivateAPI(content::BrowserContext* context)
-    : profile_(Profile::FromBrowserContext(context)),
-      logging_net_internals_(false) {
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
-                 content::Source<Profile>(profile_));
+    : browser_context_(context),
+      logging_net_internals_(false),
+      extension_registry_observer_(this) {
+  extension_registry_observer_.Add(ExtensionRegistry::Get(browser_context_));
 }
 
 LogPrivateAPI::~LogPrivateAPI() {
@@ -101,11 +97,11 @@ static base::LazyInstance<BrowserContextKeyedAPIFactory<LogPrivateAPI> >
 // static
 BrowserContextKeyedAPIFactory<LogPrivateAPI>*
 LogPrivateAPI::GetFactoryInstance() {
-  return &g_factory.Get();
+  return g_factory.Pointer();
 }
 
 void LogPrivateAPI::OnAddEntry(const net::NetLog::Entry& entry) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!pending_entries_.get()) {
     pending_entries_.reset(new base::ListValue());
     BrowserThread::PostDelayedTask(
@@ -125,7 +121,7 @@ void LogPrivateAPI::PostPendingEntries() {
 }
 
 void LogPrivateAPI::AddEntriesOnUI(scoped_ptr<base::ListValue> value) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   for (std::set<std::string>::iterator ix = net_internal_watches_.begin();
        ix != net_internal_watches_.end(); ++ix) {
@@ -134,13 +130,13 @@ void LogPrivateAPI::AddEntriesOnUI(scoped_ptr<base::ListValue> value) {
     event_args->Append(value->DeepCopy());
     scoped_ptr<Event> event(new Event(events::kOnAddNetInternalsEntries,
                                       event_args.Pass()));
-    ExtensionSystem::Get(profile_)->event_router()->DispatchEventToExtension(
-        *ix, event.Pass());
+    EventRouter::Get(browser_context_)
+        ->DispatchEventToExtension(*ix, event.Pass());
   }
 }
 
 void LogPrivateAPI::MaybeStartNetInternalLogging() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!logging_net_internals_) {
     g_browser_process->io_thread()->net_log()->AddThreadSafeObserver(
         this, net::NetLog::LOG_ALL_BUT_BYTES);
@@ -158,21 +154,18 @@ void LogPrivateAPI::MaybeStopNetInternalLogging() {
 }
 
 void LogPrivateAPI::StopNetInternalLogging() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (net_log() && logging_net_internals_) {
     net_log()->RemoveThreadSafeObserver(this);
     logging_net_internals_ = false;
   }
 }
 
-void LogPrivateAPI::Observe(int type,
-                            const content::NotificationSource& source,
-                            const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED) {
-    const Extension* extension =
-        content::Details<const UnloadedExtensionInfo>(details)->extension;
-    StopNetInternalsWatch(extension->id());
-  }
+void LogPrivateAPI::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const Extension* extension,
+    UnloadedExtensionInfo::Reason reason) {
+  StopNetInternalsWatch(extension->id());
 }
 
 LogPrivateGetHistoricalFunction::LogPrivateGetHistoricalFunction() {
@@ -181,7 +174,7 @@ LogPrivateGetHistoricalFunction::LogPrivateGetHistoricalFunction() {
 LogPrivateGetHistoricalFunction::~LogPrivateGetHistoricalFunction() {
 }
 
-bool LogPrivateGetHistoricalFunction::RunImpl() {
+bool LogPrivateGetHistoricalFunction::RunAsync() {
   // Get parameters
   scoped_ptr<api::log_private::GetHistorical::Params> params(
       api::log_private::GetHistorical::Params::Create(*args_));
@@ -223,7 +216,7 @@ LogPrivateStartNetInternalsWatchFunction::
 ~LogPrivateStartNetInternalsWatchFunction() {
 }
 
-bool LogPrivateStartNetInternalsWatchFunction::RunImpl() {
+bool LogPrivateStartNetInternalsWatchFunction::RunSync() {
   LogPrivateAPI::Get(GetProfile())->StartNetInternalsWatch(extension_id());
   return true;
 }
@@ -236,7 +229,7 @@ LogPrivateStopNetInternalsWatchFunction::
 ~LogPrivateStopNetInternalsWatchFunction() {
 }
 
-bool LogPrivateStopNetInternalsWatchFunction::RunImpl() {
+bool LogPrivateStopNetInternalsWatchFunction::RunSync() {
   LogPrivateAPI::Get(GetProfile())->StopNetInternalsWatch(extension_id());
   return true;
 }

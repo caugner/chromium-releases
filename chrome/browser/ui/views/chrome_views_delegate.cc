@@ -24,12 +24,16 @@
 
 #if defined(OS_WIN)
 #include <dwmapi.h>
+#include <shellapi.h>
+#include "base/task_runner_util.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/app_icon_win.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/base/win/shell.h"
 #endif
 
 #if defined(USE_AURA)
+#include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #endif
 
@@ -46,11 +50,22 @@
 #if defined(USE_ASH)
 #include "ash/shell.h"
 #include "ash/wm/window_state.h"
+#include "chrome/browser/ui/ash/accessibility/automation_manager_views.h"
 #include "chrome/browser/ui/ash/ash_init.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #endif
 
+
+// Helpers --------------------------------------------------------------------
+
 namespace {
+
+Profile* GetProfileForWindow(const views::Widget* window) {
+  if (!window)
+    return NULL;
+  return reinterpret_cast<Profile*>(
+      window->GetNativeWindowProperty(Profile::kProfileKey));
+}
 
 // If the given window has a profile associated with it, use that profile's
 // preference service. Otherwise, store and retrieve the data from Local State.
@@ -59,8 +74,7 @@ namespace {
 // TODO(mirandac): This function will also separate windows by profile in a
 // multi-profile environment.
 PrefService* GetPrefsForWindow(const views::Widget* window) {
-  Profile* profile = reinterpret_cast<Profile*>(
-      window->GetNativeWindowProperty(Profile::kProfileKey));
+  Profile* profile = GetProfileForWindow(window);
   if (!profile) {
     // Use local state for windows that have no explicit profile.
     return g_browser_process->local_state();
@@ -68,10 +82,57 @@ PrefService* GetPrefsForWindow(const views::Widget* window) {
   return profile->GetPrefs();
 }
 
+#if defined(OS_WIN)
+bool MonitorHasTopmostAutohideTaskbarForEdge(UINT edge, HMONITOR monitor) {
+  APPBARDATA taskbar_data = { sizeof(APPBARDATA), NULL, 0, edge };
+  // MSDN documents an ABM_GETAUTOHIDEBAREX, which supposedly takes a monitor
+  // rect and returns autohide bars on that monitor.  This sounds like a good
+  // idea for multi-monitor systems.  Unfortunately, it appears to not work at
+  // least some of the time (erroneously returning NULL) and there's almost no
+  // online documentation or other sample code using it that suggests ways to
+  // address this problem.  So we just use ABM_GETAUTOHIDEBAR and hope the user
+  // only cares about autohide bars on the monitor with the primary taskbar.
+  //
+  // NOTE: This call spins a nested message loop.
+  HWND taskbar = reinterpret_cast<HWND>(SHAppBarMessage(ABM_GETAUTOHIDEBAR,
+                                                        &taskbar_data));
+  return ::IsWindow(taskbar) &&
+      (MonitorFromWindow(taskbar, MONITOR_DEFAULTTONULL) == monitor) &&
+      (GetWindowLong(taskbar, GWL_EXSTYLE) & WS_EX_TOPMOST);
+}
+
+int GetAppbarAutohideEdgesOnWorkerThread(HMONITOR monitor) {
+  DCHECK(monitor);
+
+  int edges = 0;
+  if (MonitorHasTopmostAutohideTaskbarForEdge(ABE_LEFT, monitor))
+    edges |= views::ViewsDelegate::EDGE_LEFT;
+  if (MonitorHasTopmostAutohideTaskbarForEdge(ABE_TOP, monitor))
+    edges |= views::ViewsDelegate::EDGE_TOP;
+  if (MonitorHasTopmostAutohideTaskbarForEdge(ABE_RIGHT, monitor))
+    edges |= views::ViewsDelegate::EDGE_RIGHT;
+  if (MonitorHasTopmostAutohideTaskbarForEdge(ABE_BOTTOM, monitor))
+    edges |= views::ViewsDelegate::EDGE_BOTTOM;
+  return edges;
+}
+#endif
+
 }  // namespace
 
-///////////////////////////////////////////////////////////////////////////////
-// ChromeViewsDelegate, views::ViewsDelegate implementation:
+
+// ChromeViewsDelegate --------------------------------------------------------
+
+#if defined(OS_WIN)
+ChromeViewsDelegate::ChromeViewsDelegate()
+    : weak_factory_(this),
+      in_autohide_edges_callback_(false) {
+#else
+ChromeViewsDelegate::ChromeViewsDelegate() {
+#endif
+}
+
+ChromeViewsDelegate::~ChromeViewsDelegate() {
+}
 
 void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
                                               const std::string& window_name,
@@ -143,6 +204,11 @@ void ChromeViewsDelegate::NotifyAccessibilityEvent(
     views::View* view, ui::AXEvent event_type) {
   AccessibilityEventRouterViews::GetInstance()->HandleAccessibilityEvent(
       view, event_type);
+
+#if defined(USE_ASH)
+  AutomationManagerViews::GetInstance()->HandleEvent(
+      GetProfileForWindow(view->GetWidget()), view, event_type);
+#endif
 }
 
 void ChromeViewsDelegate::NotifyMenuItemFocused(
@@ -171,14 +237,13 @@ gfx::ImageSkia* ChromeViewsDelegate::GetDefaultWindowIcon() const {
 }
 #endif
 
+#if defined(USE_ASH)
 views::NonClientFrameView* ChromeViewsDelegate::CreateDefaultNonClientFrameView(
     views::Widget* widget) {
-#if defined(USE_ASH)
-  if (chrome::IsNativeViewInAsh(widget->GetNativeView()))
-    return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget);
-#endif
-  return NULL;
+  return chrome::IsNativeViewInAsh(widget->GetNativeView()) ?
+      ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget) : NULL;
 }
+#endif
 
 void ChromeViewsDelegate::AddRef() {
   g_browser_process->AddRefModule();
@@ -186,12 +251,6 @@ void ChromeViewsDelegate::AddRef() {
 
 void ChromeViewsDelegate::ReleaseRef() {
   g_browser_process->ReleaseModule();
-}
-
-content::WebContents* ChromeViewsDelegate::CreateWebContents(
-    content::BrowserContext* browser_context,
-    content::SiteInstance* site_instance) {
-  return NULL;
 }
 
 void ChromeViewsDelegate::OnBeforeWidgetInit(
@@ -287,7 +346,15 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
         NOTREACHED();
     }
   } else if (use_non_toplevel_window) {
-    params->native_widget = new views::NativeWidgetAura(delegate);
+    views::NativeWidgetAura* native_widget =
+        new views::NativeWidgetAura(delegate);
+    if (params->parent) {
+      Profile* parent_profile = reinterpret_cast<Profile*>(
+          params->parent->GetNativeWindowProperty(Profile::kProfileKey));
+      native_widget->SetNativeWindowProperty(Profile::kProfileKey,
+                                             parent_profile);
+    }
+    params->native_widget = native_widget;
   } else if (params->type != views::Widget::InitParams::TYPE_TOOLTIP) {
     // TODO(erg): Once we've threaded context to everywhere that needs it, we
     // should remove this check here.
@@ -301,21 +368,54 @@ void ChromeViewsDelegate::OnBeforeWidgetInit(
 #endif
 }
 
-base::TimeDelta
-ChromeViewsDelegate::GetDefaultTextfieldObscuredRevealDuration() {
-  return base::TimeDelta();
-}
-
-bool ChromeViewsDelegate::WindowManagerProvidesTitleBar(bool maximized) {
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+bool ChromeViewsDelegate::WindowManagerProvidesTitleBar(bool maximized) {
   // On Ubuntu Unity, the system always provides a title bar for maximized
   // windows.
   views::LinuxUI* ui = views::LinuxUI::instance();
   return maximized && ui && ui->UnityIsRunning();
+}
 #endif
 
-  return false;
+#if defined(OS_WIN)
+int ChromeViewsDelegate::GetAppbarAutohideEdges(HMONITOR monitor,
+                                                const base::Closure& callback) {
+  // Initialize the map with EDGE_BOTTOM. This is important, as if we return an
+  // initial value of 0 (no auto-hide edges) then we'll go fullscreen and
+  // windows will automatically remove WS_EX_TOPMOST from the appbar resulting
+  // in us thinking there is no auto-hide edges. By returning at least one edge
+  // we don't initially go fullscreen until we figure out the real auto-hide
+  // edges.
+  if (!appbar_autohide_edge_map_.count(monitor))
+    appbar_autohide_edge_map_[monitor] = EDGE_BOTTOM;
+  if (monitor && !in_autohide_edges_callback_) {
+    base::PostTaskAndReplyWithResult(
+        content::BrowserThread::GetBlockingPool(),
+        FROM_HERE,
+        base::Bind(&GetAppbarAutohideEdgesOnWorkerThread,
+                   monitor),
+        base::Bind(&ChromeViewsDelegate::OnGotAppbarAutohideEdges,
+                   weak_factory_.GetWeakPtr(),
+                   callback,
+                   monitor,
+                   appbar_autohide_edge_map_[monitor]));
+  }
+  return appbar_autohide_edge_map_[monitor];
 }
+
+void ChromeViewsDelegate::OnGotAppbarAutohideEdges(
+    const base::Closure& callback,
+    HMONITOR monitor,
+    int returned_edges,
+    int edges) {
+  appbar_autohide_edge_map_[monitor] = edges;
+  if (returned_edges == edges)
+    return;
+
+  base::AutoReset<bool> in_callback_setter(&in_autohide_edges_callback_, true);
+  callback.Run();
+}
+#endif
 
 #if !defined(USE_AURA) && !defined(USE_CHROMEOS)
 views::Widget::InitParams::WindowOpacity

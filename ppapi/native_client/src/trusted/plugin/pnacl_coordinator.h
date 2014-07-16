@@ -21,13 +21,12 @@
 #include "ppapi/native_client/src/trusted/plugin/file_downloader.h"
 #include "ppapi/native_client/src/trusted/plugin/nacl_subprocess.h"
 #include "ppapi/native_client/src/trusted/plugin/plugin_error.h"
-#include "ppapi/native_client/src/trusted/plugin/pnacl_options.h"
 #include "ppapi/native_client/src/trusted/plugin/pnacl_resources.h"
 
+struct PP_PNaClOptions;
 
 namespace plugin {
 
-class Manifest;
 class Plugin;
 class PnaclCoordinator;
 class PnaclTranslateThread;
@@ -86,7 +85,7 @@ class PnaclCoordinator: public CallbackSource<FileStreamData> {
   static PnaclCoordinator* BitcodeToNative(
       Plugin* plugin,
       const nacl::string& pexe_url,
-      const PnaclOptions& pnacl_options,
+      const PP_PNaClOptions& pnacl_options,
       const pp::CompletionCallback& translate_notify_callback);
 
   // Call this to take ownership of the FD of the translated nexe after
@@ -144,7 +143,7 @@ class PnaclCoordinator: public CallbackSource<FileStreamData> {
   // Therefore the constructor is private.
   PnaclCoordinator(Plugin* plugin,
                    const nacl::string& pexe_url,
-                   const PnaclOptions& pnacl_options,
+                   const PP_PNaClOptions& pnacl_options,
                    const pp::CompletionCallback& translate_notify_callback);
 
   // Invoke to issue a GET request for bitcode.
@@ -204,14 +203,18 @@ class PnaclCoordinator: public CallbackSource<FileStreamData> {
 
   // The manifest used by resource loading and ld + llc's reverse service
   // to look up objects and libraries.
-  nacl::scoped_ptr<const Manifest> manifest_;
+  int32_t manifest_id_;
   // An auxiliary class that manages downloaded resources (llc and ld nexes).
   nacl::scoped_ptr<PnaclResources> resources_;
 
   // The URL for the pexe file.
   nacl::string pexe_url_;
   // Options for translation.
-  PnaclOptions pnacl_options_;
+  PP_PNaClOptions pnacl_options_;
+  // Architecture-specific attributes used for translation. These are
+  // supplied by Chrome, not the developer, and are therefore different
+  // from PNaCl options.
+  nacl::string architecture_attributes_;
 
   // Object file, produced by the translator and consumed by the linker.
   std::vector<TempFile*> obj_files_;

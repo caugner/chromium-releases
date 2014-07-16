@@ -31,6 +31,8 @@ OS = None
 
 USE_ASH = False
 
+WHITELIST = None
+
 # Extra input files.
 EXTRA_INPUT_FILES = []
 
@@ -72,9 +74,9 @@ def calc_inputs(locale):
                 'platform_locale_settings_%s.pak' % locale))
 
   #e.g. '<(SHARED_INTERMEDIATE_DIR)/components/strings/
-  # component_strings_da.pak',
+  # components_strings_da.pak',
   inputs.append(os.path.join(SHARE_INT_DIR, 'components', 'strings',
-                'component_strings_%s.pak' % locale))
+                'components_strings_%s.pak' % locale))
 
   if USE_ASH:
     #e.g. '<(SHARED_INTERMEDIATE_DIR)/ash_strings/ash_strings_da.pak',
@@ -99,6 +101,12 @@ def calc_inputs(locale):
     inputs.append(os.path.join(SHARE_INT_DIR, 'ui', 'app_locale_settings',
                   'app_locale_settings_%s.pak' % locale))
 
+    # For example:
+    # '<(SHARED_INTERMEDIATE_DIR)/extensions/strings/extensions_strings_da.pak
+    # TODO(jamescook): When Android stops building extensions code move this
+    # to the OS != 'ios' and OS != 'android' section below.
+    inputs.append(os.path.join(SHARE_INT_DIR, 'extensions', 'strings',
+                  'extensions_strings_%s.pak' % locale))
 
   if OS != 'ios' and OS != 'android':
     #e.g. '<(SHARED_INTERMEDIATE_DIR)/third_party/libaddressinput/
@@ -153,7 +161,7 @@ def repack_locales(locales):
     inputs = []
     inputs += calc_inputs(locale)
     output = calc_output(locale)
-    data_pack.DataPack.RePack(output, inputs)
+    data_pack.DataPack.RePack(output, inputs, whitelist_file=WHITELIST)
 
 
 def DoMain(argv):
@@ -163,6 +171,7 @@ def DoMain(argv):
   global INT_DIR
   global OS
   global USE_ASH
+  global WHITELIST
   global EXTRA_INPUT_FILES
 
   parser = optparse.OptionParser("usage: %prog [options] locales")
@@ -185,6 +194,8 @@ def DoMain(argv):
                     help="The target OS. (e.g. mac, linux, win, etc.)")
   parser.add_option("--use-ash", action="store", dest="use_ash",
                     help="Whether to include ash strings")
+  parser.add_option("--whitelist", action="store", help="Full path to the "
+                    "whitelist used to filter output pak file resource IDs")
   options, locales = parser.parse_args(argv)
 
   if not locales:
@@ -199,6 +210,7 @@ def DoMain(argv):
   EXTRA_INPUT_FILES = options.extra_input
   OS = options.os
   USE_ASH = options.use_ash == '1'
+  WHITELIST = options.whitelist
 
   if not OS:
     if sys.platform == 'darwin':

@@ -10,7 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "mojo/system/constants.h"
-#include "mojo/system/core_impl.h"
+#include "mojo/system/core.h"
 #include "mojo/system/dispatcher.h"
 #include "mojo/system/memory.h"
 
@@ -68,7 +68,7 @@ class MockDispatcher : public Dispatcher {
   virtual MojoResult ReadMessageImplNoLock(
       void* bytes,
       uint32_t* num_bytes,
-      std::vector<scoped_refptr<Dispatcher> >* /*dispatchers*/,
+      DispatcherVector* /*dispatchers*/,
       uint32_t* /*num_dispatchers*/,
       MojoReadMessageFlags /*flags*/) OVERRIDE {
     info_->IncrementReadMessageCallCount();
@@ -168,7 +168,7 @@ CoreTestBase::~CoreTestBase() {
 }
 
 void CoreTestBase::SetUp() {
-  core_ = new CoreImpl();
+  core_ = new Core();
 }
 
 void CoreTestBase::TearDown() {

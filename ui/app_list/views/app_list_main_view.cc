@@ -20,6 +20,7 @@
 #include "ui/app_list/pagination_model.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/views/app_list_item_view.h"
+#include "ui/app_list/views/apps_container_view.h"
 #include "ui/app_list/views/contents_switcher_view.h"
 #include "ui/app_list/views/contents_view.h"
 #include "ui/app_list/views/search_box_view.h"
@@ -137,6 +138,13 @@ void AppListMainView::ShowAppListWhenReady() {
       this, &AppListMainView::OnIconLoadingWaitTimer);
 }
 
+void AppListMainView::ResetForShow() {
+  contents_view_->apps_container_view()->ResetForShowApps();
+  // We clear the search when hiding so when app list appears it is not showing
+  // search results.
+  search_box_view_->ClearSearch();
+}
+
 void AppListMainView::Close() {
   icon_loading_wait_timer_.Stop();
   contents_view_->CancelDrag();
@@ -160,6 +168,10 @@ void AppListMainView::ModelChanged() {
 void AppListMainView::SetDragAndDropHostOfCurrentAppList(
     ApplicationDragAndDropHost* drag_and_drop_host) {
   contents_view_->SetDragAndDropHostOfCurrentAppList(drag_and_drop_host);
+}
+
+bool AppListMainView::ShouldCenterWindow() const {
+  return delegate_->ShouldCenterWindow();
 }
 
 void AppListMainView::PreloadIcons(gfx::NativeView parent) {

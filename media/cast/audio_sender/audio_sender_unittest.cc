@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stdint.h>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/scoped_ptr.h"
@@ -20,14 +22,15 @@
 namespace media {
 namespace cast {
 
-static const int64 kStartMillisecond = GG_INT64_C(12345678900000);
+static const int64 kStartMillisecond = INT64_C(12345678900000);
 
 class TestPacketSender : public transport::PacketSender {
  public:
   TestPacketSender() : number_of_rtp_packets_(0), number_of_rtcp_packets_(0) {}
 
-  virtual bool SendPacket(const Packet& packet) OVERRIDE {
-    if (Rtcp::IsRtcpPacket(&packet[0], packet.size())) {
+  virtual bool SendPacket(transport::PacketRef packet,
+                          const base::Closure& cb) OVERRIDE {
+    if (Rtcp::IsRtcpPacket(&packet->data[0], packet->data.size())) {
       ++number_of_rtcp_packets_;
     } else {
       ++number_of_rtp_packets_;
@@ -66,9 +69,6 @@ class AudioSenderTest : public ::testing::Test {
     audio_config_.bitrate = kDefaultAudioEncoderBitrate;
     audio_config_.rtp_config.payload_type = 127;
 
-    transport::CastTransportAudioConfig transport_config;
-    transport_config.base.rtp_config.payload_type = 127;
-    transport_config.channels = 2;
     net::IPEndPoint dummy_endpoint;
 
     transport_sender_.reset(new transport::CastTransportSenderImpl(
@@ -80,7 +80,6 @@ class AudioSenderTest : public ::testing::Test {
         base::TimeDelta(),
         task_runner_,
         &transport_));
-    transport_sender_->InitializeAudio(transport_config);
     audio_sender_.reset(new AudioSender(
         cast_environment_, audio_config_, transport_sender_.get()));
     task_runner_->RunTasks();

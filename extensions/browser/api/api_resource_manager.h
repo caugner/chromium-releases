@@ -25,6 +25,8 @@
 namespace extensions {
 
 namespace api {
+class BluetoothSocketApiFunction;
+class BluetoothSocketEventDispatcher;
 class SerialEventDispatcher;
 }
 
@@ -152,6 +154,9 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
  private:
   // TODO(rockot): ApiResourceData could be moved out of ApiResourceManager and
   // we could avoid maintaining a friends list here.
+  friend class BluetoothAPI;
+  friend class api::BluetoothSocketApiFunction;
+  friend class api::BluetoothSocketEventDispatcher;
   friend class api::SerialEventDispatcher;
   friend class core_api::TCPServerSocketEventDispatcher;
   friend class core_api::TCPSocketEventDispatcher;
@@ -176,7 +181,7 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
         : next_id_(1), thread_id_(thread_id) {}
 
     int Add(T* api_resource) {
-      DCHECK(content::BrowserThread::CurrentlyOn(thread_id_));
+      DCHECK_CURRENTLY_ON(thread_id_);
       int id = GenerateId();
       if (id > 0) {
         linked_ptr<T> resource_ptr(api_resource);
@@ -195,7 +200,7 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
     }
 
     void Remove(const std::string& extension_id, int api_resource_id) {
-      DCHECK(content::BrowserThread::CurrentlyOn(thread_id_));
+      DCHECK_CURRENTLY_ON(thread_id_);
       if (GetOwnedResource(extension_id, api_resource_id) != NULL) {
         DCHECK(extension_resource_map_.find(extension_id) !=
                extension_resource_map_.end());
@@ -205,36 +210,48 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
     }
 
     T* Get(const std::string& extension_id, int api_resource_id) {
-      DCHECK(content::BrowserThread::CurrentlyOn(thread_id_));
+      DCHECK_CURRENTLY_ON(thread_id_);
       return GetOwnedResource(extension_id, api_resource_id);
     }
 
     base::hash_set<int>* GetResourceIds(const std::string& extension_id) {
-      DCHECK(content::BrowserThread::CurrentlyOn(thread_id_));
+      DCHECK_CURRENTLY_ON(thread_id_);
       return GetOwnedResourceIds(extension_id);
     }
 
     void InitiateExtensionUnloadedCleanup(const std::string& extension_id) {
-      content::BrowserThread::PostTask(
-          thread_id_,
-          FROM_HERE,
-          base::Bind(&ApiResourceData::CleanupResourcesFromUnloadedExtension,
-                     this,
-                     extension_id));
+      if (content::BrowserThread::CurrentlyOn(thread_id_)) {
+        CleanupResourcesFromUnloadedExtension(extension_id);
+      } else {
+        content::BrowserThread::PostTask(
+            thread_id_,
+            FROM_HERE,
+            base::Bind(&ApiResourceData::CleanupResourcesFromUnloadedExtension,
+                       this,
+                       extension_id));
+      }
     }
 
     void InitiateExtensionSuspendedCleanup(const std::string& extension_id) {
-      content::BrowserThread::PostTask(
-          thread_id_,
-          FROM_HERE,
-          base::Bind(&ApiResourceData::CleanupResourcesFromSuspendedExtension,
-                     this,
-                     extension_id));
+      if (content::BrowserThread::CurrentlyOn(thread_id_)) {
+        CleanupResourcesFromSuspendedExtension(extension_id);
+      } else {
+        content::BrowserThread::PostTask(
+            thread_id_,
+            FROM_HERE,
+            base::Bind(&ApiResourceData::CleanupResourcesFromSuspendedExtension,
+                       this,
+                       extension_id));
+      }
     }
 
     void InititateCleanup() {
-      content::BrowserThread::PostTask(
-          thread_id_, FROM_HERE, base::Bind(&ApiResourceData::Cleanup, this));
+      if (content::BrowserThread::CurrentlyOn(thread_id_)) {
+        Cleanup();
+      } else {
+        content::BrowserThread::PostTask(
+            thread_id_, FROM_HERE, base::Bind(&ApiResourceData::Cleanup, this));
+      }
     }
 
    private:
@@ -251,7 +268,7 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
     }
 
     base::hash_set<int>* GetOwnedResourceIds(const std::string& extension_id) {
-      DCHECK(content::BrowserThread::CurrentlyOn(thread_id_));
+      DCHECK_CURRENTLY_ON(thread_id_);
       if (extension_resource_map_.find(extension_id) ==
           extension_resource_map_.end())
         return NULL;
@@ -271,7 +288,7 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
 
     void CleanupResourcesFromExtension(const std::string& extension_id,
                                        bool remove_all) {
-      DCHECK(content::BrowserThread::CurrentlyOn(thread_id_));
+      DCHECK_CURRENTLY_ON(thread_id_);
 
       if (extension_resource_map_.find(extension_id) ==
           extension_resource_map_.end()) {
@@ -307,7 +324,7 @@ class ApiResourceManager : public BrowserContextKeyedAPI,
     }
 
     void Cleanup() {
-      DCHECK(content::BrowserThread::CurrentlyOn(thread_id_));
+      DCHECK_CURRENTLY_ON(thread_id_);
 
       api_resource_map_.clear();
       extension_resource_map_.clear();

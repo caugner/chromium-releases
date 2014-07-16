@@ -17,7 +17,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 
 using content::BrowserThread;
@@ -136,7 +135,7 @@ TabCaptureRegistry::GetFactoryInstance() {
 
 const TabCaptureRegistry::RegistryCaptureInfo
     TabCaptureRegistry::GetCapturedTabs(const std::string& extension_id) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   RegistryCaptureInfo list;
   for (ScopedVector<TabCaptureRequest>::const_iterator it = requests_.begin();
        it != requests_.end(); ++it) {
@@ -150,7 +149,7 @@ const TabCaptureRegistry::RegistryCaptureInfo
 void TabCaptureRegistry::Observe(int type,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED: {
       // Cleanup all the requested media streams for this extension.
@@ -230,7 +229,7 @@ bool TabCaptureRegistry::AddRequest(int render_process_id,
 
 bool TabCaptureRegistry::VerifyRequest(int render_process_id,
                                        int render_view_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DVLOG(1) << "Verifying tabCapture request for "
            << render_process_id << ":" << render_view_id;
   // TODO(justinlin): Verify extension too.
@@ -242,7 +241,7 @@ void TabCaptureRegistry::OnRequestUpdate(
     int render_view_id,
     const content::MediaStreamDevice& device,
     const content::MediaRequestState new_state) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (device.type != content::MEDIA_TAB_VIDEO_CAPTURE &&
       device.type != content::MEDIA_TAB_AUDIO_CAPTURE) {
     return;
@@ -316,8 +315,7 @@ void TabCaptureRegistry::OnRequestUpdate(
 
 void TabCaptureRegistry::DispatchStatusChangeEvent(
     const TabCaptureRequest* request) const {
-  EventRouter* router = profile_ ?
-      extensions::ExtensionSystem::Get(profile_)->event_router() : NULL;
+  EventRouter* router = profile_ ? EventRouter::Get(profile_) : NULL;
   if (!router)
     return;
 

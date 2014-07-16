@@ -14,12 +14,13 @@
 #endif
 
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/signin_tracker_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -30,12 +31,14 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/sync/one_click_signin_sync_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/webui/signin/profile_signin_confirmation_dialog.h"
-#include "chrome/common/profile_management_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -51,14 +54,17 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
     StartSyncMode start_mode,
     content::WebContents* web_contents,
     ConfirmationRequired confirmation_required,
+    const GURL& continue_url,
     Callback sync_setup_completed_callback)
     : content::WebContentsObserver(web_contents),
       start_mode_(start_mode),
       desktop_type_(chrome::HOST_DESKTOP_TYPE_NATIVE),
       confirmation_required_(confirmation_required),
+      continue_url_(continue_url),
       sync_setup_completed_callback_(sync_setup_completed_callback),
       weak_pointer_factory_(this) {
   DCHECK(profile);
+  DCHECK(web_contents || continue_url.is_empty());
   BrowserList::AddObserver(this);
 
   Initialize(profile, browser);
@@ -94,7 +100,7 @@ void OneClickSigninSyncStarter::Initialize(Profile* profile, Browser* browser) {
     desktop_type_ = chrome::GetActiveDesktop();
   }
 
-  signin_tracker_.reset(new SigninTracker(profile_, this));
+  signin_tracker_ = SigninTrackerFactory::CreateForProfile(profile_, this);
 
   // Let the sync service know that setup is in progress so it doesn't start
   // syncing until the user has finished any configuration.
@@ -227,7 +233,7 @@ void OneClickSigninSyncStarter::CreateNewSignedInProfile() {
       GetProfileInfoCache().ChooseAvatarIconIndexForNewProfile();
   ProfileManager::CreateMultiProfileAsync(
       base::UTF8ToUTF16(signin->GetUsernameForAuthInProgress()),
-      base::UTF8ToUTF16(ProfileInfoCache::GetDefaultAvatarIconUrl(icon_index)),
+      base::UTF8ToUTF16(profiles::GetDefaultAvatarIconUrl(icon_index)),
       base::Bind(&OneClickSigninSyncStarter::CompleteInitForNewProfile,
                  weak_pointer_factory_.GetWeakPtr(), desktop_type_),
       std::string());
@@ -398,9 +404,17 @@ void OneClickSigninSyncStarter::MergeSessionComplete(
     case SHOW_SETTINGS_WITHOUT_CONFIGURE:
       ShowSettingsPage(false);  // Don't show sync config UI.
       break;
-    default:
+    case UNDO_SYNC:
       NOTREACHED();
   }
+
+  // Navigate to the |continue_url_| if one is set, unless the user first needs
+  // to configure Sync.
+  if (web_contents() && !continue_url_.is_empty() &&
+      start_mode_ != CONFIGURE_SYNC_FIRST) {
+    LoadContinueUrl();
+  }
+
   delete this;
 }
 
@@ -481,12 +495,15 @@ void OneClickSigninSyncStarter::ShowSettingsPage(bool configure_sync) {
         }
       }
     } else {
-      // Sync is disabled - just display the settings page.
+      // Sync is disabled - just display the settings page or redirect to the
+      // |continue_url_|.
       FinishProfileSyncServiceSetup();
-      if (use_same_tab)
-        ShowSettingsPageInWebContents(web_contents(), std::string());
-      else
+      if (!use_same_tab)
         chrome::ShowSettings(browser_);
+      else if (!continue_url_.is_empty())
+        LoadContinueUrl();
+      else
+        ShowSettingsPageInWebContents(web_contents(), std::string());
     }
   }
 }
@@ -508,6 +525,12 @@ void OneClickSigninSyncStarter::FinishProfileSyncServiceSetup() {
 void OneClickSigninSyncStarter::ShowSettingsPageInWebContents(
     content::WebContents* contents,
     const std::string& sub_page) {
+  if (!continue_url_.is_empty()) {
+    // The observer deletes itself once it's done.
+    DCHECK(!sub_page.empty());
+    new OneClickSigninSyncObserver(contents, continue_url_);
+  }
+
   GURL url = chrome::GetSettingsUrl(sub_page);
   content::OpenURLParams params(url,
                                 content::Referrer(),
@@ -522,4 +545,12 @@ void OneClickSigninSyncStarter::ShowSettingsPageInWebContents(
       browser->tab_strip_model()->GetIndexOfWebContents(contents);
   browser->tab_strip_model()->ActivateTabAt(content_index,
                                             false /* user_gesture */);
+}
+
+void OneClickSigninSyncStarter::LoadContinueUrl() {
+  web_contents()->GetController().LoadURL(
+      continue_url_,
+      content::Referrer(),
+      content::PAGE_TRANSITION_AUTO_TOPLEVEL,
+      std::string());
 }

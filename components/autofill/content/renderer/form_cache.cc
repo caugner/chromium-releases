@@ -12,14 +12,14 @@
 #include "components/autofill/core/common/form_data_predictions.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/form_field_data_predictions.h"
-#include "grit/component_strings.h"
+#include "grit/components_strings.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFormControlElement.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebSelectElement.h"
 #include "third_party/WebKit/public/web/WebTextAreaElement.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -206,9 +206,7 @@ bool FormCache::ClearFormWithElement(const WebFormControlElement& element) {
         input_element->setSelectionRange(length, length);
       }
     } else if (IsTextAreaElement(control_element)) {
-      WebTextAreaElement text_area = control_element.to<WebTextAreaElement>();
-      text_area.setValue(base::string16());
-      text_area.dispatchFormControlChangeEvent();
+      control_element.setValue(base::string16(), true);
     } else if (IsSelectElement(control_element)) {
       WebSelectElement select_element = control_element.to<WebSelectElement>();
 
@@ -216,8 +214,7 @@ bool FormCache::ClearFormWithElement(const WebFormControlElement& element) {
           initial_value_iter = initial_select_values_.find(select_element);
       if (initial_value_iter != initial_select_values_.end() &&
           select_element.value() != initial_value_iter->second) {
-        select_element.setValue(initial_value_iter->second);
-        select_element.dispatchFormControlChangeEvent();
+        select_element.setValue(initial_value_iter->second, true);
       }
     } else {
       WebInputElement input_element = control_element.to<WebInputElement>();

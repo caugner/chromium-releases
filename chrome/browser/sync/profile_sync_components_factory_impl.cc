@@ -16,7 +16,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_profile_data_type_controller.h"
@@ -27,12 +26,8 @@
 #include "chrome/browser/sync/glue/data_type_manager_impl.h"
 #include "chrome/browser/sync/glue/extension_data_type_controller.h"
 #include "chrome/browser/sync/glue/extension_setting_data_type_controller.h"
-#include "chrome/browser/sync/glue/generic_change_processor.h"
 #include "chrome/browser/sync/glue/password_data_type_controller.h"
 #include "chrome/browser/sync/glue/search_engine_data_type_controller.h"
-#include "chrome/browser/sync/glue/session_change_processor.h"
-#include "chrome/browser/sync/glue/session_data_type_controller.h"
-#include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/shared_change_processor.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/sync_backend_host_impl.h"
@@ -44,7 +39,7 @@
 #include "chrome/browser/sync/profile_sync_components_factory_impl.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/sync/sessions2/session_data_type_controller2.h"
+#include "chrome/browser/sync/sessions/session_data_type_controller.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_syncable_service.h"
@@ -57,10 +52,15 @@
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/data_type_manager_observer.h"
+#include "components/sync_driver/generic_change_processor.h"
 #include "components/sync_driver/proxy_data_type_controller.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_system.h"
+#include "sync/api/attachments/attachment_service.h"
+#include "sync/api/attachments/fake_attachment_service.h"
+#include "sync/api/attachments/fake_attachment_store.h"
 #include "sync/api/syncable_service.h"
 
 #if defined(ENABLE_EXTENSIONS)
@@ -108,14 +108,10 @@ using browser_sync::DataTypeManagerImpl;
 using browser_sync::DataTypeManagerObserver;
 using browser_sync::ExtensionDataTypeController;
 using browser_sync::ExtensionSettingDataTypeController;
-using browser_sync::GenericChangeProcessor;
 using browser_sync::PasswordDataTypeController;
 using browser_sync::ProxyDataTypeController;
 using browser_sync::SearchEngineDataTypeController;
-using browser_sync::SessionChangeProcessor;
 using browser_sync::SessionDataTypeController;
-using browser_sync::SessionDataTypeController2;
-using browser_sync::SessionModelAssociator;
 using browser_sync::SharedChangeProcessor;
 using browser_sync::SyncBackendHost;
 using browser_sync::ThemeDataTypeController;
@@ -213,7 +209,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
          syncer::PROXY_TABS));
     pss->RegisterDataTypeController(
-        new SessionDataTypeController2(this, profile_, pss));
+        new SessionDataTypeController(this, profile_, pss));
   }
 
   // Favicon sync is enabled by default. Register unless explicitly disabled.
@@ -385,8 +381,13 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
               profile_,
               pss));
 
-    // Synced Notification App Infos are disabled by default.
-    if (command_line_->HasSwitch(switches::kEnableSyncSyncedNotifications)) {
+    // Synced Notification App Infos are enabled by default on Dev and Canary
+    // only.
+    // TODO(petewil): Enable on stable when the feature is ready.
+    chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+    if (channel == chrome::VersionInfo::CHANNEL_UNKNOWN ||
+        channel == chrome::VersionInfo::CHANNEL_DEV ||
+        channel == chrome::VersionInfo::CHANNEL_CANARY) {
       pss->RegisterDataTypeController(new UIDataTypeController(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
           base::Bind(&ChromeReportUnrecoverableError),
@@ -434,24 +435,6 @@ ProfileSyncComponentsFactoryImpl::CreateSyncBackendHost(
     Profile* profile,
     const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs) {
   return new browser_sync::SyncBackendHostImpl(name, profile, sync_prefs);
-}
-
-browser_sync::GenericChangeProcessor*
-    ProfileSyncComponentsFactoryImpl::CreateGenericChangeProcessor(
-        ProfileSyncService* profile_sync_service,
-        browser_sync::DataTypeErrorHandler* error_handler,
-        const base::WeakPtr<syncer::SyncableService>& local_service,
-        const base::WeakPtr<syncer::SyncMergeResult>& merge_result) {
-  syncer::UserShare* user_share = profile_sync_service->GetUserShare();
-  return new GenericChangeProcessor(error_handler,
-                                    local_service,
-                                    merge_result,
-                                    user_share);
-}
-
-browser_sync::SharedChangeProcessor* ProfileSyncComponentsFactoryImpl::
-    CreateSharedChangeProcessor() {
-  return new SharedChangeProcessor();
 }
 
 base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
@@ -555,14 +538,14 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       return base::WeakPtr<syncer::SyncableService>();
     }
     case syncer::SESSIONS: {
-      DCHECK(!command_line_->HasSwitch(switches::kDisableSyncSessionsV2));
       return ProfileSyncServiceFactory::GetForProfile(profile_)->
           GetSessionsSyncableService()->AsWeakPtr();
     }
     case syncer::PASSWORDS: {
 #if defined(PASSWORD_MANAGER_ENABLE_SYNC)
-      PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
-          profile_, Profile::EXPLICIT_ACCESS);
+      password_manager::PasswordStore* password_store =
+          PasswordStoreFactory::GetForProfile(profile_,
+                                              Profile::EXPLICIT_ACCESS);
       return password_store ? password_store->GetPasswordSyncableService()
                             : base::WeakPtr<syncer::SyncableService>();
 #else
@@ -577,6 +560,15 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       NOTREACHED();
       return base::WeakPtr<syncer::SyncableService>();
   }
+}
+
+scoped_ptr<syncer::AttachmentStore>
+    ProfileSyncComponentsFactoryImpl::CreateCustomAttachmentStoreForType(
+    syncer::ModelType type) {
+  scoped_ptr<syncer::AttachmentStore> store(
+      new syncer::FakeAttachmentStore(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
+  return store.Pass();
 }
 
 ProfileSyncComponentsFactory::SyncComponents
@@ -599,7 +591,8 @@ ProfileSyncComponentsFactory::SyncComponents
                                   error_handler,
                                   kExpectMobileBookmarksFolder);
   BookmarkChangeProcessor* change_processor =
-      new BookmarkChangeProcessor(model_associator,
+      new BookmarkChangeProcessor(profile_sync_service->profile(),
+                                  model_associator,
                                   error_handler);
   return SyncComponents(model_associator, change_processor);
 }
@@ -618,16 +611,5 @@ ProfileSyncComponentsFactory::SyncComponents
                                   model_associator,
                                   history_backend,
                                   error_handler);
-  return SyncComponents(model_associator, change_processor);
-}
-
-ProfileSyncComponentsFactory::SyncComponents
-    ProfileSyncComponentsFactoryImpl::CreateSessionSyncComponents(
-       ProfileSyncService* profile_sync_service,
-        DataTypeErrorHandler* error_handler) {
-  SessionModelAssociator* model_associator =
-      new SessionModelAssociator(profile_sync_service, error_handler);
-  SessionChangeProcessor* change_processor =
-      new SessionChangeProcessor(error_handler, model_associator);
   return SyncComponents(model_associator, change_processor);
 }

@@ -40,6 +40,7 @@
 #include "chrome/browser/extensions/extension_creator.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_error_ui.h"
+#include "chrome/browser/extensions/extension_garbage_collector_factory.h"
 #include "chrome/browser/extensions/extension_notification_observer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
@@ -70,7 +71,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/plugins/plugins_handler.h"
-#include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
@@ -98,10 +98,12 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
+#include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/permissions/permission_set.h"
+#include "extensions/common/switches.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/value_builder.h"
 #include "gpu/config/gpu_info.h"
@@ -492,6 +494,10 @@ void ExtensionServiceTestBase::InitializeExtensionService(
   extensions_install_dir_ = params.extensions_install_dir;
   expected_extensions_count_ = 0;
   registry_ = extensions::ExtensionRegistry::Get(profile_.get());
+  extensions::ExtensionGarbageCollectorFactory::GetInstance()
+      ->SetTestingFactoryAndUse(
+          profile_.get(),
+          &extensions::ExtensionGarbageCollectorFactory::BuildInstanceFor);
 }
 
 // static
@@ -664,7 +670,8 @@ class ExtensionServiceTest
         was_update_(false),
         override_external_install_prompt_(
             FeatureSwitch::prompt_for_external_extensions(), false) {
-    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+    registrar_.Add(this,
+                   chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                    content::NotificationService::AllSources());
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                    content::NotificationService::AllSources());
@@ -676,7 +683,7 @@ class ExtensionServiceTest
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
-      case chrome::NOTIFICATION_EXTENSION_LOADED: {
+      case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED: {
         const Extension* extension =
             content::Details<const Extension>(details).ptr();
         loaded_.push_back(make_scoped_refptr(extension));
@@ -974,7 +981,7 @@ class ExtensionServiceTest
     content::WindowedNotificationObserver observer(
         chrome::NOTIFICATION_CRX_INSTALLER_DONE,
         base::Bind(&IsCrxInstallerDone, &installer));
-    service_->UpdateExtension(id, path, true, GURL(), &installer);
+    service_->UpdateExtension(id, path, true, &installer);
 
     if (installer)
       observer.Wait();
@@ -1464,118 +1471,6 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectoryFail) {
       extensions::manifest_errors::kManifestUnreadable)) <<
       base::UTF16ToUTF8(GetErrors()[3]);
 };
-
-// Test that partially deleted extensions are cleaned up during startup
-// Test loading bad extensions from the profile directory.
-TEST_F(ExtensionServiceTest, CleanupOnStartup) {
-  InitPluginService();
-  InitializeGoodInstalledExtensionService();
-
-  // Simulate that one of them got partially deleted by clearing its pref.
-  {
-    DictionaryPrefUpdate update(profile_->GetPrefs(), "extensions.settings");
-    base::DictionaryValue* dict = update.Get();
-    ASSERT_TRUE(dict != NULL);
-    dict->Remove("behllobkkfkfnphdnhnkndlbkcpglgmj", NULL);
-  }
-
-  service_->Init();
-  // A delayed task to call GarbageCollectExtensions is posted by
-  // ExtensionService::Init. As the test won't wait for the delayed task to
-  // be called, call it manually instead.
-  service_->GarbageCollectExtensions();
-  // Wait for GarbageCollectExtensions task to complete.
-  base::RunLoop().RunUntilIdle();
-
-  base::FileEnumerator dirs(extensions_install_dir_, false,
-                            base::FileEnumerator::DIRECTORIES);
-  size_t count = 0;
-  while (!dirs.Next().empty())
-    count++;
-
-  // We should have only gotten two extensions now.
-  EXPECT_EQ(2u, count);
-
-  // And extension1 dir should now be toast.
-  base::FilePath extension_dir = extensions_install_dir_
-      .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj");
-  ASSERT_FALSE(base::PathExists(extension_dir));
-}
-
-// Test that GarbageCollectExtensions deletes the right versions of an
-// extension.
-TEST_F(ExtensionServiceTest, GarbageCollectWithPendingUpdates) {
-  InitPluginService();
-
-  base::FilePath source_install_dir = data_dir_
-      .AppendASCII("pending_updates")
-      .AppendASCII("Extensions");
-  base::FilePath pref_path =
-      source_install_dir.DirName().Append(chrome::kPreferencesFilename);
-
-  InitializeInstalledExtensionService(pref_path, source_install_dir);
-
-  // This is the directory that is going to be deleted, so make sure it actually
-  // is there before the garbage collection.
-  ASSERT_TRUE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "hpiknbiabeeppbpihjehijgoemciehgk/3")));
-
-  service_->GarbageCollectExtensions();
-  // Wait for GarbageCollectExtensions task to complete.
-  base::RunLoop().RunUntilIdle();
-
-  // Verify that the pending update for the first extension didn't get
-  // deleted.
-  EXPECT_TRUE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "bjafgdebaacbbbecmhlhpofkepfkgcpa/1.0")));
-  EXPECT_TRUE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "bjafgdebaacbbbecmhlhpofkepfkgcpa/2.0")));
-  EXPECT_TRUE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "hpiknbiabeeppbpihjehijgoemciehgk/2")));
-  EXPECT_FALSE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "hpiknbiabeeppbpihjehijgoemciehgk/3")));
-}
-
-// Test that pending updates are properly handled on startup.
-TEST_F(ExtensionServiceTest, UpdateOnStartup) {
-  InitPluginService();
-
-  base::FilePath source_install_dir = data_dir_
-      .AppendASCII("pending_updates")
-      .AppendASCII("Extensions");
-  base::FilePath pref_path =
-      source_install_dir.DirName().Append(chrome::kPreferencesFilename);
-
-  InitializeInstalledExtensionService(pref_path, source_install_dir);
-
-  // This is the directory that is going to be deleted, so make sure it actually
-  // is there before the garbage collection.
-  ASSERT_TRUE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "hpiknbiabeeppbpihjehijgoemciehgk/3")));
-
-  service_->Init();
-  // A delayed task to call GarbageCollectExtensions is posted by
-  // ExtensionService::Init. As the test won't wait for the delayed task to
-  // be called, call it manually instead.
-  service_->GarbageCollectExtensions();
-  // Wait for GarbageCollectExtensions task to complete.
-  base::RunLoop().RunUntilIdle();
-
-  // Verify that the pending update for the first extension got installed.
-  EXPECT_FALSE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "bjafgdebaacbbbecmhlhpofkepfkgcpa/1.0")));
-  EXPECT_TRUE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "bjafgdebaacbbbecmhlhpofkepfkgcpa/2.0")));
-  EXPECT_TRUE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "hpiknbiabeeppbpihjehijgoemciehgk/2")));
-  EXPECT_FALSE(base::PathExists(extensions_install_dir_.AppendASCII(
-      "hpiknbiabeeppbpihjehijgoemciehgk/3")));
-
-  // Make sure update information got deleted.
-  ExtensionPrefs* prefs = ExtensionPrefs::Get(profile_.get());
-  EXPECT_FALSE(
-      prefs->GetDelayedInstallInfo("bjafgdebaacbbbecmhlhpofkepfkgcpa"));
-}
 
 // Test various cases for delayed install because of missing imports.
 TEST_F(ExtensionServiceTest, PendingImports) {
@@ -2894,7 +2789,7 @@ TEST_F(ExtensionServiceTest, UpdateExtensionDuringShutdown) {
 
   // Update should fail and extension should not be updated.
   path = data_dir_.AppendASCII("good2.crx");
-  bool updated = service_->UpdateExtension(good_crx, path, true, GURL(), NULL);
+  bool updated = service_->UpdateExtension(good_crx, path, true, NULL);
   ASSERT_FALSE(updated);
   ASSERT_EQ("1.0.0.0",
             service_->GetExtensionById(good_crx, false)->
@@ -5201,6 +5096,19 @@ TEST_F(ExtensionServiceTest, ExternalPrefProvider) {
       "  }"
       "}";
   EXPECT_EQ(1, from_webstore_visitor.Visit(json_data));
+
+  // Test was_installed_by_eom.
+  MockProviderVisitor was_installed_by_eom_visitor(
+      base_path, Extension::WAS_INSTALLED_BY_OEM);
+  json_data =
+      "{"
+      "  \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\": {"
+      "    \"external_crx\": \"RandomExtension.crx\","
+      "    \"external_version\": \"1.0\","
+      "    \"was_installed_by_oem\": true"
+      "  }"
+      "}";
+  EXPECT_EQ(1, was_installed_by_eom_visitor.Visit(json_data));
 }
 
 // Test loading good extensions from the profile directory.
@@ -6536,7 +6444,7 @@ TEST_F(ExtensionServiceTest, ConcurrentExternalLocalFile) {
 TEST_F(ExtensionServiceTest, InstallWhitelistedExtension) {
   std::string test_id = "hdkklepkcpckhnpgjnmbdfhehckloojk";
   CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kWhitelistedExtensionID, test_id);
+      extensions::switches::kWhitelistedExtensionID, test_id);
 
   InitializeEmptyExtensionService();
   base::FilePath path = data_dir_

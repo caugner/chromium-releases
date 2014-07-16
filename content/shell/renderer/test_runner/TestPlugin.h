@@ -20,9 +20,9 @@
 
 namespace blink {
 class WebFrame;
-}  // namespace blink
+}
 
-namespace WebTestRunner {
+namespace content {
 
 class WebTestDelegate;
 
@@ -69,7 +69,6 @@ public:
     virtual bool isPlaceholder();
 
     // cc::TextureLayerClient methods:
-    virtual unsigned PrepareTexture() OVERRIDE;
     virtual bool PrepareTextureMailbox(
         cc::TextureMailbox* mailbox,
         scoped_ptr<cc::SingleReleaseCallback>* releaseCallback,
@@ -154,6 +153,6 @@ private:
     DISALLOW_COPY_AND_ASSIGN(TestPlugin);
 };
 
-}
+}  // namespace content
 
 #endif  // CONTENT_SHELL_RENDERER_TEST_RUNNER_TESTPLUGIN_H_

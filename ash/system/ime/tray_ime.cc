@@ -23,6 +23,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
+#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
@@ -32,8 +34,37 @@
 #include "ui/views/widget/widget.h"
 
 namespace ash {
-namespace internal {
 namespace tray {
+
+// A |HoverHighlightView| that uses bold or normal font depending on whetehr
+// it is selected.  This view exposes itself as a checkbox to the accessibility
+// framework.
+class SelectableHoverHighlightView : public HoverHighlightView {
+ public:
+  SelectableHoverHighlightView(ViewClickListener* listener,
+                               const base::string16& label,
+                               bool selected)
+      : HoverHighlightView(listener), selected_(selected) {
+    AddLabel(
+        label, gfx::ALIGN_LEFT, selected ? gfx::Font::BOLD : gfx::Font::NORMAL);
+  }
+
+  virtual ~SelectableHoverHighlightView() {}
+
+ protected:
+  // Overridden from views::View.
+  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE {
+    HoverHighlightView::GetAccessibleState(state);
+    state->role = ui::AX_ROLE_CHECK_BOX;
+    if (selected_)
+      state->AddStateFlag(ui::AX_STATE_CHECKED);
+  }
+
+ private:
+  bool selected_;
+
+  DISALLOW_COPY_AND_ASSIGN(SelectableHoverHighlightView);
+};
 
 class IMEDefaultView : public TrayItemMore {
  public:
@@ -100,9 +131,8 @@ class IMEDetailedView : public TrayDetailsView,
     ime_map_.clear();
     CreateScrollableList();
     for (size_t i = 0; i < list.size(); i++) {
-      HoverHighlightView* container = new HoverHighlightView(this);
-      container->AddLabel(list[i].name,
-          list[i].selected ? gfx::Font::BOLD : gfx::Font::NORMAL);
+      HoverHighlightView* container = new SelectableHoverHighlightView(
+          this, list[i].name, list[i].selected);
       scroll_content()->AddChildView(container);
       ime_map_[container] = list[i].id;
     }
@@ -111,10 +141,8 @@ class IMEDetailedView : public TrayDetailsView,
   void AppendIMEProperties(const IMEPropertyInfoList& property_list) {
     property_map_.clear();
     for (size_t i = 0; i < property_list.size(); i++) {
-      HoverHighlightView* container = new HoverHighlightView(this);
-      container->AddLabel(
-          property_list[i].name,
-          property_list[i].selected ? gfx::Font::BOLD : gfx::Font::NORMAL);
+      HoverHighlightView* container = new SelectableHoverHighlightView(
+          this, property_list[i].name, property_list[i].selected);
       if (i == 0)
         container->SetBorder(views::Border::CreateSolidSidedBorder(
             1, 0, 0, 0, kBorderLightColor));
@@ -125,8 +153,10 @@ class IMEDetailedView : public TrayDetailsView,
 
   void AppendSettings() {
     HoverHighlightView* container = new HoverHighlightView(this);
-    container->AddLabel(ui::ResourceBundle::GetSharedInstance().
-        GetLocalizedString(IDS_ASH_STATUS_TRAY_IME_SETTINGS),
+    container->AddLabel(
+        ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
+            IDS_ASH_STATUS_TRAY_IME_SETTINGS),
+        gfx::ALIGN_LEFT,
         gfx::Font::NORMAL);
     AddChildView(container);
     settings_ = container;
@@ -270,5 +300,4 @@ void TrayIME::OnIMERefresh() {
     detailed_->Update(list, property_list);
 }
 
-}  // namespace internal
 }  // namespace ash

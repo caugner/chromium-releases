@@ -46,7 +46,7 @@ int MaskForKey(const char* key) {
 
 }  // namespace
 
-bool WebviewExtensionFunction::RunImpl() {
+bool WebviewExtensionFunction::RunAsync() {
   int instance_id = 0;
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &instance_id));
   WebViewGuest* guest = WebViewGuest::From(
@@ -54,12 +54,12 @@ bool WebviewExtensionFunction::RunImpl() {
   if (!guest)
     return false;
 
-  return RunImplSafe(guest);
+  return RunAsyncSafe(guest);
 }
 
 // TODO(lazyboy): Add checks similar to
-// WebviewExtensionFunction::RunImplSafe(WebViewGuest*).
-bool WebviewContextMenusCreateFunction::RunImpl() {
+// WebviewExtensionFunction::RunAsyncSafe(WebViewGuest*).
+bool WebviewContextMenusCreateFunction::RunAsync() {
   scoped_ptr<webview::ContextMenusCreate::Params> params(
       webview::ContextMenusCreate::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -89,7 +89,7 @@ bool WebviewContextMenusCreateFunction::RunImpl() {
   return success;
 }
 
-bool WebviewContextMenusUpdateFunction::RunImpl() {
+bool WebviewContextMenusUpdateFunction::RunAsync() {
   scoped_ptr<webview::ContextMenusUpdate::Params> params(
       webview::ContextMenusUpdate::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -112,7 +112,7 @@ bool WebviewContextMenusUpdateFunction::RunImpl() {
   return success;
 }
 
-bool WebviewContextMenusRemoveFunction::RunImpl() {
+bool WebviewContextMenusRemoveFunction::RunAsync() {
   scoped_ptr<webview::ContextMenusRemove::Params> params(
       webview::ContextMenusRemove::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -148,7 +148,7 @@ bool WebviewContextMenusRemoveFunction::RunImpl() {
   return success;
 }
 
-bool WebviewContextMenusRemoveAllFunction::RunImpl() {
+bool WebviewContextMenusRemoveAllFunction::RunAsync() {
   scoped_ptr<webview::ContextMenusRemoveAll::Params> params(
       webview::ContextMenusRemoveAll::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -196,7 +196,7 @@ uint32 WebviewClearDataFunction::GetRemovalMask() {
 
 // TODO(lazyboy): Parameters in this extension function are similar (or a
 // sub-set) to BrowsingDataRemoverFunction. How can we share this code?
-bool WebviewClearDataFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewClearDataFunction::RunAsyncSafe(WebViewGuest* guest) {
   // Grab the initial |options| parameter, and parse out the arguments.
   base::DictionaryValue* options;
   EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(1, &options));
@@ -242,13 +242,12 @@ bool WebviewClearDataFunction::RunImplSafe(WebViewGuest* guest) {
 }
 
 void WebviewClearDataFunction::ClearDataDone() {
-  Release();  // Balanced in RunImpl().
+  Release();  // Balanced in RunAsync().
   SendResponse(true);
 }
 
 WebviewExecuteCodeFunction::WebviewExecuteCodeFunction()
-    : guest_instance_id_(0) {
-}
+    : guest_instance_id_(0), guest_src_(GURL::EmptyGURL()) {}
 
 WebviewExecuteCodeFunction::~WebviewExecuteCodeFunction() {
 }
@@ -263,8 +262,16 @@ bool WebviewExecuteCodeFunction::Init() {
   if (!guest_instance_id_)
     return false;
 
+  std::string src;
+  if (!args_->GetString(1, &src))
+    return false;
+
+  guest_src_ = GURL(src);
+  if (!guest_src_.is_valid())
+    return false;
+
   base::DictionaryValue* details_value = NULL;
-  if (!args_->GetDictionary(1, &details_value))
+  if (!args_->GetDictionary(2, &details_value))
     return false;
   scoped_ptr<InjectDetails> details(new InjectDetails());
   if (!InjectDetails::Populate(*details_value, details.get()))
@@ -293,6 +300,10 @@ extensions::ScriptExecutor* WebviewExecuteCodeFunction::GetScriptExecutor() {
 
 bool WebviewExecuteCodeFunction::IsWebView() const {
   return true;
+}
+
+const GURL& WebviewExecuteCodeFunction::GetWebViewSrc() const {
+  return guest_src_;
 }
 
 WebviewExecuteScriptFunction::WebviewExecuteScriptFunction() {
@@ -344,7 +355,7 @@ WebviewSetZoomFunction::WebviewSetZoomFunction() {
 WebviewSetZoomFunction::~WebviewSetZoomFunction() {
 }
 
-bool WebviewSetZoomFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewSetZoomFunction::RunAsyncSafe(WebViewGuest* guest) {
   scoped_ptr<webview::SetZoom::Params> params(
       webview::SetZoom::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -360,7 +371,7 @@ WebviewGetZoomFunction::WebviewGetZoomFunction() {
 WebviewGetZoomFunction::~WebviewGetZoomFunction() {
 }
 
-bool WebviewGetZoomFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewGetZoomFunction::RunAsyncSafe(WebViewGuest* guest) {
   scoped_ptr<webview::GetZoom::Params> params(
       webview::GetZoom::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -377,7 +388,7 @@ WebviewFindFunction::WebviewFindFunction() {
 WebviewFindFunction::~WebviewFindFunction() {
 }
 
-bool WebviewFindFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewFindFunction::RunAsyncSafe(WebViewGuest* guest) {
   scoped_ptr<webview::Find::Params> params(
       webview::Find::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -407,7 +418,7 @@ WebviewStopFindingFunction::WebviewStopFindingFunction() {
 WebviewStopFindingFunction::~WebviewStopFindingFunction() {
 }
 
-bool WebviewStopFindingFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewStopFindingFunction::RunAsyncSafe(WebViewGuest* guest) {
   scoped_ptr<webview::StopFinding::Params> params(
       webview::StopFinding::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -438,7 +449,7 @@ WebviewGoFunction::WebviewGoFunction() {
 WebviewGoFunction::~WebviewGoFunction() {
 }
 
-bool WebviewGoFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewGoFunction::RunAsyncSafe(WebViewGuest* guest) {
   scoped_ptr<webview::Go::Params> params(webview::Go::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -452,7 +463,7 @@ WebviewReloadFunction::WebviewReloadFunction() {
 WebviewReloadFunction::~WebviewReloadFunction() {
 }
 
-bool WebviewReloadFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewReloadFunction::RunAsyncSafe(WebViewGuest* guest) {
   guest->Reload();
   return true;
 }
@@ -463,7 +474,7 @@ WebviewSetPermissionFunction::WebviewSetPermissionFunction() {
 WebviewSetPermissionFunction::~WebviewSetPermissionFunction() {
 }
 
-bool WebviewSetPermissionFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewSetPermissionFunction::RunAsyncSafe(WebViewGuest* guest) {
   scoped_ptr<webview::SetPermission::Params> params(
       webview::SetPermission::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -497,13 +508,32 @@ bool WebviewSetPermissionFunction::RunImplSafe(WebViewGuest* guest) {
   return true;
 }
 
+WebviewShowContextMenuFunction::WebviewShowContextMenuFunction() {
+}
+
+WebviewShowContextMenuFunction::~WebviewShowContextMenuFunction() {
+}
+
+bool WebviewShowContextMenuFunction::RunAsyncSafe(WebViewGuest* guest) {
+  scoped_ptr<webview::ShowContextMenu::Params> params(
+      webview::ShowContextMenu::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  // TODO(lazyboy): Actually implement filtering menu items, we pass NULL for
+  // now.
+  guest->ShowContextMenu(params->request_id, NULL);
+
+  SendResponse(true);
+  return true;
+}
+
 WebviewOverrideUserAgentFunction::WebviewOverrideUserAgentFunction() {
 }
 
 WebviewOverrideUserAgentFunction::~WebviewOverrideUserAgentFunction() {
 }
 
-bool WebviewOverrideUserAgentFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewOverrideUserAgentFunction::RunAsyncSafe(WebViewGuest* guest) {
   scoped_ptr<extensions::api::webview::OverrideUserAgent::Params> params(
       extensions::api::webview::OverrideUserAgent::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -518,7 +548,7 @@ WebviewStopFunction::WebviewStopFunction() {
 WebviewStopFunction::~WebviewStopFunction() {
 }
 
-bool WebviewStopFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewStopFunction::RunAsyncSafe(WebViewGuest* guest) {
   guest->Stop();
   return true;
 }
@@ -529,7 +559,7 @@ WebviewTerminateFunction::WebviewTerminateFunction() {
 WebviewTerminateFunction::~WebviewTerminateFunction() {
 }
 
-bool WebviewTerminateFunction::RunImplSafe(WebViewGuest* guest) {
+bool WebviewTerminateFunction::RunAsyncSafe(WebViewGuest* guest) {
   guest->Terminate();
   return true;
 }

@@ -11,12 +11,37 @@
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/test/context_factories_for_test.h"
 #include "ui/gfx/ozone/surface_factory_ozone.h"
+#include "ui/gfx/ozone/surface_ozone_canvas.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/vsync_provider.h"
 #include "ui/gl/gl_implementation.h"
 
 namespace {
+
+class MockSurfaceOzone : public gfx::SurfaceOzoneCanvas {
+ public:
+  MockSurfaceOzone() {}
+  virtual ~MockSurfaceOzone() {}
+
+  // gfx::SurfaceOzoneCanvas overrides:
+  virtual void ResizeCanvas(const gfx::Size& size) OVERRIDE {
+    surface_ = skia::AdoptRef(SkSurface::NewRaster(
+        SkImageInfo::MakeN32Premul(size.width(), size.height())));
+  }
+  virtual skia::RefPtr<SkCanvas> GetCanvas() OVERRIDE {
+    return skia::SharePtr(surface_->getCanvas());
+  }
+  virtual void PresentCanvas(const gfx::Rect& damage) OVERRIDE {}
+  virtual scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() OVERRIDE {
+    return scoped_ptr<gfx::VSyncProvider>();
+  }
+
+ private:
+  skia::RefPtr<SkSurface> surface_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockSurfaceOzone);
+};
 
 class MockSurfaceFactoryOzone : public gfx::SurfaceFactoryOzone {
  public:
@@ -29,29 +54,17 @@ class MockSurfaceFactoryOzone : public gfx::SurfaceFactoryOzone {
 
   virtual void ShutdownHardware() OVERRIDE {}
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE { return 1; }
-  virtual gfx::AcceleratedWidget RealizeAcceleratedWidget(
-      gfx::AcceleratedWidget w) OVERRIDE { return w; }
   virtual bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
       SetGLGetProcAddressProcCallback set_gl_get_proc_address) OVERRIDE {
     return false;
   }
-  virtual bool AttemptToResizeAcceleratedWidget(
-      gfx::AcceleratedWidget w, const gfx::Rect& bounds) OVERRIDE {
-    surface_ = skia::AdoptRef(SkSurface::NewRaster(
-        SkImageInfo::MakeN32Premul(bounds.width(), bounds.height())));
-    return true;
+  virtual scoped_ptr<gfx::SurfaceOzoneCanvas> CreateCanvasForWidget(
+      gfx::AcceleratedWidget widget) OVERRIDE {
+    return make_scoped_ptr<gfx::SurfaceOzoneCanvas>(new MockSurfaceOzone());
   }
-  virtual SkCanvas* GetCanvasForWidget(gfx::AcceleratedWidget w) OVERRIDE {
-    return surface_->getCanvas();
-  }
-  virtual scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider(
-      gfx::AcceleratedWidget w) OVERRIDE {
-    return scoped_ptr<gfx::VSyncProvider>();
-  }
- private:
-  skia::RefPtr<SkSurface> surface_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(MockSurfaceFactoryOzone);
 };
 
@@ -121,31 +134,6 @@ void SoftwareOutputDeviceOzonePixelTest::SetUp() {
   SoftwareOutputDeviceOzoneTest::SetUp();
 }
 
-TEST_F(SoftwareOutputDeviceOzoneTest, CheckClipAfterBeginPaint) {
-  gfx::Rect damage(10, 10, 100, 100);
-  SkCanvas* canvas = output_device_->BeginPaint(damage);
-
-  SkIRect sk_bounds;
-  canvas->getClipDeviceBounds(&sk_bounds);
-
-  EXPECT_EQ(damage.ToString(), gfx::SkIRectToRect(sk_bounds).ToString());
-}
-
-TEST_F(SoftwareOutputDeviceOzoneTest, CheckClipAfterSecondBeginPaint) {
-  gfx::Rect damage(10, 10, 100, 100);
-  SkCanvas* canvas = output_device_->BeginPaint(damage);
-
-  cc::SoftwareFrameData frame;
-  output_device_->EndPaint(&frame);
-
-  damage = gfx::Rect(100, 100, 100, 100);
-  canvas = output_device_->BeginPaint(damage);
-  SkIRect sk_bounds;
-  canvas->getClipDeviceBounds(&sk_bounds);
-
-  EXPECT_EQ(damage.ToString(), gfx::SkIRectToRect(sk_bounds).ToString());
-}
-
 TEST_F(SoftwareOutputDeviceOzoneTest, CheckCorrectResizeBehavior) {
   gfx::Rect damage(0, 0, 100, 100);
   gfx::Size size(200, 100);
@@ -184,6 +172,7 @@ TEST_F(SoftwareOutputDeviceOzonePixelTest, CheckCopyToBitmap) {
   // Draw a white rectangle.
   gfx::Rect damage(area.width() / 2, area.height() / 2);
   canvas = output_device_->BeginPaint(damage);
+  canvas->clipRect(gfx::RectToSkRect(damage), SkRegion::kReplace_Op);
 
   canvas->drawColor(SK_ColorWHITE);
 

@@ -127,7 +127,8 @@ class DomDistillerViewerSourceBrowserTest : public InProcessBrowserTest {
         new DomDistillerContextKeyedService(
             scoped_ptr<DomDistillerStoreInterface>(
                 CreateStoreWithFakeDB(fake_db, FakeDB::EntryMap())),
-            scoped_ptr<DistillerFactory>(factory));
+            scoped_ptr<DistillerFactory>(factory),
+            scoped_ptr<DistillerPageFactory>());
     fake_db->InitCallback(true);
     fake_db->LoadCallback(true);
     if (expect_distillation_) {
@@ -154,7 +155,7 @@ bool DomDistillerViewerSourceBrowserTest::expect_distillation_ = false;
 // are enabled when the article exists in the database.
 // Flakiness: crbug.com/356866
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       FLAKY_NoWebUIBindingsArticleExists) {
+                       DISABLED_NoWebUIBindingsArticleExists) {
   // Ensure there is one item in the database, which will trigger distillation.
   const ArticleEntry entry = CreateEntry("DISTILLED", "http://example.com/1");
   AddEntry(entry, database_model_);
@@ -166,8 +167,9 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
 
 // The DomDistillerViewerSource renders untrusted content, so ensure no bindings
 // are enabled when the article is not found.
+// Flakiness: crbug.com/356866
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       NoWebUIBindingsArticleNotFound) {
+                       DISABLED_NoWebUIBindingsArticleNotFound) {
   // The article does not exist, so assume no distillation will happen.
   expect_distillation_ = false;
   const GURL url(std::string(chrome::kDomDistillerScheme) + "://" +
@@ -179,7 +181,7 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
 // are enabled when requesting to view an arbitrary URL.
 // Flakiness: crbug.com/356866
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       FLAKY_NoWebUIBindingsViewUrl) {
+                       DISABLED_NoWebUIBindingsViewUrl) {
   // We should expect distillation for any valid URL.
   expect_distillation_ = true;
   GURL view_url("http://www.example.com/1");

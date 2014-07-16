@@ -15,7 +15,7 @@
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
-#include "grit/component_strings.h"
+#include "grit/components_strings.h"
 #include "policy/policy_constants.h"
 
 #if defined(OS_CHROMEOS)
@@ -69,6 +69,7 @@ void DownloadDirPolicyHandler::ApplyPolicySettingsWithParameters(
 
   base::FilePath::StringType expanded_value;
 #if defined(OS_CHROMEOS)
+  bool download_to_drive = false;
   // TODO(kaliamoorthi): Clean up policy::path_parser and fold this code
   // into it. http://crbug.com/352627
   size_t position = string_value.find(kDriveNamePolicyVariableName);
@@ -79,6 +80,7 @@ void DownloadDirPolicyHandler::ApplyPolicySettingsWithParameters(
                               parameters.user_id_hash)
                               .Append(kRootRelativeToDriveMount)
                               .value();
+      download_to_drive = true;
     }
     expanded_value = string_value.replace(
         position,
@@ -103,6 +105,12 @@ void DownloadDirPolicyHandler::ApplyPolicySettingsWithParameters(
   // Otherwise, it would enable a user to bypass the mandatory policy.
   if (policies.Get(policy_name())->level == policy::POLICY_LEVEL_MANDATORY) {
     prefs->SetValue(prefs::kPromptForDownload,
-                    base::Value::CreateBooleanValue(false));
+                    new base::FundamentalValue(false));
+#if defined(OS_CHROMEOS)
+    if (download_to_drive) {
+      prefs->SetValue(prefs::kDisableDrive,
+                      new base::FundamentalValue(false));
+    }
+#endif
   }
 }

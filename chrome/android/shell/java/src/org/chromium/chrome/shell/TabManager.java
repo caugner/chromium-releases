@@ -11,7 +11,10 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 
+import org.chromium.chrome.browser.EmptyTabObserver;
+import org.chromium.chrome.browser.Tab;
 import org.chromium.content.browser.ContentVideoViewClient;
+import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewRenderView;
 import org.chromium.ui.base.WindowAndroid;
@@ -33,6 +36,7 @@ public class TabManager extends LinearLayout {
     private ChromeShellTab mCurrentTab;
 
     private String mStartupUrl = DEFAULT_URL;
+    private ContentView mCurrentContentView;
 
     /**
      * @param context The Context the view is running in.
@@ -79,6 +83,15 @@ public class TabManager extends LinearLayout {
     }
 
     /**
+     * Enter or leave overlay video mode.
+     * @param enabled Whether overlay mode is enabled.
+     */
+    public void setOverlayVideoMode(boolean enabled) {
+        if (mContentViewRenderView == null) return;
+        mContentViewRenderView.setOverlayVideoMode(enabled);
+    }
+
+    /**
      * @return The currently visible {@link ChromeShellTab}.
      */
     public ChromeShellTab getCurrentTab() {
@@ -113,11 +126,24 @@ public class TabManager extends LinearLayout {
         }
 
         mCurrentTab = tab;
+        mCurrentContentView = tab.getContentView();
+
+        mCurrentTab.addObserver(new EmptyTabObserver() {
+            @Override
+            public void onContentChanged(Tab tab) {
+                mContentViewHolder.removeView(mCurrentContentView);
+                setupContent(tab);
+            }
+        });
 
         mToolbar.showTab(mCurrentTab);
-        mContentViewHolder.addView(mCurrentTab.getContentView());
-        mContentViewRenderView.setCurrentContentView(mCurrentTab.getContentView());
-        mCurrentTab.getContentView().requestFocus();
-        mCurrentTab.getContentView().onShow();
+        setupContent(mCurrentTab);
+    }
+
+    private void setupContent(Tab tab) {
+        mContentViewHolder.addView(tab.getContentView());
+        mContentViewRenderView.setCurrentContentViewCore(tab.getContentViewCore());
+        tab.getContentView().requestFocus();
+        tab.getContentViewCore().onShow();
     }
 }

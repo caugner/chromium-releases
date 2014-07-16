@@ -81,15 +81,11 @@ class PageCycler(page_measurement.PageMeasurement):
       tab.ClearCache(force=True)
     if self._report_speed_index:
       self._speedindex_metric.Start(page, tab)
+    self._cpu_metric.Start(page, tab)
 
   def DidNavigateToPage(self, page, tab):
     self._memory_metric.Start(page, tab)
     self._power_metric.Start(page, tab)
-    # TODO(qyearsley): Uncomment the following line and move it to
-    # WillNavigateToPage once the cpu metric has been changed.
-    # This is being temporarily commented out to let the page cycler
-    # results return to how they were before the cpu metric was added.
-    # self._cpu_metric.Start(page, tab) See crbug.com/301714.
     if self._record_v8_object_stats:
       self._v8_object_stats_metric.Start(page, tab)
 
@@ -116,18 +112,14 @@ class PageCycler(page_measurement.PageMeasurement):
     # assertion failures on _started_warm in WillNavigateToPage.
     if cold_runs_percent_set:
       number_warm_pageset_runs = int(
-          (int(options.repeat_options.pageset_repeat) - 1) *
+          (int(options.pageset_repeat) - 1) *
           (100 - options.cold_load_percent) / 100)
-      number_warm_runs = (number_warm_pageset_runs *
-                          options.repeat_options.page_repeat)
-      self._cold_run_start_index = (number_warm_runs +
-          options.repeat_options.page_repeat)
+      number_warm_runs = number_warm_pageset_runs * options.page_repeat
+      self._cold_run_start_index = number_warm_runs + options.page_repeat
       self.discard_first_result = (not options.cold_load_percent or
                                    self.discard_first_result)
     else:
-      self._cold_run_start_index = (
-          options.repeat_options.pageset_repeat *
-          options.repeat_options.page_repeat)
+      self._cold_run_start_index = options.pageset_repeat * options.page_repeat
 
   def MeasurePage(self, page, tab, results):
     tab.WaitForJavaScriptExpression('__pc_load_time', 60)
@@ -146,10 +138,8 @@ class PageCycler(page_measurement.PageMeasurement):
     self._memory_metric.AddResults(tab, results)
     self._power_metric.AddResults(tab, results)
 
-    # TODO(qyearsley): Uncomment the following line when CPU metric is
-    # changed. See crbug.com/301714.
-    # self._cpu_metric.Stop(page, tab)
-    # self._cpu_metric.AddResults(tab, results)
+    self._cpu_metric.Stop(page, tab)
+    self._cpu_metric.AddResults(tab, results)
     if self._record_v8_object_stats:
       self._v8_object_stats_metric.Stop(page, tab)
       self._v8_object_stats_metric.AddResults(tab, results)

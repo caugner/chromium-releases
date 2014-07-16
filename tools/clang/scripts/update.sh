@@ -8,7 +8,7 @@
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://code.google.com/p/chromium/wiki/UpdatingClang
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION=202555
+CLANG_REVISION=206824
 
 THIS_DIR="$(dirname "${0}")"
 LLVM_DIR="${THIS_DIR}/../../../third_party/llvm"
@@ -78,6 +78,10 @@ while [[ $# > 0 ]]; do
     --force-local-build)
       force_local_build=yes
       ;;
+    --print-revision)
+      echo $CLANG_REVISION
+      exit 0
+      ;;
     --run-tests)
       run_tests=yes
       ;;
@@ -113,6 +117,7 @@ while [[ $# > 0 ]]; do
       echo "--force-local-build: Don't try to download prebuilt binaries."
       echo "--if-needed: Download clang only if the script thinks it is needed."
       echo "--run-tests: Run tests after building. Only for local builds."
+      echo "--print-revision: Print current clang revision and exit."
       echo "--without-android: Don't build ASan Android runtime library."
       echo "--with-chrome-tools: Select which chrome tools to build." \
            "Defaults to plugins."
@@ -132,6 +137,12 @@ while [[ $# > 0 ]]; do
   shift
 done
 
+# Remove clang on bots where it was autoinstalled in r262025.
+if [[ -f "${LLVM_BUILD_DIR}/autoinstall_stamp" ]]; then
+  echo Removing autoinstalled clang and clobbering
+  rm -rf "${LLVM_BUILD_DIR}"
+fi
+
 if [[ -n "$if_needed" ]]; then
   if [[ "${OS}" == "Darwin" ]]; then
     # clang is used on Mac.
@@ -149,31 +160,6 @@ if [[ -n "$if_needed" ]]; then
   fi
 fi
 
-# Xcode and clang don't get along when predictive compilation is enabled.
-# http://crbug.com/96315
-if [[ "${OS}" = "Darwin" ]] && xcodebuild -version | grep -q 'Xcode 3.2' ; then
-  XCONF=com.apple.Xcode
-  if [[ "${GYP_GENERATORS}" != "make" ]] && \
-     [ "$(defaults read "${XCONF}" EnablePredictiveCompilation)" != "0" ]; then
-    echo
-    echo "          HEARKEN!"
-    echo "You're using Xcode3 and you have 'Predictive Compilation' enabled."
-    echo "This does not work well with clang (http://crbug.com/96315)."
-    echo "Disable it in Preferences->Building (lower right), or run"
-    echo "    defaults write ${XCONF} EnablePredictiveCompilation -boolean NO"
-    echo "while Xcode is not running."
-    echo
-  fi
-
-  SUB_VERSION=$(xcodebuild -version | sed -Ene 's/Xcode 3\.2\.([0-9]+)/\1/p')
-  if [[ "${SUB_VERSION}" < 6 ]]; then
-    echo
-    echo "          YOUR LD IS BUGGY!"
-    echo "Please upgrade Xcode to at least 3.2.6."
-    echo
-  fi
-fi
-
 
 # Check if there's anything to be done, exit early if not.
 if [[ -f "${STAMP_FILE}" ]]; then
@@ -188,31 +174,6 @@ fi
 # To always force a new build if someone interrupts their build half way.
 rm -f "${STAMP_FILE}"
 
-
-# Clobber build files. PCH files only work with the compiler that created them.
-# We delete .o files to make sure all files are built with the new compiler.
-echo "Clobbering build files"
-MAKE_DIR="${THIS_DIR}/../../../out"
-XCODEBUILD_DIR="${THIS_DIR}/../../../xcodebuild"
-for DIR in "${XCODEBUILD_DIR}" "${MAKE_DIR}/Debug" "${MAKE_DIR}/Release"; do
-  if [[ -d "${DIR}" ]]; then
-    find "${DIR}" -name '*.o' -exec rm {} +
-    find "${DIR}" -name '*.o.d' -exec rm {} +
-    find "${DIR}" -name '*.gch' -exec rm {} +
-    find "${DIR}" -name '*.dylib' -exec rm -rf {} +
-    find "${DIR}" -name 'SharedPrecompiledHeaders' -exec rm -rf {} +
-  fi
-done
-
-# Clobber NaCl toolchain stamp files, see http://crbug.com/159793
-if [[ -d "${MAKE_DIR}" ]]; then
-  find "${MAKE_DIR}" -name 'stamp.untar' -exec rm {} +
-fi
-if [[ "${OS}" = "Darwin" ]]; then
-  if [[ -d "${XCODEBUILD_DIR}" ]]; then
-    find "${XCODEBUILD_DIR}" -name 'stamp.untar' -exec rm {} +
-  fi
-fi
 
 if [[ -z "$force_local_build" ]]; then
   # Check if there's a prebuilt binary and if so just fetch that. That's faster,
@@ -258,6 +219,22 @@ if [[ -n "${with_android}" ]] && ! [[ -d "${ANDROID_NDK_DIR}" ]]; then
   exit 1
 fi
 
+# Revert previous temporary patches.
+if [[ -d "${COMPILER_RT_DIR}" ]]; then
+  pushd "${COMPILER_RT_DIR}"
+  svn revert lib/sanitizer_common/sanitizer_symbolizer_posix_libcdep.cc
+  svn revert make/platform/clang_linux.mk
+  popd
+fi
+if [[ -d "${LLVM_DIR}" ]]; then
+  pushd "${LLVM_DIR}"
+  svn revert lib/Target/ARM/MCTargetDesc/ARMMCAsmInfo.cpp
+  svn revert test/CodeGen/ARM/debug-frame-large-stack.ll
+  svn revert test/CodeGen/ARM/debug-frame-vararg.ll
+  svn revert test/CodeGen/ARM/debug-frame.ll
+  popd
+fi
+
 echo Getting LLVM r"${CLANG_REVISION}" in "${LLVM_DIR}"
 if ! svn co --force "${LLVM_REPO_URL}/llvm/trunk@${CLANG_REVISION}" \
                     "${LLVM_DIR}"; then
@@ -290,7 +267,7 @@ if [ "${OS}" = "Darwin" ]; then
 fi
 
 # Apply patch for test failing with --disable-pthreads (llvm.org/PR11974)
-cd "${CLANG_DIR}"
+pushd "${CLANG_DIR}"
 svn revert test/Index/crash-recovery-modules.m
 cat << 'EOF' |
 --- third_party/llvm/tools/clang/test/Index/crash-recovery-modules.m	(revision 202554)
@@ -305,648 +282,7 @@ cat << 'EOF' |
  @import Crash;
 EOF
 patch -p4
-cd -
-
-# Temporary patches to make build on android work.
-# Merge LLVM r202793, r203601
-cd "${COMPILER_RT_DIR}"
-svn revert lib/sanitizer_common/sanitizer_symbolizer_posix_libcdep.cc
-svn revert make/platform/clang_linux.mk
-cat << 'EOF' |
-Index: compiler-rt/trunk/lib/sanitizer_common/sanitizer_symbolizer_posix_libcdep.cc
-===================================================================
---- compiler-rt/trunk/lib/sanitizer_common/sanitizer_symbolizer_posix_libcdep.cc (original)
-+++ compiler-rt/trunk/lib/sanitizer_common/sanitizer_symbolizer_posix_libcdep.cc Tue Mar 11 15:23:59 2014
-@@ -32,18 +32,10 @@
- // C++ demangling function, as required by Itanium C++ ABI. This is weak,
- // because we do not require a C++ ABI library to be linked to a program
- // using sanitizers; if it's not present, we'll just use the mangled name.
--//
--// On Android, this is not weak, because we are using shared runtime library
--// AND static libstdc++, and there is no good way to conditionally export
--// __cxa_demangle. By making this a non-weak symbol, we statically link
--// __cxa_demangle into ASan runtime library.
- namespace __cxxabiv1 {
--  extern "C"
--#if !SANITIZER_ANDROID
--  SANITIZER_WEAK_ATTRIBUTE
--#endif
--  char *__cxa_demangle(const char *mangled, char *buffer, size_t *length,
--                       int *status);
-+  extern "C" SANITIZER_WEAK_ATTRIBUTE
-+  char *__cxa_demangle(const char *mangled, char *buffer,
-+                                  size_t *length, int *status);
- }
-
- namespace __sanitizer {
-@@ -55,7 +47,7 @@ static const char *DemangleCXXABI(const
-   // own demangler (libc++abi's implementation could be adapted so that
-   // it does not allocate). For now, we just call it anyway, and we leak
-   // the returned value.
--  if (SANITIZER_ANDROID || &__cxxabiv1::__cxa_demangle)
-+  if (__cxxabiv1::__cxa_demangle)
-     if (const char *demangled_name =
-           __cxxabiv1::__cxa_demangle(name, 0, 0, 0))
-       return demangled_name;
-
-Index: compiler-rt/trunk/make/platform/clang_linux.mk
-===================================================================
---- compiler-rt/trunk/make/platform/clang_linux.mk (original)
-+++ compiler-rt/trunk/make/platform/clang_linux.mk Tue Mar  4 01:17:38 2014
-@@ -110,9 +110,10 @@ ANDROID_COMMON_FLAGS := -target arm-linu
- 	--sysroot=$(LLVM_ANDROID_TOOLCHAIN_DIR)/sysroot \
- 	-B$(LLVM_ANDROID_TOOLCHAIN_DIR)
- CFLAGS.asan-arm-android := $(CFLAGS) -fPIC -fno-builtin \
--	$(ANDROID_COMMON_FLAGS) -fno-rtti
-+	$(ANDROID_COMMON_FLAGS) -fno-rtti \
-+	-I$(ProjSrcRoot)/third_party/android/include
- LDFLAGS.asan-arm-android := $(LDFLAGS) $(ANDROID_COMMON_FLAGS) -ldl -lm -llog \
--	-Wl,-soname=libclang_rt.asan-arm-android.so -Wl,-z,defs
-+	-lstdc++ -Wl,-soname=libclang_rt.asan-arm-android.so -Wl,-z,defs
- 
- # Use our stub SDK as the sysroot to support more portable building. For now we
- # just do this for the core module, because the stub SDK doesn't have
-EOF
-patch -p2
-cd -
-
-# Merge LLVM r203635
-cd "${LLVM_DIR}"
-svn revert lib/Target/ARM/MCTargetDesc/ARMMCAsmInfo.cpp
-svn revert test/CodeGen/ARM/debug-frame-large-stack.ll
-svn revert test/CodeGen/ARM/debug-frame-vararg.ll
-svn revert test/CodeGen/ARM/debug-frame.ll
-cat << 'EOF' |
-Index: lib/Target/ARM/MCTargetDesc/ARMMCAsmInfo.cpp
-===================================================================
---- lib/Target/ARM/MCTargetDesc/ARMMCAsmInfo.cpp
-+++ lib/Target/ARM/MCTargetDesc/ARMMCAsmInfo.cpp
-@@ -54,4 +54,7 @@
-   UseParensForSymbolVariant = true;
- 
-   UseIntegratedAssembler = true;
-+
-+  // gas doesn't handle VFP register names in cfi directives.
-+  DwarfRegNumForCFI = true;
- }
-Index: test/CodeGen/ARM/debug-frame-large-stack.ll
-===================================================================
---- test/CodeGen/ARM/debug-frame-large-stack.ll
-+++ test/CodeGen/ARM/debug-frame-large-stack.ll
-@@ -42,8 +42,8 @@
- ; CHECK-ARM: .cfi_startproc
- ; CHECK-ARM: push    {r4, r5}
- ; CHECK-ARM: .cfi_def_cfa_offset 8
--; CHECK-ARM: .cfi_offset r5, -4
--; CHECK-ARM: .cfi_offset r4, -8
-+; CHECK-ARM: .cfi_offset 5, -4
-+; CHECK-ARM: .cfi_offset 4, -8
- ; CHECK-ARM: sub    sp, sp, #72
- ; CHECK-ARM: sub    sp, sp, #4096
- ; CHECK-ARM: .cfi_def_cfa_offset 4176
-@@ -54,7 +54,7 @@
- ; CHECK-ARM-FP_ELIM: push    {r4, r5}
- ; CHECK-ARM-FP_ELIM: .cfi_def_cfa_offset 8
- ; CHECK-ARM-FP_ELIM: .cfi_offset 54, -4
--; CHECK-ARM-FP_ELIM: .cfi_offset r4, -8
-+; CHECK-ARM-FP_ELIM: .cfi_offset 4, -8
- ; CHECK-ARM-FP_ELIM: sub    sp, sp, #72
- ; CHECK-ARM-FP_ELIM: sub    sp, sp, #4096
- ; CHECK-ARM-FP_ELIM: .cfi_def_cfa_offset 4176
-@@ -73,11 +73,11 @@
- ; CHECK-ARM: .cfi_startproc
- ; CHECK-ARM: push    {r4, r5, r11}
- ; CHECK-ARM: .cfi_def_cfa_offset 12
--; CHECK-ARM: .cfi_offset r11, -4
--; CHECK-ARM: .cfi_offset r5, -8
--; CHECK-ARM: .cfi_offset r4, -12
-+; CHECK-ARM: .cfi_offset 11, -4
-+; CHECK-ARM: .cfi_offset 5, -8
-+; CHECK-ARM: .cfi_offset 4, -12
- ; CHECK-ARM: add    r11, sp, #8
--; CHECK-ARM: .cfi_def_cfa r11, 4
-+; CHECK-ARM: .cfi_def_cfa 11, 4
- ; CHECK-ARM: sub    sp, sp, #20
- ; CHECK-ARM: sub    sp, sp, #805306368
- ; CHECK-ARM: bic    sp, sp, #15
-@@ -87,11 +87,11 @@
- ; CHECK-ARM-FP-ELIM: .cfi_startproc
- ; CHECK-ARM-FP-ELIM: push    {r4, r5, r11}
- ; CHECK-ARM-FP-ELIM: .cfi_def_cfa_offset 12
--; CHECK-ARM-FP-ELIM: .cfi_offset r11, -4
--; CHECK-ARM-FP-ELIM: .cfi_offset r5, -8
--; CHECK-ARM-FP-ELIM: .cfi_offset r4, -12
-+; CHECK-ARM-FP-ELIM: .cfi_offset 11, -4
-+; CHECK-ARM-FP-ELIM: .cfi_offset 5, -8
-+; CHECK-ARM-FP-ELIM: .cfi_offset 4, -12
- ; CHECK-ARM-FP-ELIM: add    r11, sp, #8
--; CHECK-ARM-FP-ELIM: .cfi_def_cfa r11, 4
-+; CHECK-ARM-FP-ELIM: .cfi_def_cfa 11, 4
- ; CHECK-ARM-FP-ELIM: sub    sp, sp, #20
- ; CHECK-ARM-FP-ELIM: sub    sp, sp, #805306368
- ; CHECK-ARM-FP-ELIM: bic    sp, sp, #15
-Index: test/CodeGen/ARM/debug-frame-vararg.ll
-===================================================================
---- test/CodeGen/ARM/debug-frame-vararg.ll
-+++ test/CodeGen/ARM/debug-frame-vararg.ll
-@@ -66,8 +66,8 @@
- ; CHECK-FP: .cfi_def_cfa_offset 16
- ; CHECK-FP: push   {r4, lr}
- ; CHECK-FP: .cfi_def_cfa_offset 24
--; CHECK-FP: .cfi_offset lr, -20
--; CHECK-FP: .cfi_offset r4, -24
-+; CHECK-FP: .cfi_offset 14, -20
-+; CHECK-FP: .cfi_offset 4, -24
- ; CHECK-FP: sub    sp, sp, #8
- ; CHECK-FP: .cfi_def_cfa_offset 32
- 
-@@ -77,22 +77,22 @@
- ; CHECK-FP-ELIM: .cfi_def_cfa_offset 16
- ; CHECK-FP-ELIM: push   {r4, r11, lr}
- ; CHECK-FP-ELIM: .cfi_def_cfa_offset 28
--; CHECK-FP-ELIM: .cfi_offset lr, -20
--; CHECK-FP-ELIM: .cfi_offset r11, -24
--; CHECK-FP-ELIM: .cfi_offset r4, -28
-+; CHECK-FP-ELIM: .cfi_offset 14, -20
-+; CHECK-FP-ELIM: .cfi_offset 11, -24
-+; CHECK-FP-ELIM: .cfi_offset 4, -28
- ; CHECK-FP-ELIM: add    r11, sp, #4
--; CHECK-FP-ELIM: .cfi_def_cfa r11, 24
-+; CHECK-FP-ELIM: .cfi_def_cfa 11, 24
- 
- ; CHECK-THUMB-FP-LABEL: sum
- ; CHECK-THUMB-FP: .cfi_startproc
- ; CHECK-THUMB-FP: sub    sp, #16
- ; CHECK-THUMB-FP: .cfi_def_cfa_offset 16
- ; CHECK-THUMB-FP: push   {r4, r5, r7, lr}
- ; CHECK-THUMB-FP: .cfi_def_cfa_offset 32
--; CHECK-THUMB-FP: .cfi_offset lr, -20
--; CHECK-THUMB-FP: .cfi_offset r7, -24
--; CHECK-THUMB-FP: .cfi_offset r5, -28
--; CHECK-THUMB-FP: .cfi_offset r4, -32
-+; CHECK-THUMB-FP: .cfi_offset 14, -20
-+; CHECK-THUMB-FP: .cfi_offset 7, -24
-+; CHECK-THUMB-FP: .cfi_offset 5, -28
-+; CHECK-THUMB-FP: .cfi_offset 4, -32
- ; CHECK-THUMB-FP: sub    sp, #8
- ; CHECK-THUMB-FP: .cfi_def_cfa_offset 40
- 
-@@ -102,12 +102,12 @@
- ; CHECK-THUMB-FP-ELIM: .cfi_def_cfa_offset 16
- ; CHECK-THUMB-FP-ELIM: push   {r4, r5, r7, lr}
- ; CHECK-THUMB-FP-ELIM: .cfi_def_cfa_offset 32
--; CHECK-THUMB-FP-ELIM: .cfi_offset lr, -20
--; CHECK-THUMB-FP-ELIM: .cfi_offset r7, -24
--; CHECK-THUMB-FP-ELIM: .cfi_offset r5, -28
--; CHECK-THUMB-FP-ELIM: .cfi_offset r4, -32
-+; CHECK-THUMB-FP-ELIM: .cfi_offset 14, -20
-+; CHECK-THUMB-FP-ELIM: .cfi_offset 7, -24
-+; CHECK-THUMB-FP-ELIM: .cfi_offset 5, -28
-+; CHECK-THUMB-FP-ELIM: .cfi_offset 4, -32
- ; CHECK-THUMB-FP-ELIM: add    r7, sp, #8
--; CHECK-THUMB-FP-ELIM: .cfi_def_cfa r7, 24
-+; CHECK-THUMB-FP-ELIM: .cfi_def_cfa 7, 24
- 
- define i32 @sum(i32 %count, ...) {
- entry:
-Index: test/CodeGen/ARM/debug-frame.ll
-===================================================================
---- test/CodeGen/ARM/debug-frame.ll
-+++ test/CodeGen/ARM/debug-frame.ll
-@@ -163,131 +163,131 @@
- ; CHECK-FP:   .cfi_startproc
- ; CHECK-FP:   push   {r4, r5, r6, r7, r8, r9, r10, r11, lr}
- ; CHECK-FP:   .cfi_def_cfa_offset 36
--; CHECK-FP:   .cfi_offset lr, -4
--; CHECK-FP:   .cfi_offset r11, -8
--; CHECK-FP:   .cfi_offset r10, -12
--; CHECK-FP:   .cfi_offset r9, -16
--; CHECK-FP:   .cfi_offset r8, -20
--; CHECK-FP:   .cfi_offset r7, -24
--; CHECK-FP:   .cfi_offset r6, -28
--; CHECK-FP:   .cfi_offset r5, -32
--; CHECK-FP:   .cfi_offset r4, -36
-+; CHECK-FP:   .cfi_offset 14, -4
-+; CHECK-FP:   .cfi_offset 11, -8
-+; CHECK-FP:   .cfi_offset 10, -12
-+; CHECK-FP:   .cfi_offset 9, -16
-+; CHECK-FP:   .cfi_offset 8, -20
-+; CHECK-FP:   .cfi_offset 7, -24
-+; CHECK-FP:   .cfi_offset 6, -28
-+; CHECK-FP:   .cfi_offset 5, -32
-+; CHECK-FP:   .cfi_offset 4, -36
- ; CHECK-FP:   add    r11, sp, #28
--; CHECK-FP:   .cfi_def_cfa r11, 8
-+; CHECK-FP:   .cfi_def_cfa 11, 8
- ; CHECK-FP:   sub    sp, sp, #28
- ; CHECK-FP:   .cfi_endproc
- 
- ; CHECK-FP-ELIM-LABEL: _Z4testiiiiiddddd:
- ; CHECK-FP-ELIM:   .cfi_startproc
- ; CHECK-FP-ELIM:   push  {r4, r5, r6, r7, r8, r9, r10, r11, lr}
- ; CHECK-FP-ELIM:   .cfi_def_cfa_offset 36
--; CHECK-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-FP-ELIM:   .cfi_offset r11, -8
--; CHECK-FP-ELIM:   .cfi_offset r10, -12
--; CHECK-FP-ELIM:   .cfi_offset r9, -16
--; CHECK-FP-ELIM:   .cfi_offset r8, -20
--; CHECK-FP-ELIM:   .cfi_offset r7, -24
--; CHECK-FP-ELIM:   .cfi_offset r6, -28
--; CHECK-FP-ELIM:   .cfi_offset r5, -32
--; CHECK-FP-ELIM:   .cfi_offset r4, -36
-+; CHECK-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-FP-ELIM:   .cfi_offset 11, -8
-+; CHECK-FP-ELIM:   .cfi_offset 10, -12
-+; CHECK-FP-ELIM:   .cfi_offset 9, -16
-+; CHECK-FP-ELIM:   .cfi_offset 8, -20
-+; CHECK-FP-ELIM:   .cfi_offset 7, -24
-+; CHECK-FP-ELIM:   .cfi_offset 6, -28
-+; CHECK-FP-ELIM:   .cfi_offset 5, -32
-+; CHECK-FP-ELIM:   .cfi_offset 4, -36
- ; CHECK-FP-ELIM:   sub   sp, sp, #28
- ; CHECK-FP-ELIM:   .cfi_def_cfa_offset 64
- ; CHECK-FP-ELIM:   .cfi_endproc
- 
- ; CHECK-V7-FP-LABEL: _Z4testiiiiiddddd:
- ; CHECK-V7-FP:   .cfi_startproc
- ; CHECK-V7-FP:   push   {r4, r11, lr}
- ; CHECK-V7-FP:   .cfi_def_cfa_offset 12
--; CHECK-V7-FP:   .cfi_offset lr, -4
--; CHECK-V7-FP:   .cfi_offset r11, -8
--; CHECK-V7-FP:   .cfi_offset r4, -12
-+; CHECK-V7-FP:   .cfi_offset 14, -4
-+; CHECK-V7-FP:   .cfi_offset 11, -8
-+; CHECK-V7-FP:   .cfi_offset 4, -12
- ; CHECK-V7-FP:   add    r11, sp, #4
--; CHECK-V7-FP:   .cfi_def_cfa r11, 8
-+; CHECK-V7-FP:   .cfi_def_cfa 11, 8
- ; CHECK-V7-FP:   vpush  {d8, d9, d10, d11, d12}
--; CHECK-V7-FP:   .cfi_offset d12, -24
--; CHECK-V7-FP:   .cfi_offset d11, -32
--; CHECK-V7-FP:   .cfi_offset d10, -40
--; CHECK-V7-FP:   .cfi_offset d9, -48
--; CHECK-V7-FP:   .cfi_offset d8, -56
-+; CHECK-V7-FP:   .cfi_offset 268, -24
-+; CHECK-V7-FP:   .cfi_offset 267, -32
-+; CHECK-V7-FP:   .cfi_offset 266, -40
-+; CHECK-V7-FP:   .cfi_offset 265, -48
-+; CHECK-V7-FP:   .cfi_offset 264, -56
- ; CHECK-V7-FP:   sub    sp, sp, #28
- ; CHECK-V7-FP:   .cfi_endproc
- 
- ; CHECK-V7-FP-ELIM-LABEL: _Z4testiiiiiddddd:
- ; CHECK-V7-FP-ELIM:   .cfi_startproc
- ; CHECK-V7-FP-ELIM:   push   {r4, lr}
- ; CHECK-V7-FP-ELIM:   .cfi_def_cfa_offset 8
--; CHECK-V7-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-V7-FP-ELIM:   .cfi_offset r4, -8
-+; CHECK-V7-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-V7-FP-ELIM:   .cfi_offset 4, -8
- ; CHECK-V7-FP-ELIM:   vpush  {d8, d9, d10, d11, d12}
- ; CHECK-V7-FP-ELIM:   .cfi_def_cfa_offset 48
--; CHECK-V7-FP-ELIM:   .cfi_offset d12, -16
--; CHECK-V7-FP-ELIM:   .cfi_offset d11, -24
--; CHECK-V7-FP-ELIM:   .cfi_offset d10, -32
--; CHECK-V7-FP-ELIM:   .cfi_offset d9, -40
--; CHECK-V7-FP-ELIM:   .cfi_offset d8, -48
-+; CHECK-V7-FP-ELIM:   .cfi_offset 268, -16
-+; CHECK-V7-FP-ELIM:   .cfi_offset 267, -24
-+; CHECK-V7-FP-ELIM:   .cfi_offset 266, -32
-+; CHECK-V7-FP-ELIM:   .cfi_offset 265, -40
-+; CHECK-V7-FP-ELIM:   .cfi_offset 264, -48
- ; CHECK-V7-FP-ELIM:   sub    sp, sp, #24
- ; CHECK-V7-FP-ELIM:   .cfi_def_cfa_offset 72
- ; CHECK-V7-FP-ELIM:   .cfi_endproc
- 
- ; CHECK-THUMB-FP-LABEL: _Z4testiiiiiddddd:
- ; CHECK-THUMB-FP:   .cfi_startproc
- ; CHECK-THUMB-FP:   push   {r4, r5, r6, r7, lr}
- ; CHECK-THUMB-FP:   .cfi_def_cfa_offset 20
--; CHECK-THUMB-FP:   .cfi_offset lr, -4
--; CHECK-THUMB-FP:   .cfi_offset r7, -8
--; CHECK-THUMB-FP:   .cfi_offset r6, -12
--; CHECK-THUMB-FP:   .cfi_offset r5, -16
--; CHECK-THUMB-FP:   .cfi_offset r4, -20
-+; CHECK-THUMB-FP:   .cfi_offset 14, -4
-+; CHECK-THUMB-FP:   .cfi_offset 7, -8
-+; CHECK-THUMB-FP:   .cfi_offset 6, -12
-+; CHECK-THUMB-FP:   .cfi_offset 5, -16
-+; CHECK-THUMB-FP:   .cfi_offset 4, -20
- ; CHECK-THUMB-FP:   add    r7, sp, #12
--; CHECK-THUMB-FP:   .cfi_def_cfa r7, 8
-+; CHECK-THUMB-FP:   .cfi_def_cfa 7, 8
- ; CHECK-THUMB-FP:   sub    sp, #60
- ; CHECK-THUMB-FP:   .cfi_endproc
- 
- ; CHECK-THUMB-FP-ELIM-LABEL: _Z4testiiiiiddddd:
- ; CHECK-THUMB-FP-ELIM:   .cfi_startproc
- ; CHECK-THUMB-FP-ELIM:   push   {r4, r5, r6, r7, lr}
- ; CHECK-THUMB-FP-ELIM:   .cfi_def_cfa_offset 20
--; CHECK-THUMB-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-THUMB-FP-ELIM:   .cfi_offset r7, -8
--; CHECK-THUMB-FP-ELIM:   .cfi_offset r6, -12
--; CHECK-THUMB-FP-ELIM:   .cfi_offset r5, -16
--; CHECK-THUMB-FP-ELIM:   .cfi_offset r4, -20
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 7, -8
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 6, -12
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 5, -16
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 4, -20
- ; CHECK-THUMB-FP-ELIM:   sub    sp, #60
- ; CHECK-THUMB-FP-ELIM:   .cfi_def_cfa_offset 80
- ; CHECK-THUMB-FP-ELIM:   .cfi_endproc
- 
- ; CHECK-THUMB-V7-FP-LABEL: _Z4testiiiiiddddd:
- ; CHECK-THUMB-V7-FP:   .cfi_startproc
- ; CHECK-THUMB-V7-FP:   push.w   {r4, r7, r11, lr}
- ; CHECK-THUMB-V7-FP:   .cfi_def_cfa_offset 16
--; CHECK-THUMB-V7-FP:   .cfi_offset lr, -4
--; CHECK-THUMB-V7-FP:   .cfi_offset r11, -8
--; CHECK-THUMB-V7-FP:   .cfi_offset r7, -12
--; CHECK-THUMB-V7-FP:   .cfi_offset r4, -16
-+; CHECK-THUMB-V7-FP:   .cfi_offset 14, -4
-+; CHECK-THUMB-V7-FP:   .cfi_offset 11, -8
-+; CHECK-THUMB-V7-FP:   .cfi_offset 7, -12
-+; CHECK-THUMB-V7-FP:   .cfi_offset 4, -16
- ; CHECK-THUMB-V7-FP:   add    r7, sp, #4
--; CHECK-THUMB-V7-FP:   .cfi_def_cfa r7, 12
-+; CHECK-THUMB-V7-FP:   .cfi_def_cfa 7, 12
- ; CHECK-THUMB-V7-FP:   vpush  {d8, d9, d10, d11, d12}
--; CHECK-THUMB-V7-FP:   .cfi_offset d12, -24
--; CHECK-THUMB-V7-FP:   .cfi_offset d11, -32
--; CHECK-THUMB-V7-FP:   .cfi_offset d10, -40
--; CHECK-THUMB-V7-FP:   .cfi_offset d9, -48
--; CHECK-THUMB-V7-FP:   .cfi_offset d8, -56
-+; CHECK-THUMB-V7-FP:   .cfi_offset 268, -24
-+; CHECK-THUMB-V7-FP:   .cfi_offset 267, -32
-+; CHECK-THUMB-V7-FP:   .cfi_offset 266, -40
-+; CHECK-THUMB-V7-FP:   .cfi_offset 265, -48
-+; CHECK-THUMB-V7-FP:   .cfi_offset 264, -56
- ; CHECK-THUMB-V7-FP:   sub    sp, #24
- ; CHECK-THUMB-V7-FP:   .cfi_endproc
- 
- ; CHECK-THUMB-V7-FP-ELIM-LABEL: _Z4testiiiiiddddd:
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_startproc
- ; CHECK-THUMB-V7-FP-ELIM:   push   {r4, lr}
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_def_cfa_offset 8
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset r4, -8
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 4, -8
- ; CHECK-THUMB-V7-FP-ELIM:   vpush  {d8, d9, d10, d11, d12}
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_def_cfa_offset 48
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset d12, -16
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset d11, -24
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset d10, -32
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset d9, -40
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset d8, -48
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 268, -16
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 267, -24
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 266, -32
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 265, -40
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 264, -48
- ; CHECK-THUMB-V7-FP-ELIM:   sub    sp, #24
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_def_cfa_offset 72
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_endproc
-@@ -309,81 +309,81 @@
- ; CHECK-FP:   .cfi_startproc
- ; CHECK-FP:   push   {r11, lr}
- ; CHECK-FP:   .cfi_def_cfa_offset 8
--; CHECK-FP:   .cfi_offset lr, -4
--; CHECK-FP:   .cfi_offset r11, -8
-+; CHECK-FP:   .cfi_offset 14, -4
-+; CHECK-FP:   .cfi_offset 11, -8
- ; CHECK-FP:   mov    r11, sp
--; CHECK-FP:   .cfi_def_cfa_register r11
-+; CHECK-FP:   .cfi_def_cfa_register 11
- ; CHECK-FP:   pop    {r11, lr}
- ; CHECK-FP:   mov    pc, lr
- ; CHECK-FP:   .cfi_endproc
- 
- ; CHECK-FP-ELIM-LABEL: test2:
- ; CHECK-FP-ELIM:   .cfi_startproc
- ; CHECK-FP-ELIM:   push  {r11, lr}
- ; CHECK-FP-ELIM:   .cfi_def_cfa_offset 8
--; CHECK-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-FP-ELIM:   .cfi_offset r11, -8
-+; CHECK-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-FP-ELIM:   .cfi_offset 11, -8
- ; CHECK-FP-ELIM:   pop   {r11, lr}
- ; CHECK-FP-ELIM:   mov   pc, lr
- ; CHECK-FP-ELIM:   .cfi_endproc
- 
- ; CHECK-V7-FP-LABEL: test2:
- ; CHECK-V7-FP:   .cfi_startproc
- ; CHECK-V7-FP:   push   {r11, lr}
- ; CHECK-V7-FP:   .cfi_def_cfa_offset 8
--; CHECK-V7-FP:   .cfi_offset lr, -4
--; CHECK-V7-FP:   .cfi_offset r11, -8
-+; CHECK-V7-FP:   .cfi_offset 14, -4
-+; CHECK-V7-FP:   .cfi_offset 11, -8
- ; CHECK-V7-FP:   mov    r11, sp
--; CHECK-V7-FP:   .cfi_def_cfa_register r11
-+; CHECK-V7-FP:   .cfi_def_cfa_register 11
- ; CHECK-V7-FP:   pop    {r11, pc}
- ; CHECK-V7-FP:   .cfi_endproc
- 
- ; CHECK-V7-FP-ELIM-LABEL: test2:
- ; CHECK-V7-FP-ELIM:   .cfi_startproc
- ; CHECK-V7-FP-ELIM:   push  {r11, lr}
- ; CHECK-V7-FP-ELIM:   .cfi_def_cfa_offset 8
--; CHECK-V7-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-V7-FP-ELIM:   .cfi_offset r11, -8
-+; CHECK-V7-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-V7-FP-ELIM:   .cfi_offset 11, -8
- ; CHECK-V7-FP-ELIM:   pop   {r11, pc}
- ; CHECK-V7-FP-ELIM:   .cfi_endproc
- 
- ; CHECK-THUMB-FP-LABEL: test2:
- ; CHECK-THUMB-FP:   .cfi_startproc
- ; CHECK-THUMB-FP:   push   {r7, lr}
- ; CHECK-THUMB-FP:   .cfi_def_cfa_offset 8
--; CHECK-THUMB-FP:   .cfi_offset lr, -4
--; CHECK-THUMB-FP:   .cfi_offset r7, -8
-+; CHECK-THUMB-FP:   .cfi_offset 14, -4
-+; CHECK-THUMB-FP:   .cfi_offset 7, -8
- ; CHECK-THUMB-FP:   add    r7, sp, #0
--; CHECK-THUMB-FP:   .cfi_def_cfa_register r7
-+; CHECK-THUMB-FP:   .cfi_def_cfa_register 7
- ; CHECK-THUMB-FP:   pop    {r7, pc}
- ; CHECK-THUMB-FP:   .cfi_endproc
- 
- ; CHECK-THUMB-FP-ELIM-LABEL: test2:
- ; CHECK-THUMB-FP-ELIM:   .cfi_startproc
- ; CHECK-THUMB-FP-ELIM:   push  {r7, lr}
- ; CHECK-THUMB-FP-ELIM:   .cfi_def_cfa_offset 8
--; CHECK-THUMB-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-THUMB-FP-ELIM:   .cfi_offset r7, -8
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 7, -8
- ; CHECK-THUMB-FP-ELIM:   pop   {r7, pc}
- ; CHECK-THUMB-FP-ELIM:   .cfi_endproc
- 
- ; CHECK-THUMB-V7-FP-LABEL: test2:
- ; CHECK-THUMB-V7-FP:   .cfi_startproc
- ; CHECK-THUMB-V7-FP:   push   {r7, lr}
- ; CHECK-THUMB-V7-FP:   .cfi_def_cfa_offset 8
--; CHECK-THUMB-V7-FP:   .cfi_offset lr, -4
--; CHECK-THUMB-V7-FP:   .cfi_offset r7, -8
-+; CHECK-THUMB-V7-FP:   .cfi_offset 14, -4
-+; CHECK-THUMB-V7-FP:   .cfi_offset 7, -8
- ; CHECK-THUMB-V7-FP:   mov    r7, sp
--; CHECK-THUMB-V7-FP:   .cfi_def_cfa_register r7
-+; CHECK-THUMB-V7-FP:   .cfi_def_cfa_register 7
- ; CHECK-THUMB-V7-FP:   pop    {r7, pc}
- ; CHECK-THUMB-V7-FP:   .cfi_endproc
- 
- ; CHECK-THUMB-V7-FP-ELIM-LABEL: test2:
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_startproc
- ; CHECK-THUMB-V7-FP-ELIM:   push.w  {r11, lr}
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_def_cfa_offset 8
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset r11, -8
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 11, -8
- ; CHECK-THUMB-V7-FP-ELIM:   pop.w   {r11, pc}
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_endproc
- 
-@@ -413,97 +413,97 @@
- ; CHECK-FP:   .cfi_startproc
- ; CHECK-FP:   push   {r4, r5, r11, lr}
- ; CHECK-FP:   .cfi_def_cfa_offset 16
--; CHECK-FP:   .cfi_offset lr, -4
--; CHECK-FP:   .cfi_offset r11, -8
--; CHECK-FP:   .cfi_offset r5, -12
--; CHECK-FP:   .cfi_offset r4, -16
-+; CHECK-FP:   .cfi_offset 14, -4
-+; CHECK-FP:   .cfi_offset 11, -8
-+; CHECK-FP:   .cfi_offset 5, -12
-+; CHECK-FP:   .cfi_offset 4, -16
- ; CHECK-FP:   add    r11, sp, #8
--; CHECK-FP:   .cfi_def_cfa r11, 8
-+; CHECK-FP:   .cfi_def_cfa 11, 8
- ; CHECK-FP:   pop    {r4, r5, r11, lr}
- ; CHECK-FP:   mov    pc, lr
- ; CHECK-FP:   .cfi_endproc
- 
- ; CHECK-FP-ELIM-LABEL: test3:
- ; CHECK-FP-ELIM:   .cfi_startproc
- ; CHECK-FP-ELIM:   push  {r4, r5, r11, lr}
- ; CHECK-FP-ELIM:   .cfi_def_cfa_offset 16
--; CHECK-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-FP-ELIM:   .cfi_offset r11, -8
--; CHECK-FP-ELIM:   .cfi_offset r5, -12
--; CHECK-FP-ELIM:   .cfi_offset r4, -16
-+; CHECK-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-FP-ELIM:   .cfi_offset 11, -8
-+; CHECK-FP-ELIM:   .cfi_offset 5, -12
-+; CHECK-FP-ELIM:   .cfi_offset 4, -16
- ; CHECK-FP-ELIM:   pop   {r4, r5, r11, lr}
- ; CHECK-FP-ELIM:   mov   pc, lr
- ; CHECK-FP-ELIM:   .cfi_endproc
- 
- ; CHECK-V7-FP-LABEL: test3:
- ; CHECK-V7-FP:   .cfi_startproc
- ; CHECK-V7-FP:   push   {r4, r5, r11, lr}
- ; CHECK-V7-FP:   .cfi_def_cfa_offset 16
--; CHECK-V7-FP:   .cfi_offset lr, -4
--; CHECK-V7-FP:   .cfi_offset r11, -8
--; CHECK-V7-FP:   .cfi_offset r5, -12
--; CHECK-V7-FP:   .cfi_offset r4, -16
-+; CHECK-V7-FP:   .cfi_offset 14, -4
-+; CHECK-V7-FP:   .cfi_offset 11, -8
-+; CHECK-V7-FP:   .cfi_offset 5, -12
-+; CHECK-V7-FP:   .cfi_offset 4, -16
- ; CHECK-V7-FP:   add    r11, sp, #8
--; CHECK-V7-FP:   .cfi_def_cfa r11, 8
-+; CHECK-V7-FP:   .cfi_def_cfa 11, 8
- ; CHECK-V7-FP:   pop    {r4, r5, r11, pc}
- ; CHECK-V7-FP:   .cfi_endproc
- 
- ; CHECK-V7-FP-ELIM-LABEL: test3:
- ; CHECK-V7-FP-ELIM:   .cfi_startproc
- ; CHECK-V7-FP-ELIM:   push  {r4, r5, r11, lr}
- ; CHECK-V7-FP-ELIM:   .cfi_def_cfa_offset 16
--; CHECK-V7-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-V7-FP-ELIM:   .cfi_offset r11, -8
--; CHECK-V7-FP-ELIM:   .cfi_offset r5, -12
--; CHECK-V7-FP-ELIM:   .cfi_offset r4, -16
-+; CHECK-V7-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-V7-FP-ELIM:   .cfi_offset 11, -8
-+; CHECK-V7-FP-ELIM:   .cfi_offset 5, -12
-+; CHECK-V7-FP-ELIM:   .cfi_offset 4, -16
- ; CHECK-V7-FP-ELIM:   pop   {r4, r5, r11, pc}
- ; CHECK-V7-FP-ELIM:   .cfi_endproc
- 
- ; CHECK-THUMB-FP-LABEL: test3:
- ; CHECK-THUMB-FP:   .cfi_startproc
- ; CHECK-THUMB-FP:   push   {r4, r5, r7, lr}
- ; CHECK-THUMB-FP:   .cfi_def_cfa_offset 16
--; CHECK-THUMB-FP:   .cfi_offset lr, -4
--; CHECK-THUMB-FP:   .cfi_offset r7, -8
--; CHECK-THUMB-FP:   .cfi_offset r5, -12
--; CHECK-THUMB-FP:   .cfi_offset r4, -16
-+; CHECK-THUMB-FP:   .cfi_offset 14, -4
-+; CHECK-THUMB-FP:   .cfi_offset 7, -8
-+; CHECK-THUMB-FP:   .cfi_offset 5, -12
-+; CHECK-THUMB-FP:   .cfi_offset 4, -16
- ; CHECK-THUMB-FP:   add    r7, sp, #8
--; CHECK-THUMB-FP:   .cfi_def_cfa r7, 8
-+; CHECK-THUMB-FP:   .cfi_def_cfa 7, 8
- ; CHECK-THUMB-FP:   pop    {r4, r5, r7, pc}
- ; CHECK-THUMB-FP:   .cfi_endproc
- 
- ; CHECK-THUMB-FP-ELIM-LABEL: test3:
- ; CHECK-THUMB-FP-ELIM:   .cfi_startproc
- ; CHECK-THUMB-FP-ELIM:   push  {r4, r5, r7, lr}
- ; CHECK-THUMB-FP-ELIM:   .cfi_def_cfa_offset 16
--; CHECK-THUMB-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-THUMB-FP-ELIM:   .cfi_offset r7, -8
--; CHECK-THUMB-FP-ELIM:   .cfi_offset r5, -12
--; CHECK-THUMB-FP-ELIM:   .cfi_offset r4, -16
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 7, -8
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 5, -12
-+; CHECK-THUMB-FP-ELIM:   .cfi_offset 4, -16
- ; CHECK-THUMB-FP-ELIM:   pop   {r4, r5, r7, pc}
- ; CHECK-THUMB-FP-ELIM:   .cfi_endproc
- 
- ; CHECK-THUMB-V7-FP-LABEL: test3:
- ; CHECK-THUMB-V7-FP:   .cfi_startproc
- ; CHECK-THUMB-V7-FP:   push   {r4, r5, r7, lr}
- ; CHECK-THUMB-V7-FP:   .cfi_def_cfa_offset 16
--; CHECK-THUMB-V7-FP:   .cfi_offset lr, -4
--; CHECK-THUMB-V7-FP:   .cfi_offset r7, -8
--; CHECK-THUMB-V7-FP:   .cfi_offset r5, -12
--; CHECK-THUMB-V7-FP:   .cfi_offset r4, -16
-+; CHECK-THUMB-V7-FP:   .cfi_offset 14, -4
-+; CHECK-THUMB-V7-FP:   .cfi_offset 7, -8
-+; CHECK-THUMB-V7-FP:   .cfi_offset 5, -12
-+; CHECK-THUMB-V7-FP:   .cfi_offset 4, -16
- ; CHECK-THUMB-V7-FP:   add    r7, sp, #8
--; CHECK-THUMB-V7-FP:   .cfi_def_cfa r7, 8
-+; CHECK-THUMB-V7-FP:   .cfi_def_cfa 7, 8
- ; CHECK-THUMB-V7-FP:   pop    {r4, r5, r7, pc}
- ; CHECK-THUMB-V7-FP:   .cfi_endproc
- 
- ; CHECK-THUMB-V7-FP-ELIM-LABEL: test3:
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_startproc
- ; CHECK-THUMB-V7-FP-ELIM:   push.w  {r4, r5, r11, lr}
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_def_cfa_offset 16
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset lr, -4
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset r11, -8
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset r5, -12
--; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset r4, -16
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 14, -4
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 11, -8
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 5, -12
-+; CHECK-THUMB-V7-FP-ELIM:   .cfi_offset 4, -16
- ; CHECK-THUMB-V7-FP-ELIM:   pop.w   {r4, r5, r11, pc}
- ; CHECK-THUMB-V7-FP-ELIM:   .cfi_endproc
- 
-EOF
-patch -p0
-cd -
+popd
 
 # Echo all commands.
 set -x
@@ -962,6 +298,9 @@ if [[ -n "${gcc_toolchain}" ]]; then
   # Use the specified gcc installation for building.
   export CC="$gcc_toolchain/bin/gcc"
   export CXX="$gcc_toolchain/bin/g++"
+  # Set LD_LIBRARY_PATH to make auxiliary targets (tablegen, bootstrap compiler,
+  # etc.) find the .so.
+  export LD_LIBRARY_PATH="$(dirname $(${CXX} -print-file-name=libstdc++.so.6))"
 fi
 
 export CFLAGS=""
@@ -986,7 +325,7 @@ if [[ -n "${bootstrap}" ]]; then
   ABS_INSTALL_DIR="${PWD}/${LLVM_BOOTSTRAP_INSTALL_DIR}"
   echo "Building bootstrap compiler"
   mkdir -p "${LLVM_BOOTSTRAP_DIR}"
-  cd "${LLVM_BOOTSTRAP_DIR}"
+  pushd "${LLVM_BOOTSTRAP_DIR}"
   if [[ ! -f ./config.status ]]; then
     # The bootstrap compiler only needs to be able to build the real compiler,
     # so it needs no cross-compiler output support. In general, the host
@@ -1016,7 +355,7 @@ if [[ -n "${bootstrap}" ]]; then
       "${ABS_INSTALL_DIR}/lib/"
   fi
 
-  cd -
+  popd
   export CC="${ABS_INSTALL_DIR}/bin/clang"
   export CXX="${ABS_INSTALL_DIR}/bin/clang++"
 
@@ -1107,10 +446,10 @@ if [[ -n "${with_android}" ]]; then
   # Build ASan runtime for Android.
   # Note: LLVM_ANDROID_TOOLCHAIN_DIR is not relative to PWD, but to where we
   # build the runtime, i.e. third_party/llvm/projects/compiler-rt.
-  cd "${LLVM_BUILD_DIR}"
+  pushd "${LLVM_BUILD_DIR}"
   ${MAKE} -C tools/clang/runtime/ \
     LLVM_ANDROID_TOOLCHAIN_DIR="../../../llvm-build/android-toolchain"
-  cd -
+  popd
 fi
 
 # Build Chrome-specific clang tools. Paths in this list should be relative to
@@ -1137,9 +476,9 @@ if [[ -n "$run_tests" ]]; then
       "${TOOL_SRC_DIR}/tests/test.sh" "${LLVM_BUILD_DIR}/Release+Asserts"
     fi
   done
-  cd "${LLVM_BUILD_DIR}"
+  pushd "${LLVM_BUILD_DIR}"
   ${MAKE} check-all
-  cd -
+  popd
 fi
 
 # After everything is done, log success for this revision.

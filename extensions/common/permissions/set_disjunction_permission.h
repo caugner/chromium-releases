@@ -5,10 +5,10 @@
 #ifndef EXTENSIONS_COMMON_PERMISSIONS_SET_DISJUNCTION_PERMISSION_H_
 #define EXTENSIONS_COMMON_PERMISSIONS_SET_DISJUNCTION_PERMISSION_H_
 
-#include <algorithm>
 #include <set>
 #include <string>
 
+#include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "extensions/common/extension_messages.h"
@@ -51,10 +51,8 @@ class SetDisjunctionPermission : public APIPermission {
     CHECK(rhs->info() == info());
     const SetDisjunctionPermission* perm =
         static_cast<const SetDisjunctionPermission*>(rhs);
-    return std::includes(data_set_.begin(),
-                         data_set_.end(),
-                         perm->data_set_.begin(),
-                         perm->data_set_.end());
+    return base::STLIncludes<std::set<PermissionDataType> >(
+        data_set_, perm->data_set_);
   }
 
   virtual bool Equal(const APIPermission* rhs) const OVERRIDE {
@@ -75,12 +73,8 @@ class SetDisjunctionPermission : public APIPermission {
     const SetDisjunctionPermission* perm =
         static_cast<const SetDisjunctionPermission*>(rhs);
     scoped_ptr<SetDisjunctionPermission> result(new DerivedType(info()));
-    std::set_difference(data_set_.begin(),
-                        data_set_.end(),
-                        perm->data_set_.begin(),
-                        perm->data_set_.end(),
-                        std::inserter<std::set<PermissionDataType> >(
-                            result->data_set_, result->data_set_.begin()));
+    result->data_set_ = base::STLSetDifference<std::set<PermissionDataType> >(
+        data_set_, perm->data_set_);
     return result->data_set_.empty() ? NULL : result.release();
   }
 
@@ -89,12 +83,8 @@ class SetDisjunctionPermission : public APIPermission {
     const SetDisjunctionPermission* perm =
         static_cast<const SetDisjunctionPermission*>(rhs);
     scoped_ptr<SetDisjunctionPermission> result(new DerivedType(info()));
-    std::set_union(data_set_.begin(),
-                   data_set_.end(),
-                   perm->data_set_.begin(),
-                   perm->data_set_.end(),
-                   std::inserter<std::set<PermissionDataType> >(
-                       result->data_set_, result->data_set_.begin()));
+    result->data_set_ = base::STLSetUnion<std::set<PermissionDataType> >(
+        data_set_, perm->data_set_);
     return result.release();
   }
 
@@ -103,17 +93,15 @@ class SetDisjunctionPermission : public APIPermission {
     const SetDisjunctionPermission* perm =
         static_cast<const SetDisjunctionPermission*>(rhs);
     scoped_ptr<SetDisjunctionPermission> result(new DerivedType(info()));
-    std::set_intersection(data_set_.begin(),
-                          data_set_.end(),
-                          perm->data_set_.begin(),
-                          perm->data_set_.end(),
-                          std::inserter<std::set<PermissionDataType> >(
-                              result->data_set_, result->data_set_.begin()));
+    result->data_set_ = base::STLSetIntersection<std::set<PermissionDataType> >(
+        data_set_, perm->data_set_);
     return result->data_set_.empty() ? NULL : result.release();
   }
 
-  virtual bool FromValue(const base::Value* value,
-                         std::string* error) OVERRIDE {
+  virtual bool FromValue(
+      const base::Value* value,
+      std::string* error,
+      std::vector<std::string>* unhandled_permissions) OVERRIDE {
     data_set_.clear();
     const base::ListValue* list = NULL;
 
@@ -130,13 +118,21 @@ class SetDisjunctionPermission : public APIPermission {
       DCHECK(item_value);
 
       PermissionDataType data;
-      if (!data.FromValue(item_value)) {
-        if (error)
-          *error = "Cannot parse an item from the permission list";
-        return false;
+      if (data.FromValue(item_value)) {
+        data_set_.insert(data);
+      } else {
+        std::string unknown_permission;
+        base::JSONWriter::Write(item_value, &unknown_permission);
+        if (unhandled_permissions) {
+          unhandled_permissions->push_back(unknown_permission);
+        } else {
+          if (error) {
+            *error = "Cannot parse an item from the permission list: " +
+                     unknown_permission;
+          }
+          return false;
+        }
       }
-
-      data_set_.insert(data);
     }
     return true;
   }

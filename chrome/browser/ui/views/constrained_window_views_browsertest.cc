@@ -20,6 +20,7 @@
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "ipc/ipc_message.h"
@@ -158,7 +159,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, MAYBE_FocusTest) {
   views::Widget* window1 = views::Widget::CreateWindowAsFramelessChild(
       test_dialog1.get(),
       modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
-  web_contents_modal_dialog_manager->ShowDialog(window1->GetNativeView());
+  web_contents_modal_dialog_manager->ShowModalDialog(window1->GetNativeView());
 
   views::FocusManager* focus_manager = window1->GetFocusManager();
   ASSERT_TRUE(focus_manager);
@@ -174,7 +175,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, MAYBE_FocusTest) {
   views::Widget* window2 = views::Widget::CreateWindowAsFramelessChild(
       test_dialog2.get(),
       modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
-  web_contents_modal_dialog_manager->ShowDialog(window2->GetNativeView());
+  web_contents_modal_dialog_manager->ShowModalDialog(window2->GetNativeView());
   // Should be the same focus_manager.
   ASSERT_EQ(focus_manager, window2->GetFocusManager());
 
@@ -247,7 +248,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, MAYBE_TabCloseTest) {
   views::Widget* window = views::Widget::CreateWindowAsFramelessChild(
       test_dialog.get(),
       modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
-  web_contents_modal_dialog_manager->ShowDialog(window->GetNativeView());
+  web_contents_modal_dialog_manager->ShowModalDialog(window->GetNativeView());
 
   bool closed =
       browser()->tab_strip_model()->CloseWebContentsAt(
@@ -282,7 +283,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, MAYBE_TabSwitchTest) {
   views::Widget* window = views::Widget::CreateWindowAsFramelessChild(
       test_dialog.get(),
       modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
-  web_contents_modal_dialog_manager->ShowDialog(window->GetNativeView());
+  web_contents_modal_dialog_manager->ShowModalDialog(window->GetNativeView());
   EXPECT_TRUE(window->IsVisible());
 
   // Open a new tab. The constrained window should hide itself.
@@ -332,7 +333,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, TabMoveTest) {
   views::Widget* window = views::Widget::CreateWindowAsFramelessChild(
       test_dialog.get(),
       modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
-  web_contents_modal_dialog_manager->ShowDialog(window->GetNativeView());
+  web_contents_modal_dialog_manager->ShowModalDialog(window->GetNativeView());
   EXPECT_TRUE(window->IsVisible());
 
   // Detach the web contents from the second browser's tab strip.

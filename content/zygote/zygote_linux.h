@@ -6,9 +6,10 @@
 #define CONTENT_ZYGOTE_ZYGOTE_H_
 
 #include <string>
-#include <vector>
 
 #include "base/containers/small_map.h"
+#include "base/files/scoped_file.h"
+#include "base/memory/scoped_vector.h"
 #include "base/posix/global_descriptors.h"
 #include "base/process/kill.h"
 #include "base/process/process.h"
@@ -74,12 +75,16 @@ class Zygote {
 
   // This is equivalent to fork(), except that, when using the SUID sandbox, it
   // returns the real PID of the child process as it appears outside the
-  // sandbox, rather than returning the PID inside the sandbox. Optionally, it
-  // fills in uma_name et al with a report the helper wants to make via
-  // UMA_HISTOGRAM_ENUMERATION.
+  // sandbox, rather than returning the PID inside the sandbox.  The child's
+  // real PID is determined by having it call content::SendZygoteChildPing(int)
+  // using the |pid_oracle| descriptor.
+  // Finally, when using a ZygoteForkDelegate helper, |uma_name|, |uma_sample|,
+  // and |uma_boundary_value| may be set if the helper wants to make a UMA
+  // report via UMA_HISTOGRAM_ENUMERATION.
   int ForkWithRealPid(const std::string& process_type,
                       const base::GlobalDescriptors::Mapping& fd_mapping,
-                      const std::string& channel_switch,
+                      const std::string& channel_id,
+                      base::ScopedFD pid_oracle,
                       std::string* uma_name,
                       int* uma_sample,
                       int* uma_boundary_value);
@@ -89,7 +94,7 @@ class Zygote {
   // process and the child process ID to the parent process, like fork().
   base::ProcessId ReadArgsAndFork(const Pickle& pickle,
                                   PickleIterator iter,
-                                  std::vector<int>& fds,
+                                  ScopedVector<base::ScopedFD> fds,
                                   std::string* uma_name,
                                   int* uma_sample,
                                   int* uma_boundary_value);
@@ -101,7 +106,7 @@ class Zygote {
   bool HandleForkRequest(int fd,
                          const Pickle& pickle,
                          PickleIterator iter,
-                         std::vector<int>& fds);
+                         ScopedVector<base::ScopedFD> fds);
 
   bool HandleGetSandboxStatus(int fd,
                               const Pickle& pickle,

@@ -30,12 +30,10 @@ namespace gin {
 class Arguments;
 }
 
-namespace WebTestRunner {
+namespace content {
+
 class TestInterfaces;
 class WebTestDelegate;
-}
-
-namespace content {
 
 // Key event location code introduced in DOM Level 3.
 // See also: http://www.w3.org/TR/DOM-Level-3-Events/#events-keyboardevents
@@ -48,12 +46,12 @@ enum KeyLocationCode {
 
 class EventSender : public base::SupportsWeakPtr<EventSender> {
  public:
-  explicit EventSender(WebTestRunner::TestInterfaces*);
+  explicit EventSender(TestInterfaces*);
   virtual ~EventSender();
 
   void Reset();
   void Install(blink::WebFrame*);
-  void SetDelegate(WebTestRunner::WebTestDelegate*);
+  void SetDelegate(WebTestDelegate*);
   void SetWebView(blink::WebView*);
 
   void SetContextMenuData(const blink::WebContextMenuData&);
@@ -66,7 +64,7 @@ class EventSender : public base::SupportsWeakPtr<EventSender> {
                int modifiers,
                KeyLocationCode location);
 
-  WebTestRunner::WebTaskList* taskList() { return &task_list_; }
+  WebTaskList* taskList() { return &task_list_; }
 
  private:
   friend class EventSenderBindings;
@@ -99,6 +97,7 @@ class EventSender : public base::SupportsWeakPtr<EventSender> {
 
   void ZoomPageIn();
   void ZoomPageOut();
+  void SetPageZoomFactor(double zoom_factor);
 
   void SetPageScaleFactor(float scale_factor, int x, int y);
 
@@ -107,6 +106,8 @@ class EventSender : public base::SupportsWeakPtr<EventSender> {
   void UpdateTouchPoint(unsigned index, int x, int y);
   void CancelTouchPoint(unsigned index);
   void SetTouchModifier(const std::string& key_name, bool set_mask);
+  void SetTouchCancelable(bool cancelable);
+  void ThrowTouchPointError();
 
   void DumpFilenameBeingDragged();
 
@@ -142,7 +143,6 @@ class EventSender : public base::SupportsWeakPtr<EventSender> {
   void GestureTwoFingerTap(gin::Arguments* args);
 
   void ContinuousMouseScrollBy(gin::Arguments* args);
-  void DispatchMessage(int msg, int wparam, int lparam);
   void MouseMoveTo(gin::Arguments* args);
   void MouseScrollBy(gin::Arguments* args);
   void MouseMomentumScrollBy(gin::Arguments* args);
@@ -219,10 +219,10 @@ class EventSender : public base::SupportsWeakPtr<EventSender> {
   int wm_sys_dead_char_;
 #endif
 
-  WebTestRunner::WebTaskList task_list_;
+  WebTaskList task_list_;
 
-  WebTestRunner::TestInterfaces* interfaces_;
-  WebTestRunner::WebTestDelegate* delegate_;
+  TestInterfaces* interfaces_;
+  WebTestDelegate* delegate_;
   blink::WebView* view_;
 
   bool force_layout_on_events_;
@@ -232,6 +232,7 @@ class EventSender : public base::SupportsWeakPtr<EventSender> {
   bool is_drag_mode_;
 
   int touch_modifiers_;
+  bool touch_cancelable_;
   std::vector<blink::WebTouchPoint> touch_points_;
 
   scoped_ptr<blink::WebContextMenuData> last_context_menu_data_;

@@ -7,7 +7,7 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
-#include "content/shell/renderer/test_runner/KeyCodeMapping.h"
+#include "content/public/common/page_zoom.h"
 #include "content/shell/renderer/test_runner/MockSpellCheck.h"
 #include "content/shell/renderer/test_runner/TestInterfaces.h"
 #include "content/shell/renderer/test_runner/WebTestDelegate.h"
@@ -21,17 +21,8 @@
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "v8/include/v8.h"
-
-#if defined(OS_WIN)
-#include "third_party/WebKit/public/web/win/WebInputEventFactory.h"
-#elif defined(OS_MACOSX)
-#include "third_party/WebKit/public/web/mac/WebInputEventFactory.h"
-#elif defined(OS_ANDROID)
-#include "third_party/WebKit/public/web/android/WebInputEventFactory.h"
-#elif defined(TOOLKIT_GTK)
-#include "third_party/WebKit/public/web/gtk/WebInputEventFactory.h"
-#endif
 
 using blink::WebContextMenuData;
 using blink::WebDragData;
@@ -49,11 +40,6 @@ using blink::WebTouchEvent;
 using blink::WebTouchPoint;
 using blink::WebVector;
 using blink::WebView;
-
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_ANDROID) || \
-    defined(TOOLKIT_GTK)
-using blink::WebInputEventFactory;
-#endif
 
 namespace content {
 
@@ -152,7 +138,7 @@ bool OutsideMultiClickRadius(const WebPoint& a, const WebPoint& b) {
 // helpful.
 std::vector<std::string> MakeMenuItemStringsFor(
     WebContextMenuData* context_menu,
-    WebTestRunner::WebTestDelegate* delegate) {
+    WebTestDelegate* delegate) {
   // These constants are based on Safari's context menu because tests are made
   // for it.
   static const char* kNonEditableMenuStrings[] = {
@@ -191,7 +177,7 @@ std::vector<std::string> MakeMenuItemStringsFor(
       strings.push_back(*item);
     }
     WebVector<WebString> suggestions;
-    WebTestRunner::MockSpellCheck::fillSuggestionList(
+    MockSpellCheck::fillSuggestionList(
         context_menu->misspelledWord, &suggestions);
     for (size_t i = 0; i < suggestions.size(); ++i) {
       strings.push_back(suggestions[i].utf8());
@@ -217,7 +203,7 @@ WebMouseEvent::Button GetButtonTypeFromButtonNumber(int button_code) {
   return WebMouseEvent::ButtonMiddle;
 }
 
-class MouseDownTask : public WebTestRunner::WebMethodTask<EventSender> {
+class MouseDownTask : public WebMethodTask<EventSender> {
  public:
   MouseDownTask(EventSender* obj, int button_number, int modifiers)
       : WebMethodTask<EventSender>(obj),
@@ -233,7 +219,7 @@ class MouseDownTask : public WebTestRunner::WebMethodTask<EventSender> {
   int modifiers_;
 };
 
-class MouseUpTask : public WebTestRunner::WebMethodTask<EventSender> {
+class MouseUpTask : public WebMethodTask<EventSender> {
  public:
   MouseUpTask(EventSender* obj, int button_number, int modifiers)
       : WebMethodTask<EventSender>(obj),
@@ -249,7 +235,7 @@ class MouseUpTask : public WebTestRunner::WebMethodTask<EventSender> {
   int modifiers_;
 };
 
-class KeyDownTask : public WebTestRunner::WebMethodTask<EventSender> {
+class KeyDownTask : public WebMethodTask<EventSender> {
  public:
   KeyDownTask(EventSender* obj,
               const std::string code_str,
@@ -289,16 +275,16 @@ bool GetEditCommand(const WebKeyboardEvent& event, std::string* name) {
     return false;
 
   switch (event.windowsKeyCode) {
-    case WebTestRunner::VKEY_LEFT:
+    case ui::VKEY_LEFT:
       *name = "MoveToBeginningOfLine";
       break;
-    case WebTestRunner::VKEY_RIGHT:
+    case ui::VKEY_RIGHT:
       *name = "MoveToEndOfLine";
       break;
-    case WebTestRunner::VKEY_UP:
+    case ui::VKEY_UP:
       *name = "MoveToBeginningOfDocument";
       break;
-    case WebTestRunner::VKEY_DOWN:
+    case ui::VKEY_DOWN:
       *name = "MoveToEndOfDocument";
       break;
     default:
@@ -311,6 +297,16 @@ bool GetEditCommand(const WebKeyboardEvent& event, std::string* name) {
   return true;
 #else
   return false;
+#endif
+}
+
+bool IsSystemKeyEvent(const WebKeyboardEvent& event) {
+#if defined(OS_MACOSX)
+  return event.modifiers & WebInputEvent::MetaKey &&
+      event.windowsKeyCode != ui::VKEY_B &&
+      event.windowsKeyCode != ui::VKEY_I;
+#else
+  return !!(event.modifiers & WebInputEvent::AltKey);
 #endif
 }
 
@@ -340,12 +336,14 @@ class EventSenderBindings : public gin::Wrappable<EventSenderBindings> {
   void TextZoomOut();
   void ZoomPageIn();
   void ZoomPageOut();
+  void SetPageZoomFactor(double factor);
   void SetPageScaleFactor(gin::Arguments* args);
   void ClearTouchPoints();
   void ReleaseTouchPoint(unsigned index);
-  void UpdateTouchPoint(unsigned index, int x, int y);
+  void UpdateTouchPoint(unsigned index, double x, double y);
   void CancelTouchPoint(unsigned index);
   void SetTouchModifier(const std::string& key_name, bool set_mask);
+  void SetTouchCancelable(bool cancelable);
   void DumpFilenameBeingDragged();
   void GestureFlingCancel();
   void GestureFlingStart(float x, float y, float velocity_x, float velocity_y);
@@ -372,7 +370,6 @@ class EventSenderBindings : public gin::Wrappable<EventSenderBindings> {
   void GestureLongTap(gin::Arguments* args);
   void GestureTwoFingerTap(gin::Arguments* args);
   void ContinuousMouseScrollBy(gin::Arguments* args);
-  void DispatchMessage(int msg, int wparam, int lparam);
   void MouseMoveTo(gin::Arguments* args);
   void MouseScrollBy(gin::Arguments* args);
   void MouseMomentumScrollBy(gin::Arguments* args);
@@ -441,6 +438,8 @@ void EventSenderBindings::Install(base::WeakPtr<EventSender> sender,
 
   gin::Handle<EventSenderBindings> bindings =
       gin::CreateHandle(isolate, new EventSenderBindings(sender));
+  if (bindings.IsEmpty())
+    return;
   v8::Handle<v8::Object> global = context->Global();
   global->Set(gin::StringToV8(isolate, "eventSender"), bindings.ToV8());
 }
@@ -458,12 +457,14 @@ EventSenderBindings::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("textZoomOut", &EventSenderBindings::TextZoomOut)
       .SetMethod("zoomPageIn", &EventSenderBindings::ZoomPageIn)
       .SetMethod("zoomPageOut", &EventSenderBindings::ZoomPageOut)
+      .SetMethod("setPageZoomFactor", &EventSenderBindings::SetPageZoomFactor)
       .SetMethod("setPageScaleFactor", &EventSenderBindings::SetPageScaleFactor)
       .SetMethod("clearTouchPoints", &EventSenderBindings::ClearTouchPoints)
       .SetMethod("releaseTouchPoint", &EventSenderBindings::ReleaseTouchPoint)
       .SetMethod("updateTouchPoint", &EventSenderBindings::UpdateTouchPoint)
       .SetMethod("cancelTouchPoint", &EventSenderBindings::CancelTouchPoint)
       .SetMethod("setTouchModifier", &EventSenderBindings::SetTouchModifier)
+      .SetMethod("setTouchCancelable", &EventSenderBindings::SetTouchCancelable)
       .SetMethod("dumpFilenameBeingDragged",
                  &EventSenderBindings::DumpFilenameBeingDragged)
       .SetMethod("gestureFlingCancel", &EventSenderBindings::GestureFlingCancel)
@@ -496,7 +497,6 @@ EventSenderBindings::GetObjectTemplateBuilder(v8::Isolate* isolate) {
                  &EventSenderBindings::GestureTwoFingerTap)
       .SetMethod("continuousMouseScrollBy",
                  &EventSenderBindings::ContinuousMouseScrollBy)
-      .SetMethod("dispatchMessage", &EventSenderBindings::DispatchMessage)
       .SetMethod("keyDown", &EventSenderBindings::KeyDown)
       .SetMethod("mouseDown", &EventSenderBindings::MouseDown)
       .SetMethod("mouseMoveTo", &EventSenderBindings::MouseMoveTo)
@@ -586,12 +586,17 @@ void EventSenderBindings::ZoomPageOut() {
     sender_->ZoomPageOut();
 }
 
+void EventSenderBindings::SetPageZoomFactor(double factor) {
+  if (sender_)
+    sender_->SetPageZoomFactor(factor);
+}
+
 void EventSenderBindings::SetPageScaleFactor(gin::Arguments* args) {
   if (!sender_)
     return;
   float scale_factor;
-  int x;
-  int y;
+  double x;
+  double y;
   if (args->PeekNext().IsEmpty())
     return;
   args->GetNext(&scale_factor);
@@ -601,7 +606,8 @@ void EventSenderBindings::SetPageScaleFactor(gin::Arguments* args) {
   if (args->PeekNext().IsEmpty())
     return;
   args->GetNext(&y);
-  sender_->SetPageScaleFactor(scale_factor, x, y);
+  sender_->SetPageScaleFactor(scale_factor,
+                              static_cast<int>(x), static_cast<int>(y));
 }
 
 void EventSenderBindings::ClearTouchPoints() {
@@ -614,9 +620,9 @@ void EventSenderBindings::ReleaseTouchPoint(unsigned index) {
     sender_->ReleaseTouchPoint(index);
 }
 
-void EventSenderBindings::UpdateTouchPoint(unsigned index, int x, int y) {
+void EventSenderBindings::UpdateTouchPoint(unsigned index, double x, double y) {
   if (sender_)
-    sender_->UpdateTouchPoint(index, x, y);
+    sender_->UpdateTouchPoint(index, static_cast<int>(x), static_cast<int>(y));
 }
 
 void EventSenderBindings::CancelTouchPoint(unsigned index) {
@@ -628,6 +634,11 @@ void EventSenderBindings::SetTouchModifier(const std::string& key_name,
                                            bool set_mask) {
   if (sender_)
     sender_->SetTouchModifier(key_name, set_mask);
+}
+
+void EventSenderBindings::SetTouchCancelable(bool cancelable) {
+  if (sender_)
+    sender_->SetTouchCancelable(cancelable);
 }
 
 void EventSenderBindings::DumpFilenameBeingDragged() {
@@ -763,11 +774,6 @@ void EventSenderBindings::GestureTwoFingerTap(gin::Arguments* args) {
 void EventSenderBindings::ContinuousMouseScrollBy(gin::Arguments* args) {
   if (sender_)
     sender_->ContinuousMouseScrollBy(args);
-}
-
-void EventSenderBindings::DispatchMessage(int msg, int wparam, int lparam) {
-  if (sender_)
-    sender_->DispatchMessage(msg, wparam, lparam);
 }
 
 void EventSenderBindings::MouseMoveTo(gin::Arguments* args) {
@@ -996,13 +1002,14 @@ EventSender::SavedEvent::SavedEvent()
       milliseconds(0),
       modifiers(0) {}
 
-EventSender::EventSender(WebTestRunner::TestInterfaces* interfaces)
+EventSender::EventSender(TestInterfaces* interfaces)
     : interfaces_(interfaces),
       delegate_(NULL),
       view_(NULL),
       force_layout_on_events_(false),
       is_drag_mode_(true),
       touch_modifiers_(0),
+      touch_cancelable_(true),
       replaying_saved_events_(false),
       current_drag_effects_allowed_(blink::WebDragOperationNone),
       last_click_time_sec_(0),
@@ -1057,13 +1064,17 @@ void EventSender::Reset() {
 
   time_offset_ms_ = 0;
   click_count_ = 0;
+
+  touch_modifiers_ = 0;
+  touch_cancelable_ = true;
+  touch_points_.clear();
 }
 
 void EventSender::Install(WebFrame* frame) {
   EventSenderBindings::Install(weak_factory_.GetWeakPtr(), frame);
 }
 
-void EventSender::SetDelegate(WebTestRunner::WebTestDelegate* delegate) {
+void EventSender::SetDelegate(WebTestDelegate* delegate) {
   delegate_ = delegate;
 }
 
@@ -1166,45 +1177,45 @@ void EventSender::KeyDown(const std::string& code_str,
 
   if ("\n" == code_str) {
     generate_char = true;
-    text = code = WebTestRunner::VKEY_RETURN;
+    text = code = ui::VKEY_RETURN;
   } else if ("rightArrow" == code_str) {
-    code = WebTestRunner::VKEY_RIGHT;
+    code = ui::VKEY_RIGHT;
   } else if ("downArrow" == code_str) {
-    code = WebTestRunner::VKEY_DOWN;
+    code = ui::VKEY_DOWN;
   } else if ("leftArrow" == code_str) {
-    code = WebTestRunner::VKEY_LEFT;
+    code = ui::VKEY_LEFT;
   } else if ("upArrow" == code_str) {
-    code = WebTestRunner::VKEY_UP;
+    code = ui::VKEY_UP;
   } else if ("insert" == code_str) {
-    code = WebTestRunner::VKEY_INSERT;
+    code = ui::VKEY_INSERT;
   } else if ("delete" == code_str) {
-    code = WebTestRunner::VKEY_DELETE;
+    code = ui::VKEY_DELETE;
   } else if ("pageUp" == code_str) {
-    code = WebTestRunner::VKEY_PRIOR;
+    code = ui::VKEY_PRIOR;
   } else if ("pageDown" == code_str) {
-    code = WebTestRunner::VKEY_NEXT;
+    code = ui::VKEY_NEXT;
   } else if ("home" == code_str) {
-    code = WebTestRunner::VKEY_HOME;
+    code = ui::VKEY_HOME;
   } else if ("end" == code_str) {
-    code = WebTestRunner::VKEY_END;
+    code = ui::VKEY_END;
   } else if ("printScreen" == code_str) {
-    code = WebTestRunner::VKEY_SNAPSHOT;
+    code = ui::VKEY_SNAPSHOT;
   } else if ("menu" == code_str) {
-    code = WebTestRunner::VKEY_APPS;
+    code = ui::VKEY_APPS;
   } else if ("leftControl" == code_str) {
-    code = WebTestRunner::VKEY_LCONTROL;
+    code = ui::VKEY_LCONTROL;
   } else if ("rightControl" == code_str) {
-    code = WebTestRunner::VKEY_RCONTROL;
+    code = ui::VKEY_RCONTROL;
   } else if ("leftShift" == code_str) {
-    code = WebTestRunner::VKEY_LSHIFT;
+    code = ui::VKEY_LSHIFT;
   } else if ("rightShift" == code_str) {
-    code = WebTestRunner::VKEY_RSHIFT;
+    code = ui::VKEY_RSHIFT;
   } else if ("leftAlt" == code_str) {
-    code = WebTestRunner::VKEY_LMENU;
+    code = ui::VKEY_LMENU;
   } else if ("rightAlt" == code_str) {
-    code = WebTestRunner::VKEY_RMENU;
+    code = ui::VKEY_RMENU;
   } else if ("numLock" == code_str) {
-    code = WebTestRunner::VKEY_NUMLOCK;
+    code = ui::VKEY_NUMLOCK;
   } else {
     // Compare the input string with the function-key names defined by the
     // DOM spec (i.e. "F1",...,"F24"). If the input string is a function-key
@@ -1212,7 +1223,7 @@ void EventSender::KeyDown(const std::string& code_str,
     for (int i = 1; i <= 24; ++i) {
       std::string function_key_name = base::StringPrintf("F%d", i);
       if (function_key_name == code_str) {
-        code = WebTestRunner::VKEY_F1 + (i - 1);
+        code = ui::VKEY_F1 + (i - 1);
         break;
       }
     }
@@ -1243,11 +1254,6 @@ void EventSender::KeyDown(const std::string& code_str,
   event_down.modifiers = modifiers;
   event_down.windowsKeyCode = code;
 
-#if defined(OS_LINUX) && defined(TOOLKIT_GTK)
-  event_down.nativeKeyCode =
-      WebTestRunner::NativeKeyCodeForWindowsKeyCode(code);
-#endif
-
   if (generate_char) {
     event_down.text[0] = text;
     event_down.unmodifiedText[0] = text;
@@ -1255,11 +1261,8 @@ void EventSender::KeyDown(const std::string& code_str,
 
   event_down.setKeyIdentifierFromWindowsKeyCode();
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_ANDROID) || \
-    defined(TOOLKIT_GTK)
   if (event_down.modifiers != 0)
-    event_down.isSystemKey = WebInputEventFactory::isSystemKeyEvent(event_down);
-#endif
+    event_down.isSystemKey = IsSystemKeyEvent(event_down);
 
   if (needs_shift_key_modifier)
     event_down.modifiers |= WebInputEvent::ShiftKey;
@@ -1287,7 +1290,7 @@ void EventSender::KeyDown(const std::string& code_str,
 
   view_->handleInputEvent(event_down);
 
-  if (code == WebTestRunner::VKEY_ESCAPE && !current_drag_data_.isNull()) {
+  if (code == ui::VKEY_ESCAPE && !current_drag_data_.isNull()) {
     WebMouseEvent event;
     InitMouseEvent(WebInputEvent::MouseDown,
                    pressed_button_,
@@ -1358,7 +1361,9 @@ std::vector<std::string> EventSender::ContextClick() {
   pressed_button_= WebMouseEvent::ButtonNone;
 #endif
 
-  return MakeMenuItemStringsFor(last_context_menu_data_.release(), delegate_);
+  std::vector<std::string> menu_items = MakeMenuItemStringsFor(last_context_menu_data_.get(), delegate_);
+  last_context_menu_data_.reset();
+  return menu_items;
 }
 
 void EventSender::TextZoomIn() {
@@ -1370,8 +1375,7 @@ void EventSender::TextZoomOut() {
 }
 
 void EventSender::ZoomPageIn() {
-  const std::vector<WebTestRunner::WebTestProxyBase*>& window_list =
-      interfaces_->windowList();
+  const std::vector<WebTestProxyBase*>& window_list = interfaces_->windowList();
 
   for (size_t i = 0; i < window_list.size(); ++i) {
     window_list.at(i)->webView()->setZoomLevel(
@@ -1380,12 +1384,20 @@ void EventSender::ZoomPageIn() {
 }
 
 void EventSender::ZoomPageOut() {
-  const std::vector<WebTestRunner::WebTestProxyBase*>& window_list =
-      interfaces_->windowList();
+  const std::vector<WebTestProxyBase*>& window_list = interfaces_->windowList();
 
   for (size_t i = 0; i < window_list.size(); ++i) {
     window_list.at(i)->webView()->setZoomLevel(
         window_list.at(i)->webView()->zoomLevel() - 1);
+  }
+}
+
+void EventSender::SetPageZoomFactor(double zoom_factor) {
+  const std::vector<WebTestProxyBase*>& window_list = interfaces_->windowList();
+
+  for (size_t i = 0; i < window_list.size(); ++i) {
+    window_list.at(i)->webView()->setZoomLevel(
+        ZoomFactorToZoomLevel(zoom_factor));
   }
 }
 
@@ -1398,15 +1410,27 @@ void EventSender::ClearTouchPoints() {
   touch_points_.clear();
 }
 
+void EventSender::ThrowTouchPointError() {
+  v8::Isolate* isolate = blink::mainThreadIsolate();
+  isolate->ThrowException(v8::Exception::TypeError(
+      gin::StringToV8(isolate, "Invalid touch point.")));
+}
+
 void EventSender::ReleaseTouchPoint(unsigned index) {
-  DCHECK_LT(index, touch_points_.size());
+  if (index >= touch_points_.size()) {
+    ThrowTouchPointError();
+    return;
+  }
 
   WebTouchPoint* touch_point = &touch_points_[index];
   touch_point->state = WebTouchPoint::StateReleased;
 }
 
 void EventSender::UpdateTouchPoint(unsigned index, int x, int y) {
-  DCHECK_LT(index, touch_points_.size());
+  if (index >= touch_points_.size()) {
+    ThrowTouchPointError();
+    return;
+  }
 
   WebTouchPoint* touch_point = &touch_points_[index];
   touch_point->state = WebTouchPoint::StateMoved;
@@ -1415,7 +1439,10 @@ void EventSender::UpdateTouchPoint(unsigned index, int x, int y) {
 }
 
 void EventSender::CancelTouchPoint(unsigned index) {
-  DCHECK_LT(index, touch_points_.size());
+  if (index >= touch_points_.size()) {
+    ThrowTouchPointError();
+    return;
+  }
 
   WebTouchPoint* touch_point = &touch_points_[index];
   touch_point->state = WebTouchPoint::StateCancelled;
@@ -1437,6 +1464,10 @@ void EventSender::SetTouchModifier(const std::string& key_name,
     touch_modifiers_ |= mask;
   else
     touch_modifiers_ &= ~mask;
+}
+
+void EventSender::SetTouchCancelable(bool cancelable) {
+  touch_cancelable_ = cancelable;
 }
 
 void EventSender::DumpFilenameBeingDragged() {
@@ -1546,24 +1577,25 @@ void EventSender::BeginDragWithFiles(const std::vector<std::string>& files) {
 }
 
 void EventSender::AddTouchPoint(gin::Arguments* args) {
-  int x;
-  int y;
+  double x;
+  double y;
   args->GetNext(&x);
   args->GetNext(&y);
 
   WebTouchPoint touch_point;
   touch_point.state = WebTouchPoint::StatePressed;
-  touch_point.position = WebFloatPoint(x, y);
+  touch_point.position = WebFloatPoint(static_cast<int>(x),
+                                       static_cast<int>(y));
   touch_point.screenPosition = touch_point.position;
 
   if (!args->PeekNext().IsEmpty()) {
-    int radius_x;
+    double radius_x;
     if (!args->GetNext(&radius_x)) {
       args->ThrowError();
       return;
     }
 
-    int radius_y = radius_x;
+    double radius_y = radius_x;
     if (!args->PeekNext().IsEmpty()) {
       if (!args->GetNext(&radius_y)) {
         args->ThrowError();
@@ -1571,8 +1603,8 @@ void EventSender::AddTouchPoint(gin::Arguments* args) {
       }
     }
 
-    touch_point.radiusX = radius_x;
-    touch_point.radiusY = radius_y;
+    touch_point.radiusX = static_cast<int>(radius_x);
+    touch_point.radiusY = static_cast<int>(radius_y);
   }
 
   int lowest_id = 0;
@@ -1676,31 +1708,15 @@ void EventSender::ContinuousMouseScrollBy(gin::Arguments* args) {
   view_->handleInputEvent(event);
 }
 
-void EventSender::DispatchMessage(int msg, int wparam, int lparam) {
-#if defined(OS_WIN)
-  // WebKit's version of this function stuffs a MSG struct and uses
-  // TranslateMessage and DispatchMessage. We use a WebKeyboardEvent, which
-  // doesn't need to receive the DeadChar and SysDeadChar messages.
-  if (msg == WM_DEADCHAR || msg == WM_SYSDEADCHAR)
-    return;
-
-  if (force_layout_on_events_)
-    view_->layout();
-
-  view_->handleInputEvent(
-      WebInputEventFactory::keyboardEvent(0, msg, wparam, lparam));
-#endif
-}
-
 void EventSender::MouseMoveTo(gin::Arguments* args) {
   if (force_layout_on_events_)
     view_->layout();
 
-  int x;
-  int y;
+  double x;
+  double y;
   args->GetNext(&x);
   args->GetNext(&y);
-  WebPoint mouse_pos(x, y);
+  WebPoint mouse_pos(static_cast<int>(x), static_cast<int>(y));
 
   int modifiers = 0;
   if (!args->PeekNext().IsEmpty())
@@ -1782,6 +1798,7 @@ void EventSender::SendCurrentTouchEvent(WebInputEvent::Type type) {
   WebTouchEvent touch_event;
   touch_event.type = type;
   touch_event.modifiers = touch_modifiers_;
+  touch_event.cancelable = touch_cancelable_;
   touch_event.timeStampSeconds = GetCurrentEventTimeSec();
   touch_event.touchesLength = touch_points_.size();
   for (size_t i = 0; i < touch_points_.size(); ++i)

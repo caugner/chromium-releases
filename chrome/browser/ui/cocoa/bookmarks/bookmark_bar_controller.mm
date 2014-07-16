@@ -9,11 +9,8 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/sys_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_stats.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -49,9 +46,14 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_node_data.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/extension_set.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -132,9 +134,9 @@ const NSTimeInterval kBookmarkBarAnimationDuration = 0.12;
 const NSTimeInterval kDragAndDropAnimationDuration = 0.25;
 
 void RecordAppLaunch(Profile* profile, GURL url) {
-  DCHECK(profile->GetExtensionService());
   const extensions::Extension* extension =
-      profile->GetExtensionService()->GetInstalledApp(url);
+      extensions::ExtensionRegistry::Get(profile)->
+          enabled_extensions().GetAppByURL(url);
   if (!extension)
     return;
 
@@ -1023,7 +1025,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
 - (IBAction)openBookmarkMenuItem:(id)sender {
   int64 tag = [self nodeIdFromMenuTag:[sender tag]];
-  const BookmarkNode* node = bookmarkModel_->GetNodeByID(tag);
+  const BookmarkNode* node = GetBookmarkNodeByID(bookmarkModel_, tag);
   WindowOpenDisposition disposition =
       ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
   [self openURL:node->url() disposition:disposition];
@@ -2414,7 +2416,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   BookmarkNodeData dragData;
   if (dragData.ReadFromClipboard(ui::CLIPBOARD_TYPE_DRAG)) {
     std::vector<const BookmarkNode*> nodes(
-        dragData.GetNodes(browser_->profile()));
+        dragData.GetNodes(bookmarkModel_, browser_->profile()->GetPath()));
     dragDataNodes.assign(nodes.begin(), nodes.end());
   }
   return dragDataNodes;

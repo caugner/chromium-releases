@@ -29,37 +29,47 @@ class URLRequestContextGetter;
 
 namespace domain_reliability {
 
-// The top-level per-profile object that measures requests and hands off the
-// measurements to the proper |DomainReliabilityContext|.  Referenced by the
-// |ChromeNetworkDelegate|, which calls the On* methods.
+// The top-level object that measures requests and hands off the measurements
+// to the proper |DomainReliabilityContext|. Lives on the I/O thread, so the
+// constructor accepts a URLRequestContext directly instead of a
+// URLRequestContextGetter.
 class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor {
  public:
-  // NB: We don't take a URLRequestContextGetter because we already live on the
-  // I/O thread.
-  explicit DomainReliabilityMonitor(
-      net::URLRequestContext* url_request_context);
-  DomainReliabilityMonitor(
-      net::URLRequestContext* url_request_context,
-      scoped_ptr<MockableTime> time);
+  DomainReliabilityMonitor(net::URLRequestContext* url_request_context,
+                           const std::string& upload_reporter_string);
+  DomainReliabilityMonitor(net::URLRequestContext* url_request_context,
+                           const std::string& upload_reporter_string,
+                           scoped_ptr<MockableTime> time);
   ~DomainReliabilityMonitor();
 
-  // Should be called from the profile's NetworkDelegate on the corresponding
-  // events:
+  // Populates the monitor with contexts that were configured at compile time.
+  void AddBakedInConfigs();
+
+  // Should be called when |request| is about to follow a redirect. Will
+  // examine and possibly log the redirect request.
   void OnBeforeRedirect(net::URLRequest* request);
+
+  // Should be called when |request| is complete. Will examine and possibly
+  // log the (final) request. (|started| should be true if the request was
+  // actually started before it was terminated.)
   void OnCompleted(net::URLRequest* request, bool started);
 
-  // Creates a context for testing, adds it to the monitor, and returns a
-  // pointer to it. (The pointer is only valid until the MOnitor is destroyed.)
   DomainReliabilityContext* AddContextForTesting(
       scoped_ptr<const DomainReliabilityConfig> config);
+
+  size_t contexts_size_for_testing() const { return contexts_.size(); }
 
  private:
   friend class DomainReliabilityMonitorTest;
 
+  typedef std::map<std::string, DomainReliabilityContext*> ContextMap;
+
   struct DOMAIN_RELIABILITY_EXPORT RequestInfo {
     RequestInfo();
-    RequestInfo(const net::URLRequest& request);
+    explicit RequestInfo(const net::URLRequest& request);
     ~RequestInfo();
+
+    bool DefinitelyReachedNetwork() const;
 
     GURL url;
     net::URLRequestStatus status;
@@ -67,16 +77,23 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityMonitor {
     net::HostPortPair socket_address;
     net::LoadTimingInfo load_timing_info;
     bool was_cached;
+    int load_flags;
+    bool is_upload;
   };
 
+  // Creates a context, adds it to the monitor, and returns a pointer to it.
+  // (The pointer is only valid until the Monitor is destroyed.)
+  DomainReliabilityContext* AddContext(
+      scoped_ptr<const DomainReliabilityConfig> config);
   void OnRequestLegComplete(const RequestInfo& info);
 
   scoped_ptr<MockableTime> time_;
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
+  const std::string upload_reporter_string_;
   DomainReliabilityScheduler::Params scheduler_params_;
   DomainReliabilityDispatcher dispatcher_;
   scoped_ptr<DomainReliabilityUploader> uploader_;
-  std::map<std::string, DomainReliabilityContext*> contexts_;
+  ContextMap contexts_;
 
   DISALLOW_COPY_AND_ASSIGN(DomainReliabilityMonitor);
 };

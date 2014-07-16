@@ -91,6 +91,7 @@
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_switches.h"
+#include "components/signin/core/common/signin_pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -374,8 +375,6 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
       run_loop_->Quit();
   }
 
-  virtual void OnAppWindowIconChanged(apps::AppWindow* app_window) OVERRIDE {}
-
   virtual void OnAppWindowRemoved(apps::AppWindow* app_window) OVERRIDE {
     if (run_loop_)
       run_loop_->Quit();
@@ -621,6 +620,13 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, StartSession) {
     EXPECT_EQ(GURL(kStartupURLs[i]),
               tabs->GetWebContentsAt(i)->GetVisibleURL());
   }
+
+  // Verify that the session is not considered to be logged in with a GAIA
+  // account.
+  Profile* profile = GetProfileForTest();
+  ASSERT_TRUE(profile);
+  EXPECT_FALSE(profile->GetPrefs()->HasPrefPath(
+      prefs::kGoogleServicesUsername));
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, FullscreenDisallowed) {
@@ -1032,7 +1038,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, UserAvatarImage) {
 
   EXPECT_FALSE(user->HasDefaultImage());
   EXPECT_EQ(chromeos::User::kExternalImageIndex, user->image_index());
-  EXPECT_TRUE(chromeos::test::AreImagesEqual(*policy_image, user->image()));
+  EXPECT_TRUE(chromeos::test::AreImagesEqual(*policy_image, user->GetImage()));
   const base::DictionaryValue* images_pref =
       g_browser_process->local_state()->GetDictionary("user_image_info");
   ASSERT_TRUE(images_pref);
@@ -1096,7 +1102,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, LastWindowClosedLogoutReminder) {
   app_window_registry->AddObserver(this);
 
   // Verify that the logout confirmation dialog is not showing.
-  ash::internal::LogoutConfirmationController* logout_confirmation_controller =
+  ash::LogoutConfirmationController* logout_confirmation_controller =
       ash::Shell::GetInstance()->logout_confirmation_controller();
   ASSERT_TRUE(logout_confirmation_controller);
   EXPECT_FALSE(logout_confirmation_controller->dialog_for_testing());
@@ -1196,7 +1202,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, LastWindowClosedLogoutReminder) {
   EXPECT_TRUE(browser_list->empty());
 
   // Verify that the logout confirmation dialog is showing.
-  ash::internal::LogoutConfirmationDialog* dialog =
+  ash::LogoutConfirmationDialog* dialog =
       logout_confirmation_controller->dialog_for_testing();
   ASSERT_TRUE(dialog);
 
@@ -1305,9 +1311,9 @@ IN_PROC_BROWSER_TEST_P(TermsOfServiceTest, TermsOfServiceScreen) {
   ASSERT_TRUE(contents);
   std::string json;
   ASSERT_TRUE(content::ExecuteScriptAndExtractString(contents,
-      "var screen = document.getElementById('terms-of-service');"
+      "var screenElement = document.getElementById('terms-of-service');"
       "function SendReplyIfDownloadDone() {"
-      "  if (screen.classList.contains('tos-loading'))"
+      "  if (screenElement.classList.contains('tos-loading'))"
       "    return false;"
       "  var status = {};"
       "  status.heading = document.getElementById('tos-heading').textContent;"
@@ -1317,7 +1323,7 @@ IN_PROC_BROWSER_TEST_P(TermsOfServiceTest, TermsOfServiceScreen) {
       "      document.getElementById('tos-content-heading').textContent;"
       "  status.content ="
       "      document.getElementById('tos-content-main').textContent;"
-      "  status.error = screen.classList.contains('error');"
+      "  status.error = screenElement.classList.contains('error');"
       "  status.acceptEnabled ="
       "      !document.getElementById('tos-accept-button').disabled;"
       "  domAutomationController.send(JSON.stringify(status));"
@@ -1327,7 +1333,7 @@ IN_PROC_BROWSER_TEST_P(TermsOfServiceTest, TermsOfServiceScreen) {
       "var observer = new MutationObserver(SendReplyIfDownloadDone);"
       "if (!SendReplyIfDownloadDone()) {"
       "  var options = { attributes: true, attributeFilter: [ 'class' ] };"
-      "  observer.observe(screen, options);"
+      "  observer.observe(screenElement, options);"
       "}",
       &json));
   scoped_ptr<base::Value> value_ptr(base::JSONReader::Read(json));

@@ -12,12 +12,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_stats.h"
-#include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/bookmarks/scoped_group_bookmark_actions.h"
 #include "chrome/browser/extensions/api/bookmarks/bookmark_api_constants.h"
 #include "chrome/browser/extensions/api/bookmarks/bookmark_api_helpers.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
@@ -27,22 +23,20 @@
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "chrome/common/extensions/api/bookmark_manager_private.h"
 #include "chrome/common/pref_names.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_node_data.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
+#include "components/bookmarks/core/browser/scoped_group_bookmark_actions.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/extension_function_dispatcher.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/view_type_utils.h"
 #include "grit/generated_resources.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
-
-#if defined(OS_WIN)
-#include "win8/util/win8_util.h"
-#endif  // OS_WIN
 
 namespace extensions {
 
@@ -50,6 +44,8 @@ namespace bookmark_keys = bookmark_api_constants;
 namespace bookmark_manager_private = api::bookmark_manager_private;
 namespace CanPaste = api::bookmark_manager_private::CanPaste;
 namespace Copy = api::bookmark_manager_private::Copy;
+namespace CreateWithMetaInfo =
+    api::bookmark_manager_private::CreateWithMetaInfo;
 namespace Cut = api::bookmark_manager_private::Cut;
 namespace Drop = api::bookmark_manager_private::Drop;
 namespace GetSubtree = api::bookmark_manager_private::GetSubtree;
@@ -61,6 +57,7 @@ namespace SetMetaInfo = api::bookmark_manager_private::SetMetaInfo;
 namespace SortChildren = api::bookmark_manager_private::SortChildren;
 namespace StartDrag = api::bookmark_manager_private::StartDrag;
 namespace UndoInfo = api::bookmark_manager_private::GetUndoInfo;
+namespace UpdateMetaInfo = api::bookmark_manager_private::UpdateMetaInfo;
 
 using content::WebContents;
 
@@ -68,12 +65,12 @@ namespace {
 
 // Returns a single bookmark node from the argument ID.
 // This returns NULL in case of failure.
-const BookmarkNode* GetNodeFromString(
-    BookmarkModel* model, const std::string& id_string) {
+const BookmarkNode* GetNodeFromString(BookmarkModel* model,
+                                      const std::string& id_string) {
   int64 id;
   if (!base::StringToInt64(id_string, &id))
     return NULL;
-  return model->GetNodeByID(id);
+  return GetBookmarkNodeByID(model, id);
 }
 
 // Gets a vector of bookmark nodes from the argument list of IDs.
@@ -144,12 +141,15 @@ CreateApiNodeDataElement(const BookmarkNodeData::Element& element) {
 // Creates a bookmark_manager_private::BookmarkNodeData from a BookmarkNodeData.
 scoped_ptr<bookmark_manager_private::BookmarkNodeData>
 CreateApiBookmarkNodeData(Profile* profile, const BookmarkNodeData& data) {
+  const base::FilePath& profile_path = profile->GetPath();
+
   scoped_ptr<bookmark_manager_private::BookmarkNodeData> node_data(
       new bookmark_manager_private::BookmarkNodeData);
-  node_data->same_profile = data.IsFromProfile(profile);
+  node_data->same_profile = data.IsFromProfilePath(profile_path);
 
   if (node_data->same_profile) {
-    std::vector<const BookmarkNode*> nodes = data.GetNodes(profile);
+    std::vector<const BookmarkNode*> nodes = data.GetNodes(
+        BookmarkModelFactory::GetForProfile(profile), profile_path);
     for (size_t i = 0; i < nodes.size(); ++i) {
       node_data->elements.push_back(
           CreateNodeDataElementFromBookmarkNode(*nodes[i]));
@@ -180,10 +180,8 @@ BookmarkManagerPrivateEventRouter::~BookmarkManagerPrivateEventRouter() {
 void BookmarkManagerPrivateEventRouter::DispatchEvent(
     const std::string& event_name,
     scoped_ptr<base::ListValue> event_args) {
-  extensions::ExtensionSystem::Get(browser_context_)
-      ->event_router()
-      ->BroadcastEvent(make_scoped_ptr(
-          new extensions::Event(event_name, event_args.Pass())));
+  extensions::EventRouter::Get(browser_context_)->BroadcastEvent(
+      make_scoped_ptr(new extensions::Event(event_name, event_args.Pass())));
 }
 
 void BookmarkManagerPrivateEventRouter::BookmarkModelChanged() {}
@@ -193,19 +191,59 @@ void BookmarkManagerPrivateEventRouter::BookmarkModelBeingDeleted(
   bookmark_model_ = NULL;
 }
 
+void BookmarkManagerPrivateEventRouter::OnWillChangeBookmarkMetaInfo(
+    BookmarkModel* model,
+    const BookmarkNode* node) {
+  DCHECK(prev_meta_info_.empty());
+  if (node->GetMetaInfoMap())
+    prev_meta_info_ = *node->GetMetaInfoMap();
+}
+
 void BookmarkManagerPrivateEventRouter::BookmarkMetaInfoChanged(
     BookmarkModel* model,
     const BookmarkNode* node) {
+  const BookmarkNode::MetaInfoMap* new_meta_info = node->GetMetaInfoMap();
+  bookmark_manager_private::MetaInfoFields changes;
+
+  // Identify changed/removed fields:
+  for (BookmarkNode::MetaInfoMap::const_iterator it = prev_meta_info_.begin();
+       it != prev_meta_info_.end();
+       ++it) {
+    if (!new_meta_info) {
+      changes.additional_properties[it->first] = "";
+    } else {
+      BookmarkNode::MetaInfoMap::const_iterator new_meta_field =
+          new_meta_info->find(it->first);
+      if (new_meta_field == new_meta_info->end()) {
+        changes.additional_properties[it->first] = "";
+      } else if (it->second != new_meta_field->second) {
+        changes.additional_properties[it->first] = new_meta_field->second;
+      }
+    }
+  }
+
+  // Identify added fields:
+  if (new_meta_info) {
+    for (BookmarkNode::MetaInfoMap::const_iterator it = new_meta_info->begin();
+         it != new_meta_info->end();
+         ++it) {
+      BookmarkNode::MetaInfoMap::const_iterator prev_meta_field =
+          prev_meta_info_.find(it->first);
+      if (prev_meta_field == prev_meta_info_.end())
+        changes.additional_properties[it->first] = it->second;
+    }
+  }
+
+  prev_meta_info_.clear();
   DispatchEvent(bookmark_manager_private::OnMetaInfoChanged::kEventName,
                 bookmark_manager_private::OnMetaInfoChanged::Create(
-                    base::Int64ToString(node->id())));
+                    base::Int64ToString(node->id()), changes));
 }
 
 BookmarkManagerPrivateAPI::BookmarkManagerPrivateAPI(
     content::BrowserContext* browser_context)
     : browser_context_(browser_context) {
-  EventRouter* event_router =
-      ExtensionSystem::Get(browser_context)->event_router();
+  EventRouter* event_router = EventRouter::Get(browser_context);
   event_router->RegisterObserver(
       this, bookmark_manager_private::OnMetaInfoChanged::kEventName);
 }
@@ -213,8 +251,7 @@ BookmarkManagerPrivateAPI::BookmarkManagerPrivateAPI(
 BookmarkManagerPrivateAPI::~BookmarkManagerPrivateAPI() {}
 
 void BookmarkManagerPrivateAPI::Shutdown() {
-  ExtensionSystem::Get(browser_context_)->event_router()->UnregisterObserver(
-      this);
+  EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
 static base::LazyInstance<
@@ -229,8 +266,7 @@ BookmarkManagerPrivateAPI::GetFactoryInstance() {
 
 void BookmarkManagerPrivateAPI::OnListenerAdded(
     const EventListenerInfo& details) {
-  ExtensionSystem::Get(browser_context_)->event_router()->UnregisterObserver(
-      this);
+  EventRouter::Get(browser_context_)->UnregisterObserver(this);
   event_router_.reset(new BookmarkManagerPrivateEventRouter(
       browser_context_,
       BookmarkModelFactory::GetForProfile(
@@ -257,11 +293,12 @@ BookmarkManagerPrivateDragEventRouter::
 void BookmarkManagerPrivateDragEventRouter::DispatchEvent(
     const std::string& event_name,
     scoped_ptr<base::ListValue> args) {
-  if (!ExtensionSystem::Get(profile_)->event_router())
+  EventRouter* event_router = EventRouter::Get(profile_);
+  if (!event_router)
     return;
 
   scoped_ptr<Event> event(new Event(event_name, args.Pass()));
-  ExtensionSystem::Get(profile_)->event_router()->BroadcastEvent(event.Pass());
+  event_router->BroadcastEvent(event.Pass());
 }
 
 void BookmarkManagerPrivateDragEventRouter::OnDragEnter(
@@ -321,13 +358,13 @@ bool ClipboardBookmarkManagerFunction::CopyOrCut(bool cut,
   return true;
 }
 
-bool BookmarkManagerPrivateCopyFunction::RunImpl() {
+bool BookmarkManagerPrivateCopyFunction::RunOnReady() {
   scoped_ptr<Copy::Params> params(Copy::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
   return CopyOrCut(false, params->id_list);
 }
 
-bool BookmarkManagerPrivateCutFunction::RunImpl() {
+bool BookmarkManagerPrivateCutFunction::RunOnReady() {
   if (!EditBookmarksEnabled())
     return false;
 
@@ -336,7 +373,7 @@ bool BookmarkManagerPrivateCutFunction::RunImpl() {
   return CopyOrCut(true, params->id_list);
 }
 
-bool BookmarkManagerPrivatePasteFunction::RunImpl() {
+bool BookmarkManagerPrivatePasteFunction::RunOnReady() {
   if (!EditBookmarksEnabled())
     return false;
 
@@ -369,7 +406,7 @@ bool BookmarkManagerPrivatePasteFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateCanPasteFunction::RunImpl() {
+bool BookmarkManagerPrivateCanPasteFunction::RunOnReady() {
   if (!EditBookmarksEnabled())
     return false;
 
@@ -387,7 +424,7 @@ bool BookmarkManagerPrivateCanPasteFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateSortChildrenFunction::RunImpl() {
+bool BookmarkManagerPrivateSortChildrenFunction::RunOnReady() {
   if (!EditBookmarksEnabled())
     return false;
 
@@ -404,7 +441,7 @@ bool BookmarkManagerPrivateSortChildrenFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateGetStringsFunction::RunImpl() {
+bool BookmarkManagerPrivateGetStringsFunction::RunAsync() {
   base::DictionaryValue* localized_strings = new base::DictionaryValue();
 
   localized_strings->SetString("title",
@@ -483,7 +520,7 @@ bool BookmarkManagerPrivateGetStringsFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateStartDragFunction::RunImpl() {
+bool BookmarkManagerPrivateStartDragFunction::RunOnReady() {
   if (!EditBookmarksEnabled())
     return false;
 
@@ -508,7 +545,7 @@ bool BookmarkManagerPrivateStartDragFunction::RunImpl() {
       source = ui::DragDropTypes::DRAG_EVENT_SOURCE_TOUCH;
 
     chrome::DragBookmarks(
-        GetProfile(), nodes, web_contents->GetView()->GetNativeView(), source);
+        GetProfile(), nodes, web_contents->GetNativeView(), source);
 
     return true;
   } else {
@@ -517,7 +554,7 @@ bool BookmarkManagerPrivateStartDragFunction::RunImpl() {
   }
 }
 
-bool BookmarkManagerPrivateDropFunction::RunImpl() {
+bool BookmarkManagerPrivateDropFunction::RunOnReady() {
   if (!EditBookmarksEnabled())
     return false;
 
@@ -566,7 +603,7 @@ bool BookmarkManagerPrivateDropFunction::RunImpl() {
   }
 }
 
-bool BookmarkManagerPrivateGetSubtreeFunction::RunImpl() {
+bool BookmarkManagerPrivateGetSubtreeFunction::RunOnReady() {
   scoped_ptr<GetSubtree::Params> params(GetSubtree::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -590,19 +627,37 @@ bool BookmarkManagerPrivateGetSubtreeFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateCanEditFunction::RunImpl() {
+bool BookmarkManagerPrivateCanEditFunction::RunOnReady() {
   PrefService* prefs = user_prefs::UserPrefs::Get(GetProfile());
   SetResult(new base::FundamentalValue(
       prefs->GetBoolean(prefs::kEditBookmarksEnabled)));
   return true;
 }
 
-bool BookmarkManagerPrivateRecordLaunchFunction::RunImpl() {
+bool BookmarkManagerPrivateRecordLaunchFunction::RunOnReady() {
   RecordBookmarkLaunch(NULL, BOOKMARK_LAUNCH_LOCATION_MANAGER);
   return true;
 }
 
-bool BookmarkManagerPrivateGetMetaInfoFunction::RunImpl() {
+bool BookmarkManagerPrivateCreateWithMetaInfoFunction::RunOnReady() {
+  scoped_ptr<CreateWithMetaInfo::Params> params(
+      CreateWithMetaInfo::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  const BookmarkNode* node = CreateBookmarkNode(
+      model, params->bookmark, &params->meta_info.additional_properties);
+  if (!node)
+    return false;
+
+  scoped_ptr<api::bookmarks::BookmarkTreeNode> result_node(
+      bookmark_api_helpers::GetBookmarkTreeNode(node, false, false));
+  results_ = CreateWithMetaInfo::Results::Create(*result_node);
+
+  return true;
+}
+
+bool BookmarkManagerPrivateGetMetaInfoFunction::RunOnReady() {
   scoped_ptr<GetMetaInfo::Params> params(GetMetaInfo::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -610,13 +665,28 @@ bool BookmarkManagerPrivateGetMetaInfoFunction::RunImpl() {
   if (!node)
     return false;
 
-  std::string value;
-  if (node->GetMetaInfo(params->key, &value))
-    results_ = GetMetaInfo::Results::Create(value);
+  if (params->key) {
+    std::string value;
+    if (node->GetMetaInfo(*params->key, &value)) {
+      GetMetaInfo::Results::Value result;
+      result.as_string.reset(new std::string(value));
+      results_ = GetMetaInfo::Results::Create(result);
+    }
+  } else {
+    GetMetaInfo::Results::Value result;
+    result.as_meta_info_fields.reset(
+        new bookmark_manager_private::MetaInfoFields);
+
+    const BookmarkNode::MetaInfoMap* meta_info = node->GetMetaInfoMap();
+    if (meta_info)
+      result.as_meta_info_fields->additional_properties = *meta_info;
+    results_ = GetMetaInfo::Results::Create(result);
+  }
+
   return true;
 }
 
-bool BookmarkManagerPrivateSetMetaInfoFunction::RunImpl() {
+bool BookmarkManagerPrivateSetMetaInfoFunction::RunOnReady() {
   scoped_ptr<SetMetaInfo::Params> params(SetMetaInfo::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
@@ -629,26 +699,41 @@ bool BookmarkManagerPrivateSetMetaInfoFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateCanOpenNewWindowsFunction::RunImpl() {
+bool BookmarkManagerPrivateUpdateMetaInfoFunction::RunOnReady() {
+  scoped_ptr<UpdateMetaInfo::Params> params(
+      UpdateMetaInfo::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  const BookmarkNode* node = GetBookmarkNodeFromId(params->id);
+  if (!node)
+    return false;
+
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  BookmarkNode::MetaInfoMap new_meta_info(
+      params->meta_info_changes.additional_properties);
+  if (node->GetMetaInfoMap()) {
+    new_meta_info.insert(node->GetMetaInfoMap()->begin(),
+                         node->GetMetaInfoMap()->end());
+  }
+  model->SetNodeMetaInfoMap(node, new_meta_info);
+
+  return true;
+}
+
+bool BookmarkManagerPrivateCanOpenNewWindowsFunction::RunOnReady() {
   bool can_open_new_windows = true;
-
-#if defined(OS_WIN)
-  if (win8::IsSingleWindowMetroMode())
-    can_open_new_windows = false;
-#endif  // OS_WIN
-
   SetResult(new base::FundamentalValue(can_open_new_windows));
   return true;
 }
 
-bool BookmarkManagerPrivateRemoveTreesFunction::RunImpl() {
+bool BookmarkManagerPrivateRemoveTreesFunction::RunOnReady() {
   scoped_ptr<RemoveTrees::Params> params(RemoveTrees::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-#if !defined(OS_ANDROID)
-  ScopedGroupBookmarkActions group_deletes(GetProfile());
-#endif
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+#if !defined(OS_ANDROID)
+  ScopedGroupBookmarkActions group_deletes(model);
+#endif
   int64 id;
   for (size_t i = 0; i < params->id_list.size(); ++i) {
     if (!GetBookmarkIdAsInt64(params->id_list[i], &id))
@@ -660,7 +745,7 @@ bool BookmarkManagerPrivateRemoveTreesFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateUndoFunction::RunImpl() {
+bool BookmarkManagerPrivateUndoFunction::RunOnReady() {
 #if !defined(OS_ANDROID)
   BookmarkUndoServiceFactory::GetForProfile(GetProfile())->undo_manager()->
       Undo();
@@ -669,7 +754,7 @@ bool BookmarkManagerPrivateUndoFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateRedoFunction::RunImpl() {
+bool BookmarkManagerPrivateRedoFunction::RunOnReady() {
 #if !defined(OS_ANDROID)
   BookmarkUndoServiceFactory::GetForProfile(GetProfile())->undo_manager()->
       Redo();
@@ -678,7 +763,7 @@ bool BookmarkManagerPrivateRedoFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateGetUndoInfoFunction::RunImpl() {
+bool BookmarkManagerPrivateGetUndoInfoFunction::RunOnReady() {
 #if !defined(OS_ANDROID)
   UndoManager* undo_manager =
       BookmarkUndoServiceFactory::GetForProfile(GetProfile())->undo_manager();
@@ -693,7 +778,7 @@ bool BookmarkManagerPrivateGetUndoInfoFunction::RunImpl() {
   return true;
 }
 
-bool BookmarkManagerPrivateGetRedoInfoFunction::RunImpl() {
+bool BookmarkManagerPrivateGetRedoInfoFunction::RunOnReady() {
 #if !defined(OS_ANDROID)
   UndoManager* undo_manager =
       BookmarkUndoServiceFactory::GetForProfile(GetProfile())->undo_manager();

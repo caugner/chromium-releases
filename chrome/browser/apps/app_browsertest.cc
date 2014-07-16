@@ -4,6 +4,7 @@
 
 #include "apps/app_window.h"
 #include "apps/app_window_registry.h"
+#include "apps/common/api/app_runtime.h"
 #include "apps/launcher.h"
 #include "apps/ui/native_app_window.h"
 #include "base/bind.h"
@@ -15,7 +16,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
-#include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
@@ -29,7 +29,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/api/app_runtime.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/test_switches.h"
@@ -39,7 +38,6 @@
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_system.h"
@@ -61,9 +59,9 @@ using apps::AppWindowRegistry;
 using content::WebContents;
 using web_modal::WebContentsModalDialogManager;
 
-namespace extensions {
+namespace app_runtime = apps::api::app_runtime;
 
-namespace app_runtime = api::app_runtime;
+namespace extensions {
 
 namespace {
 
@@ -143,9 +141,9 @@ class ScopedPreviewTestingDelegate : PrintPreviewUI::TestingDelegate {
   }
 
   // PrintPreviewUI::TestingDelegate implementation.
-  virtual void DidRenderPreviewPage(const content::WebContents& preview_dialog)
+  virtual void DidRenderPreviewPage(content::WebContents* preview_dialog)
       OVERRIDE {
-    dialog_size_ = preview_dialog.GetView()->GetContainerSize();
+    dialog_size_ = preview_dialog->GetContainerBounds().size();
     ++rendered_page_count_;
     CHECK(rendered_page_count_ <= total_page_count_);
     if (waiting_runner_ && rendered_page_count_ == total_page_count_) {
@@ -396,7 +394,13 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_DisallowNavigation) {
             observer.tabs()[1]->GetURL().spec());
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, Iframes) {
+// Failing on some Win and Linux buildbots.  See crbug.com/354425.
+#if (defined(OS_WIN) || defined(OS_LINUX)) && defined(ARCH_CPU_X86)
+#define MAYBE_Iframes DISABLED_Iframes
+#else
+#define MAYBE_Iframes Iframes
+#endif
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_Iframes) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/iframes")) << message_;
 }
@@ -435,7 +439,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, Isolation) {
   // Make sure the cookie is set.
   int cookie_size;
   std::string cookie_value;
-  automation_util::GetCookies(
+  ui_test_utils::GetCookies(
       set_cookie_url,
       browser()->tab_strip_model()->GetWebContentsAt(0),
       &cookie_size,
@@ -540,6 +544,16 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchWithFileExtension) {
   SetCommandLineArg(kTestFilePath);
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/launch_file_by_extension"))
       << message_;
+}
+
+// Tests that launch data is sent through to a whitelisted extension if the file
+// extension matches.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
+                       LaunchWhiteListedExtensionWithFile) {
+  SetCommandLineArg(kTestFilePath);
+  ASSERT_TRUE(RunPlatformAppTest(
+      "platform_apps/launch_whitelisted_ext_with_file"))
+          << message_;
 }
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
@@ -647,10 +661,18 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchWithNoIntent) {
       << message_;
 }
 
+// Tests that launch data is sent through when the file has unknown extension
+// but the MIME type can be sniffed and the sniffed type matches.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchWithSniffableType) {
+  SetCommandLineArg("platform_apps/launch_files/test.unknownextension");
+  ASSERT_TRUE(RunPlatformAppTest(
+      "platform_apps/launch_file_by_extension_and_type")) << message_;
+}
+
 // Tests that launch data is sent through with the MIME type set to
 // application/octet-stream if the file MIME type cannot be read.
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, LaunchNoType) {
-  SetCommandLineArg("platform_apps/launch_files/test.unknownextension");
+  SetCommandLineArg("platform_apps/launch_files/test_binary.unknownextension");
   ASSERT_TRUE(RunPlatformAppTest(
       "platform_apps/launch_application_octet_stream")) << message_;
 }
@@ -1012,8 +1034,8 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
   ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(browser()->profile());
 
   // Clear the registered events to ensure they are updated.
-  extensions::ExtensionSystem::Get(browser()->profile())->event_router()->
-      SetRegisteredEvents(extension->id(), std::set<std::string>());
+  extensions::EventRouter::Get(browser()->profile())
+      ->SetRegisteredEvents(extension->id(), std::set<std::string>());
 
   DictionaryPrefUpdate update(extension_prefs->pref_service(),
                               extensions::pref_names::kExtensions);
@@ -1171,10 +1193,8 @@ class PlatformAppIncognitoBrowserTest : public PlatformAppBrowserTest,
 
   // AppWindowRegistry::Observer implementation.
   virtual void OnAppWindowAdded(AppWindow* app_window) OVERRIDE {
-    opener_app_ids_.insert(app_window->extension()->id());
+    opener_app_ids_.insert(app_window->extension_id());
   }
-  virtual void OnAppWindowIconChanged(AppWindow* app_window) OVERRIDE {}
-  virtual void OnAppWindowRemoved(AppWindow* app_window) OVERRIDE {}
 
  protected:
   // A set of ids of apps we've seen open a app window.
@@ -1191,7 +1211,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppIncognitoBrowserTest, IncognitoComponentApp) {
 
   // Wait until the file manager has had a chance to register its listener
   // for the launch event.
-  EventRouter* router = ExtensionSystem::Get(incognito_profile)->event_router();
+  EventRouter* router = EventRouter::Get(incognito_profile);
   ASSERT_TRUE(router != NULL);
   while (!router->ExtensionHasEventListener(
       file_manager->id(), app_runtime::OnLaunched::kEventName)) {

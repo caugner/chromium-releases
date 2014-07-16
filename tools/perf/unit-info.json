@@ -5,6 +5,14 @@
     "improvement_direction": "down",
     "why": "Percent CPU usage. Used by cpu metric."
   },
+  "bit/s": {
+    "improvement_direction": "down",
+    "why": "Bitrate."
+  },
+  "bytes/s": {
+    "improvement_direction": "down",
+    "why": "Bitrate."
+  },
   "bytes": {
     "improvement_direction": "down"
   },
@@ -19,6 +27,10 @@
   "count": {
     "improvement_direction": "down",
     "why": "Processes"
+  },
+  "dB": {
+    "improvement_direction": "up",
+    "why": "Decibels peak signal-to-noise ratio. Used by WebRTC quality tests."
   },
   "files": {
     "improvement_direction": "down",
@@ -169,5 +181,9 @@
   },
   "us": {
     "improvement_direction": "down"
+  },
+  "vsyncs": {
+    "improvement_direction": "down",
+    "why": "Used in smoothness benchmarks. Number of vsyncs to generate a frame, never < 1.0"
   }
 }

@@ -7,13 +7,12 @@
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/invalidation/gcm_invalidation_bridge.h"
-#include "chrome/browser/invalidation/invalidation_auth_provider.h"
-#include "chrome/browser/services/gcm/gcm_profile_service.h"
-#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/services/gcm/gcm_service.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "google_apis/gaia/gaia_constants.h"
+#include "google_apis/gaia/identity_provider.h"
 
 namespace invalidation {
 namespace {
@@ -148,17 +147,17 @@ void GCMInvalidationBridge::Core::OnIncomingMessage(
 }
 
 GCMInvalidationBridge::GCMInvalidationBridge(
-    gcm::GCMProfileService* gcm_profile_service,
-    InvalidationAuthProvider* auth_provider)
+    gcm::GCMService* gcm_service,
+    IdentityProvider* identity_provider)
     : OAuth2TokenService::Consumer("gcm_network_channel"),
-      gcm_profile_service_(gcm_profile_service),
-      auth_provider_(auth_provider),
+      gcm_service_(gcm_service),
+      identity_provider_(identity_provider),
       subscribed_for_incoming_messages_(false),
       weak_factory_(this) {}
 
 GCMInvalidationBridge::~GCMInvalidationBridge() {
   if (subscribed_for_incoming_messages_)
-    gcm_profile_service_->RemoveAppHandler(kInvalidationsAppId);
+    gcm_service_->RemoveAppHandler(kInvalidationsAppId);
 }
 
 scoped_ptr<syncer::GCMNetworkChannelDelegate>
@@ -195,8 +194,8 @@ void GCMInvalidationBridge::RequestToken(
   request_token_callback_ = callback;
   OAuth2TokenService::ScopeSet scopes;
   scopes.insert(GaiaConstants::kChromeSyncOAuth2Scope);
-  access_token_request_ = auth_provider_->GetTokenService()->StartRequest(
-      auth_provider_->GetAccountId(), scopes, this);
+  access_token_request_ = identity_provider_->GetTokenService()->StartRequest(
+      identity_provider_->GetActiveAccountId(), scopes, this);
 }
 
 void GCMInvalidationBridge::OnGetTokenSuccess(
@@ -236,25 +235,24 @@ void GCMInvalidationBridge::InvalidateToken(const std::string& token) {
   DCHECK(CalledOnValidThread());
   OAuth2TokenService::ScopeSet scopes;
   scopes.insert(GaiaConstants::kChromeSyncOAuth2Scope);
-  auth_provider_->GetTokenService()->InvalidateToken(
-      auth_provider_->GetAccountId(), scopes, token);
+  identity_provider_->GetTokenService()->InvalidateToken(
+      identity_provider_->GetActiveAccountId(), scopes, token);
 }
 
 void GCMInvalidationBridge::Register(
     syncer::GCMNetworkChannelDelegate::RegisterCallback callback) {
   DCHECK(CalledOnValidThread());
   // No-op if GCMClient is disabled.
-  if (gcm_profile_service_ == NULL)
+  if (gcm_service_ == NULL)
     return;
 
   std::vector<std::string> sender_ids;
   sender_ids.push_back(kInvalidationsSenderId);
-  gcm_profile_service_->Register(
-      kInvalidationsAppId,
-      sender_ids,
-      base::Bind(&GCMInvalidationBridge::RegisterFinished,
-                 weak_factory_.GetWeakPtr(),
-                 callback));
+  gcm_service_->Register(kInvalidationsAppId,
+                         sender_ids,
+                         base::Bind(&GCMInvalidationBridge::RegisterFinished,
+                                    weak_factory_.GetWeakPtr(),
+                                    callback));
 }
 
 void GCMInvalidationBridge::RegisterFinished(
@@ -273,11 +271,11 @@ void GCMInvalidationBridge::RegisterFinished(
 
 void GCMInvalidationBridge::SubscribeForIncomingMessages() {
   // No-op if GCMClient is disabled.
-  if (gcm_profile_service_ == NULL)
+  if (gcm_service_ == NULL)
     return;
 
   DCHECK(!subscribed_for_incoming_messages_);
-  gcm_profile_service_->AddAppHandler(kInvalidationsAppId, this);
+  gcm_service_->AddAppHandler(kInvalidationsAppId, this);
   subscribed_for_incoming_messages_ = true;
 }
 

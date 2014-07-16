@@ -7,7 +7,7 @@
 
 #include <jni.h>
 
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 
@@ -35,8 +35,6 @@ class FeedbackReporterAndroid : content::WebContentsObserver {
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
-
-  static jboolean IsReportableUrl(JNIEnv* env, jclass clazz);
 
  private:
   // FeedbackReporterAndroid on the Java side.

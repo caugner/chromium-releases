@@ -39,6 +39,7 @@
             '../third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
             '../third_party/protobuf/protobuf.gyp:protobuf_lite',
             'components_resources.gyp:components_resources',
+            'components_strings.gyp:components_strings',
             'distilled_page_proto',
           ],
           'include_dirs': [
@@ -54,6 +55,8 @@
             'dom_distiller/core/article_distillation_update.h',
             'dom_distiller/core/article_entry.cc',
             'dom_distiller/core/article_entry.h',
+            'dom_distiller/core/distilled_content_store.cc',
+            'dom_distiller/core/distilled_content_store.h',
             'dom_distiller/core/distiller.cc',
             'dom_distiller/core/distiller.h',
             'dom_distiller/core/distiller_page.cc',
@@ -73,8 +76,6 @@
             'dom_distiller/core/dom_distiller_store.h',
             'dom_distiller/core/feedback_reporter.cc',
             'dom_distiller/core/feedback_reporter.h',
-            'dom_distiller/core/page_distiller.cc',
-            'dom_distiller/core/page_distiller.h',
             'dom_distiller/core/task_tracker.cc',
             'dom_distiller/core/task_tracker.h',
             'dom_distiller/core/url_constants.cc',
@@ -83,6 +84,8 @@
             'dom_distiller/core/url_utils_android.h',
             'dom_distiller/core/url_utils.cc',
             'dom_distiller/core/url_utils.h',
+            'dom_distiller/core/viewer.cc',
+            'dom_distiller/core/viewer.h',
           ],
           'conditions': [
             ['OS == "android"', {
@@ -110,6 +113,8 @@
             'dom_distiller/core/fake_db.h',
             'dom_distiller/core/fake_distiller.cc',
             'dom_distiller/core/fake_distiller.h',
+            'dom_distiller/core/fake_distiller_page.cc',
+            'dom_distiller/core/fake_distiller_page.h',
           ],
         },
         {

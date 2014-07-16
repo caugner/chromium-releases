@@ -200,8 +200,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerManagedUsersTest,
 
   // No error infobar should show up.
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
-  InfoBarService* info_bar_service = InfoBarService::FromWebContents(contents);
-  EXPECT_EQ(info_bar_service->infobar_count(), 0u);
+  InfoBarService* infobar_service = InfoBarService::FromWebContents(contents);
+  EXPECT_EQ(0u, infobar_service->infobar_count());
 }
 
 // The unpack failure test needs to use a different install .crx, which is

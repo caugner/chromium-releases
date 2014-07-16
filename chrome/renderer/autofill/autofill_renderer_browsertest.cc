@@ -15,16 +15,19 @@
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/WebKit/public/web/WebAutocompleteParams.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 
 using base::ASCIIToUTF16;
+using blink::WebAutocompleteParams;
 using blink::WebDocument;
 using blink::WebElement;
 using blink::WebFormElement;
 using blink::WebFrame;
+using blink::WebLocalFrame;
 using blink::WebInputElement;
 using blink::WebString;
 using blink::WebURLRequest;
@@ -208,13 +211,13 @@ class RequestAutocompleteRendererTest : public AutofillRendererTest {
 
     WebElement subframe = GetMainFrame()->document().getElementById("subframe");
     ASSERT_FALSE(subframe.isNull());
-    invoking_frame_ = WebFrame::fromFrameOwnerElement(subframe);
+    invoking_frame_ = WebLocalFrame::fromFrameOwnerElement(subframe);
     ASSERT_TRUE(invoking_frame());
     ASSERT_EQ(GetMainFrame(), invoking_frame()->parent());
 
     WebElement sibling = GetMainFrame()->document().getElementById("sibling");
     ASSERT_FALSE(sibling.isNull());
-    sibling_frame_ = WebFrame::fromFrameOwnerElement(sibling);
+    sibling_frame_ = WebLocalFrame::fromFrameOwnerElement(sibling);
     ASSERT_TRUE(sibling_frame());
 
     WebVector<WebFormElement> forms;
@@ -226,7 +229,8 @@ class RequestAutocompleteRendererTest : public AutofillRendererTest {
     render_thread_->sink().ClearMessages();
 
     // Invoke requestAutocomplete to show the dialog.
-    autofill_agent_->didRequestAutocomplete(invoking_frame(), invoking_form());
+    autofill_agent_->didRequestAutocomplete(invoking_form(),
+                                            blink::WebAutocompleteParams());
     ASSERT_TRUE(render_thread_->sink().GetFirstMessageMatching(
         AutofillHostMsg_RequestAutocomplete::ID));
 
@@ -244,12 +248,12 @@ class RequestAutocompleteRendererTest : public AutofillRendererTest {
   }
 
   const WebFormElement& invoking_form() const { return invoking_form_; }
-  WebFrame* invoking_frame() { return invoking_frame_; }
+  WebLocalFrame* invoking_frame() { return invoking_frame_; }
   WebFrame* sibling_frame() { return sibling_frame_; }
 
  private:
   WebFormElement invoking_form_;
-  WebFrame* invoking_frame_;
+  WebLocalFrame* invoking_frame_;
   WebFrame* sibling_frame_;
 
   DISALLOW_COPY_AND_ASSIGN(RequestAutocompleteRendererTest);
@@ -279,7 +283,9 @@ TEST_F(RequestAutocompleteRendererTest, MainFrameNavigateCancels) {
 TEST_F(RequestAutocompleteRendererTest, NoCancelOnSubframeNavigateAfterDone) {
   // Pretend that the dialog was cancelled.
   autofill_agent_->OnRequestAutocompleteResult(
-      WebFormElement::AutocompleteResultErrorCancel, FormData());
+      WebFormElement::AutocompleteResultErrorCancel,
+      base::ASCIIToUTF16("Print me to the console"),
+      FormData());
 
   // Additional navigations should not crash nor send cancels.
   NavigateFrame(invoking_frame());
@@ -290,7 +296,9 @@ TEST_F(RequestAutocompleteRendererTest, NoCancelOnSubframeNavigateAfterDone) {
 TEST_F(RequestAutocompleteRendererTest, NoCancelOnMainFrameNavigateAfterDone) {
   // Pretend that the dialog was cancelled.
   autofill_agent_->OnRequestAutocompleteResult(
-      WebFormElement::AutocompleteResultErrorCancel, FormData());
+      WebFormElement::AutocompleteResultErrorCancel,
+      base::ASCIIToUTF16("Print me to the console"),
+      FormData());
 
   // Additional navigations should not crash nor send cancels.
   NavigateFrame(GetMainFrame());
@@ -300,7 +308,8 @@ TEST_F(RequestAutocompleteRendererTest, NoCancelOnMainFrameNavigateAfterDone) {
 
 TEST_F(RequestAutocompleteRendererTest, InvokingTwiceOnlyShowsOnce) {
   // Attempting to show the requestAutocomplete dialog again should be ignored.
-  autofill_agent_->didRequestAutocomplete(invoking_frame(), invoking_form());
+  autofill_agent_->didRequestAutocomplete(invoking_form(),
+                                          blink::WebAutocompleteParams());
   EXPECT_FALSE(render_thread_->sink().GetFirstMessageMatching(
       AutofillHostMsg_RequestAutocomplete::ID));
 }

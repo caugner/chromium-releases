@@ -48,8 +48,8 @@ ChromeDownloadManagerDelegate* DownloadService::GetDownloadManagerDelegate() {
   manager_delegate_->SetDownloadManager(manager);
 
 #if !defined(OS_ANDROID)
-  extension_event_router_.reset(new ExtensionDownloadsEventRouter(
-      profile_, manager));
+  extension_event_router_.reset(
+      new extensions::ExtensionDownloadsEventRouter(profile_, manager));
 #endif
 
   if (!profile_->IsOffTheRecord()) {
@@ -95,6 +95,22 @@ int DownloadService::NonMaliciousDownloadCount() const {
       NonMaliciousInProgressCount();
 }
 
+void DownloadService::CancelDownloads() {
+  if (!download_manager_created_)
+    return;
+
+  DownloadManager* download_manager =
+      BrowserContext::GetDownloadManager(profile_);
+  DownloadManager::DownloadVector downloads;
+  download_manager->GetAllDownloads(&downloads);
+  for (DownloadManager::DownloadVector::iterator it = downloads.begin();
+       it != downloads.end();
+       ++it) {
+    if ((*it)->GetState() == content::DownloadItem::IN_PROGRESS)
+      (*it)->Cancel(false);
+  }
+}
+
 // static
 int DownloadService::NonMaliciousDownloadCountAllProfiles() {
   std::vector<Profile*> profiles(
@@ -120,17 +136,9 @@ void DownloadService::CancelAllDownloads() {
   for (std::vector<Profile*>::iterator it = profiles.begin();
        it < profiles.end();
        ++it) {
-    content::DownloadManager* download_manager =
-        content::BrowserContext::GetDownloadManager(*it);
-    content::DownloadManager::DownloadVector downloads;
-    download_manager->GetAllDownloads(&downloads);
-    for (content::DownloadManager::DownloadVector::iterator it =
-             downloads.begin();
-         it != downloads.end();
-         ++it) {
-      if ((*it)->GetState() == content::DownloadItem::IN_PROGRESS)
-        (*it)->Cancel(false);
-    }
+    DownloadService* service =
+        DownloadServiceFactory::GetForBrowserContext(*it);
+    service->CancelDownloads();
   }
 }
 

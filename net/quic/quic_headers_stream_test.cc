@@ -4,6 +4,7 @@
 
 #include "net/quic/quic_headers_stream.h"
 
+#include "net/quic/quic_flags.h"
 #include "net/quic/quic_utils.h"
 #include "net/quic/spdy_utils.h"
 #include "net/quic/test_tools/quic_connection_peer.h"
@@ -67,7 +68,7 @@ class QuicHeadersStreamTest : public ::testing::TestWithParam<bool> {
  public:
   static QuicVersionVector GetVersions() {
     QuicVersionVector versions;
-    versions.push_back(QUIC_VERSION_13);
+    versions.push_back(QuicVersionMax());
     return versions;
   }
 
@@ -81,7 +82,7 @@ class QuicHeadersStreamTest : public ::testing::TestWithParam<bool> {
     headers_[":status"] = "200 Ok";
     headers_["content-length"] = "11";
     framer_.set_visitor(&visitor_);
-    EXPECT_EQ(QUIC_VERSION_13, session_.connection()->version());
+    EXPECT_EQ(QuicVersionMax(), session_.connection()->version());
     EXPECT_TRUE(headers_stream_ != NULL);
   }
 
@@ -313,6 +314,11 @@ TEST_P(QuicHeadersStreamTest, ProcessSpdyWindowUpdateFrame) {
       .WillOnce(InvokeWithoutArgs(this,
                                   &QuicHeadersStreamTest::CloseConnection));
   headers_stream_->ProcessRawData(frame->data(), frame->size());
+}
+
+TEST_P(QuicHeadersStreamTest, NoFlowControl) {
+  ValueRestore<bool> old_flag(&FLAGS_enable_quic_stream_flow_control_2, true);
+  EXPECT_FALSE(headers_stream_->flow_controller()->IsEnabled());
 }
 
 }  // namespace

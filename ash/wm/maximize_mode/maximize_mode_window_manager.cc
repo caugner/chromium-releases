@@ -11,14 +11,31 @@
 #include "ash/wm/maximize_mode/workspace_backdrop_delegate.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/window_selector_controller.h"
+#include "ash/wm/wm_event.h"
 #include "ash/wm/workspace_controller.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/screen.h"
 
 namespace ash {
-namespace internal {
+
+namespace {
+
+// Exits overview mode if it is currently active.
+void CancelOverview() {
+  WindowSelectorController* controller =
+      Shell::GetInstance()->window_selector_controller();
+  if (controller && controller->IsSelecting())
+    controller->OnSelectionCanceled();
+}
+
+}  // namespace
 
 MaximizeModeWindowManager::~MaximizeModeWindowManager() {
+  // Overview mode needs to be ended before exiting maximize mode to prevent
+  // transforming windows which are currently in
+  // overview: http://crbug.com/366605
+  CancelOverview();
+
   Shell::GetInstance()->RemoveShellObserver(this);
   Shell::GetScreen()->RemoveObserver(this);
   EnableBackdropBehindTopWindowOnEachDisplay(false);
@@ -41,7 +58,7 @@ void MaximizeModeWindowManager::WindowStateDestroyed(aura::Window* window) {
   window_state_map_.erase(it);
 }
 
-void MaximizeModeWindowManager::OnOverviewModeStarted() {
+void MaximizeModeWindowManager::OnOverviewModeStarting() {
   if (backdrops_hidden_)
     return;
 
@@ -49,7 +66,7 @@ void MaximizeModeWindowManager::OnOverviewModeStarted() {
   backdrops_hidden_ = true;
 }
 
-void MaximizeModeWindowManager::OnOverviewModeEnded() {
+void MaximizeModeWindowManager::OnOverviewModeEnding() {
   if (!backdrops_hidden_)
     return;
 
@@ -63,12 +80,18 @@ void MaximizeModeWindowManager::OnWindowDestroying(aura::Window* window) {
     ForgetWindow(window);
 }
 
-void MaximizeModeWindowManager::OnWindowAdded(
-    aura::Window* window) {
+void MaximizeModeWindowManager::OnWindowAdded(aura::Window* window) {
   // A window can get removed and then re-added by a drag and drop operation.
   if (IsContainerWindow(window->parent()) &&
-      window_state_map_.find(window) == window_state_map_.end())
+      window_state_map_.find(window) == window_state_map_.end()) {
     MaximizeAndTrackWindow(window);
+    // When the state got added, the "WM_EVENT_ADDED_TO_WORKSPACE" event got
+    // already sent and we have to notify our state again.
+    if (window_state_map_.find(window) != window_state_map_.end()) {
+      wm::WMEvent event(wm::WM_EVENT_ADDED_TO_WORKSPACE);
+      wm::GetWindowState(window)->OnWMEvent(&event);
+    }
+  }
 }
 
 void MaximizeModeWindowManager::OnWindowBoundsChanged(
@@ -102,10 +125,7 @@ MaximizeModeWindowManager::MaximizeModeWindowManager()
       : backdrops_hidden_(false) {
   // The overview mode needs to be ended before the maximize mode is started. To
   // guarantee the proper order, it will be turned off from here.
-  WindowSelectorController* controller =
-      Shell::GetInstance()->window_selector_controller();
-  if (controller && controller->IsSelecting())
-    controller->OnSelectionCanceled();
+  CancelOverview();
 
   MaximizeAllWindows();
   AddWindowCreationObservers();
@@ -170,8 +190,8 @@ void MaximizeModeWindowManager::AddWindowCreationObservers() {
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   for (aura::Window::Windows::const_iterator iter = root_windows.begin();
        iter != root_windows.end(); ++iter) {
-    aura::Window* container = Shell::GetContainer(*iter,
-        internal::kShellWindowId_DefaultContainer);
+    aura::Window* container =
+        Shell::GetContainer(*iter, kShellWindowId_DefaultContainer);
     DCHECK(observed_container_windows_.find(container) ==
               observed_container_windows_.end());
     container->AddObserver(this);
@@ -212,13 +232,11 @@ void MaximizeModeWindowManager::EnableBackdropBehindTopWindowOnEachDisplay(
        iter != controllers.end(); ++iter) {
     RootWindowController* controller = *iter;
     aura::Window* container = Shell::GetContainer(
-        controller->root_window(),
-        internal::kShellWindowId_DefaultContainer);
+        controller->GetRootWindow(), kShellWindowId_DefaultContainer);
     controller->workspace_controller()->SetMaximizeBackdropDelegate(
         scoped_ptr<WorkspaceLayoutManagerDelegate>(
             enable ? new WorkspaceBackdropDelegate(container) : NULL));
   }
 }
 
-}  // namespace internal
 }  // namespace ash

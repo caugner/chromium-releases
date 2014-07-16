@@ -234,6 +234,7 @@ function waitForElementLost(windowId, query, opt_iframeQuery) {
 }
 
 /**
+/**
  * Waits for the file list turns to the given contents.
  * @param {string} windowId Target window ID.
  * @param {Array.<Array.<string>>} expected Expected contents of file list.
@@ -314,6 +315,44 @@ function waitUntilTaskExecutes(windowId, taskId) {
           if (executedTasks.indexOf(taskId) === -1)
             return pending('Executed task is %j', executedTasks);
         });
+  });
+}
+
+/**
+ * Adds check of chrome.test to the end of the given promise.
+ * @param {Promise} promise Promise.
+ */
+function testPromise(promise) {
+  promise.then(function() {
+    return new Promise(checkIfNoErrorsOccured);
+  }).then(chrome.test.callbackPass(function() {
+    // The callbacPass is necessary to avoid prematurely finishing tests.
+    // Don't put chrome.test.succeed() here to avoid doubled success log.
+  }), function(error) {
+    chrome.test.fail(error.stack || error);
+  });
+};
+
+/**
+ * Sends a fake key down event.
+ * @param {string} windowId Window ID.
+ * @param {string} query Query for the target element.
+ * @param {string} keyIdentifer Key identifier.
+ * @param {boolean} ctrlKey Control key flag.
+ * @return {Promise} Promise to be fulfilled or rejected depending on the
+ *     result.
+ */
+function fakeKeyDown(windowId, query, keyIdentifer, ctrlKey) {
+  return new Promise(function(fulfill, reject) {
+    callRemoteTestUtil('fakeKeyDown',
+                       windowId,
+                       [query, keyIdentifer, ctrlKey],
+                       function(result) {
+                         if (result)
+                           fulfill();
+                         else
+                           reject(new Error('Fail to fake key down.'));
+                       });
   });
 }
 
@@ -699,7 +738,7 @@ function setupAndWaitUntilReady(appState, initialRoot, callback) {
  */
 function checkIfNoErrorsOccured(callback) {
   callRemoteTestUtil('getErrorCount', null, [], function(count) {
-    chrome.test.assertEq(0, count);
+    chrome.test.assertEq(0, count, 'The error count is not 0.');
     callback();
   });
 }

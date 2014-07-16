@@ -8,7 +8,7 @@
 #include <jni.h>
 #include <vector>
 
-#include "base/android/jni_helper.h"
+#include "base/android/jni_weak_ref.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -69,7 +69,7 @@ class AwAutofillManagerDelegate
   virtual void ShowRequestAutocompleteDialog(
       const autofill::FormData& form,
       const GURL& source_url,
-      const base::Callback<void(const autofill::FormStructure*)>& callback)
+      const ResultCallback& callback)
       OVERRIDE;
   virtual void ShowAutofillPopup(
       const gfx::RectF& element_bounds,

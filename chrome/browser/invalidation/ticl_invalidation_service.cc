@@ -6,19 +6,12 @@
 
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "chrome/browser/invalidation/gcm_invalidation_bridge.h"
-#include "chrome/browser/invalidation/invalidation_auth_provider.h"
-#include "chrome/browser/invalidation/invalidation_logger.h"
 #include "chrome/browser/invalidation/invalidation_service_util.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/services/gcm/gcm_profile_service.h"
-#include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
+#include "chrome/browser/services/gcm/gcm_service.h"
 #include "chrome/common/chrome_content_client.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "google_apis/gaia/gaia_constants.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "sync/notifier/gcm_network_channel_delegate.h"
 #include "sync/notifier/invalidation_util.h"
 #include "sync/notifier/invalidator.h"
@@ -61,39 +54,33 @@ static const net::BackoffEntry::Policy kRequestAccessTokenBackoffPolicy = {
 namespace invalidation {
 
 TiclInvalidationService::TiclInvalidationService(
-    scoped_ptr<InvalidationAuthProvider> auth_provider,
-    Profile* profile)
+    scoped_ptr<IdentityProvider> identity_provider,
+    scoped_ptr<TiclSettingsProvider> settings_provider,
+    gcm::GCMService* gcm_service,
+    const scoped_refptr<net::URLRequestContextGetter>& request_context)
     : OAuth2TokenService::Consumer("ticl_invalidation"),
-      profile_(profile),
-      auth_provider_(auth_provider.Pass()),
+      identity_provider_(identity_provider.Pass()),
+      settings_provider_(settings_provider.Pass()),
       invalidator_registrar_(new syncer::InvalidatorRegistrar()),
       request_access_token_backoff_(&kRequestAccessTokenBackoffPolicy),
       network_channel_type_(PUSH_CLIENT_CHANNEL),
+      gcm_service_(gcm_service),
+      request_context_(request_context),
       logger_() {}
 
 TiclInvalidationService::~TiclInvalidationService() {
   DCHECK(CalledOnValidThread());
 }
 
-void TiclInvalidationService::Init() {
+void TiclInvalidationService::Init(
+    scoped_ptr<syncer::InvalidationStateTracker> invalidation_state_tracker) {
   DCHECK(CalledOnValidThread());
+  invalidation_state_tracker_ = invalidation_state_tracker.Pass();
 
-  invalidator_storage_.reset(new InvalidatorStorage(profile_->GetPrefs()));
-  if (invalidator_storage_->GetInvalidatorClientId().empty()) {
-    // This also clears any existing state.  We can't reuse old invalidator
-    // state with the new ID anyway.
-    invalidator_storage_->SetInvalidatorClientId(GenerateInvalidatorClientId());
+  if (invalidation_state_tracker_->GetInvalidatorClientId().empty()) {
+    invalidation_state_tracker_->ClearAndSetNewClientId(
+        GenerateInvalidatorClientId());
   }
-
-  pref_change_registrar_.Init(profile_->GetPrefs());
-  pref_change_registrar_.Add(
-      prefs::kInvalidationServiceUseGCMChannel,
-      base::Bind(&TiclInvalidationService::UpdateInvalidationNetworkChannel,
-                 base::Unretained(this)));
-  pref_change_registrar_.Add(
-      prefs::kGCMChannelEnabled,
-      base::Bind(&TiclInvalidationService::UpdateInvalidationNetworkChannel,
-                 base::Unretained(this)));
 
   UpdateInvalidationNetworkChannel();
   UMA_HISTOGRAM_ENUMERATION("Invalidations.NetworkChannel",
@@ -104,14 +91,18 @@ void TiclInvalidationService::Init() {
     StartInvalidator(network_channel_type_);
   }
 
-  auth_provider_->AddObserver(this);
-  auth_provider_->GetTokenService()->AddObserver(this);
+  identity_provider_->AddObserver(this);
+  identity_provider_->AddActiveAccountRefreshTokenObserver(this);
+  settings_provider_->AddObserver(this);
 }
 
-void TiclInvalidationService::InitForTest(syncer::Invalidator* invalidator) {
+void TiclInvalidationService::InitForTest(
+    scoped_ptr<syncer::InvalidationStateTracker> invalidation_state_tracker,
+    syncer::Invalidator* invalidator) {
   // Here we perform the equivalent of Init() and StartInvalidator(), but with
   // some minor changes to account for the fact that we're injecting the
   // invalidator.
+  invalidation_state_tracker_ = invalidation_state_tracker.Pass();
   invalidator_.reset(invalidator);
 
   invalidator_->RegisterHandler(this);
@@ -169,16 +160,15 @@ syncer::InvalidatorState TiclInvalidationService::GetInvalidatorState() const {
 
 std::string TiclInvalidationService::GetInvalidatorClientId() const {
   DCHECK(CalledOnValidThread());
-  return invalidator_storage_->GetInvalidatorClientId();
+  return invalidation_state_tracker_->GetInvalidatorClientId();
 }
 
 InvalidationLogger* TiclInvalidationService::GetInvalidationLogger() {
   return &logger_;
 }
 
-InvalidationAuthProvider*
-TiclInvalidationService::GetInvalidationAuthProvider() {
-  return auth_provider_.get();
+IdentityProvider* TiclInvalidationService::GetIdentityProvider() {
+  return identity_provider_.get();
 }
 
 void TiclInvalidationService::RequestDetailedStatus(
@@ -199,8 +189,8 @@ void TiclInvalidationService::RequestAccessToken() {
     oauth2_scopes.insert(kOAuth2Scopes[i]);
   // Invalidate previous token, otherwise token service will return the same
   // token again.
-  const std::string& account_id = auth_provider_->GetAccountId();
-  OAuth2TokenService* token_service = auth_provider_->GetTokenService();
+  const std::string& account_id = identity_provider_->GetActiveAccountId();
+  OAuth2TokenService* token_service = identity_provider_->GetTokenService();
   token_service->InvalidateToken(account_id, oauth2_scopes, access_token_);
   access_token_.clear();
   access_token_request_ =
@@ -255,24 +245,18 @@ void TiclInvalidationService::OnGetTokenFailure(
 
 void TiclInvalidationService::OnRefreshTokenAvailable(
     const std::string& account_id) {
-  if (auth_provider_->GetAccountId() == account_id) {
-    if (!IsStarted() && IsReadyToStart()) {
-      StartInvalidator(network_channel_type_);
-    }
-  }
+  if (!IsStarted() && IsReadyToStart())
+    StartInvalidator(network_channel_type_);
 }
 
 void TiclInvalidationService::OnRefreshTokenRevoked(
     const std::string& account_id) {
-  if (auth_provider_->GetAccountId() == account_id) {
-    access_token_.clear();
-    if (IsStarted()) {
-      UpdateInvalidatorCredentials();
-    }
-  }
+  access_token_.clear();
+  if (IsStarted())
+    UpdateInvalidatorCredentials();
 }
 
-void TiclInvalidationService::OnInvalidationAuthLogout() {
+void TiclInvalidationService::OnActiveAccountLogout() {
   access_token_request_.reset();
   request_access_token_retry_timer_.Stop();
 
@@ -280,11 +264,15 @@ void TiclInvalidationService::OnInvalidationAuthLogout() {
     StopInvalidator();
   }
 
-  // This service always expects to have a valid invalidator storage.
-  // So we must not only clear the old one, but also start a new one.
-  invalidator_storage_->Clear();
-  invalidator_storage_.reset(new InvalidatorStorage(profile_->GetPrefs()));
-  invalidator_storage_->SetInvalidatorClientId(GenerateInvalidatorClientId());
+  // This service always expects to have a valid invalidation state. Thus, we
+  // must generate a new client ID to replace the existing one. Setting a new
+  // client ID also clears all other state.
+  invalidation_state_tracker_->
+      ClearAndSetNewClientId(GenerateInvalidatorClientId());
+}
+
+void TiclInvalidationService::OnUseGCMChannelChanged() {
+  UpdateInvalidationNetworkChannel();
 }
 
 void TiclInvalidationService::OnInvalidatorStateChange(
@@ -320,27 +308,23 @@ std::string TiclInvalidationService::GetOwnerName() const { return "TICL"; }
 
 void TiclInvalidationService::Shutdown() {
   DCHECK(CalledOnValidThread());
-  auth_provider_->GetTokenService()->RemoveObserver(this);
-  auth_provider_->RemoveObserver(this);
+  settings_provider_->RemoveObserver(this);
+  identity_provider_->RemoveActiveAccountRefreshTokenObserver(this);
+  identity_provider_->RemoveObserver(this);
   if (IsStarted()) {
     StopInvalidator();
   }
-  invalidator_storage_.reset();
+  invalidation_state_tracker_.reset();
   invalidator_registrar_.reset();
 }
 
 bool TiclInvalidationService::IsReadyToStart() {
-  if (profile_->IsManaged()) {
-    DVLOG(2) << "Not starting TiclInvalidationService: User is managed.";
-    return false;
-  }
-
-  if (auth_provider_->GetAccountId().empty()) {
+  if (identity_provider_->GetActiveAccountId().empty()) {
     DVLOG(2) << "Not starting TiclInvalidationService: User is not signed in.";
     return false;
   }
 
-  OAuth2TokenService* token_service = auth_provider_->GetTokenService();
+  OAuth2TokenService* token_service = identity_provider_->GetTokenService();
   if (!token_service) {
     DVLOG(2)
         << "Not starting TiclInvalidationService: "
@@ -348,7 +332,8 @@ bool TiclInvalidationService::IsReadyToStart() {
     return false;
   }
 
-  if (!token_service->RefreshTokenIsAvailable(auth_provider_->GetAccountId())) {
+  if (!token_service->RefreshTokenIsAvailable(
+          identity_provider_->GetActiveAccountId())) {
     DVLOG(2)
         << "Not starting TiclInvalidationServce: Waiting for refresh token.";
     return false;
@@ -365,8 +350,8 @@ void TiclInvalidationService::StartInvalidator(
     InvalidationNetworkChannel network_channel) {
   DCHECK(CalledOnValidThread());
   DCHECK(!invalidator_);
-  DCHECK(invalidator_storage_);
-  DCHECK(!invalidator_storage_->GetInvalidatorClientId().empty());
+  DCHECK(invalidation_state_tracker_);
+  DCHECK(!invalidation_state_tracker_->GetInvalidatorClientId().empty());
 
   // Request access token for PushClientChannel. GCMNetworkChannel will request
   // access token before sending message to server.
@@ -384,7 +369,7 @@ void TiclInvalidationService::StartInvalidator(
     case PUSH_CLIENT_CHANNEL: {
       notifier::NotifierOptions options =
           ParseNotifierOptions(*CommandLine::ForCurrentProcess());
-      options.request_context_getter = profile_->GetRequestContext();
+      options.request_context_getter = request_context_;
       options.auth_mechanism = "X-OAUTH2";
       network_channel_options_.SetString("Options.HostPort",
                                          options.xmpp_host_port.ToString());
@@ -396,13 +381,11 @@ void TiclInvalidationService::StartInvalidator(
       break;
     }
     case GCM_NETWORK_CHANNEL: {
-      gcm::GCMProfileService* gcm_profile_service =
-          gcm::GCMProfileServiceFactory::GetForProfile(profile_);
-      gcm_invalidation_bridge_.reset(
-          new GCMInvalidationBridge(gcm_profile_service, auth_provider_.get()));
+      gcm_invalidation_bridge_.reset(new GCMInvalidationBridge(
+          gcm_service_, identity_provider_.get()));
       network_channel_creator =
           syncer::NonBlockingInvalidator::MakeGCMNetworkChannelCreator(
-              profile_->GetRequestContext(),
+              request_context_,
               gcm_invalidation_bridge_->CreateDelegate().Pass());
       break;
     }
@@ -413,13 +396,12 @@ void TiclInvalidationService::StartInvalidator(
   }
   invalidator_.reset(new syncer::NonBlockingInvalidator(
           network_channel_creator,
-          invalidator_storage_->GetInvalidatorClientId(),
-          invalidator_storage_->GetSavedInvalidations(),
-          invalidator_storage_->GetBootstrapData(),
-          syncer::WeakHandle<syncer::InvalidationStateTracker>(
-              invalidator_storage_->AsWeakPtr()),
+          invalidation_state_tracker_->GetInvalidatorClientId(),
+          invalidation_state_tracker_->GetSavedInvalidations(),
+          invalidation_state_tracker_->GetBootstrapData(),
+          invalidation_state_tracker_.get(),
           GetUserAgent(),
-          profile_->GetRequestContext()));
+          request_context_));
 
   UpdateInvalidatorCredentials();
 
@@ -430,15 +412,9 @@ void TiclInvalidationService::StartInvalidator(
 }
 
 void TiclInvalidationService::UpdateInvalidationNetworkChannel() {
-  InvalidationNetworkChannel network_channel_type = PUSH_CLIENT_CHANNEL;
-  if (gcm::GCMProfileService::GetGCMEnabledState(profile_) ==
-          gcm::GCMProfileService::ALWAYS_ENABLED &&
-      (profile_->GetPrefs()->GetBoolean(
-           prefs::kInvalidationServiceUseGCMChannel) ||
-       CommandLine::ForCurrentProcess()->HasSwitch(
-           switches::kInvalidationUseGCMChannel))) {
-    network_channel_type = GCM_NETWORK_CHANNEL;
-  }
+  const InvalidationNetworkChannel network_channel_type =
+      settings_provider_->UseGCMChannel() ? GCM_NETWORK_CHANNEL
+                                          : PUSH_CLIENT_CHANNEL;
   if (network_channel_type_ == network_channel_type)
     return;
   network_channel_type_ = network_channel_type;
@@ -449,7 +425,7 @@ void TiclInvalidationService::UpdateInvalidationNetworkChannel() {
 }
 
 void TiclInvalidationService::UpdateInvalidatorCredentials() {
-  std::string email = auth_provider_->GetAccountId();
+  std::string email = identity_provider_->GetActiveAccountId();
 
   DCHECK(!email.empty()) << "Expected user to be signed in.";
 

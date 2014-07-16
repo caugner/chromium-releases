@@ -5,6 +5,8 @@
 #ifndef UI_APP_LIST_VIEWS_APPS_CONTAINER_VIEW_H_
 #define UI_APP_LIST_VIEWS_APPS_CONTAINER_VIEW_H_
 
+#include <vector>
+
 #include "ui/app_list/app_list_folder_item.h"
 #include "ui/app_list/views/top_icon_animation_view.h"
 #include "ui/views/view.h"
@@ -43,6 +45,12 @@ class AppsContainerView : public views::View,
   // a folder view with |folder_item|. If |folder_item| is NULL skips animation.
   void ShowApps(AppListFolderItem* folder_item);
 
+  // Resets the app list to a state where it shows the main grid view. This is
+  // called when the user opens the launcher for the first time or when the user
+  // hides and then shows it. This is necessary because we only hide and show
+  // the launcher on Windows and Linux so we need to reset to a fresh state.
+  void ResetForShowApps();
+
   // Sets |drag_and_drop_host_| for the current app list in both
   // app_list_folder_view_ and root level apps_grid_view_.
   void SetDragAndDropHostOfCurrentAppList(
@@ -51,6 +59,9 @@ class AppsContainerView : public views::View,
   // Transits the UI from folder view to root lelve apps grid view when
   // re-parenting a child item of |folder_item|.
   void ReparentFolderItemTransit(AppListFolderItem* folder_item);
+
+  // Returns true if it is currently showing an active folder page.
+  bool IsInFolderView() const;
 
   // views::View overrides:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
@@ -68,6 +79,7 @@ class AppsContainerView : public views::View,
 
  private:
   enum ShowState {
+    SHOW_NONE,  // initial state
     SHOW_APPS,
     SHOW_ACTIVE_FOLDER,
     SHOW_ITEM_REPARENT,

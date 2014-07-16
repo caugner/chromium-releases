@@ -5,7 +5,8 @@
 #ifndef UI_DISPLAY_CHROMEOS_X11_DISPLAY_SNAPSHOT_X11_H_
 #define UI_DISPLAY_CHROMEOS_X11_DISPLAY_SNAPSHOT_X11_H_
 
-#include "ui/display/chromeos/display_snapshot.h"
+#include "ui/display/display_export.h"
+#include "ui/display/types/chromeos/display_snapshot.h"
 
 // Forward declare from Xlib and Xrandr.
 typedef unsigned long XID;
@@ -20,8 +21,10 @@ class DISPLAY_EXPORT DisplaySnapshotX11 : public DisplaySnapshot {
                      bool has_proper_display_id,
                      const gfx::Point& origin,
                      const gfx::Size& physical_size,
-                     OutputType type,
+                     DisplayConnectionType type,
                      bool is_aspect_preserving_scaling,
+                     bool has_overscan,
+                     std::string display_name,
                      const std::vector<const DisplayMode*>& modes,
                      const DisplayMode* current_mode,
                      const DisplayMode* native_mode,
@@ -35,8 +38,6 @@ class DISPLAY_EXPORT DisplaySnapshotX11 : public DisplaySnapshot {
   int index() const { return index_; }
 
   // DisplaySnapshot overrides:
-  virtual std::string GetDisplayName() OVERRIDE;
-  virtual bool GetOverscanFlag() OVERRIDE;
   virtual std::string ToString() const OVERRIDE;
 
  private:

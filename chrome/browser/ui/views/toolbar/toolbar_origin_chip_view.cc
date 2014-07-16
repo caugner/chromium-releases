@@ -11,6 +11,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_icon_image.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -25,7 +26,6 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/user_metrics.h"
@@ -33,6 +33,7 @@
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -76,7 +77,7 @@ ToolbarOriginChipExtensionIcon::ToolbarOriginChipExtensionIcon(
           extension,
           extensions::IconsInfo::GetIcons(extension),
           extension_misc::EXTENSION_ICON_BITTY,
-          extensions::IconsInfo::GetDefaultAppIcon(),
+          extensions::util::GetDefaultAppIcon(),
           this)) {
   // Forces load of the image.
   icon_image_->image_skia().GetRepresentation(1.0f);

@@ -43,27 +43,10 @@ bool g_accessibility_keyboard_enabled = false;
 
 base::LazyInstance<GURL> g_override_content_url = LAZY_INSTANCE_INITIALIZER;
 
-// The ratio between the height of the keyboard and the screen when using the
-// usability keyboard.
-const float kUsabilityKeyboardHeightRatio = 1.0f;
-
-// The default ratio between the height of the keyboard and the screen.
-const float kDefaultKeyboardHeightRatio = 0.41f;
-
-// The ratio between the height of the keyboard and the screen when using the
-// accessibility keyboard.
-const float kAccessibilityKeyboardHeightRatio = 0.3f;
-
-float GetKeyboardHeightRatio(){
-  if (keyboard::IsKeyboardUsabilityExperimentEnabled()) {
-    return kUsabilityKeyboardHeightRatio;
-  } else if (keyboard::GetAccessibilityKeyboardEnabled()) {
-    return kAccessibilityKeyboardHeightRatio;
-  }
-  return kDefaultKeyboardHeightRatio;
-}
-
 bool g_touch_keyboard_enabled = false;
+
+keyboard::KeyboardOverscrolOverride g_keyboard_overscroll_override =
+    keyboard::KEYBOARD_OVERSCROLL_OVERRIDE_NONE;
 
 }  // namespace
 
@@ -71,12 +54,23 @@ namespace keyboard {
 
 gfx::Rect DefaultKeyboardBoundsFromWindowBounds(
     const gfx::Rect& window_bounds) {
-  const float kKeyboardHeightRatio = GetKeyboardHeightRatio();
+  // Initialize default keyboard height to 0. The keyboard window height should
+  // only be set by window.resizeTo in virtual keyboard web contents. Otherwise,
+  // the default height may conflict with the new height and causing some
+  // strange animation issues. For keyboard usability experiments, a full screen
+  // virtual keyboard window is always preferred.
   int keyboard_height =
-      static_cast<int>(window_bounds.height() * kKeyboardHeightRatio);
+      keyboard::IsKeyboardUsabilityExperimentEnabled() ?
+          window_bounds.height() : 0;
+
+  return KeyboardBoundsFromWindowBounds(window_bounds, keyboard_height);
+}
+
+gfx::Rect KeyboardBoundsFromWindowBounds(const gfx::Rect& window_bounds,
+                                         int keyboard_height) {
   return gfx::Rect(
       window_bounds.x(),
-      window_bounds.y() + window_bounds.height() - keyboard_height,
+      window_bounds.bottom() - keyboard_height,
       window_bounds.width(),
       keyboard_height);
 }
@@ -116,13 +110,40 @@ bool IsKeyboardUsabilityExperimentEnabled() {
       switches::kKeyboardUsabilityExperiment);
 }
 
+bool IsKeyboardOverscrollEnabled() {
+  if (!IsKeyboardEnabled())
+    return false;
+
+  // Users of the accessibility on-screen keyboard are likely to be using mouse
+  // input, which may interfere with overscrolling.
+  if (g_accessibility_keyboard_enabled)
+    return false;
+
+  // If overscroll enabled override is set, use it instead. Currently
+  // login / out-of-box disable keyboard overscroll. http://crbug.com/363635
+  if (g_keyboard_overscroll_override != KEYBOARD_OVERSCROLL_OVERRIDE_NONE) {
+    return g_keyboard_overscroll_override ==
+        KEYBOARD_OVERSCROLL_OVERRIDE_ENABLED;
+  }
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableVirtualKeyboardOverscroll)) {
+    return false;
+  }
+  return true;
+}
+
+void SetKeyboardOverscrollOverride(KeyboardOverscrolOverride override) {
+  g_keyboard_overscroll_override = override;
+}
+
 bool IsInputViewEnabled() {
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableInputView))
     return true;
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableInputView))
     return false;
   // Default value if no command line flags specified.
-  return false;
+  return true;
 }
 
 bool InsertText(const base::string16& text, aura::Window* root_window) {
@@ -275,7 +296,7 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
   static const GritResourceMap kKeyboardResources[] = {
     {"keyboard/layouts/function-key-row.html", IDR_KEYBOARD_FUNCTION_KEY_ROW},
     {"keyboard/images/back.svg", IDR_KEYBOARD_IMAGES_BACK},
-    {"keyboard/images/backspace.svg", IDR_KEYBOARD_IMAGES_BACKSPACE},
+    {"keyboard/images/backspace.png", IDR_KEYBOARD_IMAGES_BACKSPACE},
     {"keyboard/images/brightness-down.svg",
         IDR_KEYBOARD_IMAGES_BRIGHTNESS_DOWN},
     {"keyboard/images/brightness-up.svg", IDR_KEYBOARD_IMAGES_BRIGHTNESS_UP},
@@ -283,7 +304,7 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
     {"keyboard/images/down.svg", IDR_KEYBOARD_IMAGES_DOWN},
     {"keyboard/images/forward.svg", IDR_KEYBOARD_IMAGES_FORWARD},
     {"keyboard/images/fullscreen.svg", IDR_KEYBOARD_IMAGES_FULLSCREEN},
-    {"keyboard/images/hide-keyboard.svg", IDR_KEYBOARD_IMAGES_HIDE_KEYBOARD},
+    {"keyboard/images/hide-keyboard.png", IDR_KEYBOARD_IMAGES_HIDE_KEYBOARD},
     {"keyboard/images/keyboard.svg", IDR_KEYBOARD_IMAGES_KEYBOARD},
     {"keyboard/images/left.svg", IDR_KEYBOARD_IMAGES_LEFT},
     {"keyboard/images/microphone.svg", IDR_KEYBOARD_IMAGES_MICROPHONE},
@@ -291,13 +312,12 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
         IDR_KEYBOARD_IMAGES_MICROPHONE_GREEN},
     {"keyboard/images/mute.svg", IDR_KEYBOARD_IMAGES_MUTE},
     {"keyboard/images/reload.svg", IDR_KEYBOARD_IMAGES_RELOAD},
-    {"keyboard/images/return.svg", IDR_KEYBOARD_IMAGES_RETURN},
+    {"keyboard/images/return.png", IDR_KEYBOARD_IMAGES_RETURN},
     {"keyboard/images/right.svg", IDR_KEYBOARD_IMAGES_RIGHT},
-    {"keyboard/images/search.svg", IDR_KEYBOARD_IMAGES_SEARCH},
-    {"keyboard/images/shift.svg", IDR_KEYBOARD_IMAGES_SHIFT},
-    {"keyboard/images/shift-filled.svg", IDR_KEYBOARD_IMAGES_SHIFT_FILLED},
+    {"keyboard/images/search.png", IDR_KEYBOARD_IMAGES_SEARCH},
+    {"keyboard/images/shift.png", IDR_KEYBOARD_IMAGES_SHIFT},
     {"keyboard/images/shutdown.svg", IDR_KEYBOARD_IMAGES_SHUTDOWN},
-    {"keyboard/images/tab.svg", IDR_KEYBOARD_IMAGES_TAB},
+    {"keyboard/images/tab.png", IDR_KEYBOARD_IMAGES_TAB},
     {"keyboard/images/up.svg", IDR_KEYBOARD_IMAGES_UP},
     {"keyboard/images/volume-down.svg", IDR_KEYBOARD_IMAGES_VOLUME_DOWN},
     {"keyboard/images/volume-up.svg", IDR_KEYBOARD_IMAGES_VOLUME_UP},
@@ -326,12 +346,10 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
 }
 
 void SetOverrideContentUrl(const GURL& url) {
-  DCHECK_EQ(base::MessageLoop::current()->type(), base::MessageLoop::TYPE_UI);
   g_override_content_url.Get() = url;
 }
 
 const GURL& GetOverrideContentUrl() {
-  DCHECK_EQ(base::MessageLoop::current()->type(), base::MessageLoop::TYPE_UI);
   return g_override_content_url.Get();
 }
 

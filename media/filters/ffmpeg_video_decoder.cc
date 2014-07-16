@@ -54,6 +54,12 @@ static int GetThreadCount(AVCodecID codec_id) {
   return decode_threads;
 }
 
+static size_t RoundUp(size_t value, size_t alignment) {
+  // Check that |alignment| is a power of 2.
+  DCHECK((alignment + (alignment - 1)) == (alignment | (alignment - 1)));
+  return ((value + (alignment - 1)) & ~(alignment - 1));
+}
+
 FFmpegVideoDecoder::FFmpegVideoDecoder(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner)
     : task_runner_(task_runner), state_(kUninitialized) {}
@@ -72,8 +78,8 @@ int FFmpegVideoDecoder::GetVideoBuffer(AVCodecContext* codec_context,
          format == VideoFrame::YV12J);
 
   gfx::Size size(codec_context->width, codec_context->height);
-  int ret;
-  if ((ret = av_image_check_size(size.width(), size.height(), 0, NULL)) < 0)
+  const int ret = av_image_check_size(size.width(), size.height(), 0, NULL);
+  if (ret < 0)
     return ret;
 
   gfx::Size natural_size;
@@ -85,12 +91,26 @@ int FFmpegVideoDecoder::GetVideoBuffer(AVCodecContext* codec_context,
     natural_size = config_.natural_size();
   }
 
-  if (!VideoFrame::IsValidConfig(format, size, gfx::Rect(size), natural_size))
+  // FFmpeg has specific requirements on the allocation size of the frame.  The
+  // following logic replicates FFmpeg's allocation strategy to ensure buffers
+  // are not overread / overwritten.  See ff_init_buffer_info() for details.
+  //
+  // When lowres is non-zero, dimensions should be divided by 2^(lowres), but
+  // since we don't use this, just DCHECK that it's zero.
+  //
+  // Always round up to a multiple of two to match VideoFrame restrictions on
+  // frame alignment.
+  DCHECK_EQ(codec_context->lowres, 0);
+  gfx::Size coded_size(
+      RoundUp(std::max(size.width(), codec_context->coded_width), 2),
+      RoundUp(std::max(size.height(), codec_context->coded_height), 2));
+
+  if (!VideoFrame::IsValidConfig(
+          format, coded_size, gfx::Rect(size), natural_size))
     return AVERROR(EINVAL);
 
-  scoped_refptr<VideoFrame> video_frame =
-      frame_pool_.CreateFrame(format, size, gfx::Rect(size),
-                              natural_size, kNoTimestamp());
+  scoped_refptr<VideoFrame> video_frame = frame_pool_.CreateFrame(
+      format, coded_size, gfx::Rect(size), natural_size, kNoTimestamp());
 
   for (int i = 0; i < 3; i++) {
     frame->base[i] = video_frame->data(i);
@@ -101,8 +121,8 @@ int FFmpegVideoDecoder::GetVideoBuffer(AVCodecContext* codec_context,
   frame->opaque = NULL;
   video_frame.swap(reinterpret_cast<VideoFrame**>(&frame->opaque));
   frame->type = FF_BUFFER_TYPE_USER;
-  frame->width = codec_context->width;
-  frame->height = codec_context->height;
+  frame->width = coded_size.width();
+  frame->height = coded_size.height();
   frame->format = codec_context->pix_fmt;
 
   return 0;
@@ -124,10 +144,10 @@ static void ReleaseVideoBufferImpl(AVCodecContext* s, AVFrame* frame) {
 }
 
 void FFmpegVideoDecoder::Initialize(const VideoDecoderConfig& config,
+                                    bool low_delay,
                                     const PipelineStatusCB& status_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(decode_cb_.is_null());
-  DCHECK(reset_cb_.is_null());
   DCHECK(!config.is_encrypted());
 
   FFmpegGlue::InitializeFFmpeg();
@@ -135,7 +155,7 @@ void FFmpegVideoDecoder::Initialize(const VideoDecoderConfig& config,
   config_ = config;
   PipelineStatusCB initialize_cb = BindToCurrentLoop(status_cb);
 
-  if (!config.IsValidConfig() || !ConfigureDecoder()) {
+  if (!config.IsValidConfig() || !ConfigureDecoder(low_delay)) {
     initialize_cb.Run(DECODER_ERROR_NOT_SUPPORTED);
     return;
   }
@@ -169,37 +189,18 @@ void FFmpegVideoDecoder::Decode(const scoped_refptr<DecoderBuffer>& buffer,
 
 void FFmpegVideoDecoder::Reset(const base::Closure& closure) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK(reset_cb_.is_null());
-  reset_cb_ = BindToCurrentLoop(closure);
-
-  // Defer the reset if a decode is pending.
-  if (!decode_cb_.is_null())
-    return;
-
-  DoReset();
-}
-
-void FFmpegVideoDecoder::DoReset() {
   DCHECK(decode_cb_.is_null());
 
   avcodec_flush_buffers(codec_context_.get());
   state_ = kNormal;
-  base::ResetAndReturn(&reset_cb_).Run();
+  task_runner_->PostTask(FROM_HERE, closure);
 }
 
-void FFmpegVideoDecoder::Stop(const base::Closure& closure) {
+void FFmpegVideoDecoder::Stop() {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  base::ScopedClosureRunner runner(BindToCurrentLoop(closure));
 
   if (state_ == kUninitialized)
     return;
-
-  if (!decode_cb_.is_null()) {
-    base::ResetAndReturn(&decode_cb_).Run(kAborted, NULL);
-    // Reset is pending only when decode is pending.
-    if (!reset_cb_.is_null())
-      base::ResetAndReturn(&reset_cb_).Run();
-  }
 
   ReleaseFFmpegResources();
   state_ = kUninitialized;
@@ -217,7 +218,6 @@ void FFmpegVideoDecoder::DecodeBuffer(
   DCHECK_NE(state_, kUninitialized);
   DCHECK_NE(state_, kDecodeFinished);
   DCHECK_NE(state_, kError);
-  DCHECK(reset_cb_.is_null());
   DCHECK(!decode_cb_.is_null());
   DCHECK(buffer);
 
@@ -342,7 +342,7 @@ bool FFmpegVideoDecoder::FFmpegDecode(
   }
   *video_frame = static_cast<VideoFrame*>(av_frame_->opaque);
 
-  (*video_frame)->SetTimestamp(
+  (*video_frame)->set_timestamp(
       base::TimeDelta::FromMicroseconds(av_frame_->reordered_opaque));
 
   return true;
@@ -353,7 +353,7 @@ void FFmpegVideoDecoder::ReleaseFFmpegResources() {
   av_frame_.reset();
 }
 
-bool FFmpegVideoDecoder::ConfigureDecoder() {
+bool FFmpegVideoDecoder::ConfigureDecoder(bool low_delay) {
   // Release existing decoder resources if necessary.
   ReleaseFFmpegResources();
 
@@ -365,6 +365,7 @@ bool FFmpegVideoDecoder::ConfigureDecoder() {
   // for damaged macroblocks, and set our error detection sensitivity.
   codec_context_->error_concealment = FF_EC_GUESS_MVS | FF_EC_DEBLOCK;
   codec_context_->thread_count = GetThreadCount(codec_context_->codec_id);
+  codec_context_->thread_type = low_delay ? FF_THREAD_SLICE : FF_THREAD_FRAME;
   codec_context_->opaque = this;
   codec_context_->flags |= CODEC_FLAG_EMU_EDGE;
   codec_context_->get_buffer = GetVideoBufferImpl;

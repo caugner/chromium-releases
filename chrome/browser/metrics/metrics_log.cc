@@ -37,12 +37,12 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/metrics/proto/omnibox_event.pb.h"
-#include "chrome/common/metrics/proto/profiler_event.pb.h"
-#include "chrome/common/metrics/proto/system_profile.pb.h"
 #include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "components/metrics/proto/omnibox_event.pb.h"
+#include "components/metrics/proto/profiler_event.pb.h"
+#include "components/metrics/proto/system_profile.pb.h"
 #include "components/nacl/common/nacl_process_type.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/content_client.h"
@@ -67,6 +67,7 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 #endif  // OS_CHROMEOS
 
 using content::GpuDataManager;
+using metrics::MetricsLogBase;
 using metrics::OmniboxEventProto;
 using metrics::ProfilerEventProto;
 using metrics::SystemProfileProto;
@@ -141,6 +142,8 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
       return OmniboxEventProto::Suggestion::EXTENSION_APP;
     case AutocompleteMatchType::BOOKMARK_TITLE:
       return OmniboxEventProto::Suggestion::BOOKMARK_TITLE;
+    case AutocompleteMatchType::NAVSUGGEST_PERSONALIZED:
+      return OmniboxEventProto::Suggestion::NAVSUGGEST_PERSONALIZED;
     default:
       NOTREACHED();
       return OmniboxEventProto::Suggestion::UNKNOWN_RESULT_TYPE;
@@ -204,6 +207,25 @@ ProfilerEventProto::TrackedObject::ProcessType AsProtobufProcessType(
     default:
       NOTREACHED();
       return ProfilerEventProto::TrackedObject::UNKNOWN;
+  }
+}
+
+SystemProfileProto::Channel AsProtobufChannel(
+    chrome::VersionInfo::Channel channel) {
+  switch (channel) {
+    case chrome::VersionInfo::CHANNEL_UNKNOWN:
+      return SystemProfileProto::CHANNEL_UNKNOWN;
+    case chrome::VersionInfo::CHANNEL_CANARY:
+      return SystemProfileProto::CHANNEL_CANARY;
+    case chrome::VersionInfo::CHANNEL_DEV:
+      return SystemProfileProto::CHANNEL_DEV;
+    case chrome::VersionInfo::CHANNEL_BETA:
+      return SystemProfileProto::CHANNEL_BETA;
+    case chrome::VersionInfo::CHANNEL_STABLE:
+      return SystemProfileProto::CHANNEL_STABLE;
+    default:
+      NOTREACHED();
+      return SystemProfileProto::CHANNEL_UNKNOWN;
   }
 }
 
@@ -273,6 +295,15 @@ std::string MapThreadName(const std::string& thread_name) {
   return thread_name.substr(0, i) + '*';
 }
 
+// Normalizes a source filename (which is platform- and build-method-dependent)
+// by extracting the last component of the full file name.
+// Example: "c:\b\build\slave\win\build\src\chrome\app\chrome_main.cc" =>
+// "chrome_main.cc".
+std::string NormalizeFileName(const std::string& file_name) {
+  const size_t offset = file_name.find_last_of("\\/");
+  return offset != std::string::npos ? file_name.substr(offset + 1) : file_name;
+}
+
 void WriteProfilerData(const ProcessDataSnapshot& profiler_data,
                        int process_type,
                        ProfilerEventProto* performance_profile) {
@@ -287,7 +318,7 @@ void WriteProfilerData(const ProcessDataSnapshot& profiler_data,
     tracked_object->set_exec_thread_name_hash(
         MetricsLogBase::Hash(MapThreadName(it->death_thread_name)));
     tracked_object->set_source_file_name_hash(
-        MetricsLogBase::Hash(it->birth.location.file_name));
+        MetricsLogBase::Hash(NormalizeFileName(it->birth.location.file_name)));
     tracked_object->set_source_function_name_hash(
         MetricsLogBase::Hash(it->birth.location.function_name));
     tracked_object->set_source_line_number(it->birth.location.line_number);
@@ -370,10 +401,16 @@ GoogleUpdateMetrics::~GoogleUpdateMetrics() {}
 static base::LazyInstance<std::string>::Leaky
     g_version_extension = LAZY_INSTANCE_INITIALIZER;
 
-MetricsLog::MetricsLog(const std::string& client_id, int session_id)
-    : MetricsLogBase(client_id, session_id, MetricsLog::GetVersionString()),
+MetricsLog::MetricsLog(const std::string& client_id,
+                       int session_id,
+                       LogType log_type)
+    : MetricsLogBase(client_id, session_id, log_type,
+                     MetricsLog::GetVersionString()),
       creation_time_(base::TimeTicks::Now()),
       extension_metrics_(uma_proto()->client_id()) {
+  uma_proto()->mutable_system_profile()->set_channel(
+      AsProtobufChannel(chrome::VersionInfo::GetChannel()));
+
 #if defined(OS_CHROMEOS)
   metrics_log_chromeos_.reset(new MetricsLogChromeOS(uma_proto()));
 #endif  // OS_CHROMEOS
@@ -413,9 +450,7 @@ const std::string& MetricsLog::version_extension() {
 }
 
 void MetricsLog::RecordStabilityMetrics(base::TimeDelta incremental_uptime,
-                                        base::TimeDelta uptime,
-                                        LogType log_type) {
-  DCHECK_NE(NO_LOG, log_type);
+                                        base::TimeDelta uptime) {
   DCHECK(!locked());
   DCHECK(HasEnvironment());
   DCHECK(!HasStabilityMetrics());
@@ -437,7 +472,7 @@ void MetricsLog::RecordStabilityMetrics(base::TimeDelta incremental_uptime,
   WriteRealtimeStabilityAttributes(pref, incremental_uptime, uptime);
 
   // Omit some stats unless this is the initial stability log.
-  if (log_type != INITIAL_LOG)
+  if (log_type() != INITIAL_STABILITY_LOG)
     return;
 
   int incomplete_shutdown_count =
@@ -836,19 +871,33 @@ void MetricsLog::RecordOmniboxOpenedURL(const OmniboxLog& log) {
   omnibox_event->set_selected_index(log.selected_index);
   if (log.completed_length != base::string16::npos)
     omnibox_event->set_completed_length(log.completed_length);
+  const base::TimeDelta default_time_delta =
+      base::TimeDelta::FromMilliseconds(-1);
   if (log.elapsed_time_since_user_first_modified_omnibox !=
-      base::TimeDelta::FromMilliseconds(-1)) {
+      default_time_delta) {
     // Only upload the typing duration if it is set/valid.
     omnibox_event->set_typing_duration_ms(
         log.elapsed_time_since_user_first_modified_omnibox.InMilliseconds());
   }
-  omnibox_event->set_duration_since_last_default_match_update_ms(
-      log.elapsed_time_since_last_change_to_default_match.InMilliseconds());
+  if (log.elapsed_time_since_last_change_to_default_match !=
+      default_time_delta) {
+    omnibox_event->set_duration_since_last_default_match_update_ms(
+        log.elapsed_time_since_last_change_to_default_match.InMilliseconds());
+  }
   omnibox_event->set_current_page_classification(
       AsOmniboxEventPageClassification(log.current_page_classification));
   omnibox_event->set_input_type(AsOmniboxEventInputType(log.input_type));
-  omnibox_event->set_is_top_result_hidden_in_dropdown(
-      log.result.ShouldHideTopMatch());
+  // We consider a paste-and-search/paste-and-go action to have a closed popup
+  // (as explained in omnibox_event.proto) even if it was not, because such
+  // actions ignore the contents of the popup so it doesn't matter that it was
+  // open.
+  const bool consider_popup_open = log.is_popup_open && !log.is_paste_and_go;
+  omnibox_event->set_is_popup_open(consider_popup_open);
+  omnibox_event->set_is_paste_and_go(log.is_paste_and_go);
+  if (consider_popup_open) {
+    omnibox_event->set_is_top_result_hidden_in_dropdown(
+        log.result.ShouldHideTopMatch());
+  }
 
   for (AutocompleteResult::const_iterator i(log.result.begin());
        i != log.result.end(); ++i) {

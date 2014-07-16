@@ -4,6 +4,8 @@
 #ifndef COMPONENTS_ONC_ONC_CONSTANTS_H_
 #define COMPONENTS_ONC_ONC_CONSTANTS_H_
 
+#include <string>
+
 #include "components/onc/onc_export.h"
 
 // Constants for ONC properties.
@@ -63,11 +65,17 @@ ONC_EXPORT extern const char kName[];
 ONC_EXPORT extern const char kNameServers[];
 ONC_EXPORT extern const char kProxySettings[];
 ONC_EXPORT extern const char kSearchDomains[];
-ONC_EXPORT extern const char kServicePath[];
 ONC_EXPORT extern const char kConnectionState[];
+ONC_EXPORT extern const char kConnectable[];
+ONC_EXPORT extern const char kErrorState[];
 ONC_EXPORT extern const char kType[];
 ONC_EXPORT extern const char kVPN[];
 ONC_EXPORT extern const char kWiFi[];
+
+ONC_EXPORT extern std::string CellularProperty(const std::string& property);
+ONC_EXPORT extern std::string VpnProperty(const std::string& property);
+ONC_EXPORT extern std::string WifiProperty(const std::string& property);
+
 }  // namespace network_config
 
 namespace network_type {
@@ -135,6 +143,7 @@ ONC_EXPORT extern const char kGateway[];
 ONC_EXPORT extern const char kIPAddress[];
 ONC_EXPORT extern const char kIPv4[];
 ONC_EXPORT extern const char kIPv6[];
+ONC_EXPORT extern const char kNameServers[];
 ONC_EXPORT extern const char kRoutingPrefix[];
 ONC_EXPORT extern const char kType[];
 }  // namespace ipconfig
@@ -334,4 +343,3 @@ ONC_EXPORT extern const char kAllowOnlyPolicyNetworksToAutoconnect[];
 }  // namespace onc
 
 #endif  // COMPONENTS_ONC_ONC_CONSTANTS_H_
-

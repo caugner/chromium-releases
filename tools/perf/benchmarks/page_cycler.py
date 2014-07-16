@@ -8,59 +8,60 @@ from telemetry import test
 
 class PageCyclerBloat(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/page_cycler/bloat.json'
+  page_set = 'page_sets/page_cycler/bloat.py'
   options = {'pageset_repeat': 10}
 
 
 class PageCyclerDhtml(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/page_cycler/dhtml.json'
+  page_set = 'page_sets/page_cycler/dhtml.py'
   options = {'pageset_repeat': 10}
 
 
 class PageCyclerIntlArFaHe(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/intl_ar_fa_he.json'
+  page_set = 'page_sets/intl_ar_fa_he.py'
   options = {'pageset_repeat': 10}
 
 
 class PageCyclerIntlEsFrPtBr(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/intl_es_fr_pt-BR.json'
+  page_set = 'page_sets/intl_es_fr_pt-BR.py'
   options = {'pageset_repeat': 10}
 
 
 class PageCyclerIntlHiRu(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/intl_hi_ru.json'
+  page_set = 'page_sets/intl_hi_ru.py'
   options = {'pageset_repeat': 10}
 
 
 @test.Disabled('win')  # crbug.com/330909
 class PageCyclerIntlJaZh(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/intl_ja_zh.json'
+  page_set = 'page_sets/intl_ja_zh.py'
   options = {'pageset_repeat': 10}
 
 
 class PageCyclerIntlKoThVi(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/intl_ko_th_vi.json'
+  page_set = 'page_sets/intl_ko_th_vi.py'
   options = {'pageset_repeat': 10}
 
 
 class PageCyclerMorejs(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/page_cycler/morejs.json'
+  page_set = 'page_sets/page_cycler/morejs.py'
   options = {'pageset_repeat': 10}
 
 
 class PageCyclerMoz(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/page_cycler/moz.json'
+  page_set = 'page_sets/page_cycler/moz.py'
   options = {'pageset_repeat': 10}
 
 
+@test.Disabled('linux', 'win')  # crbug.com/353260
 class PageCyclerNetsimTop10(test.Test):
   """Measures load time of the top 10 sites under simulated cable network."""
   tag = 'netsim'
@@ -84,19 +85,20 @@ class PageCyclerNetsimTop10(test.Test):
 
 class PageCyclerTop10Mobile(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/top_10_mobile.json'
+  page_set = 'page_sets/top_10_mobile.py'
   options = {'pageset_repeat': 10}
 
 
 class PageCyclerKeyMobileSites(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/key_mobile_sites.json'
+  page_set = 'page_sets/key_mobile_sites.py'
   options = {'pageset_repeat': 10}
 
 
+@test.Disabled('android')  # crbug.com/357326
 class PageCyclerToughLayoutCases(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/tough_layout_cases.json'
+  page_set = 'page_sets/tough_layout_cases.py'
   options = {'pageset_repeat': 10}
 
 
@@ -105,5 +107,5 @@ class PageCyclerToughLayoutCases(test.Test):
 @test.Disabled('android', 'win')
 class PageCyclerTypical25(test.Test):
   test = page_cycler.PageCycler
-  page_set = 'page_sets/typical_25.json'
+  page_set = 'page_sets/typical_25.py'
   options = {'pageset_repeat': 10}

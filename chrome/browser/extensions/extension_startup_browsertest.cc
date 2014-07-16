@@ -34,7 +34,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/feature_switch.h"
-#include "net/base/net_util.h"
+#include "net/base/filename_util.h"
 
 using extensions::FeatureSwitch;
 
@@ -64,7 +64,7 @@ class ExtensionStartupTestBase : public InProcessBrowserTest {
 #if defined(OFFICIAL_BUILD) && defined(OS_WIN)
       // In Windows official builds, it is not possible to disable settings
       // authentication.
-      unauthenticated_load_allowed_ = false;
+      unauthenticated_load_allowed_ = true;
 #endif
     } else {
       base::FilePath::StringType paths = JoinString(load_extensions_, ',');

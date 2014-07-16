@@ -18,7 +18,8 @@ class IMEBridgeImpl : public IMEBridge {
   IMEBridgeImpl()
     : input_context_handler_(NULL),
       engine_handler_(NULL),
-      candidate_window_handler_(NULL) {
+      candidate_window_handler_(NULL),
+      current_text_input_(ui::TEXT_INPUT_TYPE_NONE) {
   }
 
   virtual ~IMEBridgeImpl() {
@@ -37,45 +38,9 @@ class IMEBridgeImpl : public IMEBridge {
   }
 
   // IMEBridge override.
-  virtual void SetEngineHandler(
-      const std::string& engine_id,
-      IMEEngineHandlerInterface* handler) OVERRIDE {
-    DCHECK(!engine_id.empty());
-    DCHECK(handler);
-    engine_handler_map_[engine_id] = handler;
-  }
-
-  // IMEBridge override.
-  virtual IMEEngineHandlerInterface* GetEngineHandler(
-      const std::string& engine_id) OVERRIDE {
-    if (engine_id.empty() ||
-        engine_handler_map_.find(engine_id) == engine_handler_map_.end()) {
-      return NULL;
-    }
-    return engine_handler_map_[engine_id];
-  }
-
-  // IMEBridge override.
   virtual void SetCurrentEngineHandler(
       IMEEngineHandlerInterface* handler) OVERRIDE {
     engine_handler_ = handler;
-  }
-
-  // IMEBridge override.
-  virtual IMEEngineHandlerInterface* SetCurrentEngineHandlerById(
-      const std::string& engine_id) OVERRIDE {
-    std::map<std::string, IMEEngineHandlerInterface*>::const_iterator itor =
-        engine_handler_map_.find(engine_id);
-    // It is normal in that the engine is not found, because sometimes the
-    // extension based xkb id may be provided but the xkb component extension
-    // is not installed, for example, in browser_tests.
-    if (itor == engine_handler_map_.end()) {
-      engine_handler_ = NULL;
-      return NULL;
-    }
-
-    engine_handler_ = engine_handler_map_[engine_id];
-    return engine_handler_;
   }
 
   // IMEBridge override.
@@ -95,11 +60,21 @@ class IMEBridgeImpl : public IMEBridge {
     candidate_window_handler_ = handler;
   }
 
+  // IMEBridge override.
+  virtual void SetCurrentTextInputType(ui::TextInputType input_type) OVERRIDE {
+    current_text_input_ = input_type;
+  }
+
+  // IMEBridge override.
+  virtual ui::TextInputType GetCurrentTextInputType() const OVERRIDE {
+    return current_text_input_;
+  }
+
  private:
   IMEInputContextHandlerInterface* input_context_handler_;
   IMEEngineHandlerInterface* engine_handler_;
   IMECandidateWindowHandlerInterface* candidate_window_handler_;
-  std::map<std::string, IMEEngineHandlerInterface*> engine_handler_map_;
+  ui::TextInputType current_text_input_;
 
   DISALLOW_COPY_AND_ASSIGN(IMEBridgeImpl);
 };

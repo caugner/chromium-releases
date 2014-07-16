@@ -4,10 +4,19 @@
 
 #include "components/password_manager/core/common/password_manager_switches.h"
 
+namespace password_manager {
+
 namespace switches {
 
-// Enables the chrome://memory-internals/ page.
+// Disables the save-password prompt. Passwords are then saved automatically,
+// without asking the user.
+const char kEnableAutomaticPasswordSaving[] =
+    "enable-automatic-password-saving";
+
+// Enables the chrome://password-manager-internals/ page.
 const char kEnablePasswordManagerInternalsUI[] =
     "enable-password-manager-internals-ui";
 
 }  // namespace switches
+
+}  // namespace password_manager

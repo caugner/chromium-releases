@@ -588,7 +588,7 @@ class SpdyNetworkTransactionTest
     int port = helper.test_params().ssl_type == SPDYNPN ? 443 : 80;
     HostPortPair host_port_pair(url.host(), port);
     SpdySessionKey key(host_port_pair, ProxyServer::Direct(),
-                       kPrivacyModeDisabled);
+                       PRIVACY_MODE_DISABLED);
     BoundNetLog log;
     const scoped_refptr<HttpNetworkSession>& session = helper.session();
     base::WeakPtr<SpdySession> spdy_session =
@@ -705,12 +705,9 @@ INSTANTIATE_TEST_CASE_P(
         SpdyNetworkTransactionTestParams(kProtoSPDY31, SPDYNOSSL),
         SpdyNetworkTransactionTestParams(kProtoSPDY31, SPDYSSL),
         SpdyNetworkTransactionTestParams(kProtoSPDY31, SPDYNPN),
-        SpdyNetworkTransactionTestParams(kProtoSPDY4a2, SPDYNOSSL),
-        SpdyNetworkTransactionTestParams(kProtoSPDY4a2, SPDYSSL),
-        SpdyNetworkTransactionTestParams(kProtoSPDY4a2, SPDYNPN),
-        SpdyNetworkTransactionTestParams(kProtoHTTP2Draft04, SPDYNOSSL),
-        SpdyNetworkTransactionTestParams(kProtoHTTP2Draft04, SPDYSSL),
-        SpdyNetworkTransactionTestParams(kProtoHTTP2Draft04, SPDYNPN)));
+        SpdyNetworkTransactionTestParams(kProtoSPDY4, SPDYNOSSL),
+        SpdyNetworkTransactionTestParams(kProtoSPDY4, SPDYSSL),
+        SpdyNetworkTransactionTestParams(kProtoSPDY4, SPDYNPN)));
 
 // Verify HttpNetworkTransaction constructor.
 TEST_P(SpdyNetworkTransactionTest, Constructor) {
@@ -3288,16 +3285,20 @@ TEST_P(SpdyNetworkTransactionTest, SynReplyHeaders) {
   test_cases[0].expected_headers["cookie"] += "val2";
   test_cases[0].expected_headers["hello"] = "bye";
   test_cases[0].expected_headers["status"] = "200";
-  test_cases[0].expected_headers["version"] = "HTTP/1.1";
 
   test_cases[1].expected_headers["hello"] = "bye";
   test_cases[1].expected_headers["status"] = "200";
-  test_cases[1].expected_headers["version"] = "HTTP/1.1";
 
   test_cases[2].expected_headers["cookie"] = "val1,val2";
   test_cases[2].expected_headers["hello"] = "bye";
   test_cases[2].expected_headers["status"] = "200";
-  test_cases[2].expected_headers["version"] = "HTTP/1.1";
+
+  if (spdy_util_.spdy_version() < SPDY4) {
+    // SPDY4/HTTP2 eliminates use of the :version header.
+    test_cases[0].expected_headers["version"] = "HTTP/1.1";
+    test_cases[1].expected_headers["version"] = "HTTP/1.1";
+    test_cases[2].expected_headers["version"] = "HTTP/1.1";
+  }
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
     scoped_ptr<SpdyFrame> req(
@@ -3648,9 +3649,7 @@ TEST_P(SpdyNetworkTransactionTest, CorruptFrameSessionErrorSpdy4) {
       spdy_util_.ConstructSpdyGetSynReply(NULL, 0, 1));
   BufferedSpdyFramer framer(spdy_util_.spdy_version(), false);
   size_t right_size =
-      (spdy_util_.spdy_version() < SPDY4) ?
-      syn_reply_wrong_length->size() - framer.GetControlFrameHeaderSize() :
-      syn_reply_wrong_length->size();
+      syn_reply_wrong_length->size() - framer.GetControlFrameHeaderSize();
   size_t wrong_size = right_size - 4;
   test::SetFrameLength(syn_reply_wrong_length.get(),
                        wrong_size,
@@ -3666,7 +3665,8 @@ TEST_P(SpdyNetworkTransactionTest, CorruptFrameSessionErrorSpdy4) {
 
   scoped_ptr<SpdyFrame> body(spdy_util_.ConstructSpdyBodyFrame(1, true));
   MockRead reads[] = {
-    MockRead(ASYNC, syn_reply_wrong_length->data(), wrong_size),
+    MockRead(ASYNC, syn_reply_wrong_length->data(),
+             syn_reply_wrong_length->size() - 4),
   };
 
   DelayedSocketData data(1, reads, arraysize(reads),
@@ -3843,9 +3843,12 @@ TEST_P(SpdyNetworkTransactionTest, NetLog) {
   expected.push_back(std::string(spdy_util_.GetHostKey()) + ": www.google.com");
   expected.push_back(std::string(spdy_util_.GetPathKey()) + ": /");
   expected.push_back(std::string(spdy_util_.GetSchemeKey()) + ": http");
-  expected.push_back(std::string(spdy_util_.GetVersionKey()) + ": HTTP/1.1");
   expected.push_back(std::string(spdy_util_.GetMethodKey()) + ": GET");
   expected.push_back("user-agent: Chrome");
+  if (spdy_util_.spdy_version() < SPDY4) {
+    // SPDY4/HTTP2 eliminates use of the :version header.
+    expected.push_back(std::string(spdy_util_.GetVersionKey()) + ": HTTP/1.1");
+  }
   EXPECT_EQ(expected.size(), header_list->GetSize());
   for (std::vector<std::string>::const_iterator it = expected.begin();
        it != expected.end();
@@ -4411,6 +4414,7 @@ TEST_P(SpdyNetworkTransactionTest, SettingsSaved) {
 // Test that when there are settings saved that they are sent back to the
 // server upon session establishment.
 TEST_P(SpdyNetworkTransactionTest, SettingsPlayback) {
+  // TODO(jgraettinger): Remove settings persistence mechanisms altogether.
   static const SpdyHeaderInfo kSynReplyInfo = {
     SYN_REPLY,                              // Syn Reply
     1,                                      // Stream ID
@@ -4441,9 +4445,9 @@ TEST_P(SpdyNetworkTransactionTest, SettingsPlayback) {
   EXPECT_TRUE(spdy_session_pool->http_server_properties()->GetSpdySettings(
       host_port_pair).empty());
 
-  const SpdySettingsIds kSampleId1 = SETTINGS_UPLOAD_BANDWIDTH;
+  const SpdySettingsIds kSampleId1 = SETTINGS_MAX_CONCURRENT_STREAMS;
   unsigned int kSampleValue1 = 0x0a0a0a0a;
-  const SpdySettingsIds kSampleId2 = SETTINGS_ROUND_TRIP_TIME;
+  const SpdySettingsIds kSampleId2 = SETTINGS_INITIAL_WINDOW_SIZE;
   unsigned int kSampleValue2 = 0x0c0c0c0c;
 
   // First add a persisted setting.
@@ -4488,7 +4492,7 @@ TEST_P(SpdyNetworkTransactionTest, SettingsPlayback) {
       spdy_util_.ConstructSpdyGet(NULL, 0, false, 1, LOWEST, true));
 
   std::vector<MockWrite> writes;
-  if (GetParam().protocol == kProtoHTTP2Draft04) {
+  if (GetParam().protocol == kProtoSPDY4) {
     writes.push_back(
         MockWrite(ASYNC,
                   kHttp2ConnectionHeaderPrefix,
@@ -4770,12 +4774,12 @@ TEST_P(SpdyNetworkTransactionTest, DirectConnectProxyReconnect) {
   // Check that the SpdySession is still in the SpdySessionPool.
   HostPortPair host_port_pair("www.google.com", helper.port());
   SpdySessionKey session_pool_key_direct(
-      host_port_pair, ProxyServer::Direct(), kPrivacyModeDisabled);
+      host_port_pair, ProxyServer::Direct(), PRIVACY_MODE_DISABLED);
   EXPECT_TRUE(HasSpdySession(spdy_session_pool, session_pool_key_direct));
   SpdySessionKey session_pool_key_proxy(
       host_port_pair,
       ProxyServer::FromURI("www.foo.com", ProxyServer::SCHEME_HTTP),
-      kPrivacyModeDisabled);
+      PRIVACY_MODE_DISABLED);
   EXPECT_FALSE(HasSpdySession(spdy_session_pool, session_pool_key_proxy));
 
   // Set up data for the proxy connection.
@@ -5332,7 +5336,10 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushWithTwoHeaderFrames) {
 
   scoped_ptr<SpdyHeaderBlock> late_headers(new SpdyHeaderBlock());
   (*late_headers)[spdy_util_.GetStatusKey()] = "200";
-  (*late_headers)[spdy_util_.GetVersionKey()] = "HTTP/1.1";
+  if (spdy_util_.spdy_version() < SPDY4) {
+    // SPDY4/HTTP2 eliminates use of the :version header.
+    (*late_headers)[spdy_util_.GetVersionKey()] = "HTTP/1.1";
+  }
   scoped_ptr<SpdyFrame> stream2_headers2(
       spdy_util_.ConstructSpdyControlFrame(late_headers.Pass(),
                                            false,
@@ -5430,13 +5437,17 @@ TEST_P(SpdyNetworkTransactionTest, ServerPushWithTwoHeaderFrames) {
     EXPECT_TRUE(response2.headers->HasHeaderValue(
         "scheme", "http"));
     EXPECT_TRUE(response2.headers->HasHeaderValue(
-        "host", "www.google.com"));
-    EXPECT_TRUE(response2.headers->HasHeaderValue(
         "path", "/foo.dat"));
+    if (spdy_util_.spdy_version() < SPDY4) {
+      EXPECT_TRUE(response2.headers->HasHeaderValue(
+          "host", "www.google.com"));
+    } else {
+      EXPECT_TRUE(response2.headers->HasHeaderValue(
+          "authority", "www.google.com"));
+    }
   }
   EXPECT_TRUE(response2.headers->HasHeaderValue("hello", "bye"));
   EXPECT_TRUE(response2.headers->HasHeaderValue("status", "200"));
-  EXPECT_TRUE(response2.headers->HasHeaderValue("version", "HTTP/1.1"));
 
   // Read the final EOF (which will close the session)
   data.RunFor(1);

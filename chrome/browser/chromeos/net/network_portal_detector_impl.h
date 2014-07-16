@@ -17,11 +17,12 @@
 #include "base/observer_list.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/time/time.h"
-#include "chrome/browser/captive_portal/captive_portal_detector.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_strategy.h"
 #include "chrome/browser/chromeos/net/network_portal_notification_controller.h"
 #include "chromeos/network/network_state_handler_observer.h"
+#include "components/captive_portal/captive_portal_detector.h"
+#include "components/captive_portal/captive_portal_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "net/url_request/url_fetcher.h"
@@ -50,12 +51,14 @@ class NetworkPortalDetectorImpl
   static const char kOobeShillOnlineHistogram[];
   static const char kOobeShillPortalHistogram[];
   static const char kOobeShillOfflineHistogram[];
+  static const char kOobePortalToOnlineHistogram[];
 
   static const char kSessionDetectionResultHistogram[];
   static const char kSessionDetectionDurationHistogram[];
   static const char kSessionShillOnlineHistogram[];
   static const char kSessionShillPortalHistogram[];
   static const char kSessionShillOfflineHistogram[];
+  static const char kSessionPortalToOnlineHistogram[];
 
   explicit NetworkPortalDetectorImpl(
       const scoped_refptr<net::URLRequestContextGetter>& request_context);
@@ -70,6 +73,7 @@ class NetworkPortalDetectorImpl
   virtual bool IsEnabled() OVERRIDE;
   virtual void Enable(bool start_detection) OVERRIDE;
   virtual bool StartDetectionIfIdle() OVERRIDE;
+  virtual void SetStrategy(PortalDetectorStrategy::StrategyId id) OVERRIDE;
 
   // NetworkStateHandlerObserver implementation:
   virtual void DefaultNetworkChanged(const NetworkState* network) OVERRIDE;
@@ -78,10 +82,6 @@ class NetworkPortalDetectorImpl
   virtual int AttemptCount() OVERRIDE;
   virtual base::TimeTicks AttemptStartTime() OVERRIDE;
   virtual base::TimeTicks GetCurrentTimeTicks() OVERRIDE;
-
-  // ErrorScreen::Observer implementation:
-  virtual void OnErrorScreenShow() OVERRIDE;
-  virtual void OnErrorScreenHide() OVERRIDE;
 
  private:
   friend class NetworkPortalDetectorImplTest;
@@ -136,14 +136,6 @@ class NetworkPortalDetectorImpl
   // Notifies observers that portal detection is completed for a |network|.
   void NotifyDetectionCompleted(const NetworkState* network,
                                 const CaptivePortalState& state);
-
-  // Updates current detection strategy according to the curren state:
-  // error screen, login screen or user session.
-  void UpdateCurrentStrategy();
-
-  // Sets current strategy according to |id|. If current detection id
-  // doesn't equal to |id|, detection is restarted.
-  void SetStrategy(PortalDetectorStrategy::StrategyId id);
 
   State state() const { return state_; }
 
@@ -233,9 +225,6 @@ class NetworkPortalDetectorImpl
 
   // Current detection strategy.
   scoped_ptr<PortalDetectorStrategy> strategy_;
-
-  // True when error screen is displayed.
-  bool error_screen_displayed_;
 
   // UI notification controller about captive portal state.
   NetworkPortalNotificationController notification_controller_;

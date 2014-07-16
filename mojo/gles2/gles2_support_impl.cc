@@ -28,7 +28,7 @@ class GLES2ImplForCommandBuffer : public GLES2Interface {
   virtual ReturnType Function PARAMETERS OVERRIDE {                \
     return gpu_interface_->Function ARGUMENTS;                     \
   }
-#include "mojo/public/gles2/gles2_call_visitor_autogen.h"
+#include "mojo/public/c/gles2/gles2_call_visitor_autogen.h"
 #undef VISIT_GL_CALL
 
  private:
@@ -63,7 +63,7 @@ MojoGLES2Context GLES2SupportImpl::CreateContext(
     MojoGLES2ContextLost lost_callback,
     MojoGLES2DrawAnimationFrame animation_callback,
     void* closure) {
-  ScopedCommandBufferHandle scoped_handle(CommandBufferHandle(handle.value()));
+  ScopedMessagePipeHandle scoped_handle(handle);
   scoped_ptr<GLES2Context> client(new GLES2Context(async_waiter_,
                                                    scoped_handle.Pass(),
                                                    lost_callback,

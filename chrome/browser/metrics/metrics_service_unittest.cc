@@ -4,11 +4,12 @@
 
 #include "chrome/browser/metrics/metrics_service.h"
 
-#include <ctype.h>
 #include <string>
 
 #include "base/command_line.h"
 #include "base/threading/platform_thread.h"
+#include "chrome/browser/metrics/metrics_service_observer.h"
+#include "chrome/browser/metrics/metrics_state_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
@@ -26,9 +27,13 @@
 
 namespace {
 
+using metrics::MetricsLogManager;
+
 class TestMetricsService : public MetricsService {
  public:
-  TestMetricsService() {}
+  explicit TestMetricsService(metrics::MetricsStateManager* state_manager)
+      : MetricsService(state_manager) {
+  }
   virtual ~TestMetricsService() {}
 
   MetricsLogManager* log_manager() {
@@ -57,7 +62,7 @@ class TestMetricsLogChromeOS : public MetricsLogChromeOS {
 class TestMetricsLog : public MetricsLog {
  public:
   TestMetricsLog(const std::string& client_id, int session_id)
-      : MetricsLog(client_id, session_id) {
+      : MetricsLog(client_id, session_id, MetricsLog::ONGOING_LOG) {
 #if defined(OS_CHROMEOS)
     metrics_log_chromeos_.reset(new TestMetricsLogChromeOS(
         MetricsLog::uma_proto()));
@@ -84,15 +89,28 @@ class TestMetricsLog : public MetricsLog {
 class MetricsServiceTest : public testing::Test {
  public:
   MetricsServiceTest()
-      : testing_local_state_(TestingBrowserProcess::GetGlobal()) {
+      : testing_local_state_(TestingBrowserProcess::GetGlobal()),
+        metrics_state_manager_(metrics::MetricsStateManager::Create(
+            GetLocalState())) {
   }
 
   virtual ~MetricsServiceTest() {
     MetricsService::SetExecutionPhase(MetricsService::UNINITIALIZED_PHASE);
   }
 
+  metrics::MetricsStateManager* GetMetricsStateManager() {
+    return metrics_state_manager_.get();
+  }
+
   PrefService* GetLocalState() {
     return testing_local_state_.Get();
+  }
+
+  // Sets metrics reporting as enabled for testing.
+  void EnableMetricsReporting() {
+    // TODO(asvitkine): Refactor the code to not need this flag and delete it.
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableMetricsReportingForTesting);
   }
 
   // Waits until base::TimeTicks::Now() no longer equals |value|. This should
@@ -123,25 +141,28 @@ class MetricsServiceTest : public testing::Test {
  private:
   content::TestBrowserThreadBundle thread_bundle_;
   ScopedTestingLocalState testing_local_state_;
+  scoped_ptr<metrics::MetricsStateManager> metrics_state_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(MetricsServiceTest);
 };
 
-}  // namespace
+class TestMetricsServiceObserver : public MetricsServiceObserver {
+ public:
+  TestMetricsServiceObserver(): observed_(0) {}
+  virtual ~TestMetricsServiceObserver() {}
 
-// Ensure the ClientId is formatted as expected.
-TEST_F(MetricsServiceTest, ClientIdCorrectlyFormatted) {
-  std::string clientid = MetricsService::GenerateClientID();
-  EXPECT_EQ(36U, clientid.length());
-
-  for (size_t i = 0; i < clientid.length(); ++i) {
-    char current = clientid[i];
-    if (i == 8 || i == 13 || i == 18 || i == 23)
-      EXPECT_EQ('-', current);
-    else
-      EXPECT_TRUE(isxdigit(current));
+  virtual void OnDidCreateMetricsLog() OVERRIDE {
+    ++observed_;
   }
-}
+  int observed() const { return observed_; }
+
+ private:
+  int observed_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestMetricsServiceObserver);
+};
+
+}  // namespace
 
 TEST_F(MetricsServiceTest, IsPluginProcess) {
   EXPECT_TRUE(
@@ -152,82 +173,19 @@ TEST_F(MetricsServiceTest, IsPluginProcess) {
       MetricsService::IsPluginProcess(content::PROCESS_TYPE_GPU));
 }
 
-TEST_F(MetricsServiceTest, LowEntropySource0NotReset) {
-  MetricsService service;
-
-  // Get the low entropy source once, to initialize it.
-  service.GetLowEntropySource();
-
-  // Now, set it to 0 and ensure it doesn't get reset.
-  service.low_entropy_source_ = 0;
-  EXPECT_EQ(0, service.GetLowEntropySource());
-  // Call it another time, just to make sure.
-  EXPECT_EQ(0, service.GetLowEntropySource());
-}
-
-TEST_F(MetricsServiceTest, PermutedEntropyCacheClearedWhenLowEntropyReset) {
-  const PrefService::Preference* low_entropy_pref =
-      GetLocalState()->FindPreference(prefs::kMetricsLowEntropySource);
-  const char* kCachePrefName = prefs::kMetricsPermutedEntropyCache;
-  int low_entropy_value = -1;
-
-  // First, generate an initial low entropy source value.
-  {
-    EXPECT_TRUE(low_entropy_pref->IsDefaultValue());
-
-    MetricsService::SetExecutionPhase(MetricsService::UNINITIALIZED_PHASE);
-    MetricsService service;
-    service.GetLowEntropySource();
-
-    EXPECT_FALSE(low_entropy_pref->IsDefaultValue());
-    EXPECT_TRUE(low_entropy_pref->GetValue()->GetAsInteger(&low_entropy_value));
-  }
-
-  // Now, set a dummy value in the permuted entropy cache pref and verify that
-  // another call to GetLowEntropySource() doesn't clobber it when
-  // --reset-variation-state wasn't specified.
-  {
-    GetLocalState()->SetString(kCachePrefName, "test");
-
-    MetricsService::SetExecutionPhase(MetricsService::UNINITIALIZED_PHASE);
-    MetricsService service;
-    service.GetLowEntropySource();
-
-    EXPECT_EQ("test", GetLocalState()->GetString(kCachePrefName));
-    EXPECT_EQ(low_entropy_value,
-              GetLocalState()->GetInteger(prefs::kMetricsLowEntropySource));
-  }
-
-  // Verify that the cache does get reset if --reset-variations-state is passed.
-  {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kResetVariationState);
-
-    MetricsService::SetExecutionPhase(MetricsService::UNINITIALIZED_PHASE);
-    MetricsService service;
-    service.GetLowEntropySource();
-
-    EXPECT_TRUE(GetLocalState()->GetString(kCachePrefName).empty());
-  }
-}
-
 TEST_F(MetricsServiceTest, InitialStabilityLogAfterCleanShutDown) {
-  base::FieldTrialList field_trial_list(NULL);
-  base::FieldTrialList::CreateFieldTrial("UMAStability", "SeparateLog");
-
+  EnableMetricsReporting();
   GetLocalState()->SetBoolean(prefs::kStabilityExitedCleanly, true);
 
-  TestMetricsService service;
-  service.InitializeMetricsRecordingState(MetricsService::REPORTING_ENABLED);
+  TestMetricsService service(GetMetricsStateManager());
+  service.InitializeMetricsRecordingState();
   // No initial stability log should be generated.
   EXPECT_FALSE(service.log_manager()->has_unsent_logs());
   EXPECT_FALSE(service.log_manager()->has_staged_log());
 }
 
 TEST_F(MetricsServiceTest, InitialStabilityLogAfterCrash) {
-  base::FieldTrialList field_trial_list(NULL);
-  base::FieldTrialList::CreateFieldTrial("UMAStability", "SeparateLog");
-
+  EnableMetricsReporting();
   GetLocalState()->ClearPref(prefs::kStabilityExitedCleanly);
 
   // Set up prefs to simulate restarting after a crash.
@@ -248,8 +206,8 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAfterCrash) {
 
   GetLocalState()->SetBoolean(prefs::kStabilityExitedCleanly, false);
 
-  TestMetricsService service;
-  service.InitializeMetricsRecordingState(MetricsService::REPORTING_ENABLED);
+  TestMetricsService service(GetMetricsStateManager());
+  service.InitializeMetricsRecordingState();
 
   // The initial stability log should be generated and persisted in unsent logs.
   MetricsLogManager* log_manager = service.log_manager();
@@ -276,7 +234,7 @@ TEST_F(MetricsServiceTest, InitialStabilityLogAfterCrash) {
 }
 
 TEST_F(MetricsServiceTest, RegisterSyntheticTrial) {
-  MetricsService service;
+  MetricsService service(GetMetricsStateManager());
 
   // Add two synthetic trials and confirm that they show up in the list.
   SyntheticTrialGroup trial1(metrics::HashName("TestTrial1"),
@@ -289,8 +247,8 @@ TEST_F(MetricsServiceTest, RegisterSyntheticTrial) {
   // Ensure that time has advanced by at least a tick before proceeding.
   WaitUntilTimeChanges(base::TimeTicks::Now());
 
-  service.log_manager_.BeginLoggingWithLog(new MetricsLog("clientID", 1),
-                                           MetricsLog::INITIAL_LOG);
+  service.log_manager_.BeginLoggingWithLog(
+      new MetricsLog("clientID", 1, MetricsLog::INITIAL_STABILITY_LOG));
   // Save the time when the log was started (it's okay for this to be greater
   // than the time recorded by the above call since it's used to ensure the
   // value changes).
@@ -306,7 +264,6 @@ TEST_F(MetricsServiceTest, RegisterSyntheticTrial) {
   WaitUntilTimeChanges(begin_log_time);
 
   // Change the group for the first trial after the log started.
-  // TODO(asvitkine): Assumption that this is > than BeginLoggingWithLog() time.
   SyntheticTrialGroup trial3(metrics::HashName("TestTrial1"),
                              metrics::HashName("Group2"));
   service.RegisterSyntheticFieldTrial(trial3);
@@ -327,8 +284,8 @@ TEST_F(MetricsServiceTest, RegisterSyntheticTrial) {
 
   // Start a new log and ensure all three trials appear in it.
   service.log_manager_.FinishCurrentLog();
-  service.log_manager_.BeginLoggingWithLog(new MetricsLog("clientID", 1),
-                                           MetricsLog::ONGOING_LOG);
+  service.log_manager_.BeginLoggingWithLog(
+      new MetricsLog("clientID", 1, MetricsLog::ONGOING_LOG));
   service.GetCurrentSyntheticFieldTrials(&synthetic_trials);
   EXPECT_EQ(3U, synthetic_trials.size());
   EXPECT_TRUE(HasSyntheticTrial(synthetic_trials, "TestTrial1", "Group2"));
@@ -352,7 +309,6 @@ TEST_F(MetricsServiceTest, MetricsReportingEnabled) {
 #endif
 }
 
-
 TEST_F(MetricsServiceTest, CrashReportingEnabled) {
 #if defined(GOOGLE_CHROME_BUILD)
 // ChromeOS has different device settings for crash reporting.
@@ -368,48 +324,40 @@ TEST_F(MetricsServiceTest, CrashReportingEnabled) {
   EXPECT_TRUE(MetricsServiceHelper::IsCrashReportingEnabled());
   GetLocalState()->ClearPref(crash_pref);
   EXPECT_FALSE(MetricsServiceHelper::IsCrashReportingEnabled());
-#endif // !defined(OS_CHROMEOS)
-#else // defined(GOOGLE_CHROME_BUILD)
+#endif  // !defined(OS_CHROMEOS)
+#else  // defined(GOOGLE_CHROME_BUILD)
   // Chromium branded browsers never have crash reporting enabled.
   EXPECT_FALSE(MetricsServiceHelper::IsCrashReportingEnabled());
-#endif // defined(GOOGLE_CHROME_BUILD)
+#endif  // defined(GOOGLE_CHROME_BUILD)
 }
 
-// Check that setting the kMetricsResetIds pref to true causes the client id to
-// be reset. We do not check that the low entropy source is reset because we
-// cannot ensure that metrics service won't generate the same id again.
-TEST_F(MetricsServiceTest, ResetMetricsIDs) {
-  // Set an initial client id in prefs. It should not be possible for the
-  // metrics service to generate this id randomly.
-  const std::string kInitialClientId = "initial client id";
-  GetLocalState()->SetString(prefs::kMetricsClientID, kInitialClientId);
+TEST_F(MetricsServiceTest, MetricsServiceObserver) {
+  MetricsService service(GetMetricsStateManager());
+  TestMetricsServiceObserver observer1;
+  TestMetricsServiceObserver observer2;
 
-  // Make sure the initial client id isn't reset by the metrics service.
-  {
-    MetricsService service;
-    service.ForceClientIdCreation();
-    EXPECT_TRUE(service.metrics_ids_reset_check_performed_);
-    EXPECT_EQ(kInitialClientId, service.client_id_);
-  }
+  service.AddObserver(&observer1);
+  EXPECT_EQ(0, observer1.observed());
+  EXPECT_EQ(0, observer2.observed());
 
+  service.OpenNewLog();
+  EXPECT_EQ(1, observer1.observed());
+  EXPECT_EQ(0, observer2.observed());
+  service.log_manager_.FinishCurrentLog();
 
-  // Set the reset pref to cause the IDs to be reset.
-  GetLocalState()->SetBoolean(prefs::kMetricsResetIds, true);
+  service.AddObserver(&observer2);
 
-  // Cause the actual reset to happen.
-  {
-    MetricsService service;
-    service.ForceClientIdCreation();
-    EXPECT_TRUE(service.metrics_ids_reset_check_performed_);
-    EXPECT_NE(kInitialClientId, service.client_id_);
+  service.OpenNewLog();
+  EXPECT_EQ(2, observer1.observed());
+  EXPECT_EQ(1, observer2.observed());
+  service.log_manager_.FinishCurrentLog();
 
-    service.GetLowEntropySource();
+  service.RemoveObserver(&observer1);
 
-    EXPECT_FALSE(GetLocalState()->GetBoolean(prefs::kMetricsResetIds));
-  }
+  service.OpenNewLog();
+  EXPECT_EQ(2, observer1.observed());
+  EXPECT_EQ(2, observer2.observed());
+  service.log_manager_.FinishCurrentLog();
 
-  std::string new_client_id =
-      GetLocalState()->GetString(prefs::kMetricsClientID);
-
-  EXPECT_NE(kInitialClientId, new_client_id);
+  service.RemoveObserver(&observer2);
 }

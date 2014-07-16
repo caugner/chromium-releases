@@ -16,6 +16,7 @@
 #include "content/public/common/page_transition_types.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/test/test_render_frame_host.h"
+#include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/base/layout.h"
 #include "ui/gfx/vector2d_f.h"
 
@@ -62,6 +63,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
+  virtual ui::TextInputClient* GetTextInputClient() OVERRIDE;
   virtual bool HasFocus() const OVERRIDE;
   virtual bool IsSurfaceAvailableForCopy() const OVERRIDE;
   virtual void Show() OVERRIDE;
@@ -79,15 +81,11 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual bool IsSpeaking() const OVERRIDE;
   virtual void StopSpeaking() OVERRIDE;
 #endif  // defined(OS_MACOSX)
-#if defined(TOOLKIT_GTK)
-  virtual GdkEventButton* GetLastMouseDown() OVERRIDE;
-  virtual gfx::NativeView BuildInputMethodsGtkMenu() OVERRIDE;
-#endif  // defined(TOOLKIT_GTK)
   virtual void OnSwapCompositorFrame(
       uint32 output_surface_id,
       scoped_ptr<cc::CompositorFrame> frame) OVERRIDE;
 
-  // RenderWidgetHostViewPort implementation.
+  // RenderWidgetHostViewBase implementation.
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos) OVERRIDE {}
   virtual void InitAsFullscreen(
@@ -95,7 +93,6 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void WasShown() OVERRIDE {}
   virtual void WasHidden() OVERRIDE {}
   virtual void MovePluginWindows(
-      const gfx::Vector2d& scroll_offset,
       const std::vector<WebPluginGeometry>& moves) OVERRIDE {}
   virtual void Focus() OVERRIDE {}
   virtual void Blur() OVERRIDE {}
@@ -105,16 +102,11 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
                                     ui::TextInputMode input_mode,
                                     bool can_compose_inline) OVERRIDE {}
   virtual void ImeCancelComposition() OVERRIDE {}
-#if defined(OS_MACOSX) || defined(OS_WIN) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA)
   virtual void ImeCompositionRangeChanged(
       const gfx::Range& range,
       const std::vector<gfx::Rect>& character_bounds) OVERRIDE {}
 #endif
-  virtual void DidUpdateBackingStore(
-      const gfx::Rect& scroll_rect,
-      const gfx::Vector2d& scroll_delta,
-      const std::vector<gfx::Rect>& rects,
-      const std::vector<ui::LatencyInfo>& latency_info) OVERRIDE {}
   virtual void RenderProcessGone(base::TerminationStatus status,
                                  int error_code) OVERRIDE;
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) { }
@@ -122,11 +114,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void SetTooltipText(const base::string16& tooltip_text) OVERRIDE {}
   virtual void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) OVERRIDE {}
-#if defined(OS_ANDROID)
-  virtual void SelectionRootBoundsChanged(const gfx::Rect&) OVERRIDE {}
-#endif
   virtual void ScrollOffsetChanged() OVERRIDE {}
-  virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
@@ -153,14 +141,15 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual bool PostProcessEventForPluginIme(
       const NativeWebKeyboardEvent& event) OVERRIDE;
 #elif defined(OS_ANDROID)
+  virtual void SelectionRootBoundsChanged(const gfx::Rect&) OVERRIDE {}
   virtual void ShowDisambiguationPopup(
       const gfx::Rect& target_rect,
       const SkBitmap& zoomed_bitmap) OVERRIDE {}
+  virtual void LockCompositingSurface() OVERRIDE {}
+  virtual void UnlockCompositingSurface() OVERRIDE {}
 #endif
   virtual void GetScreenInfo(blink::WebScreenInfo* results) OVERRIDE {}
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
-  virtual void SetHasHorizontalScrollbar(
-      bool has_horizontal_scrollbar) OVERRIDE { }
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE { }
   virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
@@ -181,6 +170,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
  private:
   bool is_showing_;
   bool did_swap_compositor_frame_;
+  ui::DummyTextInputClient text_input_client_;
 };
 
 #if defined(COMPILER_MSVC)
@@ -320,7 +310,8 @@ class TestRenderViewHost
 
   virtual bool CreateRenderView(const base::string16& frame_name,
                                 int opener_route_id,
-                                int32 max_page_id) OVERRIDE;
+                                int32 max_page_id,
+                                bool window_was_created_with_opener) OVERRIDE;
   virtual bool IsRenderViewLive() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
 

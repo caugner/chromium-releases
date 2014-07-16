@@ -11,10 +11,13 @@ namespace ui {
 
 EventConverterEvdev::EventConverterEvdev() {}
 
+EventConverterEvdev::EventConverterEvdev(const EventDispatchCallback& callback)
+    : dispatch_callback_(callback) {}
+
 EventConverterEvdev::~EventConverterEvdev() {}
 
-void EventConverterEvdev::DispatchEvent(scoped_ptr<ui::Event> event) {
-  EventFactoryOzone::DispatchEvent(event.Pass());
+void EventConverterEvdev::DispatchEventToCallback(ui::Event* event) {
+  dispatch_callback_.Run(event);
 }
 
 }  // namespace ui

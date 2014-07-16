@@ -10,20 +10,18 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/values.h"
+#include "google_apis/gcm/monitoring/gcm_stats_recorder.h"
 #include "net/base/escape.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
-#include "url/gurl.h"
 
 namespace gcm {
 
 namespace {
 
-const char kRegistrationURL[] =
-    "https://android.clients.google.com/c2dm/register3";
 const char kRequestContentType[] = "application/x-www-form-urlencoded";
 
 // Request constants.
@@ -112,14 +110,18 @@ UnregistrationRequest::RequestInfo::RequestInfo(
 UnregistrationRequest::RequestInfo::~RequestInfo() {}
 
 UnregistrationRequest::UnregistrationRequest(
+    const GURL& registration_url,
     const RequestInfo& request_info,
     const net::BackoffEntry::Policy& backoff_policy,
     const UnregistrationCallback& callback,
-    scoped_refptr<net::URLRequestContextGetter> request_context_getter)
+    scoped_refptr<net::URLRequestContextGetter> request_context_getter,
+    GCMStatsRecorder* recorder)
     : callback_(callback),
       request_info_(request_info),
+      registration_url_(registration_url),
       backoff_entry_(&backoff_policy),
       request_context_getter_(request_context_getter),
+      recorder_(recorder),
       weak_ptr_factory_(this) {
 }
 
@@ -132,7 +134,7 @@ void UnregistrationRequest::Start() {
   DCHECK(!url_fetcher_.get());
 
   url_fetcher_.reset(net::URLFetcher::Create(
-      GURL(kRegistrationURL), net::URLFetcher::POST, this));
+      registration_url_, net::URLFetcher::POST, this));
   url_fetcher_->SetRequestContext(request_context_getter_);
 
   std::string android_id = base::Uint64ToString(request_info_.android_id);
@@ -156,6 +158,8 @@ void UnregistrationRequest::Start() {
   url_fetcher_->SetUploadData(kRequestContentType, body);
 
   DVLOG(1) << "Performing unregistration for: " << request_info_.app_id;
+  recorder_->RecordUnregistrationSent(request_info_.app_id);
+  request_start_time_ = base::TimeTicks::Now();
   url_fetcher_->Start();
 }
 
@@ -170,6 +174,9 @@ void UnregistrationRequest::RetryWithBackoff(bool update_backoff) {
              << request_info_.app_id << ", for "
              << backoff_entry_.GetTimeUntilRelease().InMilliseconds()
              << " milliseconds.";
+    recorder_->RecordUnregistrationRetryDelayed(
+        request_info_.app_id,
+        backoff_entry_.GetTimeUntilRelease().InMilliseconds());
     base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&UnregistrationRequest::RetryWithBackoff,
@@ -190,6 +197,7 @@ void UnregistrationRequest::OnURLFetchComplete(const net::URLFetcher* source) {
   UMA_HISTOGRAM_ENUMERATION("GCM.UnregistrationRequestStatus",
                             status,
                             UNREGISTRATION_STATUS_COUNT);
+  recorder_->RecordUnregistrationResponse(request_info_.app_id, status);
 
   if (status == URL_FETCHING_FAILED ||
       status == SERVICE_UNAVAILABLE ||
@@ -197,11 +205,20 @@ void UnregistrationRequest::OnURLFetchComplete(const net::URLFetcher* source) {
       status == INCORRECT_APP_ID ||
       status == RESPONSE_PARSING_FAILED) {
     RetryWithBackoff(true);
-  } else {
-    // status == SUCCESS || HTTP_NOT_OK || NO_RESPONSE_BODY ||
-    // INVALID_PARAMETERS || UNKNOWN_ERROR
-    callback_.Run(status);
+    return;
   }
+
+  // status == SUCCESS || HTTP_NOT_OK || NO_RESPONSE_BODY ||
+  // INVALID_PARAMETERS || UNKNOWN_ERROR
+
+  if (status == SUCCESS) {
+    UMA_HISTOGRAM_COUNTS("GCM.UnregistrationRetryCount",
+                         backoff_entry_.failure_count());
+    UMA_HISTOGRAM_TIMES("GCM.UnregistrationCompleteTime",
+                        base::TimeTicks::Now() - request_start_time_);
+  }
+
+  callback_.Run(status);
 }
 
 }  // namespace gcm

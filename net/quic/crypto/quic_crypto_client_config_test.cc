@@ -5,11 +5,13 @@
 #include "net/quic/crypto/quic_crypto_client_config.h"
 
 #include "net/quic/crypto/proof_verifier.h"
-#include "net/quic/quic_session_key.h"
+#include "net/quic/quic_server_id.h"
+#include "net/quic/test_tools/mock_random.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using std::string;
+using std::vector;
 
 namespace net {
 namespace test {
@@ -56,8 +58,8 @@ TEST(QuicCryptoClientConfigTest, InchoateChlo) {
   QuicCryptoClientConfig config;
   QuicCryptoNegotiatedParameters params;
   CryptoHandshakeMessage msg;
-  QuicSessionKey server_key("www.google.com", 80, false, kPrivacyModeDisabled);
-  config.FillInchoateClientHello(server_key, QuicVersionMax(), &state,
+  QuicServerId server_id("www.google.com", 80, false, PRIVACY_MODE_DISABLED);
+  config.FillInchoateClientHello(server_id, QuicVersionMax(), &state,
                                  &params, &msg);
 
   QuicTag cver;
@@ -79,8 +81,8 @@ TEST(QuicCryptoClientConfigTest, InchoateChloSecure) {
   QuicCryptoClientConfig config;
   QuicCryptoNegotiatedParameters params;
   CryptoHandshakeMessage msg;
-  QuicSessionKey server_key("www.google.com", 443, true, kPrivacyModeDisabled);
-  config.FillInchoateClientHello(server_key, QuicVersionMax(), &state,
+  QuicServerId server_id("www.google.com", 443, true, PRIVACY_MODE_DISABLED);
+  config.FillInchoateClientHello(server_id, QuicVersionMax(), &state,
                                  &params, &msg);
 
   QuicTag pdmd;
@@ -94,13 +96,44 @@ TEST(QuicCryptoClientConfigTest, InchoateChloSecureNoEcdsa) {
   config.DisableEcdsa();
   QuicCryptoNegotiatedParameters params;
   CryptoHandshakeMessage msg;
-  QuicSessionKey server_key("www.google.com", 443, true, kPrivacyModeDisabled);
-  config.FillInchoateClientHello(server_key, QuicVersionMax(), &state,
+  QuicServerId server_id("www.google.com", 443, true, PRIVACY_MODE_DISABLED);
+  config.FillInchoateClientHello(server_id, QuicVersionMax(), &state,
                                  &params, &msg);
 
   QuicTag pdmd;
   EXPECT_EQ(QUIC_NO_ERROR, msg.GetUint32(kPDMD, &pdmd));
   EXPECT_EQ(kX59R, pdmd);
+}
+
+TEST(QuicCryptoClientConfigTest, FillClientHello) {
+  QuicCryptoClientConfig::CachedState state;
+  QuicCryptoClientConfig config;
+  QuicCryptoNegotiatedParameters params;
+  QuicConnectionId kConnectionId = 1234;
+  uint32 kInitialFlowControlWindow = 5678;
+  string error_details;
+  MockRandom rand;
+  CryptoHandshakeMessage chlo;
+  QuicServerId server_id("www.google.com", 80, false, PRIVACY_MODE_DISABLED);
+  config.FillClientHello(server_id,
+                         kConnectionId,
+                         QuicVersionMax(),
+                         kInitialFlowControlWindow,
+                         &state,
+                         QuicWallTime::Zero(),
+                         &rand,
+                         &params,
+                         &chlo,
+                         &error_details);
+
+  // Verify that certain QuicTags have been set correctly in the CHLO.
+  QuicTag cver;
+  EXPECT_EQ(QUIC_NO_ERROR, chlo.GetUint32(kVER, &cver));
+  EXPECT_EQ(QuicVersionToQuicTag(QuicVersionMax()), cver);
+
+  QuicTag ifcw;
+  EXPECT_EQ(QUIC_NO_ERROR, chlo.GetUint32(kIFCW, &ifcw));
+  EXPECT_EQ(kInitialFlowControlWindow, ifcw);
 }
 
 TEST(QuicCryptoClientConfigTest, ProcessServerDowngradeAttack) {
@@ -130,22 +163,101 @@ TEST(QuicCryptoClientConfigTest, ProcessServerDowngradeAttack) {
 
 TEST(QuicCryptoClientConfigTest, InitializeFrom) {
   QuicCryptoClientConfig config;
-  QuicSessionKey canonical_key1("www.google.com", 80, false,
-                                kPrivacyModeDisabled);
+  QuicServerId canonical_server_id("www.google.com", 80, false,
+                                   PRIVACY_MODE_DISABLED);
   QuicCryptoClientConfig::CachedState* state =
-      config.LookupOrCreate(canonical_key1);
+      config.LookupOrCreate(canonical_server_id);
   // TODO(rch): Populate other fields of |state|.
   state->set_source_address_token("TOKEN");
   state->SetProofValid();
 
-  QuicSessionKey other_key("mail.google.com", 80, false, kPrivacyModeDisabled);
-  config.InitializeFrom(other_key, canonical_key1, &config);
-  QuicCryptoClientConfig::CachedState* other = config.LookupOrCreate(other_key);
+  QuicServerId other_server_id("mail.google.com", 80, false,
+                               PRIVACY_MODE_DISABLED);
+  config.InitializeFrom(other_server_id, canonical_server_id, &config);
+  QuicCryptoClientConfig::CachedState* other =
+      config.LookupOrCreate(other_server_id);
 
   EXPECT_EQ(state->server_config(), other->server_config());
   EXPECT_EQ(state->source_address_token(), other->source_address_token());
   EXPECT_EQ(state->certs(), other->certs());
   EXPECT_EQ(1u, other->generation_counter());
+}
+
+TEST(QuicCryptoClientConfigTest, Canonical) {
+  QuicCryptoClientConfig config;
+  config.AddCanonicalSuffix(".google.com");
+  QuicServerId canonical_id1("www.google.com", 80, false,
+                             PRIVACY_MODE_DISABLED);
+  QuicServerId canonical_id2("mail.google.com", 80, false,
+                             PRIVACY_MODE_DISABLED);
+  QuicCryptoClientConfig::CachedState* state =
+      config.LookupOrCreate(canonical_id1);
+  // TODO(rch): Populate other fields of |state|.
+  state->set_source_address_token("TOKEN");
+  state->SetProofValid();
+
+  QuicCryptoClientConfig::CachedState* other =
+      config.LookupOrCreate(canonical_id2);
+
+  EXPECT_TRUE(state->IsEmpty());
+  EXPECT_EQ(state->server_config(), other->server_config());
+  EXPECT_EQ(state->source_address_token(), other->source_address_token());
+  EXPECT_EQ(state->certs(), other->certs());
+  EXPECT_EQ(1u, other->generation_counter());
+
+  QuicServerId different_id("mail.google.org", 80, false,
+                            PRIVACY_MODE_DISABLED);
+  EXPECT_TRUE(config.LookupOrCreate(different_id)->IsEmpty());
+}
+
+TEST(QuicCryptoClientConfigTest, CanonicalNotUsedIfNotValid) {
+  QuicCryptoClientConfig config;
+  config.AddCanonicalSuffix(".google.com");
+  QuicServerId canonical_id1("www.google.com", 80, false,
+                             PRIVACY_MODE_DISABLED);
+  QuicServerId canonical_id2("mail.google.com", 80, false,
+                             PRIVACY_MODE_DISABLED);
+  QuicCryptoClientConfig::CachedState* state =
+      config.LookupOrCreate(canonical_id1);
+  // TODO(rch): Populate other fields of |state|.
+  state->set_source_address_token("TOKEN");
+
+  // Do not set the proof as valid, and check that it is not used
+  // as a canonical entry.
+  EXPECT_TRUE(config.LookupOrCreate(canonical_id2)->IsEmpty());
+}
+
+TEST(QuicCryptoClientConfigTest, ClearCachedStates) {
+  QuicCryptoClientConfig config;
+  QuicServerId server_id("www.google.com", 80, false, PRIVACY_MODE_DISABLED);
+  QuicCryptoClientConfig::CachedState* state = config.LookupOrCreate(server_id);
+  // TODO(rch): Populate other fields of |state|.
+  vector<string> certs(1);
+  certs[0] = "Hello Cert";
+  state->SetProof(certs, "signature");
+  state->set_source_address_token("TOKEN");
+  state->SetProofValid();
+  EXPECT_EQ(1u, state->generation_counter());
+
+  // Verify LookupOrCreate returns the same data.
+  QuicCryptoClientConfig::CachedState* other = config.LookupOrCreate(server_id);
+
+  EXPECT_EQ(state, other);
+  EXPECT_EQ(1u, other->generation_counter());
+
+  // Clear the cached states.
+  config.ClearCachedStates();
+
+  // Verify LookupOrCreate doesn't have any data.
+  QuicCryptoClientConfig::CachedState* cleared_cache =
+      config.LookupOrCreate(server_id);
+
+  EXPECT_EQ(state, cleared_cache);
+  EXPECT_FALSE(cleared_cache->proof_valid());
+  EXPECT_TRUE(cleared_cache->server_config().empty());
+  EXPECT_TRUE(cleared_cache->certs().empty());
+  EXPECT_TRUE(cleared_cache->signature().empty());
+  EXPECT_EQ(2u, cleared_cache->generation_counter());
 }
 
 }  // namespace test

@@ -104,15 +104,9 @@ class ProfilePrefStoreManager {
       const scoped_refptr<base::SequencedTaskRunner>& io_task_runner);
 
  private:
-  class InitializeHashStoreObserver;
-
   // Returns a PrefHashStoreImpl for the managed profile. Should only be called
   // if |kPlatformSupportsPreferenceTracking|.
   scoped_ptr<PrefHashStoreImpl> GetPrefHashStoreImpl();
-
-  // Returns a PrefHashStore that is a copy of the current state of the real
-  // hash store.
-  scoped_ptr<PrefHashStore> CopyPrefHashStore();
 
   const base::FilePath profile_path_;
   const std::vector<PrefHashFilter::TrackedPreferenceMetadata>

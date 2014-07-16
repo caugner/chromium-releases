@@ -6,7 +6,7 @@
 #define ASH_SYSTEM_CHROMEOS_TRAY_CAPS_LOCK_H_
 
 #include "ash/system/tray/tray_image_item.h"
-#include "chromeos/ime/xkeyboard.h"
+#include "chromeos/ime/ime_keyboard.h"
 #include "ui/events/event_handler.h"
 
 namespace views {
@@ -15,19 +15,17 @@ class View;
 }
 
 namespace ash {
-namespace internal {
-
 class CapsLockDefaultView;
 
 class TrayCapsLock : public TrayImageItem,
                      public ui::EventHandler,
-                     public chromeos::input_method::XKeyboard::Observer {
+                     public chromeos::input_method::ImeKeyboard::Observer {
  public:
   explicit TrayCapsLock(SystemTray* system_tray);
   virtual ~TrayCapsLock();
 
  private:
-  // Overriden from chromeos::input_method::XKeyboard::Observer:
+  // Overriden from chromeos::input_method::ImeKeyboard::Observer:
   virtual void OnCapsLockChanged(bool enabled) OVERRIDE;
 
   // ui::EventHandler:
@@ -49,7 +47,6 @@ class TrayCapsLock : public TrayImageItem,
   DISALLOW_COPY_AND_ASSIGN(TrayCapsLock);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_CHROMEOS_TRAY_CAPS_LOCK_H_

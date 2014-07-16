@@ -2,17 +2,17 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import logging
 import sys
 import time
 
 from telemetry.core.util import TimeoutException
 from telemetry.page import page_measurement
+from telemetry.page import page_test
 
 class RasterizeAndRecordMicro(page_measurement.PageMeasurement):
   def __init__(self):
     super(RasterizeAndRecordMicro, self).__init__('', True)
-    self._compositing_features_enabled = False
+    self._chrome_branch_number = None
 
   @classmethod
   def AddCommandLineArgs(cls, parser):
@@ -48,23 +48,14 @@ class RasterizeAndRecordMicro(page_measurement.PageMeasurement):
     # TODO(vmpstr): Remove this temporary workaround when reference build has
     # been updated to branch 1713 or later.
     backend = browser._browser_backend # pylint: disable=W0212
-    if (not hasattr(backend, 'chrome_branch_number') or
-        (sys.platform != 'android' and backend.chrome_branch_number < 1713)):
-      return
-
-    # Check if the we actually have threaded forced compositing enabled.
-    system_info = browser.GetSystemInfo()
-    if (system_info.gpu.feature_status
-        and system_info.gpu.feature_status.get(
-            'compositing', None) == 'enabled_force_threaded'):
-      self._compositing_features_enabled = True
+    self._chrome_branch_number = getattr(backend, 'chrome_branch_number', None)
+    if (not self._chrome_branch_number or
+        (sys.platform != 'android' and self._chrome_branch_number < 1713)):
+      raise page_test.TestNotSupportedOnPlatformFailure(
+          'rasterize_and_record_micro requires Chrome branch 1713 '
+          'or later. Skipping measurement.')
 
   def MeasurePage(self, page, tab, results):
-    if not self._compositing_features_enabled:
-      logging.warning('Warning: RasterizeAndRecordMicro requires forced, '
-                      'threaded compositing and Chrome branch 1713 or newer.')
-      return
-
     try:
       tab.WaitForJavaScriptExpression("document.readyState == 'complete'", 10)
     except TimeoutException:
@@ -109,6 +100,19 @@ class RasterizeAndRecordMicro(page_measurement.PageMeasurement):
     results.Add('pixels_rasterized', 'pixels', pixels_rasterized)
     results.Add('rasterize_time', 'ms', rasterize_time)
 
+    # TODO(skyostil): Remove this temporary workaround when reference build has
+    # been updated to branch 1931 or later.
+    if ((self._chrome_branch_number and self._chrome_branch_number >= 1931) or
+        sys.platform == 'android'):
+      record_time_sk_null_canvas = data['record_time_sk_null_canvas_ms']
+      record_time_painting_disabled = data['record_time_painting_disabled_ms']
+      record_time_skrecord = data['record_time_skrecord_ms']
+      results.Add('record_time_sk_null_canvas', 'ms',
+          record_time_sk_null_canvas)
+      results.Add('record_time_painting_disabled', 'ms',
+          record_time_painting_disabled)
+      results.Add('record_time_skrecord', 'ms', record_time_skrecord)
+
     if self.options.report_detailed_results:
       pixels_rasterized_with_non_solid_color = \
           data['pixels_rasterized_with_non_solid_color']
@@ -131,4 +135,3 @@ class RasterizeAndRecordMicro(page_measurement.PageMeasurement):
           total_picture_layers_with_no_content)
       results.Add('total_picture_layers_off_screen', 'count',
           total_picture_layers_off_screen)
-

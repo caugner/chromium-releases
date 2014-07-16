@@ -33,6 +33,7 @@
 #include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "url/gurl.h"
@@ -237,7 +238,8 @@ class SearchTermsDataSnapshot : public SearchTermsData {
 
   virtual std::string GoogleBaseURLValue() const OVERRIDE;
   virtual std::string GetApplicationLocale() const OVERRIDE;
-  virtual base::string16 GetRlzParameterValue() const OVERRIDE;
+  virtual base::string16 GetRlzParameterValue(
+      bool from_app_list) const OVERRIDE;
   virtual std::string GetSearchClient() const OVERRIDE;
   virtual std::string NTPIsThemedParam() const OVERRIDE;
 
@@ -255,7 +257,7 @@ SearchTermsDataSnapshot::SearchTermsDataSnapshot(
     const SearchTermsData& search_terms_data)
     : google_base_url_value_(search_terms_data.GoogleBaseURLValue()),
       application_locale_(search_terms_data.GetApplicationLocale()),
-      rlz_parameter_value_(search_terms_data.GetRlzParameterValue()),
+      rlz_parameter_value_(search_terms_data.GetRlzParameterValue(false)),
       search_client_(search_terms_data.GetSearchClient()),
       ntp_is_themed_param_(search_terms_data.NTPIsThemedParam()) {}
 
@@ -270,7 +272,8 @@ std::string SearchTermsDataSnapshot::GetApplicationLocale() const {
   return application_locale_;
 }
 
-base::string16 SearchTermsDataSnapshot::GetRlzParameterValue() const {
+base::string16 SearchTermsDataSnapshot::GetRlzParameterValue(
+    bool from_app_list) const {
   return rlz_parameter_value_;
 }
 
@@ -509,7 +512,6 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
   // Otherwise, this is just low-quality noise.  In the cases where we've parsed
   // as UNKNOWN, we'll still show an accidental search infobar if need be.
   bool have_what_you_typed_match =
-      params->input.canonicalized_url().is_valid() &&
       (params->input.type() != AutocompleteInput::QUERY) &&
       ((params->input.type() != AutocompleteInput::UNKNOWN) ||
        (classifier.type() == VisitClassifier::UNVISITED_INTRANET) ||
@@ -701,8 +703,7 @@ void HistoryURLProvider::RunAutocompletePasses(
   const bool trim_http = !AutocompleteInput::HasHTTPScheme(input.text());
   // Don't do this for queries -- while we can sometimes mark up a match for
   // this, it's not what the user wants, and just adds noise.
-  if ((input.type() != AutocompleteInput::QUERY) &&
-      input.canonicalized_url().is_valid()) {
+  if (input.type() != AutocompleteInput::QUERY) {
     AutocompleteMatch what_you_typed(SuggestExactInput(
         input.text(), input.canonicalized_url(), trim_http));
     what_you_typed.relevance = CalculateRelevance(WHAT_YOU_TYPED, 0);
@@ -766,8 +767,7 @@ void HistoryURLProvider::RunAutocompletePasses(
 
   // Pass 2: Ask the history service to call us back on the history thread,
   // where we can read the full on-disk DB.
-  if (search_url_database_ &&
-      (input.matches_requested() == AutocompleteInput::ALL_MATCHES)) {
+  if (search_url_database_ && input.want_asynchronous_matches()) {
     done_ = false;
     params_ = params.release();  // This object will be destroyed in
                                  // QueryComplete() once we're done with it.
@@ -812,7 +812,7 @@ bool HistoryURLProvider::FixupExactSuggestion(
   }
 
   const GURL& url = match->destination_url;
-  const url_parse::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
+  const url::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
   // If the what-you-typed result looks like a single word (which can be
   // interpreted as an intranet address) followed by a pound sign ("#"),
   // leave the score for the url-what-you-typed result as is.  It will be
@@ -830,11 +830,11 @@ bool HistoryURLProvider::FixupExactSuggestion(
   // between the input "c" and the input "c#", both of which will have empty
   // reference fragments.)
   if ((type == UNVISITED_INTRANET) &&
-      (input.type() != AutocompleteInput::URL) &&
-      url.username().empty() && url.password().empty() && url.port().empty() &&
-      (url.path() == "/") && url.query().empty() &&
-      (parsed.CountCharactersBefore(url_parse::Parsed::REF, true) !=
-       parsed.CountCharactersBefore(url_parse::Parsed::REF, false))) {
+      (input.type() != AutocompleteInput::URL) && url.username().empty() &&
+      url.password().empty() && url.port().empty() && (url.path() == "/") &&
+      url.query().empty() &&
+      (parsed.CountCharactersBefore(url::Parsed::REF, true) !=
+       parsed.CountCharactersBefore(url::Parsed::REF, false))) {
     return false;
   }
 
@@ -862,7 +862,7 @@ bool HistoryURLProvider::CanFindIntranetURL(
   // input's text and parts between Parse() and here, it seems better to be
   // paranoid and check.
   if ((input.type() != AutocompleteInput::UNKNOWN) ||
-      !LowerCaseEqualsASCII(input.scheme(), content::kHttpScheme) ||
+      !LowerCaseEqualsASCII(input.scheme(), url::kHttpScheme) ||
       !input.parts().host.is_nonempty())
     return false;
   const std::string host(base::UTF16ToUTF8(
@@ -1148,16 +1148,20 @@ int HistoryURLProvider::CalculateRelevanceScoreUsingScoringParams(
 ACMatchClassifications HistoryURLProvider::ClassifyDescription(
     const base::string16& input_text,
     const base::string16& description) {
-  base::string16 clean_description = history::CleanUpTitleForMatching(
+  base::string16 clean_description = bookmark_utils::CleanUpTitleForMatching(
       description);
   history::TermMatches description_matches(SortAndDeoverlapMatches(
       history::MatchTermInString(input_text, clean_description, 0)));
   history::WordStarts description_word_starts;
   history::String16VectorFromString16(
       clean_description, false, &description_word_starts);
+  // If HistoryURL retrieves any matches (and hence we reach this code), we
+  // are guaranteed that the beginning of input_text must be a word break.
+  history::WordStarts offsets(1, 0u);
   description_matches =
       history::ScoredHistoryMatch::FilterTermMatchesByWordStarts(
-          description_matches, description_word_starts, 0, std::string::npos);
+          description_matches, offsets, description_word_starts, 0,
+          std::string::npos);
   return SpansFromTermMatch(
       description_matches, clean_description.length(), false);
 }

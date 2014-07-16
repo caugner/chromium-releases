@@ -8,17 +8,16 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "chrome/renderer/extensions/chrome_v8_context.h"
-#include "grit/renderer_resources.h"
+#include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDOMFileSystem.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 
 namespace extensions {
 
 FileBrowserHandlerCustomBindings::FileBrowserHandlerCustomBindings(
-    Dispatcher* dispatcher, ChromeV8Context* context)
-    : ChromeV8Extension(dispatcher, context) {
+    ScriptContext* context)
+    : ObjectBackedNativeHandler(context) {
   RouteFunction(
       "GetExternalFileEntry",
       base::Bind(&FileBrowserHandlerCustomBindings::GetExternalFileEntry,
@@ -47,8 +46,8 @@ void FileBrowserHandlerCustomBindings::GetExternalFileEntry(
     blink::WebDOMFileSystem::EntryType entry_type =
         is_directory ? blink::WebDOMFileSystem::EntryTypeDirectory
                      : blink::WebDOMFileSystem::EntryTypeFile;
-    blink::WebFrame* webframe =
-        blink::WebFrame::frameForContext(context()->v8_context());
+    blink::WebLocalFrame* webframe =
+        blink::WebLocalFrame::frameForContext(context()->v8_context());
     args.GetReturnValue().Set(
         blink::WebDOMFileSystem::create(
             webframe,

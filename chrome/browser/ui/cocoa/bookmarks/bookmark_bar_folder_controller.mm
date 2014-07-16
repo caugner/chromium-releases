@@ -7,8 +7,7 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_node_data.h"
+#import "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_button_cell.h"
@@ -18,6 +17,8 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_folder_target.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_node_data.h"
 #include "ui/base/theme_provider.h"
 
 using bookmarks::kBookmarkBarMenuCornerRadius;
@@ -1469,7 +1470,9 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   std::vector<const BookmarkNode*> dragDataNodes;
   BookmarkNodeData dragData;
   if (dragData.ReadFromClipboard(ui::CLIPBOARD_TYPE_DRAG)) {
-    std::vector<const BookmarkNode*> nodes(dragData.GetNodes(profile_));
+    BookmarkModel* bookmarkModel = [self bookmarkModel];
+    std::vector<const BookmarkNode*> nodes(
+        dragData.GetNodes(bookmarkModel, profile_->GetPath()));
     dragDataNodes.assign(nodes.begin(), nodes.end());
   }
   return dragDataNodes;

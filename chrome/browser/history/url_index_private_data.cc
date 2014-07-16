@@ -14,6 +14,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_util.h"
+#include "base/i18n/break_iterator.h"
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
@@ -21,14 +22,12 @@
 #include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/url_prefix.h"
-#include "chrome/browser/bookmarks/bookmark_service.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/in_memory_url_index.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
+#include "components/bookmarks/core/browser/bookmark_service.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
 #include "net/base/net_util.h"
 
 #if defined(USE_SYSTEM_PROTOBUF)
@@ -755,10 +754,12 @@ void URLIndexPrivateData::AddRowWordsToIndex(const URLRow& row,
   HistoryID history_id = static_cast<HistoryID>(row.id());
   // Split URL into individual, unique words then add in the title words.
   const GURL& gurl(row.url());
-  const base::string16& url = CleanUpUrlForMatching(gurl, languages);
+  const base::string16& url =
+      bookmark_utils::CleanUpUrlForMatching(gurl, languages, NULL);
   String16Set url_words = String16SetFromString16(url,
       word_starts ? &word_starts->url_word_starts_ : NULL);
-  const base::string16& title = CleanUpTitleForMatching(row.title());
+  const base::string16& title =
+      bookmark_utils::CleanUpTitleForMatching(row.title());
   String16Set title_words = String16SetFromString16(title,
       word_starts ? &word_starts->title_word_starts_ : NULL);
   String16Set words;
@@ -1236,9 +1237,11 @@ bool URLIndexPrivateData::RestoreWordStartsMap(
          iter != history_info_map_.end(); ++iter) {
       RowWordStarts word_starts;
       const URLRow& row(iter->second.url_row);
-      const base::string16& url = CleanUpUrlForMatching(row.url(), languages);
+      const base::string16& url = bookmark_utils::CleanUpUrlForMatching(
+          row.url(), languages, NULL);
       String16VectorFromString16(url, false, &word_starts.url_word_starts_);
-      const base::string16& title = CleanUpTitleForMatching(row.title());
+      const base::string16& title =
+          bookmark_utils::CleanUpTitleForMatching(row.title());
       String16VectorFromString16(title, false, &word_starts.title_word_starts_);
       word_starts_map_[iter->first] = word_starts;
     }
@@ -1283,7 +1286,24 @@ URLIndexPrivateData::AddHistoryMatch::AddHistoryMatch(
     bookmark_service_(bookmark_service),
     lower_string_(lower_string),
     lower_terms_(lower_terms),
-    now_(now) {}
+    now_(now) {
+  // Calculate offsets for each term.  For instance, the offset for
+  // ".net" should be 1, indicating that the actual word-part of the term
+  // starts at offset 1.
+  lower_terms_to_word_starts_offsets_.resize(lower_terms_.size(), 0u);
+  for (size_t i = 0; i < lower_terms_.size(); ++i) {
+    base::i18n::BreakIterator iter(lower_terms_[i],
+                                   base::i18n::BreakIterator::BREAK_WORD);
+    // If the iterator doesn't work, assume an offset of 0.
+    if (!iter.Init())
+      continue;
+    // Find the first word start.
+    while (iter.Advance() && !iter.IsWord()) {}
+    if (iter.IsWord())
+      lower_terms_to_word_starts_offsets_[i] = iter.prev();
+    // Else: the iterator didn't find a word break.  Assume an offset of 0.
+  }
+}
 
 URLIndexPrivateData::AddHistoryMatch::~AddHistoryMatch() {}
 
@@ -1298,8 +1318,8 @@ void URLIndexPrivateData::AddHistoryMatch::operator()(
         private_data_.word_starts_map_.find(history_id);
     DCHECK(starts_pos != private_data_.word_starts_map_.end());
     ScoredHistoryMatch match(hist_item, visits, languages_, lower_string_,
-                             lower_terms_, starts_pos->second, now_,
-                             bookmark_service_);
+                             lower_terms_, lower_terms_to_word_starts_offsets_,
+                             starts_pos->second, now_, bookmark_service_);
     if (match.raw_score() > 0)
       scored_matches_.push_back(match);
   }

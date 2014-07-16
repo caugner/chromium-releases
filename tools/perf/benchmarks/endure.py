@@ -29,35 +29,35 @@ class _EndureBenchmark(test.Test):
 
 
 class EndureCalendarForwardBackward(_EndureBenchmark):
-  page_set = 'page_sets/calendar_forward_backward.json'
+  page_set = 'page_sets/calendar_forward_backward.py'
 
 
 class EndureBrowserControl(_EndureBenchmark):
-  page_set = 'page_sets/browser_control.json'
+  page_set = 'page_sets/browser_control.py'
 
 
 class EndureBrowserControlClick(_EndureBenchmark):
-  page_set = 'page_sets/browser_control_click.json'
+  page_set = 'page_sets/browser_control_click.py'
 
 
 class EndureGmailAltThreadlistConversation(_EndureBenchmark):
-  page_set = 'page_sets/gmail_alt_threadlist_conversation.json'
+  page_set = 'page_sets/gmail_alt_threadlist_conversation.py'
 
 
 class EndureGmailAltTwoLabels(_EndureBenchmark):
-  page_set = 'page_sets/gmail_alt_two_labels.json'
+  page_set = 'page_sets/gmail_alt_two_labels.py'
 
 
 class EndureGmailExpandCollapseConversation(_EndureBenchmark):
-  page_set = 'page_sets/gmail_expand_collapse_conversation.json'
+  page_set = 'page_sets/gmail_expand_collapse_conversation.py'
 
 
 class EndureIndexedDBOffline(_EndureBenchmark):
-  page_set = 'page_sets/indexeddb_offline.json'
+  page_set = 'page_sets/indexeddb_offline.py'
 
 
 class EndurePlusAltPostsPhotos(_EndureBenchmark):
-  page_set = 'page_sets/plus_alt_posts_photos.json'
+  page_set = 'page_sets/plus_alt_posts_photos.py'
 
 
 class EndureGmailRefresh(test.Test):
@@ -67,4 +67,4 @@ class EndureGmailRefresh(test.Test):
       'page_repeat': 20,
       'perf_stats_interval': 1
   }
-  page_set = 'page_sets/endure_gmail_refresh.json'
+  page_set = 'page_sets/endure_gmail_refresh.py'

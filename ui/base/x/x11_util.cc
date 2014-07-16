@@ -19,9 +19,9 @@
 
 #include <X11/extensions/shape.h>
 #include <X11/extensions/XInput2.h>
+#include <X11/Xcursor/Xcursor.h>
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -33,6 +33,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/sys_byteorder.h"
 #include "base/threading/thread.h"
+#include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkPostConfig.h"
 #include "ui/base/x/x11_menu_list.h"
@@ -48,6 +49,7 @@
 #include "ui/gfx/point_conversions.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/skia_util.h"
 #include "ui/gfx/x/x11_error_tracker.h"
 
 #if defined(OS_FREEBSD)
@@ -55,46 +57,9 @@
 #include <sys/types.h>
 #endif
 
-#if defined(USE_AURA)
-#include <X11/Xcursor/Xcursor.h>
-#include "skia/ext/image_operations.h"
-#include "ui/gfx/skia_util.h"
-#endif
-
-#if defined(TOOLKIT_GTK)
-#include <gdk/gdk.h>
-#include <gtk/gtk.h>
-#include "ui/gfx/gdk_compat.h"
-#include "ui/gfx/gtk_compat.h"
-#endif
-
 namespace ui {
 
 namespace {
-
-// Used to cache the XRenderPictFormat for a visual/display pair.
-struct CachedPictFormat {
-  bool equals(XDisplay* display, Visual* visual) const {
-    return display == this->display && visual == this->visual;
-  }
-
-  XDisplay* display;
-  Visual* visual;
-  XRenderPictFormat* format;
-};
-
-typedef std::list<CachedPictFormat> CachedPictFormats;
-
-// Returns the cache of pict formats.
-CachedPictFormats* get_cached_pict_formats() {
-  static CachedPictFormats* formats = NULL;
-  if (!formats)
-    formats = new CachedPictFormats();
-  return formats;
-}
-
-// Maximum number of CachedPictFormats we keep around.
-const size_t kMaxCacheSize = 5;
 
 int DefaultX11ErrorHandler(XDisplay* d, XErrorEvent* e) {
   if (base::MessageLoop::current()) {
@@ -151,14 +116,14 @@ class XCursorCache {
     std::pair<std::map<int, ::Cursor>::iterator, bool> it = cache_.insert(
         std::make_pair(cursor_shape, 0));
     if (it.second) {
-      XDisplay* display = base::MessagePumpForUI::GetDefaultXDisplay();
+      XDisplay* display = gfx::GetXDisplay();
       it.first->second = XCreateFontCursor(display, cursor_shape);
     }
     return it.first->second;
   }
 
   void Clear() {
-    XDisplay* display = base::MessagePumpForUI::GetDefaultXDisplay();
+    XDisplay* display = gfx::GetXDisplay();
     for (std::map<int, ::Cursor>::iterator it =
         cache_.begin(); it != cache_.end(); ++it) {
       XFreeCursor(display, it->second);
@@ -175,7 +140,6 @@ class XCursorCache {
 
 XCursorCache* cursor_cache = NULL;
 
-#if defined(USE_AURA)
 // A process wide singleton cache for custom X cursors.
 class XCustomCursorCache {
  public:
@@ -201,6 +165,10 @@ class XCustomCursorCache {
 
   void Clear() {
     cache_.clear();
+  }
+
+  const XcursorImage* GetXcursorImage(::Cursor cursor) const {
+    return cache_.find(cursor)->second->image();
   }
 
  private:
@@ -235,6 +203,10 @@ class XCustomCursorCache {
       return false;
     }
 
+    const XcursorImage* image() const {
+      return image_;
+    };
+
    private:
     XcursorImage* image_;
     int ref_;
@@ -251,7 +223,6 @@ class XCustomCursorCache {
   std::map< ::Cursor, XCustomCursor*> cache_;
   DISALLOW_COPY_AND_ASSIGN(XCustomCursorCache);
 };
-#endif  // defined(USE_AURA)
 
 bool IsShapeAvailable() {
   int dummy;
@@ -261,21 +232,7 @@ bool IsShapeAvailable() {
 
 }
 
-// A list of bogus sizes in mm that X detects that should be ignored.
-// See crbug.com/136533. The first element maintains the minimum
-// size required to be valid size.
-const unsigned long kInvalidDisplaySizeList[][2] = {
-  {40, 30},
-  {50, 40},
-  {160, 90},
-  {160, 100},
-};
-
 }  // namespace
-
-bool XDisplayExists() {
-  return (gfx::GetXDisplay() != NULL);
-}
 
 bool IsXInput2Available() {
   return DeviceDataManager::GetInstance()->IsXInput2Available();
@@ -351,24 +308,13 @@ SharedMemorySupport QuerySharedMemorySupport(XDisplay* dpy) {
   return shared_memory_support;
 }
 
-bool QueryRenderSupport(XDisplay* dpy) {
-  static bool render_supported = false;
-  static bool render_supported_cached = false;
-
-  if (render_supported_cached)
-    return render_supported;
-
+bool QueryRenderSupport(Display* dpy) {
+  int dummy;
   // We don't care about the version of Xrender since all the features which
   // we use are included in every version.
-  int dummy;
-  render_supported = XRenderQueryExtension(dpy, &dummy, &dummy);
-  render_supported_cached = true;
+  static bool render_supported = XRenderQueryExtension(dpy, &dummy, &dummy);
 
   return render_supported;
-}
-
-int GetDefaultScreen(XDisplay* display) {
-  return XDefaultScreen(display);
 }
 
 ::Cursor GetXCursor(int cursor_shape) {
@@ -377,12 +323,6 @@ int GetDefaultScreen(XDisplay* display) {
   return cursor_cache->GetCursor(cursor_shape);
 }
 
-void ResetXCursorCache() {
-  delete cursor_cache;
-  cursor_cache = NULL;
-}
-
-#if defined(USE_AURA)
 ::Cursor CreateReffedCustomXCursor(XcursorImage* image) {
   return XCustomCursorCache::GetInstance()->InstallCustomCursor(image);
 }
@@ -508,7 +448,6 @@ int CoalescePendingMotionEvents(const XEvent* xev,
   }
   return num_coalesced;
 }
-#endif
 
 void HideHostCursor() {
   CR_DEFINE_STATIC_LOCAL(XScopedCursor, invisible_cursor,
@@ -539,33 +478,6 @@ XID GetX11RootWindow() {
 bool GetCurrentDesktop(int* desktop) {
   return GetIntProperty(GetX11RootWindow(), "_NET_CURRENT_DESKTOP", desktop);
 }
-
-#if defined(TOOLKIT_GTK)
-XID GetX11WindowFromGtkWidget(GtkWidget* widget) {
-  return GDK_WINDOW_XID(gtk_widget_get_window(widget));
-}
-
-XID GetX11WindowFromGdkWindow(GdkWindow* window) {
-  return GDK_WINDOW_XID(window);
-}
-
-GtkWindow* GetGtkWindowFromX11Window(XID xid) {
-  GdkWindow* gdk_window =
-      gdk_x11_window_lookup_for_display(gdk_display_get_default(), xid);
-  if (!gdk_window)
-    return NULL;
-  GtkWindow* gtk_window = NULL;
-  gdk_window_get_user_data(gdk_window,
-                           reinterpret_cast<gpointer*>(&gtk_window));
-  if (!gtk_window)
-    return NULL;
-  return gtk_window;
-}
-
-void* GetVisualFromGtkWidget(GtkWidget* widget) {
-  return GDK_VISUAL_XVISUAL(gtk_widget_get_visual(widget));
-}
-#endif  // defined(TOOLKIT_GTK)
 
 void SetHideTitlebarWhenMaximizedProperty(XID window,
                                           HideTitlebarWhenMaximized property) {
@@ -694,8 +606,11 @@ bool WindowContainsPoint(XID window, gfx::Point screen_loc) {
                                                   rectangle_kind[kind_index],
                                                   &shape_rects_size,
                                                   &dummy);
-    if (!shape_rects)
-      continue;
+    if (!shape_rects) {
+      // The shape is empty. This can occur when |window| is minimized.
+      DCHECK_EQ(0, shape_rects_size);
+      return false;
+    }
     bool is_in_shape_rects = false;
     for (int i = 0; i < shape_rects_size; ++i) {
       // The ShapeInput and ShapeBounding rects are to be in window space, so we
@@ -983,13 +898,8 @@ bool SetStringProperty(XID window,
 }
 
 Atom GetAtom(const char* name) {
-#if defined(TOOLKIT_GTK)
-  return gdk_x11_get_xatom_by_name_for_display(
-      gdk_display_get_default(), name);
-#else
   // TODO(derat): Cache atoms to avoid round-trips to the server.
   return XInternAtom(gfx::GetXDisplay(), name, false);
-#endif
 }
 
 void SetWindowClassHint(XDisplay* display,
@@ -1014,28 +924,6 @@ void SetWindowRole(XDisplay* display, XID window, const std::string& role) {
                     PropModeReplace,
                     reinterpret_cast<unsigned char*>(role_c),
                     role.size());
-  }
-}
-
-XID GetParentWindow(XID window) {
-  XID root = None;
-  XID parent = None;
-  XID* children = NULL;
-  unsigned int num_children = 0;
-  XQueryTree(gfx::GetXDisplay(), window, &root, &parent, &children, &num_children);
-  if (children)
-    XFree(children);
-  return parent;
-}
-
-XID GetHighestAncestorWindow(XID window, XID root) {
-  while (true) {
-    XID parent = GetParentWindow(window);
-    if (parent == None)
-      return None;
-    if (parent == root)
-      return window;
-    window = parent;
   }
 }
 
@@ -1185,45 +1073,6 @@ bool GetXWindowStack(Window window, std::vector<XID>* windows) {
   return result;
 }
 
-void RestackWindow(XID window, XID sibling, bool above) {
-  XWindowChanges changes;
-  changes.sibling = sibling;
-  changes.stack_mode = above ? Above : Below;
-  XConfigureWindow(gfx::GetXDisplay(), window, CWSibling | CWStackMode, &changes);
-}
-
-XSharedMemoryId AttachSharedMemory(XDisplay* display, int shared_memory_key) {
-  DCHECK(QuerySharedMemorySupport(display));
-
-  XShmSegmentInfo shminfo;
-  memset(&shminfo, 0, sizeof(shminfo));
-  shminfo.shmid = shared_memory_key;
-
-  // This function is only called if QuerySharedMemorySupport returned true. In
-  // which case we've already succeeded in having the X server attach to one of
-  // our shared memory segments.
-  if (!XShmAttach(display, &shminfo)) {
-    LOG(WARNING) << "X failed to attach to shared memory segment "
-                 << shminfo.shmid;
-    NOTREACHED();
-  } else {
-    VLOG(1) << "X attached to shared memory segment " << shminfo.shmid;
-  }
-
-  return shminfo.shmseg;
-}
-
-void DetachSharedMemory(XDisplay* display, XSharedMemoryId shmseg) {
-  DCHECK(QuerySharedMemorySupport(display));
-
-  XShmSegmentInfo shminfo;
-  memset(&shminfo, 0, sizeof(shminfo));
-  shminfo.shmseg = shmseg;
-
-  if (!XShmDetach(display, &shminfo))
-    NOTREACHED();
-}
-
 bool CopyAreaToCanvas(XID drawable,
                       gfx::Rect source_bounds,
                       gfx::Point dest_offset,
@@ -1270,21 +1119,6 @@ bool CopyAreaToCanvas(XID drawable,
   }
 
   return true;
-}
-
-XID CreatePictureFromSkiaPixmap(XDisplay* display, XID pixmap) {
-  XID picture = XRenderCreatePicture(
-      display, pixmap, GetRenderARGB32Format(display), 0, NULL);
-
-  return picture;
-}
-
-void FreePicture(XDisplay* display, XID picture) {
-  XRenderFreePicture(display, picture);
-}
-
-void FreePixmap(XDisplay* display, XID pixmap) {
-  XFreePixmap(display, pixmap);
 }
 
 bool GetWindowManagerName(std::string* wm_name) {
@@ -1351,29 +1185,6 @@ WindowManagerName GuessWindowManager() {
   return WM_UNKNOWN;
 }
 
-bool ChangeWindowDesktop(XID window, XID destination) {
-  int desktop;
-  if (!GetWindowDesktop(destination, &desktop))
-    return false;
-
-  // If |window| is sticky, use the current desktop.
-  if (desktop == kAllDesktops &&
-      !GetCurrentDesktop(&desktop))
-    return false;
-
-  XEvent event;
-  event.xclient.type = ClientMessage;
-  event.xclient.window = window;
-  event.xclient.message_type = GetAtom("_NET_WM_DESKTOP");
-  event.xclient.format = 32;
-  event.xclient.data.l[0] = desktop;
-  event.xclient.data.l[1] = 1;  // source indication
-
-  int result = XSendEvent(gfx::GetXDisplay(), GetX11RootWindow(), False,
-                          SubstructureNotifyMask, &event);
-  return result == Success;
-}
-
 void SetDefaultX11ErrorHandlers() {
   SetX11ErrorHandlers(NULL, NULL);
 }
@@ -1404,17 +1215,6 @@ bool IsX11WindowFullScreen(XID window) {
   if (!ui::GetWindowRect(window, &window_rect))
     return false;
 
-#if defined(TOOLKIT_GTK)
-  // As the last resort, check if the window size is as large as the main
-  // screen.
-  GdkRectangle monitor_rect;
-  gdk_screen_get_monitor_geometry(gdk_screen_get_default(), 0, &monitor_rect);
-
-  return monitor_rect.x == window_rect.x() &&
-         monitor_rect.y == window_rect.y() &&
-         monitor_rect.width == window_rect.width() &&
-         monitor_rect.height == window_rect.height();
-#else
   // We can't use gfx::Screen here because we don't have an aura::Window. So
   // instead just look at the size of the default display.
   //
@@ -1425,26 +1225,6 @@ bool IsX11WindowFullScreen(XID window) {
   int width = WidthOfScreen(screen);
   int height = HeightOfScreen(screen);
   return window_rect.size() == gfx::Size(width, height);
-#endif
-}
-
-bool IsXDisplaySizeBlackListed(unsigned long mm_width,
-                               unsigned long mm_height) {
-  // Ignore if the reported display is smaller than minimum size.
-  if (mm_width <= kInvalidDisplaySizeList[0][0] ||
-      mm_height <= kInvalidDisplaySizeList[0][1]) {
-    LOG(WARNING) << "Smaller than minimum display size";
-    return true;
-  }
-  for (unsigned long i = 1 ; i < arraysize(kInvalidDisplaySizeList); ++i) {
-    const unsigned long* size = kInvalidDisplaySizeList[i];
-    if (mm_width == size[0] && mm_height == size[1]) {
-      LOG(WARNING) << "Black listed display size detected:"
-                   << size[0] << "x" << size[1];
-      return true;
-    }
-  }
-  return false;
 }
 
 const unsigned char* XRefcountedMemory::front() const {
@@ -1494,6 +1274,18 @@ void XScopedCursor::reset(::Cursor cursor) {
   cursor_ = cursor;
 }
 
+namespace test {
+
+void ResetXCursorCache() {
+  delete cursor_cache;
+  cursor_cache = NULL;
+}
+
+const XcursorImage* GetCachedXcursorImage(::Cursor cursor) {
+  return XCustomCursorCache::GetInstance()->GetXcursorImage(cursor);
+}
+}
+
 // ----------------------------------------------------------------------------
 // These functions are declared in x11_util_internal.h because they require
 // XLib.h to be included, and it conflicts with many other headers.
@@ -1528,43 +1320,6 @@ XRenderPictFormat* GetRenderARGB32Format(XDisplay* dpy) {
     // that they must support an ARGB32 format, so we can always return that.
     pictformat = XRenderFindStandardFormat(dpy, PictStandardARGB32);
     CHECK(pictformat) << "XRENDER ARGB32 not supported.";
-  }
-
-  return pictformat;
-}
-
-XRenderPictFormat* GetRenderVisualFormat(XDisplay* dpy, Visual* visual) {
-  DCHECK(QueryRenderSupport(dpy));
-
-  CachedPictFormats* formats = get_cached_pict_formats();
-
-  for (CachedPictFormats::const_iterator i = formats->begin();
-       i != formats->end(); ++i) {
-    if (i->equals(dpy, visual))
-      return i->format;
-  }
-
-  // Not cached, look up the value.
-  XRenderPictFormat* pictformat = XRenderFindVisualFormat(dpy, visual);
-  CHECK(pictformat) << "XRENDER does not support default visual";
-
-  // And store it in the cache.
-  CachedPictFormat cached_value;
-  cached_value.visual = visual;
-  cached_value.display = dpy;
-  cached_value.format = pictformat;
-  formats->push_front(cached_value);
-
-  if (formats->size() == kMaxCacheSize) {
-    formats->pop_back();
-    // We should really only have at most 2 display/visual combinations:
-    // one for normal browser windows, and possibly another for an argb window
-    // created to display a menu.
-    //
-    // If we get here it's not fatal, we just need to make sure we aren't
-    // always blowing away the cache. If we are, then we should figure out why
-    // and make it bigger.
-    NOTREACHED();
   }
 
   return pictformat;

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/chrome_extensions_browser_client.h"
 
+#include "apps/common/api/generated_api.h"
 #include "base/command_line.h"
 #include "base/version.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
@@ -11,11 +12,13 @@
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/preference/chrome_direct_setting.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
+#include "chrome/browser/extensions/api/runtime/chrome_runtime_api_delegate.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/chrome_app_sorting.h"
 #include "chrome/browser/extensions/chrome_extension_host_delegate.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/extensions/url_request_util.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -36,6 +39,7 @@
 
 #if defined(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/api/chrome_extensions_api_client.h"
+#include "chrome/browser/extensions/api/content_settings/content_settings_service.h"
 #endif
 
 namespace extensions {
@@ -110,9 +114,46 @@ bool ChromeExtensionsBrowserClient::CanExtensionCrossIncognito(
       || util::CanCrossIncognito(extension, context);
 }
 
+bool ChromeExtensionsBrowserClient::IsWebViewRequest(
+    net::URLRequest* request) const {
+  return url_request_util::IsWebViewRequest(request);
+}
+
+net::URLRequestJob*
+ChromeExtensionsBrowserClient::MaybeCreateResourceBundleRequestJob(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
+    const base::FilePath& directory_path,
+    const std::string& content_security_policy,
+    bool send_cors_header) {
+  return url_request_util::MaybeCreateURLRequestResourceBundleJob(
+      request,
+      network_delegate,
+      directory_path,
+      content_security_policy,
+      send_cors_header);
+}
+
+bool ChromeExtensionsBrowserClient::AllowCrossRendererResourceLoad(
+    net::URLRequest* request,
+    bool is_incognito,
+    const Extension* extension,
+    InfoMap* extension_info_map) {
+  return url_request_util::AllowCrossRendererResourceLoad(
+      request, is_incognito, extension, extension_info_map);
+}
+
 PrefService* ChromeExtensionsBrowserClient::GetPrefServiceForContext(
     content::BrowserContext* context) {
   return static_cast<Profile*>(context)->GetPrefs();
+}
+
+void ChromeExtensionsBrowserClient::GetEarlyExtensionPrefsObservers(
+    content::BrowserContext* context,
+    std::vector<ExtensionPrefsObserver*>* observers) const {
+#if defined(ENABLE_EXTENSIONS)
+  observers->push_back(ContentSettingsService::Get(context));
+#endif
 }
 
 bool ChromeExtensionsBrowserClient::DeferLoadingBackgroundHosts(
@@ -182,10 +223,6 @@ bool ChromeExtensionsBrowserClient::DidVersionUpdate(
   return last_version.IsOlderThan(current_version);
 }
 
-void ChromeExtensionsBrowserClient::PermitExternalProtocolHandler() {
-  ExternalProtocolHandler::PermitLaunchUrl();
-}
-
 scoped_ptr<AppSorting> ChromeExtensionsBrowserClient::CreateAppSorting() {
   return scoped_ptr<AppSorting>(new ChromeAppSorting());
 }
@@ -211,10 +248,6 @@ void ChromeExtensionsBrowserClient::RegisterExtensionFunctions(
 // ChromeExtensionsBrowserClient and refactor so this ifdef isn't necessary.
 // See http://crbug.com/349436
 #if defined(ENABLE_EXTENSIONS)
-  // WebRequest.
-  registry->RegisterFunction<WebRequestAddEventListener>();
-  registry->RegisterFunction<WebRequestEventHandled>();
-
   // Preferences.
   registry->RegisterFunction<extensions::GetPreferenceFunction>();
   registry->RegisterFunction<extensions::SetPreferenceFunction>();
@@ -228,10 +261,20 @@ void ChromeExtensionsBrowserClient::RegisterExtensionFunctions(
   registry->RegisterFunction<
       extensions::chromedirectsetting::ClearDirectSettingFunction>();
 
-  // Generated APIs.
+  // Generated APIs from lower-level modules.
   extensions::core_api::GeneratedFunctionRegistry::RegisterAll(registry);
+  apps::api::GeneratedFunctionRegistry::RegisterAll(registry);
+
+  // Generated APIs from Chrome.
   extensions::api::GeneratedFunctionRegistry::RegisterAll(registry);
 #endif
+}
+
+scoped_ptr<extensions::RuntimeAPIDelegate>
+ChromeExtensionsBrowserClient::CreateRuntimeAPIDelegate(
+    content::BrowserContext* context) const {
+  return scoped_ptr<extensions::RuntimeAPIDelegate>(
+      new ChromeRuntimeAPIDelegate(context));
 }
 
 }  // namespace extensions

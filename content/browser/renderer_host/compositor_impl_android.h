@@ -46,8 +46,12 @@ class CONTENT_EXPORT CompositorImpl
 
   static bool IsInitialized();
 
-  // Returns the Java Surface object for a given view surface id.
-  static jobject GetSurface(int surface_id);
+  // Creates a surface texture and returns a surface texture id. Returns -1 on
+  // failure.
+  static int CreateSurfaceTexture(int child_process_id);
+
+  // Destroy all surface textures associated with |child_process_id|.
+  static void DestroyAllSurfaceTextures(int child_process_id);
 
   // Compositor implementation.
   virtual void SetRootLayer(scoped_refptr<cc::Layer> root) OVERRIDE;
@@ -77,13 +81,11 @@ class CONTENT_EXPORT CompositorImpl
                                    float page_scale) OVERRIDE {}
   virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface(bool fallback)
       OVERRIDE;
-  virtual void DidInitializeOutputSurface(bool success) OVERRIDE {}
+  virtual void DidInitializeOutputSurface() OVERRIDE {}
   virtual void WillCommit() OVERRIDE {}
   virtual void DidCommit() OVERRIDE;
   virtual void DidCommitAndDrawFrame() OVERRIDE {}
   virtual void DidCompleteSwapBuffers() OVERRIDE;
-  virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProvider() OVERRIDE;
 
   // LayerTreeHostSingleThreadClient implementation.
   virtual void ScheduleComposite() OVERRIDE;
@@ -113,8 +115,6 @@ class CONTENT_EXPORT CompositorImpl
   int surface_id_;
 
   CompositorClient* client_;
-
-  scoped_refptr<cc::ContextProvider> null_offscreen_context_provider_;
 
   typedef base::ScopedPtrHashMap<cc::UIResourceId, cc::UIResourceClient>
       UIResourceMap;

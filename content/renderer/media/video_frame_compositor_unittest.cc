@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "cc/layers/video_frame_provider.h"
 #include "content/renderer/media/video_frame_compositor.h"
 #include "media/base/video_frame.h"
@@ -18,28 +17,28 @@ class VideoFrameCompositorTest : public testing::Test,
  public:
   VideoFrameCompositorTest()
       : compositor_(new VideoFrameCompositor(
-            message_loop_.message_loop_proxy(),
             base::Bind(&VideoFrameCompositorTest::NaturalSizeChanged,
+                       base::Unretained(this)),
+            base::Bind(&VideoFrameCompositorTest::OpacityChanged,
                        base::Unretained(this)))),
         did_receive_frame_count_(0),
-        natural_size_changed_count_(0) {
-    provider()->SetVideoFrameProviderClient(this);
+        natural_size_changed_count_(0),
+        opacity_changed_count_(0),
+        opaque_(false) {
+    compositor_->SetVideoFrameProviderClient(this);
   }
 
   virtual ~VideoFrameCompositorTest() {
-    provider()->SetVideoFrameProviderClient(NULL);
-    compositor_.reset();
-    message_loop_.RunUntilIdle();
+    compositor_->SetVideoFrameProviderClient(NULL);
   }
 
-  base::MessageLoop* message_loop() { return &message_loop_; }
   VideoFrameCompositor* compositor() { return compositor_.get(); }
-  cc::VideoFrameProvider* provider() {
-    return compositor_->GetVideoFrameProvider();
-  }
   int did_receive_frame_count() { return did_receive_frame_count_; }
   int natural_size_changed_count() { return natural_size_changed_count_; }
   gfx::Size natural_size() { return natural_size_; }
+
+  int opacity_changed_count() { return opacity_changed_count_; }
+  bool opaque() { return opaque_; }
 
  private:
   // cc::VideoFrameProvider::Client implementation.
@@ -54,31 +53,33 @@ class VideoFrameCompositorTest : public testing::Test,
     natural_size_ = natural_size;
   }
 
-  base::MessageLoop message_loop_;
+  void OpacityChanged(bool opaque) {
+    ++opacity_changed_count_;
+    opaque_ = opaque;
+  }
+
   scoped_ptr<VideoFrameCompositor> compositor_;
   int did_receive_frame_count_;
   int natural_size_changed_count_;
   gfx::Size natural_size_;
+  int opacity_changed_count_;
+  bool opaque_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoFrameCompositorTest);
 };
 
 TEST_F(VideoFrameCompositorTest, InitialValues) {
-  EXPECT_TRUE(compositor()->GetVideoFrameProvider());
   EXPECT_FALSE(compositor()->GetCurrentFrame());
-  EXPECT_EQ(0u, compositor()->GetFramesDroppedBeforeCompositorWasNotified());
 }
 
 TEST_F(VideoFrameCompositorTest, UpdateCurrentFrame) {
   scoped_refptr<VideoFrame> expected = VideoFrame::CreateEOSFrame();
 
+  // Should notify compositor synchronously.
+  EXPECT_EQ(0, did_receive_frame_count());
   compositor()->UpdateCurrentFrame(expected);
   scoped_refptr<VideoFrame> actual = compositor()->GetCurrentFrame();
   EXPECT_EQ(expected, actual);
-
-  // Should notify compositor asynchronously.
-  EXPECT_EQ(0, did_receive_frame_count());
-  message_loop()->RunUntilIdle();
   EXPECT_EQ(1, did_receive_frame_count());
 }
 
@@ -125,38 +126,37 @@ TEST_F(VideoFrameCompositorTest, NaturalSizeChanged) {
   EXPECT_EQ(2, natural_size_changed_count());
 }
 
-TEST_F(VideoFrameCompositorTest, GetFramesDroppedBeforeCompositorWasNotified) {
-  scoped_refptr<VideoFrame> frame = VideoFrame::CreateEOSFrame();
+TEST_F(VideoFrameCompositorTest, OpacityChanged) {
+  gfx::Size size(8, 8);
+  gfx::Rect rect(gfx::Point(0, 0), size);
+  scoped_refptr<VideoFrame> opaque_frame = VideoFrame::CreateFrame(
+      VideoFrame::YV12, size, rect, size, base::TimeDelta());
+  scoped_refptr<VideoFrame> not_opaque_frame = VideoFrame::CreateFrame(
+      VideoFrame::YV12A, size, rect, size, base::TimeDelta());
 
-  compositor()->UpdateCurrentFrame(frame);
-  EXPECT_EQ(0, did_receive_frame_count());
-  EXPECT_EQ(0u, compositor()->GetFramesDroppedBeforeCompositorWasNotified());
+  // Initial expectations.
+  EXPECT_FALSE(opaque());
+  EXPECT_EQ(0, opacity_changed_count());
 
-  // Should not increment if we finished notifying the compositor.
-  //
-  // This covers the normal scenario where the compositor is getting
-  // notifications in a timely manner.
-  message_loop()->RunUntilIdle();
-  compositor()->UpdateCurrentFrame(frame);
-  EXPECT_EQ(1, did_receive_frame_count());
-  EXPECT_EQ(0u, compositor()->GetFramesDroppedBeforeCompositorWasNotified());
+  // Callback is fired for the first frame.
+  compositor()->UpdateCurrentFrame(not_opaque_frame);
+  EXPECT_FALSE(opaque());
+  EXPECT_EQ(1, opacity_changed_count());
 
-  // Should increment if we didn't notify the compositor.
-  //
-  // This covers the scenario where the compositor is falling behind.
-  // Consider it dropped.
-  message_loop()->RunUntilIdle();
-  compositor()->UpdateCurrentFrame(frame);
-  compositor()->UpdateCurrentFrame(frame);
-  EXPECT_EQ(2, did_receive_frame_count());
-  EXPECT_EQ(1u, compositor()->GetFramesDroppedBeforeCompositorWasNotified());
+  // Callback shouldn't be first subsequent times with same opaqueness.
+  compositor()->UpdateCurrentFrame(not_opaque_frame);
+  EXPECT_FALSE(opaque());
+  EXPECT_EQ(1, opacity_changed_count());
 
-  // Shouldn't overflow.
-  compositor()->SetFramesDroppedBeforeCompositorWasNotifiedForTesting(
-      kuint32max);
-  compositor()->UpdateCurrentFrame(frame);
-  EXPECT_EQ(kuint32max,
-            compositor()->GetFramesDroppedBeforeCompositorWasNotified());
+  // Callback is fired when using opacity changes.
+  compositor()->UpdateCurrentFrame(opaque_frame);
+  EXPECT_TRUE(opaque());
+  EXPECT_EQ(2, opacity_changed_count());
+
+  // Callback shouldn't be first subsequent times with same opaqueness.
+  compositor()->UpdateCurrentFrame(opaque_frame);
+  EXPECT_TRUE(opaque());
+  EXPECT_EQ(2, opacity_changed_count());
 }
 
 }  // namespace content

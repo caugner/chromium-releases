@@ -11,6 +11,7 @@
 #include "chrome/common/extensions/permissions/chrome_api_permissions.h"
 #include "chrome/common/extensions/permissions/chrome_permission_message_provider.h"
 #include "extensions/common/extensions_client.h"
+#include "extensions/common/permissions/extensions_api_permissions.h"
 
 namespace extensions {
 
@@ -23,11 +24,10 @@ class ChromeExtensionsClient : public ExtensionsClient {
 
   virtual void Initialize() OVERRIDE;
 
-  virtual const PermissionsProvider& GetPermissionsProvider() const OVERRIDE;
   virtual const PermissionMessageProvider& GetPermissionMessageProvider() const
       OVERRIDE;
-  virtual FeatureProvider* GetFeatureProviderByName(const std::string& name)
-      const OVERRIDE;
+  virtual scoped_ptr<FeatureProvider> CreateFeatureProvider(
+      const std::string& name) const OVERRIDE;
   virtual void FilterHostPermissions(
       const URLPatternSet& hosts,
       URLPatternSet* new_hosts,
@@ -43,12 +43,14 @@ class ChromeExtensionsClient : public ExtensionsClient {
   virtual bool IsAPISchemaGenerated(const std::string& name) const OVERRIDE;
   virtual base::StringPiece GetAPISchema(const std::string& name) const
       OVERRIDE;
+  virtual bool ShouldSuppressFatalErrors() const OVERRIDE;
 
   // Get the LazyInstance for ChromeExtensionsClient.
   static ChromeExtensionsClient* GetInstance();
 
  private:
   const ChromeAPIPermissions chrome_api_permissions_;
+  const ExtensionsAPIPermissions extensions_api_permissions_;
   const ChromePermissionMessageProvider permission_message_provider_;
 
   // A whitelist of extensions that can script anywhere. Do not add to this

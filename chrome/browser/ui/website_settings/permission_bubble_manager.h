@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/timer/timer.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_view.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -48,17 +48,14 @@ class PermissionBubbleManager
   // removed and never shown. If the request is showing, it will continue to be
   // shown, but the user's action won't be reported back to the request object.
   // In some circumstances, we can remove the request from the bubble, and may
-  // do so. The caller may delete the request after calling this method.
+  // do so. The request will have RequestFinished executed on it if it is found,
+  // at which time the caller is free to delete the request.
   virtual void CancelRequest(PermissionBubbleRequest* request);
 
   // Sets the active view for the permission bubble. If this is NULL, it
   // means any existing permission bubble can no longer be shown. Does not
   // take ownership of the view.
   virtual void SetView(PermissionBubbleView* view) OVERRIDE;
-
- protected:
-  // Sets the coalesce time interval to |interval_ms|. For testing only.
-  void SetCoalesceIntervalForTesting(int interval_ms);
 
  private:
   friend class PermissionBubbleManagerTest;
@@ -67,17 +64,17 @@ class PermissionBubbleManager
 
   explicit PermissionBubbleManager(content::WebContents* web_contents);
 
-  // contents::WebContentsObserver:
-  // TODO(leng):  Investigate the ordering and timing of page loading and
-  // permission requests with iFrames. DocumentOnLoadCompletedInMainFrame()
-  // and DocumentLoadedInFrame() might be needed as well.
-  virtual void DidFinishLoad(
-      int64 frame_id,
-      const GURL& validated_url,
-      bool is_main_frame,
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void WebContentsDestroyed(
-      content::WebContents* web_contents) OVERRIDE;
+  // WebContentsObserver:
+
+  // TODO(leng): Finalize policy for permission requests with iFrames.
+  // DocumentLoadedInFrame() might be needed as well.
+  virtual void DocumentOnLoadCompletedInMainFrame() OVERRIDE;
+
+  // If a page on which permissions requests are pending is navigated,
+  // they will be finalized as if canceled by the user.
+  virtual void NavigationEntryCommitted(
+      const content::LoadCommittedDetails& details) OVERRIDE;
+  virtual void WebContentsDestroyed() OVERRIDE;
 
   // PermissionBubbleView::Delegate:
   virtual void ToggleAccept(int request_index, bool new_value) OVERRIDE;
@@ -86,11 +83,15 @@ class PermissionBubbleManager
   virtual void Deny() OVERRIDE;
   virtual void Closing() OVERRIDE;
 
-  // Called when the coalescing timer is done. Presents the bubble.
   void ShowBubble();
 
   // Finalize the pending permissions request.
   void FinalizeBubble();
+
+  // Cancel any pending requests. This is called if the WebContents
+  // on which permissions calls are pending is destroyed or navigated away
+  // from the requesting page.
+  void CancelPendingQueue();
 
   // Whether or not we are showing the bubble in this tab.
   bool bubble_showing_;
@@ -100,10 +101,16 @@ class PermissionBubbleManager
 
   std::vector<PermissionBubbleRequest*> requests_;
   std::vector<PermissionBubbleRequest*> queued_requests_;
+
+  // URL of the main frame in the WebContents to which this manager is attached.
+  // TODO(gbillock): if there are iframes in the page, we need to deal with it.
+  GURL request_url_;
+  bool request_url_has_loaded_;
+
   std::vector<bool> accept_states_;
   bool customization_mode_;
 
-  scoped_ptr<base::Timer> timer_;
+  base::WeakPtrFactory<PermissionBubbleManager> weak_factory_;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBSITE_SETTINGS_PERMISSION_BUBBLE_MANAGER_H_

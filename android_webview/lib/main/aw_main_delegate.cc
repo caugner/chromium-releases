@@ -5,16 +5,18 @@
 #include "android_webview/lib/main/aw_main_delegate.h"
 
 #include "android_webview/browser/aw_content_browser_client.h"
+#include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/gpu_memory_buffer_factory_impl.h"
-#include "android_webview/browser/hardware_renderer.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
 #include "android_webview/lib/aw_browser_dependency_factory_impl.h"
 #include "android_webview/native/aw_geolocation_permission_context.h"
 #include "android_webview/native/aw_quota_manager_bridge_impl.h"
 #include "android_webview/native/aw_web_contents_view_delegate.h"
 #include "android_webview/native/aw_web_preferences_populater_impl.h"
+#include "android_webview/native/external_video_surface_container_impl.h"
 #include "android_webview/renderer/aw_content_renderer_client.h"
 #include "base/command_line.h"
+#include "base/cpu.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -51,18 +53,17 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   gpu::InProcessCommandBuffer::SetGpuMemoryBufferFactory(
       gpu_memory_buffer_factory_.get());
 
-  HardwareRenderer::CalculateTileMemoryPolicy();
+  BrowserViewRenderer::CalculateTileMemoryPolicy();
 
   CommandLine* cl = CommandLine::ForCurrentProcess();
   cl->AppendSwitch(switches::kEnableBeginFrameScheduling);
-  cl->AppendSwitch(switches::kEnableMapImage);
+  cl->AppendSwitch(switches::kEnableZeroCopy);
   cl->AppendSwitch(switches::kEnableImplSidePainting);
 
   // WebView uses the Android system's scrollbars and overscroll glow.
   cl->AppendSwitch(switches::kDisableOverscrollEdgeEffect);
 
   // Not yet supported in single-process mode.
-  cl->AppendSwitch(switches::kDisableExperimentalWebGL);
   cl->AppendSwitch(switches::kDisableSharedWorkers);
 
 
@@ -72,20 +73,24 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // Fullscreen video with subtitle is not yet supported.
   cl->AppendSwitch(switches::kDisableOverlayFullscreenVideoSubtitle);
 
-  // Disable WebRTC.
-  cl->AppendSwitch(switches::kDisableWebRTC);
-
 #if defined(VIDEO_HOLE)
   // Support EME/L1 with hole-punching.
   cl->AppendSwitch(switches::kMediaDrmEnableNonCompositing);
 #endif
 
+  // WebRTC hardware decoding is not supported, internal bug 15075307
+  cl->AppendSwitch(switches::kDisableWebRtcHWDecoding);
   return false;
 }
 
 void AwMainDelegate::PreSandboxStartup() {
   // TODO(torne): When we have a separate renderer process, we need to handle
   // being passed open FDs for the resource paks here.
+#if defined(ARCH_CPU_ARM_FAMILY)
+  // Create an instance of the CPU class to parse /proc/cpuinfo and cache
+  // cpu_brand info.
+  base::CPU cpu_info;
+#endif
 }
 
 void AwMainDelegate::SandboxInitialized(const std::string& process_type) {
@@ -150,5 +155,13 @@ content::WebContentsViewDelegate* AwMainDelegate::CreateViewDelegate(
 AwWebPreferencesPopulater* AwMainDelegate::CreateWebPreferencesPopulater() {
   return new AwWebPreferencesPopulaterImpl();
 }
+
+#if defined(VIDEO_HOLE)
+content::ExternalVideoSurfaceContainer*
+AwMainDelegate::CreateExternalVideoSurfaceContainer(
+    content::WebContents* web_contents) {
+  return new ExternalVideoSurfaceContainerImpl(web_contents);
+}
+#endif
 
 }  // namespace android_webview

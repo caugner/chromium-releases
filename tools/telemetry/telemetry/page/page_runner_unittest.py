@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 
+from telemetry import decorators
 from telemetry.core import browser_finder
 from telemetry.core import exceptions
 from telemetry.core import user_agent
@@ -44,14 +45,14 @@ class StubCredentialsBackend(object):
     self.login_return_value = login_return_value
 
   @property
-  def credentials_type(self): # pylint: disable=R0201
+  def credentials_type(self):
     return 'test'
 
-  def LoginNeeded(self, tab, config): # pylint: disable=W0613
+  def LoginNeeded(self, *_):
     self.did_get_login = True
     return self.login_return_value
 
-  def LoginNoLongerNeeded(self, tab): # pylint: disable=W0613
+  def LoginNoLongerNeeded(self, _):
     self.did_get_login_no_longer_needed = True
 
 
@@ -66,13 +67,13 @@ class PageRunnerTests(unittest.TestCase):
     ps.pages.append(page1)
 
     class Test(page_test.PageTest):
-      def RunTest(self, *args):
+      def ValidatePage(self, *args):
         pass
 
     options = options_for_unittests.GetCopy()
     options.output_format = 'none'
     SetUpPageRunnerArguments(options)
-    results = page_runner.Run(Test('RunTest'), ps, expectations, options)
+    results = page_runner.Run(Test(), ps, expectations, options)
     self.assertEquals(0, len(results.successes))
     self.assertEquals(0, len(results.failures))
     self.assertEquals(1, len(results.errors))
@@ -92,7 +93,7 @@ class PageRunnerTests(unittest.TestCase):
       def __init__(self, *args):
         super(Test, self).__init__(*args)
         self.run_count = 0
-      def RunTest(self, *_):
+      def ValidatePage(self, *_):
         old_run_count = self.run_count
         self.run_count += 1
         if old_run_count == 0:
@@ -100,7 +101,7 @@ class PageRunnerTests(unittest.TestCase):
 
     options = options_for_unittests.GetCopy()
     options.output_format = 'none'
-    test = Test('RunTest')
+    test = Test()
     SetUpPageRunnerArguments(options)
     results = page_runner.Run(test, ps, expectations, options)
     self.assertEquals(2, test.run_count)
@@ -115,14 +116,14 @@ class PageRunnerTests(unittest.TestCase):
     ps.pages.append(page1)
 
     class Test(page_test.PageTest):
-      def RunTest(self, *_):
+      def ValidatePage(self, *_):
         pass
 
     options = options_for_unittests.GetCopy()
     options.output_format = 'none'
     SetUpPageRunnerArguments(options)
     results = page_runner.Run(
-        Test('RunTest'), ps, expectations, options)
+        Test(), ps, expectations, options)
     self.assertEquals(1, len(results.successes))
     self.assertEquals(0, len(results.failures))
     self.assertEquals(0, len(results.errors))
@@ -171,35 +172,36 @@ class PageRunnerTests(unittest.TestCase):
     options.upload_results = None
     options.results_label = None
 
-    options.repeat_options.page_repeat = 1
-    options.repeat_options.pageset_repeat = 1
+    options.page_repeat = 1
+    options.pageset_repeat = 1
     SetUpPageRunnerArguments(options)
     results = page_runner.Run(Measurement(), ps, expectations, options)
     self.assertEquals(0, len(results.successes))
     self.assertEquals(0, len(results.failures))
 
-    options.repeat_options.page_repeat = 1
-    options.repeat_options.pageset_repeat = 2
+    options.page_repeat = 1
+    options.pageset_repeat = 2
     SetUpPageRunnerArguments(options)
     results = page_runner.Run(Measurement(), ps, expectations, options)
     self.assertEquals(2, len(results.successes))
     self.assertEquals(0, len(results.failures))
 
-    options.repeat_options.page_repeat = 2
-    options.repeat_options.pageset_repeat = 1
+    options.page_repeat = 2
+    options.pageset_repeat = 1
     SetUpPageRunnerArguments(options)
     results = page_runner.Run(Measurement(), ps, expectations, options)
     self.assertEquals(2, len(results.successes))
     self.assertEquals(0, len(results.failures))
 
     options.output_format = 'html'
-    options.repeat_options.page_repeat = 1
-    options.repeat_options.pageset_repeat = 1
+    options.page_repeat = 1
+    options.pageset_repeat = 1
     SetUpPageRunnerArguments(options)
     results = page_runner.Run(Measurement(), ps, expectations, options)
     self.assertEquals(0, len(results.successes))
     self.assertEquals(0, len(results.failures))
 
+  @decorators.Disabled('win')
   def testPagesetRepeat(self):
     ps = page_set.PageSet()
     expectations = test_expectations.TestExpectations()
@@ -210,7 +212,7 @@ class PageRunnerTests(unittest.TestCase):
 
     class Measurement(page_measurement.PageMeasurement):
       i = 0
-      def MeasurePage(self, _, __, results):
+      def MeasurePage(self, _1, _2, results):
         self.i += 1
         results.Add('metric', 'unit', self.i)
 
@@ -223,14 +225,15 @@ class PageRunnerTests(unittest.TestCase):
       options.upload_results = None
       options.results_label = None
 
-      options.repeat_options.page_repeat = 1
-      options.repeat_options.pageset_repeat = 2
+      options.page_repeat = 1
+      options.pageset_repeat = 2
       SetUpPageRunnerArguments(options)
       results = page_runner.Run(Measurement(), ps, expectations, options)
       results.PrintSummary()
       self.assertEquals(4, len(results.successes))
       self.assertEquals(0, len(results.failures))
-      stdout = open(output_file).read()
+      with open(output_file) as f:
+        stdout = f.read()
       self.assertIn('RESULT metric_by_url: blank.html= [1,3] unit', stdout)
       self.assertIn('RESULT metric_by_url: green_rect.html= [2,4] unit', stdout)
       self.assertIn('*RESULT metric: metric= [1,2,3,4] unit', stdout)
@@ -252,8 +255,7 @@ class PageRunnerTests(unittest.TestCase):
     assert credentials_backend.did_get_login_no_longer_needed == True
     assert did_run
 
-  def runCredentialsTest(self, # pylint: disable=R0201
-                         credentials_backend):
+  def runCredentialsTest(self, credentials_backend):
     ps = page_set.PageSet()
     expectations = test_expectations.TestExpectations()
     page = page_module.Page(
@@ -270,13 +272,13 @@ class PageRunnerTests(unittest.TestCase):
 
       class TestThatInstallsCredentialsBackend(page_test.PageTest):
         def __init__(self, credentials_backend):
-          super(TestThatInstallsCredentialsBackend, self).__init__('RunTest')
+          super(TestThatInstallsCredentialsBackend, self).__init__()
           self._credentials_backend = credentials_backend
 
         def DidStartBrowser(self, browser):
           browser.credentials.AddBackend(self._credentials_backend)
 
-        def RunTest(self, page, tab, results): # pylint: disable=W0613,R0201
+        def ValidatePage(self, *_):
           did_run[0] = True
 
       test = TestThatInstallsCredentialsBackend(credentials_backend)
@@ -298,7 +300,7 @@ class PageRunnerTests(unittest.TestCase):
     ps.user_agent_type = 'tablet'
 
     class TestUserAgent(page_test.PageTest):
-      def RunTest(self, page, tab, results): # pylint: disable=W0613,R0201
+      def ValidatePage(self, _1, tab, _2):
         actual_user_agent = tab.EvaluateJavaScript('window.navigator.userAgent')
         expected_user_agent = user_agent.UA_TYPE_MAPPING['tablet']
         assert actual_user_agent.strip() == expected_user_agent
@@ -308,7 +310,7 @@ class PageRunnerTests(unittest.TestCase):
         # should fail, but since it skipped all the asserts, it slipped by.
         self.hasRun = True # pylint: disable=W0201
 
-    test = TestUserAgent('RunTest')
+    test = TestUserAgent()
     options = options_for_unittests.GetCopy()
     options.output_format = 'none'
     SetUpPageRunnerArguments(options)
@@ -325,12 +327,8 @@ class PageRunnerTests(unittest.TestCase):
     ps.pages.append(page)
 
     class TestOneTab(page_test.PageTest):
-      def __init__(self,
-                   test_method_name,
-                   action_name_to_run='',
-                   needs_browser_restart_after_each_page=False):
-        super(TestOneTab, self).__init__(test_method_name, action_name_to_run,
-                                         needs_browser_restart_after_each_page)
+      def __init__(self):
+        super(TestOneTab, self).__init__()
         self._browser = None
 
       def DidStartBrowser(self, browser):
@@ -338,13 +336,13 @@ class PageRunnerTests(unittest.TestCase):
         if self._browser.supports_tab_control:
           self._browser.tabs.New()
 
-      def RunTest(self, page, tab, results): # pylint: disable=W0613,R0201
+      def ValidatePage(self, *_):
         if not self._browser.supports_tab_control:
           logging.warning('Browser does not support tab control, skipping test')
           return
         assert len(self._browser.tabs) == 1
 
-    test = TestOneTab('RunTest')
+    test = TestOneTab()
     options = options_for_unittests.GetCopy()
     options.output_format = 'none'
     SetUpPageRunnerArguments(options)
@@ -360,11 +358,8 @@ class PageRunnerTests(unittest.TestCase):
     ps.pages.append(page)
 
     class TestBeforeLaunch(page_test.PageTest):
-      def __init__(self,
-                   test_method_name,
-                   action_name_to_run=''):
-        super(TestBeforeLaunch, self).__init__(
-            test_method_name, action_name_to_run, False)
+      def __init__(self):
+        super(TestBeforeLaunch, self).__init__()
         self._did_call_will_start = False
         self._did_call_did_start = False
 
@@ -376,10 +371,10 @@ class PageRunnerTests(unittest.TestCase):
         assert self._did_call_will_start
         self._did_call_did_start = True
 
-      def RunTest(self, page, tab, results): # pylint: disable=W0613,R0201
+      def ValidatePage(self, *_):
         assert self._did_call_did_start
 
-    test = TestBeforeLaunch('RunTest')
+    test = TestBeforeLaunch()
     options = options_for_unittests.GetCopy()
     options.output_format = 'none'
     SetUpPageRunnerArguments(options)
@@ -407,7 +402,7 @@ class PageRunnerTests(unittest.TestCase):
         pass
 
     options = options_for_unittests.GetCopy()
-    options.repeat_options.page_repeat = 2
+    options.page_repeat = 2
     options.output_format = 'none'
     if not browser_finder.FindBrowser(options):
       return
@@ -426,21 +421,18 @@ class PageRunnerTests(unittest.TestCase):
     ps.pages.append(page)
 
     class Test(page_test.PageTest):
-      def __init__(self,
-                   test_method_name,
-                   action_name_to_run=''):
-        super(Test, self).__init__(
-            test_method_name, action_name_to_run, False)
+      def __init__(self):
+        super(Test, self).__init__()
         self.did_call_clean_up = False
 
-      def RunTest(self, _, _2, _3):
+      def ValidatePage(self, *_):
         raise Exception('Intentional failure')
 
       def CleanUpAfterPage(self, page, tab):
         self.did_call_clean_up = True
 
 
-    test = Test('RunTest')
+    test = Test()
     options = options_for_unittests.GetCopy()
     options.output_format = 'none'
     SetUpPageRunnerArguments(options)

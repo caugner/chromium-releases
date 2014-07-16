@@ -99,7 +99,8 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     DISABLE_KNOWN_DISABLED = 1 << 7,
     DISABLE_NOT_VERIFIED = 1 << 8,  // Disabled because we could not verify
                                     // the install.
-    DISABLE_GREYLIST = 1 << 9
+    DISABLE_GREYLIST = 1 << 9,
+    DISABLE_CORRUPTED = 1 << 10,
   };
 
   enum InstallType {
@@ -511,6 +512,7 @@ struct InstalledExtensionInfo {
 };
 
 struct UnloadedExtensionInfo {
+  // TODO(DHNishi): Move this enum to ExtensionRegistryObserver.
   enum Reason {
     REASON_DISABLE,    // Extension is being disabled.
     REASON_UPDATE,     // Extension is being updated to a newer version.

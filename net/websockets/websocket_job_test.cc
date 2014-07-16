@@ -286,7 +286,7 @@ class MockHttpTransactionFactory : public HttpTransactionFactory {
     host_port_pair_.set_port(80);
     spdy_session_key_ = SpdySessionKey(host_port_pair_,
                                             ProxyServer::Direct(),
-                                            kPrivacyModeDisabled);
+                                            PRIVACY_MODE_DISABLED);
     session_ = CreateInsecureSpdySession(
         http_session_, spdy_session_key_, BoundNetLog());
   }
@@ -708,8 +708,7 @@ INSTANTIATE_TEST_CASE_P(
     NextProto,
     WebSocketJobTest,
     testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4a2,
-                    kProtoHTTP2Draft04));
+                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
 
 TEST_P(WebSocketJobTest, DelayedCookies) {
   WebSocketJob::set_websocket_over_spdy_enabled(true);

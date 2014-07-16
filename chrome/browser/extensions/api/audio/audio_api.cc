@@ -9,7 +9,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/audio.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_system.h"
 
 namespace extensions {
 
@@ -39,17 +38,15 @@ AudioService* AudioAPI::GetService() const {
 }
 
 void AudioAPI::OnDeviceChanged() {
-  if (browser_context_ &&
-      ExtensionSystem::Get(browser_context_)->event_router()) {
+  if (browser_context_ && EventRouter::Get(browser_context_)) {
     scoped_ptr<Event> event(new Event(
         audio::OnDeviceChanged::kEventName,
         scoped_ptr<base::ListValue>(new base::ListValue())));
-    ExtensionSystem::Get(browser_context_)->event_router()->BroadcastEvent(
-        event.Pass());
+    EventRouter::Get(browser_context_)->BroadcastEvent(event.Pass());
   }
 }
 
-bool AudioGetInfoFunction::RunImpl() {
+bool AudioGetInfoFunction::RunAsync() {
   AudioService* service =
       AudioAPI::GetFactoryInstance()->Get(GetProfile())->GetService();
   DCHECK(service);
@@ -68,7 +65,7 @@ void AudioGetInfoFunction::OnGetInfoCompleted(const OutputInfo& output_info,
   SendResponse(success);
 }
 
-bool AudioSetActiveDevicesFunction::RunImpl() {
+bool AudioSetActiveDevicesFunction::RunSync() {
   scoped_ptr<api::audio::SetActiveDevices::Params> params(
       api::audio::SetActiveDevices::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -81,7 +78,7 @@ bool AudioSetActiveDevicesFunction::RunImpl() {
   return true;
 }
 
-bool AudioSetPropertiesFunction::RunImpl() {
+bool AudioSetPropertiesFunction::RunSync() {
   scoped_ptr<api::audio::SetProperties::Params> params(
       api::audio::SetProperties::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());

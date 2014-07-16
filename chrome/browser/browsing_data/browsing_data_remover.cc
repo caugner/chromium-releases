@@ -514,8 +514,9 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
 
   if (remove_mask & REMOVE_PASSWORDS) {
     content::RecordAction(UserMetricsAction("ClearBrowsingData_Passwords"));
-    PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
-        profile_, Profile::EXPLICIT_ACCESS).get();
+    password_manager::PasswordStore* password_store =
+        PasswordStoreFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS)
+            .get();
 
     if (password_store)
       password_store->RemoveLoginsCreatedBetween(delete_begin_, delete_end_);
@@ -657,6 +658,10 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
 #endif
   }
 #endif
+
+  // Remove omnibox zero-suggest cache results.
+  if ((remove_mask & (REMOVE_CACHE | REMOVE_COOKIES)))
+    prefs->SetString(prefs::kZeroSuggestCachedResults, std::string());
 
   // Always wipe accumulated network related data (TransportSecurityState and
   // HttpServerPropertiesManager data).
@@ -884,12 +889,17 @@ void BrowsingDataRemover::DoClearCache(int rv) {
             (next_cache_state_ == STATE_CREATE_MAIN)
                 ? main_context_getter_.get()
                 : media_context_getter_.get();
-        net::HttpTransactionFactory* factory =
-            getter->GetURLRequestContext()->http_transaction_factory();
+        net::HttpCache* http_cache =
+            getter->GetURLRequestContext()->http_transaction_factory()->
+                GetCache();
 
         next_cache_state_ = (next_cache_state_ == STATE_CREATE_MAIN) ?
                                 STATE_DELETE_MAIN : STATE_DELETE_MEDIA;
-        rv = factory->GetCache()->GetBackend(
+
+        // Clear QUIC server information from memory and the disk cache.
+        http_cache->GetSession()->quic_stream_factory()->
+            ClearCachedStatesInCryptoConfig();
+        rv = http_cache->GetBackend(
             &cache_, base::Bind(&BrowsingDataRemover::DoClearCache,
                                 base::Unretained(this)));
         break;

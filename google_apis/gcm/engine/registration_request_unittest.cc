@@ -9,6 +9,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "google_apis/gcm/engine/registration_request.h"
+#include "google_apis/gcm/monitoring/gcm_stats_recorder.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
@@ -21,6 +22,7 @@ const uint64 kAndroidId = 42UL;
 const char kAppId[] = "TestAppId";
 const char kDeveloperId[] = "Project1";
 const char kLoginHeader[] = "AidLogin";
+const char kRegistrationURL[] = "http://foo.bar/register";
 const uint64 kSecurityToken = 77UL;
 
 // Backoff policy for testing registration request.
@@ -80,6 +82,7 @@ class RegistrationRequestTest : public testing::Test {
   base::MessageLoop message_loop_;
   net::TestURLFetcherFactory url_fetcher_factory_;
   scoped_refptr<net::TestURLRequestContextGetter> url_request_context_getter_;
+  GCMStatsRecorder recorder_;
 };
 
 RegistrationRequestTest::RegistrationRequestTest()
@@ -106,6 +109,7 @@ void RegistrationRequestTest::CreateRequest(const std::string& sender_ids) {
     senders.push_back(tokenizer.token());
 
   request_.reset(new RegistrationRequest(
+      GURL(kRegistrationURL),
       RegistrationRequest::RequestInfo(kAndroidId,
                                        kSecurityToken,
                                        kAppId,
@@ -114,7 +118,8 @@ void RegistrationRequestTest::CreateRequest(const std::string& sender_ids) {
       base::Bind(&RegistrationRequestTest::RegistrationCallback,
                  base::Unretained(this)),
       max_retry_count_,
-      url_request_context_getter_.get()));
+      url_request_context_getter_.get(),
+      &recorder_));
 }
 
 void RegistrationRequestTest::SetResponseStatusAndString(
@@ -149,13 +154,15 @@ TEST_F(RegistrationRequestTest, RequestSuccessful) {
   EXPECT_EQ("2501", registration_id_);
 }
 
-TEST_F(RegistrationRequestTest, RequestDataPassedToFetcher) {
+TEST_F(RegistrationRequestTest, RequestDataAndURL) {
   CreateRequest(kDeveloperId);
   request_->Start();
 
   // Get data sent by request.
   net::TestURLFetcher* fetcher = url_fetcher_factory_.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
+
+  EXPECT_EQ(GURL(kRegistrationURL), fetcher->GetOriginalURL());
 
   // Verify that authorization header was put together properly.
   net::HttpRequestHeaders headers;

@@ -49,7 +49,7 @@ class ChromeRenderViewObserver : public content::RenderViewObserver {
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidStartLoading() OVERRIDE;
   virtual void DidStopLoading() OVERRIDE;
-  virtual void DidCommitProvisionalLoad(blink::WebFrame* frame,
+  virtual void DidCommitProvisionalLoad(blink::WebLocalFrame* frame,
                                         bool is_new_navigation) OVERRIDE;
   virtual void DetailedConsoleMessageAdded(const base::string16& message,
                                            const base::string16& source,
@@ -59,7 +59,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver {
   virtual void Navigate(const GURL& url) OVERRIDE;
 
   void OnWebUIJavaScript(const base::string16& javascript);
-  void OnJavaScriptStressTestControl(int cmd, int param);
   void OnSetClientSidePhishingDetection(bool enable_phishing_detection);
   void OnSetVisuallyDeemphasized(bool deemphasized);
   void OnGetFPS();

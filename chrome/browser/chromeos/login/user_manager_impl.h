@@ -39,7 +39,6 @@ struct DeviceLocalAccount;
 
 namespace chromeos {
 
-class MultiProfileFirstRunNotification;
 class MultiProfileUserController;
 class RemoveUserDelegate;
 class SupervisedUserManagerImpl;
@@ -315,7 +314,7 @@ class UserManagerImpl
   // Update the global LoginState.
   void UpdateLoginState();
 
-  // Insert |user| at the front of the LRU user list..
+  // Insert |user| at the front of the LRU user list.
   void SetLRUUser(User* user);
 
   // Adds |user| to users list, and adds it to front of LRU list. It is assumed
@@ -476,8 +475,6 @@ class UserManagerImpl
       supervised_users_subscription_;
 
   scoped_ptr<MultiProfileUserController> multi_profile_user_controller_;
-  scoped_ptr<MultiProfileFirstRunNotification>
-      multi_profile_first_run_notification_;
 
   // Observer for the policy that can be used to manage user images.
   scoped_ptr<policy::CloudExternalDataPolicyObserver> avatar_policy_observer_;
@@ -485,6 +482,10 @@ class UserManagerImpl
   // Observer for the policy that can be used to manage wallpapers.
   scoped_ptr<policy::CloudExternalDataPolicyObserver>
       wallpaper_policy_observer_;
+
+  // ID of the user just added to the session that needs to be activated
+  // as soon as user's profile is loaded.
+  std::string pending_user_switch_;
 
   DISALLOW_COPY_AND_ASSIGN(UserManagerImpl);
 };

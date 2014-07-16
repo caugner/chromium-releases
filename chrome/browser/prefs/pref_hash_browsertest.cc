@@ -138,17 +138,12 @@ class PrefHashBrowserTest : public InProcessBrowserTest,
   // builds. Explicitly return whether the default in
   // chrome_pref_service_factory.cc allows unloaded profile seeding on this
   // platform.
-#if defined(OS_WIN)
-    return false;
-#else
-    return true;
-#endif  // defined(OS_WIN)
+  return true;
 #endif  // defined(OFFICIAL_BUILD)
-    return GetParam() != chrome_prefs::internals::
-                             kSettingsEnforcementGroupEnforceAlways &&
-           GetParam() !=
-               chrome_prefs::internals::
-                   kSettingsEnforcementGroupEnforceAlwaysWithExtensions;
+    return GetParam() == chrome_prefs::internals::
+                             kSettingsEnforcementGroupNoEnforcement ||
+           GetParam() == chrome_prefs::internals::
+                             kSettingsEnforcementGroupEnforceOnload;
   }
 };
 
@@ -325,4 +320,6 @@ INSTANTIATE_TEST_CASE_P(
         chrome_prefs::internals::kSettingsEnforcementGroupEnforceOnload,
         chrome_prefs::internals::kSettingsEnforcementGroupEnforceAlways,
         chrome_prefs::internals::
-            kSettingsEnforcementGroupEnforceAlwaysWithExtensions));
+            kSettingsEnforcementGroupEnforceAlwaysWithDSE,
+        chrome_prefs::internals::
+            kSettingsEnforcementGroupEnforceAlwaysWithExtensionsAndDSE));

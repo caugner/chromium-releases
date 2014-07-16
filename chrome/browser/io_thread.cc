@@ -25,6 +25,7 @@
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/default_tick_clock.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
@@ -38,12 +39,13 @@
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
-#include "chrome/browser/net/spdyproxy/http_auth_handler_spdyproxy.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_prefs.h"
+#include "components/data_reduction_proxy/browser/http_auth_handler_data_reduction_proxy.h"
 #include "components/policy/core/common/policy_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
@@ -82,10 +84,6 @@
 #include "net/url_request/url_request_throttler_manager.h"
 #include "net/websockets/websocket_job.h"
 
-#if defined(OS_WIN)
-#include "win8/util/win8_util.h"
-#endif
-
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "policy/policy_constants.h"
 #endif
@@ -99,12 +97,8 @@
 #include "net/ocsp/nss_ocsp.h"
 #endif
 
-#if !defined(OS_IOS) && !defined(OS_ANDROID)
-#include "net/proxy/proxy_resolver_v8.h"
-#endif
-
 #if defined(OS_ANDROID) || defined(OS_IOS)
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -113,6 +107,10 @@
 #endif
 
 using content::BrowserThread;
+
+#if defined(OS_ANDROID) || defined(OS_IOS)
+using data_reduction_proxy::DataReductionProxySettings;
+#endif
 
 class SafeBrowsingURLRequestContext;
 
@@ -126,6 +124,8 @@ const char kQuicFieldTrialEnabledGroupName[] = "Enabled";
 const char kQuicFieldTrialHttpsEnabledGroupName[] = "HttpsEnabled";
 const char kQuicFieldTrialPacketLengthSuffix[] = "BytePackets";
 const char kQuicFieldTrialPacingSuffix[] = "WithPacing";
+const char kQuicFieldTrialTimeBasedLossDetectionSuffix[] =
+    "WithTimeBasedLossDetection";
 
 const char kSpdyFieldTrialName[] = "SPDY";
 const char kSpdyFieldTrialDisabledGroupName[] = "SpdyDisabled";
@@ -417,17 +417,8 @@ IOThread::IOThread(
       globals_(NULL),
       sdch_manager_(NULL),
       is_spdy_disabled_by_policy_(false),
-      weak_factory_(this) {
-#if !defined(OS_IOS) && !defined(OS_ANDROID)
-#if defined(OS_WIN)
-  if (!win8::IsSingleWindowMetroMode())
-    net::ProxyResolverV8::RememberDefaultIsolate();
-  else
-    net::ProxyResolverV8::CreateIsolate();
-#else
-  net::ProxyResolverV8::RememberDefaultIsolate();
-#endif
-#endif
+      weak_factory_(this),
+      creation_time_(base::TimeTicks::Now()) {
   auth_schemes_ = local_state->GetString(prefs::kAuthSchemes);
   negotiate_disable_cname_lookup_ = local_state->GetBoolean(
       prefs::kDisableAuthNegotiateCnameLookup);
@@ -610,7 +601,7 @@ void IOThread::InitAsync() {
 #endif
   globals_->ssl_config_service = GetSSLConfigService();
 #if defined(OS_ANDROID) || defined(OS_IOS)
-  if (DataReductionProxySettings::IsDataReductionProxyAllowed()) {
+  if (DataReductionProxySettings::IsIncludedInFieldTrialOrFlags()) {
     spdyproxy_auth_origins_ =
         DataReductionProxySettings::GetDataReductionProxies();
   }
@@ -742,6 +733,9 @@ void IOThread::CleanUp() {
   // Release objects that the net::URLRequestContext could have been pointing
   // to.
 
+  // Shutdown the HistogramWatcher on the IO thread.
+  net::NetworkChangeNotifier::ShutdownHistogramWatcher();
+
   // This must be reset before the ChromeNetLog is destroyed.
   network_change_observer_.reset();
 
@@ -780,10 +774,8 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
       std::string spdy_mode =
           command_line.GetSwitchValueASCII(switches::kUseSpdy);
       EnableSpdy(spdy_mode);
-    } else if (command_line.HasSwitch(switches::kEnableHttp2Draft04)) {
-      net::HttpStreamFactory::EnableNpnHttp2Draft04();
-    } else if (command_line.HasSwitch(switches::kEnableSpdy4a2)) {
-      net::HttpStreamFactory::EnableNpnSpdy4a2();
+    } else if (command_line.HasSwitch(switches::kEnableSpdy4)) {
+      net::HttpStreamFactory::EnableNpnSpdy4Http2();
     } else if (command_line.HasSwitch(switches::kDisableSpdy31)) {
       net::HttpStreamFactory::EnableNpnSpdy3();
     } else if (command_line.HasSwitch(switches::kEnableNpnHttpOnly)) {
@@ -882,31 +874,10 @@ void IOThread::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterStringPref(prefs::kAuthNegotiateDelegateWhitelist,
                                std::string());
   registry->RegisterStringPref(prefs::kGSSAPILibraryName, std::string());
-  registry->RegisterStringPref(prefs::kSpdyProxyAuthOrigin, std::string());
+  registry->RegisterStringPref(
+      data_reduction_proxy::prefs::kDataReductionProxy, std::string());
   registry->RegisterBooleanPref(prefs::kEnableReferrers, true);
-  registry->RegisterInt64Pref(prefs::kHttpReceivedContentLength, 0);
-  registry->RegisterInt64Pref(prefs::kHttpOriginalContentLength, 0);
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  registry->RegisterListPref(prefs::kDailyHttpOriginalContentLength);
-  registry->RegisterListPref(prefs::kDailyHttpReceivedContentLength);
-  registry->RegisterListPref(
-      prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabled);
-  registry->RegisterListPref(
-      prefs::kDailyContentLengthWithDataReductionProxyEnabled);
-  registry->RegisterListPref(
-      prefs::kDailyContentLengthHttpsWithDataReductionProxyEnabled);
-  registry->RegisterListPref(
-      prefs::kDailyContentLengthShortBypassWithDataReductionProxyEnabled);
-  registry->RegisterListPref(
-      prefs::kDailyContentLengthLongBypassWithDataReductionProxyEnabled);
-  registry->RegisterListPref(
-      prefs::kDailyContentLengthUnknownWithDataReductionProxyEnabled);
-  registry->RegisterListPref(
-      prefs::kDailyOriginalContentLengthViaDataReductionProxy);
-  registry->RegisterListPref(
-      prefs::kDailyContentLengthViaDataReductionProxy);
-  registry->RegisterInt64Pref(prefs::kDailyHttpContentLengthLastUpdateDate, 0L);
-#endif
+  data_reduction_proxy::RegisterPrefs(registry);
   registry->RegisterBooleanPref(prefs::kBuiltInDnsClientEnabled, true);
   registry->RegisterBooleanPref(prefs::kQuickCheckEnabled, true);
 }
@@ -938,7 +909,7 @@ net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory(
   if (!spdyproxy_auth_origins_.empty()) {
     registry_factory->RegisterSchemeFactory(
         "spdyproxy",
-        new spdyproxy::HttpAuthHandlerSpdyProxy::Factory(
+        new data_reduction_proxy::HttpAuthHandlerDataReductionProxy::Factory(
             spdyproxy_auth_origins_));
   }
 
@@ -987,6 +958,8 @@ void IOThread::InitializeNetworkSessionParams(
   globals_->enable_quic_https.CopyToIfSet(&params->enable_quic_https);
   globals_->enable_quic_pacing.CopyToIfSet(
       &params->enable_quic_pacing);
+  globals_->enable_quic_time_based_loss_detection.CopyToIfSet(
+      &params->enable_quic_time_based_loss_detection);
   globals_->enable_quic_persist_server_info.CopyToIfSet(
       &params->enable_quic_persist_server_info);
   globals_->enable_quic_port_selection.CopyToIfSet(
@@ -998,6 +971,10 @@ void IOThread::InitializeNetworkSessionParams(
       &params->origin_to_force_quic_on);
   params->enable_user_alternate_protocol_ports =
       globals_->enable_user_alternate_protocol_ports;
+}
+
+base::TimeTicks IOThread::creation_time() const {
+  return creation_time_;
 }
 
 net::SSLConfigService* IOThread::GetSSLConfigService() {
@@ -1080,6 +1057,8 @@ void IOThread::ConfigureQuic(const CommandLine& command_line) {
         ShouldEnableQuicHttps(command_line, quic_trial_group));
     globals_->enable_quic_pacing.set(
         ShouldEnableQuicPacing(command_line, quic_trial_group));
+    globals_->enable_quic_time_based_loss_detection.set(
+        ShouldEnableQuicTimeBasedLossDetection(command_line, quic_trial_group));
     globals_->enable_quic_persist_server_info.set(
         ShouldEnableQuicPersistServerInfo(command_line));
     globals_->enable_quic_port_selection.set(
@@ -1171,16 +1150,22 @@ bool IOThread::ShouldEnableQuicPacing(const CommandLine& command_line,
   return quic_trial_group.ends_with(kQuicFieldTrialPacingSuffix);
 }
 
+bool IOThread::ShouldEnableQuicTimeBasedLossDetection(
+    const CommandLine& command_line,
+    base::StringPiece quic_trial_group) {
+  if (command_line.HasSwitch(switches::kEnableQuicTimeBasedLossDetection))
+    return true;
+
+  if (command_line.HasSwitch(switches::kDisableQuicTimeBasedLossDetection))
+    return false;
+
+  return quic_trial_group.ends_with(
+      kQuicFieldTrialTimeBasedLossDetectionSuffix);
+}
+
+// TODO(rtenneti): Delete this method after the merge.
 bool IOThread::ShouldEnableQuicPersistServerInfo(
     const CommandLine& command_line) {
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  // Avoid persisting of Quic server config information to disk cache when we
-  // have a beta or stable release.  Allow in all other cases, including when we
-  // do a developer build (CHANNEL_UNKNOWN).
-  if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
-      channel == chrome::VersionInfo::CHANNEL_BETA) {
-    return false;
-  }
   return true;
 }
 

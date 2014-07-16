@@ -12,6 +12,7 @@
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_state_delegate.h"
+#include "ash/wm/window_state_util.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
@@ -31,7 +32,7 @@ const float kMinimumPercentOnScreenArea = 0.3f;
 
 bool IsPanel(aura::Window* window) {
   return window->parent() &&
-      window->parent()->id() == internal::kShellWindowId_PanelContainer;
+         window->parent()->id() == kShellWindowId_PanelContainer;
 }
 
 void MoveToDisplayForRestore(WindowState* window_state) {
@@ -258,25 +259,9 @@ bool DefaultState::ProcessCompoundEvents(WindowState* window_state,
       }
       return true;
     }
-    case WM_EVENT_TOGGLE_FULLSCREEN: {
-      // Window which cannot be maximized should not be fullscreened.
-      // It can, however, be restored if it was fullscreened.
-      bool is_fullscreen = window_state->IsFullscreen();
-      if (!is_fullscreen && !window_state->CanMaximize())
-        return true;
-      if (window_state->delegate() &&
-          window_state->delegate()->ToggleFullscreen(window_state)) {
-        return true;
-      }
-      if (is_fullscreen) {
-        window_state->Restore();
-      } else {
-        //
-        window_state->window()->SetProperty(aura::client::kShowStateKey,
-                                            ui::SHOW_STATE_FULLSCREEN);
-      }
+    case WM_EVENT_TOGGLE_FULLSCREEN:
+      ToggleFullScreen(window_state, window_state->delegate());
       return true;
-    }
     case WM_EVENT_CENTER:
       CenterWindow(window_state);
       return true;
@@ -474,11 +459,18 @@ void DefaultState::ReenterToCurrentState(
     WindowState* window_state,
     WindowState::State* state_in_previous_mode) {
   WindowStateType previous_state_type = state_in_previous_mode->GetType();
+  if (previous_state_type == wm::WINDOW_STATE_TYPE_FULLSCREEN) {
+    // A state change should not move a window out of full screen since full
+    // screen is a "special mode" the user wanted to be in and should be
+    // respected as such.
+    state_type_ = wm::WINDOW_STATE_TYPE_FULLSCREEN;
+  }
   window_state->UpdateWindowShowStateFromStateType();
   window_state->NotifyPreStateTypeChange(previous_state_type);
 
-  if (state_type_ == wm::WINDOW_STATE_TYPE_NORMAL ||
-      state_type_ == wm::WINDOW_STATE_TYPE_DEFAULT) {
+  if ((state_type_ == wm::WINDOW_STATE_TYPE_NORMAL ||
+       state_type_ == wm::WINDOW_STATE_TYPE_DEFAULT) &&
+      !stored_bounds_.IsEmpty()) {
     // Use the restore mechanism to set the bounds for
     // the window in normal state. This also covers unminimize case.
     window_state->SetRestoreBoundsInParent(stored_bounds_);

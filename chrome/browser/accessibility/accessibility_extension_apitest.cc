@@ -34,9 +34,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_GetAlertsForTab) {
 
   const char kAlertMessage[] = "Simple Alert Infobar.";
   SimpleAlertInfoBarDelegate::Create(infobar_service,
-                                     InfoBarDelegate::kNoIconID,
+                                     infobars::InfoBarDelegate::kNoIconID,
                                      base::ASCIIToUTF16(kAlertMessage), false);
   CommandLine::ForCurrentProcess()->AppendSwitch(
       extensions::switches::kEnableExperimentalExtensionApis);
-  ASSERT_TRUE(RunExtensionTest("accessibility/get_alerts_for_tab")) << message_;
+  ASSERT_TRUE(RunComponentExtensionTest("accessibility/get_alerts_for_tab"))
+      << message_;
 }

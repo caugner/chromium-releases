@@ -20,11 +20,9 @@ static const int kStatsCallbackIntervalMs = 33;
 
 RtpSender::RtpSender(
     base::TickClock* clock,
-    LoggingImpl* logging,
     const scoped_refptr<base::SingleThreadTaskRunner>& transport_task_runner,
     PacedSender* const transport)
     : clock_(clock),
-      logging_(logging),
       transport_(transport),
       stats_callback_(),
       transport_task_runner_(transport_task_runner),
@@ -35,26 +33,32 @@ RtpSender::RtpSender(
 
 RtpSender::~RtpSender() {}
 
-void RtpSender::InitializeAudio(const CastTransportAudioConfig& config) {
-  storage_.reset(new PacketStorage(clock_, config.base.rtp_config.history_ms));
+bool RtpSender::InitializeAudio(const CastTransportAudioConfig& config) {
+  storage_.reset(new PacketStorage(config.rtp.max_outstanding_frames));
+  if (!storage_->IsValid()) {
+    return false;
+  }
   config_.audio = true;
-  config_.ssrc = config.base.ssrc;
-  config_.payload_type = config.base.rtp_config.payload_type;
+  config_.ssrc = config.rtp.config.ssrc;
+  config_.payload_type = config.rtp.config.payload_type;
   config_.frequency = config.frequency;
   config_.audio_codec = config.codec;
-  packetizer_.reset(
-      new RtpPacketizer(transport_, storage_.get(), config_, clock_, logging_));
+  packetizer_.reset(new RtpPacketizer(transport_, storage_.get(), config_));
+  return true;
 }
 
-void RtpSender::InitializeVideo(const CastTransportVideoConfig& config) {
-  storage_.reset(new PacketStorage(clock_, config.base.rtp_config.history_ms));
+bool RtpSender::InitializeVideo(const CastTransportVideoConfig& config) {
+  storage_.reset(new PacketStorage(config.rtp.max_outstanding_frames));
+  if (!storage_->IsValid()) {
+    return false;
+  }
   config_.audio = false;
-  config_.ssrc = config.base.ssrc;
-  config_.payload_type = config.base.rtp_config.payload_type;
+  config_.ssrc = config.rtp.config.ssrc;
+  config_.payload_type = config.rtp.config.payload_type;
   config_.frequency = kVideoFrequency;
   config_.video_codec = config.codec;
-  packetizer_.reset(
-      new RtpPacketizer(transport_, storage_.get(), config_, clock_, logging_));
+  packetizer_.reset(new RtpPacketizer(transport_, storage_.get(), config_));
+  return true;
 }
 
 void RtpSender::IncomingEncodedVideoFrame(const EncodedVideoFrame* video_frame,
@@ -78,7 +82,7 @@ void RtpSender::ResendPackets(
            missing_frames_and_packets.begin();
        it != missing_frames_and_packets.end();
        ++it) {
-    PacketList packets_to_resend;
+    SendPacketVector packets_to_resend;
     uint8 frame_id = it->first;
     const PacketIdSet& packets_set = it->second;
     bool success = false;
@@ -91,13 +95,17 @@ void RtpSender::ResendPackets(
         // Get packet from storage.
         success = storage_->GetPacket(frame_id, packet_id, &packets_to_resend);
 
+        // Check that we got at least one packet.
+        DCHECK(packet_id != 0 || success)
+            << "Failed to resend frame " << static_cast<int>(frame_id);
+
         // Resend packet to the network.
         if (success) {
           VLOG(3) << "Resend " << static_cast<int>(frame_id) << ":"
                   << packet_id;
           // Set a unique incremental sequence number for every packet.
-          Packet& packet = packets_to_resend.back();
-          UpdateSequenceNumber(&packet);
+          PacketRef packet = packets_to_resend.back().second;
+          UpdateSequenceNumber(&packet->data);
           // Set the size as correspond to each frame.
           ++packet_id;
         }
@@ -110,12 +118,16 @@ void RtpSender::ResendPackets(
         uint16 packet_id = *set_it;
         success = storage_->GetPacket(frame_id, packet_id, &packets_to_resend);
 
+        // Check that we got at least one packet.
+        DCHECK(set_it != packets_set.begin() || success)
+            << "Failed to resend frame " << frame_id;
+
         // Resend packet to the network.
         if (success) {
           VLOG(3) << "Resend " << static_cast<int>(frame_id) << ":"
                   << packet_id;
-          Packet& packet = packets_to_resend.back();
-          UpdateSequenceNumber(&packet);
+          PacketRef packet = packets_to_resend.back().second;
+          UpdateSequenceNumber(&packet->data);
         }
       }
     }

@@ -14,6 +14,7 @@
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
+#include "cc/test/fake_renderer_client.h"
 #include "cc/test/mock_quad_culler.h"
 #include "cc/test/pixel_test.h"
 #include "cc/test/render_pass_test_common.h"
@@ -124,24 +125,6 @@ namespace {
 TEST_F(GLRendererShaderPixelTest, AllShadersCompile) { TestShaders(); }
 #endif
 
-class FakeRendererClient : public RendererClient {
- public:
-  FakeRendererClient() : set_full_root_layer_damage_count_(0) {}
-
-  // RendererClient methods.
-  virtual void SetFullRootLayerDamage() OVERRIDE {
-    set_full_root_layer_damage_count_++;
-  }
-
-  // Methods added for test.
-  int set_full_root_layer_damage_count() const {
-    return set_full_root_layer_damage_count_;
-  }
-
- private:
-  int set_full_root_layer_damage_count_;
-};
-
 class FakeRendererGL : public GLRenderer {
  public:
   FakeRendererGL(RendererClient* client,
@@ -175,8 +158,8 @@ class GLRendererWithDefaultHarnessTest : public GLRendererTest {
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
     resource_provider_ =
         ResourceProvider::Create(
-            output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1)
-            .Pass();
+            output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1,
+            false).Pass();
     renderer_ = make_scoped_ptr(new FakeRendererGL(&renderer_client_,
                                                    &settings_,
                                                    output_surface_.get(),
@@ -208,8 +191,8 @@ class GLRendererShaderTest : public GLRendererTest {
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
     resource_provider_ =
         ResourceProvider::Create(
-            output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1)
-            .Pass();
+            output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1,
+            false).Pass();
     renderer_.reset(new FakeRendererGL(&renderer_client_,
                                        &settings_,
                                        output_surface_.get(),
@@ -340,7 +323,6 @@ TEST_F(GLRendererWithDefaultHarnessTest,
 
   renderer_->SetVisible(true);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -365,7 +347,6 @@ TEST_F(GLRendererWithDefaultHarnessTest,
 
   char pixels[4];
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -390,7 +371,6 @@ TEST_F(GLRendererWithDefaultHarnessTest, ExternalStencil) {
   root_pass->has_transparent_background = false;
 
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -524,7 +504,7 @@ TEST_F(GLRendererTest, InitializationDoesNotMakeSynchronousCalls) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -560,7 +540,7 @@ TEST_F(GLRendererTest, InitializationWithQuicklyLostContextDoesNotAssert) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -593,7 +573,7 @@ TEST_F(GLRendererTest, OpaqueBackground) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -620,7 +600,6 @@ TEST_F(GLRendererTest, OpaqueBackground) {
   EXPECT_CALL(*context, clear(_)).Times(1);
 #endif
   renderer.DrawFrame(&render_passes_in_draw_order_,
-                     NULL,
                      1.f,
                      viewport_rect,
                      viewport_rect,
@@ -640,7 +619,7 @@ TEST_F(GLRendererTest, TransparentBackground) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -659,7 +638,6 @@ TEST_F(GLRendererTest, TransparentBackground) {
   EXPECT_CALL(*context, discardFramebufferEXT(GL_FRAMEBUFFER, 1, _)).Times(1);
   EXPECT_CALL(*context, clear(_)).Times(1);
   renderer.DrawFrame(&render_passes_in_draw_order_,
-                     NULL,
                      1.f,
                      viewport_rect,
                      viewport_rect,
@@ -680,7 +658,7 @@ TEST_F(GLRendererTest, OffscreenOutputSurface) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -700,7 +678,6 @@ TEST_F(GLRendererTest, OffscreenOutputSurface) {
       .Times(1);
   EXPECT_CALL(*context, clear(_)).Times(AnyNumber());
   renderer.DrawFrame(&render_passes_in_draw_order_,
-                     NULL,
                      1.f,
                      viewport_rect,
                      viewport_rect,
@@ -762,7 +739,7 @@ TEST_F(GLRendererTest, VisibilityChangeIsLastCall) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -784,7 +761,6 @@ TEST_F(GLRendererTest, VisibilityChangeIsLastCall) {
   // the stack.
   renderer.SetVisible(true);
   renderer.DrawFrame(&render_passes_in_draw_order_,
-                     NULL,
                      1.f,
                      viewport_rect,
                      viewport_rect,
@@ -827,7 +803,7 @@ TEST_F(GLRendererTest, ActiveTextureState) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -879,7 +855,6 @@ TEST_F(GLRendererTest, ActiveTextureState) {
 
   gfx::Rect viewport_rect(100, 100);
   renderer.DrawFrame(&render_passes_in_draw_order_,
-                     NULL,
                      1.f,
                      viewport_rect,
                      viewport_rect,
@@ -907,7 +882,7 @@ TEST_F(GLRendererTest, ShouldClearRootRenderPass) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   settings.should_clear_root_render_pass = false;
@@ -957,7 +932,6 @@ TEST_F(GLRendererTest, ShouldClearRootRenderPass) {
 
   renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer.DrawFrame(&render_passes_in_draw_order_,
-                     NULL,
                      1.f,
                      viewport_rect,
                      viewport_rect,
@@ -1000,7 +974,7 @@ TEST_F(GLRendererTest, ScissorTestWhenClearing) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -1041,7 +1015,6 @@ TEST_F(GLRendererTest, ScissorTestWhenClearing) {
 
   renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer.DrawFrame(&render_passes_in_draw_order_,
-                     NULL,
                      1.f,
                      viewport_rect,
                      viewport_rect,
@@ -1094,7 +1067,7 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   settings.partial_swap_enabled = true;
@@ -1116,11 +1089,10 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                                               viewport_rect,
                                               gfx::Transform());
     AddQuad(root_pass, viewport_rect, SK_ColorGREEN);
-    root_pass->damage_rect = gfx::RectF(2.f, 2.f, 3.f, 3.f);
+    root_pass->damage_rect = gfx::Rect(2, 2, 3, 3);
 
     renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
     renderer.DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        clip_rect,
@@ -1136,11 +1108,10 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                                               viewport_rect,
                                               gfx::Transform());
     AddQuad(root_pass, viewport_rect, SK_ColorGREEN);
-    root_pass->damage_rect = gfx::RectF(root_pass->output_rect);
+    root_pass->damage_rect = root_pass->output_rect;
 
     renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
     renderer.DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        clip_rect,
@@ -1157,12 +1128,11 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                                               viewport_rect,
                                               gfx::Transform());
     AddQuad(root_pass, viewport_rect, SK_ColorGREEN);
-    root_pass->damage_rect = gfx::RectF(root_pass->output_rect);
+    root_pass->damage_rect = root_pass->output_rect;
     root_pass->has_transparent_background = false;
 
     renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
     renderer.DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        clip_rect,
@@ -1180,11 +1150,10 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                                               viewport_rect,
                                               gfx::Transform());
     AddQuad(root_pass, viewport_rect, SK_ColorGREEN);
-    root_pass->damage_rect = gfx::RectF(root_pass->output_rect);
+    root_pass->damage_rect = root_pass->output_rect;
 
     renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
     renderer.DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        clip_rect,
@@ -1201,11 +1170,10 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                                               viewport_rect,
                                               gfx::Transform());
     AddQuad(root_pass, viewport_rect, SK_ColorGREEN);
-    root_pass->damage_rect = gfx::RectF(root_pass->output_rect);
+    root_pass->damage_rect = root_pass->output_rect;
 
     renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
     renderer.DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        clip_rect,
@@ -1223,11 +1191,10 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                                               viewport_rect,
                                               gfx::Transform());
     AddQuad(root_pass, viewport_rect, SK_ColorGREEN);
-    root_pass->damage_rect = gfx::RectF(root_pass->output_rect);
+    root_pass->damage_rect = root_pass->output_rect;
 
     renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
     renderer.DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        clip_rect,
@@ -1285,7 +1252,7 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1));
+      output_surface.get(), shared_bitmap_manager.get(), 0, false, 1, false));
 
   LayerTreeSettings settings;
   FakeRendererClient renderer_client;
@@ -1308,7 +1275,6 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
 
   renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer.DrawFrame(&render_passes_in_draw_order_,
-                     NULL,
                      1.f,
                      device_viewport_rect,
                      device_viewport_rect,
@@ -1374,7 +1340,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1398,7 +1363,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1423,7 +1387,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1447,7 +1410,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1472,7 +1434,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1496,7 +1457,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1521,7 +1481,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1545,7 +1504,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1590,7 +1548,6 @@ TEST_F(GLRendererShaderTest, DrawRenderPassQuadSkipsAAForClippingTransform) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1621,7 +1578,6 @@ TEST_F(GLRendererShaderTest, DrawSolidColorShader) {
 
   renderer_->DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
   renderer_->DrawFrame(&render_passes_in_draw_order_,
-                       NULL,
                        1.f,
                        viewport_rect,
                        viewport_rect,
@@ -1671,7 +1627,8 @@ class MockOutputSurfaceTest : public GLRendererTest {
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
     resource_provider_ =
         ResourceProvider::Create(
-            &output_surface_, shared_bitmap_manager_.get(), 0, false, 1).Pass();
+            &output_surface_, shared_bitmap_manager_.get(), 0, false, 1, false)
+            .Pass();
 
     renderer_.reset(new FakeRendererGL(&renderer_client_,
                                        &settings_,
@@ -1703,7 +1660,6 @@ class MockOutputSurfaceTest : public GLRendererTest {
     renderer_->DecideRenderPassAllocationsForFrame(
         render_passes_in_draw_order_);
     renderer_->DrawFrame(&render_passes_in_draw_order_,
-                         NULL,
                          device_scale_factor,
                          device_viewport_rect,
                          device_viewport_rect,

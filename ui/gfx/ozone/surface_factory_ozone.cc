@@ -7,7 +7,8 @@
 #include <stdlib.h>
 
 #include "base/command_line.h"
-#include "ui/gfx/vsync_provider.h"
+#include "ui/gfx/ozone/surface_ozone_canvas.h"
+#include "ui/gfx/ozone/surface_ozone_egl.h"
 
 namespace gfx {
 
@@ -33,12 +34,16 @@ intptr_t SurfaceFactoryOzone::GetNativeDisplay() {
   return 0;
 }
 
-bool SurfaceFactoryOzone::SchedulePageFlip(gfx::AcceleratedWidget w) {
-  return true;
+scoped_ptr<SurfaceOzoneEGL> SurfaceFactoryOzone::CreateEGLSurfaceForWidget(
+      gfx::AcceleratedWidget widget) {
+  NOTIMPLEMENTED();
+  return scoped_ptr<SurfaceOzoneEGL>();
 }
 
-SkCanvas* SurfaceFactoryOzone::GetCanvasForWidget(gfx::AcceleratedWidget w) {
-  return NULL;
+scoped_ptr<SurfaceOzoneCanvas> SurfaceFactoryOzone::CreateCanvasForWidget(
+      gfx::AcceleratedWidget widget) {
+  NOTIMPLEMENTED();
+  return scoped_ptr<SurfaceOzoneCanvas>();
 }
 
 const int32* SurfaceFactoryOzone::GetEGLSurfaceProperties(
@@ -52,12 +57,13 @@ gfx::OverlayCandidatesOzone* SurfaceFactoryOzone::GetOverlayCandidates(
   return NULL;
 }
 
-void SurfaceFactoryOzone::ScheduleOverlayPlane(gfx::AcceleratedWidget w,
-                                               int plane_z_order,
-                                               OverlayTransform plane_transform,
-                                               gfx::NativeBufferOzone buffer,
-                                               const gfx::Rect& display_bounds,
-                                               gfx::RectF crop_rect) {
+void SurfaceFactoryOzone::ScheduleOverlayPlane(
+    gfx::AcceleratedWidget w,
+    int plane_z_order,
+    gfx::OverlayTransform plane_transform,
+    gfx::NativeBufferOzone buffer,
+    const gfx::Rect& display_bounds,
+    gfx::RectF crop_rect) {
   NOTREACHED();
 }
 

@@ -13,6 +13,8 @@
 
 using autofill::PasswordForm;
 
+namespace password_manager {
+
 PasswordStoreDefault::PasswordStoreDefault(
     scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner,
     scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner,
@@ -31,6 +33,7 @@ void PasswordStoreDefault::ReportMetricsImpl() {
 
 PasswordStoreChangeList PasswordStoreDefault::AddLoginImpl(
     const PasswordForm& form) {
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   PasswordStoreChangeList changes;
   if (login_db_->AddLogin(form))
     changes.push_back(PasswordStoreChange(PasswordStoreChange::ADD, form));
@@ -39,6 +42,7 @@ PasswordStoreChangeList PasswordStoreDefault::AddLoginImpl(
 
 PasswordStoreChangeList PasswordStoreDefault::UpdateLoginImpl(
     const PasswordForm& form) {
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   PasswordStoreChangeList changes;
   if (login_db_->UpdateLogin(form, NULL))
     changes.push_back(PasswordStoreChange(PasswordStoreChange::UPDATE, form));
@@ -47,6 +51,7 @@ PasswordStoreChangeList PasswordStoreDefault::UpdateLoginImpl(
 
 PasswordStoreChangeList PasswordStoreDefault::RemoveLoginImpl(
     const PasswordForm& form) {
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   PasswordStoreChangeList changes;
   if (login_db_->RemoveLogin(form))
     changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE, form));
@@ -103,3 +108,5 @@ bool PasswordStoreDefault::FillBlacklistLogins(
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   return login_db_->GetBlacklistLogins(forms);
 }
+
+}  // namespace password_manager

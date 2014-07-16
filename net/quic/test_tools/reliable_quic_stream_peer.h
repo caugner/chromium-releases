@@ -24,6 +24,8 @@ class ReliableQuicStreamPeer {
   static bool FinSent(ReliableQuicStream* stream);
   static bool RstSent(ReliableQuicStream* stream);
 
+  static uint32 SizeOfQueuedData(ReliableQuicStream* stream);
+
  private:
   DISALLOW_COPY_AND_ASSIGN(ReliableQuicStreamPeer);
 };

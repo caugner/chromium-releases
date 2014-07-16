@@ -159,6 +159,7 @@ def GenerateManifest(srcroot, dstroot, desc):
       'key': True,
       'channel': None,
       'permissions': pretty_permissions,
+      'multi_platform': desc.get('MULTI_PLATFORM', False),
       'version': build_version.ChromeVersionNoTrunk()
   }
   RunTemplateFileIfChanged(srcpath, dstpath, replace)
@@ -262,6 +263,7 @@ def ProcessProject(pepperdir, srcroot, dstroot, desc, toolchains, configs=None,
     'tools': tools,
     'sel_ldr': desc.get('SEL_LDR'),
     'targets': desc['TARGETS'],
+    'multi_platform': desc.get('MULTI_PLATFORM', False),
   }
   RunTemplateFileIfChanged(template, make_path, template_dict)
 
@@ -274,7 +276,7 @@ def ProcessProject(pepperdir, srcroot, dstroot, desc, toolchains, configs=None,
   return (name, desc['DEST'])
 
 
-def GenerateMasterMakefile(pepperdir, out_path, targets):
+def GenerateMasterMakefile(pepperdir, out_path, targets, deps):
   """Generate a Master Makefile that builds all examples.
 
   Args:
@@ -287,6 +289,7 @@ def GenerateMasterMakefile(pepperdir, out_path, targets):
   rel_path = os.path.relpath(pepperdir, os.path.dirname(out_path))
   template_dict = {
     'projects': targets,
+    'deps' : deps,
     'rel_sdk' : rel_path,
   }
   RunTemplateFileIfChanged(in_path, out_path, template_dict)

@@ -35,7 +35,8 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
 
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
     resource_provider_ = ResourceProvider::Create(
-        output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1);
+        output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1,
+        false);
     renderer_ = SoftwareRenderer::Create(
         this, &settings_, output_surface_.get(), resource_provider());
   }
@@ -67,7 +68,12 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
 
   InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
-  scoped_ptr<SharedQuadState> shared_quad_state = SharedQuadState::Create();
+  RenderPass::Id root_render_pass_id = RenderPass::Id(1, 1);
+  scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
+  root_render_pass->SetNew(
+      root_render_pass_id, outer_rect, outer_rect, gfx::Transform());
+  SharedQuadState* shared_quad_state =
+      root_render_pass->CreateAndAppendSharedQuadState();
   shared_quad_state->SetAll(gfx::Transform(),
                             outer_size,
                             outer_rect,
@@ -75,16 +81,12 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
                             false,
                             1.0,
                             SkXfermode::kSrcOver_Mode);
-  RenderPass::Id root_render_pass_id = RenderPass::Id(1, 1);
-  scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
-  root_render_pass->SetNew(
-      root_render_pass_id, outer_rect, outer_rect, gfx::Transform());
   scoped_ptr<SolidColorDrawQuad> outer_quad = SolidColorDrawQuad::Create();
   outer_quad->SetNew(
-      shared_quad_state.get(), outer_rect, outer_rect, SK_ColorYELLOW, false);
+      shared_quad_state, outer_rect, outer_rect, SK_ColorYELLOW, false);
   scoped_ptr<SolidColorDrawQuad> inner_quad = SolidColorDrawQuad::Create();
   inner_quad->SetNew(
-      shared_quad_state.get(), inner_rect, inner_rect, SK_ColorCYAN, false);
+      shared_quad_state, inner_rect, inner_rect, SK_ColorCYAN, false);
   inner_quad->visible_rect = visible_rect;
   root_render_pass->AppendQuad(inner_quad.PassAs<DrawQuad>());
   root_render_pass->AppendQuad(outer_quad.PassAs<DrawQuad>());
@@ -95,7 +97,6 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
   float device_scale_factor = 1.f;
   gfx::Rect device_viewport_rect(outer_size);
   renderer()->DrawFrame(&list,
-                        NULL,
                         device_scale_factor,
                         device_viewport_rect,
                         device_viewport_rect,
@@ -160,7 +161,12 @@ TEST_F(SoftwareRendererTest, TileQuad) {
 
   gfx::Rect root_rect = outer_rect;
 
-  scoped_ptr<SharedQuadState> shared_quad_state = SharedQuadState::Create();
+  RenderPass::Id root_render_pass_id = RenderPass::Id(1, 1);
+  scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
+  root_render_pass->SetNew(
+      root_render_pass_id, root_rect, root_rect, gfx::Transform());
+  SharedQuadState* shared_quad_state =
+      root_render_pass->CreateAndAppendSharedQuadState();
   shared_quad_state->SetAll(gfx::Transform(),
                             outer_size,
                             outer_rect,
@@ -168,12 +174,8 @@ TEST_F(SoftwareRendererTest, TileQuad) {
                             false,
                             1.0,
                             SkXfermode::kSrcOver_Mode);
-  RenderPass::Id root_render_pass_id = RenderPass::Id(1, 1);
-  scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
-  root_render_pass->SetNew(
-      root_render_pass_id, root_rect, root_rect, gfx::Transform());
   scoped_ptr<TileDrawQuad> outer_quad = TileDrawQuad::Create();
-  outer_quad->SetNew(shared_quad_state.get(),
+  outer_quad->SetNew(shared_quad_state,
                      outer_rect,
                      outer_rect,
                      outer_rect,
@@ -182,7 +184,7 @@ TEST_F(SoftwareRendererTest, TileQuad) {
                      outer_size,
                      false);
   scoped_ptr<TileDrawQuad> inner_quad = TileDrawQuad::Create();
-  inner_quad->SetNew(shared_quad_state.get(),
+  inner_quad->SetNew(shared_quad_state,
                      inner_rect,
                      inner_rect,
                      inner_rect,
@@ -199,7 +201,6 @@ TEST_F(SoftwareRendererTest, TileQuad) {
   float device_scale_factor = 1.f;
   gfx::Rect device_viewport_rect(outer_size);
   renderer()->DrawFrame(&list,
-                        NULL,
                         device_scale_factor,
                         device_viewport_rect,
                         device_viewport_rect,
@@ -250,7 +251,12 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
 
   gfx::Rect root_rect(tile_size);
 
-  scoped_ptr<SharedQuadState> shared_quad_state = SharedQuadState::Create();
+  RenderPass::Id root_render_pass_id = RenderPass::Id(1, 1);
+  scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
+  root_render_pass->SetNew(
+      root_render_pass_id, root_rect, root_rect, gfx::Transform());
+  SharedQuadState* shared_quad_state =
+      root_render_pass->CreateAndAppendSharedQuadState();
   shared_quad_state->SetAll(gfx::Transform(),
                             tile_size,
                             tile_rect,
@@ -258,12 +264,8 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
                             false,
                             1.0,
                             SkXfermode::kSrcOver_Mode);
-  RenderPass::Id root_render_pass_id = RenderPass::Id(1, 1);
-  scoped_ptr<TestRenderPass> root_render_pass = TestRenderPass::Create();
-  root_render_pass->SetNew(
-      root_render_pass_id, root_rect, root_rect, gfx::Transform());
   scoped_ptr<TileDrawQuad> quad = TileDrawQuad::Create();
-  quad->SetNew(shared_quad_state.get(),
+  quad->SetNew(shared_quad_state,
                tile_rect,
                tile_rect,
                tile_rect,
@@ -280,7 +282,6 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
   float device_scale_factor = 1.f;
   gfx::Rect device_viewport_rect(tile_size);
   renderer()->DrawFrame(&list,
-                        NULL,
                         device_scale_factor,
                         device_viewport_rect,
                         device_viewport_rect,
@@ -335,7 +336,6 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
 
   renderer()->DecideRenderPassAllocationsForFrame(list);
   renderer()->DrawFrame(&list,
-                        NULL,
                         device_scale_factor,
                         viewport_rect,
                         viewport_rect,
@@ -359,7 +359,6 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
 
   renderer()->DecideRenderPassAllocationsForFrame(list);
   renderer()->DrawFrame(&list,
-                        NULL,
                         device_scale_factor,
                         viewport_rect,
                         viewport_rect,
@@ -410,7 +409,6 @@ TEST_F(SoftwareRendererTest, RenderPassVisibleRect) {
 
   renderer()->DecideRenderPassAllocationsForFrame(list);
   renderer()->DrawFrame(&list,
-                        NULL,
                         device_scale_factor,
                         viewport_rect,
                         viewport_rect,

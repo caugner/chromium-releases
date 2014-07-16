@@ -12,7 +12,7 @@
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/renderer/savable_resources.h"
 #include "content/shell/browser/shell.h"
-#include "net/base/net_util.h"
+#include "net/base/filename_util.h"
 
 namespace content {
 
@@ -22,7 +22,7 @@ class SavableResourcesTest : public ContentBrowserTest {
     command_line->AppendSwitch(switches::kSingleProcess);
 #if defined(OS_WIN)
     // Don't want to try to create a GPU process.
-    command_line->AppendSwitch(switches::kDisableAcceleratedCompositing);
+    command_line->AppendSwitch(switches::kDisableGpu);
 #endif
   }
 

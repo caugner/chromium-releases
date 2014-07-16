@@ -202,6 +202,9 @@ class TestingProfile : public Profile {
   // Blocks until TopSites finishes loading.
   void BlockUntilTopSitesLoaded();
 
+  // Allow setting a profile as Guest after-the-fact to simplify some tests.
+  void SetGuestSession(bool guest);
+
   TestingPrefServiceSyncable* GetTestingPrefService();
 
   // content::BrowserContext
@@ -219,6 +222,8 @@ class TestingProfile : public Profile {
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
   virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
+  virtual content::BrowserPluginGuestManagerDelegate*
+      GetGuestManagerDelegate() OVERRIDE;
   virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
 
   virtual TestingProfile* AsTestingProfile() OVERRIDE;

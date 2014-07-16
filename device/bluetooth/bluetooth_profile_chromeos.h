@@ -11,12 +11,14 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequenced_task_runner.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/bluetooth_profile_manager_client.h"
 #include "chromeos/dbus/bluetooth_profile_service_provider.h"
 #include "dbus/object_path.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_profile.h"
+#include "device/bluetooth/bluetooth_uuid.h"
 
 namespace dbus {
 
@@ -24,14 +26,20 @@ class FileDescriptor;
 
 }  // namespace dbus
 
+namespace device {
+class BluetoothSocketThread;
+}  // namespace device
+
 namespace chromeos {
+
+class BluetoothSocketChromeOS;
 
 // The BluetoothProfileChromeOS class implements BluetoothProfile for the
 // Chrome OS platform.
 class CHROMEOS_EXPORT BluetoothProfileChromeOS
     : public device::BluetoothProfile,
-      private device::BluetoothAdapter::Observer,
-      private BluetoothProfileServiceProvider::Delegate {
+      public device::BluetoothAdapter::Observer,
+      public BluetoothProfileServiceProvider::Delegate {
  public:
   // BluetoothProfile override.
   virtual void Unregister() OVERRIDE;
@@ -39,23 +47,25 @@ class CHROMEOS_EXPORT BluetoothProfileChromeOS
       const ConnectionCallback& callback) OVERRIDE;
 
   // Return the UUID of the profile.
-  const std::string& uuid() const { return uuid_; }
+  const device::BluetoothUUID& uuid() const { return uuid_; }
 
  private:
   friend class BluetoothProfile;
 
-  BluetoothProfileChromeOS();
+  BluetoothProfileChromeOS(
+      scoped_refptr<base::SequencedTaskRunner> ui_task_runner,
+      scoped_refptr<device::BluetoothSocketThread> socket_thread);
   virtual ~BluetoothProfileChromeOS();
 
   // Called by BluetoothProfile::Register to initialize the profile object
   // asynchronously. |uuid|, |options| and |callback| are the arguments to
   // BluetoothProfile::Register.
-  void Init(const std::string& uuid,
+  void Init(const device::BluetoothUUID& uuid,
             const device::BluetoothProfile::Options& options,
             const ProfileCallback& callback);
 
   // BluetoothProfileServiceProvider::Delegate override.
-  virtual void Release() OVERRIDE;
+  virtual void Released() OVERRIDE;
   virtual void NewConnection(
       const dbus::ObjectPath& device_path,
       scoped_ptr<dbus::FileDescriptor> fd,
@@ -104,8 +114,19 @@ class CHROMEOS_EXPORT BluetoothProfileChromeOS
       const ConfirmationCallback& callback,
       scoped_ptr<dbus::FileDescriptor> fd);
 
+  // Methods run after the socket has been connected to a
+  // BluetoothSocketChromeOS instance on the I/O thread, these methods complete
+  // the incoming connection calling both the Bluetooth daemon callback
+  // |callback| to indicate success or failure and calling this object's
+  // new connection callback method.
+  void OnConnect(const dbus::ObjectPath& device_path,
+                 scoped_refptr<BluetoothSocketChromeOS> socket,
+                 const ConfirmationCallback& callback);
+  void OnConnectError(const ConfirmationCallback& callback,
+                      const std::string& error_message);
+
   // UUID of the profile passed during initialization.
-  std::string uuid_;
+  device::BluetoothUUID uuid_;
 
   // Copy of the profile options passed during initialization.
   BluetoothProfileManagerClient::Options options_;
@@ -124,6 +145,10 @@ class CHROMEOS_EXPORT BluetoothProfileChromeOS
   // Callback used on both outgoing and incoming connections to pass the
   // connected socket to profile object owner.
   ConnectionCallback connection_callback_;
+
+  // UI thread task runner and socket thread object used to create sockets.
+  scoped_refptr<base::SequencedTaskRunner> ui_task_runner_;
+  scoped_refptr<device::BluetoothSocketThread> socket_thread_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

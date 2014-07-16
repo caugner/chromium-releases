@@ -9,7 +9,6 @@
 #include "base/values.h"
 #include "chrome/browser/notifications/message_center_notification_manager.h"
 #include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/notifications/notification_prefs_manager.h"
 #include "chrome/browser/notifications/notification_test_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
@@ -29,7 +28,7 @@ namespace message_center {
 class MessageCenterNotificationManagerTest : public testing::Test {
  protected:
   MessageCenterNotificationManagerTest() {
-    NotificationPrefsManager::RegisterPrefs(local_state_.registry());
+    MessageCenterNotificationManager::RegisterPrefs(local_state_.registry());
   }
 
   virtual void SetUp() {
@@ -74,6 +73,9 @@ class MessageCenterNotificationManagerTest : public testing::Test {
                           GURL(),
                           base::string16(),
                           base::string16(),
+                          blink::WebTextDirectionDefault,
+                          base::string16(),
+                          base::string16(),
                           new MockNotificationDelegate(id));
   }
 
@@ -103,7 +105,8 @@ TEST_F(MessageCenterNotificationManagerTest, SetupNotificationManager) {
 TEST_F(MessageCenterNotificationManagerTest, FirstRunShown) {
   TestingProfile profile;
   notification_manager()->Add(GetANotification("test"), &profile);
-  message_center()->DisplayedNotification("test");
+  message_center()->DisplayedNotification(
+      "test", message_center::DISPLAY_SOURCE_MESSAGE_CENTER);
   message_center()->MarkSinglePopupAsShown("test", false);
 
   run_loop()->Run();
@@ -117,7 +120,8 @@ TEST_F(MessageCenterNotificationManagerTest,
        FirstRunNotShownWithPopupsVisible) {
   TestingProfile profile;
   notification_manager()->Add(GetANotification("test"), &profile);
-  message_center()->DisplayedNotification("test");
+  message_center()->DisplayedNotification(
+      "test", message_center::DISPLAY_SOURCE_MESSAGE_CENTER);
   run_loop()->RunUntilIdle();
   EXPECT_FALSE(delegate()->displayed_first_run_balloon());
   EXPECT_FALSE(notification_manager()->FirstRunTimerIsActive());

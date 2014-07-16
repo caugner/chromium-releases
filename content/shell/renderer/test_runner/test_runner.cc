@@ -6,8 +6,8 @@
 
 #include <limits>
 
-#include "content/shell/common/test_runner/WebPreferences.h"
-#include "content/shell/renderer/test_runner/MockWebSpeechInputController.h"
+#include "base/logging.h"
+#include "content/shell/common/test_runner/test_preferences.h"
 #include "content/shell/renderer/test_runner/MockWebSpeechRecognizer.h"
 #include "content/shell/renderer/test_runner/TestInterfaces.h"
 #include "content/shell/renderer/test_runner/WebPermissions.h"
@@ -47,7 +47,8 @@
 #endif
 
 using namespace blink;
-using namespace WebTestRunner;
+
+namespace content {
 
 namespace {
 
@@ -58,12 +59,11 @@ WebString V8StringToWebString(v8::Handle<v8::String> v8_str) {
   return WebString::fromUTF8(chars.get());
 }
 
-class HostMethodTask :
-      public ::WebTestRunner::WebMethodTask<content::TestRunner> {
+class HostMethodTask : public WebMethodTask<TestRunner> {
  public:
-  typedef void (content::TestRunner::*CallbackMethodType)();
-  HostMethodTask(content::TestRunner* object, CallbackMethodType callback)
-      : WebMethodTask<content::TestRunner>(object), callback_(callback) {}
+  typedef void (TestRunner::*CallbackMethodType)();
+  HostMethodTask(TestRunner* object, CallbackMethodType callback)
+      : WebMethodTask<TestRunner>(object), callback_(callback) {}
 
   virtual void runIfValid() OVERRIDE {
     (m_object->*callback_)();
@@ -75,13 +75,10 @@ class HostMethodTask :
 
 }  // namespace
 
-namespace content {
-
-class InvokeCallbackTask : public WebMethodTask<content::TestRunner> {
+class InvokeCallbackTask : public WebMethodTask<TestRunner> {
  public:
-  InvokeCallbackTask(content::TestRunner* object,
-                     v8::Handle<v8::Function> callback)
-      : WebMethodTask<content::TestRunner>(object),
+  InvokeCallbackTask(TestRunner* object, v8::Handle<v8::Function> callback)
+      : WebMethodTask<TestRunner>(object),
         callback_(blink::mainThreadIsolate(), callback) {}
 
   virtual void runIfValid() OVERRIDE {
@@ -103,7 +100,7 @@ class InvokeCallbackTask : public WebMethodTask<content::TestRunner> {
   }
 
  private:
-  v8::Persistent<v8::Function> callback_;
+  v8::UniquePersistent<v8::Function> callback_;
 };
 
 class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
@@ -215,8 +212,6 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void DumpSpellCheckCallbacks();
   void DumpBackForwardList();
   void DumpSelectionRect();
-  void TestRepaint();
-  void RepaintSweepHorizontally();
   void SetPrinting();
   void SetShouldStayOnPageAfterHandlingBeforeUnload(bool value);
   void SetWillSendRequestClearHeader(const std::string& header);
@@ -233,15 +228,13 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetWindowIsKey(bool value);
   std::string PathToLocalResource(const std::string& path);
   void SetBackingScaleFactor(double value, v8::Handle<v8::Function> callback);
+  void SetColorProfile(const std::string& name,
+                       v8::Handle<v8::Function> callback);
   void SetPOSIXLocale(const std::string& locale);
   void SetMIDIAccessorResult(bool result);
   void SetMIDISysexPermission(bool value);
   void GrantWebNotificationPermission(gin::Arguments* args);
   bool SimulateWebNotificationClick(const std::string& value);
-  void AddMockSpeechInputResult(const std::string& result,
-                                double confidence,
-                                const std::string& language);
-  void SetMockSpeechInputDumpRect(bool value);
   void AddMockSpeechRecognitionResult(const std::string& transcript,
                                       double confidence);
   void SetMockSpeechRecognitionError(const std::string& error,
@@ -249,8 +242,9 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   bool WasMockSpeechRecognitionAborted();
   void AddWebPageOverlay();
   void RemoveWebPageOverlay();
-  void Display();
-  void DisplayInvalidatedRegion();
+  void DisplayAsync();
+  void DisplayAsyncThen(v8::Handle<v8::Function> callback);
+  void SetCustomTextOutput(std::string output);
 
   bool GlobalFlag();
   void SetGlobalFlag(bool value);
@@ -284,6 +278,8 @@ void TestRunnerBindings::Install(base::WeakPtr<TestRunner> runner,
 
   gin::Handle<TestRunnerBindings> bindings =
       gin::CreateHandle(isolate, new TestRunnerBindings(runner));
+  if (bindings.IsEmpty())
+    return;
   v8::Handle<v8::Object> global = context->Global();
   v8::Handle<v8::Value> v8_bindings = bindings.ToV8();
   global->Set(gin::StringToV8(isolate, "testRunner"), v8_bindings);
@@ -297,8 +293,7 @@ TestRunnerBindings::~TestRunnerBindings() {}
 
 gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
     v8::Isolate* isolate) {
-  return gin::Wrappable<TestRunnerBindings>::GetObjectTemplateBuilder(
-      isolate)
+  return gin::Wrappable<TestRunnerBindings>::GetObjectTemplateBuilder(isolate)
       // Methods controlling test execution.
       .SetMethod("notifyDone", &TestRunnerBindings::NotifyDone)
       .SetMethod("waitUntilDone", &TestRunnerBindings::WaitUntilDone)
@@ -330,9 +325,9 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::CallShouldCloseOnWebView)
       .SetMethod("setDomainRelaxationForbiddenForURLScheme",
                  &TestRunnerBindings::SetDomainRelaxationForbiddenForURLScheme)
-      .SetMethod("evaluateScriptInIsolatedWorldAndReturnValue",
-                 &TestRunnerBindings::
-                     EvaluateScriptInIsolatedWorldAndReturnValue)
+      .SetMethod(
+           "evaluateScriptInIsolatedWorldAndReturnValue",
+           &TestRunnerBindings::EvaluateScriptInIsolatedWorldAndReturnValue)
       .SetMethod("evaluateScriptInIsolatedWorld",
                  &TestRunnerBindings::EvaluateScriptInIsolatedWorld)
       .SetMethod("setIsolatedWorldSecurityOrigin",
@@ -432,13 +427,10 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("dumpBackForwardList",
                  &TestRunnerBindings::DumpBackForwardList)
       .SetMethod("dumpSelectionRect", &TestRunnerBindings::DumpSelectionRect)
-      .SetMethod("testRepaint", &TestRunnerBindings::TestRepaint)
-      .SetMethod("repaintSweepHorizontally",
-                 &TestRunnerBindings::RepaintSweepHorizontally)
       .SetMethod("setPrinting", &TestRunnerBindings::SetPrinting)
-      .SetMethod("setShouldStayOnPageAfterHandlingBeforeUnload",
-                 &TestRunnerBindings::
-                     SetShouldStayOnPageAfterHandlingBeforeUnload)
+      .SetMethod(
+           "setShouldStayOnPageAfterHandlingBeforeUnload",
+           &TestRunnerBindings::SetShouldStayOnPageAfterHandlingBeforeUnload)
       .SetMethod("setWillSendRequestClearHeader",
                  &TestRunnerBindings::SetWillSendRequestClearHeader)
       .SetMethod("dumpResourceRequestPriorities",
@@ -460,6 +452,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::PathToLocalResource)
       .SetMethod("setBackingScaleFactor",
                  &TestRunnerBindings::SetBackingScaleFactor)
+      .SetMethod("setColorProfile",
+                 &TestRunnerBindings::SetColorProfile)
       .SetMethod("setPOSIXLocale", &TestRunnerBindings::SetPOSIXLocale)
       .SetMethod("setMIDIAccessorResult",
                  &TestRunnerBindings::SetMIDIAccessorResult)
@@ -469,10 +463,6 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::GrantWebNotificationPermission)
       .SetMethod("simulateWebNotificationClick",
                  &TestRunnerBindings::SimulateWebNotificationClick)
-      .SetMethod("addMockSpeechInputResult",
-                 &TestRunnerBindings::AddMockSpeechInputResult)
-      .SetMethod("setMockSpeechInputDumpRect",
-                 &TestRunnerBindings::SetMockSpeechInputDumpRect)
       .SetMethod("addMockSpeechRecognitionResult",
                  &TestRunnerBindings::AddMockSpeechRecognitionResult)
       .SetMethod("setMockSpeechRecognitionError",
@@ -482,12 +472,14 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("addWebPageOverlay", &TestRunnerBindings::AddWebPageOverlay)
       .SetMethod("removeWebPageOverlay",
                  &TestRunnerBindings::RemoveWebPageOverlay)
-      .SetMethod("display", &TestRunnerBindings::Display)
-      .SetMethod("displayInvalidatedRegion",
-                 &TestRunnerBindings::DisplayInvalidatedRegion)
+      .SetMethod("displayAsync", &TestRunnerBindings::DisplayAsync)
+      .SetMethod("displayAsyncThen", &TestRunnerBindings::DisplayAsyncThen)
+      .SetMethod("setCustomTextOutput",
+                 &TestRunnerBindings::SetCustomTextOutput)
 
       // Properties.
-      .SetProperty("globalFlag", &TestRunnerBindings::GlobalFlag,
+      .SetProperty("globalFlag",
+                   &TestRunnerBindings::GlobalFlag,
                    &TestRunnerBindings::SetGlobalFlag)
       .SetProperty("platformName", &TestRunnerBindings::PlatformName)
       .SetProperty("tooltipText", &TestRunnerBindings::TooltipText)
@@ -534,7 +526,6 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       // Used at fast/dom/assign-to-window-status.html
       .SetMethod("dumpStatusCallbacks",
                  &TestRunnerBindings::DumpWindowStatusChanges);
-
 }
 
 void TestRunnerBindings::NotifyDone() {
@@ -1068,16 +1059,6 @@ void TestRunnerBindings::DumpSelectionRect() {
     runner_->DumpSelectionRect();
 }
 
-void TestRunnerBindings::TestRepaint() {
-  if (runner_)
-    runner_->TestRepaint();
-}
-
-void TestRunnerBindings::RepaintSweepHorizontally() {
-  if (runner_)
-    runner_->RepaintSweepHorizontally();
-}
-
 void TestRunnerBindings::SetPrinting() {
   if (runner_)
     runner_->SetPrinting();
@@ -1112,9 +1093,11 @@ void TestRunnerBindings::WaitUntilExternalURLLoad() {
 
 void TestRunnerBindings::ShowWebInspector(gin::Arguments* args) {
   if (runner_) {
-    std::string str;
-    args->GetNext(&str);
-    runner_->ShowWebInspector(str);
+    std::string settings;
+    args->GetNext(&settings);
+    std::string frontend_url;
+    args->GetNext(&frontend_url);
+    runner_->ShowWebInspector(settings, frontend_url);
   }
 }
 
@@ -1167,6 +1150,12 @@ void TestRunnerBindings::SetBackingScaleFactor(
     runner_->SetBackingScaleFactor(value, callback);
 }
 
+void TestRunnerBindings::SetColorProfile(
+    const std::string& name, v8::Handle<v8::Function> callback) {
+  if (runner_)
+    runner_->SetColorProfile(name, callback);
+}
+
 void TestRunnerBindings::SetPOSIXLocale(const std::string& locale) {
   if (runner_)
     runner_->SetPOSIXLocale(locale);
@@ -1199,18 +1188,6 @@ bool TestRunnerBindings::SimulateWebNotificationClick(
   return false;
 }
 
-void TestRunnerBindings::AddMockSpeechInputResult(const std::string& result,
-                                                  double confidence,
-                                                  const std::string& language) {
-  if (runner_)
-    runner_->AddMockSpeechInputResult(result, confidence, language);
-}
-
-void TestRunnerBindings::SetMockSpeechInputDumpRect(bool value) {
-  if (runner_)
-    runner_->SetMockSpeechInputDumpRect(value);
-}
-
 void TestRunnerBindings::AddMockSpeechRecognitionResult(
     const std::string& transcript, double confidence) {
   if (runner_)
@@ -1239,14 +1216,18 @@ void TestRunnerBindings::RemoveWebPageOverlay() {
     runner_->RemoveWebPageOverlay();
 }
 
-void TestRunnerBindings::Display() {
+void TestRunnerBindings::DisplayAsync() {
   if (runner_)
-    runner_->Display();
+    runner_->DisplayAsync();
 }
 
-void TestRunnerBindings::DisplayInvalidatedRegion() {
+void TestRunnerBindings::DisplayAsyncThen(v8::Handle<v8::Function> callback) {
   if (runner_)
-    runner_->DisplayInvalidatedRegion();
+    runner_->DisplayAsyncThen(callback);
+}
+
+void TestRunnerBindings::SetCustomTextOutput(std::string output) {
+  runner_->setCustomTextOutput(output);
 }
 
 bool TestRunnerBindings::GlobalFlag() {
@@ -1385,7 +1366,7 @@ TestRunner::TestRunner(TestInterfaces* interfaces)
       web_view_(NULL),
       page_overlay_(NULL),
       web_permissions_(new WebPermissions()),
-      notification_presenter_(new content::NotificationPresenter()),
+      notification_presenter_(new NotificationPresenter()),
       weak_factory_(this) {}
 
 TestRunner::~TestRunner() {}
@@ -1442,6 +1423,7 @@ void TestRunner::Reset() {
   if (delegate_) {
     // Reset the default quota for each origin to 5MB
     delegate_->setDatabaseQuota(5 * 1024 * 1024);
+    delegate_->setDeviceColorProfile("sRGB");
     delegate_->setDeviceScaleFactor(1);
     delegate_->setAcceptAllCookies(false);
     delegate_->setLocale("");
@@ -1478,6 +1460,8 @@ void TestRunner::Reset() {
   midi_accessor_result_ = true;
   should_stay_on_page_after_handling_before_unload_ = false;
   should_dump_resource_priorities_ = false;
+  has_custom_text_output_ = false;
+  custom_text_output_.clear();
 
   http_headers_to_clear_.clear();
 
@@ -1508,6 +1492,10 @@ void TestRunner::SetTestIsRunning(bool running) {
   test_is_running_ = running;
 }
 
+void TestRunner::InvokeCallback(scoped_ptr<InvokeCallbackTask> task) {
+  delegate_->postTask(task.release());
+}
+
 bool TestRunner::shouldDumpEditingCallbacks() const {
   return dump_editting_callbacks_;
 }
@@ -1527,6 +1515,19 @@ bool TestRunner::shouldDumpAsMarkup() {
 
 void TestRunner::setShouldDumpAsMarkup(bool value) {
   dump_as_markup_ = value;
+}
+
+bool TestRunner::shouldDumpAsCustomText() const {
+  return has_custom_text_output_;
+}
+
+std::string TestRunner::customDumpText() const {
+  return custom_text_output_;
+}
+
+void TestRunner::setCustomTextOutput(std::string text) {
+  custom_text_output_ = text;
+  has_custom_text_output_ = true;
 }
 
 bool TestRunner::shouldGeneratePixelResults() {
@@ -1630,14 +1631,6 @@ bool TestRunner::shouldDumpSelectionRect() const {
   return dump_selection_rect_;
 }
 
-bool TestRunner::testRepaint() const {
-  return test_repaint_;
-}
-
-bool TestRunner::sweepHorizontally() const {
-  return sweep_horizontally_;
-}
-
 bool TestRunner::isPrinting() const {
   return is_printing_;
 }
@@ -1672,7 +1665,7 @@ WebFrame* TestRunner::topLoadingFrame() const {
 }
 
 void TestRunner::policyDelegateDone() {
-  BLINK_ASSERT(wait_until_done_);
+  DCHECK(wait_until_done_);
   delegate_->testFinished();
   wait_until_done_ = false;
 }
@@ -1709,13 +1702,13 @@ bool TestRunner::RequestPointerLock() {
           0);
       return true;
     case PointerLockWillRespondAsync:
-      BLINK_ASSERT(!pointer_locked_);
+      DCHECK(!pointer_locked_);
       return true;
     case PointerLockWillFailSync:
-      BLINK_ASSERT(!pointer_locked_);
+      DCHECK(!pointer_locked_);
       return false;
     default:
-      BLINK_ASSERT_NOT_REACHED();
+      NOTREACHED();
       return false;
   }
 }
@@ -1741,8 +1734,9 @@ void TestRunner::clearDevToolsLocalStorage() {
   delegate_->clearDevToolsLocalStorage();
 }
 
-void TestRunner::showDevTools(const std::string& settings) {
-  delegate_->showDevTools(settings);
+void TestRunner::showDevTools(const std::string& settings,
+                              const std::string& frontend_url) {
+  delegate_->showDevTools(settings, frontend_url);
 }
 
 class WorkItemBackForward : public TestRunner::WorkItem {
@@ -1946,7 +1940,7 @@ bool TestRunner::IsCommandEnabled(const std::string& command) {
 }
 
 bool TestRunner::CallShouldCloseOnWebView() {
-  return web_view_->dispatchBeforeUnloadEvent();
+  return web_view_->mainFrame()->dispatchBeforeUnloadEvent();
 }
 
 void TestRunner::SetDomainRelaxationForbiddenForURLScheme(
@@ -2211,7 +2205,7 @@ void TestRunner::SetMockDeviceOrientation(bool has_alpha, double alpha,
 }
 
 void TestRunner::SetMockScreenOrientation(const std::string& orientation_str) {
-  blink::WebScreenOrientation orientation;
+  blink::WebScreenOrientationType orientation;
 
   if (orientation_str == "portrait-primary") {
     orientation = WebScreenOrientationPortraitPrimary;
@@ -2247,72 +2241,72 @@ void TestRunner::SetPointerLockWillRespondAsynchronously() {
 }
 
 void TestRunner::SetPopupBlockingEnabled(bool block_popups) {
-  delegate_->preferences()->javaScriptCanOpenWindowsAutomatically =
+  delegate_->preferences()->java_script_can_open_windows_automatically =
       !block_popups;
   delegate_->applyPreferences();
 }
 
 void TestRunner::SetJavaScriptCanAccessClipboard(bool can_access) {
-  delegate_->preferences()->javaScriptCanAccessClipboard = can_access;
+  delegate_->preferences()->java_script_can_access_clipboard = can_access;
   delegate_->applyPreferences();
 }
 
 void TestRunner::SetXSSAuditorEnabled(bool enabled) {
-  delegate_->preferences()->XSSAuditorEnabled = enabled;
+  delegate_->preferences()->xss_auditor_enabled = enabled;
   delegate_->applyPreferences();
 }
 
 void TestRunner::SetAllowUniversalAccessFromFileURLs(bool allow) {
-  delegate_->preferences()->allowUniversalAccessFromFileURLs = allow;
+  delegate_->preferences()->allow_universal_access_from_file_urls = allow;
   delegate_->applyPreferences();
 }
 
 void TestRunner::SetAllowFileAccessFromFileURLs(bool allow) {
-  delegate_->preferences()->allowFileAccessFromFileURLs = allow;
+  delegate_->preferences()->allow_file_access_from_file_urls = allow;
   delegate_->applyPreferences();
 }
 
 void TestRunner::OverridePreference(const std::string key,
                                     v8::Handle<v8::Value> value) {
-  WebPreferences* prefs = delegate_->preferences();
+  TestPreferences* prefs = delegate_->preferences();
   if (key == "WebKitDefaultFontSize") {
-    prefs->defaultFontSize = value->Int32Value();
+    prefs->default_font_size = value->Int32Value();
   } else if (key == "WebKitMinimumFontSize") {
-    prefs->minimumFontSize = value->Int32Value();
+    prefs->minimum_font_size = value->Int32Value();
   } else if (key == "WebKitDefaultTextEncodingName") {
-    prefs->defaultTextEncodingName = V8StringToWebString(value->ToString());
+    prefs->default_text_encoding_name = V8StringToWebString(value->ToString());
   } else if (key == "WebKitJavaScriptEnabled") {
-    prefs->javaScriptEnabled = value->BooleanValue();
+    prefs->java_script_enabled = value->BooleanValue();
   } else if (key == "WebKitSupportsMultipleWindows") {
-    prefs->supportsMultipleWindows = value->BooleanValue();
+    prefs->supports_multiple_windows = value->BooleanValue();
   } else if (key == "WebKitDisplayImagesKey") {
-    prefs->loadsImagesAutomatically = value->BooleanValue();
+    prefs->loads_images_automatically = value->BooleanValue();
   } else if (key == "WebKitPluginsEnabled") {
-    prefs->pluginsEnabled = value->BooleanValue();
+    prefs->plugins_enabled = value->BooleanValue();
   } else if (key == "WebKitJavaEnabled") {
-    prefs->javaEnabled = value->BooleanValue();
+    prefs->java_enabled = value->BooleanValue();
   } else if (key == "WebKitOfflineWebApplicationCacheEnabled") {
-    prefs->offlineWebApplicationCacheEnabled = value->BooleanValue();
+    prefs->offline_web_application_cache_enabled = value->BooleanValue();
   } else if (key == "WebKitTabToLinksPreferenceKey") {
-    prefs->tabsToLinks = value->BooleanValue();
+    prefs->tabs_to_links = value->BooleanValue();
   } else if (key == "WebKitWebGLEnabled") {
-    prefs->experimentalWebGLEnabled = value->BooleanValue();
+    prefs->experimental_webgl_enabled = value->BooleanValue();
   } else if (key == "WebKitCSSRegionsEnabled") {
-    prefs->experimentalCSSRegionsEnabled = value->BooleanValue();
+    prefs->experimental_css_regions_enabled = value->BooleanValue();
   } else if (key == "WebKitCSSGridLayoutEnabled") {
-    prefs->experimentalCSSGridLayoutEnabled = value->BooleanValue();
+    prefs->experimental_css_grid_layout_enabled = value->BooleanValue();
   } else if (key == "WebKitHyperlinkAuditingEnabled") {
-    prefs->hyperlinkAuditingEnabled = value->BooleanValue();
+    prefs->hyperlink_auditing_enabled = value->BooleanValue();
   } else if (key == "WebKitEnableCaretBrowsing") {
-    prefs->caretBrowsingEnabled = value->BooleanValue();
+    prefs->caret_browsing_enabled = value->BooleanValue();
   } else if (key == "WebKitAllowDisplayingInsecureContent") {
-    prefs->allowDisplayOfInsecureContent = value->BooleanValue();
+    prefs->allow_display_of_insecure_content = value->BooleanValue();
   } else if (key == "WebKitAllowRunningInsecureContent") {
-    prefs->allowRunningOfInsecureContent = value->BooleanValue();
+    prefs->allow_running_of_insecure_content = value->BooleanValue();
   } else if (key == "WebKitShouldRespectImageOrientation") {
-    prefs->shouldRespectImageOrientation = value->BooleanValue();
+    prefs->should_respect_image_orientation = value->BooleanValue();
   } else if (key == "WebKitWebAudioEnabled") {
-    BLINK_ASSERT(value->BooleanValue());
+    DCHECK(value->BooleanValue());
   } else {
     std::string message("Invalid name for preference: ");
     message.append(key);
@@ -2322,7 +2316,7 @@ void TestRunner::OverridePreference(const std::string key,
 }
 
 void TestRunner::SetPluginsEnabled(bool enabled) {
-  delegate_->preferences()->pluginsEnabled = enabled;
+  delegate_->preferences()->plugins_enabled = enabled;
   delegate_->applyPreferences();
 }
 
@@ -2443,14 +2437,6 @@ void TestRunner::DumpSelectionRect() {
   dump_selection_rect_ = true;
 }
 
-void TestRunner::TestRepaint() {
-  test_repaint_ = true;
-}
-
-void TestRunner::RepaintSweepHorizontally() {
-  sweep_horizontally_ = true;
-}
-
 void TestRunner::SetPrinting() {
   is_printing_ = true;
 }
@@ -2472,8 +2458,9 @@ void TestRunner::SetUseMockTheme(bool use) {
   use_mock_theme_ = use;
 }
 
-void TestRunner::ShowWebInspector(const std::string& str) {
-  showDevTools(str);
+void TestRunner::ShowWebInspector(const std::string& str,
+                                  const std::string& frontend_url) {
+  showDevTools(str, frontend_url);
 }
 
 void TestRunner::WaitUntilExternalURLLoad() {
@@ -2520,6 +2507,12 @@ void TestRunner::SetBackingScaleFactor(double value,
   delegate_->postTask(new InvokeCallbackTask(this, callback));
 }
 
+void TestRunner::SetColorProfile(const std::string& name,
+                                 v8::Handle<v8::Function> callback) {
+  delegate_->setDeviceColorProfile(name);
+  delegate_->postTask(new InvokeCallbackTask(this, callback));
+}
+
 void TestRunner::SetPOSIXLocale(const std::string& locale) {
   delegate_->setLocale(locale);
 }
@@ -2542,21 +2535,6 @@ void TestRunner::GrantWebNotificationPermission(const std::string& origin,
 
 bool TestRunner::SimulateWebNotificationClick(const std::string& value) {
   return notification_presenter_->SimulateClick(value);
-}
-
-void TestRunner::AddMockSpeechInputResult(const std::string& result,
-                                          double confidence,
-                                          const std::string& language) {
-#if ENABLE_INPUT_SPEECH
-  proxy_->speechInputControllerMock()->addMockRecognitionResult(
-      WebString::fromUTF8(result), confidence, WebString::fromUTF8(language));
-#endif
-}
-
-void TestRunner::SetMockSpeechInputDumpRect(bool value) {
-#if ENABLE_INPUT_SPEECH
-  proxy_->speechInputControllerMock()->setDumpRect(value);
-#endif
 }
 
 void TestRunner::AddMockSpeechRecognitionResult(const std::string& transcript,
@@ -2590,12 +2568,16 @@ void TestRunner::RemoveWebPageOverlay() {
   }
 }
 
-void TestRunner::Display() {
-  proxy_->display();
+void TestRunner::DisplayAsync() {
+  proxy_->displayAsyncThen(base::Closure());
 }
 
-void TestRunner::DisplayInvalidatedRegion() {
-  proxy_->displayInvalidatedRegion();
+void TestRunner::DisplayAsyncThen(v8::Handle<v8::Function> callback) {
+  scoped_ptr<InvokeCallbackTask> task(
+      new InvokeCallbackTask(this, callback));
+  proxy_->displayAsyncThen(base::Bind(&TestRunner::InvokeCallback,
+                                      base::Unretained(this),
+                                      base::Passed(&task)));
 }
 
 void TestRunner::LocationChangeDone() {
@@ -2636,7 +2618,7 @@ void TestRunner::DidAcquirePointerLockInternal() {
 }
 
 void TestRunner::DidNotAcquirePointerLockInternal() {
-  BLINK_ASSERT(!pointer_locked_);
+  DCHECK(!pointer_locked_);
   pointer_locked_ = false;
   web_view_->didNotAcquirePointerLock();
 

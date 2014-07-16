@@ -28,7 +28,7 @@ class NetworkingPrivateGetPropertiesFunction
   virtual ~NetworkingPrivateGetPropertiesFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void GetPropertiesSuccess(const std::string& service_path,
@@ -50,7 +50,7 @@ class NetworkingPrivateGetManagedPropertiesFunction
   virtual ~NetworkingPrivateGetManagedPropertiesFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   // Callbacks for ManagedNetworkConfigurationHandler::GetManagedProperties.
@@ -73,7 +73,7 @@ class NetworkingPrivateGetStateFunction : public ChromeAsyncExtensionFunction {
   virtual ~NetworkingPrivateGetStateFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void Success(const std::string& service_path,
@@ -96,7 +96,7 @@ class NetworkingPrivateSetPropertiesFunction
   virtual ~NetworkingPrivateSetPropertiesFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void ErrorCallback(const std::string& error_name,
@@ -117,7 +117,7 @@ class NetworkingPrivateCreateNetworkFunction
   virtual ~NetworkingPrivateCreateNetworkFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void ErrorCallback(const std::string& error_name,
@@ -138,7 +138,7 @@ class NetworkingPrivateGetVisibleNetworksFunction
   virtual ~NetworkingPrivateGetVisibleNetworksFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void ResultCallback(const base::ListValue& network_list);
@@ -158,7 +158,7 @@ class NetworkingPrivateGetEnabledNetworkTypesFunction
   virtual ~NetworkingPrivateGetEnabledNetworkTypesFunction();
 
   // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetEnabledNetworkTypesFunction);
@@ -176,7 +176,7 @@ class NetworkingPrivateEnableNetworkTypeFunction
   virtual ~NetworkingPrivateEnableNetworkTypeFunction();
 
   // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateEnableNetworkTypeFunction);
@@ -194,7 +194,7 @@ class NetworkingPrivateDisableNetworkTypeFunction
   virtual ~NetworkingPrivateDisableNetworkTypeFunction();
 
   // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateDisableNetworkTypeFunction);
@@ -212,7 +212,7 @@ class NetworkingPrivateRequestNetworkScanFunction
   virtual ~NetworkingPrivateRequestNetworkScanFunction();
 
   // SyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateRequestNetworkScanFunction);
@@ -231,7 +231,7 @@ class NetworkingPrivateStartConnectFunction
   virtual ~NetworkingPrivateStartConnectFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   // Called when the request to connect succeeds. Doesn't mean that the connect
@@ -257,7 +257,7 @@ class NetworkingPrivateStartDisconnectFunction
   virtual ~NetworkingPrivateStartDisconnectFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   // Called when the request to disconnect succeeds. Doesn't mean that the
@@ -283,7 +283,7 @@ class NetworkingPrivateVerifyDestinationFunction
   virtual ~NetworkingPrivateVerifyDestinationFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   void ResultCallback(bool result);
   void ErrorCallback(const std::string& error_name, const std::string& error);
@@ -304,7 +304,7 @@ class NetworkingPrivateVerifyAndEncryptCredentialsFunction
   virtual ~NetworkingPrivateVerifyAndEncryptCredentialsFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   void ResultCallback(const std::string& result);
   void ErrorCallback(const std::string& error_name, const std::string& error);
@@ -326,7 +326,7 @@ class NetworkingPrivateVerifyAndEncryptDataFunction
   virtual ~NetworkingPrivateVerifyAndEncryptDataFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   void ResultCallback(const std::string& result);
   void ErrorCallback(const std::string& error_name, const std::string& error);
@@ -347,7 +347,7 @@ class NetworkingPrivateSetWifiTDLSEnabledStateFunction
   virtual ~NetworkingPrivateSetWifiTDLSEnabledStateFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   void Success(const std::string& result);
   void Failure(const std::string& error_name,
@@ -369,7 +369,7 @@ class NetworkingPrivateGetWifiTDLSStatusFunction
   virtual ~NetworkingPrivateGetWifiTDLSStatusFunction();
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   void Success(const std::string& result);
   void Failure(const std::string& error_name,
@@ -377,6 +377,23 @@ class NetworkingPrivateGetWifiTDLSStatusFunction
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetWifiTDLSStatusFunction);
+};
+
+class NetworkingPrivateGetCaptivePortalStatusFunction
+    : public ChromeAsyncExtensionFunction {
+ public:
+  NetworkingPrivateGetCaptivePortalStatusFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.getCaptivePortalStatus",
+                             NETWORKINGPRIVATE_GETCAPTIVEPORTALSTATUS);
+
+  // AsyncExtensionFunction overrides.
+  virtual bool RunAsync() OVERRIDE;
+
+ protected:
+  virtual ~NetworkingPrivateGetCaptivePortalStatusFunction();
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetCaptivePortalStatusFunction);
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_NETWORKING_PRIVATE_NETWORKING_PRIVATE_API_H_

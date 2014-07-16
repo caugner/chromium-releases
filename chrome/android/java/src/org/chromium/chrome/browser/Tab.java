@@ -21,7 +21,7 @@ import org.chromium.chrome.browser.contextmenu.ContextMenuParams;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulator;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulatorWrapper;
 import org.chromium.chrome.browser.contextmenu.EmptyChromeContextMenuItemDelegate;
-import org.chromium.chrome.browser.dom_distiller.FeedbackReporter;
+import org.chromium.chrome.browser.dom_distiller.DomDistillerFeedbackReporter;
 import org.chromium.chrome.browser.infobar.AutoLoginProcessor;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -32,7 +32,6 @@ import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.browser.NavigationClient;
 import org.chromium.content.browser.NavigationHistory;
-import org.chromium.content.browser.PageInfo;
 import org.chromium.content.browser.WebContentsObserverAndroid;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.Clipboard;
@@ -129,7 +128,7 @@ public class Tab implements NavigationClient {
     private WebContentsObserverAndroid mWebContentsObserver;
     private VoiceSearchTabHelper mVoiceSearchTabHelper;
     private TabChromeWebContentsDelegateAndroid mWebContentsDelegate;
-    private FeedbackReporter mFeedbackReporter;
+    private DomDistillerFeedbackReporter mDomDistillerFeedbackReporter;
 
     /**
      * If this tab was opened from another tab, store the id of the tab that
@@ -142,6 +141,8 @@ public class Tab implements NavigationClient {
      * Whether the tab should be grouped with its parent tab.
      */
     private boolean mGroupedWithParent = true;
+
+    private boolean mIsClosing = false;
 
     /**
      * A default {@link ChromeContextMenuItemDelegate} that supports some of the context menu
@@ -419,7 +420,8 @@ public class Tab implements NavigationClient {
                 // Policy will be ignored for null referrer url, 0 is just a placeholder.
                 // TODO(ppi): Should we pass Referrer jobject and add JNI methods to read it from
                 //            the native?
-                params.getReferrer() != null ? params.getReferrer().getPolicy() : 0);
+                params.getReferrer() != null ? params.getReferrer().getPolicy() : 0,
+                params.getIsRendererInitiated());
 
         TraceEvent.end();
 
@@ -451,8 +453,7 @@ public class Tab implements NavigationClient {
      *         be {@code null}, if the tab is frozen or being initialized or destroyed.
      */
     public View getView() {
-        PageInfo pageInfo = getPageInfo();
-        return pageInfo != null ? pageInfo.getView() : null;
+        return mNativePage != null ? mNativePage.getView() : mContentView;
     }
 
     /**
@@ -509,7 +510,7 @@ public class Tab implements NavigationClient {
     }
 
     /**
-     * Reloads the current page content if it is a {@link ContentView}.
+     * Reloads the current page content.
      */
     public void reload() {
         // TODO(dtrainor): Should we try to rebuild the ContentView if it's frozen?
@@ -517,7 +518,7 @@ public class Tab implements NavigationClient {
     }
 
     /**
-     * Reloads the current page content if it is a {@link ContentView}.
+     * Reloads the current page content.
      * This version ignores the cache and reloads from the network.
      */
     public void reloadIgnoringCache() {
@@ -533,7 +534,9 @@ public class Tab implements NavigationClient {
      * @return The background color of the tab.
      */
     public int getBackgroundColor() {
-        return getPageInfo() != null ? getPageInfo().getBackgroundColor() : Color.WHITE;
+        if (mNativePage != null) return mNativePage.getBackgroundColor();
+        if (mContentViewCore != null) return mContentViewCore.getBackgroundColor();
+        return Color.WHITE;
     }
 
     /**
@@ -585,14 +588,6 @@ public class Tab implements NavigationClient {
      */
     public ContentViewCore getContentViewCore() {
         return mNativePage == null ? mContentViewCore : null;
-    }
-
-    /**
-     * @return A {@link PageInfo} describing the current page.  This is always not {@code null}
-     *         except during initialization, destruction, and when the tab is frozen.
-     */
-    public PageInfo getPageInfo() {
-        return mNativePage != null ? mNativePage : mContentView;
     }
 
     /**
@@ -766,7 +761,7 @@ public class Tab implements NavigationClient {
 
     /**
      * Completes the {@link ContentView} specific initialization around a native WebContents
-     * pointer.  {@link #getPageInfo()} will still return the {@link NativePage} if there is one.
+     * pointer. {@link #getNativePage()} will still return the {@link NativePage} if there is one.
      * All initialization that needs to reoccur after a web contents swap should be added here.
      * <p />
      * NOTE: If you attempt to pass a native WebContents that does not have the same incognito
@@ -810,8 +805,8 @@ public class Tab implements NavigationClient {
             mAppBannerManager = new AppBannerManager(this);
         }
 
-        if (FeedbackReporter.isEnabled() && mFeedbackReporter == null) {
-            mFeedbackReporter = new FeedbackReporter(this);
+        if (DomDistillerFeedbackReporter.isEnabled() && mDomDistillerFeedbackReporter == null) {
+            mDomDistillerFeedbackReporter = new DomDistillerFeedbackReporter(this);
         }
 
         for (TabObserver observer : mObservers) observer.onContentChanged(this);
@@ -858,7 +853,7 @@ public class Tab implements NavigationClient {
      */
     @CalledByNative
     public String getUrl() {
-        return mContentView != null ? mContentView.getUrl() : "";
+        return mContentViewCore != null ? mContentViewCore.getUrl() : "";
     }
 
     /**
@@ -866,7 +861,9 @@ public class Tab implements NavigationClient {
      */
     @CalledByNative
     public String getTitle() {
-        return getPageInfo() != null ? getPageInfo().getTitle() : "";
+        if (mNativePage != null) return mNativePage.getTitle();
+        if (mContentViewCore != null) return mContentViewCore.getTitle();
+        return "";
     }
 
     /**
@@ -879,12 +876,26 @@ public class Tab implements NavigationClient {
     }
 
     /**
-     * Restores the tab if it is frozen or crashed.
-     * @return true iff tab restore was triggered.
+     * Loads the tab if it's not loaded (e.g. because it was killed in background).
+     * @return true iff tab load was triggered
      */
     @CalledByNative
-    public boolean restoreIfNeeded() {
+    public boolean loadIfNeeded() {
         return false;
+    }
+
+    /**
+     * @return Whether or not the tab is in the closing process.
+     */
+    public boolean isClosing() {
+        return mIsClosing;
+    }
+
+    /**
+     * @param closing Whether or not the tab is in the closing process.
+     */
+    public void setClosing(boolean closing) {
+        mIsClosing = closing;
     }
 
     /**
@@ -913,7 +924,7 @@ public class Tab implements NavigationClient {
 
     private void destroyNativePageInternal(NativePage nativePage) {
         if (nativePage == null) return;
-        assert getPageInfo() != nativePage : "Attempting to destroy active page.";
+        assert nativePage != mNativePage : "Attempting to destroy active page.";
 
         nativePage.destroy();
     }
@@ -1117,7 +1128,8 @@ public class Tab implements NavigationClient {
     private native WebContents nativeGetWebContents(long nativeTabAndroid);
     private native Profile nativeGetProfileAndroid(long nativeTabAndroid);
     private native int nativeLoadUrl(long nativeTabAndroid, String url, String extraHeaders,
-            byte[] postData, int transition, String referrerUrl, int referrerPolicy);
+            byte[] postData, int transition, String referrerUrl, int referrerPolicy,
+            boolean isRendererInitiated);
     private native int nativeGetSecurityLevel(long nativeTabAndroid);
     private native void nativeSetActiveNavigationEntryTitleForUrl(long nativeTabAndroid, String url,
             String title);

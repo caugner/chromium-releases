@@ -23,6 +23,9 @@ ResourceAndRange = namedtuple('ResourceAndRange', ['resource', 'byte_range'])
 
 class MemoryCacheHTTPRequestHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
+  protocol_version = 'HTTP/1.1'  # override BaseHTTPServer setting
+  wbufsize = -1  # override StreamRequestHandler (a base class) setting
+
   def do_GET(self):
     """Serve a GET request."""
     resource_range = self.SendHead()
@@ -136,6 +139,9 @@ class _MemoryCacheHTTPServerImpl(SocketServer.ThreadingMixIn,
   # Since we're intercepting many domains through this single server,
   # it is quite possible to get more than 5 concurrent requests.
   request_queue_size = 128
+
+  # Don't prevent python from exiting when there is thread activity.
+  daemon_threads = True
 
   def __init__(self, host_port, handler, paths):
     BaseHTTPServer.HTTPServer.__init__(self, host_port, handler)

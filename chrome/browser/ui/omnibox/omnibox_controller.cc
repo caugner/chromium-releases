@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
-#include "chrome/browser/ui/search/instant_controller.h"
 #include "chrome/common/instant_types.h"
 #include "extensions/common/constants.h"
 #include "ui/gfx/rect.h"
@@ -73,23 +72,13 @@ OmniboxController::~OmniboxController() {
 }
 
 void OmniboxController::StartAutocomplete(
-    base::string16 user_text,
-    size_t cursor_position,
-    const GURL& current_url,
-    AutocompleteInput::PageClassification current_page_classification,
-    bool prevent_inline_autocomplete,
-    bool prefer_keyword,
-    bool allow_exact_keyword_match) const {
+    const AutocompleteInput& input) const {
   ClearPopupKeywordMode();
   popup_->SetHoveredLine(OmniboxPopupModel::kNoMatch);
 
   // We don't explicitly clear OmniboxPopupModel::manually_selected_match, as
   // Start ends up invoking OmniboxPopupModel::OnResultChanged which clears it.
-  autocomplete_controller_->Start(AutocompleteInput(
-      user_text, cursor_position, base::string16(), current_url,
-      current_page_classification, prevent_inline_autocomplete,
-      prefer_keyword, allow_exact_keyword_match,
-      AutocompleteInput::ALL_MATCHES));
+  autocomplete_controller_->Start(input);
 }
 
 void OmniboxController::OnResultChanged(bool default_match_changed) {
@@ -105,8 +94,7 @@ void OmniboxController::OnResultChanged(bool default_match_changed) {
         DoPreconnect(*match);
       omnibox_edit_model_->OnCurrentMatchChanged();
 
-      if (chrome::IsInstantExtendedAPIEnabled() &&
-          omnibox_edit_model_->GetInstantController()) {
+      if (chrome::IsInstantExtendedAPIEnabled()) {
         InstantSuggestion prefetch_suggestion;
         const AutocompleteMatch* match_to_prefetch = GetMatchToPrefetch(result);
         if (match_to_prefetch) {
@@ -117,8 +105,7 @@ void OmniboxController::OnResultChanged(bool default_match_changed) {
         // Send the prefetch suggestion unconditionally to the InstantPage. If
         // there is no suggestion to prefetch, we need to send a blank query to
         // clear the prefetched results.
-        omnibox_edit_model_->GetInstantController()->SetSuggestionToPrefetch(
-            prefetch_suggestion);
+        omnibox_edit_model_->SetSuggestionToPrefetch(prefetch_suggestion);
       }
     } else {
       InvalidateCurrentMatch();

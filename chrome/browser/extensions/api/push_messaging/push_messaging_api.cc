@@ -16,25 +16,24 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/token_cache/token_cache_service.h"
 #include "chrome/browser/extensions/token_cache/token_cache_service_factory.h"
-#include "chrome/browser/invalidation/invalidation_auth_provider.h"
-#include "chrome/browser/invalidation/invalidation_service.h"
 #include "chrome/browser/invalidation/invalidation_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/extensions/api/push_messaging.h"
+#include "components/invalidation/invalidation_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_system_provider.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "google_apis/gaia/gaia_constants.h"
+#include "google_apis/gaia/identity_provider.h"
 
 using content::BrowserThread;
 
@@ -42,6 +41,8 @@ const char kChannelIdSeparator[] = "/";
 const char kUserNotSignedIn[] = "The user is not signed in.";
 const char kUserAccessTokenFailure[] =
     "Cannot obtain access token for the user.";
+const char kAPINotAvailableForUser[] =
+    "The API is not available for this user.";
 const int kObfuscatedGaiaIdTimeoutInDays = 30;
 
 namespace extensions {
@@ -74,10 +75,10 @@ void PushMessagingEventRouter::OnMessage(const std::string& extension_id,
            << "' extension = '" << extension_id << "'";
 
   scoped_ptr<base::ListValue> args(glue::OnMessage::Create(message));
-  scoped_ptr<extensions::Event> event(new extensions::Event(
-      glue::OnMessage::kEventName, args.Pass()));
+  scoped_ptr<extensions::Event> event(
+      new extensions::Event(glue::OnMessage::kEventName, args.Pass()));
   event->restrict_to_browser_context = profile_;
-  ExtensionSystem::Get(profile_)->event_router()->DispatchEventToExtension(
+  EventRouter::Get(profile_)->DispatchEventToExtension(
       extension_id, event.Pass());
 }
 
@@ -89,7 +90,7 @@ PushMessagingGetChannelIdFunction::PushMessagingGetChannelIdFunction()
 
 PushMessagingGetChannelIdFunction::~PushMessagingGetChannelIdFunction() {}
 
-bool PushMessagingGetChannelIdFunction::RunImpl() {
+bool PushMessagingGetChannelIdFunction::RunAsync() {
   // Fetch the function arguments.
   scoped_ptr<glue::GetChannelId::Params> params(
       glue::GetChannelId::Params::Create(*args_));
@@ -102,11 +103,20 @@ bool PushMessagingGetChannelIdFunction::RunImpl() {
   // Balanced in ReportResult()
   AddRef();
 
-  if (!IsUserLoggedIn()) {
-    invalidation::InvalidationAuthProvider* auth_provider =
-        GetInvalidationAuthProvider();
-    if (interactive_ && auth_provider->ShowLoginUI()) {
-      auth_provider->GetTokenService()->AddObserver(this);
+  invalidation::InvalidationService* invalidation_service =
+      invalidation::InvalidationServiceFactory::GetForProfile(GetProfile());
+  if (!invalidation_service) {
+    error_ = kAPINotAvailableForUser;
+    ReportResult(std::string(), error_);
+    return false;
+  }
+
+  IdentityProvider* identity_provider =
+      invalidation_service->GetIdentityProvider();
+  if (!identity_provider->GetTokenService()->RefreshTokenIsAvailable(
+          identity_provider->GetActiveAccountId())) {
+    if (interactive_ && identity_provider->RequestLogin()) {
+      identity_provider->AddActiveAccountRefreshTokenObserver(this);
       return true;
     } else {
       error_ = kUserNotSignedIn;
@@ -122,19 +132,27 @@ bool PushMessagingGetChannelIdFunction::RunImpl() {
 }
 
 void PushMessagingGetChannelIdFunction::StartAccessTokenFetch() {
+  invalidation::InvalidationService* invalidation_service =
+      invalidation::InvalidationServiceFactory::GetForProfile(GetProfile());
+  CHECK(invalidation_service);
+  IdentityProvider* identity_provider =
+      invalidation_service->GetIdentityProvider();
+
   std::vector<std::string> scope_vector =
       extensions::ObfuscatedGaiaIdFetcher::GetScopes();
   OAuth2TokenService::ScopeSet scopes(scope_vector.begin(), scope_vector.end());
-  invalidation::InvalidationAuthProvider* auth_provider =
-      GetInvalidationAuthProvider();
   fetcher_access_token_request_ =
-      auth_provider->GetTokenService()->StartRequest(
-          auth_provider->GetAccountId(), scopes, this);
+      identity_provider->GetTokenService()->StartRequest(
+          identity_provider->GetActiveAccountId(), scopes, this);
 }
 
 void PushMessagingGetChannelIdFunction::OnRefreshTokenAvailable(
     const std::string& account_id) {
-  GetInvalidationAuthProvider()->GetTokenService()->RemoveObserver(this);
+  invalidation::InvalidationService* invalidation_service =
+      invalidation::InvalidationServiceFactory::GetForProfile(GetProfile());
+  CHECK(invalidation_service);
+  invalidation_service->GetIdentityProvider()->
+      RemoveActiveAccountRefreshTokenObserver(this);
   DVLOG(2) << "Newly logged in: " << GetProfile()->GetProfileName();
   StartAccessTokenFetch();
 }
@@ -167,7 +185,7 @@ void PushMessagingGetChannelIdFunction::OnGetTokenFailure(
 void PushMessagingGetChannelIdFunction::StartGaiaIdFetch(
     const std::string& access_token) {
   // Start the async fetch of the Gaia Id.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   net::URLRequestContextGetter* context = GetProfile()->GetRequestContext();
   fetcher_.reset(new ObfuscatedGaiaIdFetcher(context, this, access_token));
 
@@ -187,17 +205,9 @@ void PushMessagingGetChannelIdFunction::StartGaiaIdFetch(
   fetcher_->Start();
 }
 
-// Check if the user is logged in.
-bool PushMessagingGetChannelIdFunction::IsUserLoggedIn() {
-  invalidation::InvalidationAuthProvider* auth_provider =
-      GetInvalidationAuthProvider();
-  return auth_provider->GetTokenService()->RefreshTokenIsAvailable(
-      auth_provider->GetAccountId());
-}
-
 void PushMessagingGetChannelIdFunction::ReportResult(
     const std::string& gaia_id, const std::string& error_string) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   BuildAndSendResult(gaia_id, error_string);
 
@@ -212,7 +222,7 @@ void PushMessagingGetChannelIdFunction::ReportResult(
                             timeout);
   }
 
-  // Balanced in RunImpl.
+  // Balanced in RunAsync.
   Release();
 }
 
@@ -260,7 +270,11 @@ void PushMessagingGetChannelIdFunction::OnObfuscatedGaiaIdFetchFailure(
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
     case GoogleServiceAuthError::ACCOUNT_DELETED:
     case GoogleServiceAuthError::ACCOUNT_DISABLED: {
-      if (!interactive_ || !GetInvalidationAuthProvider()->ShowLoginUI()) {
+      invalidation::InvalidationService* invalidation_service =
+          invalidation::InvalidationServiceFactory::GetForProfile(GetProfile());
+      CHECK(invalidation_service);
+      if (!interactive_ ||
+          !invalidation_service->GetIdentityProvider()->RequestLogin()) {
         ReportResult(std::string(), error_text);
       }
       return;
@@ -272,17 +286,12 @@ void PushMessagingGetChannelIdFunction::OnObfuscatedGaiaIdFetchFailure(
   }
 }
 
-invalidation::InvalidationAuthProvider*
-PushMessagingGetChannelIdFunction::GetInvalidationAuthProvider() {
-  return invalidation::InvalidationServiceFactory::GetForProfile(GetProfile())
-      ->GetInvalidationAuthProvider();
-}
-
 PushMessagingAPI::PushMessagingAPI(content::BrowserContext* context)
     : profile_(Profile::FromBrowserContext(context)) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile_->GetOriginalProfile()));
@@ -315,8 +324,6 @@ void PushMessagingAPI::Observe(int type,
                                const content::NotificationDetails& details) {
   invalidation::InvalidationService* invalidation_service =
       invalidation::InvalidationServiceFactory::GetForProfile(profile_);
-  // This may be NULL; for example, for the ChromeOS guest user. In these cases,
-  // just return without setting up anything, since it won't work anyway.
   if (!invalidation_service)
     return;
 
@@ -335,7 +342,7 @@ void PushMessagingAPI::Observe(int type,
       }
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_LOADED: {
+    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED: {
       const Extension* extension = content::Details<Extension>(details).ptr();
       if (extension->HasAPIPermission(APIPermission::kPushMessaging)) {
         handler_->RegisterExtension(extension->id());

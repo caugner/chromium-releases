@@ -630,9 +630,6 @@ TEST_F(StickyKeysTest, MouseEventLocked) {
 }
 
 TEST_F(StickyKeysTest, ScrollEventOneshot) {
-  // Disable Australlian scrolling.
-  ui::DeviceDataManager::GetInstance()->set_natural_scroll_enabled(true);
-
   scoped_ptr<ui::ScrollEvent> ev;
   scoped_ptr<ui::KeyEvent> kev;
   MockStickyKeysHandlerDelegate* mock_delegate =
@@ -682,9 +679,6 @@ TEST_F(StickyKeysTest, ScrollEventOneshot) {
 }
 
 TEST_F(StickyKeysTest, ScrollDirectionChanged) {
-  // Disable Australlian scrolling.
-  ui::DeviceDataManager::GetInstance()->set_natural_scroll_enabled(true);
-
   scoped_ptr<ui::ScrollEvent> ev;
   scoped_ptr<ui::KeyEvent> kev;
   MockStickyKeysHandlerDelegate* mock_delegate =
@@ -719,9 +713,6 @@ TEST_F(StickyKeysTest, ScrollDirectionChanged) {
 }
 
 TEST_F(StickyKeysTest, ScrollEventLocked) {
-  // Disable Australlian scrolling.
-  ui::DeviceDataManager::GetInstance()->set_natural_scroll_enabled(true);
-
   scoped_ptr<ui::ScrollEvent> ev;
   scoped_ptr<ui::KeyEvent> kev;
   MockStickyKeysHandlerDelegate* mock_delegate =
@@ -854,7 +845,8 @@ TEST_F(StickyKeysTest, KeyEventDispatchImpl) {
   buffer.PopEvents(&events);
   scoped_ptr<ui::KeyEvent> kev;
   kev.reset(GenerateSynthesizedKeyEvent(true, ui::VKEY_K));
-  dispatcher->OnEventFromSource(kev.get());
+  details = dispatcher->OnEventFromSource(kev.get());
+  ASSERT_FALSE(details.dispatcher_destroyed);
   buffer.PopEvents(&events);
   EXPECT_EQ(2u, events.size());
   EXPECT_EQ(ui::ET_KEY_PRESSED, events[0]->type());
@@ -921,7 +913,8 @@ TEST_P(StickyKeysMouseDispatchTest, MouseEventDispatchImpl) {
   SendActivateStickyKeyPattern(dispatcher, ui::VKEY_CONTROL);
   buffer.PopEvents(&events);
   ev.reset(GenerateSynthesizedMouseClickEvent(false, physical_location));
-  dispatcher->OnEventFromSource(ev.get());
+  details = dispatcher->OnEventFromSource(ev.get());
+  ASSERT_FALSE(details.dispatcher_destroyed);
   buffer.PopEvents(&events);
   EXPECT_EQ(2u, events.size());
   EXPECT_EQ(ui::ET_MOUSE_RELEASED, events[0]->type());
@@ -991,7 +984,8 @@ TEST_P(StickyKeysMouseDispatchTest, MouseWheelEventDispatchImpl) {
   buffer.PopEvents(&events);
   ev.reset(
       GenerateSynthesizedMouseWheelEvent(ui::MouseWheelEvent::kWheelDelta));
-  dispatcher->OnEventFromSource(ev.get());
+  details = dispatcher->OnEventFromSource(ev.get());
+  ASSERT_FALSE(details.dispatcher_destroyed);
   buffer.PopEvents(&events);
   EXPECT_EQ(2u, events.size());
   EXPECT_TRUE(events[0]->IsMouseWheelEvent());

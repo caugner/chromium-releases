@@ -6,6 +6,7 @@
 #include "base/values.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/browser/web_contents/web_contents_view.h"
 #include "content/public/browser/load_notification_details.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_details.h"
@@ -14,7 +15,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
@@ -33,15 +33,16 @@ void ResizeWebContentsView(Shell* shell, const gfx::Size& size,
   // window on Linux because if we don't, the next layout of the unchanged shell
   // window will resize WebContentsView back to the previous size.
   // SizeContents is a hack and should not be relied on.
-#if defined(TOOLKIT_GTK) || defined(OS_MACOSX)
+#if defined(OS_MACOSX)
   shell->SizeTo(size);
   // If |set_start_page| is true, start with blank page to make sure resize
   // takes effect.
   if (set_start_page)
     NavigateToURL(shell, GURL("about://blank"));
 #else
-  shell->web_contents()->GetView()->SizeContents(size);
-#endif  // defined(TOOLKIT_GTK) || defined(OS_MACOSX)
+  static_cast<WebContentsImpl*>(shell->web_contents())->GetView()->
+      SizeContents(size);
+#endif  // defined(OS_MACOSX)
 }
 
 class WebContentsImplBrowserTest : public ContentBrowserTest {
@@ -113,8 +114,8 @@ class RenderViewSizeDelegate : public WebContentsDelegate {
 
   // WebContentsDelegate:
   virtual gfx::Size GetSizeForNewRenderView(
-      const WebContents* web_contents) const OVERRIDE {
-    gfx::Size size(web_contents->GetView()->GetContainerSize());
+      WebContents* web_contents) const OVERRIDE {
+    gfx::Size size(web_contents->GetContainerBounds().size());
     size.Enlarge(size_insets_.width(), size_insets_.height());
     return size;
   }
@@ -258,9 +259,8 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
 
 // TODO(shrikant): enable this for Windows when issue with
 // force-compositing-mode is resolved (http://crbug.com/281726).
-// For TOOLKIT_GTK failure, see http://crbug.com/351234.
 // Also crashes under ThreadSanitizer, http://crbug.com/356758.
-#if defined(OS_WIN) || defined(OS_ANDROID) || defined(TOOLKIT_GTK) \
+#if defined(OS_WIN) || defined(OS_ANDROID) \
     || defined(THREAD_SANITIZER)
 #define MAYBE_GetSizeForNewRenderView DISABLED_GetSizeForNewRenderView
 #else
@@ -285,7 +285,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
   // When no size is set, RenderWidgetHostView adopts the size of
   // WebContentsView.
   NavigateToURL(shell(), embedded_test_server()->GetURL("/title2.html"));
-  EXPECT_EQ(shell()->web_contents()->GetView()->GetContainerSize(),
+  EXPECT_EQ(shell()->web_contents()->GetContainerBounds().size(),
             shell()->web_contents()->GetRenderWidgetHostView()->GetViewBounds().
                 size());
 
@@ -309,7 +309,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
 #endif
 
   EXPECT_EQ(exp_wcv_size,
-            shell()->web_contents()->GetView()->GetContainerSize());
+            shell()->web_contents()->GetContainerBounds().size());
 
   // If WebContentsView is resized after RenderWidgetHostView is created but
   // before pending navigation entry is committed, both RenderWidgetHostView and
@@ -335,7 +335,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
       GetViewBounds().size();
 
   EXPECT_EQ(new_size, actual_size);
-  EXPECT_EQ(new_size, shell()->web_contents()->GetView()->GetContainerSize());
+  EXPECT_EQ(new_size, shell()->web_contents()->GetContainerBounds().size());
 }
 
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, OpenURLSubframe) {
@@ -363,7 +363,6 @@ class RenderFrameCreatedObserver : public WebContentsObserver {
   }
 
   virtual void RenderFrameCreated(RenderFrameHost* render_frame_host) OVERRIDE {
-    LOG(ERROR) << "RFCreated: " << render_frame_host;
     last_rfh_ = render_frame_host;
   }
 
@@ -439,3 +438,4 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
 }
 
 }  // namespace content
+

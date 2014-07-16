@@ -33,31 +33,62 @@
 #endif  // defined(NDEBUG)
 #endif  // defined(GTEST_HAS_DEATH_TEST) && !defined(OS_ANDROID)
 
+namespace content {
+
 using blink::WebString;
 
 // These are the (fake) key systems that are registered for these tests.
 // kUsesAes uses the AesDecryptor like Clear Key.
 // kExternal uses an external CDM, such as Pepper-based or Android platform CDM.
-static const char kUsesAes[] = "org.example.clear";
-static const char kUsesAesParent[] = "org.example";  // Not registered.
-static const char kExternal[] = "com.example.test";
-static const char kExternalParent[] = "com.example";
+const char kUsesAes[] = "org.example.clear";
+const char kUsesAesParent[] = "org.example";  // Not registered.
+const char kExternal[] = "com.example.test";
+const char kExternalParent[] = "com.example";
 
-static const char kClearKey[] = "org.w3.clearkey";
-static const char kPrefixedClearKey[] = "webkit-org.w3.clearkey";
-static const char kExternalClearKey[] = "org.chromium.externalclearkey";
+const char kClearKey[] = "org.w3.clearkey";
+const char kPrefixedClearKey[] = "webkit-org.w3.clearkey";
+const char kExternalClearKey[] = "org.chromium.externalclearkey";
 
-static const char kAudioWebM[] = "audio/webm";
-static const char kVideoWebM[] = "video/webm";
-static const char kWebMAudioCodecs[] = "vorbis";
-static const char kWebMVideoCodecs[] = "vorbis,vp8,vp8.0";
+const char kAudioWebM[] = "audio/webm";
+const char kVideoWebM[] = "video/webm";
+const char kAudioFoo[] = "audio/foo";
+const char kVideoFoo[] = "video/foo";
 
-static const char kAudioFoo[] = "audio/foo";
-static const char kVideoFoo[] = "video/foo";
-static const char kFooAudioCodecs[] = "fooaudio";
-static const char kFooVideoCodecs[] = "fooaudio,foovideo";
+// Pick some arbitrary bit fields as long as they are not in conflict with the
+// real ones.
+enum TestCodec {
+  TEST_CODEC_FOO_AUDIO = 1 << 10,  // An audio codec for foo container.
+  TEST_CODEC_FOO_AUDIO_ALL = TEST_CODEC_FOO_AUDIO,
+  TEST_CODEC_FOO_VIDEO = 1 << 11,  // A video codec for foo container.
+  TEST_CODEC_FOO_VIDEO_ALL = TEST_CODEC_FOO_VIDEO,
+  TEST_CODEC_FOO_ALL = TEST_CODEC_FOO_AUDIO_ALL | TEST_CODEC_FOO_VIDEO_ALL
+};
 
-namespace content {
+COMPILE_ASSERT((TEST_CODEC_FOO_ALL & EME_CODEC_ALL) == EME_CODEC_NONE,
+                test_codec_masks_should_only_use_invalid_codec_masks);
+
+// Adds test container and codec masks.
+// This function must be called after SetContentClient() is called.
+// More details: AddXxxMask() will create KeySystems if it hasn't been created.
+// During KeySystems's construction GetContentClient() will be used to add key
+// systems. In test code, the content client is set by SetContentClient().
+// Therefore, SetContentClient() must be called before this function to avoid
+// access violation.
+static void AddContainerAndCodecMasksForTest() {
+  // Since KeySystems is a singleton. Make sure we only add test container and
+  // codec masks once per process.
+  static bool is_test_masks_added = false;
+
+  if (is_test_masks_added)
+    return;
+
+  AddContainerMask("audio/foo", TEST_CODEC_FOO_AUDIO_ALL);
+  AddContainerMask("video/foo", TEST_CODEC_FOO_ALL);
+  AddCodecMask("fooaudio", TEST_CODEC_FOO_AUDIO);
+  AddCodecMask("foovideo", TEST_CODEC_FOO_VIDEO);
+
+  is_test_masks_added = true;
+}
 
 class TestContentRendererClient : public ContentRendererClient {
   virtual void AddKeySystems(
@@ -67,31 +98,18 @@ class TestContentRendererClient : public ContentRendererClient {
 void TestContentRendererClient::AddKeySystems(
     std::vector<content::KeySystemInfo>* key_systems) {
   KeySystemInfo aes(kUsesAes);
-
-  aes.supported_types.push_back(std::make_pair(kAudioWebM, kWebMAudioCodecs));
-  aes.supported_types.push_back(std::make_pair(kVideoWebM, kWebMVideoCodecs));
-
-  aes.supported_types.push_back(std::make_pair(kAudioFoo, kFooAudioCodecs));
-  aes.supported_types.push_back(std::make_pair(kVideoFoo, kFooVideoCodecs));
-
+  aes.supported_codecs = EME_CODEC_WEBM_ALL;
+  aes.supported_codecs |= TEST_CODEC_FOO_ALL;
   aes.use_aes_decryptor = true;
-
   key_systems->push_back(aes);
 
   KeySystemInfo ext(kExternal);
-
-  ext.supported_types.push_back(std::make_pair(kAudioWebM, kWebMAudioCodecs));
-  ext.supported_types.push_back(std::make_pair(kVideoWebM, kWebMVideoCodecs));
-
-  ext.supported_types.push_back(std::make_pair(kAudioFoo, kFooAudioCodecs));
-  ext.supported_types.push_back(std::make_pair(kVideoFoo, kFooVideoCodecs));
-
+  ext.supported_codecs = EME_CODEC_WEBM_ALL;
+  ext.supported_codecs |= TEST_CODEC_FOO_ALL;
   ext.parent_key_system = kExternalParent;
-
 #if defined(ENABLE_PEPPER_CDMS)
   ext.pepper_type = "application/x-ppapi-external-cdm";
 #endif  // defined(ENABLE_PEPPER_CDMS)
-
   key_systems->push_back(ext);
 }
 
@@ -102,10 +120,17 @@ class KeySystemsTest : public testing::Test {
 
     vp80_codec_.push_back("vp8.0");
 
+    vp9_codec_.push_back("vp9");
+
+    vp90_codec_.push_back("vp9.0");
+
     vorbis_codec_.push_back("vorbis");
 
     vp8_and_vorbis_codecs_.push_back("vp8");
     vp8_and_vorbis_codecs_.push_back("vorbis");
+
+    vp9_and_vorbis_codecs_.push_back("vp9");
+    vp9_and_vorbis_codecs_.push_back("vorbis");
 
     foovideo_codec_.push_back("foovideo");
 
@@ -134,6 +159,10 @@ class KeySystemsTest : public testing::Test {
     SetRendererClientForTesting(&content_renderer_client_);
   }
 
+  virtual void SetUp() OVERRIDE {
+    AddContainerAndCodecMasksForTest();
+  }
+
   virtual ~KeySystemsTest() {
     // Clear the use of content_client_, which was set in SetUp().
     SetContentClient(NULL);
@@ -145,9 +174,16 @@ class KeySystemsTest : public testing::Test {
 
   const CodecVector& vp8_codec() const { return vp8_codec_; }
   const CodecVector& vp80_codec() const { return vp80_codec_; }
+  const CodecVector& vp9_codec() const { return vp9_codec_; }
+  const CodecVector& vp90_codec() const { return vp90_codec_; }
+
   const CodecVector& vorbis_codec() const { return vorbis_codec_; }
+
   const CodecVector& vp8_and_vorbis_codecs() const {
     return vp8_and_vorbis_codecs_;
+  }
+  const CodecVector& vp9_and_vorbis_codecs() const {
+    return vp9_and_vorbis_codecs_;
   }
 
   const CodecVector& foovideo_codec() const { return foovideo_codec_; }
@@ -166,11 +202,13 @@ class KeySystemsTest : public testing::Test {
 
  private:
   const CodecVector no_codecs_;
-
   CodecVector vp8_codec_;
   CodecVector vp80_codec_;
+  CodecVector vp9_codec_;
+  CodecVector vp90_codec_;
   CodecVector vorbis_codec_;
   CodecVector vp8_and_vorbis_codecs_;
+  CodecVector vp9_and_vorbis_codecs_;
 
   CodecVector foovideo_codec_;
   CodecVector foovideo_extended_codec_;
@@ -261,6 +299,12 @@ TEST_F(KeySystemsTest,
   EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
       kVideoWebM, vp8_and_vorbis_codecs(), kUsesAes));
   EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
+      kVideoWebM, vp9_codec(), kUsesAes));
+  EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
+      kVideoWebM, vp90_codec(), kUsesAes));
+  EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
+      kVideoWebM, vp9_and_vorbis_codecs(), kUsesAes));
+  EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
       kVideoWebM, vorbis_codec(), kUsesAes));
 
   // Non-Webm codecs.
@@ -282,6 +326,10 @@ TEST_F(KeySystemsTest,
       kAudioWebM, vp8_codec(), kUsesAes));
   EXPECT_FALSE(IsSupportedKeySystemWithMediaMimeType(
       kAudioWebM, vp8_and_vorbis_codecs(), kUsesAes));
+  EXPECT_FALSE(IsSupportedKeySystemWithMediaMimeType(
+      kAudioWebM, vp9_codec(), kUsesAes));
+  EXPECT_FALSE(IsSupportedKeySystemWithMediaMimeType(
+      kAudioWebM, vp9_and_vorbis_codecs(), kUsesAes));
 
   // Non-Webm codec.
   EXPECT_FALSE(IsSupportedKeySystemWithMediaMimeType(
@@ -455,6 +503,12 @@ TEST_F(
   EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
       kVideoWebM, vp8_and_vorbis_codecs(), kExternal));
   EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
+      kVideoWebM, vp9_codec(), kExternal));
+  EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
+      kVideoWebM, vp90_codec(), kExternal));
+  EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
+      kVideoWebM, vp9_and_vorbis_codecs(), kExternal));
+  EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
       kVideoWebM, vorbis_codec(), kExternal));
 
   // Valid video types - parent key system.
@@ -466,6 +520,12 @@ TEST_F(
       kVideoWebM, vp80_codec(), kExternalParent));
   EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
       kVideoWebM, vp8_and_vorbis_codecs(), kExternalParent));
+  EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
+      kVideoWebM, vp9_codec(), kExternalParent));
+  EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
+      kVideoWebM, vp90_codec(), kExternalParent));
+  EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
+      kVideoWebM, vp9_and_vorbis_codecs(), kExternalParent));
   EXPECT_TRUE(IsSupportedKeySystemWithMediaMimeType(
       kVideoWebM, vorbis_codec(), kExternalParent));
 
@@ -494,6 +554,10 @@ TEST_F(
       kAudioWebM, vp8_codec(), kExternal));
   EXPECT_FALSE(IsSupportedKeySystemWithMediaMimeType(
       kAudioWebM, vp8_and_vorbis_codecs(), kExternal));
+  EXPECT_FALSE(IsSupportedKeySystemWithMediaMimeType(
+      kAudioWebM, vp9_codec(), kExternal));
+  EXPECT_FALSE(IsSupportedKeySystemWithMediaMimeType(
+      kAudioWebM, vp9_and_vorbis_codecs(), kExternal));
 
   // Non-Webm codec.
   EXPECT_FALSE(IsSupportedKeySystemWithMediaMimeType(

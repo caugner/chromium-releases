@@ -27,6 +27,10 @@
 #include "ui/gfx/image/image_family.h"
 #include "ui/gfx/image/image_skia.h"
 
+#if defined(OS_CHROMEOS)
+#include "ui/file_manager/file_manager_resource_util.h"
+#endif
+
 #if defined(USE_AURA)
 #include "ui/keyboard/keyboard_util.h"
 #endif
@@ -71,7 +75,7 @@ SkBitmap ResizeIfNeeded(const SkBitmap& bitmap,
 }
 
 void LoadResourceOnUIThread(int resource_id, SkBitmap* bitmap) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   gfx::ImageSkia image(
       *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id));
@@ -277,11 +281,21 @@ bool ImageLoader::IsComponentExtensionResource(
         kExtraComponentExtensionResources,
         arraysize(kExtraComponentExtensionResources));
 #if defined(OS_CHROMEOS)
-    size_t size;
-    const GritResourceMap* keyboard_resources =
-        keyboard::GetKeyboardExtensionResources(&size);
+    size_t file_manager_resource_size;
+    const GritResourceMap* file_manager_resources =
+        file_manager::GetFileManagerResources(&file_manager_resource_size);
     AddComponentResourceEntries(
-        path_to_resource_id.Pointer(), keyboard_resources, size);
+        path_to_resource_id.Pointer(),
+        file_manager_resources,
+        file_manager_resource_size);
+
+    size_t keyboard_resource_size;
+    const GritResourceMap* keyboard_resources =
+        keyboard::GetKeyboardExtensionResources(&keyboard_resource_size);
+    AddComponentResourceEntries(
+        path_to_resource_id.Pointer(),
+        keyboard_resources,
+        keyboard_resource_size);
 #endif
   }
 
@@ -320,7 +334,7 @@ void ImageLoader::LoadImagesAsync(
     const Extension* extension,
     const std::vector<ImageRepresentation>& info_list,
     const ImageLoaderImageCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   base::PostTaskAndReplyWithResult(
       BrowserThread::GetBlockingPool(),
@@ -336,7 +350,7 @@ void ImageLoader::LoadImageFamilyAsync(
     const extensions::Extension* extension,
     const std::vector<ImageRepresentation>& info_list,
     const ImageLoaderImageFamilyCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   base::PostTaskAndReplyWithResult(
       BrowserThread::GetBlockingPool(),
@@ -351,7 +365,7 @@ void ImageLoader::LoadImageFamilyAsync(
 
 void ImageLoader::ReplyBack(const ImageLoaderImageCallback& callback,
                             const std::vector<LoadResult>& load_result) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   gfx::ImageSkia image_skia;
 
@@ -377,7 +391,7 @@ void ImageLoader::ReplyBack(const ImageLoaderImageCallback& callback,
 void ImageLoader::ReplyBackWithImageFamily(
     const ImageLoaderImageFamilyCallback& callback,
     const std::vector<LoadResult>& load_result) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   std::map<std::pair<int, int>, gfx::ImageSkia> image_skia_map;
   gfx::ImageFamily image_family;

@@ -12,6 +12,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/gfx_export.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/overlay_transform.h"
 #include "ui/gfx/rect.h"
 
 class SkBitmap;
@@ -20,6 +21,8 @@ class SkCanvas;
 namespace gfx {
 class VSyncProvider;
 class OverlayCandidatesOzone;
+class SurfaceOzoneCanvas;
+class SurfaceOzoneEGL;
 typedef intptr_t NativeBufferOzone;
 
 // The Ozone interface allows external implementations to hook into Chromium to
@@ -27,6 +30,9 @@ typedef intptr_t NativeBufferOzone;
 // drawing modes: 1) accelerated drawing through EGL and 2) software drawing
 // through Skia.
 //
+// If you want to paint on a window with ozone, you need to create a
+// SurfaceOzoneEGL or SurfaceOzoneCanvas for that window. The platform can
+// support software, EGL, or both for painting on the window.
 // The following functionality is specific to the drawing mode and may not have
 // any meaningful implementation in the other mode. An implementation must
 // provide functionality for at least one mode.
@@ -38,11 +44,12 @@ typedef intptr_t NativeBufferOzone;
 //  - LoadEGLGLES2Bindings
 //  - GetEGLSurfaceProperties (optional if the properties match the default
 //  Chromium ones).
+//  - CreateEGLSurfaceForWidget
 //
 // 2) Software Drawing (Skia):
 //
 // The following function is specific to the software path:
-//  - GetCanvasForWidget
+//  - CreateCanvasForWidget
 //
 // The accelerated path can optionally provide support for the software drawing
 // path.
@@ -65,17 +72,6 @@ class GFX_EXPORT SurfaceFactoryOzone {
     UNKNOWN,
     RGBA_8888,
     RGB_888,
-  };
-
-  // Describes transformation to be applied to the buffer before presenting
-  // to screen.
-  enum OverlayTransform {
-    NONE,
-    FLIP_HORIZONTAL,
-    FLIP_VERTICAL,
-    ROTATE_90,
-    ROTATE_180,
-    ROTATE_270,
   };
 
   typedef void*(*GLGetProcAddressProc)(const char* name);
@@ -109,42 +105,26 @@ class GFX_EXPORT SurfaceFactoryOzone {
   // before it can be used to create a GL surface.
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() = 0;
 
-  // Realizes an AcceleratedWidget so that the returned AcceleratedWidget
-  // can be used to to create a GLSurface. This method may only be called in
-  // a process that has a valid GL context.
-  virtual gfx::AcceleratedWidget RealizeAcceleratedWidget(
-      gfx::AcceleratedWidget w) = 0;
+  // Create SurfaceOzoneEGL for the specified gfx::AcceleratedWidget.
+  //
+  // Note: When used from content, this is called in the GPU process. The
+  // platform must support creation of SurfaceOzoneEGL from the GPU process
+  // using only the handle contained in gfx::AcceleratedWidget.
+  virtual scoped_ptr<SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
+        gfx::AcceleratedWidget widget);
+
+  // Create SurfaceOzoneCanvas for the specified gfx::AcceleratedWidget.
+  //
+  // Note: The platform must support creation of SurfaceOzoneCanvas from the
+  // Browser Process using only the handle contained in gfx::AcceleratedWidget.
+  virtual scoped_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
+        gfx::AcceleratedWidget widget);
 
   // Sets up GL bindings for the native surface. Takes two callback parameters
   // that allow Ozone to register the GL bindings.
   virtual bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
       SetGLGetProcAddressProcCallback set_gl_get_proc_address) = 0;
-
-  // If possible attempts to resize the given AcceleratedWidget instance and if
-  // a resize action was performed returns true, otherwise false (native
-  // hardware may only support a single fixed size).
-  virtual bool AttemptToResizeAcceleratedWidget(
-      gfx::AcceleratedWidget w,
-      const gfx::Rect& bounds) = 0;
-
-  // Called after the appropriate GL swap buffers command. Used if extra work
-  // is needed to perform the actual buffer swap.
-  virtual bool SchedulePageFlip(gfx::AcceleratedWidget w);
-
-  // Returns a SkCanvas for the backing buffers. Drawing to the canvas will draw
-  // to the native surface. The canvas is intended for use when no EGL
-  // acceleration is possible. Its implementation is optional when an EGL
-  // backend is provided for rendering.
-  virtual SkCanvas* GetCanvasForWidget(gfx::AcceleratedWidget w);
-
-  // Returns a gfx::VsyncProvider for the provided AcceleratedWidget. Note
-  // that this may be called after we have entered the sandbox so if there are
-  // operations (e.g. opening a file descriptor providing vsync events) that
-  // must be done outside of the sandbox, they must have been completed
-  // in InitializeHardware. Returns an empty scoped_ptr on error.
-  virtual scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider(
-      gfx::AcceleratedWidget w) = 0;
 
   // Returns an array of EGL properties, which can be used in any EGL function
   // used to select a display configuration. Note that all properties should be
@@ -168,7 +148,7 @@ class GFX_EXPORT SurfaceFactoryOzone {
   // |display_bounds|.
   virtual void ScheduleOverlayPlane(gfx::AcceleratedWidget w,
                                     int plane_z_order,
-                                    OverlayTransform plane_transform,
+                                    gfx::OverlayTransform plane_transform,
                                     gfx::NativeBufferOzone buffer,
                                     const gfx::Rect& display_bounds,
                                     gfx::RectF crop_rect);

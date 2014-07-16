@@ -24,7 +24,6 @@
 #include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/rect.h"
 
 #if defined(OS_ANDROID)
@@ -97,7 +96,7 @@ void TabAutofillManagerDelegate::ConfirmSaveCreditCard(
 void TabAutofillManagerDelegate::ShowRequestAutocompleteDialog(
     const FormData& form,
     const GURL& source_url,
-    const base::Callback<void(const FormStructure*)>& callback) {
+    const ResultCallback& callback) {
   HideRequestAutocompleteDialog();
 
   dialog_controller_ = AutofillDialogController::Create(web_contents_,
@@ -107,7 +106,9 @@ void TabAutofillManagerDelegate::ShowRequestAutocompleteDialog(
   if (dialog_controller_) {
     dialog_controller_->Show();
   } else {
-    callback.Run(NULL);
+    callback.Run(AutofillManagerDelegate::AutocompleteResultErrorDisabled,
+                 base::string16(),
+                 NULL);
     NOTIMPLEMENTED();
   }
 }
@@ -121,8 +122,7 @@ void TabAutofillManagerDelegate::ShowAutofillPopup(
     const std::vector<int>& identifiers,
     base::WeakPtr<AutofillPopupDelegate> delegate) {
   // Convert element_bounds to be in screen space.
-  gfx::Rect client_area;
-  web_contents_->GetView()->GetContainerBounds(&client_area);
+  gfx::Rect client_area = web_contents_->GetContainerBounds();
   gfx::RectF element_bounds_in_screen_space =
       element_bounds + client_area.OffsetFromOrigin();
 
@@ -131,7 +131,7 @@ void TabAutofillManagerDelegate::ShowAutofillPopup(
       popup_controller_,
       delegate,
       web_contents(),
-      web_contents()->GetView()->GetNativeView(),
+      web_contents()->GetNativeView(),
       element_bounds_in_screen_space,
       text_direction);
 
@@ -167,14 +167,13 @@ void TabAutofillManagerDelegate::HideRequestAutocompleteDialog() {
     dialog_controller_->Hide();
 }
 
-void TabAutofillManagerDelegate::WebContentsDestroyed(
-    content::WebContents* web_contents) {
+void TabAutofillManagerDelegate::WebContentsDestroyed() {
   HideAutofillPopup();
 }
 
 void TabAutofillManagerDelegate::DetectAccountCreationForms(
     const std::vector<autofill::FormStructure*>& forms) {
-  PasswordGenerationManager* manager =
+  password_manager::PasswordGenerationManager* manager =
       ChromePasswordManagerClient::GetGenerationManagerFromWebContents(
           web_contents_);
   if (manager)

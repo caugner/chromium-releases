@@ -41,7 +41,6 @@
 #include "ui/wm/public/activation_client.h"
 
 namespace ash {
-namespace internal {
 
 // Minimum, maximum width of the dock area and a width of the gap
 // static
@@ -58,7 +57,7 @@ const int kFadeDurationMs = 60;
 const int kMinimizeDurationMs = 720;
 
 class DockedBackgroundWidget : public views::Widget,
-                               public internal::BackgroundAnimatorDelegate {
+                               public BackgroundAnimatorDelegate {
  public:
   explicit DockedBackgroundWidget(aura::Window* container)
       : alignment_(DOCKED_ALIGNMENT_NONE),
@@ -147,16 +146,16 @@ class DockedBackgroundWidget : public views::Widget,
     set_focus_on_creation(false);
     Init(params);
     SetVisibilityChangedAnimationsEnabled(false);
-    GetNativeWindow()->SetProperty(internal::kStayInSameRootWindowKey, true);
+    GetNativeWindow()->SetProperty(kStayInSameRootWindowKey, true);
     opaque_background_.SetColor(SK_ColorBLACK);
     opaque_background_.SetBounds(gfx::Rect(GetWindowBoundsInScreen().size()));
     opaque_background_.SetOpacity(0.0f);
     GetNativeWindow()->layer()->Add(&opaque_background_);
     Hide();
 
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     gfx::ImageSkia shelf_background =
-        *rb.GetImageSkiaNamed(IDR_AURA_LAUNCHER_BACKGROUND);
+        *rb.GetImageSkiaNamed(IDR_ASH_SHELF_BACKGROUND);
     shelf_background_left_ = gfx::ImageSkiaOperations::CreateRotatedImage(
         shelf_background, SkBitmapOperations::ROTATION_90_CW);
     shelf_background_right_ = gfx::ImageSkiaOperations::CreateRotatedImage(
@@ -194,7 +193,7 @@ class DockedBackgroundWidget : public views::Widget,
   DockedAlignment alignment_;
 
   // The animator for the background transitions.
-  internal::BackgroundAnimator background_animator_;
+  BackgroundAnimator background_animator_;
 
   // The alpha to use for drawing image assets covering the docked background.
   int alpha_;
@@ -591,8 +590,9 @@ DockedAlignment DockedWindowLayoutManager::CalculateAlignment() const {
   return DOCKED_ALIGNMENT_NONE;
 }
 
-bool DockedWindowLayoutManager::CanDockWindow(aura::Window* window,
-                                              SnapType edge) {
+bool DockedWindowLayoutManager::CanDockWindow(
+    aura::Window* window,
+    DockedAlignment desired_alignment) {
   if (!switches::UseDockedWindows())
     return false;
   // Don't allow interactive docking of windows with transient parents such as
@@ -623,16 +623,19 @@ bool DockedWindowLayoutManager::CanDockWindow(aura::Window* window,
     return false;
   // Cannot dock on the other size from an existing dock.
   const DockedAlignment alignment = CalculateAlignment();
-  if ((edge == SNAP_LEFT && alignment == DOCKED_ALIGNMENT_RIGHT) ||
-      (edge == SNAP_RIGHT && alignment == DOCKED_ALIGNMENT_LEFT)) {
+  if (desired_alignment != DOCKED_ALIGNMENT_NONE &&
+      alignment != DOCKED_ALIGNMENT_NONE &&
+      alignment != desired_alignment) {
     return false;
   }
   // Do not allow docking on the same side as shelf.
   ShelfAlignment shelf_alignment = SHELF_ALIGNMENT_BOTTOM;
   if (shelf_)
     shelf_alignment = shelf_->alignment();
-  if ((edge == SNAP_LEFT && shelf_alignment == SHELF_ALIGNMENT_LEFT) ||
-      (edge == SNAP_RIGHT && shelf_alignment == SHELF_ALIGNMENT_RIGHT)) {
+  if ((desired_alignment == DOCKED_ALIGNMENT_LEFT &&
+       shelf_alignment == SHELF_ALIGNMENT_LEFT) ||
+      (desired_alignment == DOCKED_ALIGNMENT_RIGHT &&
+       shelf_alignment == SHELF_ALIGNMENT_RIGHT)) {
     return false;
   }
   return true;
@@ -708,12 +711,21 @@ void DockedWindowLayoutManager::OnChildWindowVisibilityChanged(
 void DockedWindowLayoutManager::SetChildBounds(
     aura::Window* child,
     const gfx::Rect& requested_bounds) {
+  // The minimum constraints have to be applied first by the layout manager.
+  gfx::Rect actual_new_bounds(requested_bounds);
+  if (child->delegate()) {
+    const gfx::Size& min_size = child->delegate()->GetMinimumSize();
+    actual_new_bounds.set_width(
+        std::max(min_size.width(), actual_new_bounds.width()));
+    actual_new_bounds.set_height(
+        std::max(min_size.height(), actual_new_bounds.height()));
+  }
   // Whenever one of our windows is moved or resized enforce layout.
-  SetChildBoundsDirect(child, requested_bounds);
+  SetChildBoundsDirect(child, actual_new_bounds);
   if (IsPopupOrTransient(child))
     return;
-  ShelfLayoutManager* shelf_layout = internal::ShelfLayoutManager::ForShelf(
-      dock_container_);
+  ShelfLayoutManager* shelf_layout =
+      ShelfLayoutManager::ForShelf(dock_container_);
   if (shelf_layout)
     shelf_layout->UpdateVisibilityState();
 }
@@ -935,7 +947,7 @@ void DockedWindowLayoutManager::RestoreDockedWindow(
   const gfx::Rect work_area = display.work_area();
 
   // Evict the window if it can no longer be docked because of its height.
-  if (!CanDockWindow(window, SNAP_NONE)) {
+  if (!CanDockWindow(window, DOCKED_ALIGNMENT_NONE)) {
     UndockWindow(window);
     RecordUmaAction(DOCKED_ACTION_EVICT, DOCKED_ACTION_SOURCE_UNKNOWN);
     return;
@@ -1316,5 +1328,4 @@ void DockedWindowLayoutManager::OnKeyboardBoundsChanging(
   UpdateDockBounds(DockedWindowLayoutManagerObserver::KEYBOARD_BOUNDS_CHANGING);
 }
 
-}  // namespace internal
 }  // namespace ash

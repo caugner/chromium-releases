@@ -6,13 +6,35 @@
 #outer-container {
   -webkit-box-align: center;
   -webkit-box-pack: center;
-  -webkit-perspective: 600px;
+  -webkit-perspective: 1px; /* Workaround, see http://crbug.com/360567 */
   bottom: 51px;  /* Leave space for the header bar */
   display: -webkit-box;
   left: 0;
   position: absolute;
   right: 0;
   top: 0;
+}
+
+html[not(screen=lock)] #outer-container {
+  min-height: 717px; /* This enables scrolling. Min resolution: 1024x768 */
+}
+
+.oobe-display #outer-container.down {
+  -webkit-perspective: 600px;
+}
+
+#scroll-container {
+  bottom: 0;        /* Allows content overlap with control bar. */
+  left: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+#scroll-container::-webkit-scrollbar {
+  display: none;
 }
 
 #inner-container {
@@ -39,6 +61,7 @@
 #oobe.kiosk-enable #inner-container,
 #oobe.oauth-enrollment #inner-container,
 #oobe.reset #inner-container,
+#oobe.hid-detection #inner-container,
 #oobe.update #inner-container,
 #oobe.user-image #inner-container,
 #oobe.managed-user-creation-dialog #inner-container,
@@ -86,6 +109,8 @@
 #progress-dots {
   -webkit-box-pack: center;
   -webkit-margin-before: 15px;
+  -webkit-transition: opacity 200ms ease-in-out,
+                      visibility 200ms ease-in-out;
   display: -webkit-box;
 }
 
@@ -121,7 +146,8 @@
 #terms-of-service-dot,
 #wrong-hwid-dot,
 #confirm-password-dot,
-#fatal-error-dot {
+#fatal-error-dot,
+#hid-detection-dot {
   display: none;
 }
 
@@ -136,6 +162,10 @@
 #oobe.update #update-dot,
 #oobe.user-image #user-image-dot {
   opacity: 1;
+}
+
+#oobe.reset #progress-dots {
+  visibility: hidden;
 }
 
 body:not(.oobe-display) #inner-container {

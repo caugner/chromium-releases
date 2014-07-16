@@ -27,16 +27,19 @@
         'bluetooth/bluetooth_adapter_win_unittest.cc',
         'bluetooth/bluetooth_device_win_unittest.cc',
         'bluetooth/bluetooth_chromeos_unittest.cc',
+        'bluetooth/bluetooth_gatt_chromeos_unittest.cc',
         'bluetooth/bluetooth_profile_chromeos_unittest.cc',
         'bluetooth/bluetooth_service_record_mac_unittest.mm',
         'bluetooth/bluetooth_service_record_win_unittest.cc',
         'bluetooth/bluetooth_task_manager_win_unittest.cc',
-        'bluetooth/bluetooth_utils_unittest.cc',
+        'bluetooth/bluetooth_uuid_unittest.cc',
         'nfc/nfc_chromeos_unittest.cc',
         'nfc/nfc_ndef_record_unittest.cc',
         'usb/usb_ids_unittest.cc',
         'hid/hid_connection_unittest.cc',
+        'hid/hid_report_descriptor_unittest.cc',
         'hid/hid_service_unittest.cc',
+        'hid/input_service_linux_unittest.cc',
       ],
       'conditions': [
         ['chromeos==1', {
@@ -56,8 +59,7 @@
         }],
         ['os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
           'conditions': [
-            # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-            ['(use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1)', {
+            ['use_allocator!="none"', {
               'dependencies': [
                 '../base/allocator/allocator.gyp:allocator',
               ],

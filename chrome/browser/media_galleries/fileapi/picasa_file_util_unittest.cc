@@ -22,9 +22,11 @@
 #include "chrome/browser/media_galleries/fileapi/media_path_filter.h"
 #include "chrome/browser/media_galleries/fileapi/picasa_data_provider.h"
 #include "chrome/browser/media_galleries/fileapi/picasa_file_util.h"
+#include "chrome/browser/media_galleries/imported_media_gallery_registry.h"
 #include "chrome/common/media_galleries/picasa_types.h"
 #include "chrome/common/media_galleries/pmp_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_file_system_options.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -34,7 +36,6 @@
 #include "webkit/browser/fileapi/file_system_operation_context.h"
 #include "webkit/browser/fileapi/file_system_operation_runner.h"
 #include "webkit/browser/fileapi/isolated_context.h"
-#include "webkit/browser/quota/mock_special_storage_policy.h"
 #include "webkit/common/blob/shareable_file_reference.h"
 
 using fileapi::FileSystemOperationContext;
@@ -228,9 +229,10 @@ class PicasaFileUtilTest : public testing::Test {
 
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(profile_dir_.CreateUniqueTempDir());
+    ImportedMediaGalleryRegistry::GetInstance()->Initialize();
 
     scoped_refptr<quota::SpecialStoragePolicy> storage_policy =
-        new quota::MockSpecialStoragePolicy();
+        new content::MockSpecialStoragePolicy();
 
     SynchronouslyRunOnMediaTaskRunner(base::Bind(
         &PicasaFileUtilTest::SetUpOnMediaTaskRunner, base::Unretained(this)));
@@ -356,10 +358,14 @@ class PicasaFileUtilTest : public testing::Test {
     EXPECT_EQ(0u, contents.size());
   }
 
-  FileSystemURL CreateURL(const std::string& virtual_path) const {
+  FileSystemURL CreateURL(const std::string& path) const {
+    base::FilePath virtual_path =
+        ImportedMediaGalleryRegistry::GetInstance()->ImportedRoot();
+    virtual_path = virtual_path.AppendASCII("picasa");
+    virtual_path = virtual_path.AppendASCII(path);
     return file_system_context_->CreateCrackedFileSystemURL(
         GURL("http://www.example.com"), fileapi::kFileSystemTypePicasa,
-        base::FilePath::FromUTF8Unsafe(virtual_path));
+        virtual_path);
   }
 
   fileapi::FileSystemOperationRunner* operation_runner() const {
@@ -504,9 +510,7 @@ TEST_F(PicasaFileUtilTest, ManyFolders) {
   ScopedVector<TestFolder> test_folders;
   base::Time test_date = base::Time::FromLocalExploded(test_date_exploded);
 
-  // TODO(tommycli): Turn number of test folders back up to 50 (or more) once
-  // https://codereview.chromium.org/15479003/ lands.
-  for (unsigned int i = 0; i < 25; ++i) {
+  for (unsigned int i = 0; i < 50; ++i) {
     base::Time date = test_date - base::TimeDelta::FromDays(i);
 
     test_folders.push_back(

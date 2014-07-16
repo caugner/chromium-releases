@@ -14,9 +14,9 @@
 #include "base/basictypes.h"
 #include "chrome/browser/metrics/extension_metrics.h"
 #include "chrome/browser/metrics/metrics_network_observer.h"
-#include "chrome/common/metrics/metrics_log_base.h"
 #include "chrome/common/metrics/variations/variations_util.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "components/metrics/metrics_log_base.h"
 #include "ui/gfx/size.h"
 
 class HashedExtensionMetrics;
@@ -55,7 +55,7 @@ struct GoogleUpdateMetrics {
     bool is_system_install;
     // The time at which Google Update last started an automatic update check.
     base::Time last_started_au;
-    // The time at which Google Update last successfully recieved update
+    // The time at which Google Update last successfully received update
     // information from Google servers.
     base::Time last_checked;
     // Details about Google Update's attempts to update itself.
@@ -64,12 +64,12 @@ struct GoogleUpdateMetrics {
     GoogleUpdateSettings::ProductData product_data;
 };
 
-class MetricsLog : public MetricsLogBase {
+class MetricsLog : public metrics::MetricsLogBase {
  public:
-  // Creates a new metrics log
+  // Creates a new metrics log of the specified type.
   // client_id is the identifier for this profile on this installation
   // session_id is an integer that's incremented on each application launch
-  MetricsLog(const std::string& client_id, int session_id);
+  MetricsLog(const std::string& client_id, int session_id, LogType log_type);
   virtual ~MetricsLog();
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
@@ -113,11 +113,11 @@ class MetricsLog : public MetricsLogBase {
   // call to RecordEnvironment() or LoadSavedEnvironmentFromPrefs().
   // NOTE: Has the side-effect of clearing the stability prefs..
   //
-  // If |log_type| is INITIAL_LOG, records additional info such as number of
-  // incomplete shutdowns as well as extra breakpad and debugger stats.
+  // If this log is of type INITIAL_STABILITY_LOG, records additional info such
+  // as number of incomplete shutdowns as well as extra breakpad and debugger
+  // stats.
   void RecordStabilityMetrics(base::TimeDelta incremental_uptime,
-                              base::TimeDelta uptime,
-                              LogType log_type);
+                              base::TimeDelta uptime);
 
   const base::TimeTicks& creation_time() const {
     return creation_time_;

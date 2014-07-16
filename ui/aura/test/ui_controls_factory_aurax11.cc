@@ -5,9 +5,11 @@
 #include <X11/keysym.h>
 #include <X11/Xlib.h>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
+#include "ui/aura/test/aura_test_utils.h"
 #include "ui/aura/test/ui_controls_factory_aura.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
@@ -15,6 +17,7 @@
 #include "ui/base/x/x11_util.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
+#include "ui/events/test/platform_event_waiter.h"
 
 namespace aura {
 namespace test {
@@ -30,42 +33,6 @@ using ui_controls::UP;
 
 // Mask of the buttons currently down.
 unsigned button_down_mask = 0;
-
-// Event waiter executes the specified closure|when a matching event
-// is found.
-// TODO(oshima): Move this to base.
-class EventWaiter : public base::MessageLoopForUI::Observer {
- public:
-  typedef bool (*EventWaiterMatcher)(const base::NativeEvent& event);
-
-  EventWaiter(const base::Closure& closure, EventWaiterMatcher matcher)
-      : closure_(closure),
-        matcher_(matcher) {
-    base::MessageLoopForUI::current()->AddObserver(this);
-  }
-
-  virtual ~EventWaiter() {
-    base::MessageLoopForUI::current()->RemoveObserver(this);
-  }
-
-  // MessageLoop::Observer implementation:
-  virtual base::EventStatus WillProcessEvent(
-      const base::NativeEvent& event) OVERRIDE {
-    if ((*matcher_)(event)) {
-      base::MessageLoop::current()->PostTask(FROM_HERE, closure_);
-      delete this;
-    }
-    return base::EVENT_CONTINUE;
-  }
-
-  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE {
-  }
-
- private:
-  base::Closure closure_;
-  EventWaiterMatcher matcher_;
-  DISALLOW_COPY_AND_ASSIGN(EventWaiter);
-};
 
 // Returns atom that indidates that the XEvent is marker event.
 Atom MarkerEventAtom() {
@@ -143,8 +110,8 @@ class UIControlsX11 : public UIControlsAura {
       screen_position_client->ConvertPointFromScreen(host_->window(),
                                                      &root_location);
     }
-    gfx::Point root_current_location;
-    host_->QueryMouseLocation(&root_current_location);
+    gfx::Point root_current_location =
+        QueryLatestMousePositionRequestInHost(host_);
     host_->ConvertPointFromHost(&root_current_location);
 
     if (root_location != root_current_location && button_down_mask == 0) {
@@ -229,7 +196,7 @@ class UIControlsX11 : public UIControlsAura {
     }
     marker_event->xclient.message_type = MarkerEventAtom();
     host_->PostNativeEvent(marker_event);
-    new EventWaiter(closure, &Matcher);
+    ui::PlatformEventWaiter::Create(closure, base::Bind(&Matcher));
   }
  private:
   void SetKeycodeAndSendThenMask(XEvent* xevent,

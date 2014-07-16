@@ -41,8 +41,8 @@
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebNodeList.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -61,6 +61,7 @@ using blink::WebElement;
 using blink::WebFrame;
 using blink::WebGestureEvent;
 using blink::WebIconURL;
+using blink::WebLocalFrame;
 using blink::WebNode;
 using blink::WebNodeList;
 using blink::WebRect;
@@ -232,8 +233,6 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderViewObserver, message)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_WebUIJavaScript, OnWebUIJavaScript)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_JavaScriptStressTestControl,
-                        OnJavaScriptStressTestControl)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetClientSidePhishingDetection,
                         OnSetClientSidePhishingDetection)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetVisuallyDeemphasized,
@@ -257,15 +256,6 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
 void ChromeRenderViewObserver::OnWebUIJavaScript(
     const base::string16& javascript) {
   webui_javascript_ = javascript;
-}
-
-void ChromeRenderViewObserver::OnJavaScriptStressTestControl(int cmd,
-                                                             int param) {
-  if (cmd == kJavaScriptStressTestSetStressRunType) {
-    v8::Testing::SetStressRunType(static_cast<v8::Testing::StressType>(param));
-  } else if (cmd == kJavaScriptStressTestPrepareStressRun) {
-    v8::Testing::PrepareStressRun(param);
-  }
 }
 
 #if defined(OS_ANDROID)
@@ -419,7 +409,7 @@ void ChromeRenderViewObserver::DidStopLoading() {
 }
 
 void ChromeRenderViewObserver::DidCommitProvisionalLoad(
-    WebFrame* frame, bool is_new_navigation) {
+    WebLocalFrame* frame, bool is_new_navigation) {
   // Don't capture pages being not new, or including refresh meta tag.
   if (!is_new_navigation || HasRefreshMetaTag(frame))
     return;

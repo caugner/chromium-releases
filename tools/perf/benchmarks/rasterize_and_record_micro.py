@@ -7,37 +7,36 @@ from measurements import rasterize_and_record_micro
 from telemetry import test
 
 
-# RasterizeAndRecord disabled on mac because Chrome DCHECKS.
-# TODO: Re-enable when unittests are happy: crbug.com/350684.
-
-@test.Disabled('android', 'linux', 'mac')
+# RasterizeAndRecord disabled on mac because of crbug.com/350684.
+# RasterizeAndRecord disabled on windows because of crbug.com/338057.
+@test.Disabled('android', 'mac', 'win')  # android tracked by crbug.com/371148
 class RasterizeAndRecordMicroTop25(test.Test):
   """Measures rasterize and record performance on the top 25 web pages.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   test = rasterize_and_record_micro.RasterizeAndRecordMicro
-  page_set = 'page_sets/top_25.json'
+  page_set = 'page_sets/top_25.py'
 
 
-@test.Disabled('mac')
+@test.Disabled('android', 'mac', 'win')  # android tracked by crbug.com/371148
 class RasterizeAndRecordMicroKeyMobileSites(test.Test):
   """Measures rasterize and record performance on the key mobile sites.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   test = rasterize_and_record_micro.RasterizeAndRecordMicro
-  page_set = 'page_sets/key_mobile_sites.json'
+  page_set = 'page_sets/key_mobile_sites.py'
 
 
-@test.Disabled('mac')
+@test.Disabled('android', 'mac', 'win')
 class RasterizeAndRecordMicroKeySilkCases(test.Test):
   """Measures rasterize and record performance on the silk sites.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   test = rasterize_and_record_micro.RasterizeAndRecordMicro
-  page_set = 'page_sets/key_silk_cases.json'
+  page_set = 'page_sets/key_silk_cases.py'
 
 
-@test.Disabled('mac')
+@test.Disabled('android', 'mac', 'win')
 class RasterizeAndRecordMicroFastPathKeySilkCases(test.Test):
   """Measures rasterize and record performance on the silk sites.
 
@@ -46,6 +45,30 @@ class RasterizeAndRecordMicroFastPathKeySilkCases(test.Test):
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   tag = 'fast_path'
   test = rasterize_and_record_micro.RasterizeAndRecordMicro
-  page_set = 'page_sets/key_silk_cases.json'
+  page_set = 'page_sets/key_silk_cases.py'
   def CustomizeBrowserOptions(self, options):
     silk_flags.CustomizeBrowserOptionsForFastPath(options)
+
+
+@test.Disabled('android', 'mac', 'win')
+class RasterizeAndRecordMicroFastPathGpuRasterizationKeySilkCases(test.Test):
+  """Measures rasterize and record performance on the silk sites.
+
+  Uses GPU rasterization together with bleeding edge rendering fast paths.
+
+  http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
+  tag = 'fast_path_gpu_rasterization'
+  test = rasterize_and_record_micro.RasterizeAndRecordMicro
+  page_set = 'page_sets/key_silk_cases.py'
+  def CustomizeBrowserOptions(self, options):
+    silk_flags.CustomizeBrowserOptionsForFastPath(options)
+    silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
+
+
+@test.Enabled('android')
+class RasterizeAndRecordMicroPolymer(test.Test):
+  """Measures rasterize and record performance on the Polymer cases.
+
+  http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
+  test = rasterize_and_record_micro.RasterizeAndRecordMicro
+  page_set = 'page_sets/polymer.py'

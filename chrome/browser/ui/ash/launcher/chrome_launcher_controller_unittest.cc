@@ -618,27 +618,6 @@ class ChromeLauncherControllerTest : public BrowserWithTestWindowTest {
   DISALLOW_COPY_AND_ASSIGN(ChromeLauncherControllerTest);
 };
 
-// The testing framework to test the legacy shelf layout.
-class LegacyShelfLayoutChromeLauncherControllerTest
-    : public ChromeLauncherControllerTest {
- protected:
-  LegacyShelfLayoutChromeLauncherControllerTest() {
-  }
-
-  virtual ~LegacyShelfLayoutChromeLauncherControllerTest() {
-  }
-
-  // Overwrite the Setup function to use the legacy shelf layout option.
-  virtual void SetUp() OVERRIDE {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        ash::switches::kAshDisableAlternateShelfLayout);
-    ChromeLauncherControllerTest::SetUp();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(LegacyShelfLayoutChromeLauncherControllerTest);
-};
-
 #if defined(OS_CHROMEOS)
 // A browser window proxy which is able to associate an aura native window with
 // it.
@@ -704,8 +683,7 @@ class WebContentsDestroyedWatcher : public content::WebContentsObserver {
 
  private:
   // Overridden WebContentsObserver methods.
-  virtual void WebContentsDestroyed(
-      content::WebContents* web_contents) OVERRIDE {
+  virtual void WebContentsDestroyed() OVERRIDE {
     message_loop_runner_->Quit();
   }
 
@@ -727,12 +705,12 @@ class V1App : public TestBrowserWindow {
     aura::client::ParentWindowWithContext(native_window_.get(),
                                           ash::Shell::GetPrimaryRootWindow(),
                                           gfx::Rect(10, 10, 20, 30));
-    Browser::CreateParams params = Browser::CreateParams::CreateForApp(
-        Browser::TYPE_POPUP,
-        kCrxAppPrefix + app_name,
-        gfx::Rect(),
-        profile,
-        chrome::HOST_DESKTOP_TYPE_ASH);
+    Browser::CreateParams params =
+        Browser::CreateParams::CreateForApp(kCrxAppPrefix + app_name,
+                                            true /* trusted_source */,
+                                            gfx::Rect(),
+                                            profile,
+                                            chrome::HOST_DESKTOP_TYPE_ASH);
     params.window = this;
     browser_.reset(new Browser(params));
     chrome::AddTabAt(browser_.get(), GURL(), 0, true);
@@ -820,9 +798,7 @@ class MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest
     ChromeLauncherControllerTest::SetUp();
 
     // Get some base objects.
-    session_delegate_ = static_cast<ash::test::TestSessionStateDelegate*>(
-        ash::Shell::GetInstance()->session_state_delegate());
-    session_delegate_->set_logged_in_users(2);
+    session_delegate()->set_logged_in_users(2);
     shell_delegate_ = static_cast<ash::test::TestShellDelegate*>(
         ash::Shell::GetInstance()->delegate());
     shell_delegate_->set_multi_profiles_enabled(true);
@@ -846,8 +822,11 @@ class MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest
   // the ownership of the created object.
   TestingProfile* CreateMultiUserProfile(const std::string& user_name) {
     std::string email_string = user_name + "@example.com";
-
+    static_cast<ash::test::TestSessionStateDelegate*>(
+        ash::Shell::GetInstance()->session_state_delegate())
+        ->AddUser(email_string);
     // Add a user to the fake user manager.
+    session_delegate()->AddUser(email_string);
     GetFakeUserManager()->AddUser(email_string);
 
     GetFakeUserManager()->UserLoggedIn(
@@ -880,7 +859,8 @@ class MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest
     chrome::MultiUserWindowManagerChromeOS* manager =
         static_cast<chrome::MultiUserWindowManagerChromeOS*>(
             chrome::MultiUserWindowManager::GetInstance());
-    manager->SetAnimationsForTest(true);
+    manager->SetAnimationSpeedForTest(
+        chrome::MultiUserWindowManagerChromeOS::ANIMATION_SPEED_DISABLED);
     manager->ActiveUserChanged(name);
     launcher_controller_->browser_status_monitor_for_test()->
         ActiveUserChanged(name);
@@ -924,8 +904,10 @@ class MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest
     return v1_app;
   }
 
-  ash::test::TestSessionStateDelegate*
-      session_delegate() { return session_delegate_; }
+  ash::test::TestSessionStateDelegate* session_delegate() {
+    return static_cast<ash::test::TestSessionStateDelegate*>(
+        ash::Shell::GetInstance()->session_state_delegate());
+  }
   ash::test::TestShellDelegate* shell_delegate() { return shell_delegate_; }
 
   // Override BrowserWithTestWindowTest:
@@ -956,7 +938,6 @@ class MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest
   scoped_ptr<TestingProfileManager> profile_manager_;
   scoped_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
 
-  ash::test::TestSessionStateDelegate* session_delegate_;
   ash::test::TestShellDelegate* shell_delegate_;
 
   ProfileToNameMap created_profiles_;
@@ -966,178 +947,6 @@ class MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest
 };
 #endif  // defined(OS_CHROMEOS)
 
-TEST_F(LegacyShelfLayoutChromeLauncherControllerTest, DefaultApps) {
-  InitLauncherController();
-  // Model should only contain the browser shortcut and app list items.
-  EXPECT_EQ(2, model_->item_count());
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension2_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension3_->id()));
-
-  // Installing |extension3_| should add it to the launcher - behind the
-  // chrome icon.
-  extension_service_->AddExtension(extension3_.get());
-  EXPECT_EQ("Chrome, App3, AppList", GetPinnedAppStatus());
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension2_->id()));
-}
-
-// Check that the restauration of launcher items is happening in the same order
-// as the user has pinned them (on another system) when they are synced reverse
-// order.
-TEST_F(LegacyShelfLayoutChromeLauncherControllerTest,
-    RestoreDefaultAppsReverseOrder) {
-  InitLauncherController();
-
-  base::ListValue policy_value;
-  InsertPrefValue(&policy_value, 0, extension1_->id());
-  InsertPrefValue(&policy_value, 1, extension2_->id());
-  InsertPrefValue(&policy_value, 2, extension3_->id());
-  profile()->GetTestingPrefService()->SetUserPref(prefs::kPinnedLauncherApps,
-                                                  policy_value.DeepCopy());
-  EXPECT_EQ(0, profile()->GetPrefs()->GetInteger(prefs::kShelfChromeIconIndex));
-  // Model should only contain the browser shortcut and app list items.
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension2_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension3_->id()));
-  EXPECT_EQ("Chrome, AppList", GetPinnedAppStatus());
-
-  // Installing |extension3_| should add it to the shelf - behind the
-  // chrome icon.
-  ash::ShelfItem item;
-  extension_service_->AddExtension(extension3_.get());
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension2_->id()));
-  EXPECT_EQ("Chrome, App3, AppList", GetPinnedAppStatus());
-
-  // Installing |extension2_| should add it to the launcher - behind the
-  // chrome icon, but in first location.
-  extension_service_->AddExtension(extension2_.get());
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
-  EXPECT_EQ("Chrome, App2, App3, AppList", GetPinnedAppStatus());
-
-  // Installing |extension1_| should add it to the launcher - behind the
-  // chrome icon, but in first location.
-  extension_service_->AddExtension(extension1_.get());
-  EXPECT_EQ("Chrome, App1, App2, App3, AppList", GetPinnedAppStatus());
-}
-
-// Check that the restauration of launcher items is happening in the same order
-// as the user has pinned them (on another system) when they are synced random
-// order.
-TEST_F(LegacyShelfLayoutChromeLauncherControllerTest,
-    RestoreDefaultAppsRandomOrder) {
-  InitLauncherController();
-
-  base::ListValue policy_value;
-  InsertPrefValue(&policy_value, 0, extension1_->id());
-  InsertPrefValue(&policy_value, 1, extension2_->id());
-  InsertPrefValue(&policy_value, 2, extension3_->id());
-  profile()->GetTestingPrefService()->SetUserPref(prefs::kPinnedLauncherApps,
-                                                  policy_value.DeepCopy());
-  EXPECT_EQ(0, profile()->GetPrefs()->GetInteger(prefs::kShelfChromeIconIndex));
-  // Model should only contain the browser shortcut and app list items.
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension2_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension3_->id()));
-  EXPECT_EQ("Chrome, AppList", GetPinnedAppStatus());
-
-  // Installing |extension2_| should add it to the launcher - behind the
-  // chrome icon.
-  extension_service_->AddExtension(extension2_.get());
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension3_->id()));
-  EXPECT_EQ("Chrome, App2, AppList", GetPinnedAppStatus());
-
-  // Installing |extension1_| should add it to the launcher - behind the
-  // chrome icon, but in first location.
-  extension_service_->AddExtension(extension1_.get());
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension3_->id()));
-  EXPECT_EQ("Chrome, App1, App2, AppList", GetPinnedAppStatus());
-
-  // Installing |extension3_| should add it to the launcher - behind the
-  // chrome icon, but in first location.
-  extension_service_->AddExtension(extension3_.get());
-  EXPECT_EQ("Chrome, App1, App2, App3, AppList", GetPinnedAppStatus());
-}
-
-// Check that the restauration of launcher items is happening in the same order
-// as the user has pinned / moved them (on another system) when they are synced
-// random order - including the chrome icon.
-TEST_F(LegacyShelfLayoutChromeLauncherControllerTest,
-    RestoreDefaultAppsRandomOrderChromeMoved) {
-  InitLauncherController();
-
-  base::ListValue policy_value;
-  InsertPrefValue(&policy_value, 0, extension1_->id());
-  InsertPrefValue(&policy_value, 1, extension2_->id());
-  InsertPrefValue(&policy_value, 2, extension3_->id());
-  profile()->GetTestingPrefService()->SetUserPref(prefs::kPinnedLauncherApps,
-                                                  policy_value.DeepCopy());
-  profile()->GetTestingPrefService()->SetInteger(prefs::kShelfChromeIconIndex,
-                                                 1);
-  // Model should only contain the browser shortcut and app list items.
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension2_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension3_->id()));
-  EXPECT_EQ("Chrome, AppList", GetPinnedAppStatus());
-
-  // Installing |extension2_| should add it to the shelf - behind the
-  // chrome icon.
-  ash::ShelfItem item;
-  extension_service_->AddExtension(extension2_.get());
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension3_->id()));
-  EXPECT_EQ("Chrome, App2, AppList", GetPinnedAppStatus());
-
-  // Installing |extension1_| should add it to the launcher - behind the
-  // chrome icon, but in first location.
-  extension_service_->AddExtension(extension1_.get());
-  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension3_->id()));
-  EXPECT_EQ("App1, Chrome, App2, AppList", GetPinnedAppStatus());
-
-  // Installing |extension3_| should add it to the launcher - behind the
-  // chrome icon, but in first location.
-  extension_service_->AddExtension(extension3_.get());
-  EXPECT_EQ("App1, Chrome, App2, App3, AppList", GetPinnedAppStatus());
-}
-
-// Check that syncing to a different state does the correct thing.
-TEST_F(LegacyShelfLayoutChromeLauncherControllerTest,
-    RestoreDefaultAppsResyncOrder) {
-  InitLauncherController();
-  base::ListValue policy_value;
-  InsertPrefValue(&policy_value, 0, extension1_->id());
-  InsertPrefValue(&policy_value, 1, extension2_->id());
-  InsertPrefValue(&policy_value, 2, extension3_->id());
-  profile()->GetTestingPrefService()->SetUserPref(prefs::kPinnedLauncherApps,
-                                                  policy_value.DeepCopy());
-  EXPECT_EQ(0, profile()->GetPrefs()->GetInteger(prefs::kShelfChromeIconIndex));
-  extension_service_->AddExtension(extension2_.get());
-  extension_service_->AddExtension(extension1_.get());
-  extension_service_->AddExtension(extension3_.get());
-  EXPECT_EQ("Chrome, App1, App2, App3, AppList", GetPinnedAppStatus());
-
-  // Change the order with increasing chrome position and decreasing position.
-  base::ListValue policy_value1;
-  InsertPrefValue(&policy_value1, 0, extension3_->id());
-  InsertPrefValue(&policy_value1, 1, extension1_->id());
-  InsertPrefValue(&policy_value1, 2, extension2_->id());
-  profile()->GetTestingPrefService()->SetInteger(prefs::kShelfChromeIconIndex,
-                                                 2);
-  profile()->GetTestingPrefService()->SetUserPref(prefs::kPinnedLauncherApps,
-                                                  policy_value1.DeepCopy());
-  EXPECT_EQ("App3, App1, Chrome, App2, AppList", GetPinnedAppStatus());
-  base::ListValue policy_value2;
-  InsertPrefValue(&policy_value2, 0, extension2_->id());
-  InsertPrefValue(&policy_value2, 1, extension3_->id());
-  InsertPrefValue(&policy_value2, 2, extension1_->id());
-  profile()->GetTestingPrefService()->SetInteger(prefs::kShelfChromeIconIndex,
-                                                 1);
-  profile()->GetTestingPrefService()->SetUserPref(prefs::kPinnedLauncherApps,
-                                                  policy_value2.DeepCopy());
-  EXPECT_EQ("App2, Chrome, App3, App1, AppList", GetPinnedAppStatus());
-}
 
 TEST_F(ChromeLauncherControllerTest, DefaultApps) {
   InitLauncherController();
@@ -1153,29 +962,6 @@ TEST_F(ChromeLauncherControllerTest, DefaultApps) {
   EXPECT_EQ("AppList, Chrome, App3", GetPinnedAppStatus());
   EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
   EXPECT_FALSE(launcher_controller_->IsAppPinned(extension2_->id()));
-}
-
-// Check that changing from the alternate shelf layout to the old shelflayout
-// and back does keep the app launcher at location #0.
-TEST_F(ChromeLauncherControllerTest,
-       SwitchingFromAlternateShelfLayoutToLegacyAndBack) {
-  InitLauncherController();
-
-  // We simulate this problem by intentionally placing the app list item in
-  // the middle of several apps which caused a crash (see crbug.com/329597).
-  const char kAppShelfIdPlaceholder[] = "AppShelfIDPlaceholder--------";
-
-  base::ListValue policy_value;
-  InsertPrefValue(&policy_value, 0, extension1_->id());
-  InsertPrefValue(&policy_value, 1, kAppShelfIdPlaceholder);
-  InsertPrefValue(&policy_value, 2, extension2_->id());
-  profile()->GetTestingPrefService()->SetUserPref(prefs::kPinnedLauncherApps,
-                                                  policy_value.DeepCopy());
-  EXPECT_EQ(0, profile()->GetPrefs()->GetInteger(prefs::kShelfChromeIconIndex));
-  // Model should only contain the browser shortcut and app list items.
-  extension_service_->AddExtension(extension1_.get());
-  extension_service_->AddExtension(extension2_.get());
-  EXPECT_EQ("AppList, Chrome, App1, App2", GetPinnedAppStatus());
 }
 
 // Check that the restauration of launcher items is happening in the same order
@@ -2516,6 +2302,80 @@ TEST_F(MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest,
   EXPECT_FALSE(v2_app_5.window()->GetNativeWindow()->IsVisible());
   SwitchActiveUser(profile1->GetProfileName());
   EXPECT_TRUE(v2_app_5.window()->GetNativeWindow()->IsVisible());
+
+  // Switching to desktop #2, hiding the app window and creating an app should
+  // teleport there automatically.
+  SwitchActiveUser(profile2->GetProfileName());
+  v2_app_1.window()->Hide();
+  V2App v2_app_6(profile1, extension1_);
+  EXPECT_FALSE(v2_app_1.window()->GetNativeWindow()->IsVisible());
+  EXPECT_FALSE(v2_app_2.window()->GetNativeWindow()->IsVisible());
+  EXPECT_TRUE(v2_app_6.window()->GetNativeWindow()->IsVisible());
+}
+
+// Check that V2 applications hide correctly on the shelf when the app window
+// is hidden.
+TEST_F(MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest,
+       V2AppHiddenWindows) {
+  InitLauncherController();
+
+  TestingProfile* profile2 = CreateMultiUserProfile("user-2");
+  SwitchActiveUser(profile()->GetProfileName());
+  EXPECT_EQ(2, model_->item_count());
+
+  V2App v2_app_1(profile(), extension1_);
+  EXPECT_EQ(3, model_->item_count());
+  {
+    // Hide and show the app.
+    v2_app_1.window()->Hide();
+    EXPECT_EQ(2, model_->item_count());
+
+    v2_app_1.window()->Show(apps::AppWindow::SHOW_ACTIVE);
+    EXPECT_EQ(3, model_->item_count());
+  }
+  {
+    // Switch user, hide and show the app and switch back.
+    SwitchActiveUser(profile2->GetProfileName());
+    EXPECT_EQ(2, model_->item_count());
+
+    v2_app_1.window()->Hide();
+    EXPECT_EQ(2, model_->item_count());
+
+    v2_app_1.window()->Show(apps::AppWindow::SHOW_ACTIVE);
+    EXPECT_EQ(2, model_->item_count());
+
+    SwitchActiveUser(profile()->GetProfileName());
+    EXPECT_EQ(3, model_->item_count());
+  }
+  {
+    // Switch user, hide the app, switch back and then show it again.
+    SwitchActiveUser(profile2->GetProfileName());
+    EXPECT_EQ(2, model_->item_count());
+
+    v2_app_1.window()->Hide();
+    EXPECT_EQ(2, model_->item_count());
+
+    SwitchActiveUser(profile()->GetProfileName());
+    EXPECT_EQ(2, model_->item_count());
+
+    v2_app_1.window()->Show(apps::AppWindow::SHOW_ACTIVE);
+    EXPECT_EQ(3, model_->item_count());
+  }
+  {
+    // Create a second app, hide and show it and then hide both apps.
+    V2App v2_app_2(profile(), extension1_);
+    EXPECT_EQ(3, model_->item_count());
+
+    v2_app_2.window()->Hide();
+    EXPECT_EQ(3, model_->item_count());
+
+    v2_app_2.window()->Show(apps::AppWindow::SHOW_ACTIVE);
+    EXPECT_EQ(3, model_->item_count());
+
+    v2_app_1.window()->Hide();
+    v2_app_2.window()->Hide();
+    EXPECT_EQ(2, model_->item_count());
+  }
 }
 #endif  // defined(OS_CHROMEOS)
 

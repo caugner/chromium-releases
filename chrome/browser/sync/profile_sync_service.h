@@ -26,7 +26,7 @@
 #include "chrome/browser/sync/profile_sync_service_base.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/protocol_event_observer.h"
-#include "chrome/browser/sync/sessions2/sessions_sync_manager.h"
+#include "chrome/browser/sync/sessions/sessions_sync_manager.h"
 #include "chrome/browser/sync/startup_controller.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
@@ -35,6 +35,7 @@
 #include "components/sync_driver/data_type_manager.h"
 #include "components/sync_driver/data_type_manager_observer.h"
 #include "components/sync_driver/failed_data_types_handler.h"
+#include "components/sync_driver/non_blocking_data_type_manager.h"
 #include "components/sync_driver/sync_frontend.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -62,7 +63,6 @@ class DeviceInfo;
 class FaviconCache;
 class JsController;
 class OpenTabsUIDelegate;
-class SessionModelAssociator;
 
 namespace sessions {
 class SyncSessionSnapshot;
@@ -72,7 +72,10 @@ class SyncSessionSnapshot;
 namespace syncer {
 class BaseTransaction;
 class NetworkResources;
+struct CommitCounters;
+struct StatusCounters;
 struct SyncCredentials;
+struct UpdateCounters;
 struct UserShare;
 }  // namespace syncer
 
@@ -276,6 +279,18 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   void RemoveProtocolEventObserver(
       browser_sync::ProtocolEventObserver* observer);
 
+  void AddTypeDebugInfoObserver(syncer::TypeDebugInfoObserver* observer);
+  void RemoveTypeDebugInfoObserver(syncer::TypeDebugInfoObserver* observer);
+
+  // Asynchronously fetches base::Value representations of all sync nodes and
+  // returns them to the specified callback on this thread.
+  //
+  // These requests can live a long time and return when you least expect it.
+  // For safety, the callback should be bound to some sort of WeakPtr<> or
+  // scoped_refptr<>.
+  void GetAllNodes(
+      const base::Callback<void(scoped_ptr<base::ListValue>)>& callback);
+
   void RegisterAuthNotifications();
   void UnregisterAuthNotifications();
 
@@ -300,16 +315,23 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   void RegisterDataTypeController(
       browser_sync::DataTypeController* data_type_controller);
 
-  // Returns the session model associator associated with this type, but only if
-  // the associator is running.  If it is doing anything else, it will return
-  // null.
+  // Registers a type whose sync storage will not be managed by the
+  // ProfileSyncService.  It declares that this sync type may be activated at
+  // some point in the future.  This function call does not enable or activate
+  // the syncing of this type
+  void RegisterNonBlockingType(syncer::ModelType type);
+
+  // Called by a component that supports non-blocking sync when it is ready to
+  // initialize its connection to the sync backend.
   //
-  // *** DONT USE THIS ANYMORE! ***
-  // If you think you want to use this, think again! Can you use
-  // GetOpenTabsUIDelegate instead?
-  // TODO(tim): Remove this method.
-  virtual browser_sync::SessionModelAssociator*
-      GetSessionModelAssociatorDeprecated();
+  // If policy allows for syncing this type (ie. it is "preferred"), then this
+  // should result in a message to enable syncing for this type when the sync
+  // backend is available.  If the type is not to be synced, this should result
+  // in a message that allows the component to delete its local sync state.
+  void InitializeNonBlockingType(
+      syncer::ModelType type,
+      scoped_refptr<base::SequencedTaskRunner> task_runner,
+      base::WeakPtr<syncer::NonBlockingTypeProcessor> processor);
 
   // Return the active OpenTabsUIDelegate. If sessions is not enabled or not
   // currently syncing, returns NULL.
@@ -369,6 +391,15 @@ class ProfileSyncService : public ProfileSyncServiceBase,
       bool success) OVERRIDE;
   virtual void OnSyncCycleCompleted() OVERRIDE;
   virtual void OnProtocolEvent(const syncer::ProtocolEvent& event) OVERRIDE;
+  virtual void OnDirectoryTypeCommitCounterUpdated(
+      syncer::ModelType type,
+      const syncer::CommitCounters& counters) OVERRIDE;
+  virtual void OnDirectoryTypeUpdateCounterUpdated(
+      syncer::ModelType type,
+      const syncer::UpdateCounters& counters) OVERRIDE;
+  virtual void OnDirectoryTypeStatusCounterUpdated(
+      syncer::ModelType type,
+      const syncer::StatusCounters& counters) OVERRIDE;
   virtual void OnSyncConfigureRetry() OVERRIDE;
   virtual void OnConnectionStatusChange(
       syncer::ConnectionStatus status) OVERRIDE;
@@ -559,9 +590,6 @@ class ProfileSyncService : public ProfileSyncServiceBase,
 
   // Overridden by tests.
   // TODO(zea): Remove these and have the dtc's call directly into the SBH.
-  virtual void ActivateDataType(
-      syncer::ModelType type, syncer::ModelSafeGroup group,
-      browser_sync::ChangeProcessor* change_processor);
   virtual void DeactivateDataType(syncer::ModelType type);
 
   // SyncPrefObserver implementation.
@@ -578,11 +606,23 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // superset of the active types (see GetActiveDataTypes()).
   virtual syncer::ModelTypeSet GetPreferredDataTypes() const;
 
+  // Returns the set of directory types which are preferred for enabling.
+  virtual syncer::ModelTypeSet GetPreferredDirectoryDataTypes() const;
+
+  // Returns the set of off-thread types which are preferred for enabling.
+  virtual syncer::ModelTypeSet GetPreferredNonBlockingDataTypes() const;
+
   // Gets the set of all data types that could be allowed (the set that
   // should be advertised to the user).  These will typically only change
   // via a command-line option.  See class comment for more on what it means
   // for a datatype to be Registered.
   virtual syncer::ModelTypeSet GetRegisteredDataTypes() const;
+
+  // Gets the set of directory types which could be allowed.
+  virtual syncer::ModelTypeSet GetRegisteredDirectoryDataTypes() const;
+
+  // Gets the set of off-thread types which could be allowed.
+  virtual syncer::ModelTypeSet GetRegisteredNonBlockingDataTypes() const;
 
   // Checks whether the Cryptographer is ready to encrypt and decrypt updates
   // for sensitive data types. Caller must be holding a
@@ -727,8 +767,9 @@ class ProfileSyncService : public ProfileSyncServiceBase,
 
   virtual syncer::WeakHandle<syncer::JsEventHandler> GetJsEventHandler();
 
-  const browser_sync::DataTypeController::TypeMap& data_type_controllers() {
-    return data_type_controllers_;
+  const browser_sync::DataTypeController::TypeMap&
+      directory_data_type_controllers() {
+    return directory_data_type_controllers_;
   }
 
   // Helper method for managing encryption UI.
@@ -889,8 +930,8 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // is equal to !HasSyncSetupCompleted() at the time of OnBackendInitialized().
   bool is_first_time_sync_configure_;
 
-  // List of available data type controllers.
-  browser_sync::DataTypeController::TypeMap data_type_controllers_;
+  // List of available data type controllers for directory types.
+  browser_sync::DataTypeController::TypeMap directory_data_type_controllers_;
 
   // Whether the SyncBackendHost has been initialized.
   bool backend_initialized_;
@@ -913,11 +954,15 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   std::string unrecoverable_error_message_;
   tracked_objects::Location unrecoverable_error_location_;
 
-  // Manages the start and stop of the various data types.
-  scoped_ptr<browser_sync::DataTypeManager> data_type_manager_;
+  // Manages the start and stop of the directory data types.
+  scoped_ptr<browser_sync::DataTypeManager> directory_data_type_manager_;
+
+  // Manager for the non-blocking data types.
+  browser_sync::NonBlockingDataTypeManager non_blocking_data_type_manager_;
 
   ObserverList<ProfileSyncServiceBase::Observer> observers_;
   ObserverList<browser_sync::ProtocolEventObserver> protocol_event_observers_;
+  ObserverList<syncer::TypeDebugInfoObserver> type_debug_info_observers_;
 
   syncer::SyncJsController sync_js_controller_;
 

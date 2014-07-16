@@ -5,6 +5,7 @@
 #include "chrome/app/chrome_main_delegate.h"
 
 #include "base/command_line.h"
+#include "base/cpu.h"
 #include "base/files/file_path.h"
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
@@ -199,7 +200,8 @@ static void AdjustLinuxOOMScore(const std::string& process_type) {
              process_type == switches::kServiceProcess) {
     score = kMiscScore;
 #ifndef DISABLE_NACL
-  } else if (process_type == switches::kNaClLoaderProcess) {
+  } else if (process_type == switches::kNaClLoaderProcess ||
+             process_type == switches::kNaClLoaderNonSfiProcess) {
     score = kPluginScore;
 #endif
   } else if (process_type == switches::kZygoteProcess ||
@@ -337,7 +339,7 @@ void InitializeUserDataDir() {
     std::string user_data_dir_string;
     scoped_ptr<base::Environment> environment(base::Environment::Create());
     if (environment->GetVar("CHROME_USER_DATA_DIR", &user_data_dir_string) &&
-        IsStringUTF8(user_data_dir_string)) {
+        base::IsStringUTF8(user_data_dir_string)) {
       user_data_dir = base::FilePath::FromUTF8Unsafe(user_data_dir_string);
     }
   }
@@ -348,7 +350,7 @@ void InitializeUserDataDir() {
 
   const bool specified_directory_was_invalid = !user_data_dir.empty() &&
       !PathService::OverrideAndCreateIfNeeded(chrome::DIR_USER_DATA,
-          user_data_dir, true);
+          user_data_dir, false, true);
   // Save inaccessible or invalid paths so the user may be prompted later.
   if (specified_directory_was_invalid)
     chrome::SetInvalidSpecifiedUserDataDir(user_data_dir);
@@ -647,6 +649,11 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #if defined(OS_WIN)
   child_process_logging::Init();
 #endif
+#if defined(ARCH_CPU_ARM_FAMILY) && (defined(OS_ANDROID) || defined(OS_LINUX))
+  // Create an instance of the CPU class to parse /proc/cpuinfo and cache
+  // cpu_brand info.
+  base::CPU cpu_info;
+#endif
 
   // Initialize the user data dir for any process type that needs it.
   if (chrome::ProcessNeedsProfileDir(process_type))
@@ -674,7 +681,9 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #endif
 
 #if defined(OS_WIN)
-  // TODO(darin): Kill this once http://crbug.com/52609 is fixed.
+  // TODO(zturner): Throbber icons are still stored in chrome.dll, this can be
+  // killed once those are merged into resources.pak.  See
+  // GlassBrowserFrameView::InitThrobberIcons() and http://crbug.com/368327.
   ui::SetResourcesDataDLL(_AtlBaseModule.GetResourceInstance());
 #endif
 

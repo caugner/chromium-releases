@@ -10,19 +10,19 @@
 #include <cmath>
 #include <set>
 
-#include "base/message_loop/message_pump_x11.h"
-#include "ui/display/chromeos/display_mode.h"
-#include "ui/display/chromeos/display_snapshot.h"
+#include "ui/display/types/chromeos/display_mode.h"
+#include "ui/display/types/chromeos/display_snapshot.h"
+#include "ui/gfx/x/x11_types.h"
 
 namespace ui {
 
 TouchscreenDelegateX11::TouchscreenDelegateX11()
-    : display_(base::MessagePumpX11::GetDefaultXDisplay()) {}
+    : display_(gfx::GetXDisplay()) {}
 
 TouchscreenDelegateX11::~TouchscreenDelegateX11() {}
 
 void TouchscreenDelegateX11::AssociateTouchscreens(
-    OutputConfigurator::DisplayStateList* outputs) {
+    DisplayConfigurator::DisplayStateList* outputs) {
   int ndevices = 0;
   Atom valuator_x = XInternAtom(display_, "Abs MT Position X", False);
   Atom valuator_y = XInternAtom(display_, "Abs MT Position Y", False);
@@ -74,7 +74,7 @@ void TouchscreenDelegateX11::AssociateTouchscreens(
     if (width > 0.0 && height > 0.0 && is_direct_touch) {
       size_t k = 0;
       for (; k < outputs->size(); k++) {
-        OutputConfigurator::DisplayState* output = &(*outputs)[k];
+        DisplayConfigurator::DisplayState* output = &(*outputs)[k];
         if (output->touch_device_id != None)
           continue;
 
@@ -115,7 +115,7 @@ void TouchscreenDelegateX11::AssociateTouchscreens(
        it != no_match_touchscreen.end();
        it++) {
     for (size_t i = 0; i < outputs->size(); i++) {
-      if ((*outputs)[i].display->type() != OUTPUT_TYPE_INTERNAL &&
+      if ((*outputs)[i].display->type() != DISPLAY_CONNECTION_TYPE_INTERNAL &&
           (*outputs)[i].display->native_mode() != NULL &&
           (*outputs)[i].touch_device_id == None) {
         (*outputs)[i].touch_device_id = *it;
@@ -126,56 +126,6 @@ void TouchscreenDelegateX11::AssociateTouchscreens(
     }
   }
 
-  XIFreeDeviceInfo(info);
-}
-
-void TouchscreenDelegateX11::ConfigureCTM(
-    int touch_device_id,
-    const OutputConfigurator::CoordinateTransformation& ctm) {
-  VLOG(1) << "ConfigureCTM: id=" << touch_device_id << " scale=" << ctm.x_scale
-          << "x" << ctm.y_scale << " offset=(" << ctm.x_offset << ", "
-          << ctm.y_offset << ")";
-  int ndevices = 0;
-  XIDeviceInfo* info = XIQueryDevice(display_, touch_device_id, &ndevices);
-  Atom prop = XInternAtom(display_, "Coordinate Transformation Matrix", False);
-  Atom float_atom = XInternAtom(display_, "FLOAT", False);
-  if (ndevices == 1 && prop != None && float_atom != None) {
-    Atom type;
-    int format;
-    unsigned long num_items;
-    unsigned long bytes_after;
-    unsigned char* data = NULL;
-    // Verify that the property exists with correct format, type, etc.
-    int status = XIGetProperty(display_,
-                               info->deviceid,
-                               prop,
-                               0,
-                               0,
-                               False,
-                               AnyPropertyType,
-                               &type,
-                               &format,
-                               &num_items,
-                               &bytes_after,
-                               &data);
-    if (data)
-      XFree(data);
-    if (status == Success && type == float_atom && format == 32) {
-      float value[3][3] = {
-        { ctm.x_scale,         0.0, ctm.x_offset },
-        {         0.0, ctm.y_scale, ctm.y_offset },
-        {         0.0,         0.0,          1.0 }
-      };
-      XIChangeProperty(display_,
-                       info->deviceid,
-                       prop,
-                       type,
-                       format,
-                       PropModeReplace,
-                       reinterpret_cast<unsigned char*>(value),
-                       9);
-    }
-  }
   XIFreeDeviceInfo(info);
 }
 

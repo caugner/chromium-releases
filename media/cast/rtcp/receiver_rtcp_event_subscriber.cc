@@ -32,9 +32,6 @@ void ReceiverRtcpEventSubscriber::OnReceiveFrameEvent(
         rtcp_event.delay_delta = frame_event.delay_delta;
       case kAudioFrameDecoded:
       case kVideoFrameDecoded:
-      // TODO(imcheng): This doesn't seem correct because kAudioAckSent and
-      // kVideoAckSent logged as generic events in AudioReceiver /
-      // VideoReceiver. (crbug.com/339590)
       case kAudioAckSent:
       case kVideoAckSent:
         rtcp_event.type = frame_event.type;
@@ -73,10 +70,12 @@ void ReceiverRtcpEventSubscriber::OnReceivePacketEvent(
   DCHECK(rtcp_events_.size() <= max_size_to_retain_);
 }
 
-void ReceiverRtcpEventSubscriber::OnReceiveGenericEvent(
-    const GenericEvent& generic_event) {
+void ReceiverRtcpEventSubscriber::GetRtcpEventsAndReset(
+    RtcpEventMultiMap* rtcp_events) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // Do nothing as RTP receiver is not interested in generic events for RTCP.
+  DCHECK(rtcp_events);
+  rtcp_events->swap(rtcp_events_);
+  rtcp_events_.clear();
 }
 
 void ReceiverRtcpEventSubscriber::TruncateMapIfNeeded() {

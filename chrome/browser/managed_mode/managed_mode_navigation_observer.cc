@@ -12,7 +12,6 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/managed_mode/managed_mode_interstitial.h"
 #include "chrome/browser/managed_mode/managed_mode_resource_throttle.h"
@@ -21,12 +20,12 @@
 #include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "components/infobars/core/infobar.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -63,8 +62,7 @@ void GoBackToSafety(content::WebContents* web_contents) {
   // If we can't go back (because we opened a new tab), try to close the tab.
   // If this is the last tab on this desktop, open a new window.
   chrome::HostDesktopType host_desktop_type =
-      chrome::GetHostDesktopTypeForNativeView(
-          web_contents->GetView()->GetNativeView());
+      chrome::GetHostDesktopTypeForNativeView(web_contents->GetNativeView());
   const BrowserList* browser_list = BrowserList::GetInstance(host_desktop_type);
   if (browser_list->size() == 1) {
     Browser* browser = browser_list->get(0);
@@ -83,15 +81,14 @@ class ManagedModeWarningInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
   // Creates a managed mode warning infobar and delegate and adds the infobar to
   // |infobar_service|.  Returns the infobar if it was successfully added.
-  static InfoBar* Create(InfoBarService* infobar_service);
+  static infobars::InfoBar* Create(InfoBarService* infobar_service);
 
  private:
   ManagedModeWarningInfoBarDelegate();
   virtual ~ManagedModeWarningInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
-  virtual bool ShouldExpire(
-      const content::LoadCommittedDetails& details) const OVERRIDE;
+  virtual bool ShouldExpire(const NavigationDetails& details) const OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
   virtual base::string16 GetMessageText() const OVERRIDE;
   virtual int GetButtons() const OVERRIDE;
@@ -102,7 +99,7 @@ class ManagedModeWarningInfoBarDelegate : public ConfirmInfoBarDelegate {
 };
 
 // static
-InfoBar* ManagedModeWarningInfoBarDelegate::Create(
+infobars::InfoBar* ManagedModeWarningInfoBarDelegate::Create(
     InfoBarService* infobar_service) {
   return infobar_service->AddInfoBar(ConfirmInfoBarDelegate::CreateInfoBar(
       scoped_ptr<ConfirmInfoBarDelegate>(
@@ -117,14 +114,16 @@ ManagedModeWarningInfoBarDelegate::~ManagedModeWarningInfoBarDelegate() {
 }
 
 bool ManagedModeWarningInfoBarDelegate::ShouldExpire(
-    const content::LoadCommittedDetails& details) const {
+    const NavigationDetails& details) const {
   // ManagedModeNavigationObserver removes us below.
   return false;
 }
 
 void ManagedModeWarningInfoBarDelegate::InfoBarDismissed() {
+  content::WebContents* web_contents =
+      InfoBarService::WebContentsFromInfoBar(infobar());
   ManagedModeNavigationObserver::FromWebContents(
-      web_contents())->WarnInfoBarDismissed();
+      web_contents)->WarnInfoBarDismissed();
 }
 
 base::string16 ManagedModeWarningInfoBarDelegate::GetMessageText() const {
@@ -147,7 +146,7 @@ bool ManagedModeWarningInfoBarDelegate::Accept() {
   // http://crbug.com/313377
   NOTIMPLEMENTED();
 #else
-  GoBackToSafety(web_contents());
+  GoBackToSafety(InfoBarService::WebContentsFromInfoBar(infobar()));
 #endif
 
   return false;
@@ -232,7 +231,7 @@ void ManagedModeNavigationObserver::OnRequestBlocked(
     navigation_observer->OnRequestBlockedInternal(url);
 
   // Show the interstitial.
-  new ManagedModeInterstitial(web_contents, url, callback);
+  ManagedModeInterstitial::Show(web_contents, url, callback);
 }
 
 void ManagedModeNavigationObserver::OnRequestBlockedInternal(const GURL& url) {

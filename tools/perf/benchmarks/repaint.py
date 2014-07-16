@@ -2,22 +2,17 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from benchmarks import silk_flags
 from measurements import repaint
 from telemetry import test
 
 
-class RepaintThreadedRasterizationKeyMobileSites(test.Test):
-  """Measures repaint performance on the key mobile sites with threaded
-  rasterization.
+class RepaintKeyMobileSites(test.Test):
+  """Measures repaint performance on the key mobile sites.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  tag = 'threaded_rasterization'
   test = repaint.Repaint
-  page_set = 'page_sets/key_mobile_sites.json'
-  def CustomizeBrowserOptions(self, options):
-    options.AppendExtraBrowserArgs('--enable-threaded-compositing')
-    options.AppendExtraBrowserArgs('--force-compositing-mode')
-    options.AppendExtraBrowserArgs('--enable-impl-side-painting')
+  page_set = 'page_sets/key_mobile_sites.py'
 
 
 class RepaintGpuRasterizationKeyMobileSites(test.Test):
@@ -27,9 +22,6 @@ class RepaintGpuRasterizationKeyMobileSites(test.Test):
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   tag = 'gpu_rasterization'
   test = repaint.Repaint
-  page_set = 'page_sets/key_mobile_sites.json'
+  page_set = 'page_sets/key_mobile_sites.py'
   def CustomizeBrowserOptions(self, options):
-    options.AppendExtraBrowserArgs('--enable-threaded-compositing')
-    options.AppendExtraBrowserArgs('--force-compositing-mode')
-    options.AppendExtraBrowserArgs('--enable-impl-side-painting')
-    options.AppendExtraBrowserArgs('--force-gpu-rasterization')
+    silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)

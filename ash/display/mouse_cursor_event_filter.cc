@@ -22,7 +22,6 @@
 #include "ui/gfx/screen.h"
 
 namespace ash {
-namespace internal {
 namespace {
 
 // Maximum size on the display edge that initiate snapping phantom window,
@@ -99,10 +98,8 @@ void MouseCursorEventFilter::OnMouseEvent(ui::MouseEvent* event) {
       return;
   }
 
-  if (!(event->flags() & ui::EF_IS_SYNTHESIZED)) {
-    Shell::GetInstance()->display_controller()->
-        cursor_window_controller()->UpdateLocation();
-  }
+  Shell::GetInstance()->display_controller()->
+      cursor_window_controller()->UpdateLocation();
 
   gfx::Point point_in_screen(event->location());
   wm::ConvertPointToScreen(target, &point_in_screen);
@@ -262,5 +259,4 @@ void MouseCursorEventFilter::UpdateVerticalIndicatorWindowBounds() {
   src_indicator_bounds_.set_height(lower_indicator_y - upper_indicator_y);
 }
 
-}  // namespace internal
 }  // namespace ash

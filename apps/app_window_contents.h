@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_EXTENSIONS_APP_WINDOW_CONTENTS_H_
-#define CHROME_BROWSER_EXTENSIONS_APP_WINDOW_CONTENTS_H_
+#ifndef APPS_APP_WINDOW_CONTENTS_H_
+#define APPS_APP_WINDOW_CONTENTS_H_
 
 #include <vector>
 
@@ -29,10 +29,11 @@ namespace apps {
 // AppWindowContents class specific to app windows. It maintains a
 // WebContents instance and observes it for the purpose of passing
 // messages to the extensions system.
-class AppWindowContentsImpl : public AppWindowContents,
-                              public content::NotificationObserver,
-                              public content::WebContentsObserver,
-                              public ExtensionFunctionDispatcher::Delegate {
+class AppWindowContentsImpl
+    : public AppWindowContents,
+      public content::NotificationObserver,
+      public content::WebContentsObserver,
+      public extensions::ExtensionFunctionDispatcher::Delegate {
  public:
   explicit AppWindowContentsImpl(AppWindow* host);
   virtual ~AppWindowContentsImpl();
@@ -54,7 +55,7 @@ class AppWindowContentsImpl : public AppWindowContents,
   // content::WebContentsObserver
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  // ExtensionFunctionDispatcher::Delegate
+  // extensions::ExtensionFunctionDispatcher::Delegate
   virtual extensions::WindowController* GetExtensionWindowController() const
       OVERRIDE;
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
@@ -68,11 +69,12 @@ class AppWindowContentsImpl : public AppWindowContents,
   GURL url_;
   content::NotificationRegistrar registrar_;
   scoped_ptr<content::WebContents> web_contents_;
-  scoped_ptr<ExtensionFunctionDispatcher> extension_function_dispatcher_;
+  scoped_ptr<extensions::ExtensionFunctionDispatcher>
+      extension_function_dispatcher_;
 
   DISALLOW_COPY_AND_ASSIGN(AppWindowContentsImpl);
 };
 
 }  // namespace apps
 
-#endif  // CHROME_BROWSER_EXTENSIONS_APP_WINDOW_CONTENTS_H_
+#endif  // APPS_APP_WINDOW_CONTENTS_H_

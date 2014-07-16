@@ -4,6 +4,7 @@
 
 import logging
 
+from telemetry import test
 from telemetry.core import util
 from telemetry.core import exceptions
 from telemetry.unittest import tab_test_case
@@ -57,7 +58,7 @@ class TabTest(tab_test_case.TabTestCase):
       logging.warning('Browser does not support tab control, skipping test.')
       return
 
-    self.assertTrue(_IsDocumentVisible(self._tab))
+    util.WaitFor(lambda: _IsDocumentVisible(self._tab), timeout=5)
     new_tab = self._browser.tabs.New()
     new_tab.Navigate('about:blank')
     util.WaitFor(lambda: _IsDocumentVisible(new_tab), timeout=5)
@@ -65,6 +66,11 @@ class TabTest(tab_test_case.TabTestCase):
     self._tab.Activate()
     util.WaitFor(lambda: _IsDocumentVisible(self._tab), timeout=5)
     self.assertFalse(_IsDocumentVisible(new_tab))
+
+  def testTabUrl(self):
+    self.assertEquals(self._tab.url, 'about:blank')
+    self.Navigate('blank.html')
+    self.assertEquals(self._tab.url, self.test_url)
 
   def testIsTimelineRecordingRunningTab(self):
     self.assertFalse(self._tab.is_timeline_recording_running)
@@ -93,6 +99,8 @@ class GpuTabTest(tab_test_case.TabTestCase):
     self._extra_browser_args = ['--enable-gpu-benchmarking']
     super(GpuTabTest, self).setUp()
 
+  # Test flaky on mac: http://crbug.com/358664
+  @test.Disabled('android', 'mac')
   def testScreenshot(self):
     if not self._tab.screenshot_supported:
       logging.warning('Browser does not support screenshots, skipping test.')

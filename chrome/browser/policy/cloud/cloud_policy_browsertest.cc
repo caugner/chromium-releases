@@ -12,6 +12,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/invalidation/fake_invalidation_service.h"
@@ -51,9 +52,9 @@
 #include "chromeos/dbus/cryptohome_client.h"
 #else
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
+#include "components/signin/core/browser/signin_manager.h"
 #endif
 
 using testing::AnyNumber;
@@ -120,6 +121,14 @@ std::string GetTestPolicy(const char* homepage, int key_version) {
                             key_version);
 }
 
+void GetExpectedDefaultPolicy(PolicyMap* policy_map) {
+#if defined(OS_CHROMEOS)
+  policy_map->Set(
+      key::kChromeOsMultiProfileUserBehavior, POLICY_LEVEL_MANDATORY,
+      POLICY_SCOPE_USER, base::Value::CreateStringValue("primary-only"), NULL);
+#endif
+}
+
 void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
   expected->Set(key::kShowHomeButton, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                 base::Value::CreateBooleanValue(true), NULL);
@@ -137,6 +146,11 @@ void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
   expected->Set(
       key::kHomepageLocation, POLICY_LEVEL_RECOMMENDED,
       POLICY_SCOPE_USER, base::Value::CreateStringValue(homepage), NULL);
+#if defined(OS_CHROMEOS)
+  expected->Set(
+      key::kChromeOsMultiProfileUserBehavior, POLICY_LEVEL_MANDATORY,
+      POLICY_SCOPE_USER, base::Value::CreateStringValue("primary-only"), NULL);
+#endif
 }
 
 }  // namespace
@@ -281,8 +295,9 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyTest, FetchPolicy) {
     run_loop.Run();
   }
 
-  PolicyMap empty;
-  EXPECT_TRUE(empty.Equals(policy_service->GetPolicies(
+  PolicyMap default_policy;
+  GetExpectedDefaultPolicy(&default_policy);
+  EXPECT_TRUE(default_policy.Equals(policy_service->GetPolicies(
       PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))));
 
   ASSERT_NO_FATAL_FAILURE(SetServerPolicy(GetTestPolicy("google.com", 0)));
@@ -312,10 +327,12 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyTest, InvalidatePolicy) {
 
   // Update the homepage in the policy and trigger an invalidation.
   ASSERT_NO_FATAL_FAILURE(SetServerPolicy(GetTestPolicy("youtube.com", 0)));
+  base::TimeDelta now =
+      base::Time::NowFromSystemTime() - base::Time::UnixEpoch();
   GetInvalidationService()->EmitInvalidationForTest(
       syncer::Invalidation::Init(
           invalidation::ObjectId(16, "test_policy"),
-          1 /* version */,
+          now.InMicroseconds() /* version */,
           "payload"));
   {
     base::RunLoop run_loop;
@@ -346,8 +363,9 @@ IN_PROC_BROWSER_TEST_F(CloudPolicyTest, FetchPolicyWithRotatedKey) {
   std::string initial_key;
   ASSERT_TRUE(base::ReadFileToString(user_policy_key_file_, &initial_key));
 
-  PolicyMap empty;
-  EXPECT_TRUE(empty.Equals(policy_service->GetPolicies(
+  PolicyMap default_policy;
+  GetExpectedDefaultPolicy(&default_policy);
+  EXPECT_TRUE(default_policy.Equals(policy_service->GetPolicies(
       PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))));
 
   // Set the new policies and a new key at the server.

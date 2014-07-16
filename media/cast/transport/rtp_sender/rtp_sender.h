@@ -25,8 +25,6 @@
 namespace media {
 namespace cast {
 
-class LoggingImpl;
-
 namespace transport {
 
 // This object is only called from the main cast thread.
@@ -37,19 +35,18 @@ class RtpSender {
  public:
   RtpSender(
       base::TickClock* clock,
-      LoggingImpl* logging,
       const scoped_refptr<base::SingleThreadTaskRunner>& transport_task_runner,
       PacedSender* const transport);
 
   ~RtpSender();
 
   // Initialize audio stack. Audio must be initialized prior to sending encoded
-  // audio frames.
-  void InitializeAudio(const CastTransportAudioConfig& config);
+  // audio frames. Returns false if configuration is invalid.
+  bool InitializeAudio(const CastTransportAudioConfig& config);
 
   // Initialize video stack. Video must be initialized prior to sending encoded
-  // video frames.
-  void InitializeVideo(const CastTransportVideoConfig& config);
+  // video frames. Returns false if configuration is invalid.
+  bool InitializeVideo(const CastTransportVideoConfig& config);
 
   // The video_frame objects ownership is handled by the main cast thread.
   void IncomingEncodedVideoFrame(const EncodedVideoFrame* video_frame,
@@ -72,7 +69,6 @@ class RtpSender {
   void UpdateSequenceNumber(Packet* packet);
 
   base::TickClock* clock_;  // Not owned by this class.
-  LoggingImpl* logging_;    // Not owned by this class.
   RtpPacketizerConfig config_;
   scoped_ptr<RtpPacketizer> packetizer_;
   scoped_ptr<PacketStorage> storage_;

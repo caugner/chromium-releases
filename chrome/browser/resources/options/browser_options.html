@@ -16,6 +16,7 @@
       <div id="shared-proxies" class="checkbox">
         <label>
           <input id="use-shared-proxies" type="checkbox"
+              metric="Options_NetworkUseSharedProxies"
               pref="settings.use_shared_proxies">
           <span i18n-content="useSharedProxies"></span>
         </label>
@@ -138,7 +139,7 @@
         <div class="settings-row">
           <select id="default-search-engine" class="weakrtl"></select>
           <span class="controlled-setting-indicator"
-              pref="default_search_provider.enabled">
+              pref="default_search_provider_data.template_url_data">
           </span>
           <button id="manage-default-search-engines"
               i18n-content="defaultSearchManageEngines">
@@ -209,13 +210,30 @@
           </select>
         </div>
       </div>
-      <div class="checkbox">
+      <div class="checkbox settings-row">
         <label>
           <input id="use-24hour-clock" pref="settings.clock.use_24hour_clock"
               type="checkbox">
           <span i18n-content="use24HourClock"></span>
         </label>
       </div>
+      <div id="time-synced-explanation" class="settings-row"
+          i18n-content="timeSyncedExplanation"></div>
+      <div id="set-time" class="settings-row" hidden>
+        <button id="set-time-button"
+            i18n-content="setTimeButton"></button>
+      </div>
+    </div>
+  </section>
+
+  <section id="security-section" hidden>
+    <h3 i18n-content="securityTitle"></h3>
+    <div class="settings-row">
+      <span i18n-content="consumerManagementEnrollDescription"></span>
+    </div>
+    <div class="settings-row">
+      <button id="consumer-management-enroll-button"
+          i18n-content="consumerManagementEnrollButton"></button>
     </div>
   </section>
 </if>
@@ -310,6 +328,7 @@
       <div class="checkbox">
         <span class="controlled-setting-with-label">
           <input id="spelling-enabled-control" type="checkbox"
+              metric="Options_SpellingServiceCheckbox"
               pref="spellcheck.use_spelling_service" dialog-pref>
           <span>
             <label for="spelling-enabled-control" i18n-content="spellingPref">
@@ -619,20 +638,20 @@
         </span>
       </div>
 </if>
-<if expr="not chromeos">
       <div id="auto-open-file-types-section" hidden>
         <div id="auto-open-file-types-container">
-          <div id="auto-open-file-types-label"
+          <div id="auto-open-file-types-label" class="settings-row"
               i18n-content="autoOpenFileTypesInfo"></div>
-          <button id="autoOpenFileTypesResetToDefault"
-              i18n-content="autoOpenFileTypesResetToDefault"></button>
+          <div class="settings-row">
+            <button id="autoOpenFileTypesResetToDefault"
+                i18n-content="autoOpenFileTypesResetToDefault"></button>
+            </div>
         </div>
       </div>
-</if>
     </div>
   </section>
   <section>
-      <h3 i18n-content="advancedSectionTitleSecurity"></h3>
+      <h3 i18n-content="advancedSectionTitleCertificates"></h3>
       <div>
 <if expr="use_nss or is_win or is_macosx">
         <div class="settings-row">
@@ -640,19 +659,11 @@
               i18n-content="certificatesManageButton"></button>
         </div>
 </if>
-        <div class="checkbox">
-          <label>
-            <input id="sslCheckRevocation" pref="ssl.rev_checking.enabled"
-                   type="checkbox">
-            <span i18n-content="sslCheckRevocation"></span>
-          </label>
-        </div>
       </div>
   </section>
-  <section id="cloud-print-connector-section">
-    <h3 i18n-content="advancedSectionTitleCloudPrint"></h3>
 <if expr="enable_service_discovery">
-    <div id="cloudprint-options-mdns" hidden>
+    <section id="cloudprint-options-mdns">
+      <h3 i18n-content="advancedSectionTitleCloudPrint"></h3>
       <div class="settings-row">
         <span i18n-content="cloudPrintOptionLabel"></span>
         <a target="_blank" i18n-content="learnMore"
@@ -677,36 +688,10 @@
                   pref="local_discovery.notifications_enabled">
             </span>
           </span>
+        </span>
       </div>
-    </div>
+    </section>
 </if>
-
-    <div id="cloudprint-options-nomdns">
-<if expr="chromeos">
-      <div>
-        <span i18n-content="cloudPrintOptionLabel"></span>
-        <a target="_blank" i18n-content="learnMore"
-           i18n-values="href:cloudPrintLearnMoreURL"></a>
-      </div>
-</if>
-
-<if expr="not chromeos">
-      <p id="cloudPrintConnectorLabel" class="settings-row"
-         i18n-content="cloudPrintConnectorDisabledLabel"></p>
-</if>
-
-      <div class="settings-row">
-<if expr="not chromeos">
-        <button id="cloudPrintConnectorSetupButton"
-                i18n-content="cloudPrintConnectorDisabledButton"></button>
-</if>
-
-        <button id="cloudPrintManageButton"
-                i18n-content="cloudPrintManageButton">
-        </button>
-      </div>
-    </div>
-  </section>
 
 <if expr="chromeos">
   <include src="startup_section.html">

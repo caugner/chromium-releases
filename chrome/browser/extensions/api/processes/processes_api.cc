@@ -34,7 +34,6 @@
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_function_util.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/common/error_utils.h"
 
 namespace extensions {
@@ -470,29 +469,25 @@ void ProcessesEventRouter::ProcessClosedEvent(
 void ProcessesEventRouter::DispatchEvent(
     const std::string& event_name,
     scoped_ptr<base::ListValue> event_args) {
-  if (extensions::ExtensionSystem::Get(browser_context_)->event_router()) {
+  EventRouter* event_router = EventRouter::Get(browser_context_);
+  if (event_router) {
     scoped_ptr<extensions::Event> event(new extensions::Event(
         event_name, event_args.Pass()));
-    extensions::ExtensionSystem::Get(browser_context_)
-        ->event_router()
-        ->BroadcastEvent(event.Pass());
+    event_router->BroadcastEvent(event.Pass());
   }
 }
 
 bool ProcessesEventRouter::HasEventListeners(const std::string& event_name) {
-  extensions::EventRouter* router =
-      extensions::ExtensionSystem::Get(browser_context_)->event_router();
-  if (router && router->HasEventListener(event_name))
-    return true;
-  return false;
+  EventRouter* event_router = EventRouter::Get(browser_context_);
+  return event_router && event_router->HasEventListener(event_name);
 }
 
 ProcessesAPI::ProcessesAPI(content::BrowserContext* context)
     : browser_context_(context) {
-  ExtensionSystem::Get(browser_context_)->event_router()->RegisterObserver(
-      this, processes_api_constants::kOnUpdated);
-  ExtensionSystem::Get(browser_context_)->event_router()->RegisterObserver(
-      this, processes_api_constants::kOnUpdatedWithMemory);
+  EventRouter* event_router = EventRouter::Get(browser_context_);
+  event_router->RegisterObserver(this, processes_api_constants::kOnUpdated);
+  event_router->RegisterObserver(this,
+                                 processes_api_constants::kOnUpdatedWithMemory);
   ExtensionFunctionRegistry* registry =
       ExtensionFunctionRegistry::GetInstance();
   registry->RegisterFunction<extensions::GetProcessIdForTabFunction>();
@@ -504,8 +499,7 @@ ProcessesAPI::~ProcessesAPI() {
 }
 
 void ProcessesAPI::Shutdown() {
-  ExtensionSystem::Get(browser_context_)->event_router()->UnregisterObserver(
-      this);
+  EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<ProcessesAPI> >
@@ -544,7 +538,7 @@ void ProcessesAPI::OnListenerRemoved(const EventListenerInfo& details) {
 GetProcessIdForTabFunction::GetProcessIdForTabFunction() : tab_id_(-1) {
 }
 
-bool GetProcessIdForTabFunction::RunImpl() {
+bool GetProcessIdForTabFunction::RunAsync() {
 #if defined(ENABLE_TASK_MANAGER)
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &tab_id_));
 
@@ -598,14 +592,14 @@ void GetProcessIdForTabFunction::GetProcessIdForTab() {
     SendResponse(true);
   }
 
-  // Balance the AddRef in the RunImpl.
+  // Balance the AddRef in the RunAsync.
   Release();
 }
 
 TerminateFunction::TerminateFunction() : process_id_(-1) {
 }
 
-bool TerminateFunction::RunImpl() {
+bool TerminateFunction::RunAsync() {
 #if defined(ENABLE_TASK_MANAGER)
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &process_id_));
 
@@ -668,7 +662,7 @@ void TerminateFunction::TerminateProcess() {
     SendResponse(true);
   }
 
-  // Balance the AddRef in the RunImpl.
+  // Balance the AddRef in the RunAsync.
   Release();
 #else
   error_ = errors::kExtensionNotSupported;
@@ -686,7 +680,7 @@ GetProcessInfoFunction::GetProcessInfoFunction()
 GetProcessInfoFunction::~GetProcessInfoFunction() {
 }
 
-bool GetProcessInfoFunction::RunImpl() {
+bool GetProcessInfoFunction::RunAsync() {
 #if defined(ENABLE_TASK_MANAGER)
   base::Value* processes = NULL;
 
@@ -769,7 +763,7 @@ void GetProcessInfoFunction::GatherProcessInfo() {
   SetResult(processes);
   SendResponse(true);
 
-  // Balance the AddRef in the RunImpl.
+  // Balance the AddRef in the RunAsync.
   Release();
 #endif  // defined(ENABLE_TASK_MANAGER)
 }

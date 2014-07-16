@@ -118,10 +118,12 @@ class VideoSender : public base::NonThreadSafe,
   uint8 max_unacked_frames_;
   int last_acked_frame_id_;
   int last_sent_frame_id_;
+  int frames_in_encoder_;
   int duplicate_ack_;
   base::TimeTicks last_send_time_;
   base::TimeTicks last_checked_skip_count_time_;
   int last_skip_count_;
+  int current_requested_bitrate_;
   CongestionControl congestion_control_;
 
   // This is a "good enough" mapping for finding the RTP timestamp associated

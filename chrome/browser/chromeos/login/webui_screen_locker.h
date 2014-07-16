@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "ash/shell_delegate.h"
 #include "ash/wm/lock_state_observer.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
@@ -19,6 +20,7 @@
 #include "chromeos/dbus/power_manager_client.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 
@@ -28,6 +30,7 @@ class WebUI;
 
 namespace chromeos {
 
+class OobeUI;
 class ScreenLocker;
 class WebUILoginDisplay;
 struct UserContext;
@@ -48,7 +51,9 @@ class WebUIScreenLocker : public WebUILoginView,
                           public LockWindow::Observer,
                           public ash::LockStateObserver,
                           public views::WidgetObserver,
-                          public PowerManagerClient::Observer {
+                          public PowerManagerClient::Observer,
+                          public ash::VirtualKeyboardStateObserver,
+                          public keyboard::KeyboardControllerObserver {
  public:
   explicit WebUIScreenLocker(ScreenLocker* screen_locker);
 
@@ -92,7 +97,6 @@ class WebUIScreenLocker : public WebUILoginView,
   virtual void OnUserSelected(const std::string& username) OVERRIDE;
   virtual void OnStartEnterpriseEnrollment() OVERRIDE;
   virtual void OnStartKioskEnableScreen() OVERRIDE;
-  virtual void OnStartDeviceReset() OVERRIDE;
   virtual void OnStartKioskAutolaunchScreen() OVERRIDE;
   virtual void ShowWrongHWIDScreen() OVERRIDE;
   virtual void ResetPublicSessionAutoLoginTimer() OVERRIDE;
@@ -118,12 +122,21 @@ class WebUIScreenLocker : public WebUILoginView,
   virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
 
   // PowerManagerClient::Observer overrides:
-  virtual void SystemResumed(const base::TimeDelta& sleep_duration) OVERRIDE;
+  virtual void SuspendDone(const base::TimeDelta& sleep_duration) OVERRIDE;
   virtual void LidEventReceived(bool open,
                                 const base::TimeTicks& time) OVERRIDE;
 
   // Overridden from content::WebContentsObserver:
   virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
+
+  // Overridden from ash::KeyboardStateObserver:
+  virtual void OnVirtualKeyboardStateChanged(bool activated) OVERRIDE;
+
+  // Overridden from keyboard::KeyboardControllerObserver:
+  virtual void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) OVERRIDE;
+
+  // Returns instance of the OOBE WebUI.
+  OobeUI* GetOobeUI();
 
  private:
   friend class test::WebUIScreenLockerTester;
@@ -152,6 +165,12 @@ class WebUIScreenLocker : public WebUILoginView,
   base::TimeTicks lock_time_;
 
   scoped_ptr<login::NetworkStateHelper> network_state_helper_;
+
+  // True is subscribed as keyboard controller observer.
+  bool is_observing_keyboard_;
+
+  // The bounds of the virtual keyboard.
+  gfx::Rect keyboard_bounds_;
 
   base::WeakPtrFactory<WebUIScreenLocker> weak_factory_;
 

@@ -22,7 +22,9 @@
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -37,7 +39,7 @@ PasswordGenerationPopupControllerImpl::GetOrCreate(
     const gfx::RectF& bounds,
     const PasswordForm& form,
     int max_length,
-    PasswordManager* password_manager,
+    password_manager::PasswordManager* password_manager,
     PasswordGenerationPopupObserver* observer,
     content::WebContents* web_contents,
     gfx::NativeView container_view) {
@@ -67,7 +69,7 @@ PasswordGenerationPopupControllerImpl::PasswordGenerationPopupControllerImpl(
     const gfx::RectF& bounds,
     const PasswordForm& form,
     int max_length,
-    PasswordManager* password_manager,
+    password_manager::PasswordManager* password_manager,
     PasswordGenerationPopupObserver* observer,
     content::WebContents* web_contents,
     gfx::NativeView container_view)
@@ -301,16 +303,6 @@ bool PasswordGenerationPopupControllerImpl::AcceptSelectedLine() {
 
 void PasswordGenerationPopupControllerImpl::SelectionCleared() {
   PasswordSelected(false);
-}
-
-bool PasswordGenerationPopupControllerImpl::ShouldRepostEvent(
-    const ui::MouseEvent& event) {
-  return false;
-}
-
-bool PasswordGenerationPopupControllerImpl::ShouldHideOnOutsideClick() const {
-  // Will be hidden when focus changes anyway.
-  return false;
 }
 
 gfx::NativeView PasswordGenerationPopupControllerImpl::container_view() {

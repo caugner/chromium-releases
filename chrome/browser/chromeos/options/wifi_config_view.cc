@@ -561,13 +561,13 @@ void WifiConfigView::RefreshShareCheckbox() {
     // user certificates are enabled.
     share_network_checkbox_->SetEnabled(false);
     share_network_checkbox_->SetChecked(false);
-  } else if (!LoginState::Get()->IsUserAuthenticated()) {
-    // If not logged in as an authenticated user, networks must be shared.
-    share_network_checkbox_->SetEnabled(false);
-    share_network_checkbox_->SetChecked(true);
   } else {
-    share_network_checkbox_->SetEnabled(true);
-    share_network_checkbox_->SetChecked(false);  // Default to unshared.
+    bool value = false;
+    bool enabled = false;
+    ChildNetworkConfigView::GetShareStateForLoginState(&value, &enabled);
+
+    share_network_checkbox_->SetChecked(value);
+    share_network_checkbox_->SetEnabled(enabled);
   }
 }
 
@@ -575,7 +575,8 @@ void WifiConfigView::UpdateErrorLabel() {
   base::string16 error_msg;
   if (UserCertRequired() && CertLibrary::Get()->CertificatesLoaded()) {
     if (!HaveUserCerts()) {
-      if (!LoginState::Get()->IsUserAuthenticated()) {
+      if (!LoginState::Get()->IsUserLoggedIn() ||
+          LoginState::Get()->IsGuestUser()) {
         error_msg = l10n_util::GetStringUTF16(
             IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_LOGIN_FOR_USER_CERT);
       } else {
@@ -824,8 +825,7 @@ std::string WifiConfigView::GetEapServerCaCertPEM() const {
     return std::string();
   } else {
     int cert_index = index - 1;
-    return CertLibrary::Get()->GetCertPEMAt(
-        CertLibrary::CERT_TYPE_SERVER_CA, cert_index);
+    return CertLibrary::Get()->GetServerCACertPEMAt(cert_index);
   }
 }
 
@@ -847,8 +847,7 @@ std::string WifiConfigView::GetEapClientCertPkcs11Id() const {
   } else {
     // Certificates are listed in the order they appear in the model.
     int index = user_cert_combobox_->selected_index();
-    return CertLibrary::Get()->GetCertPkcs11IdAt(
-        CertLibrary::CERT_TYPE_USER, index);
+    return CertLibrary::Get()->GetUserCertPkcs11IdAt(index);
   }
 }
 
@@ -1279,8 +1278,8 @@ void WifiConfigView::InitFromProperties(
       }
     } else {
       // Select the certificate if available.
-      int cert_index = CertLibrary::Get()->GetCertIndexByPEM(
-          CertLibrary::CERT_TYPE_SERVER_CA, eap_ca_cert_pem);
+      int cert_index =
+          CertLibrary::Get()->GetServerCACertIndexByPEM(eap_ca_cert_pem);
       if (cert_index >= 0) {
         // Skip item for "Default".
         server_ca_cert_combobox_->SetSelectedIndex(1 + cert_index);
@@ -1297,8 +1296,8 @@ void WifiConfigView::InitFromProperties(
     properties.GetStringWithoutPathExpansion(
         shill::kEapCertIdProperty, &eap_cert_id);
     if (!eap_cert_id.empty()) {
-      int cert_index = CertLibrary::Get()->GetCertIndexByPkcs11Id(
-          CertLibrary::CERT_TYPE_USER, eap_cert_id);
+      int cert_index =
+          CertLibrary::Get()->GetUserCertIndexByPkcs11Id(eap_cert_id);
       if (cert_index >= 0)
         user_cert_combobox_->SetSelectedIndex(cert_index);
     }
@@ -1367,8 +1366,8 @@ void WifiConfigView::ParseUIProperty(NetworkPropertyUIData* property_ui_data,
   const base::DictionaryValue* onc =
       onc::FindPolicyForActiveUser(network->guid(), &onc_source);
   std::string onc_tag = network->type() == shill::kTypeEthernet
-                            ? ::onc::network_config::kWiFi
-                            : ::onc::network_config::kEthernet;
+                            ? ::onc::network_config::kEthernet
+                            : ::onc::network_config::kWiFi;
   property_ui_data->ParseOncProperty(onc_source, onc, onc_tag + '.' + key);
 }
 

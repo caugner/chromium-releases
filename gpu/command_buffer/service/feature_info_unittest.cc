@@ -246,6 +246,10 @@ TEST_F(FeatureInfoTest, InitializeNoExtensions) {
               Not(HasSubstr("GL_EXT_texture_storage")));
   EXPECT_THAT(info_->extensions(),
               Not(HasSubstr("GL_OES_compressed_ETC1_RGB8_texture")));
+  EXPECT_THAT(info_->extensions(),
+              Not(HasSubstr("GL_AMD_compressed_ATC_texture")));
+  EXPECT_THAT(info_->extensions(),
+              Not(HasSubstr("GL_IMG_texture_compression_pvrtc")));
   EXPECT_FALSE(info_->feature_flags().npot_ok);
   EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
       GL_COMPRESSED_RGB_S3TC_DXT1_EXT));
@@ -257,6 +261,20 @@ TEST_F(FeatureInfoTest, InitializeNoExtensions) {
       GL_COMPRESSED_RGBA_S3TC_DXT5_EXT));
   EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
       GL_ETC1_RGB8_OES));
+  EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
+      GL_ATC_RGB_AMD));
+  EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
+      GL_ATC_RGBA_EXPLICIT_ALPHA_AMD));
+  EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
+      GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD));
+  EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
+      GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG));
+  EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
+      GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG));
+  EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
+      GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG));
+  EXPECT_FALSE(info_->validators()->compressed_texture_format.IsValid(
+      GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG));
   EXPECT_FALSE(info_->validators()->read_pixel_format.IsValid(
       GL_BGRA_EXT));
   EXPECT_FALSE(info_->validators()->texture_parameter.IsValid(
@@ -826,6 +844,32 @@ TEST_F(FeatureInfoTest, InitializeOES_compressed_ETC1_RGB8_texture) {
       GL_ETC1_RGB8_OES));
 }
 
+TEST_F(FeatureInfoTest, InitializeAMD_compressed_ATC_texture) {
+  SetupInitExpectations("GL_AMD_compressed_ATC_texture");
+  EXPECT_THAT(info_->extensions(),
+              HasSubstr("GL_AMD_compressed_ATC_texture"));
+  EXPECT_TRUE(info_->validators()->compressed_texture_format.IsValid(
+      GL_ATC_RGB_AMD));
+  EXPECT_TRUE(info_->validators()->compressed_texture_format.IsValid(
+      GL_ATC_RGBA_EXPLICIT_ALPHA_AMD));
+  EXPECT_TRUE(info_->validators()->compressed_texture_format.IsValid(
+      GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD));
+}
+
+TEST_F(FeatureInfoTest, InitializeIMG_texture_compression_pvrtc) {
+  SetupInitExpectations("GL_IMG_texture_compression_pvrtc");
+  EXPECT_THAT(info_->extensions(),
+              HasSubstr("GL_IMG_texture_compression_pvrtc"));
+  EXPECT_TRUE(info_->validators()->compressed_texture_format.IsValid(
+      GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG));
+  EXPECT_TRUE(info_->validators()->compressed_texture_format.IsValid(
+      GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG));
+  EXPECT_TRUE(info_->validators()->compressed_texture_format.IsValid(
+      GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG));
+  EXPECT_TRUE(info_->validators()->compressed_texture_format.IsValid(
+      GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG));
+}
+
 TEST_F(FeatureInfoTest, InitializeEXT_occlusion_query_boolean) {
   SetupInitExpectations("GL_EXT_occlusion_query_boolean");
   EXPECT_THAT(info_->extensions(),
@@ -914,6 +958,12 @@ TEST_F(FeatureInfoTest, InitializeEXT_frag_depth) {
   EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_frag_depth"));
 }
 
+TEST_F(FeatureInfoTest, InitializeEXT_shader_texture_lod) {
+  SetupInitExpectations("GL_EXT_shader_texture_lod");
+  EXPECT_TRUE(info_->feature_flags().ext_shader_texture_lod);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_shader_texture_lod"));
+}
+
 TEST_F(FeatureInfoTest, InitializeEXT_discard_framebuffer) {
   SetupInitExpectations("GL_EXT_discard_framebuffer");
   EXPECT_TRUE(info_->feature_flags().ext_discard_framebuffer);
@@ -936,7 +986,7 @@ TEST_F(FeatureInfoTest, InitializeWithES3) {
   EXPECT_TRUE(info_->feature_flags().use_core_framebuffer_multisample);
   EXPECT_THAT(info_->extensions(),
               HasSubstr("GL_CHROMIUM_framebuffer_multisample"));
-  EXPECT_FALSE(info_->feature_flags().use_async_readpixels);
+  EXPECT_TRUE(info_->feature_flags().use_async_readpixels);
   EXPECT_TRUE(info_->feature_flags().oes_depth24);
   EXPECT_THAT(info_->extensions(), HasSubstr("GL_GOOGLE_depth_texture"));
   EXPECT_THAT(info_->extensions(), HasSubstr("GL_CHROMIUM_depth_texture"));

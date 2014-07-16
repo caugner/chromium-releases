@@ -234,12 +234,13 @@ class TestWebGraphicsContext3D {
 
   virtual GLuint createImageCHROMIUM(GLsizei width,
                                      GLsizei height,
-                                     GLenum internalformat);
+                                     GLenum internalformat,
+                                     GLenum usage);
   virtual void destroyImageCHROMIUM(GLuint image_id);
   virtual void getImageParameterivCHROMIUM(GLuint image_id,
                                            GLenum pname,
                                            GLint* params);
-  virtual void* mapImageCHROMIUM(GLuint image_id, GLenum access);
+  virtual void* mapImageCHROMIUM(GLuint image_id);
   virtual void unmapImageCHROMIUM(GLuint image_id);
   virtual void texImageIOSurface2DCHROMIUM(GLenum target,
                                            GLsizei width,
@@ -301,6 +302,9 @@ class TestWebGraphicsContext3D {
   void set_support_texture_storage(bool support) {
     test_capabilities_.gpu.texture_storage = support;
   }
+  void set_support_sync_query(bool support) {
+    test_capabilities_.gpu.sync_query = support;
+  }
 
   // When this context is lost, all contexts in its share group are also lost.
   void add_share_group_context(TestWebGraphicsContext3D* context3d) {
@@ -321,9 +325,6 @@ class TestWebGraphicsContext3D {
 
   size_t GetTransferBufferMemoryUsedBytes() const;
   void SetMaxTransferBufferUsageBytes(size_t max_transfer_buffer_usage_bytes);
-  size_t GetPeakTransferBufferMemoryUsedBytes() const {
-    return peak_transfer_buffer_memory_used_bytes_;
-  }
 
   void set_test_support(TestContextSupport* test_support) {
     test_support_ = test_support;
@@ -434,8 +435,6 @@ class TestWebGraphicsContext3D {
 
   unsigned bound_buffer_;
   TextureTargets texture_targets_;
-
-  size_t peak_transfer_buffer_memory_used_bytes_;
 
   scoped_refptr<Namespace> namespace_;
   static Namespace* shared_namespace_;

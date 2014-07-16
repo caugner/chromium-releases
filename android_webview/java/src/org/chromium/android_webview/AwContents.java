@@ -15,6 +15,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Picture;
 import android.graphics.Rect;
+import android.net.Uri;
 import android.net.http.SslCertificate;
 import android.os.AsyncTask;
 import android.os.Build;
@@ -37,6 +38,7 @@ import android.widget.OverScroller;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
@@ -50,6 +52,7 @@ import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.browser.NavigationHistory;
 import org.chromium.content.browser.PageTransitionTypes;
 import org.chromium.content.common.CleanupReference;
+import org.chromium.content_public.Referrer;
 import org.chromium.content_public.browser.GestureStateListener;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.WindowAndroid;
@@ -59,9 +62,9 @@ import java.io.File;
 import java.lang.annotation.Annotation;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.Callable;
 
 
@@ -134,18 +137,14 @@ public class AwContents {
          * Requests a callback on the native DrawGL method (see getAwDrawGLFunction)
          * if called from within onDraw, |canvas| will be non-null and hardware accelerated.
          * otherwise, |canvas| will be null, and the container view itself will be hardware
-         * accelerated.
+         * accelerated. If |waitForCompletion| is true, this method will not return until
+         * functor has returned.
+         * Should avoid setting |waitForCompletion| when |canvas| is not null.
          *
          * @return false indicates the GL draw request was not accepted, and the caller
          *         should fallback to the SW path.
          */
-        boolean requestDrawGL(Canvas canvas);
-
-        /**
-         * Run the action on with EGLContext current or return false.
-         * See hidden View#executeHardwareAction for details.
-         */
-        public boolean executeHardwareAction(Runnable action);
+        boolean requestDrawGL(Canvas canvas, boolean waitForCompletion);
     }
 
     /**
@@ -232,8 +231,6 @@ public class AwContents {
         }
         @Override
         public void run() {
-            // This is a no-op if not currently attached.
-            nativeOnDetachedFromWindow(mNativeAwContents);
             nativeDestroy(mNativeAwContents);
         }
     }
@@ -241,11 +238,6 @@ public class AwContents {
     // Reference to the active mNativeAwContents pointer while it is active use
     // (ie before it is destroyed).
     private CleanupReference mCleanupReference;
-
-    // A list of references to native pointers where the Java counterpart has been
-    // destroyed, but are held here because they are waiting for onDetachFromWindow
-    // to release GL resources. This is cleared inside onDetachFromWindow.
-    private List<CleanupReference> mPendingDetachCleanupReferences;
 
     //--------------------------------------------------------------------------------------------
     private class IoThreadClientImpl implements AwContentsIoThreadClient {
@@ -444,14 +436,7 @@ public class AwContents {
             if (mNativeAwContents == 0) return;
             boolean visibleRectEmpty = getGlobalVisibleRect().isEmpty();
             final boolean visible = mIsViewVisible && mIsWindowVisible && !visibleRectEmpty;
-            // Don't care about return value of executeHardwareAction since if view is not
-            // hardware accelerated, then there is nothing to clean up anyway.
-            mInternalAccessAdapter.executeHardwareAction(new Runnable() {
-                @Override
-                public void run() {
-                    nativeTrimMemoryOnRenderThread(mNativeAwContents, level, visible);
-                }
-            });
+            nativeTrimMemory(mNativeAwContents, level, visible);
         }
 
         @Override
@@ -508,7 +493,8 @@ public class AwContents {
         mLayoutSizer.setDelegate(new AwLayoutSizerDelegate());
         mLayoutSizer.setDIPScale(mDIPScale);
         mWebContentsDelegate = new AwWebContentsDelegateAdapter(contentsClient, mContainerView);
-        mContentsClientBridge = new AwContentsClientBridge(contentsClient);
+        mContentsClientBridge = new AwContentsClientBridge(contentsClient,
+                mBrowserContext.getKeyStore(), AwContentsStatics.getClientCertLookupTable());
         mZoomControls = new AwZoomControls(this);
         mIoThreadClient = new IoThreadClientImpl();
         mInterceptNavigationDelegate = new InterceptNavigationDelegateImpl();
@@ -633,16 +619,17 @@ public class AwContents {
         if (wasWindowFocused) onWindowFocusChanged(false);
         if (wasViewVisible) setViewVisibilityInternal(false);
         if (wasWindowVisible) setWindowVisibilityInternal(false);
+        if (wasAttached) onDetachedFromWindow();
         if (!wasPaused) onPause();
-        // Not calling onDetachedFromWindow here because native code requires GL context to release
-        // GL resources. This case is properly handled when destroy is called while still attached
-        // to window.
 
         setNewAwContents(popupNativeAwContents);
 
         // Finally refresh all view state for mContentViewCore and mNativeAwContents.
         if (!wasPaused) onResume();
-        if (wasAttached) onAttachedToWindow();
+        if (wasAttached) {
+            onAttachedToWindow();
+            postInvalidateOnAnimation();
+        }
         onSizeChanged(mContainerView.getWidth(), mContainerView.getHeight(), 0, 0);
         if (wasWindowVisible) setWindowVisibilityInternal(true);
         if (wasViewVisible) setViewVisibilityInternal(true);
@@ -651,13 +638,17 @@ public class AwContents {
     }
 
     /**
-     * Deletes the native counterpart of this object. Normally happens immediately,
-     * but maybe deferred until the appropriate time for GL resource cleanup. Either way
-     * this is transparent to the caller: after this function returns the object is
-     * effectively dead and methods are no-ops.
+     * Deletes the native counterpart of this object.
      */
     public void destroy() {
         if (mCleanupReference != null) {
+            assert mNativeAwContents != 0;
+            // If we are attached, we have to call native detach to clean up
+            // hardware resources.
+            if (mIsAttachedToWindow) {
+                nativeOnDetachedFromWindow(mNativeAwContents);
+            }
+
             // We explicitly do not null out the mContentViewCore reference here
             // because ContentViewCore already has code to deal with the case
             // methods are called on it after it's been destroyed, and other
@@ -665,17 +656,7 @@ public class AwContents {
             mContentViewCore.destroy();
             mNativeAwContents = 0;
 
-            // We cannot destroy immediately if we are still attached to the window.
-            // Instead if we make sure to null out the native pointer so there is no more native
-            // calls, and delay the actual destroy until onDetachedFromWindow.
-            if (mIsAttachedToWindow) {
-                if (mPendingDetachCleanupReferences == null) {
-                    mPendingDetachCleanupReferences = new ArrayList<CleanupReference>();
-                }
-                mPendingDetachCleanupReferences.add(mCleanupReference);
-            } else {
-                mCleanupReference.cleanupNow();
-            }
+            mCleanupReference.cleanupNow();
             mCleanupReference = null;
         }
 
@@ -912,8 +893,23 @@ public class AwContents {
         // every time the user agent in AwSettings is modified.
         params.setOverrideUserAgent(LoadUrlParams.UA_OVERRIDE_TRUE);
 
+
         // We don't pass extra headers to the content layer, as WebViewClassic
         // was adding them in a very narrow set of conditions. See http://crbug.com/306873
+        // However, if the embedder is attempting to inject a Referer header for their
+        // loadUrl call, then we set that separately and remove it from the extra headers map/
+        final String REFERER = "referer";
+        Map<String, String> extraHeaders = params.getExtraHeaders();
+        if (extraHeaders != null) {
+            for (String header : extraHeaders.keySet()) {
+                if (REFERER.equals(header.toLowerCase(Locale.US))) {
+                    params.setReferrer(new Referrer(extraHeaders.remove(header), 1));
+                    params.setExtraHeaders(extraHeaders);
+                    break;
+                }
+            }
+        }
+
         if (mNativeAwContents != 0) {
             nativeSetExtraHeadersForUrl(
                     mNativeAwContents, params.getUrl(), params.getExtraHttpRequestHeadersString());
@@ -1368,6 +1364,9 @@ public class AwContents {
         mContentViewCore.clearSslPreferences();
     }
 
+    // TODO(sgurun) remove after this rolls in. To keep internal tree happy.
+    public void clearClientCertPreferences() { }
+
     /**
      * Method to return all hit test values relevant to public WebView API.
      * Note that this expose more data than needed for WebView.getHitTestResult.
@@ -1500,6 +1499,14 @@ public class AwContents {
     }
 
     /**
+     * @see android.webkit.WebView#preauthorizePermission(Uri, long)
+     */
+    public void preauthorizePermission(Uri origin, long resources) {
+        if (mNativeAwContents == 0) return;
+        nativePreauthorizePermission(mNativeAwContents, origin.toString(), resources);
+    }
+
+    /**
      * @see ContentViewCore.evaluateJavaScript(String, ContentViewCore.JavaScriptCallback)
      */
     public void evaluateJavaScript(String script, final ValueCallback<String> callback) {
@@ -1585,6 +1592,10 @@ public class AwContents {
      */
     public void onAttachedToWindow() {
         if (mNativeAwContents == 0) return;
+        if (mIsAttachedToWindow) {
+            Log.w(TAG, "onAttachedToWindow called when already attached. Ignoring");
+            return;
+        }
         mIsAttachedToWindow = true;
 
         mContentViewCore.onAttachedToWindow();
@@ -1602,21 +1613,13 @@ public class AwContents {
      */
     @SuppressLint("MissingSuperCall")
     public void onDetachedFromWindow() {
+        if (!mIsAttachedToWindow) {
+            Log.w(TAG, "onDetachedFromWindow called when already detached. Ignoring");
+            return;
+        }
         mIsAttachedToWindow = false;
         hideAutofillPopup();
         if (mNativeAwContents != 0) {
-            if (mContainerView.isHardwareAccelerated()) {
-                boolean result = mInternalAccessAdapter.executeHardwareAction(new Runnable() {
-                    @Override
-                    public void run() {
-                        nativeReleaseHardwareDrawOnRenderThread(mNativeAwContents);
-                    }
-                });
-                if (!result) {
-                    Log.d(TAG, "executeHardwareAction failed");
-                }
-            }
-
             nativeOnDetachedFromWindow(mNativeAwContents);
         }
 
@@ -1629,13 +1632,6 @@ public class AwContents {
         }
 
         mScrollAccessibilityHelper.removePostedCallbacks();
-
-        if (mPendingDetachCleanupReferences != null) {
-            for (int i = 0; i < mPendingDetachCleanupReferences.size(); ++i) {
-                mPendingDetachCleanupReferences.get(i).cleanupNow();
-            }
-            mPendingDetachCleanupReferences = null;
-        }
     }
 
     /**
@@ -1883,6 +1879,16 @@ public class AwContents {
     }
 
     @CalledByNative
+    private void onPermissionRequest(AwPermissionRequest awPermissionRequest) {
+        mContentsClient.onPermissionRequest(awPermissionRequest);
+    }
+
+    @CalledByNative
+    private void onPermissionRequestCanceled(AwPermissionRequest awPermissionRequest) {
+        mContentsClient.onPermissionRequestCanceled(awPermissionRequest);
+    }
+
+    @CalledByNative
     public void onFindResultReceived(int activeMatchOrdinal, int numberOfMatches,
             boolean isDoneCounting) {
         mContentsClient.onFindResultReceived(activeMatchOrdinal, numberOfMatches, isDoneCounting);
@@ -1908,8 +1914,8 @@ public class AwContents {
     }
 
     @CalledByNative
-    private boolean requestDrawGL(Canvas canvas) {
-        return mInternalAccessAdapter.requestDrawGL(canvas);
+    private boolean requestDrawGL(Canvas canvas, boolean waitForCompletion) {
+        return mInternalAccessAdapter.requestDrawGL(canvas, waitForCompletion);
     }
 
     private static final boolean SUPPORTS_ON_ANIMATION =
@@ -2075,6 +2081,7 @@ public class AwContents {
     private static native long nativeGetAwDrawGLFunction();
     private static native int nativeGetNativeInstanceCount();
     private static native void nativeSetShouldDownloadFavicons();
+
     private native void nativeSetJavaPeers(long nativeAwContents, AwContents awContents,
             AwWebContentsDelegate webViewWebContentsDelegate,
             AwContentsClientBridge contentsClientBridge,
@@ -2108,7 +2115,6 @@ public class AwContents {
     private native void nativeSetIsPaused(long nativeAwContents, boolean paused);
     private native void nativeOnAttachedToWindow(long nativeAwContents, int w, int h);
     private static native void nativeOnDetachedFromWindow(long nativeAwContents);
-    private static native void nativeReleaseHardwareDrawOnRenderThread(long nativeAwContents);
     private native void nativeSetDipScale(long nativeAwContents, float dipScale);
     private native void nativeSetFixedLayoutSize(long nativeAwContents,
             int widthDip, int heightDip);
@@ -2135,9 +2141,10 @@ public class AwContents {
 
     private native void nativeSetJsOnlineProperty(long nativeAwContents, boolean networkUp);
 
-    private native void nativeTrimMemoryOnRenderThread(long nativeAwContents, int level,
-            boolean visible);
+    private native void nativeTrimMemory(long nativeAwContents, int level, boolean visible);
 
     private native void nativeCreatePdfExporter(long nativeAwContents, AwPdfExporter awPdfExporter);
 
+    private native void nativePreauthorizePermission(long nativeAwContents, String origin,
+            long resources);
 }

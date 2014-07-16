@@ -74,21 +74,15 @@ typedef std::deque<SBSubPrefix> SBSubPrefixes;
 
 struct SBAddFullHash {
   int32 chunk_id;
-  int32 received;
+  // Received field is not used anymore, but is kept for DB compatability.
+  // TODO(shess): Deprecate and remove.
+  int32 deprecated_received;
   SBFullHash full_hash;
 
-  SBAddFullHash(int32 id, base::Time r, const SBFullHash& h)
-      : chunk_id(id),
-        received(static_cast<int32>(r.ToTimeT())),
-        full_hash(h) {
-  }
+  SBAddFullHash(int32 id, const SBFullHash& h)
+      : chunk_id(id), deprecated_received(), full_hash(h) {}
 
-  // Provided for ReadAddHashes() implementations, which already have
-  // an int32 for the time.
-  SBAddFullHash(int32 id, int32 r, const SBFullHash& h)
-      : chunk_id(id), received(r), full_hash(h) {}
-
-  SBAddFullHash() : chunk_id(), received(), full_hash() {}
+  SBAddFullHash() : chunk_id(), deprecated_received(), full_hash() {}
 
   int32 GetAddChunkId() const { return chunk_id; }
   SBPrefix GetAddPrefix() const { return full_hash.prefix; }
@@ -184,7 +178,6 @@ class SafeBrowsingStore {
 
   virtual bool WriteAddPrefix(int32 chunk_id, SBPrefix prefix) = 0;
   virtual bool WriteAddHash(int32 chunk_id,
-                            base::Time receive_time,
                             const SBFullHash& full_hash) = 0;
   virtual bool WriteSubPrefix(int32 chunk_id,
                               int32 add_chunk_id, SBPrefix prefix) = 0;
@@ -220,12 +213,7 @@ class SafeBrowsingStore {
   // Pass the collected chunks through SBPRocessSubs() and commit to
   // permanent storage.  The resulting add prefixes and hashes will be
   // stored in |add_prefixes_result| and |add_full_hashes_result|.
-  // |pending_adds| is the set of full hashes which have been received
-  // since the previous update, and is provided as a convenience
-  // (could be written via WriteAddHash(), but that would flush the
-  // chunk to disk).
   virtual bool FinishUpdate(
-      const std::vector<SBAddFullHash>& pending_adds,
       safe_browsing::PrefixSetBuilder* builder,
       std::vector<SBAddFullHash>* add_full_hashes_result) = 0;
 

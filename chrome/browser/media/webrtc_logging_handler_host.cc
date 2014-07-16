@@ -184,6 +184,7 @@ void WebRtcLoggingHandlerHost::UploadLog(const UploadDoneCallback& callback) {
     return;
   }
   upload_callback_ = callback;
+  logging_state_ = UPLOADING;
   content::BrowserThread::PostTaskAndReplyWithResult(
       content::BrowserThread::FILE,
       FROM_HERE,
@@ -219,14 +220,31 @@ void WebRtcLoggingHandlerHost::LogMessage(const std::string& message) {
       BrowserThread::IO,
       FROM_HERE,
       base::Bind(
-          &WebRtcLoggingHandlerHost::AddLogMessageFromBrowser, this, message));
+          &WebRtcLoggingHandlerHost::AddLogMessageFromBrowser,
+          this,
+          WebRtcLoggingMessageData(base::Time::Now(), message)));
+}
+
+void WebRtcLoggingHandlerHost::StartRtpDump(
+    bool incoming,
+    bool outgoing,
+    const GenericDoneCallback& callback) {
+  NOTIMPLEMENTED();
+}
+
+void WebRtcLoggingHandlerHost::StopRtpDump(
+    bool incoming,
+    bool outgoing,
+    const GenericDoneCallback& callback) {
+  NOTIMPLEMENTED();
 }
 
 void WebRtcLoggingHandlerHost::OnChannelClosing() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (logging_state_ == STARTED || logging_state_ == STOPPED) {
     if (upload_log_on_render_close_) {
-      logging_state_ = STOPPED;
+      logging_state_ = UPLOADING;
+      logging_started_time_ = base::Time();
       content::BrowserThread::PostTaskAndReplyWithResult(
           content::BrowserThread::FILE,
           FROM_HERE,
@@ -249,7 +267,7 @@ bool WebRtcLoggingHandlerHost::OnMessageReceived(const IPC::Message& message,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(WebRtcLoggingHandlerHost, message, *message_was_ok)
-    IPC_MESSAGE_HANDLER(WebRtcLoggingMsg_AddLogMessage, OnAddLogMessage)
+    IPC_MESSAGE_HANDLER(WebRtcLoggingMsg_AddLogMessages, OnAddLogMessages)
     IPC_MESSAGE_HANDLER(WebRtcLoggingMsg_LoggingStopped,
                         OnLoggingStoppedInRenderer)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -259,16 +277,20 @@ bool WebRtcLoggingHandlerHost::OnMessageReceived(const IPC::Message& message,
 }
 
 void WebRtcLoggingHandlerHost::AddLogMessageFromBrowser(
-    const std::string& message) {
+    const WebRtcLoggingMessageData& message) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (logging_state_ == STARTED)
-    LogToCircularBuffer(message);
+    LogToCircularBuffer(message.Format(logging_started_time_));
 }
 
-void WebRtcLoggingHandlerHost::OnAddLogMessage(const std::string& message) {
+void WebRtcLoggingHandlerHost::OnAddLogMessages(
+    const std::vector<WebRtcLoggingMessageData>& messages) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (logging_state_ == STARTED || logging_state_ == STOPPING)
-    LogToCircularBuffer(message);
+  if (logging_state_ == STARTED || logging_state_ == STOPPING) {
+    for (size_t i = 0; i < messages.size(); ++i) {
+      LogToCircularBuffer(messages[i].Format(logging_started_time_));
+    }
+  }
 }
 
 void WebRtcLoggingHandlerHost::OnLoggingStoppedInRenderer() {
@@ -281,6 +303,7 @@ void WebRtcLoggingHandlerHost::OnLoggingStoppedInRenderer() {
     BadMessageReceived();
     return;
   }
+  logging_started_time_ = base::Time();
   logging_state_ = STOPPED;
   FireGenericDoneCallback(&stop_callback_, true, "");
 }
@@ -377,11 +400,17 @@ void WebRtcLoggingHandlerHost::LogInitialInfoOnIOThread(
 
   // GPU
   gpu::GPUInfo gpu_info = content::GpuDataManager::GetInstance()->GetGPUInfo();
-  LogToCircularBuffer("Gpu: machine-model='" + gpu_info.machine_model +
-                      "', vendor-id=" + IntToString(gpu_info.gpu.vendor_id) +
-                      ", device-id=" + IntToString(gpu_info.gpu.device_id) +
-                      ", driver-vendor='" + gpu_info.driver_vendor +
-                      "', driver-version=" + gpu_info.driver_version);
+  LogToCircularBuffer(
+      "Gpu: machine-model-name=" + gpu_info.machine_model_name +
+      ", machine-model-version=" + gpu_info.machine_model_version +
+      ", vendor-id=" + IntToString(gpu_info.gpu.vendor_id) +
+      ", device-id=" + IntToString(gpu_info.gpu.device_id) +
+      ", driver-vendor=" + gpu_info.driver_vendor +
+      ", driver-version=" + gpu_info.driver_version);
+  LogToCircularBuffer(
+      "OpenGL: gl-vendor=" + gpu_info.gl_vendor +
+      ", gl-renderer=" + gpu_info.gl_renderer +
+      ", gl-version=" + gpu_info.gl_version);
 
   // Network interfaces
   LogToCircularBuffer("Discovered " + IntToString(network_list.size()) +
@@ -398,6 +427,7 @@ void WebRtcLoggingHandlerHost::LogInitialInfoOnIOThread(
 void WebRtcLoggingHandlerHost::NotifyLoggingStarted() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   Send(new WebRtcLoggingMsg_StartLogging());
+  logging_started_time_ = base::Time::Now();
   logging_state_ = STARTED;
   FireGenericDoneCallback(&start_callback_, true, "");
 }
@@ -425,11 +455,9 @@ base::FilePath WebRtcLoggingHandlerHost::GetLogDirectoryAndEnsureExists() {
 void WebRtcLoggingHandlerHost::TriggerUploadLog(
     const base::FilePath& log_directory) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(logging_state_ == STOPPED);
+  DCHECK_EQ(logging_state_, UPLOADING);
 
-  logging_state_ = UPLOADING;
   WebRtcLogUploadDoneData upload_done_data;
-
   upload_done_data.log_path = log_directory;
   upload_done_data.callback = upload_callback_;
   upload_done_data.host = this;

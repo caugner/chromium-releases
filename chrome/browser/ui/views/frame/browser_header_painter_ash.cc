@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "grit/ash_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -30,10 +29,8 @@
 using views::Widget;
 
 namespace {
-// Color for the restored window title text.
-const SkColor kRestoredWindowTitleTextColor = SkColorSetRGB(40, 40, 40);
-// Color for the maximized window title text.
-const SkColor kMaximizedWindowTitleTextColor = SK_ColorWHITE;
+// Color for the window title text.
+const SkColor kWindowTitleTextColor = SkColorSetRGB(40, 40, 40);
 // Duration of crossfade animation for activating and deactivating frame.
 const int kActivationCrossfadeDurationMs = 200;
 
@@ -282,15 +279,15 @@ void BrowserHeaderPainterAsh::PaintHighlightForRestoredWindow(
     gfx::Canvas* canvas) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   gfx::ImageSkia top_left_corner = *rb.GetImageSkiaNamed(
-      IDR_AURA_BROWSER_WINDOW_HEADER_SHADE_TOP_LEFT);
+      IDR_ASH_BROWSER_WINDOW_HEADER_SHADE_TOP_LEFT);
   gfx::ImageSkia top_right_corner = *rb.GetImageSkiaNamed(
-      IDR_AURA_BROWSER_WINDOW_HEADER_SHADE_TOP_RIGHT);
+      IDR_ASH_BROWSER_WINDOW_HEADER_SHADE_TOP_RIGHT);
   gfx::ImageSkia top_edge = *rb.GetImageSkiaNamed(
-      IDR_AURA_BROWSER_WINDOW_HEADER_SHADE_TOP);
+      IDR_ASH_BROWSER_WINDOW_HEADER_SHADE_TOP);
   gfx::ImageSkia left_edge = *rb.GetImageSkiaNamed(
-      IDR_AURA_BROWSER_WINDOW_HEADER_SHADE_LEFT);
+      IDR_ASH_BROWSER_WINDOW_HEADER_SHADE_LEFT);
   gfx::ImageSkia right_edge = *rb.GetImageSkiaNamed(
-      IDR_AURA_BROWSER_WINDOW_HEADER_SHADE_RIGHT);
+      IDR_ASH_BROWSER_WINDOW_HEADER_SHADE_RIGHT);
 
   int top_left_width = top_left_corner.width();
   int top_left_height = top_left_corner.height();
@@ -326,11 +323,9 @@ void BrowserHeaderPainterAsh::PaintTitleBar(gfx::Canvas* canvas) {
   // The window icon is painted by its own views::View.
   gfx::Rect title_bounds = GetTitleBounds();
   title_bounds.set_x(view_->GetMirroredXForRect(title_bounds));
-  SkColor title_color = (frame_->IsMaximized() || frame_->IsFullscreen()) ?
-      kMaximizedWindowTitleTextColor : kRestoredWindowTitleTextColor;
   canvas->DrawStringRectWithFlags(frame_->widget_delegate()->GetWindowTitle(),
                                   BrowserFrame::GetTitleFontList(),
-                                  title_color,
+                                  kWindowTitleTextColor,
                                   title_bounds,
                                   gfx::Canvas::NO_SUBPIXEL_RENDERING);
 }
@@ -368,100 +363,68 @@ void BrowserHeaderPainterAsh::GetFrameImagesForTabbedBrowser(
         IDR_THEME_FRAME_INCOGNITO_INACTIVE : IDR_THEME_FRAME_INACTIVE;
   }
 
-  if ((frame_->IsMaximized() || frame_->IsFullscreen()) &&
-      !tp->HasCustomImage(IDR_THEME_FRAME) &&
-      !tp->HasCustomImage(frame_image_id) &&
-      frame_overlay_image_id == 0) {
-    *frame_image = *tp->GetImageSkiaNamed(
-        IDR_AURA_BROWSER_WINDOW_HEADER_BASE_MAXIMIZED);
-  } else {
-    *frame_image = *tp->GetImageSkiaNamed(frame_image_id);
-  }
-
+  *frame_image = *tp->GetImageSkiaNamed(frame_image_id);
   *frame_overlay_image = (frame_overlay_image_id == 0) ?
       gfx::ImageSkia() : *tp->GetImageSkiaNamed(frame_overlay_image_id);
 }
 
 gfx::ImageSkia BrowserHeaderPainterAsh::GetFrameImageForNonTabbedBrowser(
     Mode mode) const {
+  // Request the images from the ResourceBundle (and not from the ThemeProvider)
+  // in order to get the default non-themed assets.
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  if (frame_->IsMaximized() || frame_->IsFullscreen())
-    return *rb.GetImageSkiaNamed(IDR_AURA_BROWSER_WINDOW_HEADER_BASE_MAXIMIZED);
-
   if (mode == MODE_ACTIVE) {
     return *rb.GetImageSkiaNamed(is_incognito_ ?
-        IDR_AURA_BROWSER_WINDOW_HEADER_BASE_RESTORED_INCOGNITO_ACTIVE :
-        IDR_AURA_BROWSER_WINDOW_HEADER_BASE_RESTORED_ACTIVE);
+        IDR_THEME_FRAME_INCOGNITO : IDR_THEME_FRAME);
   }
   return *rb.GetImageSkiaNamed(is_incognito_ ?
-      IDR_AURA_BROWSER_WINDOW_HEADER_BASE_RESTORED_INCOGNITO_INACTIVE :
-      IDR_AURA_BROWSER_WINDOW_HEADER_BASE_RESTORED_INACTIVE);
+      IDR_THEME_FRAME_INCOGNITO_INACTIVE : IDR_THEME_FRAME_INACTIVE);
 }
 
 void BrowserHeaderPainterAsh::UpdateCaptionButtonImages() {
+  int hover_background_id = 0;
+  int pressed_background_id = 0;
   if (frame_->IsMaximized() || frame_->IsFullscreen()) {
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_MINIMIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_MINIMIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_MINIMIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_P);
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_SIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_SIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_P);
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_CLOSE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_CLOSE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_CLOSE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_P);
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_LEFT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_LEFT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_LEFT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_P);
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_RIGHT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_RIGHT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_MAXIMIZED_RIGHT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_P);
+    hover_background_id =
+        IDR_ASH_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_H;
+    pressed_background_id =
+        IDR_ASH_BROWSER_WINDOW_CONTROL_BACKGROUND_MAXIMIZED_P;
   } else {
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_MINIMIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_MINIMIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_MINIMIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_P);
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_SIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_SIZE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_P);
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_CLOSE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_CLOSE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_CLOSE,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_P);
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_LEFT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_LEFT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_LEFT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_P);
-    caption_button_container_->SetButtonImages(
-        ash::CAPTION_BUTTON_ICON_RIGHT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_RIGHT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_ICON_RESTORED_RIGHT_SNAPPED,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_H,
-        IDR_AURA_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_P);
+    hover_background_id =
+        IDR_ASH_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_H;
+    pressed_background_id =
+        IDR_ASH_BROWSER_WINDOW_CONTROL_BACKGROUND_RESTORED_P;
   }
+  caption_button_container_->SetButtonImages(
+      ash::CAPTION_BUTTON_ICON_MINIMIZE,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_MINIMIZE,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_MINIMIZE,
+      hover_background_id,
+      pressed_background_id);
+  caption_button_container_->SetButtonImages(
+      ash::CAPTION_BUTTON_ICON_MAXIMIZE_RESTORE,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_SIZE,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_SIZE,
+      hover_background_id,
+      pressed_background_id);
+  caption_button_container_->SetButtonImages(
+      ash::CAPTION_BUTTON_ICON_CLOSE,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_CLOSE,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_CLOSE,
+      hover_background_id,
+      pressed_background_id);
+  caption_button_container_->SetButtonImages(
+      ash::CAPTION_BUTTON_ICON_LEFT_SNAPPED,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_LEFT_SNAPPED,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_LEFT_SNAPPED,
+      hover_background_id,
+      pressed_background_id);
+  caption_button_container_->SetButtonImages(
+      ash::CAPTION_BUTTON_ICON_RIGHT_SNAPPED,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_RIGHT_SNAPPED,
+      IDR_ASH_BROWSER_WINDOW_CONTROL_ICON_RIGHT_SNAPPED,
+      hover_background_id,
+      pressed_background_id);
 }
 
 gfx::Rect BrowserHeaderPainterAsh::GetPaintedBounds() const {

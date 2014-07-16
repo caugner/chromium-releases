@@ -4,12 +4,14 @@
 
 define([
     "gin/test/expect",
-    "mojo/public/bindings/js/codec",
-    "mojo/public/bindings/tests/sample_service.mojom",
+    "mojo/public/js/bindings/codec",
+    "mojo/public/interfaces/bindings/tests/sample_service.mojom",
   ], function(expect, codec, sample) {
   testBar();
   testFoo();
+  testTypes();
   testAlign();
+  testUtf8();
   this.result = "PASS";
 
   function testBar() {
@@ -41,7 +43,8 @@ define([
        5, 6, 7, 8,
     ]);
 
-    expect(message.memory).toEqual(expectedMemory);
+    var actualMemory = new Uint8Array(message.buffer.arrayBuffer);
+    expect(actualMemory).toEqual(expectedMemory);
 
     var reader = new codec.MessageReader(message);
 
@@ -83,7 +86,7 @@ define([
     foo.source = 23423782;
 
     var messageName = 31;
-    var payloadSize = 224;
+    var payloadSize = 240;
 
     var builder = new codec.MessageBuilder(messageName, payloadSize);
     builder.encodeStruct(sample.Foo, foo);
@@ -93,13 +96,13 @@ define([
     var expectedMemory = new Uint8Array([
       /*  0: */   16,    0,    0,    0,    2,    0,    0,    0,
       /*  8: */   31,    0,    0,    0,    0,    0,    0,    0,
-      /* 16: */   72,    0,    0,    0,   12,    0,    0,    0,
+      /* 16: */   80,    0,    0,    0,   13,    0,    0,    0,
       /* 24: */ 0xD5, 0xB4, 0x12, 0x02, 0x93, 0x6E, 0x01,    0,
       /* 32: */    5,    0,    0,    0,    0,    0,    0,    0,
-      /* 40: */   48,    0,    0,    0,    0,    0,    0,    0,
+      /* 40: */   56,    0,    0,    0,    0,    0,    0,    0,
     ]);
     // TODO(abarth): Test more of the message's raw memory.
-    var actualMemory = new Uint8Array(message.memory.buffer,
+    var actualMemory = new Uint8Array(message.buffer.arrayBuffer,
                                       0, expectedMemory.length);
     expect(actualMemory).toEqual(expectedMemory);
 
@@ -131,6 +134,34 @@ define([
     expect(foo2.source).toEqual(foo.source);
   }
 
+  function testTypes() {
+    function encodeDecode(cls, input, expectedResult, encodedSize) {
+      var messageName = 42;
+      var payloadSize = encodedSize || cls.encodedSize;
+
+      var builder = new codec.MessageBuilder(messageName, payloadSize);
+      builder.encodeStruct(cls, input)
+      var message = builder.finish();
+
+      var reader = new codec.MessageReader(message);
+      expect(reader.payloadSize).toBe(payloadSize);
+      expect(reader.messageName).toBe(messageName);
+      var result = reader.decodeStruct(cls);
+      expect(result).toEqual(expectedResult);
+    }
+    encodeDecode(codec.String, "banana", "banana", 24);
+    encodeDecode(codec.Int8, -1, -1);
+    encodeDecode(codec.Int8, 0xff, -1);
+    encodeDecode(codec.Int16, -1, -1);
+    encodeDecode(codec.Int16, 0xff, 0xff);
+    encodeDecode(codec.Int16, 0xffff, -1);
+    encodeDecode(codec.Int32, -1, -1);
+    encodeDecode(codec.Int32, 0xffff, 0xffff);
+    encodeDecode(codec.Int32, 0xffffffff, -1);
+    encodeDecode(codec.Float, 1.0, 1.0);
+    encodeDecode(codec.Double, 1.0, 1.0);
+  }
+
   function testAlign() {
     var aligned = [
       0, // 0
@@ -157,5 +188,32 @@ define([
     ];
     for (var i = 0; i < aligned.length; ++i)
       expect(codec.align(i)).toBe(aligned[i]);
+  }
+
+  function testUtf8() {
+    var str = "B\u03ba\u1f79";  // some UCS-2 codepoints
+    var messageName = 42;
+    var payloadSize = 24;
+
+    var builder = new codec.MessageBuilder(messageName, payloadSize);
+    var encoder = builder.createEncoder(8);
+    encoder.encodeStringPointer(str);
+    var message = builder.finish();
+    var expectedMemory = new Uint8Array([
+      /*  0: */   16,    0,    0,    0,    2,    0,    0,    0,
+      /*  8: */   42,    0,    0,    0,    0,    0,    0,    0,
+      /* 16: */    8,    0,    0,    0,    0,    0,    0,    0,
+      /* 24: */   14,    0,    0,    0,    6,    0,    0,    0,
+      /* 32: */ 0x42, 0xCE, 0xBA, 0xE1, 0xBD, 0xB9,    0,    0,
+    ]);
+    var actualMemory = new Uint8Array(message.buffer.arrayBuffer);
+    expect(actualMemory.length).toEqual(expectedMemory.length);
+    expect(actualMemory).toEqual(expectedMemory);
+
+    var reader = new codec.MessageReader(message);
+    expect(reader.payloadSize).toBe(payloadSize);
+    expect(reader.messageName).toBe(messageName);
+    var str2 = reader.decoder.decodeStringPointer();
+    expect(str2).toEqual(str);
   }
 });

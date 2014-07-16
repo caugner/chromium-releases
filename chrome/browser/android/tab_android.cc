@@ -14,12 +14,14 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/printing/print_view_manager_basic.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate_android.h"
 #include "chrome/browser/ui/android/content_settings/popup_blocked_infobar_delegate.h"
@@ -29,11 +31,13 @@
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "chrome/browser/ui/android/window_android_helper.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
+#include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 #include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/url_constants.h"
+#include "components/infobars/core/infobar_container.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -118,12 +122,12 @@ GURL TabAndroid::GetURL() const {
       Java_Tab_getUrl(env, obj.obj())));
 }
 
-bool TabAndroid::RestoreIfNeeded() {
+bool TabAndroid::LoadIfNeeded() {
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = weak_java_tab_.get(env);
   if (obj.is_null())
     return false;
-  return Java_Tab_restoreIfNeeded(env, obj.obj());
+  return Java_Tab_loadIfNeeded(env, obj.obj());
 }
 
 content::ContentViewCore* TabAndroid::GetContentViewCore() const {
@@ -173,26 +177,6 @@ void TabAndroid::OnReceivedHttpAuthRequest(jobject auth_handler,
   NOTIMPLEMENTED();
 }
 
-void TabAndroid::AddShortcutToBookmark(const GURL& url,
-                                       const base::string16& title,
-                                       const SkBitmap& skbitmap,
-                                       int r_value,
-                                       int g_value,
-                                       int b_value) {
-  NOTREACHED();
-}
-
-void TabAndroid::EditBookmark(int64 node_id,
-                              const base::string16& node_title,
-                              bool is_folder,
-                              bool is_partner_bookmark) {
-  NOTREACHED();
-}
-
-void TabAndroid::OnNewTabPageReady() {
-  NOTREACHED();
-}
-
 bool TabAndroid::ShouldWelcomePageLinkToTermsOfService() {
   NOTIMPLEMENTED();
   return false;
@@ -229,9 +213,9 @@ void TabAndroid::SwapTabContents(content::WebContents* old_contents,
           Java_Tab_getNativeInfoBarContainer(
               env,
               weak_java_tab_.get(env).obj()));
-  InfoBarService* new_infobar_service = new_contents ?
-      InfoBarService::FromWebContents(new_contents) : NULL;
-  infobar_container->ChangeInfoBarService(new_infobar_service);
+  InfoBarService* new_infobar_service =
+      new_contents ? InfoBarService::FromWebContents(new_contents) : NULL;
+  infobar_container->ChangeInfoBarManager(new_infobar_service);
 
   Java_Tab_swapWebContents(
       env,
@@ -391,7 +375,8 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(JNIEnv* env,
                                               jbyteArray j_post_data,
                                               jint page_transition,
                                               jstring j_referrer_url,
-                                              jint referrer_policy) {
+                                              jint referrer_policy,
+                                              jboolean is_renderer_initiated) {
   content::ContentViewCore* content_view = GetContentViewCore();
   if (!content_view)
     return PAGE_LOAD_FAILED;
@@ -459,6 +444,16 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(JNIEnv* env,
           GURL(base::android::ConvertJavaStringToUTF8(env, j_referrer_url)),
           static_cast<blink::WebReferrerPolicy>(referrer_policy));
     }
+    const base::string16 search_terms =
+        chrome::ExtractSearchTermsFromURL(GetProfile(), gurl);
+    SearchTabHelper* search_tab_helper =
+        SearchTabHelper::FromWebContents(web_contents_.get());
+    if (!search_terms.empty() && search_tab_helper &&
+        search_tab_helper->SupportsInstant()) {
+      search_tab_helper->Submit(search_terms);
+      return DEFAULT_PAGE_LOAD;
+    }
+    load_params.is_renderer_initiated = is_renderer_initiated;
     content_view->LoadUrl(load_params);
   }
   return DEFAULT_PAGE_LOAD;

@@ -66,6 +66,14 @@ var WEB_VIEW_EVENTS = {
     evt: CreateEvent('webview.onContentLoad'),
     fields: []
   },
+  'contextmenu': {
+    evt: CreateEvent('webview.contextmenu'),
+    cancelable: true,
+    customHandler: function(webViewInternal, event, webViewEvent) {
+      webViewInternal.maybeHandleContextMenu(event, webViewEvent);
+    },
+    fields: ['items']
+  },
   'dialog': {
     cancelable: true,
     customHandler: function(webViewInternal, event, webViewEvent) {
@@ -165,6 +173,7 @@ WebViewInternal.maybeRegisterExperimentalAPIs = function(proto) {}
 function WebViewInternal(webviewNode) {
   privates(webviewNode).internal = this;
   this.webviewNode = webviewNode;
+  this.attached = false;
   this.browserPluginNode = this.createBrowserPluginNode();
   var shadowRoot = this.webviewNode.createShadowRoot();
   shadowRoot.appendChild(this.browserPluginNode);
@@ -315,7 +324,8 @@ WebViewInternal.prototype.validateExecuteCodeCall  = function() {
  */
 WebViewInternal.prototype.executeScript = function(var_args) {
   this.validateExecuteCodeCall();
-  var args = $Array.concat([this.instanceId], $Array.slice(arguments));
+  var args = $Array.concat([this.instanceId, this.src],
+                           $Array.slice(arguments));
   $Function.apply(WebView.executeScript, null, args);
 };
 
@@ -324,7 +334,8 @@ WebViewInternal.prototype.executeScript = function(var_args) {
  */
 WebViewInternal.prototype.insertCSS = function(var_args) {
   this.validateExecuteCodeCall();
-  var args = $Array.concat([this.instanceId], $Array.slice(arguments));
+  var args = $Array.concat([this.instanceId, this.src],
+                           $Array.slice(arguments));
   $Function.apply(WebView.insertCSS, null, args);
 };
 
@@ -567,20 +578,7 @@ WebViewInternal.prototype.setupWebviewNodeEvents = function() {
   this.viewInstanceId = IdGenerator.GetNextId();
   var onInstanceIdAllocated = function(e) {
     var detail = e.detail ? JSON.parse(e.detail) : {};
-    self.instanceId = detail.windowId;
-    var params = {
-      'api': 'webview',
-      'instanceId': self.viewInstanceId
-    };
-    if (self.userAgentOverride) {
-      params['userAgentOverride'] = self.userAgentOverride;
-    }
-    self.browserPluginNode['-internal-attach'](params);
-
-    var events = self.getEvents();
-    for (var eventName in events) {
-      self.setupEvent(eventName, events[eventName]);
-    }
+    self.attachWindowAndSetUpEvents(detail.windowId);
   };
   this.browserPluginNode.addEventListener('-internal-instanceid-allocated',
                                           onInstanceIdAllocated);
@@ -799,7 +797,7 @@ WebViewInternal.prototype.handleNewWindowEvent =
   var windowObj = {
     attach: function(webview) {
       validateCall();
-      if (!webview)
+      if (!webview || !webview.tagName || webview.tagName != 'WEBVIEW')
         throw new Error(ERROR_MSG_WEBVIEW_EXPECTED);
       // Attach happens asynchronously to give the tagWatcher an opportunity
       // to pick up the new webview before attach operates on it, if it hasn't
@@ -807,9 +805,10 @@ WebViewInternal.prototype.handleNewWindowEvent =
       // Note: Any subsequent errors cannot be exceptions because they happen
       // asynchronously.
       setTimeout(function() {
+        var webViewInternal = privates(webview).internal;
         var attached =
-            browserPluginNode['-internal-attachWindowTo'](webview,
-                                                          event.windowId);
+            webViewInternal.attachWindowAndSetUpEvents(event.windowId);
+
         if (!attached) {
           window.console.error(ERROR_MSG_NEWWINDOW_UNABLE_TO_ATTACH);
         }
@@ -1020,6 +1019,25 @@ WebViewInternal.prototype.setUserAgentOverride = function(userAgentOverride) {
   WebView.overrideUserAgent(this.instanceId, userAgentOverride);
 };
 
+/** @private */
+WebViewInternal.prototype.attachWindowAndSetUpEvents = function(instanceId) {
+  this.instanceId = instanceId;
+  var params = {
+    'api': 'webview',
+    'instanceId': this.viewInstanceId
+  };
+  if (this.userAgentOverride) {
+    params['userAgentOverride'] = this.userAgentOverride;
+  }
+  this.browserPluginNode['-internal-attach'](this.instanceId, params);
+
+  var events = this.getEvents();
+  for (var eventName in events) {
+    this.setupEvent(eventName, events[eventName]);
+  }
+  return true;
+};
+
 // Registers browser plugin <object> custom element.
 function registerBrowserPluginElement() {
   var proto = Object.create(HTMLObjectElement.prototype);
@@ -1173,6 +1191,21 @@ WebViewInternal.prototype.maybeAttachWebRequestEventToObject = function() {};
  */
 WebViewInternal.prototype.maybeGetExperimentalPermissions = function() {
   return [];
+};
+
+/**
+ * Calls to show contextmenu right away instead of dispatching a 'contextmenu'
+ * event.
+ * This will be overridden in web_view_experimental.js to implement contextmenu
+ * API.
+ * @private
+ */
+WebViewInternal.prototype.maybeHandleContextMenu = function(e, webViewEvent) {
+  var requestId = e.requestId;
+  // Setting |params| = undefined will show the context menu unmodified, hence
+  // the 'contextmenu' API is disabled for stable channel.
+  var params = undefined;
+  WebView.showContextMenu(this.instanceId, requestId, params);
 };
 
 /**

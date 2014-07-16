@@ -20,6 +20,8 @@ struct DrawGLInput {
   unsigned int frame_id;
   gfx::Rect global_visible_rect;
   gfx::Vector2d scroll_offset;
+  int width;
+  int height;
 
   DrawGLInput();
 };
@@ -32,25 +34,11 @@ struct DrawGLResult {
   DrawGLResult();
 };
 
-namespace internal {
-
-// Holds variables that are accessed on both UI and RT threads and need to be
-// lock-protected when accessed. Separate struct purely for syntactic barrier
-// to implement the AssertAcquired check.
-struct BothThreads {
-  // TODO(boliu): Remove |compositor| from shared state.
-  content::SynchronousCompositor* compositor;
-  DrawGLInput draw_gl_input;
-
-  BothThreads();
-};
-
-};  // namespace internal
-
-// This class holds renderer state that is shared between UI and RT threads
-// and lock protects all access the state. In the interim, this class is
-// also responsible for thread hopping and lock protection beyond simple
-// state that should eventually be removed once RT support work is complete.
+// This class holds renderer state that is shared between UI and RT threads.
+// Android framework will block the UI thread when RT is drawing, so no locking
+// is needed in this class. In the interim, this class is also responsible for
+// thread hopping that should eventually be removed once RT support work is
+// complete.
 class SharedRendererState {
  public:
   SharedRendererState(scoped_refptr<base::MessageLoopProxy> ui_loop,
@@ -59,27 +47,30 @@ class SharedRendererState {
 
   void ClientRequestDrawGL();
 
-  // Holds the compositor and lock protects all calls into it.
+  // This function should only be called on UI thread.
   void SetCompositorOnUiThread(content::SynchronousCompositor* compositor);
-  bool CompositorInitializeHwDraw(scoped_refptr<gfx::GLSurface> surface);
-  void CompositorReleaseHwDraw();
-  bool CompositorDemandDrawHw(gfx::Size surface_size,
-                              const gfx::Transform& transform,
-                              gfx::Rect viewport,
-                              gfx::Rect clip,
-                              bool stencil_enabled);
-  bool CompositorDemandDrawSw(SkCanvas* canvas);
-  void CompositorSetMemoryPolicy(
-      const content::SynchronousCompositorMemoryPolicy& policy);
-  void CompositorDidChangeRootLayerScrollOffset();
 
+  // This function can be called on both UI and RT thread.
+  content::SynchronousCompositor* GetCompositor();
+
+  void SetMemoryPolicy(const content::SynchronousCompositorMemoryPolicy policy);
+  content::SynchronousCompositorMemoryPolicy GetMemoryPolicy() const;
+
+  void SetMemoryPolicyDirty(bool is_dirty);
+  bool IsMemoryPolicyDirty() const;
   void SetDrawGLInput(const DrawGLInput& input);
   DrawGLInput GetDrawGLInput() const;
 
+  // Set by UI and read by RT.
+  void SetHardwareAllowed(bool allowed);
+  bool IsHardwareAllowed() const;
+
+  // Set by RT and read by UI.
+  void SetHardwareInitialized(bool initialized);
+  bool IsHardwareInitialized() const;
+
  private:
   void ClientRequestDrawGLOnUIThread();
-  internal::BothThreads& both();
-  const internal::BothThreads& both() const;
 
   scoped_refptr<base::MessageLoopProxy> ui_loop_;
   // TODO(boliu): Remove |client_on_ui_| from shared state.
@@ -87,8 +78,16 @@ class SharedRendererState {
   base::WeakPtrFactory<SharedRendererState> weak_factory_on_ui_thread_;
   base::WeakPtr<SharedRendererState> ui_thread_weak_ptr_;
 
+  // Accessed by both UI and RT thread.
   mutable base::Lock lock_;
-  internal::BothThreads both_threads_;
+  content::SynchronousCompositor* compositor_;
+  content::SynchronousCompositorMemoryPolicy memory_policy_;
+  // Set to true when SetMemoryPolicy called with a different memory policy.
+  // Set to false when memory policy is read and enforced to compositor.
+  bool memory_policy_dirty_;
+  DrawGLInput draw_gl_input_;
+  bool hardware_allowed_;
+  bool hardware_initialized_;
 };
 
 }  // namespace android_webview

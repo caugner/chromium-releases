@@ -16,8 +16,6 @@
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_uma_private.h"
 
-#include "ppapi/native_client/src/trusted/plugin/manifest.h"
-#include "ppapi/native_client/src/trusted/plugin/nacl_http_response_headers.h"
 #include "ppapi/native_client/src/trusted/plugin/plugin.h"
 #include "ppapi/native_client/src/trusted/plugin/plugin_error.h"
 #include "ppapi/native_client/src/trusted/plugin/pnacl_translate_thread.h"
@@ -25,83 +23,6 @@
 #include "ppapi/native_client/src/trusted/plugin/temporary_file.h"
 
 namespace plugin {
-
-//////////////////////////////////////////////////////////////////////
-//  Pnacl-specific manifest support.
-//////////////////////////////////////////////////////////////////////
-
-// The PNaCl linker gets file descriptors via the service runtime's
-// reverse service lookup.  The reverse service lookup requires a manifest.
-// Normally, that manifest is an NMF containing mappings for shared libraries.
-// Here, we provide a manifest that redirects to PNaCl component files
-// that are part of Chrome.
-class PnaclManifest : public Manifest {
- public:
-  PnaclManifest(const nacl::string& sandbox_arch)
-      : manifest_base_url_(PnaclUrls::GetBaseUrl()),
-        sandbox_arch_(sandbox_arch) { }
-
-  virtual ~PnaclManifest() { }
-
-  virtual bool GetProgramURL(nacl::string* full_url,
-                             PnaclOptions* pnacl_options,
-                             bool* uses_nonsfi_mode,
-                             ErrorInfo* error_info) const {
-    // Does not contain program urls.
-    UNREFERENCED_PARAMETER(full_url);
-    UNREFERENCED_PARAMETER(pnacl_options);
-    UNREFERENCED_PARAMETER(uses_nonsfi_mode);
-    UNREFERENCED_PARAMETER(error_info);
-    PLUGIN_PRINTF(("PnaclManifest does not contain a program\n"));
-    error_info->SetReport(PP_NACL_ERROR_MANIFEST_GET_NEXE_URL,
-                          "pnacl manifest does not contain a program.");
-    return false;
-  }
-
-  virtual bool ResolveURL(const nacl::string& relative_url,
-                          nacl::string* full_url,
-                          ErrorInfo* error_info) const {
-    // Does not do general URL resolution, simply appends relative_url to
-    // the end of manifest_base_url_.
-    UNREFERENCED_PARAMETER(error_info);
-    *full_url = manifest_base_url_ + relative_url;
-    return true;
-  }
-
-  virtual bool GetFileKeys(std::set<nacl::string>* keys) const {
-    // Does not support enumeration.
-    PLUGIN_PRINTF(("PnaclManifest does not support key enumeration\n"));
-    UNREFERENCED_PARAMETER(keys);
-    return false;
-  }
-
-  virtual bool ResolveKey(const nacl::string& key,
-                          nacl::string* full_url,
-                          PnaclOptions* pnacl_options,
-                          ErrorInfo* error_info) const {
-    // All of the component files are native (do not require pnacl translate).
-    pnacl_options->set_translate(false);
-    // We can only resolve keys in the files/ namespace.
-    const nacl::string kFilesPrefix = "files/";
-    size_t files_prefix_pos = key.find(kFilesPrefix);
-    if (files_prefix_pos == nacl::string::npos) {
-      error_info->SetReport(PP_NACL_ERROR_MANIFEST_RESOLVE_URL,
-                            "key did not start with files/");
-      return false;
-    }
-    // Resolve the full URL to the file. Provide it with a platform-specific
-    // prefix.
-    nacl::string key_basename = key.substr(kFilesPrefix.length());
-    return ResolveURL(sandbox_arch_ + "/" + key_basename,
-                      full_url, error_info);
-  }
-
- private:
-  NACL_DISALLOW_COPY_AND_ASSIGN(PnaclManifest);
-
-  nacl::string manifest_base_url_;
-  nacl::string sandbox_arch_;
-};
 
 //////////////////////////////////////////////////////////////////////
 //  UMA stat helpers.
@@ -179,6 +100,12 @@ void HistogramOptLevel(pp::UMAPrivate& uma, int8_t opt_level) {
                            opt_level, kOptUnknown+1);
 }
 
+nacl::string GetArchitectureAttributes(Plugin* plugin) {
+  pp::Var attrs_var(pp::PASS_REF,
+                    plugin->nacl_interface()->GetCpuFeatureAttrs());
+  return attrs_var.AsString();
+}
+
 }  // namespace
 
 
@@ -194,7 +121,7 @@ CallbackSource<FileStreamData>::~CallbackSource() {}
 PnaclCoordinator* PnaclCoordinator::BitcodeToNative(
     Plugin* plugin,
     const nacl::string& pexe_url,
-    const PnaclOptions& pnacl_options,
+    const PP_PNaClOptions& pnacl_options,
     const pp::CompletionCallback& translate_notify_callback) {
   PLUGIN_PRINTF(("PnaclCoordinator::BitcodeToNative (plugin=%p, pexe=%s)\n",
                  static_cast<void*>(plugin), pexe_url.c_str()));
@@ -202,10 +129,10 @@ PnaclCoordinator* PnaclCoordinator::BitcodeToNative(
       new PnaclCoordinator(plugin, pexe_url,
                            pnacl_options,
                            translate_notify_callback);
-  coordinator->pnacl_init_time_ = NaClGetTimeOfDayMicroseconds();
-  PLUGIN_PRINTF(("PnaclCoordinator::BitcodeToNative (manifest=%p, ",
-                 reinterpret_cast<const void*>(coordinator->manifest_.get())));
+  PLUGIN_PRINTF(("PnaclCoordinator::BitcodeToNative (manifest_id=%d)\n",
+                 coordinator->manifest_id_));
 
+  coordinator->pnacl_init_time_ = NaClGetTimeOfDayMicroseconds();
   int cpus = plugin->nacl_interface()->GetNumberOfProcessors();
   coordinator->split_module_count_ = std::min(4, std::max(1, cpus));
 
@@ -220,15 +147,17 @@ PnaclCoordinator* PnaclCoordinator::BitcodeToNative(
 PnaclCoordinator::PnaclCoordinator(
     Plugin* plugin,
     const nacl::string& pexe_url,
-    const PnaclOptions& pnacl_options,
+    const PP_PNaClOptions& pnacl_options,
     const pp::CompletionCallback& translate_notify_callback)
   : translate_finish_error_(PP_OK),
     plugin_(plugin),
     translate_notify_callback_(translate_notify_callback),
     translation_finished_reported_(false),
-    manifest_(new PnaclManifest(plugin->nacl_interface()->GetSandboxArch())),
+    manifest_id_(
+        GetNaClInterface()->CreatePnaclManifest(plugin->pp_instance())),
     pexe_url_(pexe_url),
     pnacl_options_(pnacl_options),
+    architecture_attributes_(GetArchitectureAttributes(plugin)),
     split_module_count_(1),
     num_object_files_opened_(0),
     is_cache_hit_(PP_FALSE),
@@ -277,7 +206,9 @@ nacl::DescWrapper* PnaclCoordinator::ReleaseTranslatedFD() {
 
 void PnaclCoordinator::ReportNonPpapiError(PP_NaClError err_code,
                                            const nacl::string& message) {
-  error_info_.SetReport(err_code, message);
+  ErrorInfo error_info;
+  error_info.SetReport(err_code, message);
+  plugin_->ReportLoadError(error_info);
   ExitWithError();
 }
 
@@ -286,16 +217,14 @@ void PnaclCoordinator::ReportPpapiError(PP_NaClError err_code,
                                         const nacl::string& message) {
   nacl::stringstream ss;
   ss << "PnaclCoordinator: " << message << " (pp_error=" << pp_error << ").";
-  error_info_.SetReport(err_code, ss.str());
+  ErrorInfo error_info;
+  error_info.SetReport(err_code, ss.str());
+  plugin_->ReportLoadError(error_info);
   ExitWithError();
 }
 
 void PnaclCoordinator::ExitWithError() {
-  PLUGIN_PRINTF(("PnaclCoordinator::ExitWithError (error_code=%d, "
-                 "message='%s')\n",
-                 error_info_.error_code(),
-                 error_info_.message().c_str()));
-  plugin_->ReportLoadError(error_info_);
+  PLUGIN_PRINTF(("PnaclCoordinator::ExitWithError\n"));
   // Free all the intermediate callbacks we ever created.
   // Note: this doesn't *cancel* the callbacks from the factories attached
   // to the various helper classes (e.g., pnacl_resources). Thus, those
@@ -323,6 +252,7 @@ void PnaclCoordinator::TranslateFinished(int32_t pp_error) {
   // Bail out if there was an earlier error (e.g., pexe load failure),
   // or if there is an error from the translation thread.
   if (translate_finish_error_ != PP_OK || pp_error != PP_OK) {
+    plugin_->ReportLoadError(error_info_);
     ExitWithError();
     return;
   }
@@ -338,7 +268,7 @@ void PnaclCoordinator::TranslateFinished(int32_t pp_error) {
   }
 
   // If there are no errors, report stats from this thread (the main thread).
-  HistogramOptLevel(plugin_->uma_interface(), pnacl_options_.opt_level());
+  HistogramOptLevel(plugin_->uma_interface(), pnacl_options_.opt_level);
   HistogramKBPerSec(plugin_->uma_interface(),
                     "NaCl.Perf.PNaClLoadTime.CompileKBPerSec",
                     pexe_size_ / 1024.0,
@@ -451,7 +381,7 @@ void PnaclCoordinator::BitcodeStreamDidOpen(int32_t pp_error) {
   // The component updater's resource throttles + OnDemand update/install
   // should block the URL request until the compiler is present. Now we
   // can load the resources (e.g. llc and ld nexes).
-  resources_.reset(new PnaclResources(plugin_, this, this->manifest_.get()));
+  resources_.reset(new PnaclResources(plugin_, this));
   CHECK(resources_ != NULL);
 
   // The first step of loading resources: read the resource info file.
@@ -485,8 +415,6 @@ void PnaclCoordinator::ResourcesDidLoad(int32_t pp_error) {
   // get the cache key from the response headers and from the
   // compiler's version metadata.
   nacl::string headers = streaming_downloader_->GetResponseHeaders();
-  NaClHttpResponseHeaders parser;
-  parser.Parse(headers);
 
   temp_nexe_file_.reset(new TempFile(plugin_));
   pp::CompletionCallback cb =
@@ -498,12 +426,9 @@ void PnaclCoordinator::ResourcesDidLoad(int32_t pp_error) {
           // TODO(dschuff): Get this value from the pnacl json file after it
           // rolls in from NaCl.
           1,
-          pnacl_options_.opt_level(),
-          parser.GetHeader("last-modified").c_str(),
-          parser.GetHeader("etag").c_str(),
-          PP_FromBool(parser.CacheControlNoStore()),
-          plugin_->nacl_interface()->GetSandboxArch(),
-          "", // No extra compile flags yet.
+          pnacl_options_.opt_level,
+          headers.c_str(),
+          architecture_attributes_.c_str(), // Extra compile flags.
           &is_cache_hit_,
           temp_nexe_file_->existing_handle(),
           cb.pp_completion_callback());
@@ -599,9 +524,8 @@ void PnaclCoordinator::BitcodeStreamGotData(int32_t pp_error,
 
   translate_thread_->PutBytes(data, pp_error);
   // If pp_error > 0, then it represents the number of bytes received.
-  if (data && pp_error > 0) {
+  if (data && pp_error > 0)
     pexe_size_ += pp_error;
-  }
 }
 
 StreamCallback PnaclCoordinator::GetCallback() {
@@ -695,13 +619,14 @@ void PnaclCoordinator::RunTranslate(int32_t pp_error) {
 
   CHECK(translate_thread_ != NULL);
   translate_thread_->RunTranslate(report_translate_finished,
-                                  manifest_.get(),
+                                  manifest_id_,
                                   &obj_files_,
                                   temp_nexe_file_.get(),
                                   invalid_desc_wrapper_.get(),
                                   &error_info_,
                                   resources_.get(),
                                   &pnacl_options_,
+                                  architecture_attributes_,
                                   this,
                                   plugin_);
 }

@@ -24,7 +24,6 @@ import time
 
 import cmd_helper
 import constants
-import screenshot
 import system_properties
 from utils import host_utils
 
@@ -39,6 +38,7 @@ import adb_interface
 import am_instrument_parser
 import errors
 
+from pylib.device import device_blacklist
 
 # Pattern to search for the next whole line of pexpect output and capture it
 # into a match group. We can't use ^ and $ for line start end with pexpect,
@@ -50,7 +50,7 @@ PEXPECT_LINE_RE = re.compile('\n([^\r]*)\r')
 SHELL_PROMPT = '~+~PQ\x17RS~+~'
 
 # Java properties file
-LOCAL_PROPERTIES_PATH = '/data/local.prop'
+LOCAL_PROPERTIES_PATH = constants.DEVICE_LOCAL_PROPERTIES_PATH
 
 # Property in /data/local.prop that controls Java assertions.
 JAVA_ASSERT_PROPERTY = 'dalvik.vm.enableassertions'
@@ -72,6 +72,15 @@ MD5SUM_DEVICE_FOLDER = constants.TEST_EXECUTABLE_DIR + '/md5sum/'
 MD5SUM_DEVICE_PATH = MD5SUM_DEVICE_FOLDER + 'md5sum_bin'
 MD5SUM_LD_LIBRARY_PATH = 'LD_LIBRARY_PATH=%s' % MD5SUM_DEVICE_FOLDER
 
+CONTROL_USB_CHARGING_COMMANDS = [
+  {
+    # Nexus 4
+    'witness_file': '/sys/module/pm8921_charger/parameters/disabled',
+    'enable_command': 'echo 0 > /sys/module/pm8921_charger/parameters/disabled',
+    'disable_command':
+        'echo 1 > /sys/module/pm8921_charger/parameters/disabled',
+  },
+]
 
 def GetAVDs():
   """Returns a list of AVDs."""
@@ -79,28 +88,23 @@ def GetAVDs():
   avds = re_avd.findall(cmd_helper.GetCmdOutput(['android', 'list', 'avd']))
   return avds
 
-
 def ResetBadDevices():
-  """Removes the file that keeps track of bad devices for a current build."""
-  if os.path.exists(constants.BAD_DEVICES_JSON):
-    os.remove(constants.BAD_DEVICES_JSON)
-
+  """Removes the blacklist that keeps track of bad devices for a current
+     build.
+  """
+  device_blacklist.ResetBlacklist()
 
 def ExtendBadDevices(devices):
-  """Adds devices to BAD_DEVICES_JSON file.
+  """Adds devices to the blacklist that keeps track of bad devices for a
+     current build.
 
-  The devices listed in the BAD_DEVICES_JSON file will not be returned by
+  The devices listed in the bad devices file will not be returned by
   GetAttachedDevices.
 
   Args:
-    devices: list of bad devices to be added to the BAD_DEVICES_JSON file.
+    devices: list of bad devices to be added to the bad devices file.
   """
-  if os.path.exists(constants.BAD_DEVICES_JSON):
-    with open(constants.BAD_DEVICES_JSON, 'r') as f:
-      bad_devices = json.load(f)
-    devices.extend(bad_devices)
-  with open(constants.BAD_DEVICES_JSON, 'w') as f:
-    json.dump(list(set(devices)), f)
+  device_blacklist.ExtendBlacklist(devices)
 
 
 def GetAttachedDevices(hardware=True, emulator=True, offline=False):
@@ -150,12 +154,11 @@ def GetAttachedDevices(hardware=True, emulator=True, offline=False):
   if offline:
     devices = devices + offline_devices
 
-  # Remove bad devices listed in the bad_devices json file.
-  if os.path.exists(constants.BAD_DEVICES_JSON):
-    with open(constants.BAD_DEVICES_JSON, 'r') as f:
-      bad_devices = json.load(f)
-    logging.info('Avoiding bad devices %s', ' '.join(bad_devices))
-    devices = [device for device in devices if device not in bad_devices]
+  # Remove any devices in the blacklist.
+  blacklist = device_blacklist.ReadBlacklist()
+  if len(blacklist):
+    logging.info('Avoiding bad devices %s', ' '.join(blacklist))
+    devices = [device for device in devices if device not in blacklist]
 
   preferred_device = os.environ.get('ANDROID_SERIAL')
   if preferred_device in devices:
@@ -290,6 +293,12 @@ class AndroidCommands(object):
     self._util_wrapper = ''
     self._system_properties = system_properties.SystemProperties(self.Adb())
     self._push_if_needed_cache = {}
+    self._control_usb_charging_command = {
+        'command': None,
+        'cached': False,
+    }
+    self._protected_file_access_method_initialized = None
+    self._privileged_command_runner = None
 
   @property
   def system_properties(self):
@@ -630,9 +639,10 @@ class AndroidCommands(object):
     # A dict of commands to methods that may call them.
     whitelisted_callers = {
         'su': 'RunShellCommandWithSU',
+        'getprop': 'ProvisionDevices',
         }
 
-    base_command = shlex.split(command)[0]
+    base_command = shlex.split(command)[0].strip(';')
     if (base_command in preferred_apis and
         (base_command not in whitelisted_callers or
          whitelisted_callers[base_command] not in [
@@ -956,31 +966,40 @@ class AndroidCommands(object):
     host_hash_tuples, device_hash_tuples = self._RunMd5Sum(
         real_host_path, real_device_path)
 
-    # Ignore extra files on the device.
-    if not ignore_filenames:
-      host_files = [os.path.relpath(os.path.normpath(p.path),
-                                    real_host_path) for p in host_hash_tuples]
-
-      def HostHas(fname):
-        return any(path in fname for path in host_files)
-
-      device_hash_tuples = [h for h in device_hash_tuples if HostHas(h.path)]
-
     if len(host_hash_tuples) > len(device_hash_tuples):
       logging.info('%s files do not exist on the device' %
                    (len(host_hash_tuples) - len(device_hash_tuples)))
 
-    # Constructs the target device path from a given host path. Don't use when
-    # only a single file is given as the base name given in device_path may
-    # differ from that in host_path.
-    def HostToDevicePath(host_file_path):
-      return os.path.join(device_path, os.path.relpath(host_file_path,
-                                                       real_host_path))
+    host_rel = [(os.path.relpath(os.path.normpath(t.path), real_host_path),
+                 t.hash)
+                for t in host_hash_tuples]
 
-    device_hashes = [h.hash for h in device_hash_tuples]
-    return [(t.path, HostToDevicePath(t.path) if
-             os.path.isdir(real_host_path) else real_device_path)
-            for t in host_hash_tuples if t.hash not in device_hashes]
+    if os.path.isdir(real_host_path):
+      def RelToRealPaths(rel_path):
+        return (os.path.join(real_host_path, rel_path),
+                os.path.join(real_device_path, rel_path))
+    else:
+      assert len(host_rel) == 1
+      def RelToRealPaths(_):
+        return (real_host_path, real_device_path)
+
+    if ignore_filenames:
+      # If we are ignoring file names, then we want to push any file for which
+      # a file with an equivalent MD5 sum does not exist on the device.
+      device_hashes = set([h.hash for h in device_hash_tuples])
+      ShouldPush = lambda p, h: h not in device_hashes
+    else:
+      # Otherwise, we want to push any file on the host for which a file with
+      # an equivalent MD5 sum does not exist at the same relative path on the
+      # device.
+      device_rel = dict([(os.path.relpath(os.path.normpath(t.path),
+                                          real_device_path),
+                          t.hash)
+                         for t in device_hash_tuples])
+      ShouldPush = lambda p, h: p not in device_rel or h != device_rel[p]
+
+    return [RelToRealPaths(path) for path, host_hash in host_rel
+            if ShouldPush(path, host_hash)]
 
   def PushIfNeeded(self, host_path, device_path):
     """Pushes |host_path| to |device_path|.
@@ -1088,42 +1107,86 @@ class AndroidCommands(object):
     return self.RunShellCommand('su -c %s' % command, timeout_time, log_result)
 
   def CanAccessProtectedFileContents(self):
-    """Returns True if Get/SetProtectedFileContents would work via "su".
+    """Returns True if Get/SetProtectedFileContents would work via "su" or adb
+    shell running as root.
 
     Devices running user builds don't have adb root, but may provide "su" which
     can be used for accessing protected files.
     """
-    r = self.RunShellCommandWithSU('cat /dev/null')
-    return r == [] or r[0].strip() == ''
+    return (self._GetProtectedFileCommandRunner() != None)
+
+  def _GetProtectedFileCommandRunner(self):
+    """Finds the best method to access protected files on the device.
+
+    Returns:
+      1. None when privileged files cannot be accessed on the device.
+      2. Otherwise: A function taking a single parameter: a string with command
+         line arguments. Running that function executes the command with
+         the appropriate method.
+    """
+    if self._protected_file_access_method_initialized:
+      return self._privileged_command_runner
+
+    self._privileged_command_runner = None
+    self._protected_file_access_method_initialized = True
+
+    for cmd in [self.RunShellCommand, self.RunShellCommandWithSU]:
+      # Get contents of the auxv vector for the init(8) process from a small
+      # binary file that always exists on linux and is always read-protected.
+      contents = cmd('cat /proc/1/auxv')
+      # The leading 4 or 8-bytes of auxv vector is a_type. There are not many
+      # reserved a_type values, hence byte 2 must always be '\0' for a realistic
+      # auxv. See /usr/include/elf.h.
+      if len(contents) > 0 and (contents[0][2] == '\0'):
+        self._privileged_command_runner = cmd
+        break
+    return self._privileged_command_runner
 
   def GetProtectedFileContents(self, filename):
     """Gets contents from the protected file specified by |filename|.
 
-    This is less efficient than GetFileContents, but will work for protected
-    files and device files.
+    This is potentially less efficient than GetFileContents.
     """
-    # Run the script as root
-    return self.RunShellCommandWithSU('cat "%s" 2> /dev/null' % filename)
+    command = 'cat "%s" 2> /dev/null' % filename
+    command_runner = self._GetProtectedFileCommandRunner()
+    if command_runner:
+      return command_runner(command)
+    else:
+      logging.warning('Could not access protected file: %s' % filename)
+      return []
 
   def SetProtectedFileContents(self, filename, contents):
     """Writes |contents| to the protected file specified by |filename|.
 
-    This is less efficient than SetFileContents, but will work for protected
-    files and device files.
+    This is less efficient than SetFileContents.
     """
+    # TODO(skyostil): Remove this once it has been through all the bots.
+    for file_name in (AndroidCommands._TEMP_FILE_BASE_FMT,
+                      AndroidCommands._TEMP_SCRIPT_FILE_BASE_FMT):
+      self.RunShellCommand('rm ' + self.GetExternalStorage() + '/' +
+                           file_name.replace('%d', '*'))
+
     temp_file = self._GetDeviceTempFileName(AndroidCommands._TEMP_FILE_BASE_FMT)
     temp_script = self._GetDeviceTempFileName(
         AndroidCommands._TEMP_SCRIPT_FILE_BASE_FMT)
 
-    # Put the contents in a temporary file
-    self.SetFileContents(temp_file, contents)
-    # Create a script to copy the file contents to its final destination
-    self.SetFileContents(temp_script, 'cat %s > %s' % (temp_file, filename))
-    # Run the script as root
-    self.RunShellCommandWithSU('sh %s' % temp_script)
-    # And remove the temporary files
-    self.RunShellCommand('rm ' + temp_file)
-    self.RunShellCommand('rm ' + temp_script)
+    try:
+      # Put the contents in a temporary file
+      self.SetFileContents(temp_file, contents)
+      # Create a script to copy the file contents to its final destination
+      self.SetFileContents(temp_script, 'cat %s > %s' % (temp_file, filename))
+
+      command = 'sh %s' % temp_script
+      command_runner = self._GetProtectedFileCommandRunner()
+      if command_runner:
+        return command_runner(command)
+      else:
+        logging.warning(
+            'Could not set contents of protected file: %s' % filename)
+    finally:
+      # And remove the temporary files
+      self.RunShellCommand('rm ' + temp_file)
+      self.RunShellCommand('rm ' + temp_script)
 
   def RemovePushedFiles(self):
     """Removes all files pushed with PushIfNeeded() from the device."""
@@ -1694,7 +1757,17 @@ class AndroidCommands(object):
 
       return False
 
-  def TakeScreenshot(self, host_file):
+  @staticmethod
+  def GetTimestamp():
+    return time.strftime('%Y-%m-%d-%H%M%S', time.localtime())
+
+  @staticmethod
+  def EnsureHostDirectory(host_file):
+    host_dir = os.path.dirname(os.path.abspath(host_file))
+    if not os.path.exists(host_dir):
+      os.makedirs(host_dir)
+
+  def TakeScreenshot(self, host_file=None):
     """Saves a screenshot image to |host_file| on the host.
 
     Args:
@@ -1704,7 +1777,15 @@ class AndroidCommands(object):
     Returns:
       Resulting host file name of the screenshot.
     """
-    return screenshot.TakeScreenshot(self, host_file)
+    host_file = os.path.abspath(host_file or
+                                'screenshot-%s.png' % self.GetTimestamp())
+    self.EnsureHostDirectory(host_file)
+    device_file = '%s/screenshot.png' % self.GetExternalStorage()
+    self.RunShellCommand(
+        '/system/bin/screencap -p %s' % device_file)
+    self.PullFileFromDevice(device_file, host_file)
+    self.RunShellCommand('rm -f "%s"' % device_file)
+    return host_file
 
   def PullFileFromDevice(self, device_file, host_file):
     """Download |device_file| on the device from to |host_file| on the host.
@@ -1818,17 +1899,69 @@ class AndroidCommands(object):
                                     'android',
                                     'pylib',
                                     'efficient_android_directory_copy.sh')
-    self._adb.Push(host_script_path, temp_script_file)
-    self.EnableAdbRoot
-    out = self.RunShellCommand('sh %s %s %s' % (temp_script_file, source, dest),
-                               timeout_time=120)
-    if self._device:
-      device_repr = self._device[-4:]
-    else:
-      device_repr = '????'
-    for line in out:
-      logging.info('[%s]> %s', device_repr, line)
-    self.RunShellCommand('rm %s' % temp_script_file)
+    try:
+      self._adb.Push(host_script_path, temp_script_file)
+      self.EnableAdbRoot()
+      out = self.RunShellCommand('sh %s %s %s' % (temp_script_file,
+                                                  source,
+                                                  dest),
+                                 timeout_time=120)
+      if self._device:
+        device_repr = self._device[-4:]
+      else:
+        device_repr = '????'
+      for line in out:
+        logging.info('[%s]> %s', device_repr, line)
+    finally:
+      self.RunShellCommand('rm %s' % temp_script_file)
+
+  def _GetControlUsbChargingCommand(self):
+    if self._control_usb_charging_command['cached']:
+      return self._control_usb_charging_command['command']
+    self._control_usb_charging_command['cached'] = True
+    for command in CONTROL_USB_CHARGING_COMMANDS:
+      # Assert command is valid.
+      assert 'disable_command' in command
+      assert 'enable_command' in command
+      assert 'witness_file' in command
+      witness_file = command['witness_file']
+      if self.FileExistsOnDevice(witness_file):
+        self._control_usb_charging_command['command'] = command
+        return command
+    return None
+
+  def CanControlUsbCharging(self):
+    return self._GetControlUsbChargingCommand() is not None
+
+  def DisableUsbCharging(self):
+    command = self._GetControlUsbChargingCommand()
+    if not command:
+      raise Exception('Unable to act on usb charging.')
+    disable_command = command['disable_command']
+    # Do not loop directly on self.IsDeviceCharging to cut the number of calls
+    # to the device.
+    while True:
+      self.RunShellCommand(disable_command)
+      if not self.IsDeviceCharging():
+        break
+
+  def EnableUsbCharging(self):
+    command = self._GetControlUsbChargingCommand()
+    if not command:
+      raise Exception('Unable to act on usb charging.')
+    disable_command = command['enable_command']
+    # Do not loop directly on self.IsDeviceCharging to cut the number of calls
+    # to the device.
+    while True:
+      self.RunShellCommand(disable_command)
+      if self.IsDeviceCharging():
+        break
+
+  def IsDeviceCharging(self):
+    for line in self.RunShellCommand('dumpsys battery'):
+      if 'powered: ' in line:
+        if line.split('powered: ')[1] == 'true':
+          return True
 
 
 class NewLineNormalizer(object):

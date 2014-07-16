@@ -40,7 +40,6 @@
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/extensions/api/developer_private.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -60,7 +59,9 @@
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/install_warning.h"
+#include "extensions/common/manifest.h"
 #include "extensions/common/manifest_handlers/background_info.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/manifest_handlers/offline_enabled_info.h"
 #include "extensions/common/switches.h"
@@ -94,7 +95,7 @@ ExtensionUpdater* GetExtensionUpdater(Profile* profile) {
     return profile->GetExtensionService()->updater();
 }
 
-GURL GetImageURLFromData(std::string contents) {
+GURL GetImageURLFromData(const std::string& contents) {
   std::string contents_base64;
   base::Base64Encode(contents, &contents_base64);
 
@@ -172,14 +173,12 @@ DeveloperPrivateAPI::DeveloperPrivateAPI(content::BrowserContext* context)
 
 DeveloperPrivateEventRouter::DeveloperPrivateEventRouter(Profile* profile)
     : profile_(profile) {
-  int types[] = {
-    chrome::NOTIFICATION_EXTENSION_INSTALLED,
-    chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
-    chrome::NOTIFICATION_EXTENSION_LOADED,
-    chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
-    chrome::NOTIFICATION_EXTENSION_VIEW_REGISTERED,
-    chrome::NOTIFICATION_EXTENSION_VIEW_UNREGISTERED
-  };
+  int types[] = {chrome::NOTIFICATION_EXTENSION_INSTALLED,
+                 chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
+                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
+                 chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
+                 chrome::NOTIFICATION_EXTENSION_VIEW_REGISTERED,
+                 chrome::NOTIFICATION_EXTENSION_VIEW_UNREGISTERED};
 
   CHECK(registrar_.IsEmpty());
   for (size_t i = 0; i < arraysize(types); ++i) {
@@ -226,7 +225,7 @@ void DeveloperPrivateEventRouter::Observe(
       event_data.event_type = developer::EVENT_TYPE_UNINSTALLED;
       extension = content::Details<const Extension>(details).ptr();
       break;
-    case chrome::NOTIFICATION_EXTENSION_LOADED:
+    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED:
       event_data.event_type = developer::EVENT_TYPE_LOADED;
       extension = content::Details<const Extension>(details).ptr();
       break;
@@ -258,7 +257,7 @@ void DeveloperPrivateEventRouter::Observe(
 
   event_name = developer_private::OnItemStateChanged::kEventName;
   scoped_ptr<Event> event(new Event(event_name, args.Pass()));
-  ExtensionSystem::Get(profile)->event_router()->BroadcastEvent(event.Pass());
+  EventRouter::Get(profile)->BroadcastEvent(event.Pass());
 }
 
 void DeveloperPrivateEventRouter::OnErrorAdded(const ExtensionError* error) {
@@ -275,9 +274,8 @@ void DeveloperPrivateEventRouter::OnErrorAdded(const ExtensionError* error) {
   scoped_ptr<base::ListValue> args(new base::ListValue);
   args->Append(event_data.ToValue().release());
 
-  ExtensionSystem::Get(profile_)->event_router()->BroadcastEvent(
-      scoped_ptr<Event>(new Event(
-          developer_private::OnItemStateChanged::kEventName, args.Pass())));
+  EventRouter::Get(profile_)->BroadcastEvent(scoped_ptr<Event>(new Event(
+      developer_private::OnItemStateChanged::kEventName, args.Pass())));
 }
 
 void DeveloperPrivateAPI::SetLastUnpackedDirectory(const base::FilePath& path) {
@@ -285,7 +283,7 @@ void DeveloperPrivateAPI::SetLastUnpackedDirectory(const base::FilePath& path) {
 }
 
 void DeveloperPrivateAPI::RegisterNotifications() {
-  ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
+  EventRouter::Get(profile_)->RegisterObserver(
       this, developer_private::OnItemStateChanged::kEventName);
 }
 
@@ -305,8 +303,8 @@ void DeveloperPrivateAPI::OnListenerAdded(
 
 void DeveloperPrivateAPI::OnListenerRemoved(
     const EventListenerInfo& details) {
-  if (!ExtensionSystem::Get(profile_)->event_router()->HasEventListener(
-           developer_private::OnItemStateChanged::kEventName)) {
+  if (!EventRouter::Get(profile_)->HasEventListener(
+          developer_private::OnItemStateChanged::kEventName)) {
     developer_private_event_router_.reset(NULL);
   } else {
     developer_private_event_router_->RemoveExtensionId(details.extension_id);
@@ -315,7 +313,7 @@ void DeveloperPrivateAPI::OnListenerRemoved(
 
 namespace api {
 
-bool DeveloperPrivateAutoUpdateFunction::RunImpl() {
+bool DeveloperPrivateAutoUpdateFunction::RunSync() {
   ExtensionUpdater* updater = GetExtensionUpdater(GetProfile());
   if (updater)
     updater->CheckNow(ExtensionUpdater::CheckParams());
@@ -361,11 +359,12 @@ DeveloperPrivateGetItemsInfoFunction::CreateItemInfo(const Extension& item,
   if (Manifest::IsUnpackedLocation(item.location())) {
     info->path.reset(
         new std::string(base::UTF16ToUTF8(item.path().LossyDisplayName())));
-    // If the ErrorConsole is enabled, get the errors for the extension and add
-    // them to the list. Otherwise, use the install warnings (using both is
-    // redundant).
+    // If the ErrorConsole is enabled and the extension is unpacked, use the
+    // more detailed errors from the ErrorConsole. Otherwise, use the install
+    // warnings (using both is redundant).
     ErrorConsole* error_console = ErrorConsole::Get(GetProfile());
-    if (error_console->enabled()) {
+    if (error_console->IsEnabledForAppsDeveloperTools() &&
+        item.location() == Manifest::UNPACKED) {
       const ErrorList& errors = error_console->GetErrorsForExtension(item.id());
       if (!errors.empty()) {
         for (ErrorList::const_iterator iter = errors.begin();
@@ -387,6 +386,9 @@ DeveloperPrivateGetItemsInfoFunction::CreateItemInfo(const Extension& item,
               info->runtime_errors.push_back(make_linked_ptr(value.release()));
               break;
             }
+            case ExtensionError::NUM_ERROR_TYPES:
+              NOTREACHED();
+              break;
           }
         }
       }
@@ -542,7 +544,6 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
     GetInspectablePagesForExtension(
         const Extension* extension,
         bool extension_is_enabled) {
-
   ItemInspectViewList result;
   // Get the extension process's active views.
   extensions::ProcessManager* process_manager =
@@ -552,7 +553,7 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
       process_manager->GetRenderViewHostsForExtension(extension->id()),
       &result);
 
-  // Get app window views
+  // Get app window views.
   GetAppWindowPagesForExtensionProfile(extension, &result);
 
   // Include a link to start the lazy background page, if applicable.
@@ -594,7 +595,7 @@ ItemInspectViewList DeveloperPrivateGetItemsInfoFunction::
   return result;
 }
 
-bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
+bool DeveloperPrivateGetItemsInfoFunction::RunAsync() {
   scoped_ptr<developer::GetItemsInfo::Params> params(
       developer::GetItemsInfo::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
@@ -651,7 +652,7 @@ bool DeveloperPrivateGetItemsInfoFunction::RunImpl() {
 
 DeveloperPrivateGetItemsInfoFunction::~DeveloperPrivateGetItemsInfoFunction() {}
 
-bool DeveloperPrivateAllowFileAccessFunction::RunImpl() {
+bool DeveloperPrivateAllowFileAccessFunction::RunSync() {
   scoped_ptr<AllowFileAccess::Params> params(
       AllowFileAccess::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -682,7 +683,7 @@ bool DeveloperPrivateAllowFileAccessFunction::RunImpl() {
 DeveloperPrivateAllowFileAccessFunction::
     ~DeveloperPrivateAllowFileAccessFunction() {}
 
-bool DeveloperPrivateAllowIncognitoFunction::RunImpl() {
+bool DeveloperPrivateAllowIncognitoFunction::RunSync() {
   scoped_ptr<AllowIncognito::Params> params(
       AllowIncognito::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -702,8 +703,7 @@ bool DeveloperPrivateAllowIncognitoFunction::RunImpl() {
 DeveloperPrivateAllowIncognitoFunction::
     ~DeveloperPrivateAllowIncognitoFunction() {}
 
-
-bool DeveloperPrivateReloadFunction::RunImpl() {
+bool DeveloperPrivateReloadFunction::RunSync() {
   scoped_ptr<Reload::Params> params(Reload::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -713,7 +713,7 @@ bool DeveloperPrivateReloadFunction::RunImpl() {
   return true;
 }
 
-bool DeveloperPrivateShowPermissionsDialogFunction::RunImpl() {
+bool DeveloperPrivateShowPermissionsDialogFunction::RunSync() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &extension_id_));
   ExtensionService* service = GetProfile()->GetExtensionService();
   CHECK(!extension_id_.empty());
@@ -770,7 +770,7 @@ DeveloperPrivateShowPermissionsDialogFunction::
 
 DeveloperPrivateEnableFunction::DeveloperPrivateEnableFunction() {}
 
-bool DeveloperPrivateEnableFunction::RunImpl() {
+bool DeveloperPrivateEnableFunction::RunSync() {
   scoped_ptr<Enable::Params> params(Enable::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -812,8 +812,7 @@ bool DeveloperPrivateEnableFunction::RunImpl() {
                !requirements_checker_.get()) {
       // Recheck the requirements.
       scoped_refptr<const Extension> extension =
-          service->GetExtensionById(extension_id,
-                                     true );// include_disabled
+          service->GetExtensionById(extension_id, true);
       requirements_checker_.reset(new RequirementsChecker);
       // Released by OnRequirementsChecked.
       AddRef();
@@ -835,7 +834,7 @@ bool DeveloperPrivateEnableFunction::RunImpl() {
 }
 
 void DeveloperPrivateEnableFunction::OnRequirementsChecked(
-    std::string extension_id,
+    const std::string& extension_id,
     std::vector<std::string> requirements_errors) {
   if (requirements_errors.empty()) {
     ExtensionService* service = GetProfile()->GetExtensionService();
@@ -843,15 +842,14 @@ void DeveloperPrivateEnableFunction::OnRequirementsChecked(
   } else {
     ExtensionErrorReporter::GetInstance()->ReportError(
         base::UTF8ToUTF16(JoinString(requirements_errors, ' ')),
-        true,   // Be noisy.
-        NULL);  // Caller expects no response.
+        true);  // Be noisy.
   }
   Release();
 }
 
 DeveloperPrivateEnableFunction::~DeveloperPrivateEnableFunction() {}
 
-bool DeveloperPrivateInspectFunction::RunImpl() {
+bool DeveloperPrivateInspectFunction::RunSync() {
   scoped_ptr<developer::Inspect::Params> params(
       developer::Inspect::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
@@ -891,7 +889,7 @@ bool DeveloperPrivateInspectFunction::RunImpl() {
 
 DeveloperPrivateInspectFunction::~DeveloperPrivateInspectFunction() {}
 
-bool DeveloperPrivateLoadUnpackedFunction::RunImpl() {
+bool DeveloperPrivateLoadUnpackedFunction::RunAsync() {
   base::string16 select_title =
       l10n_util::GetStringUTF16(IDS_EXTENSION_LOAD_FROM_DIRECTORY);
 
@@ -948,7 +946,9 @@ bool DeveloperPrivateChooseEntryFunction::ShowPicker(
   return true;
 }
 
-bool DeveloperPrivateChooseEntryFunction::RunImpl() { return false; }
+bool DeveloperPrivateChooseEntryFunction::RunAsync() {
+  return false;
+}
 
 DeveloperPrivateChooseEntryFunction::~DeveloperPrivateChooseEntryFunction() {}
 
@@ -982,7 +982,7 @@ void DeveloperPrivatePackDirectoryFunction::OnPackFailure(
   Release();
 }
 
-bool DeveloperPrivatePackDirectoryFunction::RunImpl() {
+bool DeveloperPrivatePackDirectoryFunction::RunAsync() {
   scoped_ptr<PackDirectory::Params> params(
       PackDirectory::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -1036,7 +1036,7 @@ DeveloperPrivatePackDirectoryFunction::~DeveloperPrivatePackDirectoryFunction()
 
 DeveloperPrivateLoadUnpackedFunction::~DeveloperPrivateLoadUnpackedFunction() {}
 
-bool DeveloperPrivateLoadDirectoryFunction::RunImpl() {
+bool DeveloperPrivateLoadDirectoryFunction::RunAsync() {
   // TODO(grv) : add unittests.
   std::string directory_url_str;
   std::string filesystem_name;
@@ -1048,7 +1048,6 @@ bool DeveloperPrivateLoadDirectoryFunction::RunImpl() {
 
   // Directory url is non empty only for syncfilesystem.
   if (directory_url_str != "") {
-
     context_ = content::BrowserContext::GetStoragePartition(
         GetProfile(), render_view_host()->GetSiteInstance())
                    ->GetFileSystemContext();
@@ -1087,8 +1086,7 @@ bool DeveloperPrivateLoadDirectoryFunction::RunImpl() {
                    this,
                    project_base_path_));
   } else {
-
-    // Check if the DirecotryEntry is the instace of chrome filesystem..
+    // Check if the DirecotryEntry is the instance of chrome filesystem.
     if (!app_file_handler_util::ValidateFileEntryAndGetPath(filesystem_name,
                                                             filesystem_path,
                                                             render_view_host_,
@@ -1103,7 +1101,6 @@ bool DeveloperPrivateLoadDirectoryFunction::RunImpl() {
 }
 
 void DeveloperPrivateLoadDirectoryFunction::Load() {
-
   ExtensionService* service = GetProfile()->GetExtensionService();
   UnpackedInstaller::Create(service)->Load(project_base_path_);
 
@@ -1184,7 +1181,6 @@ void DeveloperPrivateLoadDirectoryFunction::ReadSyncFileSystemDirectoryCb(
         base::Bind(&DeveloperPrivateLoadDirectoryFunction::SnapshotFileCallback,
             this,
             target_path));
-
   }
 
   if (!has_more) {
@@ -1247,8 +1243,7 @@ DeveloperPrivateLoadDirectoryFunction::DeveloperPrivateLoadDirectoryFunction()
 DeveloperPrivateLoadDirectoryFunction::~DeveloperPrivateLoadDirectoryFunction()
     {}
 
-bool DeveloperPrivateChoosePathFunction::RunImpl() {
-
+bool DeveloperPrivateChoosePathFunction::RunAsync() {
   scoped_ptr<developer::ChoosePath::Params> params(
       developer::ChoosePath::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
@@ -1261,9 +1256,9 @@ bool DeveloperPrivateChoosePathFunction::RunImpl() {
   base::string16 select_title;
 
   int file_type_index = 0;
-  if (params->file_type == developer::FILE_TYPE_LOAD)
+  if (params->file_type == developer::FILE_TYPE_LOAD) {
     select_title = l10n_util::GetStringUTF16(IDS_EXTENSION_LOAD_FROM_DIRECTORY);
-  else if (params->file_type== developer::FILE_TYPE_PEM) {
+  } else if (params->file_type == developer::FILE_TYPE_PEM) {
     select_title = l10n_util::GetStringUTF16(
         IDS_EXTENSION_PACK_DIALOG_SELECT_KEY);
     info.extensions.push_back(std::vector<base::FilePath::StringType>());
@@ -1302,7 +1297,7 @@ void DeveloperPrivateChoosePathFunction::FileSelectionCanceled() {
 
 DeveloperPrivateChoosePathFunction::~DeveloperPrivateChoosePathFunction() {}
 
-bool DeveloperPrivateIsProfileManagedFunction::RunImpl() {
+bool DeveloperPrivateIsProfileManagedFunction::RunSync() {
   SetResult(new base::FundamentalValue(GetProfile()->IsManaged()));
   return true;
 }
@@ -1317,7 +1312,7 @@ DeveloperPrivateRequestFileSourceFunction::
 DeveloperPrivateRequestFileSourceFunction::
     ~DeveloperPrivateRequestFileSourceFunction() {}
 
-bool DeveloperPrivateRequestFileSourceFunction::RunImpl() {
+bool DeveloperPrivateRequestFileSourceFunction::RunAsync() {
   scoped_ptr<developer::RequestFileSource::Params> params(
       developer::RequestFileSource::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
@@ -1341,13 +1336,13 @@ void DeveloperPrivateRequestFileSourceFunction::LaunchCallback(
     const base::DictionaryValue& results) {
   SetResult(results.DeepCopy());
   SendResponse(true);
-  Release();  // Balanced in RunImpl().
+  Release();  // Balanced in RunAsync().
 }
 
 DeveloperPrivateOpenDevToolsFunction::DeveloperPrivateOpenDevToolsFunction() {}
 DeveloperPrivateOpenDevToolsFunction::~DeveloperPrivateOpenDevToolsFunction() {}
 
-bool DeveloperPrivateOpenDevToolsFunction::RunImpl() {
+bool DeveloperPrivateOpenDevToolsFunction::RunAsync() {
   scoped_ptr<developer::OpenDevTools::Params> params(
       developer::OpenDevTools::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
@@ -1363,6 +1358,6 @@ bool DeveloperPrivateOpenDevToolsFunction::RunImpl() {
   return true;
 }
 
-} // namespace api
+}  // namespace api
 
-} // namespace extensions
+}  // namespace extensions

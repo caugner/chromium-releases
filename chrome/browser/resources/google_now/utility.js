@@ -193,7 +193,9 @@ var errorReported = false;
  */
 function reportError(error) {
   var message = 'Critical error:\n' + error.stack;
-  console.error(message);
+  if (isInDebugMode())
+    console.error(message);
+
   if (!errorReported) {
     errorReported = true;
     chrome.metricsPrivate.getIsCrashReportingEnabled(function(isEnabled) {
@@ -570,13 +572,20 @@ function registerPromiseAdapter() {
       // We will still forward this call on to let the promise system
       // handle further processing, but since this promise is in an ending state
       // we can be confident it will never be called back.
-      if (isCallable(maybeCallback) && sameTracker.callbacks) {
+      if (isCallable(maybeCallback) &&
+          !maybeCallback.wrappedByPromiseTracker &&
+          sameTracker.callbacks) {
         var handler = wrapper.wrapCallback(function() {
           if (sameTracker.callbacks) {
             clearTracker(otherTracker);
             return maybeCallback.apply(null, arguments);
           }
         }, false);
+        // Harmony promises' catch calls will call into handleThen,
+        // double-wrapping all catch callbacks. Regular promise catch calls do
+        // not call into handleThen. Setting an attribute on the wrapped
+        // function is compatible with both promise implementations.
+        handler.wrappedByPromiseTracker = true;
         sameTracker.callbacks.push(handler);
         return handler;
       } else {
@@ -609,10 +618,13 @@ function registerPromiseAdapter() {
       return originalCatch.call(promise, rejectionHandler);
     }
 
-    // Seeds this promise with at least one 'then' and 'catch' so we always
-    // receive a callback to update the task manager on the state of callbacks.
-    handleThen(function() {});
-    handleCatch(function() {});
+    // Register at least one resolve and reject callback so we always receive
+    // a callback to update the task manager and clear the callbacks
+    // that will never occur.
+    //
+    // The then form is used to avoid reentrancy by handleCatch,
+    // which ends up calling handleThen.
+    handleThen(function() {}, function() {});
 
     return {
       handleThen: handleThen,
@@ -867,21 +879,19 @@ function buildAttemptManager(
   }
 
   /**
-   * Schedules next attempt.
-   * @param {number=} opt_previousDelaySeconds Previous delay in a sequence of
-   *     retry attempts, if specified. Not specified for scheduling first retry
-   *     in the exponential sequence.
+   * Schedules the alarm with a random factor to reduce the chance that all
+   * clients will fire their timers at the same time.
+   * @param {number} durationSeconds Number of seconds before firing the alarm.
    */
-  function scheduleNextAttempt(opt_previousDelaySeconds) {
-    var base = opt_previousDelaySeconds ? opt_previousDelaySeconds * 2 :
-                                          initialDelaySeconds;
-    var newRetryDelaySeconds =
-        Math.min(base * (1 + 0.2 * Math.random()), maximumDelaySeconds);
+  function scheduleAlarm(durationSeconds) {
+    var randomizedRetryDuration =
+        Math.min(durationSeconds * (1 + 0.2 * Math.random()),
+                 maximumDelaySeconds);
 
-    createAlarm(newRetryDelaySeconds);
+    createAlarm(randomizedRetryDuration);
 
     var items = {};
-    items[currentDelayStorageKey] = newRetryDelaySeconds;
+    items[currentDelayStorageKey] = randomizedRetryDuration;
     chrome.storage.local.set(items);
   }
 
@@ -896,7 +906,7 @@ function buildAttemptManager(
       createAlarm(opt_firstDelaySeconds);
       chrome.storage.local.remove(currentDelayStorageKey);
     } else {
-      scheduleNextAttempt();
+      scheduleAlarm(initialDelaySeconds);
     }
   }
 
@@ -909,21 +919,24 @@ function buildAttemptManager(
   }
 
   /**
-   * Plans for the next attempt.
-   * @param {function()} callback Completion callback. It will be invoked after
-   *     the planning is done.
+   * Schedules an exponential backoff retry.
+   * @return {Promise} A promise to schedule the retry.
    */
-  function planForNext(callback) {
+  function scheduleRetry() {
     var request = {};
     request[currentDelayStorageKey] = undefined;
-    fillFromChromeLocalStorage(request, PromiseRejection.ALLOW)
+    return fillFromChromeLocalStorage(request, PromiseRejection.ALLOW)
         .catch(function() {
           request[currentDelayStorageKey] = maximumDelaySeconds;
           return Promise.resolve(request);
-        }).then(function(items) {
-          console.log('planForNext-get-storage ' + JSON.stringify(items));
-          scheduleNextAttempt(items[currentDelayStorageKey]);
-          callback();
+        })
+        .then(function(items) {
+          console.log('scheduleRetry-get-storage ' + JSON.stringify(items));
+          var retrySeconds = initialDelaySeconds;
+          if (items[currentDelayStorageKey]) {
+            retrySeconds = items[currentDelayStorageKey] * 2;
+          }
+          scheduleAlarm(retrySeconds);
         });
   }
 
@@ -937,7 +950,7 @@ function buildAttemptManager(
 
   return {
     start: start,
-    planForNext: planForNext,
+    scheduleRetry: scheduleRetry,
     stop: stop,
     isRunning: isRunning
   };

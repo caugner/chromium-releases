@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
+#include "media/base/audio_bus.h"
 #include "media/cast/cast_config.h"
 #include "media/cast/cast_environment.h"
 
@@ -25,30 +26,34 @@ namespace transport {
 class PacketSender;
 }
 
-// Callback in which the raw audio frame and play-out time will be returned
-// once decoding is complete.
-typedef base::Callback<void(scoped_ptr<PcmAudioFrame>, const base::TimeTicks&)>
-    AudioFrameDecodedCallback;
+// The following callbacks are used to deliver decoded audio/video frame data,
+// the frame's corresponding play-out time, and a continuity flag.
+// |is_continuous| will be false to indicate the loss of data due to a loss of
+// frames (or decoding errors).  This allows the client to take steps to smooth
+// discontinuities for playback.  Note: A NULL pointer can be returned when data
+// is not available (e.g., bad/missing packet).
+typedef base::Callback<void(scoped_ptr<AudioBus> audio_bus,
+                            const base::TimeTicks& playout_time,
+                            bool is_continuous)> AudioFrameDecodedCallback;
+// TODO(miu): |video_frame| includes a timestamp, so use that instead.
+typedef base::Callback<void(const scoped_refptr<media::VideoFrame>& video_frame,
+                            const base::TimeTicks& playout_time,
+                            bool is_continuous)> VideoFrameDecodedCallback;
 
-// Callback in which the encoded audio frame and play-out time will be returned.
+// The following callbacks deliver still-encoded audio/video frame data, along
+// with the frame's corresponding play-out time.  The client should examine the
+// EncodedXXXFrame::frame_id field to determine whether any frames have been
+// dropped (i.e., frame_id should be incrementing by one each time).  Note: A
+// NULL pointer can be returned on error.
 typedef base::Callback<void(scoped_ptr<transport::EncodedAudioFrame>,
                             const base::TimeTicks&)> AudioFrameEncodedCallback;
-
-// Callback in which the raw frame and render time will be returned once
-// decoding is complete.
-typedef base::Callback<void(const scoped_refptr<media::VideoFrame>& video_frame,
-                            const base::TimeTicks&)> VideoFrameDecodedCallback;
-
-// Callback in which the encoded video frame and render time will be returned.
 typedef base::Callback<void(scoped_ptr<transport::EncodedVideoFrame>,
                             const base::TimeTicks&)> VideoFrameEncodedCallback;
 
 // This Class is thread safe.
 class FrameReceiver : public base::RefCountedThreadSafe<FrameReceiver> {
  public:
-  virtual void GetRawAudioFrame(int number_of_10ms_blocks,
-                                int desired_frequency,
-                                const AudioFrameDecodedCallback& callback) = 0;
+  virtual void GetRawAudioFrame(const AudioFrameDecodedCallback& callback) = 0;
 
   virtual void GetCodedAudioFrame(
       const AudioFrameEncodedCallback& callback) = 0;

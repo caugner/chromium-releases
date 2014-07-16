@@ -15,17 +15,15 @@
 #include "content/public/browser/web_ui.h"
 #include "sync/internal_api/public/events/protocol_event.h"
 #include "sync/internal_api/public/util/weak_handle.h"
-#include "sync/js/js_arg_list.h"
 #include "sync/js/js_event_details.h"
 
-using syncer::JsArgList;
 using syncer::JsEventDetails;
-using syncer::JsReplyHandler;
 using syncer::ModelTypeSet;
 using syncer::WeakHandle;
 
 SyncInternalsMessageHandler::SyncInternalsMessageHandler()
-    : weak_ptr_factory_(this) {}
+    : is_registered_(false),
+      weak_ptr_factory_(this) {}
 
 SyncInternalsMessageHandler::~SyncInternalsMessageHandler() {
   if (js_controller_)
@@ -39,16 +37,12 @@ SyncInternalsMessageHandler::~SyncInternalsMessageHandler() {
 }
 
 void SyncInternalsMessageHandler::RegisterMessages() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  // Register for ProfileSyncService events.
-  ProfileSyncService* service = GetProfileSyncService();
-  if (service) {
-    service->AddObserver(this);
-    service->AddProtocolEventObserver(this);
-    js_controller_ = service->GetJsController();
-    js_controller_->AddJsEventHandler(this);
-  }
+  web_ui()->RegisterMessageCallback(
+      "registerForEvents",
+      base::Bind(&SyncInternalsMessageHandler::HandleRegisterForEvents,
+                 base::Unretained(this)));
 
   web_ui()->RegisterMessageCallback(
       "requestUpdatedAboutInfo",
@@ -60,8 +54,27 @@ void SyncInternalsMessageHandler::RegisterMessages() {
       base::Bind(&SyncInternalsMessageHandler::HandleRequestListOfTypes,
                  base::Unretained(this)));
 
-  RegisterJsControllerCallback("getAllNodes");
-  RegisterJsControllerCallback("getClientServerTraffic");
+  web_ui()->RegisterMessageCallback(
+      "getAllNodes",
+      base::Bind(&SyncInternalsMessageHandler::HandleGetAllNodes,
+                 base::Unretained(this)));
+}
+
+void SyncInternalsMessageHandler::HandleRegisterForEvents(
+    const base::ListValue* args) {
+  DCHECK(args->empty());
+
+  // is_registered_ flag protects us from double-registering.  This could
+  // happen on a page refresh, where the JavaScript gets re-run but the
+  // message handler remains unchanged.
+  ProfileSyncService* service = GetProfileSyncService();
+  if (service && !is_registered_) {
+    service->AddObserver(this);
+    service->AddProtocolEventObserver(this);
+    js_controller_ = service->GetJsController();
+    js_controller_->AddJsEventHandler(this);
+    is_registered_ = true;
+  }
 }
 
 void SyncInternalsMessageHandler::HandleRequestUpdatedAboutInfo(
@@ -87,14 +100,27 @@ void SyncInternalsMessageHandler::HandleRequestListOfTypes(
       event_details);
 }
 
-void SyncInternalsMessageHandler::HandleJsReply(
-    const std::string& name, const JsArgList& args) {
-  DVLOG(1) << "Handling reply for " << name << " message"
-           << " with args " << args.ToString();
-  const std::string& reply_handler = "chrome.sync." + name + ".handleReply";
-  std::vector<const base::Value*> arg_list(args.Get().begin(),
-                                           args.Get().end());
-  web_ui()->CallJavascriptFunction(reply_handler, arg_list);
+void SyncInternalsMessageHandler::HandleGetAllNodes(
+    const base::ListValue* args) {
+  DCHECK_EQ(1U, args->GetSize());
+  int request_id = 0;
+  bool success = args->GetInteger(0, &request_id);
+  DCHECK(success);
+
+  ProfileSyncService* service = GetProfileSyncService();
+  if (service) {
+    service->GetAllNodes(
+        base::Bind(&SyncInternalsMessageHandler::OnReceivedAllNodes,
+                   weak_ptr_factory_.GetWeakPtr(), request_id));
+  }
+}
+
+void SyncInternalsMessageHandler::OnReceivedAllNodes(
+    int request_id,
+    scoped_ptr<base::ListValue> nodes) {
+  base::FundamentalValue id(request_id);
+  web_ui()->CallJavascriptFunction("chrome.sync.getAllNodesCallback",
+                                   id, *nodes);
 }
 
 void SyncInternalsMessageHandler::OnStateChanged() {
@@ -121,15 +147,6 @@ void SyncInternalsMessageHandler::HandleJsEvent(
                                    details.Get());
 }
 
-void SyncInternalsMessageHandler::RegisterJsControllerCallback(
-    const std::string& name) {
-  web_ui()->RegisterMessageCallback(
-      name,
-      base::Bind(&SyncInternalsMessageHandler::ForwardToJsController,
-                 base::Unretained(this),
-                 name));
-}
-
 void SyncInternalsMessageHandler::SendAboutInfo() {
   scoped_ptr<base::DictionaryValue> value =
       sync_ui_util::ConstructAboutInformation(GetProfileSyncService());
@@ -137,20 +154,6 @@ void SyncInternalsMessageHandler::SendAboutInfo() {
       "chrome.sync.dispatchEvent",
       base::StringValue("onAboutInfoUpdated"),
       *value);
-}
-
-void SyncInternalsMessageHandler::ForwardToJsController(
-    const std::string& name,
-    const base::ListValue* args) {
-  if (js_controller_) {
-    scoped_ptr<base::ListValue> args_copy(args->DeepCopy());
-    JsArgList js_arg_list(args_copy.get());
-    js_controller_->ProcessJsMessage(
-        name, js_arg_list,
-        MakeWeakHandle(weak_ptr_factory_.GetWeakPtr()));
-  } else {
-    DLOG(WARNING) << "No sync service; dropping message " << name;
-  }
 }
 
 // Gets the ProfileSyncService of the underlying original profile.

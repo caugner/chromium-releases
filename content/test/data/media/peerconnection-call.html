@@ -63,7 +63,7 @@
     waitForVideo('remote-view-2');
   }
 
-  // Test that we can setup call with an audio and video track and check that 
+  // Test that we can setup call with an audio and video track and check that
   // the video resolution is as expected.
   function callAndExpectResolution(constraints,
                                    expected_width,
@@ -96,8 +96,9 @@
   }
 
   // First makes a call between pc1 and pc2, and then makes a call between pc3
-  // and pc4 where the remote streams from pc1 and pc2 will be used as the local
-  // streams of pc3 and pc4.
+  // and pc4. The stream sent from pc3 to pc4 is the stream received on pc1.
+  // The stream sent from pc4 to pc3 is cloned from the stream received on pc2
+  // to test that cloning of remote video tracks works as intended.
   function callAndForwardRemoteStream(constraints) {
     createConnections(null);
     navigator.webkitGetUserMedia(constraints,
@@ -127,7 +128,7 @@
       thirdConnection.addStream(gRemoteStreams['remote-view-1']);
 
       fourthConnection = createConnection(null, 'remote-view-4');
-      fourthConnection.addStream(gRemoteStreams['remote-view-2']);
+      fourthConnection.addStream(gRemoteStreams['remote-view-2'].clone());
 
       negotiateBetween(thirdConnection, fourthConnection);
 
@@ -300,7 +301,7 @@
     remoteAudioTrack.enabled = enabled;
   }
 
-  function callAndEnsureAudioIsPlaying() {
+  function callAndEnsureAudioIsPlaying(beLenient) {
     createConnections(null);
     navigator.webkitGetUserMedia({audio: true, video: true},
       addStreamToBothConnectionsAndNegotiate, printGetUserMediaError);
@@ -308,9 +309,9 @@
     // Wait until we have gathered samples and can conclude if audio is playing.
     addExpectedEvent();
     var onCallEstablished = function() {
-      gatherAudioLevelSamples(gSecondConnection, 300, 100,
-                              function(samples) {
-        verifyAudioIsPlaying(samples);
+      // Gather 50 samples per second for 2 seconds.
+      gatherAudioLevelSamples(gSecondConnection, 100, 50, function(samples) {
+        verifyAudioIsPlaying(samples, beLenient);
         eventOccured();
       });
 
@@ -321,15 +322,15 @@
     detectVideoPlaying('remote-view-2', onCallEstablished);
   }
 
-  function callAndEnsureAudioTrackMutingWorks() {
-    callAndEnsureAudioIsPlaying();
+  function callAndEnsureAudioTrackMutingWorks(beLenient) {
+    callAndEnsureAudioIsPlaying(beLenient);
     setAllEventsOccuredHandler(function() {
       // Call is up, now mute the track and check everything goes silent (give
       // it a small delay though, we don't expect it to happen instantly).
       enableRemoteAudio(gSecondConnection, false);
 
       setTimeout(function() {
-        gatherAudioLevelSamples(gSecondConnection, 200, 100, function(samples) {
+        gatherAudioLevelSamples(gSecondConnection, 100, 50, function(samples) {
           verifyIsSilent(samples);
           reportTestSuccess();
         });
@@ -337,8 +338,8 @@
     });
   }
 
-  function callAndEnsureAudioTrackUnmutingWorks() {
-    callAndEnsureAudioIsPlaying();
+  function callAndEnsureAudioTrackUnmutingWorks(beLenient) {
+    callAndEnsureAudioIsPlaying(beLenient);
     setAllEventsOccuredHandler(function() {
       // Mute, wait a while, unmute, verify audio gets back up.
       enableRemoteAudio(gSecondConnection, false);
@@ -348,11 +349,13 @@
       }, 500);
 
       setTimeout(function() {
-        gatherAudioLevelSamples(gSecondConnection, 200, 100, function(samples) {
-          verifyAudioIsPlaying(samples);
+        // Sample for four seconds here; it can take a bit of time for audio to
+        // get back up after the unmute.
+        gatherAudioLevelSamples(gSecondConnection, 200, 50, function(samples) {
+          verifyAudioIsPlaying(samples, beLenient);
           reportTestSuccess();
         });
-      }, 1000);
+      }, 1500);
     });
   }
 

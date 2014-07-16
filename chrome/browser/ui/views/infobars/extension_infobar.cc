@@ -10,11 +10,11 @@
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_resource.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/animation/slide_animation.h"
@@ -23,17 +23,17 @@
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/image_view.h"
-#include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/widget/widget.h"
 
 
 // ExtensionInfoBarDelegate ----------------------------------------------------
 
 // static
-scoped_ptr<InfoBar> ExtensionInfoBarDelegate::CreateInfoBar(
+scoped_ptr<infobars::InfoBar> ExtensionInfoBarDelegate::CreateInfoBar(
     scoped_ptr<ExtensionInfoBarDelegate> delegate) {
   Browser* browser = delegate->browser_;
-  return scoped_ptr<InfoBar>(new ExtensionInfoBar(delegate.Pass(), browser));
+  return scoped_ptr<infobars::InfoBar>(
+      new ExtensionInfoBar(delegate.Pass(), browser));
 }
 
 
@@ -84,7 +84,7 @@ class MenuImageSource: public gfx::CanvasImageSource {
 ExtensionInfoBar::ExtensionInfoBar(
     scoped_ptr<ExtensionInfoBarDelegate> delegate,
     Browser* browser)
-    : InfoBarView(delegate.PassAs<InfoBarDelegate>()),
+    : InfoBarView(delegate.PassAs<infobars::InfoBarDelegate>()),
       browser_(browser),
       infobar_icon_(NULL),
       icon_as_menu_(NULL),
@@ -185,9 +185,8 @@ void ExtensionInfoBar::OnMenuButtonClicked(views::View* source,
   scoped_refptr<ExtensionContextMenuModel> options_menu_contents =
       new ExtensionContextMenuModel(extension, browser_);
   DCHECK_EQ(icon_as_menu_, source);
-  RunMenuAt(options_menu_contents.get(),
-            icon_as_menu_,
-            views::MenuItemView::TOPLEFT);
+  RunMenuAt(
+      options_menu_contents.get(), icon_as_menu_, views::MENU_ANCHOR_TOPLEFT);
 }
 
 void ExtensionInfoBar::OnImageLoaded(const gfx::Image& image) {

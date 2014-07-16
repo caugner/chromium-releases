@@ -43,10 +43,11 @@
 #include "ui/gfx/size.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/linux_ui/window_button_order_observer.h"
 
 #if defined(USE_GCONF)
-#include "chrome/browser/ui/libgtk2ui/gconf_titlebar_listener.h"
+#include "chrome/browser/ui/libgtk2ui/gconf_listener.h"
 #endif
 
 // A minimized port of GtkThemeService into something that can provide colors
@@ -318,7 +319,7 @@ color_utils::HSL GetDefaultTint(int id) {
 
 namespace libgtk2ui {
 
-Gtk2UI::Gtk2UI() {
+Gtk2UI::Gtk2UI() : middle_click_action_(MIDDLE_CLICK_ACTION_LOWER) {
   GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
 }
 
@@ -341,7 +342,6 @@ void Gtk2UI::Initialize() {
                     G_CALLBACK(&OnStyleSetThunk), this);
 
   LoadGtkValues();
-  SetXDGIconTheme();
 
   printing::PrintingContextLinux::SetCreatePrintDialogFunction(
       &PrintDialogGtk2::CreatePrintDialog);
@@ -350,7 +350,7 @@ void Gtk2UI::Initialize() {
 
 #if defined(USE_GCONF)
   // We must build this after GTK gets initialized.
-  titlebar_listener_.reset(new GConfTitlebarListener(this));
+  gconf_listener_.reset(new GConfListener(this));
 #endif  // defined(USE_GCONF)
 
   indicators_count = 0;
@@ -450,8 +450,19 @@ double Gtk2UI::GetCursorBlinkInterval() const {
   return cursor_blink ? (cursor_blink_time / kGtkCursorBlinkCycleFactor) : 0.0;
 }
 
-ui::NativeTheme* Gtk2UI::GetNativeTheme() const {
+ui::NativeTheme* Gtk2UI::GetNativeTheme(aura::Window* window) const {
+  ui::NativeTheme* native_theme_override = NULL;
+  if (!native_theme_overrider_.is_null())
+    native_theme_override = native_theme_overrider_.Run(window);
+
+  if (native_theme_override)
+    return native_theme_override;
+
   return NativeThemeGtk2::instance();
+}
+
+void Gtk2UI::SetNativeThemeOverride(const NativeThemeGetter& callback) {
+  native_theme_overrider_ = callback;
 }
 
 bool Gtk2UI::GetDefaultUsesSystemTheme() const {
@@ -535,6 +546,9 @@ gfx::Image Gtk2UI::GetIconForContentType(
 scoped_ptr<views::Border> Gtk2UI::CreateNativeBorder(
     views::LabelButton* owning_button,
     scoped_ptr<views::Border> border) {
+  if (owning_button->GetNativeTheme() != NativeThemeGtk2::instance())
+    return border.Pass();
+
   return scoped_ptr<views::Border>(
       new Gtk2Border(this, owning_button, border.Pass()));
 }
@@ -563,6 +577,10 @@ void Gtk2UI::SetWindowButtonOrdering(
   FOR_EACH_OBSERVER(views::WindowButtonOrderObserver, observer_list_,
                     OnWindowButtonOrderingChange(leading_buttons_,
                                                  trailing_buttons_));
+}
+
+void Gtk2UI::SetNonClientMiddleClickAction(NonClientMiddleClickAction action) {
+  middle_click_action_ = action;
 }
 
 scoped_ptr<ui::LinuxInputMethodContext> Gtk2UI::CreateInputMethodContext(
@@ -660,18 +678,13 @@ ui::SelectFileDialog* Gtk2UI::CreateSelectFileDialog(
   return SelectFileDialogImpl::Create(listener, policy);
 }
 
-void Gtk2UI::AddNativeThemeChangeObserver(
-    views::NativeThemeChangeObserver* observer) {
-  theme_change_observers_.AddObserver(observer);
-}
-
-void Gtk2UI::RemoveNativeThemeChangeObserver(
-    views::NativeThemeChangeObserver* observer) {
-  theme_change_observers_.RemoveObserver(observer);
-}
-
 bool Gtk2UI::UnityIsRunning() {
   return unity::IsRunning();
+}
+
+views::LinuxUI::NonClientMiddleClickAction
+Gtk2UI::GetNonClientMiddleClickAction() {
+  return middle_click_action_;
 }
 
 void Gtk2UI::NotifyWindowManagerStartupComplete() {
@@ -681,7 +694,7 @@ void Gtk2UI::NotifyWindowManagerStartupComplete() {
 }
 
 bool Gtk2UI::MatchEvent(const ui::Event& event,
-                        std::vector<ui::TextEditCommandX11>* commands) {
+                        std::vector<ui::TextEditCommandAuraLinux>* commands) {
   // Ensure that we have a keyboard handler.
   if (!key_bindings_handler_)
     key_bindings_handler_.reset(new Gtk2KeyBindingsHandler);
@@ -797,15 +810,6 @@ void Gtk2UI::GetScrollbarColors(GdkColor* thumb_active_color,
     *track_color = *theme_trough_color;
     gdk_color_free(theme_trough_color);
   }
-}
-
-void Gtk2UI::SetXDGIconTheme() {
-  gchar* gtk_theme_name;
-  g_object_get(gtk_settings_get_default(),
-               "gtk-icon-theme-name",
-               &gtk_theme_name, NULL);
-  base::nix::SetIconThemeName(gtk_theme_name);
-  g_free(gtk_theme_name);
 }
 
 void Gtk2UI::LoadGtkValues() {
@@ -927,9 +931,6 @@ void Gtk2UI::LoadGtkValues() {
       GdkColorToSkColor(entry_style->base[GTK_STATE_ACTIVE]);
   inactive_selection_fg_color_ =
       GdkColorToSkColor(entry_style->text[GTK_STATE_ACTIVE]);
-
-  // Update the insets that we hand to Gtk2Border.
-  UpdateButtonInsets();
 }
 
 GdkColor Gtk2UI::BuildFrameColors(GtkStyle* frame_style) {
@@ -1343,34 +1344,6 @@ SkBitmap Gtk2UI::DrawGtkButtonBorder(int gtk_state,
   return border;
 }
 
-gfx::Insets Gtk2UI::GetButtonInsets() const {
-  return button_insets_;
-}
-
-void Gtk2UI::UpdateButtonInsets() {
-  GtkWidget* window = gtk_offscreen_window_new();
-  GtkWidget* button = gtk_button_new();
-  gtk_container_add(GTK_CONTAINER(window), button);
-
-  GtkBorder* border = NULL;
-  gtk_widget_style_get(GTK_WIDGET(button),
-                       "default-border",
-                       &border,
-                       NULL);
-
-  gfx::Insets insets;
-  if (border) {
-    button_insets_ = gfx::Insets(border->top, border->left,
-                                 border->bottom, border->right);
-    gtk_border_free(border);
-  } else {
-    // Defined in gtkbutton.c:
-    button_insets_ = gfx::Insets(1, 1, 1, 1);
-  }
-
-  gtk_widget_destroy(window);
-}
-
 void Gtk2UI::ClearAllThemeData() {
   gtk_images_.clear();
 }
@@ -1378,9 +1351,7 @@ void Gtk2UI::ClearAllThemeData() {
 void Gtk2UI::OnStyleSet(GtkWidget* widget, GtkStyle* previous_style) {
   ClearAllThemeData();
   LoadGtkValues();
-
-  FOR_EACH_OBSERVER(views::NativeThemeChangeObserver, theme_change_observers_,
-                    OnNativeThemeChanged());
+  NativeThemeGtk2::instance()->NotifyObservers();
 }
 
 }  // namespace libgtk2ui

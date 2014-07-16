@@ -11,7 +11,6 @@
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -33,6 +32,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/infobars/core/infobar.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
@@ -131,11 +131,12 @@ base::string16 ErrorInfoBarDelegate::GetLinkText() const {
 }
 
 bool ErrorInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
-  web_contents()->OpenURL(content::OpenURLParams(
-      GURL("http://support.google.com/chrome_webstore/?p=crx_warning"),
-      content::Referrer(),
-      (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-      content::PAGE_TRANSITION_LINK, false));
+  InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
+      content::OpenURLParams(
+          GURL("http://support.google.com/chrome_webstore/?p=crx_warning"),
+          content::Referrer(),
+          (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+          content::PAGE_TRANSITION_LINK, false));
   return false;
 }
 
@@ -276,7 +277,7 @@ void ExtensionInstallUIDefault::OnInstallSuccess(const Extension* extension,
 
 void ExtensionInstallUIDefault::OnInstallFailure(
     const extensions::CrxInstallerError& error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (disable_failure_ui_for_tests() || skip_post_install_ui())
     return;
 

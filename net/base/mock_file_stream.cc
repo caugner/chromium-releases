@@ -11,18 +11,9 @@ namespace net {
 
 namespace testing {
 
-MockFileStream::MockFileStream(net::NetLog* net_log)
-    : net::FileStream(net_log),
-      forced_error_(net::OK),
-      async_error_(false),
-      throttled_(false),
-      weak_factory_(this) {
-}
-
-MockFileStream::MockFileStream(base::PlatformFile file,
-                               int flags,
-                               net::NetLog* net_log)
-    : net::FileStream(file, flags, net_log),
+MockFileStream::MockFileStream(
+    const scoped_refptr<base::TaskRunner>& task_runner)
+    : net::FileStream(task_runner),
       forced_error_(net::OK),
       async_error_(false),
       throttled_(false),
@@ -30,11 +21,9 @@ MockFileStream::MockFileStream(base::PlatformFile file,
 }
 
 MockFileStream::MockFileStream(
-    base::PlatformFile file,
-    int flags,
-    net::NetLog* net_log,
+    base::File file,
     const scoped_refptr<base::TaskRunner>& task_runner)
-    : net::FileStream(file, flags, net_log, task_runner),
+    : net::FileStream(file.Pass(), task_runner),
       forced_error_(net::OK),
       async_error_(false),
       throttled_(false),
@@ -42,11 +31,6 @@ MockFileStream::MockFileStream(
 }
 
 MockFileStream::~MockFileStream() {
-}
-
-int MockFileStream::OpenSync(const base::FilePath& path, int open_flags) {
-  path_ = path;
-  return ReturnError(FileStream::OpenSync(path, open_flags));
 }
 
 int MockFileStream::Seek(Whence whence, int64 offset,
@@ -57,14 +41,6 @@ int MockFileStream::Seek(Whence whence, int64 offset,
   if (forced_error_ == net::OK)
     return FileStream::Seek(whence, offset, wrapped_callback);
   return ErrorCallback64(wrapped_callback);
-}
-
-int64 MockFileStream::SeekSync(Whence whence, int64 offset) {
-  return ReturnError64(FileStream::SeekSync(whence, offset));
-}
-
-int64 MockFileStream::Available() {
-  return ReturnError64(FileStream::Available());
 }
 
 int MockFileStream::Read(IOBuffer* buf,
@@ -78,14 +54,6 @@ int MockFileStream::Read(IOBuffer* buf,
   return ErrorCallback(wrapped_callback);
 }
 
-int MockFileStream::ReadSync(char* buf, int buf_len) {
-  return ReturnError(FileStream::ReadSync(buf, buf_len));
-}
-
-int MockFileStream::ReadUntilComplete(char *buf, int buf_len) {
-  return ReturnError(FileStream::ReadUntilComplete(buf, buf_len));
-}
-
 int MockFileStream::Write(IOBuffer* buf,
                           int buf_len,
                           const CompletionCallback& callback) {
@@ -97,14 +65,6 @@ int MockFileStream::Write(IOBuffer* buf,
   return ErrorCallback(wrapped_callback);
 }
 
-int MockFileStream::WriteSync(const char* buf, int buf_len) {
-  return ReturnError(FileStream::WriteSync(buf, buf_len));
-}
-
-int64 MockFileStream::Truncate(int64 bytes) {
-  return ReturnError64(FileStream::Truncate(bytes));
-}
-
 int MockFileStream::Flush(const CompletionCallback& callback) {
   CompletionCallback wrapped_callback = base::Bind(&MockFileStream::DoCallback,
                                                    weak_factory_.GetWeakPtr(),
@@ -112,10 +72,6 @@ int MockFileStream::Flush(const CompletionCallback& callback) {
   if (forced_error_ == net::OK)
     return FileStream::Flush(wrapped_callback);
   return ErrorCallback(wrapped_callback);
-}
-
-int MockFileStream::FlushSync() {
-  return ReturnError(FileStream::FlushSync());
 }
 
 void MockFileStream::ThrottleCallbacks() {

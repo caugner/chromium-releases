@@ -86,7 +86,7 @@ const char kFileTransferStateCompleted[] = "completed";
 const char kFileTransferStateFailed[] = "failed";
 
 // Frequency of sending onFileTransferUpdated.
-const int64 kFileTransferEventFrequencyInMilliseconds = 1000;
+const int64 kProgressEventFrequencyInMilliseconds = 1000;
 
 // Utility function to check if |job_info| is a file uploading job.
 bool IsUploadJob(drive::JobType type) {
@@ -172,9 +172,8 @@ bool IsRecoveryToolRunning(Profile* profile) {
 void BroadcastEvent(Profile* profile,
                     const std::string& event_name,
                     scoped_ptr<base::ListValue> event_args) {
-  extensions::ExtensionSystem::Get(profile)->event_router()->
-      BroadcastEvent(make_scoped_ptr(
-          new extensions::Event(event_name, event_args.Pass())));
+  extensions::EventRouter::Get(profile)->BroadcastEvent(
+      make_scoped_ptr(new extensions::Event(event_name, event_args.Pass())));
 }
 
 file_browser_private::MountCompletedStatus
@@ -312,6 +311,23 @@ void GrantAccessForAddedProfileToRunningInstance(Profile* added_profile,
 
   const int id = extension_host->render_process_host()->GetID();
   file_manager::util::SetupProfileFileAccessPermissions(id, added_profile);
+}
+
+// Checks if we should send a progress event or not according to the
+// |last_time| of sending an event. If |always| is true, the function always
+// returns true. If the function returns true, the function also updates
+// |last_time|.
+bool ShouldSendProgressEvent(bool always, base::Time* last_time) {
+  const base::Time now = base::Time::Now();
+  const int64 delta = (now - *last_time).InMilliseconds();
+  // delta < 0 may rarely happen if system clock is synced and rewinded.
+  // To be conservative, we don't skip in that case.
+  if (!always && 0 <= delta && delta < kProgressEventFrequencyInMilliseconds) {
+    return false;
+  } else {
+    *last_time = now;
+    return true;
+  }
 }
 
 }  // namespace
@@ -529,6 +545,12 @@ void EventRouter::OnCopyProgress(
   if (type == fileapi::FileSystemOperation::PROGRESS)
     status.size.reset(new double(size));
 
+  // Should not skip events other than TYPE_PROGRESS.
+  const bool always =
+      status.type != file_browser_private::COPY_PROGRESS_STATUS_TYPE_PROGRESS;
+  if (!ShouldSendProgressEvent(always, &last_copy_progress_event_))
+    return;
+
   BroadcastEvent(
       profile_,
       file_browser_private::OnCopyProgress::kEventName,
@@ -536,8 +558,7 @@ void EventRouter::OnCopyProgress(
 }
 
 void EventRouter::DefaultNetworkChanged(const chromeos::NetworkState* network) {
-  if (!profile_ ||
-      !extensions::ExtensionSystem::Get(profile_)->event_router()) {
+  if (!profile_ || !extensions::EventRouter::Get(profile_)) {
     NOTREACHED();
     return;
   }
@@ -549,8 +570,7 @@ void EventRouter::DefaultNetworkChanged(const chromeos::NetworkState* network) {
 }
 
 void EventRouter::OnFileManagerPrefsChanged() {
-  if (!profile_ ||
-      !extensions::ExtensionSystem::Get(profile_)->event_router()) {
+  if (!profile_ || !extensions::EventRouter::Get(profile_)) {
     NOTREACHED();
     return;
   }
@@ -606,18 +626,11 @@ void EventRouter::OnJobDone(const drive::JobInfo& job_info,
 void EventRouter::SendDriveFileTransferEvent(bool always) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  const base::Time now = base::Time::Now();
-
   // When |always| flag is not set, we don't send the event until certain
   // amount of time passes after the previous one. This is to avoid
   // flooding the IPC between extensions by many onFileTransferUpdated events.
-  if (!always) {
-    const int64 delta = (now - last_file_transfer_event_).InMilliseconds();
-    // delta < 0 may rarely happen if system clock is synced and rewinded.
-    // To be conservative, we don't skip in that case.
-    if (0 <= delta && delta < kFileTransferEventFrequencyInMilliseconds)
-      return;
-  }
+  if (!ShouldSendProgressEvent(always, &last_file_transfer_event_))
+    return;
 
   // Convert the current |drive_jobs_| to IDL type.
   std::vector<linked_ptr<file_browser_private::FileTransferStatus> >
@@ -637,7 +650,6 @@ void EventRouter::SendDriveFileTransferEvent(bool always) {
       profile_,
       file_browser_private::OnFileTransfersUpdated::kEventName,
       file_browser_private::OnFileTransfersUpdated::Create(status_list));
-  last_file_transfer_event_ = now;
 }
 
 void EventRouter::OnDirectoryChanged(const base::FilePath& drive_path) {
@@ -747,6 +759,7 @@ void EventRouter::DispatchDirectoryChangeEventWithEntryDefinition(
 }
 
 void EventRouter::ShowRemovableDeviceInFileManager(
+    VolumeType type,
     const base::FilePath& mount_path) {
   // Do not attempt to open File Manager while the login is in progress or
   // the screen is locked or running in kiosk app mode and make sure the file
@@ -761,19 +774,24 @@ void EventRouter::ShowRemovableDeviceInFileManager(
   if (IsRecoveryToolRunning(profile_))
     return;
 
-  // According to DCF (Design rule of Camera File system) by JEITA / CP-3461
-  // cameras should have pictures located in the DCIM root directory.
-  const base::FilePath dcim_path = mount_path.Append(
-      FILE_PATH_LITERAL("DCIM"));
+  // Do not pop-up the File Manager, if Google+ Photos may be launched.
+  if (IsGooglePhotosInstalled(profile_)) {
+    // MTP device is handled by Photos app.
+    if (type == VOLUME_TYPE_MTP)
+      return;
+    // According to DCF (Design rule of Camera File system) by JEITA / CP-3461
+    // cameras should have pictures located in the DCIM root directory.
+    // Such removable disks are handled by Photos app.
+    if (type == VOLUME_TYPE_REMOVABLE_DISK_PARTITION) {
+      DirectoryExistsOnUIThread(
+          mount_path.AppendASCII("DCIM"),
+          base::Bind(&base::DoNothing),
+          base::Bind(&util::OpenRemovableDrive, profile_, mount_path));
+      return;
+    }
+  }
 
-  // If there is a DCIM folder and Google+ Photos is installed, then do not
-  // launch Files.app.
-  DirectoryExistsOnUIThread(
-      dcim_path,
-      IsGooglePhotosInstalled(profile_)
-          ? base::Bind(&base::DoNothing)
-          : base::Bind(&util::OpenRemovableDrive, profile_, mount_path),
-      base::Bind(&util::OpenRemovableDrive, profile_, mount_path));
+  util::OpenRemovableDrive(profile_, mount_path);
 }
 
 void EventRouter::DispatchDeviceEvent(
@@ -822,12 +840,18 @@ void EventRouter::OnDeviceAdded(const std::string& device_path) {
       device_path);
 }
 
-void EventRouter::OnDeviceRemoved(const std::string& device_path) {
+void EventRouter::OnDeviceRemoved(const std::string& device_path,
+                                  bool hard_unplugged) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   DispatchDeviceEvent(
       file_browser_private::DEVICE_EVENT_TYPE_REMOVED,
       device_path);
+
+  if (hard_unplugged) {
+    DispatchDeviceEvent(file_browser_private::DEVICE_EVENT_TYPE_HARD_UNPLUGGED,
+                        device_path);
+  }
 }
 
 void EventRouter::OnVolumeMounted(chromeos::MountError error_code,
@@ -848,12 +872,14 @@ void EventRouter::OnVolumeMounted(chromeos::MountError error_code,
       volume_info,
       is_remounting);
 
-  if (volume_info.type == VOLUME_TYPE_REMOVABLE_DISK_PARTITION &&
+  if ((volume_info.type == VOLUME_TYPE_MTP ||
+       volume_info.type == VOLUME_TYPE_REMOVABLE_DISK_PARTITION) &&
       !is_remounting) {
     // If a new device was mounted, a new File manager window may need to be
     // opened.
     if (error_code == chromeos::MOUNT_ERROR_NONE)
-      ShowRemovableDeviceInFileManager(volume_info.mount_path);
+      ShowRemovableDeviceInFileManager(volume_info.type,
+                                       volume_info.mount_path);
   }
 }
 

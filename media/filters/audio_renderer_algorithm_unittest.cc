@@ -113,7 +113,6 @@ class AudioRendererAlgorithmTest : public testing::Test {
               1,
               1,
               kFrameSize,
-              kNoTimestamp(),
               kNoTimestamp());
           break;
         case kSampleFormatS16:
@@ -125,7 +124,6 @@ class AudioRendererAlgorithmTest : public testing::Test {
               1,
               1,
               kFrameSize,
-              kNoTimestamp(),
               kNoTimestamp());
           break;
         case kSampleFormatS32:
@@ -137,7 +135,6 @@ class AudioRendererAlgorithmTest : public testing::Test {
               1,
               1,
               kFrameSize,
-              kNoTimestamp(),
               kNoTimestamp());
           break;
         default:
@@ -154,7 +151,7 @@ class AudioRendererAlgorithmTest : public testing::Test {
       bool all_zero = true;
       for (int i = 0; i < frames_written && all_zero; ++i)
         all_zero = audio_data->channel(ch)[i] == 0.0f;
-      ASSERT_FALSE(all_zero) << " for channel " << ch;
+      ASSERT_EQ(algorithm_.is_muted(), all_zero) << " for channel " << ch;
     }
   }
 

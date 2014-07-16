@@ -21,6 +21,7 @@
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/configure_reason.h"
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
+#include "sync/internal_api/public/sessions/type_debug_info_observer.h"
 #include "sync/internal_api/public/sync_manager.h"
 #include "sync/internal_api/public/util/report_unrecoverable_error_function.h"
 #include "sync/internal_api/public/util/unrecoverable_error_handler.h"
@@ -106,12 +107,13 @@ class SyncBackendHostImpl
       const base::Callback<void(syncer::ModelTypeSet,
                                 syncer::ModelTypeSet)>& ready_task,
       const base::Callback<void()>& retry_callback) OVERRIDE;
-  virtual void EnableEncryptEverything() OVERRIDE;
   virtual void ActivateDataType(
-      syncer::ModelType type, syncer::ModelSafeGroup group,
-      ChangeProcessor* change_processor) OVERRIDE;
+     syncer::ModelType type, syncer::ModelSafeGroup group,
+     ChangeProcessor* change_processor) OVERRIDE;
   virtual void DeactivateDataType(syncer::ModelType type) OVERRIDE;
+  virtual void EnableEncryptEverything() OVERRIDE;
   virtual syncer::UserShare* GetUserShare() const OVERRIDE;
+  virtual scoped_ptr<syncer::SyncCoreProxy> GetSyncCoreProxy() OVERRIDE;
   virtual Status GetDetailedStatus() OVERRIDE;
   virtual syncer::sessions::SyncSessionSnapshot
       GetLastSessionSnapshot() const OVERRIDE;
@@ -124,7 +126,14 @@ class SyncBackendHostImpl
   virtual void GetModelSafeRoutingInfo(
       syncer::ModelSafeRoutingInfo* out) const OVERRIDE;
   virtual SyncedDeviceTracker* GetSyncedDeviceTracker() const OVERRIDE;
-  virtual void SetForwardProtocolEvents(bool forward) OVERRIDE;
+  virtual void RequestBufferedProtocolEventsAndEnableForwarding() OVERRIDE;
+  virtual void DisableProtocolEventForwarding() OVERRIDE;
+  virtual void EnableDirectoryTypeDebugInfoForwarding() OVERRIDE;
+  virtual void DisableDirectoryTypeDebugInfoForwarding() OVERRIDE;
+  virtual void GetAllNodesForTypes(
+      syncer::ModelTypeSet types,
+      base::Callback<void(const std::vector<syncer::ModelType>&,
+                          ScopedVector<base::ListValue>)> type) OVERRIDE;
   virtual base::MessageLoop* GetSyncLoopForTesting() OVERRIDE;
 
  protected:
@@ -158,10 +167,15 @@ class SyncBackendHostImpl
 
   // Reports backend initialization success.  Includes some objects from sync
   // manager initialization to be passed back to the UI thread.
+  //
+  // |sync_core_proxy| points to an object owned by the SyncManager.  Ownership
+  // is not transferred, but we can obtain our own copy of the object using its
+  // Clone() method.
   virtual void HandleInitializationSuccessOnFrontendLoop(
     const syncer::WeakHandle<syncer::JsBackend> js_backend,
     const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>
-        debug_info_listener);
+        debug_info_listener,
+    syncer::SyncCoreProxy* sync_core_proxy);
 
   // Downloading of control types failed and will be retried. Invokes the
   // frontend's sync configure retry method.
@@ -171,6 +185,27 @@ class SyncBackendHostImpl
   // call to SetForwardProtocolEvents() explicitly requested that we start
   // forwarding these events.
   void HandleProtocolEventOnFrontendLoop(syncer::ProtocolEvent* event);
+
+  // Forwards a directory commit counter update to the frontend loop.  Will not
+  // be called unless a call to EnableDirectoryTypeDebugInfoForwarding()
+  // explicitly requested that we start forwarding these events.
+  void HandleDirectoryCommitCountersUpdatedOnFrontendLoop(
+      syncer::ModelType type,
+      const syncer::CommitCounters& counters);
+
+  // Forwards a directory update counter update to the frontend loop.  Will not
+  // be called unless a call to EnableDirectoryTypeDebugInfoForwarding()
+  // explicitly requested that we start forwarding these events.
+  void HandleDirectoryUpdateCountersUpdatedOnFrontendLoop(
+      syncer::ModelType type,
+      const syncer::UpdateCounters& counters);
+
+  // Forwards a directory status counter update to the frontend loop.  Will not
+  // be called unless a call to EnableDirectoryTypeDebugInfoForwarding()
+  // explicitly requested that we start forwarding these events.
+  void HandleDirectoryStatusCountersUpdatedOnFrontendLoop(
+      syncer::ModelType type,
+      const syncer::StatusCounters& counters);
 
   SyncFrontend* frontend() { return frontend_; }
 
@@ -285,6 +320,9 @@ class SyncBackendHostImpl
   // of WeakHandle because |core_| is created on UI loop but released on
   // sync loop.
   scoped_refptr<SyncBackendHostCore> core_;
+
+  // A handle referencing the main interface for non-blocking sync types.
+  scoped_ptr<syncer::SyncCoreProxy> sync_core_proxy_;
 
   bool initialized_;
 

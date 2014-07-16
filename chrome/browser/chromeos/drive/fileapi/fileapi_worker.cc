@@ -66,19 +66,10 @@ void RunGetFileInfoCallback(const GetFileInfoCallback& callback,
   callback.Run(base::File::FILE_OK, file_info);
 }
 
-// Runs |callback| with arguments converted from |error| and |resource_entries|.
-void RunReadDirectoryCallback(
+// Runs |callback| with entries.
+void RunReadDirectoryCallbackWithEntries(
     const ReadDirectoryCallback& callback,
-    FileError error,
-    scoped_ptr<ResourceEntryVector> resource_entries,
-    bool has_more) {
-  if (error != FILE_ERROR_OK) {
-    DCHECK(!has_more);
-    callback.Run(FileErrorToBaseFileError(error),
-                 std::vector<fileapi::DirectoryEntry>(), has_more);
-    return;
-  }
-
+    scoped_ptr<ResourceEntryVector> resource_entries) {
   DCHECK(resource_entries);
 
   std::vector<fileapi::DirectoryEntry> entries;
@@ -97,7 +88,14 @@ void RunReadDirectoryCallback(
     entries.push_back(entry);
   }
 
-  callback.Run(base::File::FILE_OK, entries, has_more);
+  callback.Run(base::File::FILE_OK, entries, true /*has_more*/);
+}
+
+// Runs |callback| with |error|.
+void RunReadDirectoryCallbackOnCompletion(const ReadDirectoryCallback& callback,
+                                          FileError error) {
+  callback.Run(FileErrorToBaseFileError(error),
+               std::vector<fileapi::DirectoryEntry>(), false /*has_more*/);
 }
 
 // Runs |callback| with arguments based on |error|, |local_path| and |entry|.
@@ -149,9 +147,14 @@ void RunCreateWritableSnapshotFileCallback(
 // Runs |callback| with |error| and |platform_file|.
 void RunOpenFileCallback(const OpenFileCallback& callback,
                          const base::Closure& close_callback,
-                         base::File::Error* error,
-                         base::PlatformFile platform_file) {
-  callback.Run(*error, platform_file, close_callback);
+                         base::File file) {
+  base::File::Error error = file.IsValid() ? base::File::FILE_OK :
+                                             file.error_details();
+  callback.Run(error, file.TakePlatformFile(), close_callback);
+}
+
+base::File OpenFile(const base::FilePath& path, int flags) {
+  return base::File(path, flags);
 }
 
 // Part of OpenFile(). Called after FileSystem::OpenFile().
@@ -174,27 +177,22 @@ void OpenFileAfterFileSystemOpenFile(int file_flags,
   // unexpected file creation, CREATE, OPEN_ALWAYS and CREATE_ALWAYS are
   // translated into OPEN or OPEN_TRUNCATED, here. Keep OPEN and OPEN_TRUNCATED
   // as is.
-  if (file_flags & (base::PLATFORM_FILE_CREATE |
-                    base::PLATFORM_FILE_OPEN_ALWAYS)) {
-    file_flags &= ~(base::PLATFORM_FILE_CREATE |
-                    base::PLATFORM_FILE_OPEN_ALWAYS);
-    file_flags |= base::PLATFORM_FILE_OPEN;
-  } else if (file_flags & base::PLATFORM_FILE_CREATE_ALWAYS) {
-    file_flags &= ~base::PLATFORM_FILE_CREATE_ALWAYS;
-    file_flags |= base::PLATFORM_FILE_OPEN_TRUNCATED;
+  if (file_flags & (base::File::FLAG_CREATE |
+                    base::File::FLAG_OPEN_ALWAYS)) {
+    file_flags &= ~(base::File::FLAG_CREATE |
+                    base::File::FLAG_OPEN_ALWAYS);
+    file_flags |= base::File::FLAG_OPEN;
+  } else if (file_flags & base::File::FLAG_CREATE_ALWAYS) {
+    file_flags &= ~base::File::FLAG_CREATE_ALWAYS;
+    file_flags |= base::File::FLAG_OPEN_TRUNCATED;
   }
 
   // Cache file prepared for modification is available. Open it locally.
-  // TODO(rvargas): Convert this to base::File.
-  base::File::Error* result =
-      new base::File::Error(base::File::FILE_ERROR_FAILED);
   bool posted = base::PostTaskAndReplyWithResult(
       BrowserThread::GetBlockingPool(), FROM_HERE,
-      base::Bind(&base::CreatePlatformFile,
-                 local_path, file_flags, static_cast<bool*>(NULL),
-                 reinterpret_cast<base::PlatformFileError*>(result)),
+      base::Bind(&OpenFile, local_path, file_flags),
       base::Bind(&RunOpenFileCallback,
-                 callback, close_callback, base::Owned(result)));
+                 callback, close_callback));
   DCHECK(posted);
 }
 
@@ -265,8 +263,10 @@ void ReadDirectory(const base::FilePath& file_path,
                    const ReadDirectoryCallback& callback,
                    FileSystemInterface* file_system) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  file_system->ReadDirectory(file_path,
-                             base::Bind(&RunReadDirectoryCallback, callback));
+  file_system->ReadDirectory(
+      file_path,
+      base::Bind(&RunReadDirectoryCallbackWithEntries, callback),
+      base::Bind(&RunReadDirectoryCallbackOnCompletion, callback));
 }
 
 void Remove(const base::FilePath& file_path,

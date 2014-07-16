@@ -357,23 +357,11 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case ash::UMA_WINDOW_MAXIMIZE_BUTTON_CLICK_MINIMIZE:
       base::RecordAction(base::UserMetricsAction("MinButton_Clk"));
       break;
-    case ash::UMA_WINDOW_MAXIMIZE_BUTTON_MAXIMIZE:
-      base::RecordAction(base::UserMetricsAction("MaxButton_Maximize"));
-      break;
     case ash::UMA_WINDOW_MAXIMIZE_BUTTON_MAXIMIZE_LEFT:
       base::RecordAction(base::UserMetricsAction("MaxButton_MaxLeft"));
       break;
     case ash::UMA_WINDOW_MAXIMIZE_BUTTON_MAXIMIZE_RIGHT:
       base::RecordAction(base::UserMetricsAction("MaxButton_MaxRight"));
-      break;
-    case ash::UMA_WINDOW_MAXIMIZE_BUTTON_MINIMIZE:
-      base::RecordAction(base::UserMetricsAction("MaxButton_Minimize"));
-      break;
-    case ash::UMA_WINDOW_MAXIMIZE_BUTTON_RESTORE:
-      base::RecordAction(base::UserMetricsAction("MaxButton_Restore"));
-      break;
-    case ash::UMA_WINDOW_MAXIMIZE_BUTTON_SHOW_BUBBLE:
-      base::RecordAction(base::UserMetricsAction("MaxButton_ShowBubble"));
       break;
     case ash::UMA_WINDOW_OVERVIEW:
       base::RecordAction(
@@ -387,16 +375,16 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
 }
 
 void UserMetricsRecorder::RecordPeriodicMetrics() {
-  internal::ShelfLayoutManager* manager =
-      internal::ShelfLayoutManager::ForShelf(Shell::GetPrimaryRootWindow());
+  ShelfLayoutManager* manager =
+      ShelfLayoutManager::ForShelf(Shell::GetPrimaryRootWindow());
   if (manager) {
     UMA_HISTOGRAM_ENUMERATION("Ash.ShelfAlignmentOverTime",
-        manager->SelectValueForShelfAlignment(
-            internal::SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM,
-            internal::SHELF_ALIGNMENT_UMA_ENUM_VALUE_LEFT,
-            internal::SHELF_ALIGNMENT_UMA_ENUM_VALUE_RIGHT,
-            -1),
-        internal::SHELF_ALIGNMENT_UMA_ENUM_VALUE_COUNT);
+                              manager->SelectValueForShelfAlignment(
+                                  SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM,
+                                  SHELF_ALIGNMENT_UMA_ENUM_VALUE_LEFT,
+                                  SHELF_ALIGNMENT_UMA_ENUM_VALUE_RIGHT,
+                                  -1),
+                              SHELF_ALIGNMENT_UMA_ENUM_VALUE_COUNT);
   }
 
   enum ActiveWindowStateType {

@@ -14,17 +14,17 @@
 #include "google_apis/gcm/gcm_client.h"
 #include "sync/notifier/gcm_network_channel_delegate.h"
 
+class IdentityProvider;
+
 namespace base {
 class SingleThreadTaskRunner;
 }  // namespace base
 
 namespace gcm {
-class GCMProfileService;
+class GCMService;
 }  // namespace gcm
 
 namespace invalidation {
-
-class InvalidationAuthProvider;
 
 // GCMInvalidationBridge and GCMInvalidationBridge::Core implement functions
 // needed for GCMNetworkChannel. GCMInvalidationBridge lives on UI thread while
@@ -37,8 +37,8 @@ class GCMInvalidationBridge : public gcm::GCMAppHandler,
  public:
   class Core;
 
-  GCMInvalidationBridge(gcm::GCMProfileService* gcm_profile_service,
-                        InvalidationAuthProvider* auth_provider);
+  GCMInvalidationBridge(gcm::GCMService* gcm_service,
+                        IdentityProvider* identity_provider);
   virtual ~GCMInvalidationBridge();
 
   // OAuth2TokenService::Consumer implementation.
@@ -80,8 +80,8 @@ class GCMInvalidationBridge : public gcm::GCMAppHandler,
       gcm::GCMClient::Result result);
 
  private:
-  gcm::GCMProfileService* const gcm_profile_service_;
-  InvalidationAuthProvider* const auth_provider_;
+  gcm::GCMService* const gcm_service_;
+  IdentityProvider* const identity_provider_;
 
   base::WeakPtr<Core> core_;
   scoped_refptr<base::SingleThreadTaskRunner> core_thread_task_runner_;

@@ -19,6 +19,7 @@ content::WebUIDataSource* CreateSyncInternalsHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUISyncInternalsHost);
 
+  source->SetUseJsonJSFormatV2();
   source->SetJsonPath("strings.js");
   source->AddResourcePath("sync_index.js", IDR_SYNC_INTERNALS_INDEX_JS);
   source->AddResourcePath("chrome_sync.js",
@@ -32,7 +33,6 @@ content::WebUIDataSource* CreateSyncInternalsHTMLSource() {
   source->AddResourcePath("data.js", IDR_SYNC_INTERNALS_DATA_JS);
   source->AddResourcePath("events.js", IDR_SYNC_INTERNALS_EVENTS_JS);
   source->AddResourcePath("search.js", IDR_SYNC_INTERNALS_SEARCH_JS);
-  source->AddResourcePath("traffic.js", IDR_SYNC_INTERNALS_TRAFFIC_JS);
   source->SetDefaultResource(IDR_SYNC_INTERNALS_INDEX_HTML);
   return source;
 }

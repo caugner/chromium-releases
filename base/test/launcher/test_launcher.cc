@@ -488,7 +488,7 @@ void TestLauncher::OnTestFinished(const TestResult& result) {
     test_broken_count_++;
   }
   size_t broken_threshold =
-      std::max(static_cast<size_t>(10), test_started_count_ / 10);
+      std::max(static_cast<size_t>(20), test_started_count_ / 10);
   if (test_broken_count_ >= broken_threshold) {
     fprintf(stdout, "Too many badly broken tests (%" PRIuS "), exiting now.\n",
             test_broken_count_);
@@ -1025,6 +1025,13 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
 
   new_options.job_handle = job_handle.Get();
 #endif  // defined(OS_WIN)
+
+#if defined(OS_LINUX)
+  // To prevent accidental privilege sharing to an untrusted child, processes
+  // are started with PR_SET_NO_NEW_PRIVS. Do not set that here, since this
+  // new child will be privileged and trusted.
+  new_options.allow_new_privs = true;
+#endif
 
   base::ProcessHandle process_handle;
 

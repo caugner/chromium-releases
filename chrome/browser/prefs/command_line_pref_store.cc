@@ -28,7 +28,8 @@ const CommandLinePrefStore::StringSwitchToPreferenceMapEntry
       { switches::kAuthNegotiateDelegateWhitelist,
           prefs::kAuthNegotiateDelegateWhitelist },
       { switches::kGSSAPILibraryName, prefs::kGSSAPILibraryName },
-      { switches::kSpdyProxyAuthOrigin, prefs::kSpdyProxyAuthOrigin },
+      { data_reduction_proxy::switches::kDataReductionProxy,
+          data_reduction_proxy::prefs::kDataReductionProxy },
       { switches::kDiskCacheDir, prefs::kDiskCacheDir },
       { switches::kSSLVersionMin, prefs::kSSLVersionMin },
       { switches::kSSLVersionMax, prefs::kSSLVersionMax },
@@ -54,7 +55,6 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
         prefs::kWebKitAllowDisplayingInsecureContent, false },
       { switches::kAllowCrossOriginAuthPrompt,
         prefs::kAllowCrossOriginAuthPrompt, true },
-      { switches::kDisableTLSChannelID, prefs::kEnableOriginBoundCerts, false },
       { switches::kDisableSSLFalseStart, prefs::kDisableSSLRecordSplitting,
           true },
 #if defined(GOOGLE_CHROME_BUILD)

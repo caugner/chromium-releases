@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -127,14 +127,13 @@ TEST_F(GLES2ImplementationTest, CheckFramebufferStatus) {
     cmds::CheckFramebufferStatus cmd;
   };
 
-  typedef cmds::CheckFramebufferStatus::Result Result;
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::CheckFramebufferStatus::Result));
   expected.cmd.Init(1, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
       .RetiresOnSaturation();
 
   GLboolean result = gl_->CheckFramebufferStatus(1);
@@ -445,7 +444,9 @@ TEST_F(GLES2ImplementationTest, FrontFace) {
 }
 
 TEST_F(GLES2ImplementationTest, GenBuffers) {
-  GLuint ids[2] = {0, };
+  GLuint ids[2] = {
+      0,
+  };
   struct Cmds {
     cmds::GenBuffersImmediate gen;
     GLuint data[2];
@@ -472,7 +473,9 @@ TEST_F(GLES2ImplementationTest, GenerateMipmap) {
 }
 
 TEST_F(GLES2ImplementationTest, GenFramebuffers) {
-  GLuint ids[2] = {0, };
+  GLuint ids[2] = {
+      0,
+  };
   struct Cmds {
     cmds::GenFramebuffersImmediate gen;
     GLuint data[2];
@@ -488,7 +491,9 @@ TEST_F(GLES2ImplementationTest, GenFramebuffers) {
 }
 
 TEST_F(GLES2ImplementationTest, GenRenderbuffers) {
-  GLuint ids[2] = {0, };
+  GLuint ids[2] = {
+      0,
+  };
   struct Cmds {
     cmds::GenRenderbuffersImmediate gen;
     GLuint data[2];
@@ -504,7 +509,9 @@ TEST_F(GLES2ImplementationTest, GenRenderbuffers) {
 }
 
 TEST_F(GLES2ImplementationTest, GenTextures) {
-  GLuint ids[2] = {0, };
+  GLuint ids[2] = {
+      0,
+  };
   struct Cmds {
     cmds::GenTexturesImmediate gen;
     GLuint data[2];
@@ -759,14 +766,13 @@ TEST_F(GLES2ImplementationTest, IsBuffer) {
     cmds::IsBuffer cmd;
   };
 
-  typedef cmds::IsBuffer::Result Result;
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::IsBuffer::Result));
   expected.cmd.Init(1, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
       .RetiresOnSaturation();
 
   GLboolean result = gl_->IsBuffer(1);
@@ -779,14 +785,13 @@ TEST_F(GLES2ImplementationTest, IsEnabled) {
     cmds::IsEnabled cmd;
   };
 
-  typedef cmds::IsEnabled::Result Result;
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::IsEnabled::Result));
   expected.cmd.Init(1, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
       .RetiresOnSaturation();
 
   GLboolean result = gl_->IsEnabled(1);
@@ -799,14 +804,13 @@ TEST_F(GLES2ImplementationTest, IsFramebuffer) {
     cmds::IsFramebuffer cmd;
   };
 
-  typedef cmds::IsFramebuffer::Result Result;
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::IsFramebuffer::Result));
   expected.cmd.Init(1, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
       .RetiresOnSaturation();
 
   GLboolean result = gl_->IsFramebuffer(1);
@@ -819,14 +823,13 @@ TEST_F(GLES2ImplementationTest, IsProgram) {
     cmds::IsProgram cmd;
   };
 
-  typedef cmds::IsProgram::Result Result;
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::IsProgram::Result));
   expected.cmd.Init(1, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
       .RetiresOnSaturation();
 
   GLboolean result = gl_->IsProgram(1);
@@ -839,14 +842,13 @@ TEST_F(GLES2ImplementationTest, IsRenderbuffer) {
     cmds::IsRenderbuffer cmd;
   };
 
-  typedef cmds::IsRenderbuffer::Result Result;
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::IsRenderbuffer::Result));
   expected.cmd.Init(1, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
       .RetiresOnSaturation();
 
   GLboolean result = gl_->IsRenderbuffer(1);
@@ -859,14 +861,13 @@ TEST_F(GLES2ImplementationTest, IsShader) {
     cmds::IsShader cmd;
   };
 
-  typedef cmds::IsShader::Result Result;
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::IsShader::Result));
   expected.cmd.Init(1, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
       .RetiresOnSaturation();
 
   GLboolean result = gl_->IsShader(1);
@@ -879,14 +880,13 @@ TEST_F(GLES2ImplementationTest, IsTexture) {
     cmds::IsTexture cmd;
   };
 
-  typedef cmds::IsTexture::Result Result;
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::IsTexture::Result));
   expected.cmd.Init(1, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
       .RetiresOnSaturation();
 
   GLboolean result = gl_->IsTexture(1);
@@ -1591,7 +1591,9 @@ TEST_F(GLES2ImplementationTest, TexStorage2DEXT) {
 }
 
 TEST_F(GLES2ImplementationTest, GenQueriesEXT) {
-  GLuint ids[2] = {0, };
+  GLuint ids[2] = {
+      0,
+  };
   struct Cmds {
     cmds::GenQueriesEXTImmediate gen;
     GLuint data[2];
@@ -1635,7 +1637,9 @@ TEST_F(GLES2ImplementationTest, PopGroupMarkerEXT) {
 }
 
 TEST_F(GLES2ImplementationTest, GenVertexArraysOES) {
-  GLuint ids[2] = {0, };
+  GLuint ids[2] = {
+      0,
+  };
   struct Cmds {
     cmds::GenVertexArraysOESImmediate gen;
     GLuint data[2];
@@ -1669,14 +1673,13 @@ TEST_F(GLES2ImplementationTest, IsVertexArrayOES) {
     cmds::IsVertexArrayOES cmd;
   };
 
-  typedef cmds::IsVertexArrayOES::Result Result;
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::IsVertexArrayOES::Result));
   expected.cmd.Init(1, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
       .RetiresOnSaturation();
 
   GLboolean result = gl_->IsVertexArrayOES(1);

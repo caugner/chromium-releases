@@ -9,15 +9,21 @@
 
 #include "content/browser/indexed_db/indexed_db_backing_store.h"
 
+namespace base {
+class TaskRunner;
+}
+
 namespace content {
+
+class IndexedDBFactory;
 
 class IndexedDBFakeBackingStore : public IndexedDBBackingStore {
  public:
-  IndexedDBFakeBackingStore()
-      : IndexedDBBackingStore(GURL("http://localhost:81"),
-                              scoped_ptr<LevelDBDatabase>(),
-                              scoped_ptr<LevelDBComparator>()) {}
-  virtual std::vector<base::string16> GetDatabaseNames() OVERRIDE;
+  IndexedDBFakeBackingStore();
+  IndexedDBFakeBackingStore(IndexedDBFactory* factory,
+                            base::TaskRunner* task_runner);
+  virtual std::vector<base::string16> GetDatabaseNames(leveldb::Status* s)
+      OVERRIDE;
   virtual leveldb::Status GetIDBDatabaseMetaData(const base::string16& name,
                                                  IndexedDBDatabaseMetadata*,
                                                  bool* found) OVERRIDE;
@@ -83,33 +89,37 @@ class IndexedDBFakeBackingStore : public IndexedDBBackingStore {
                                                 const IndexedDBKey&,
                                                 const RecordIdentifier&)
       OVERRIDE;
+  virtual void ReportBlobUnused(int64 database_id, int64 blob_key) OVERRIDE;
 
   virtual scoped_ptr<Cursor> OpenObjectStoreKeyCursor(
       Transaction* transaction,
       int64 database_id,
       int64 object_store_id,
       const IndexedDBKeyRange& key_range,
-      indexed_db::CursorDirection) OVERRIDE;
+      indexed_db::CursorDirection,
+      leveldb::Status*) OVERRIDE;
   virtual scoped_ptr<Cursor> OpenObjectStoreCursor(
       Transaction* transaction,
       int64 database_id,
       int64 object_store_id,
       const IndexedDBKeyRange& key_range,
-      indexed_db::CursorDirection) OVERRIDE;
+      indexed_db::CursorDirection,
+      leveldb::Status*) OVERRIDE;
   virtual scoped_ptr<Cursor> OpenIndexKeyCursor(
       Transaction* transaction,
       int64 database_id,
       int64 object_store_id,
       int64 index_id,
       const IndexedDBKeyRange& key_range,
-      indexed_db::CursorDirection) OVERRIDE;
+      indexed_db::CursorDirection,
+      leveldb::Status*) OVERRIDE;
   virtual scoped_ptr<Cursor> OpenIndexCursor(Transaction* transaction,
                                              int64 database_id,
                                              int64 object_store_id,
                                              int64 index_id,
                                              const IndexedDBKeyRange& key_range,
-                                             indexed_db::CursorDirection)
-      OVERRIDE;
+                                             indexed_db::CursorDirection,
+                                             leveldb::Status*) OVERRIDE;
 
   class FakeTransaction : public IndexedDBBackingStore::Transaction {
    public:

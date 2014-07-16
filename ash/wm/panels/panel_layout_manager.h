@@ -18,6 +18,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "ui/aura/layout_manager.h"
+#include "ui/aura/window_observer.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/wm/public/activation_change_observer.h"
@@ -36,10 +37,8 @@ class Widget;
 }
 
 namespace ash {
-class Shelf;
-
-namespace internal {
 class PanelCalloutWidget;
+class Shelf;
 class ShelfLayoutManager;
 
 // PanelLayoutManager is responsible for organizing panels within the
@@ -55,11 +54,12 @@ class ASH_EXPORT PanelLayoutManager
     : public aura::LayoutManager,
       public ShelfIconObserver,
       public ShellObserver,
+      public aura::WindowObserver,
+      public wm::WindowStateObserver,
       public aura::client::ActivationChangeObserver,
       public keyboard::KeyboardControllerObserver,
       public DisplayController::Observer,
-      public ShelfLayoutManagerObserver,
-      public wm::WindowStateObserver {
+      public ShelfLayoutManagerObserver {
  public:
   explicit PanelLayoutManager(aura::Window* panel_container);
   virtual ~PanelLayoutManager();
@@ -93,6 +93,11 @@ class ASH_EXPORT PanelLayoutManager
 
   // Overridden from ShellObserver
   virtual void OnShelfAlignmentChanged(aura::Window* root_window) OVERRIDE;
+
+  // Overridden from aura::WindowObserver
+  virtual void OnWindowPropertyChanged(aura::Window* window,
+                                       const void* key,
+                                       intptr_t old) OVERRIDE;
 
   // Overridden from ash::wm::WindowStateObserver
   virtual void OnPostWindowStateTypeChange(
@@ -134,8 +139,8 @@ class ASH_EXPORT PanelLayoutManager
     PanelCalloutWidget* callout_widget;
 
     // True on new and restored panel windows until the panel has been
-    // positioned. The first time Relayout is called the panel will slide into
-    // position and this will be set to false.
+    // positioned. The first time Relayout is called the panel will be shown,
+    // and slide into position and this will be set to false.
     bool slide_in;
   };
 
@@ -186,7 +191,6 @@ class ASH_EXPORT PanelLayoutManager
   DISALLOW_COPY_AND_ASSIGN(PanelLayoutManager);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_WM_PANELS_PANEL_LAYOUT_MANAGER_H_
