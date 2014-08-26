@@ -15,7 +15,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "components/os_crypt/os_crypt_switches.h"
+#include "google_apis/gcm/base/fake_encryptor.h"
 #include "google_apis/gcm/base/mcs_message.h"
 #include "google_apis/gcm/base/mcs_util.h"
 #include "google_apis/gcm/protocol/mcs.pb.h"
@@ -76,16 +76,13 @@ GCMStoreImplTest::~GCMStoreImplTest() {}
 
 void GCMStoreImplTest::SetUp() {
   testing::Test::SetUp();
-#if defined(OS_MACOSX)
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      os_crypt::switches::kUseMockKeychain);
-#endif  // OS_MACOSX
 }
 
 scoped_ptr<GCMStore> GCMStoreImplTest::BuildGCMStore() {
   return scoped_ptr<GCMStore>(new GCMStoreImpl(
       temp_directory_.path(),
-      message_loop_.message_loop_proxy()));
+      message_loop_.message_loop_proxy(),
+      make_scoped_ptr<Encryptor>(new FakeEncryptor)));
 }
 
 std::string GCMStoreImplTest::GetNextPersistentId() {
@@ -264,6 +261,25 @@ TEST_F(GCMStoreImplTest, Registrations) {
             load_result->registrations["app2"]->sender_ids[0]);
   EXPECT_EQ(registration2->sender_ids[1],
             load_result->registrations["app2"]->sender_ids[1]);
+
+  gcm_store->RemoveRegistration(
+      "app2",
+      base::Bind(&GCMStoreImplTest::UpdateCallback, base::Unretained(this)));
+  PumpLoop();
+
+  gcm_store = BuildGCMStore().Pass();
+  gcm_store->Load(base::Bind(
+      &GCMStoreImplTest::LoadCallback, base::Unretained(this), &load_result));
+  PumpLoop();
+
+  ASSERT_EQ(1u, load_result->registrations.size());
+  ASSERT_TRUE(load_result->registrations.find("app1") !=
+              load_result->registrations.end());
+  EXPECT_EQ(registration1->registration_id,
+            load_result->registrations["app1"]->registration_id);
+  ASSERT_EQ(1u, load_result->registrations["app1"]->sender_ids.size());
+  EXPECT_EQ(registration1->sender_ids[0],
+            load_result->registrations["app1"]->sender_ids[0]);
 }
 
 // Verify saving some incoming messages, reopening the directory, and then

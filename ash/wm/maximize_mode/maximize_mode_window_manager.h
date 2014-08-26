@@ -14,11 +14,16 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "ui/aura/window_observer.h"
+#include "ui/events/event_handler.h"
 #include "ui/gfx/display_observer.h"
 
+namespace ui {
+class TouchEvent;
+}
+
 namespace ash {
+class MaximizeModeController;
 class MaximizeModeWindowState;
-class Shell;
 
 // A window manager which - when created - will force all windows into maximized
 // mode. Exception are panels and windows which cannot be maximized.
@@ -28,7 +33,8 @@ class Shell;
 // original state.
 class ASH_EXPORT MaximizeModeWindowManager : public aura::WindowObserver,
                                              public gfx::DisplayObserver,
-                                             public ShellObserver {
+                                             public ShellObserver,
+                                             public ui::EventHandler {
  public:
   // This should only be deleted by the creator (ash::Shell).
   virtual ~MaximizeModeWindowManager();
@@ -36,8 +42,18 @@ class ASH_EXPORT MaximizeModeWindowManager : public aura::WindowObserver,
   // Returns the number of maximized & tracked windows by this manager.
   int GetNumberOfManagedWindows();
 
+  // Adds a window which needs to be maximized. This is used by other window
+  // managers for windows which needs to get tracked due to (upcoming) state
+  // changes.
+  // The call gets ignored if the window was already or should not be handled.
+  void AddWindow(aura::Window* window);
+
   // Called from a window state object when it gets destroyed.
   void WindowStateDestroyed(aura::Window* window);
+
+  // ShellObserver overrides:
+  virtual void OnOverviewModeStarting() OVERRIDE;
+  virtual void OnOverviewModeEnding() OVERRIDE;
 
   // Overridden from WindowObserver:
   virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
@@ -46,18 +62,17 @@ class ASH_EXPORT MaximizeModeWindowManager : public aura::WindowObserver,
                                      const gfx::Rect& old_bounds,
                                      const gfx::Rect& new_bounds) OVERRIDE;
 
-  // aura::DisplayObserver overrides:
-  virtual void OnDisplayBoundsChanged(
-      const gfx::Display& display) OVERRIDE;
+  // gfx::DisplayObserver overrides:
   virtual void OnDisplayAdded(const gfx::Display& display) OVERRIDE;
   virtual void OnDisplayRemoved(const gfx::Display& display) OVERRIDE;
+  virtual void OnDisplayMetricsChanged(const gfx::Display& display,
+                                       uint32_t metrics) OVERRIDE;
 
-  // ShellObserver overrides:
-  virtual void OnOverviewModeStarting() OVERRIDE;
-  virtual void OnOverviewModeEnding() OVERRIDE;
+  // ui::EventHandler override:
+  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
 
  protected:
-  friend class ash::Shell;
+  friend class MaximizeModeController;
 
   // The object should only be created by the ash::Shell.
   MaximizeModeWindowManager();

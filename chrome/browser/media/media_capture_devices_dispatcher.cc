@@ -8,6 +8,7 @@
 #include "apps/app_window_registry.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/sha1.h"
@@ -28,7 +29,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
-#include "components/user_prefs/pref_registry_syncable.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/media_capture_devices.h"
@@ -40,6 +41,7 @@
 #include "content/public/common/media_stream_request.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/permissions/permissions_data.h"
 #include "grit/generated_resources.h"
 #include "media/audio/audio_manager_base.h"
 #include "media/base/media_switches.h"
@@ -64,6 +66,16 @@ using content::MediaStreamDevices;
 
 namespace {
 
+// A finch experiment to enable the permission bubble for media requests only.
+bool MediaStreamPermissionBubbleExperimentEnabled() {
+  const std::string group =
+      base::FieldTrialList::FindFullName("MediaStreamPermissionBubble");
+  if (group == "enabled")
+    return true;
+
+  return false;
+}
+
 // Finds a device in |devices| that has |device_id|, or NULL if not found.
 const content::MediaStreamDevice* FindDeviceWithId(
     const content::MediaStreamDevices& devices,
@@ -75,7 +87,7 @@ const content::MediaStreamDevice* FindDeviceWithId(
     }
   }
   return NULL;
-};
+}
 
 // This is a short-term solution to grant camera and/or microphone access to
 // extensions:
@@ -539,14 +551,16 @@ void MediaCaptureDevicesDispatcher::ProcessTabCaptureAccessRequest(
 
   if (request.audio_type == content::MEDIA_TAB_AUDIO_CAPTURE &&
       tab_capture_allowed &&
-      extension->HasAPIPermission(extensions::APIPermission::kTabCapture)) {
+      extension->permissions_data()->HasAPIPermission(
+          extensions::APIPermission::kTabCapture)) {
     devices.push_back(content::MediaStreamDevice(
         content::MEDIA_TAB_AUDIO_CAPTURE, std::string(), std::string()));
   }
 
   if (request.video_type == content::MEDIA_TAB_VIDEO_CAPTURE &&
       tab_capture_allowed &&
-      extension->HasAPIPermission(extensions::APIPermission::kTabCapture)) {
+      extension->permissions_data()->HasAPIPermission(
+          extensions::APIPermission::kTabCapture)) {
     devices.push_back(content::MediaStreamDevice(
         content::MEDIA_TAB_VIDEO_CAPTURE, std::string(), std::string()));
   }
@@ -569,18 +583,52 @@ void MediaCaptureDevicesDispatcher::
         const content::MediaStreamRequest& request,
         const content::MediaResponseCallback& callback,
         const extensions::Extension* extension) {
-  content::MediaStreamDevices devices;
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
 
-  if (request.audio_type == content::MEDIA_DEVICE_AUDIO_CAPTURE &&
-      extension->HasAPIPermission(extensions::APIPermission::kAudioCapture)) {
-    GetDefaultDevicesForProfile(profile, true, false, &devices);
+  // TODO(vrk): This code is largely duplicated in
+  // MediaStreamDevicesController::Accept(). Move this code into a shared method
+  // between the two classes.
+
+  bool audio_allowed =
+      request.audio_type == content::MEDIA_DEVICE_AUDIO_CAPTURE &&
+      extension->permissions_data()->HasAPIPermission(
+          extensions::APIPermission::kAudioCapture);
+  bool video_allowed =
+      request.video_type == content::MEDIA_DEVICE_VIDEO_CAPTURE &&
+      extension->permissions_data()->HasAPIPermission(
+          extensions::APIPermission::kVideoCapture);
+
+  bool get_default_audio_device = audio_allowed;
+  bool get_default_video_device = video_allowed;
+
+  content::MediaStreamDevices devices;
+
+  // Get the exact audio or video device if an id is specified.
+  if (audio_allowed && !request.requested_audio_device_id.empty()) {
+    const content::MediaStreamDevice* audio_device =
+        GetRequestedAudioDevice(request.requested_audio_device_id);
+    if (audio_device) {
+      devices.push_back(*audio_device);
+      get_default_audio_device = false;
+    }
+  }
+  if (video_allowed && !request.requested_video_device_id.empty()) {
+    const content::MediaStreamDevice* video_device =
+        GetRequestedVideoDevice(request.requested_video_device_id);
+    if (video_device) {
+      devices.push_back(*video_device);
+      get_default_video_device = false;
+    }
   }
 
-  if (request.video_type == content::MEDIA_DEVICE_VIDEO_CAPTURE &&
-      extension->HasAPIPermission(extensions::APIPermission::kVideoCapture)) {
-    GetDefaultDevicesForProfile(profile, false, true, &devices);
+  // If either or both audio and video devices were requested but not
+  // specified by id, get the default devices.
+  if (get_default_audio_device || get_default_video_device) {
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents->GetBrowserContext());
+    GetDefaultDevicesForProfile(profile,
+                                get_default_audio_device,
+                                get_default_video_device,
+                                &devices);
   }
 
   scoped_ptr<content::MediaStreamUI> ui;
@@ -623,7 +671,8 @@ void MediaCaptureDevicesDispatcher::ProcessQueuedAccessRequest(
 
   DCHECK(!it->second.empty());
 
-  if (PermissionBubbleManager::Enabled()) {
+  if (PermissionBubbleManager::Enabled() ||
+      MediaStreamPermissionBubbleExperimentEnabled()) {
     scoped_ptr<MediaStreamDevicesController> controller(
         new MediaStreamDevicesController(web_contents,
             it->second.front().request,
@@ -631,8 +680,10 @@ void MediaCaptureDevicesDispatcher::ProcessQueuedAccessRequest(
                        base::Unretained(this), web_contents)));
     if (controller->DismissInfoBarAndTakeActionOnSettings())
       return;
-    PermissionBubbleManager::FromWebContents(web_contents)->
-        AddRequest(controller.release());
+    PermissionBubbleManager* bubble_manager =
+        PermissionBubbleManager::FromWebContents(web_contents);
+    if (bubble_manager)
+      bubble_manager->AddRequest(controller.release());
     return;
   }
 

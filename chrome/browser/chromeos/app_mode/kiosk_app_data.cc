@@ -19,7 +19,6 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/extensions/webstore_data_fetcher.h"
 #include "chrome/browser/extensions/webstore_install_helper.h"
 #include "chrome/browser/image_decoder.h"
@@ -27,6 +26,8 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/image_loader.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
@@ -335,7 +336,7 @@ void KioskAppData::SetStatus(Status status) {
     case STATUS_ERROR:
       delegate_->OnKioskAppDataLoadFailure(app_id_);
       break;
-  };
+  }
 }
 
 net::URLRequestContextGetter* KioskAppData::GetRequestContextGetter() {
@@ -441,6 +442,7 @@ void KioskAppData::StartFetch() {
       GetRequestContextGetter(),
       GURL(),
       app_id_));
+  webstore_fetcher_->set_max_auto_retries(3);
   webstore_fetcher_->Start();
 }
 

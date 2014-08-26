@@ -48,7 +48,7 @@ class TouchEmulatorTest : public testing::Test,
   virtual void SetUp() OVERRIDE {
 #if defined(USE_AURA)
     aura::Env::CreateInstance(true);
-    screen_.reset(aura::TestScreen::Create());
+    screen_.reset(aura::TestScreen::Create(gfx::Size()));
     gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, screen_.get());
 #endif
 
@@ -83,6 +83,8 @@ class TouchEmulatorTest : public testing::Test,
   }
 
   virtual void SetCursor(const WebCursor& cursor) OVERRIDE {}
+
+  virtual void ShowContextMenuAtPoint(const gfx::Point& point) OVERRIDE {}
 
  protected:
   TouchEmulator* emulator() const {

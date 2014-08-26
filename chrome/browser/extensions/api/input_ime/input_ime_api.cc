@@ -7,12 +7,15 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/extensions/api/input_ime.h"
 #include "chrome/common/extensions/api/input_ime/input_components_handler.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_system.h"
+#include "extensions/common/manifest_handlers/background_info.h"
 
 #if defined(USE_X11)
 #include "chrome/browser/chromeos/input_method/input_method_engine.h"
@@ -80,13 +83,32 @@ static void DispatchEventToExtension(Profile* profile,
       ->DispatchEventToExtension(extension_id, event.Pass());
 }
 
+void CallbackKeyEventHandle(chromeos::input_method::KeyEventHandle* key_data,
+                            bool handled) {
+  base::Callback<void(bool consumed)>* callback =
+      reinterpret_cast<base::Callback<void(bool consumed)>*>(key_data);
+  callback->Run(handled);
+  delete callback;
+}
+
 }  // namespace
 
 namespace chromeos {
 class ImeObserver : public InputMethodEngineInterface::Observer {
  public:
   ImeObserver(Profile* profile, const std::string& extension_id)
-      : profile_(profile), extension_id_(extension_id) {}
+      : profile_(profile), extension_id_(extension_id), has_background_(false) {
+    extensions::ExtensionSystem* extension_system =
+        extensions::ExtensionSystem::Get(profile_);
+    ExtensionService* extension_service = extension_system->extension_service();
+    const extensions::Extension* extension =
+        extension_service->GetExtensionById(extension_id, false);
+    DCHECK(extension);
+    extensions::BackgroundInfo* info = static_cast<extensions::BackgroundInfo*>(
+        extension->GetManifestData("background"));
+    if (info)
+      has_background_ = info->has_background_page();
+  }
 
   virtual ~ImeObserver() {}
 
@@ -163,13 +185,10 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
 
     // If there is no listener for the event, no need to dispatch the event to
     // extension. Instead, releases the key event for default system behavior.
-    if (!HasKeyEventListener()) {
+    if (!ShouldForwardKeyEvent()) {
       // Continue processing the key event so that the physical keyboard can
       // still work.
-      base::Callback<void(bool consumed)>* callback =
-          reinterpret_cast<base::Callback<void(bool consumed)>*>(key_data);
-      callback->Run(false);
-      delete callback;
+      CallbackKeyEventHandle(key_data, false);
       return;
     }
 
@@ -281,14 +300,20 @@ class ImeObserver : public InputMethodEngineInterface::Observer {
   }
 
  private:
-  bool HasKeyEventListener() const {
-    return extensions::EventRouter::Get(profile_)
+  // Returns true if the extension is ready to accept key event, otherwise
+  // returns false.
+  bool ShouldForwardKeyEvent() const {
+    // Need to check the background page first since the
+    // ExtensionHasEventListner returns true if the extension does not have a
+    // background page. See crbug.com/394682.
+    return has_background_ && extensions::EventRouter::Get(profile_)
         ->ExtensionHasEventListener(extension_id_,
                                     input_ime::OnKeyEvent::kEventName);
   }
 
   Profile* profile_;
   std::string extension_id_;
+  bool has_background_;
 
   DISALLOW_COPY_AND_ASSIGN(ImeObserver);
 };
@@ -303,6 +328,7 @@ InputImeEventRouter::GetInstance() {
 }
 
 bool InputImeEventRouter::RegisterIme(
+    Profile* profile,
     const std::string& extension_id,
     const extensions::InputComponentInfo& component) {
 #if defined(USE_X11)
@@ -319,11 +345,11 @@ bool InputImeEventRouter::RegisterIme(
   // to maintain an internal map for observers which does nearly nothing
   // but just make sure they can properly deleted.
   // Making Obesrver per InputMethodEngine can make things cleaner.
-  Profile* profile = ProfileManager::GetActiveUserProfile();
   scoped_ptr<chromeos::InputMethodEngineInterface::Observer> observer(
       new chromeos::ImeObserver(profile, extension_id));
   chromeos::InputMethodEngine* engine = new chromeos::InputMethodEngine();
-  engine->Initialize(observer.Pass(),
+  engine->Initialize(profile,
+                     observer.Pass(),
                      component.name.c_str(),
                      extension_id.c_str(),
                      component.id.c_str(),
@@ -412,13 +438,7 @@ void InputImeEventRouter::OnKeyEventHandled(
   chromeos::input_method::KeyEventHandle* key_data = request->second.second;
   request_map_.erase(request);
 
-  InputMethodEngineInterface* engine = GetEngine(extension_id, engine_id);
-  if (!engine) {
-    LOG(ERROR) << "Engine does not exist: " << engine_id;
-    return;
-  }
-
-  engine->KeyEventDone(key_data, handled);
+  CallbackKeyEventHandle(key_data, handled);
 }
 
 std::string InputImeEventRouter::AddRequest(
@@ -552,6 +572,7 @@ bool InputImeSendKeyEventsFunction::RunAsync() {
     event.type = input_ime::KeyboardEvent::ToString(key_data[i]->type);
     event.key = key_data[i]->key;
     event.code = key_data[i]->code;
+    event.key_code = key_data[i]->key_code.get() ? *(key_data[i]->key_code) : 0;
     if (key_data[i]->alt_key)
       event.alt_key = *(key_data[i]->alt_key);
     if (key_data[i]->ctrl_key)
@@ -810,14 +831,17 @@ void InputImeAPI::OnExtensionLoaded(content::BrowserContext* browser_context,
        component != input_components->end();
        ++component) {
     if (component->type == extensions::INPUT_COMPONENT_TYPE_IME) {
-      // Don't pass profile_ to register ime, instead always use
-      // GetActiveUserProfile. It is because:
-      // The original profile for login screen is called signin profile.
-      // And the active profile is the incognito profile based on signin
-      // profile. So if |profile_| is signin profile, we need to make sure
+      // If |browser_context| looks like signin profile, use the real signin
+      // profile. This is because IME extensions for signin profile are run
+      // in Off-The-Record profile, based on given static defaults.
+      // So if |profile_| is signin profile, we need to make sure
       // the router/observer runs under its incognito profile, because the
       // component extensions were installed under its incognito profile.
-      input_ime_event_router()->RegisterIme(extension->id(), *component);
+      Profile* profile = Profile::FromBrowserContext(browser_context);
+      if (chromeos::ProfileHelper::IsSigninProfile(profile))
+        profile = chromeos::ProfileHelper::GetSigninProfile();
+      input_ime_event_router()->RegisterIme(
+          profile, extension->id(), *component);
     }
   }
 }

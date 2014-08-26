@@ -17,12 +17,14 @@ vars = {
     'http://v8-i18n.googlecode.com/svn',
   'selenium':
     'http://selenium.googlecode.com/svn',
+  'buildspec_platforms':
+    'all',
   'snappy':
     'http://snappy.googlecode.com/svn',
   'ppapi':
     'http://ppapi.googlecode.com/svn',
-  'webrtc':
-    'http://webrtc.googlecode.com/svn',
+  'pywebsocket':
+    'http://pywebsocket.googlecode.com/svn',
   'libaddressinput':
     'http://libaddressinput.googlecode.com/svn',
   'pyftpdlib':
@@ -47,8 +49,8 @@ vars = {
     'http://linux-syscall-support.googlecode.com/svn',
   'trace-viewer':
     'http://trace-viewer.googlecode.com/svn',
-  'pywebsocket':
-    'http://pywebsocket.googlecode.com/svn',
+  'webrtc':
+    'http://webrtc.googlecode.com/svn',
   'web-page-replay':
     'http://web-page-replay.googlecode.com/svn',
   'libjingle':
@@ -106,7 +108,7 @@ deps_os = {
     'src/third_party/yasm/binaries':
       '/trunk/deps/third_party/yasm/binaries@154708',
     'src/chrome/tools/test/reference_build/chrome_win':
-      '/trunk/deps/reference_builds/chrome_win@254637',
+      '/trunk/deps/reference_builds/chrome_win@273882',
     'src/third_party/nacl_sdk_binaries':
       '/trunk/deps/third_party/nacl_sdk_binaries@111576',
     'src/third_party/lighttpd':
@@ -114,7 +116,7 @@ deps_os = {
     'src/third_party/gnu_binutils':
       (Var("native_client")) + '/trunk/deps/third_party/gnu_binutils@13077',
     'src/third_party/pefile':
-      (Var("pefile")) + '/trunk@63',
+      (Var("pefile")) + '/trunk@141',
     'src/third_party/psyco_win32':
       '/trunk/deps/third_party/psyco_win32@237949',
     'src/third_party/mingw-w64/mingw/bin':
@@ -127,12 +129,10 @@ deps_os = {
       '/trunk/deps/third_party/cygwin@231940',
     'src/third_party/swig/win':
       '/trunk/deps/third_party/swig/win@230490',
-    'src/third_party/syzygy/binaries':
-      (Var("sawbuck")) + '/trunk/syzygy/binaries@2134',
     'src/third_party/bison':
       '/trunk/deps/third_party/bison@147303',
     'src/third_party/nss':
-      '/trunk/deps/third_party/nss@267366'
+      '/trunk/deps/third_party/nss@277057'
   },
   'mac': {
     'src/third_party/pdfsqueeze':
@@ -146,25 +146,25 @@ deps_os = {
     'src/third_party/google_toolbox_for_mac/src':
       (Var("google-toolbox-for-mac")) + '/trunk@662',
     'src/chrome/tools/test/reference_build/chrome_mac':
-      '/trunk/deps/reference_builds/chrome_mac@255182',
+      '/trunk/deps/reference_builds/chrome_mac@273882',
     'src/third_party/nss':
-      '/trunk/deps/third_party/nss@267366'
+      '/trunk/deps/third_party/nss@277057'
   },
   'ios': {
     'src/third_party/sfntly/cpp/src': None,
     'src/third_party/libc++/trunk': None,
     'src/third_party/libc++abi/trunk': None,
+    'src/breakpad/src':
+      (Var("google-breakpad")) + '/branches/chrome_37/src@1357',
     'src/media/cdm/ppapi/api': None,
     'src/third_party/v8-i18n': None,
     'src/chrome/test/data/perf/frame_rate/content': None,
     'src/third_party/ots': None,
-    'src/third_party/libaddressinput/src/testdata': None,
     'src/third_party/mesa/src': None,
     'src/third_party/opus/src': None,
     'src/third_party/hunspell_dictionaries': None,
     'src/third_party/brotli/src': None,
     'src/third_party/webgl': None,
-    'src/chrome/test/data/perf/third_party/octane': None,
     'src/third_party/hunspell': None,
     'src/third_party/scons-2.0.1': None,
     'src/third_party/webdriver/pylib': None,
@@ -172,14 +172,13 @@ deps_os = {
     'src/third_party/libexif/sources': None,
     'src/third_party/safe_browsing/testing': None,
     'src/third_party/libyuv': None,
-    'src/third_party/libaddressinput/src/cpp': None,
-    'src/third_party/usrsctp/usrsctplib': None,
+    'src/third_party/WebKit': None,
     'src/third_party/webrtc': None,
     'src/third_party/libjpeg_turbo': None,
     'src/third_party/nss':
-      '/trunk/deps/third_party/nss@267366',
+      '/trunk/deps/third_party/nss@277057',
     'src/third_party/bidichecker': None,
-    'src/third_party/WebKit': None,
+    'src/third_party/usrsctp/usrsctplib': None,
     'src/third_party/openmax_dl': None,
     'src/third_party/WebKit/LayoutTests/w3c/csswg-test': None,
     'src/third_party/google_toolbox_for_mac/src':
@@ -187,19 +186,21 @@ deps_os = {
     'src/third_party/WebKit/LayoutTests/w3c/web-platform-tests': None,
     'src/chrome/test/data/extensions/api_test/permissions/nacl_enabled/bin': None,
     'src/third_party/WebKit/public':
-      (Var("blink")) + '/branches/chromium/1985/public@176821',
-    'src/native_client': None,
+      (Var("blink")) + '/branches/chromium/2062/public@180557',
+    'src/tools/page_cycler/acid3': None,
     'src/testing/iossim/third_party/class-dump':
       '/trunk/deps/third_party/class-dump@199203',
     'src/third_party/cld_2/src': None,
     'src/third_party/libsrtp': None,
     'src/third_party/ffmpeg': None,
     'src/native_client/src/third_party/ppapi': None,
-    'src/tools/page_cycler/acid3': None,
+    'src/native_client': None,
+    'src/third_party/pdfium': None,
     'src/build/util/support': None,
     'src/pdf': None,
     'src/third_party/pymox/src': None,
     'src/third_party/speex': None,
+    'src/third_party/colorama/src': None,
     'src/third_party/webpagereplay': None,
     'src/third_party/yasm/source/patched-yasm': None,
     'src/third_party/angle': None,
@@ -210,49 +211,51 @@ deps_os = {
     'unix': {
       'src/third_party/fontconfig/src':
         (Var("git.chromium.org")) + '/external/fontconfig.git@f16c3118e25546c1b749f9823c51827a60aeb5c1',
-      'build/third_party/cbuildbot_chromite':
-        (Var("git.chromium.org")) + '/chromiumos/chromite.git@004471a95329dd59ada2d64f5c0e1331aa734b23',
-      'src/third_party/cros_system_api':
-        (Var("git.chromium.org")) + '/chromiumos/platform/system_api.git@5b855c05cbbd9d4dcd7430fa58e73a296d038047',
+      'src/third_party/freetype2/src':
+        (Var("git.chromium.org")) + '/chromium/src/third_party/freetype2.git@d699c2994ecc178c4ed05ac2086061b2034c2178',
       'src/third_party/pyelftools':
         (Var("git.chromium.org")) + '/chromiumos/third_party/pyelftools.git@bdc1d380acd88d4bfaf47265008091483b0d614e',
       'src/third_party/chromite':
-        (Var("git.chromium.org")) + '/chromiumos/chromite.git@63193a4393f6e964bfca992bfb03e40183554f7d',
+        (Var("git.chromium.org")) + '/chromiumos/chromite.git@df22fd72b22d1905af6e69d23ec373b69c9c75f6',
       'build/third_party/xvfb':
         '/trunk/tools/third_party/xvfb@125214',
       'src/third_party/xdg-utils':
         '/trunk/deps/third_party/xdg-utils@203785',
       'src/third_party/undoview':
         '/trunk/deps/third_party/undoview@119694',
+      'src/third_party/cros_system_api':
+        (Var("git.chromium.org")) + '/chromiumos/platform/system_api.git@ba73627b396a7773203a6c554ae2cc759d52eb2b',
       'src/chrome/tools/test/reference_build/chrome_linux':
-        '/trunk/deps/reference_builds/chrome_linux64@254637',
+        '/trunk/deps/reference_builds/chrome_linux64@273882',
       'src/third_party/swig/linux':
         '/trunk/deps/third_party/swig/linux@230490',
       'src/third_party/liblouis/src':
         (Var("git.chromium.org")) + '/external/liblouis.git@3c2daee56250162e5a75830871601d74328d39f5',
-      'src/third_party/freetype2/src':
-        (Var("git.chromium.org")) + '/chromium/src/third_party/freetype2.git@d699c2994ecc178c4ed05ac2086061b2034c2178',
+      'build/third_party/cbuildbot_chromite':
+        (Var("git.chromium.org")) + '/chromiumos/chromite.git@ff6389dc2361455d2072625a91e18672bdf03547',
       'src/third_party/lss':
         (Var("linux-syscall-support")) + '/trunk/lss@26'
     },
     'android': {
       'src/third_party/guava/src':
         (Var("git.chromium.org")) + '/external/guava-libraries.git@c523556ab7d0f05afadebd20e7768d4c16af8771',
-      'src/third_party/android_tools':
-        (Var("git.chromium.org")) + '/android_tools.git@bf45c76e0eb23b7b7a9d5f26b28c16983daa173b',
-      'src/pdf': None,
-      'src/third_party/apache-mime4j':
-        '/trunk/deps/third_party/apache-mime4j@170888',
-      'src/third_party/freetype':
-        (Var("git.chromium.org")) + '/chromium/src/third_party/freetype.git@a2b9955b49034a51dfbc8bf9f4e9d312149cecac',
-      'src/third_party/jarjar':
-        '/trunk/deps/third_party/jarjar@170888',
-      'src/third_party/libaddressinput/src/cpp': None,
-      'src/third_party/libaddressinput/src/testdata': None,
-      'src/third_party/aosp':
-        '/trunk/deps/third_party/aosp@148330',
       'src/third_party/eyesfree/src/android/java/src/com/googlecode/eyesfree/braille':
         (Var("eyes-free")) + '/trunk/braille/client/src/com/googlecode/eyesfree/braille@797',
+      'src/third_party/freetype':
+        (Var("git.chromium.org")) + '/chromium/src/third_party/freetype.git@a2b9955b49034a51dfbc8bf9f4e9d312149cecac',
+      'src/third_party/apache-mime4j':
+        '/trunk/deps/third_party/apache-mime4j@170888',
+      'src/breakpad/src':
+        (Var("google-breakpad")) + '/branches/chrome_37/src@1357',
+      'src/third_party/elfutils/src':
+        (Var("git.chromium.org")) + '/external/elfutils.git@43a97297be82feab4b3176a094ed701ad3ccb308',
+      'src/pdf': None,
+      'src/third_party/jarjar':
+        '/trunk/deps/third_party/jarjar@170888',
+      'src/third_party/aosp':
+        '/trunk/deps/third_party/aosp@148330',
+      'src/third_party/android_tools':
+        (Var("git.chromium.org")) + '/android_tools.git@e91e44dc29517115794a72eea554616d067925ae',
       'src/third_party/httpcomponents-client':
         '/trunk/deps/third_party/httpcomponents-client@170888',
       'src/third_party/findbugs':
@@ -268,19 +271,21 @@ deps_os = {
 
 deps = {
   'depot_tools':
-    '/trunk/tools/depot_tools@269489',
+    '/trunk/tools/depot_tools@278770',
   'src/third_party/sfntly/cpp/src':
-    (Var("sfntly")) + '/trunk/cpp/src@228',
+    (Var("sfntly")) + '/trunk/cpp/src@239',
   'src/third_party/bidichecker':
     (Var("bidichecker")) + '/trunk/lib@4',
   'src/third_party/libc++/trunk':
     'http://src.chromium.org/llvm-project/libcxx/trunk@206024',
   'src/third_party/libwebm/source':
-    (Var("git.chromium.org")) + '/webm/libwebm.git@fb6b6e64444c637f27d103fd113e0c7bf4f107dd',
-  'src/third_party/skia/include':
-    (Var("skia")) + '/trunk/include@14592',
+    (Var("git.chromium.org")) + '/webm/libwebm.git@8be63972fdd7ae8c041778f8ba674ade903395c9',
+  'src/third_party/WebKit':
+    (Var("blink")) + '/branches/chromium/2062@180557',
+  'src/third_party/openssl':
+    '/trunk/deps/third_party/openssl@275836',
   'src/third_party/openmax_dl':
-    (Var("webrtc")) + '/deps/third_party/openmax@6024',
+    (Var("webrtc")) + '/deps/third_party/openmax@6483',
   'src/third_party/libc++abi/trunk':
     'http://src.chromium.org/llvm-project/libcxxabi/trunk@206024',
   'build/scripts/private/data/reliability':
@@ -290,141 +295,139 @@ deps = {
   'src/third_party/flac':
     '/trunk/deps/third_party/flac@222897',
   'src/media/cdm/ppapi/api':
-    '/trunk/deps/cdm@262570',
+    '/trunk/deps/cdm@273356',
+  'src/third_party/skia':
+    (Var("git.chromium.org")) + '/skia.git@0d78ac294f814a45380eb44b0bb4c01aae2cab01',
   'src/tools/swarming_client':
-    (Var("git.chromium.org")) + '/external/swarming.client.git@ae8085b09e6162b4ec869e430d7d09c16b32b433',
+    (Var("git.chromium.org")) + '/external/swarming.client.git@c333224ef8cf5cc41ab91f6ee9cb1fdbe3689f19',
   'src/chrome/test/data/perf/frame_rate/content':
     '/trunk/deps/frame_rate/content@93671',
   'src/third_party/ots':
     (Var("ots")) + '/trunk@113',
   'src/third_party/jsoncpp/source/src/lib_json':
     (Var("jsoncpp")) + '/trunk/jsoncpp/src/lib_json@248',
+  'build/scripts/tools/deps2git':
+    '/trunk/tools/deps2git@276439',
   'src/third_party/clang_format/script':
     'http://src.chromium.org/llvm-project/cfe/trunk/tools/clang-format@206068',
+  'src/third_party/cld_2/src':
+    (Var("cld2")) + '/trunk@161',
   'src/third_party/WebKit/LayoutTests/w3c/web-platform-tests':
     (Var("git.chromium.org")) + '/external/w3c/web-platform-tests.git@6bed4516fe8522d65512c76ef02e4f0ae8234395',
   'src/third_party/libaddressinput/src/testdata':
-    (Var("libaddressinput")) + '/trunk/testdata@176',
+    (Var("libaddressinput")) + '/trunk/testdata@293',
   'src/testing/gmock':
     (Var("googlemock")) + '/trunk@410',
-  'src/third_party/skia/src':
-    (Var("skia")) + '/trunk/src@14592',
-  'src/tools/grit':
-    (Var("grit-i18n")) + '/trunk@167',
+  'src/third_party/libsrtp':
+    '/trunk/deps/third_party/libsrtp@261337',
   'src/third_party/mesa/src':
     '/trunk/deps/third_party/mesa@265279',
   'src/third_party/smhasher/src':
     (Var("smhasher")) + '/trunk@152',
-  'src/third_party/webrtc':
-    (Var("webrtc")) + '/branches/3.53/webrtc@6374',
-  'build/scripts/tools/deps2git':
-    '/trunk/tools/deps2git@263285',
+  'src/third_party/webpagereplay':
+    (Var("git.chromium.org")) + '/external/web-page-replay.git@b62c02d3b64cf00a2f65a82cca0721aa42c3d6ad',
+  'src/chrome/browser/resources/pdf/html_office':
+    (Var("git.chromium.org")) + '/chromium/html-office-public.git@eeff97614f65e0578529490d44d412032c3d7359',
   'src/third_party/hunspell_dictionaries':
     '/trunk/deps/third_party/hunspell_dictionaries@255132',
   'src/native_client':
-    (Var("native_client")) + '/trunk/src/native_client@13159',
+    (Var("native_client")) + '/branches/2062/src/native_client@13585',
   'src/third_party/brotli/src':
-    (Var("git.chromium.org")) + '/external/font-compression-reference.git@0829e37293abc2523a1d2b0f4d68ff7b5fcd8e01',
+    (Var("git.chromium.org")) + '/external/font-compression-reference.git@6cef49677dc4c650ef6e3f56041e0a41803afa8c',
   'src/tools/page_cycler/acid3':
     '/trunk/deps/page_cycler/acid3@171600',
   'src/third_party/cacheinvalidation/src':
     (Var("google-cache-invalidation-api")) + '/trunk/src@331',
   'src/chrome/test/data/extensions/api_test/permissions/nacl_enabled/bin':
-    (Var("native_client")) + '/trunk/src/native_client/tests/prebuilt@13159',
+    (Var("native_client")) + '/branches/2062/src/native_client/tests/prebuilt@13585',
   'src/third_party/leveldatabase/src':
     (Var("leveldb")) + '/trunk@80',
   'build':
-    '/trunk/tools/build@269491',
-  'src/third_party/cld_2/src':
-    (Var("cld2")) + '/trunk@160',
+    '/trunk/tools/build@278895',
+  'src/tools/gyp':
+    (Var("gyp")) + '/trunk@1944',
   'src/chrome/test/data/perf/canvas_bench':
     '/trunk/deps/canvas_bench@122605',
-  'src/chrome/test/data/perf/third_party/octane':
-    (Var("octane-benchmark")) + '/trunk@19',
-  'src/third_party/angle':
-    (Var("git.chromium.org")) + '/angle/angle.git@d3d870647655ea8292cee9a1b65820547b13ac0c',
   'src/third_party/ffmpeg':
-    '/trunk/deps/third_party/ffmpeg@275869',
-  'src/third_party/skia/gyp':
-    (Var("skia")) + '/trunk/gyp@14592',
+    (Var("git.chromium.org")) + '/chromium/third_party/ffmpeg.git@5c3de8094903dd2162232b8f1be916c46acdd8f5',
+  'src/third_party/hunspell':
+    '/trunk/deps/third_party/hunspell@256272',
+  'src/buildtools':
+    (Var("git.chromium.org")) + '/chromium/buildtools.git@10a5251e71445a832953f1374bbbbe60ad019144',
   'src/third_party/scons-2.0.1':
     (Var("native_client")) + '/trunk/src/third_party/scons-2.0.1@13077',
   'src/third_party/webdriver/pylib':
     (Var("selenium")) + '/trunk/py@18337',
   'src/third_party/usrsctp/usrsctplib':
-    (Var("sctp-refimpl")) + '/trunk/KERN/usrsctp/usrsctplib@8838',
+    (Var("sctp-refimpl")) + '/trunk/KERN/usrsctp/usrsctplib@8875',
   'build/scripts/gsd_generate_index':
     '/trunk/tools/gsd_generate_index@164784',
-  'src/chrome/browser/resources/pdf/html_office':
-    (Var("git.chromium.org")) + '/chromium/html-office-public.git@eeff97614f65e0578529490d44d412032c3d7359',
-  'src/third_party/webgl/src':
-    (Var("git.chromium.org")) + '/external/khronosgroup/webgl.git@1700aa98cc8bc494b305d4ec1045797bc4030f45',
+  'build/third_party/lighttpd':
+    '/trunk/deps/third_party/lighttpd@58968',
   'src/third_party/libyuv':
-    (Var("libyuv")) + '/trunk@1000',
+    (Var("libyuv")) + '/trunk@1007',
   'src/third_party/libjingle/source/talk':
-    (Var("webrtc")) + '/trunk/talk@6085',
+    (Var("webrtc")) + '/trunk/talk@6496',
   'src/third_party/libexif/sources':
     '/trunk/deps/third_party/libexif/sources@265008',
   'src/third_party/jsoncpp/source/include':
     (Var("jsoncpp")) + '/trunk/jsoncpp/include@248',
   'src/third_party/libphonenumber/src/test':
     (Var("libphonenumber")) + '/trunk/cpp/test@621',
-  'src/third_party/libsrtp':
-    '/trunk/deps/third_party/libsrtp@261337',
+  'src/third_party/pdfium':
+    'https://pdfium.googlesource.com/pdfium.git@a2dfb95353c8e4851300f8d53d4659e1b764c31d',
   'src/third_party/libphonenumber/src/phonenumbers':
     (Var("libphonenumber")) + '/trunk/cpp/src/phonenumbers@621',
-  'src/third_party/openssl':
-    '/branches/third_party/openssl/1985@275906',
+  'src/third_party/libphonenumber/src/resources':
+    (Var("libphonenumber")) + '/trunk/resources@621',
   'src/third_party/trace-viewer':
-    (Var("trace-viewer")) + '/trunk@1267',
+    (Var("trace-viewer")) + '/trunk@1281',
   'src/third_party/yasm/source/patched-yasm':
     '/trunk/deps/third_party/yasm/patched-yasm@167605',
-  'build/third_party/lighttpd':
-    '/trunk/deps/third_party/lighttpd@58968',
   'src/third_party/safe_browsing/testing':
     (Var("google-safe-browsing")) + '/trunk/testing@112',
   'src/sdch/open-vcdiff':
     (Var("open-vcdiff")) + '/trunk@42',
   'build/scripts/command_wrapper/bin':
     '/trunk/tools/command_wrapper/bin@135178',
+  'src/testing/gtest':
+    (Var("googletest")) + '/trunk@643',
   'src/third_party/pyftpdlib/src':
     (Var("pyftpdlib")) + '/trunk@977',
   'src/third_party/libaddressinput/src/cpp':
-    (Var("libaddressinput")) + '/trunk/cpp@176',
-  'src/third_party/WebKit':
-    (Var("blink")) + '/branches/chromium/1985@176821',
+    (Var("libaddressinput")) + '/trunk/cpp@293',
   'src/third_party/icu':
-    '/trunk/deps/third_party/icu46@262949',
+    '/trunk/deps/third_party/icu46@285202',
   'src/third_party/speex':
-    '/trunk/deps/third_party/speex@198168',
+    '/trunk/deps/third_party/speex@272757',
   'src/third_party/opus/src':
     '/trunk/deps/third_party/opus@256783',
-  'src/third_party/libphonenumber/src/resources':
-    (Var("libphonenumber")) + '/trunk/resources@621',
-  'src/third_party/webpagereplay':
-    (Var("web-page-replay")) + '/trunk@544',
+  'src/tools/grit':
+    (Var("grit-i18n")) + '/trunk@169',
+  'src/third_party/colorama/src':
+    (Var("git.chromium.org")) + '/external/colorama.git@799604a1041e9b3bc5d2789ecbd7e8db2e18e6b8',
   'src/third_party/snappy/src':
     (Var("snappy")) + '/trunk@80',
   'src/breakpad/src':
-    (Var("google-breakpad")) + '/trunk/src@1325',
-  'src/third_party/hunspell':
-    '/trunk/deps/third_party/hunspell@256272',
+    (Var("google-breakpad")) + '/trunk/src@1338',
+  'src/third_party/webrtc':
+    (Var("webrtc")) + '/branches/3.55/webrtc@6796',
   'src/tools/deps2git':
-    '/trunk/tools/deps2git@262731',
+    '/trunk/tools/deps2git@276439',
   'src/third_party/libjpeg_turbo':
-    '/trunk/deps/third_party/libjpeg_turbo@263594',
-  'src/testing/gtest':
-    (Var("googletest")) + '/trunk@643',
+    '/trunk/deps/third_party/libjpeg_turbo@272637',
+  'src/third_party/angle':
+    (Var("git.chromium.org")) + '/angle/angle.git@f4126d2b9eb008d4e792fff2592f338e19c68569',
   'src/v8':
-    (Var("v8")) + '/branches/3.26@21981',
+    (Var("v8")) + '/branches/3.27@23158',
   'src/third_party/pywebsocket/src':
     (Var("pywebsocket")) + '/trunk/src@790',
   'src/third_party/libvpx':
-    '/trunk/deps/third_party/libvpx@269083',
+    '/trunk/deps/third_party/libvpx@278497',
   'src/third_party/swig/Lib':
     '/trunk/deps/third_party/swig/Lib@230490',
-  'src/tools/gyp':
-    (Var("gyp")) + '/trunk@1918'
+  'src/third_party/webgl/src':
+    (Var("git.chromium.org")) + '/external/khronosgroup/webgl.git@0475a2763fc30cbed22740f8a9ef53a82f03b4ac'
 }
 
 skip_child_includes = [
@@ -433,7 +436,6 @@ skip_child_includes = [
   'metro_driver',
   'native_client_sdk',
   'o3d',
-  'pdf',
   'sdch',
   'skia',
   'testing',
@@ -529,7 +531,7 @@ hooks = [{
   '--bucket',
   'chromium-gn',
   '-s',
-  'src/tools/gn/bin/win/gn.exe.sha1'],
+  'src/buildtools/win/gn.exe.sha1'],
   'pattern':
     '.',
   'name':
@@ -543,7 +545,7 @@ hooks = [{
   '--bucket',
   'chromium-gn',
   '-s',
-  'src/tools/gn/bin/mac/gn.sha1'],
+  'src/buildtools/mac/gn.sha1'],
   'pattern':
     '.',
   'name':
@@ -557,11 +559,67 @@ hooks = [{
   '--bucket',
   'chromium-gn',
   '-s',
+  'src/buildtools/linux32/gn.sha1'],
+  'pattern':
+    '.',
+  'name':
+    'gn_linux32'
+},
+{
+  'action': ['download_from_google_storage',
+  '--no_resume',
+  '--platform=linux*',
+  '--no_auth',
+  '--bucket',
+  'chromium-gn',
+  '-s',
+  'src/buildtools/linux64/gn.sha1'],
+  'pattern':
+    '.',
+  'name':
+    'gn_linux64'
+},
+{
+  'action': ['download_from_google_storage',
+  '--no_resume',
+  '--platform=win32',
+  '--no_auth',
+  '--bucket',
+  'chromium-gn',
+  '-s',
+  'src/tools/gn/bin/win/gn.exe.sha1'],
+  'pattern':
+    '.',
+  'name':
+    'gn_old_win'
+},
+{
+  'action': ['download_from_google_storage',
+  '--no_resume',
+  '--platform=darwin',
+  '--no_auth',
+  '--bucket',
+  'chromium-gn',
+  '-s',
+  'src/tools/gn/bin/mac/gn.sha1'],
+  'pattern':
+    '.',
+  'name':
+    'gn_old_mac'
+},
+{
+  'action': ['download_from_google_storage',
+  '--no_resume',
+  '--platform=linux*',
+  '--no_auth',
+  '--bucket',
+  'chromium-gn',
+  '-s',
   'src/tools/gn/bin/linux/gn.sha1'],
   'pattern':
     '.',
   'name':
-    'gn_linux'
+    'gn_old_linux'
 },
 {
   'action': ['download_from_google_storage',
@@ -575,7 +633,7 @@ hooks = [{
   'pattern':
     '.',
   'name':
-    'gn_linux32'
+    'gn_old_linux32'
 },
 {
   'action': ['download_from_google_storage',
@@ -640,6 +698,47 @@ hooks = [{
     '.',
   'name':
     'eu-strip'
+},
+{
+  'action': ['download_from_google_storage',
+  '--no_resume',
+  '--platform=win32',
+  '--no_auth',
+  '--bucket',
+  'chromium-drmemory',
+  '-s',
+  'src/third_party/drmemory/drmemory-windows-sfx.exe.sha1'],
+  'pattern':
+    '.',
+  'name':
+    'drmemory'
+},
+{
+  'action': ['python',
+  'src/build/get_syzygy_binaries.py',
+  '--output-dir=src/third_party/syzygy/binaries',
+  '--revision=b08fb72610963d31cc3eae33f746a04e263bd860',
+  '--overwrite'],
+  'pattern':
+    '.',
+  'name':
+    'syzygy-binaries'
+},
+{
+  'action': ['download_from_google_storage',
+  '--no_resume',
+  '--platform=win32',
+  '--directory',
+  '--recursive',
+  '--no_auth',
+  '--num_threads=16',
+  '--bucket',
+  'chromium-apache-win32',
+  'src/third_party/apache-win32'],
+  'pattern':
+    '\\.sha1',
+  'name':
+    'apache_win32'
 },
 {
   'action': [

@@ -8,7 +8,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/browser/bookmark_model.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -96,6 +96,10 @@ bool BookmarkContextMenu::IsItemChecked(int command_id) const {
 
 bool BookmarkContextMenu::IsCommandEnabled(int command_id) const {
   return controller_->IsCommandIdEnabled(command_id);
+}
+
+bool BookmarkContextMenu::IsCommandVisible(int command_id) const {
+  return controller_->IsCommandIdVisible(command_id);
 }
 
 bool BookmarkContextMenu::ShouldCloseAllMenusOnExecute(int id) {

@@ -16,7 +16,7 @@ namespace extensions {
 class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
  public:
   // |context| is required and must not be an incognito context.
-  TestExtensionsBrowserClient(content::BrowserContext* main_context);
+  explicit TestExtensionsBrowserClient(content::BrowserContext* main_context);
   virtual ~TestExtensionsBrowserClient();
 
   // Associates an incognito context with |main_context_|.
@@ -66,6 +66,7 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
   virtual scoped_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate()
       OVERRIDE;
   virtual bool DidVersionUpdate(content::BrowserContext* context) OVERRIDE;
+  virtual void PermitExternalProtocolHandler() OVERRIDE;
   virtual scoped_ptr<AppSorting> CreateAppSorting() OVERRIDE;
   virtual bool IsRunningInForcedAppMode() OVERRIDE;
   virtual ApiActivityMonitor* GetApiActivityMonitor(
@@ -75,6 +76,8 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
       ExtensionFunctionRegistry* registry) const OVERRIDE;
   virtual scoped_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
       content::BrowserContext* context) const OVERRIDE;
+  virtual ComponentExtensionResourceManager*
+  GetComponentExtensionResourceManager() OVERRIDE;
 
  private:
   content::BrowserContext* main_context_;       // Not owned.

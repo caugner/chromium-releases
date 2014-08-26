@@ -41,6 +41,7 @@ namespace history {
 
 namespace imui = in_memory_url_index;
 
+class HistoryClient;
 class HistoryDatabase;
 class URLIndexPrivateData;
 struct URLsDeletedDetails;
@@ -100,7 +101,8 @@ class InMemoryURLIndex : public content::NotificationObserver,
   // which URLs and omnibox searches are broken down into words and characters.
   InMemoryURLIndex(Profile* profile,
                    const base::FilePath& history_dir,
-                   const std::string& languages);
+                   const std::string& languages,
+                   HistoryClient* client);
   virtual ~InMemoryURLIndex();
 
   // Opens and prepares the index of historical URL visits. If the index private
@@ -117,9 +119,11 @@ class InMemoryURLIndex : public content::NotificationObserver,
   // URLIndexPrivateData class. For a complete description of this function
   // refer to that class.  If |cursor_position| is base::string16::npos, the
   // function doesn't do anything special with the cursor; this is equivalent
-  // to the cursor being at the end.
+  // to the cursor being at the end.  In total, |max_matches| of items will be
+  // returned in the |ScoredHistoryMatches| vector.
   ScoredHistoryMatches HistoryItemsForTerms(const base::string16& term_string,
-                                            size_t cursor_position);
+                                            size_t cursor_position,
+                                            size_t max_matches);
 
   // Deletes the index entry, if any, for the given |url|.
   void DeleteURL(const GURL& url);
@@ -252,6 +256,9 @@ class InMemoryURLIndex : public content::NotificationObserver,
   // The profile, may be null when testing.
   Profile* profile_;
 
+  // The HistoryClient; may be NULL when testing.
+  HistoryClient* history_client_;
+
   // Directory where cache file resides. This is, except when unit testing,
   // the same directory in which the profile's history database is found. It
   // should never be empty.
@@ -283,8 +290,6 @@ class InMemoryURLIndex : public content::NotificationObserver,
   // to be cached. Set to false when the index has been cached. Used as a
   // temporary safety check to insure that the cache is saved before the
   // index has been destructed.
-  // TODO(mrossetti): Eliminate once the transition to SQLite has been done.
-  // http://crbug.com/83659
   bool needs_to_be_cached_;
 
   DISALLOW_COPY_AND_ASSIGN(InMemoryURLIndex);

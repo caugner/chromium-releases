@@ -69,6 +69,14 @@ public class AppMenuButtonHelper extends SimpleOnGestureListener implements OnTo
     }
 
     /**
+     * @return Whether app menu is active. That is, AppMenu is showing or menu button is consuming
+     *         touch events to prepare AppMenu showing.
+     */
+    public boolean isAppMenuActive() {
+        return mMenuButton.isPressed() || mMenuHandler.isAppMenuShowing();
+    }
+
+    /**
      * Handle the key press event on a menu button.
      * @return Whether the app menu was shown as a result of this action.
      */
@@ -95,17 +103,18 @@ public class AppMenuButtonHelper extends SimpleOnGestureListener implements OnTo
         if (mSeenFirstScrollEvent) return false;
         mSeenFirstScrollEvent = true;
 
-        // If the scrolling direction is roughly down on the first onScroll detection,
-        // we consider it as dragging start, so shows the app menu. Otherwise, we
-        // don't show menu so that toolbar horizontal swiping can happen.
-        return -distanceY >= Math.abs(distanceX) && showAppMenu(true);
+        return showAppMenu(true);
     }
 
     @Override
     public boolean onTouch(View view, MotionEvent event) {
+        // isMenuButtonReleased is a workaround for some versions of Android that do not
+        // reset pressed animations correctly on mMenuButton.setPressed(false).
+        boolean isMenuButtonReleased = false;
         if (event.getActionMasked() == MotionEvent.ACTION_CANCEL ||
                 event.getActionMasked() == MotionEvent.ACTION_UP) {
             mMenuButton.setPressed(false);
+            isMenuButtonReleased = true;
         }
 
         // This will take care of showing app menu.
@@ -118,6 +127,6 @@ public class AppMenuButtonHelper extends SimpleOnGestureListener implements OnTo
         if (dragHelper != null && !isTouchEventConsumed) {
             isTouchEventConsumed |= dragHelper.handleDragging(event);
         }
-        return isTouchEventConsumed;
+        return !isMenuButtonReleased && isTouchEventConsumed;
     }
 }

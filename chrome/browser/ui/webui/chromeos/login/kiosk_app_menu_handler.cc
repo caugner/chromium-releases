@@ -37,14 +37,18 @@ const int kMaxAppIconSize = 160;
 
 }  // namespace
 
-KioskAppMenuHandler::KioskAppMenuHandler()
+KioskAppMenuHandler::KioskAppMenuHandler(
+    const scoped_refptr<NetworkStateInformer>& network_state_informer)
     : weak_ptr_factory_(this),
-      is_webui_initialized_(false) {
+      is_webui_initialized_(false),
+      network_state_informer_(network_state_informer) {
   KioskAppManager::Get()->AddObserver(this);
+  network_state_informer_->AddObserver(this);
 }
 
 KioskAppMenuHandler::~KioskAppMenuHandler() {
   KioskAppManager::Get()->RemoveObserver(this);
+  network_state_informer_->RemoveObserver(this);
 }
 
 void KioskAppMenuHandler::GetLocalizedStrings(
@@ -61,6 +65,9 @@ void KioskAppMenuHandler::GetLocalizedStrings(
   localized_strings->SetString(
       "confirmKioskAppDiagnosticModeNo",
       l10n_util::GetStringUTF16(IDS_CONFIRM_MESSAGEBOX_NO_BUTTON_LABEL));
+  localized_strings->SetBoolean(
+      "kioskAppHasLaunchError",
+      KioskAppLaunchError::Get() != KioskAppLaunchError::NONE);
 }
 
 void KioskAppMenuHandler::RegisterMessages() {
@@ -121,7 +128,6 @@ void KioskAppMenuHandler::SendKioskApps() {
     apps_list.Append(app_info.release());
   }
 
-
   web_ui()->CallJavascriptFunction(EnableNewKioskUI() ?
       kKioskSetAppsNewAPI : kKioskSetAppsOldAPI,
       apps_list);
@@ -131,6 +137,7 @@ void KioskAppMenuHandler::HandleInitializeKioskApps(
     const base::ListValue* args) {
   is_webui_initialized_ = true;
   SendKioskApps();
+  UpdateState(ErrorScreenActor::ERROR_REASON_UPDATE);
 }
 
 void KioskAppMenuHandler::HandleKioskAppsLoaded(
@@ -161,6 +168,11 @@ void KioskAppMenuHandler::OnKioskAppsSettingsChanged() {
 
 void KioskAppMenuHandler::OnKioskAppDataChanged(const std::string& app_id) {
   SendKioskApps();
+}
+
+void KioskAppMenuHandler::UpdateState(ErrorScreenActor::ErrorReason reason) {
+  if (network_state_informer_->state() == NetworkStateInformer::ONLINE)
+    KioskAppManager::Get()->RetryFailedAppDataFetch();
 }
 
 }  // namespace chromeos

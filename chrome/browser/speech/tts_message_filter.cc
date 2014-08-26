@@ -35,10 +35,9 @@ void TtsMessageFilter::OverrideThreadForMessage(
   }
 }
 
-bool TtsMessageFilter::OnMessageReceived(const IPC::Message& message,
-                                         bool* message_was_ok) {
+bool TtsMessageFilter::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP_EX(TtsMessageFilter, message, *message_was_ok)
+  IPC_BEGIN_MESSAGE_MAP(TtsMessageFilter, message)
     IPC_MESSAGE_HANDLER(TtsHostMsg_InitializeVoiceList, OnInitializeVoiceList)
     IPC_MESSAGE_HANDLER(TtsHostMsg_Speak, OnSpeak)
     IPC_MESSAGE_HANDLER(TtsHostMsg_Pause, OnPause)
@@ -53,6 +52,10 @@ void TtsMessageFilter::OnChannelClosing() {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&TtsMessageFilter::OnChannelClosingInUIThread, this));
+}
+
+void TtsMessageFilter::OnDestruct() const {
+  BrowserThread::DeleteOnUIThread::Destruct(this);
 }
 
 void TtsMessageFilter::OnInitializeVoiceList() {
@@ -160,4 +163,6 @@ void TtsMessageFilter::OnChannelClosingInUIThread() {
 }
 
 TtsMessageFilter::~TtsMessageFilter() {
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  TtsController::GetInstance()->RemoveVoicesChangedDelegate(this);
 }

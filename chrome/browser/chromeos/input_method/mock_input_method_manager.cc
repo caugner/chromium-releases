@@ -97,11 +97,13 @@ void MockInputMethodManager::ActivateInputMethodMenuItem(
 }
 
 void MockInputMethodManager::AddInputMethodExtension(
+    Profile* profile,
     const std::string& id,
     InputMethodEngineInterface* instance) {
 }
 
-void MockInputMethodManager::RemoveInputMethodExtension(const std::string& id) {
+void MockInputMethodManager::RemoveInputMethodExtension(Profile* profile,
+                                                        const std::string& id) {
 }
 
 void MockInputMethodManager::GetInputMethodExtensions(
@@ -113,6 +115,10 @@ void MockInputMethodManager::SetEnabledExtensionImes(
 }
 
 void MockInputMethodManager::SetInputMethodLoginDefault() {
+}
+
+void MockInputMethodManager::SetInputMethodLoginDefaultFromVPD(
+    const std::string& locale, const std::string& layout) {
 }
 
 bool MockInputMethodManager::SwitchToNextInputMethod() {
@@ -178,7 +184,7 @@ bool MockInputMethodManager::IsLoginKeyboard(
   return true;
 }
 
-bool MockInputMethodManager::MigrateXkbInputMethods(
+bool MockInputMethodManager::MigrateInputMethods(
     std::vector<std::string>* input_method_ids) {
   return false;
 }

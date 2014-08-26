@@ -30,7 +30,7 @@ class TopIconAnimationObserver {
 };
 
 // Transitional view used for top item icons animation when opening or closing
-// a folder.
+// a folder. Owns itself.
 class TopIconAnimationView : public views::View,
                              public ui::ImplicitAnimationObserver {
  public:
@@ -54,7 +54,7 @@ class TopIconAnimationView : public views::View,
 
  private:
   // views::View overrides:
-  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const OVERRIDE;
   virtual void Layout() OVERRIDE;
 
   // ui::ImplicitAnimationObserver overrides:

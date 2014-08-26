@@ -4,6 +4,7 @@
 
 package org.chromium.content.browser;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.MediaMetadataRetriever;
@@ -23,9 +24,10 @@ import java.util.Map;
 /**
  * Tests for MediaResourceGetter.
  */
+@SuppressLint("SdCardPath")
 public class MediaResourceGetterTest extends InstrumentationTestCase {
     private static final String TEST_HTTP_URL = "http://example.com";
-    private static final String TEST_USER_AGENT = // Anyhting, really
+    private static final String TEST_USER_AGENT = // Anything, really
             "Mozilla/5.0 (Windows NT 6.2; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/32.0.1667.0 Safari/537.36";
     private static final String TEST_FILE_PATH = "/mnt/sdcard/test";
@@ -99,6 +101,9 @@ public class MediaResourceGetterTest extends InstrumentationTestCase {
         String mUri = null;
         Map<String,String> mHeaders = null;
         String mPath = null;
+        int mFd;
+        long mOffset;
+        long mLength;
 
         // Write these before tests to configure functionality
         SparseArray<String> mMetadata = null;
@@ -106,6 +111,17 @@ public class MediaResourceGetterTest extends InstrumentationTestCase {
         boolean mThrowExceptionInConfigure = false;
         boolean mThrowExceptionInExtract = false;
         boolean mFileExists = false;
+
+        // Can't use a real MediaMetadataRetriever as we have no media
+        @Override
+        public void configure(int fd, long offset, long length) {
+            if (mThrowExceptionInConfigure) {
+                throw new RuntimeException("test exception");
+            }
+            mFd = fd;
+            mOffset = offset;
+            mLength = length;
+        }
 
         // Can't use a real MediaMetadataRetriever as we have no media
         @Override
@@ -336,6 +352,24 @@ public class MediaResourceGetterTest extends InstrumentationTestCase {
     }
 
     @SmallTest
+    public void testConfigure_Net_Allowed_LocalHost_WithNoNetwork() {
+        String[] localHostUrls = {
+            "http://LocalHost",
+            "https://127.0.0.1/",
+            "http://[::1]:8888/",
+        };
+        mMockContext.allowPermission = true;
+        mFakeMRG.mNetworkType = null;
+        for (String localHostUrl : localHostUrls) {
+            assertTrue(mFakeMRG.configure(mMockContext, localHostUrl,
+                                          TEST_COOKIES, TEST_USER_AGENT));
+            assertEquals(localHostUrl, mFakeMRG.mUri);
+            assertEquals(sHeadersCookieAndUA, mFakeMRG.mHeaders);
+            assertNull(mFakeMRG.mPath);
+        }
+    }
+
+    @SmallTest
     public void testConfigure_File_Allowed_MntSdcard() {
         final String path = "/mnt/sdcard/test";
         final String url = "file://" + path;
@@ -482,6 +516,22 @@ public class MediaResourceGetterTest extends InstrumentationTestCase {
         mFakeMRG.mThrowExceptionInExtract = true;
         mFakeMRG.bind(MediaMetadataRetriever.METADATA_KEY_DURATION, "1");
         assertEquals(sEmptyMetadata, mFakeMRG.extract(mMockContext, TEST_FILE_URL, null, null));
+    }
+
+    @SmallTest
+    public void testExtractFromFileDescriptor_ValidMetadata() {
+        mFakeMRG.bind(MediaMetadataRetriever.METADATA_KEY_DURATION, "1");
+        mFakeMRG.bind(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO, "yes");
+        mFakeMRG.bind(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH, "2");
+        mFakeMRG.bind(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT, "3");
+        final MediaMetadata expected = new MediaMetadata(1, 2, 3, true);
+        int fd = 1234;
+        long offset = 1000;
+        long length = 9000;
+        assertEquals(expected, mFakeMRG.extract(fd, offset, length));
+        assertEquals(fd, mFakeMRG.mFd);
+        assertEquals(offset, mFakeMRG.mOffset);
+        assertEquals(length, mFakeMRG.mLength);
     }
 
     @SmallTest

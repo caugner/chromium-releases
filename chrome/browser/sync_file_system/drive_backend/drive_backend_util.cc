@@ -89,7 +89,7 @@ void PopulateFileDetailsByFileResource(
   details->set_creation_time(file_resource.created_date().ToInternalValue());
   details->set_modification_time(
       file_resource.modified_date().ToInternalValue());
-  details->set_missing(false);
+  details->set_missing(file_resource.labels().is_trashed());
 }
 
 scoped_ptr<FileMetadata> CreateFileMetadataFromFileResource(
@@ -180,23 +180,6 @@ std::string GetMimeTypeFromTitle(const base::FilePath& title) {
       !net::GetWellKnownMimeTypeFromExtension(extension.substr(1), &mime_type))
     return kMimeTypeOctetStream;
   return mime_type;
-}
-
-scoped_ptr<google_apis::ResourceEntry> GetOldestCreatedFolderResource(
-    ScopedVector<google_apis::ResourceEntry> candidates) {
-  scoped_ptr<google_apis::ResourceEntry> oldest;
-  for (size_t i = 0; i < candidates.size(); ++i) {
-    google_apis::ResourceEntry* entry = candidates[i];
-    if (!entry->is_folder() || entry->deleted())
-      continue;
-
-    if (!oldest || oldest->published_time() > entry->published_time()) {
-      oldest.reset(entry);
-      candidates[i] = NULL;
-    }
-  }
-
-  return oldest.Pass();
 }
 
 SyncStatusCode GDataErrorCodeToSyncStatusCode(

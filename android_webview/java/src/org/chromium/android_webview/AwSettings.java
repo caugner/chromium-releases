@@ -87,6 +87,8 @@ public class AwSettings {
     private boolean mDomStorageEnabled = false;
     private boolean mDatabaseEnabled = false;
     private boolean mUseWideViewport = false;
+    private boolean mZeroLayoutHeightDisablesViewportQuirk = false;
+    private boolean mForceZeroLayoutHeight = false;
     private boolean mLoadWithOverviewMode = false;
     private boolean mMediaPlaybackRequiresUserGesture = true;
     private String mDefaultVideoPosterURL;
@@ -95,6 +97,9 @@ public class AwSettings {
     private boolean mEnableSupportedHardwareAcceleratedFeatures = false;
     private int mMixedContentMode = MIXED_CONTENT_NEVER_ALLOW;
     private boolean mVideoOverlayForEmbeddedVideoEnabled = false;
+
+    // Although this bit is stored on AwSettings it is actually controlled via the CookieManager.
+    private boolean mAcceptThirdPartyCookies;
 
     private final boolean mSupportLegacyQuirks;
 
@@ -309,6 +314,28 @@ public class AwSettings {
     public boolean getBlockNetworkLoads() {
         synchronized (mAwSettingsLock) {
             return mBlockNetworkLoads;
+        }
+    }
+
+    /**
+     * Enable/disable third party cookies for an AwContents
+     * @param accept true if we should accept third party cookies
+     */
+    public void setAcceptThirdPartyCookies(boolean accept) {
+        synchronized (mAwSettingsLock) {
+            if (mAcceptThirdPartyCookies != accept) {
+                mAcceptThirdPartyCookies = accept;
+            }
+        }
+    }
+
+    /**
+     * Return whether third party cookies are enabled for an AwContents
+     * @return true if accept third party cookies
+     */
+    public boolean getAcceptThirdPartyCookies() {
+        synchronized (mAwSettingsLock) {
+            return mAcceptThirdPartyCookies;
         }
     }
 
@@ -1184,6 +1211,48 @@ public class AwSettings {
     private boolean getUseWideViewportLocked() {
         assert Thread.holdsLock(mAwSettingsLock);
         return mUseWideViewport;
+    }
+
+    public void setZeroLayoutHeightDisablesViewportQuirk(boolean enabled) {
+        synchronized (mAwSettingsLock) {
+            if (mZeroLayoutHeightDisablesViewportQuirk != enabled) {
+                mZeroLayoutHeightDisablesViewportQuirk = enabled;
+                mEventHandler.updateWebkitPreferencesLocked();
+            }
+        }
+    }
+
+    public boolean getZeroLayoutHeightDisablesViewportQuirk() {
+        synchronized (mAwSettingsLock) {
+            return getZeroLayoutHeightDisablesViewportQuirkLocked();
+        }
+    }
+
+    @CalledByNative
+    private boolean getZeroLayoutHeightDisablesViewportQuirkLocked() {
+        assert Thread.holdsLock(mAwSettingsLock);
+        return mZeroLayoutHeightDisablesViewportQuirk;
+    }
+
+    public void setForceZeroLayoutHeight(boolean enabled) {
+        synchronized (mAwSettingsLock) {
+            if (mForceZeroLayoutHeight != enabled) {
+                mForceZeroLayoutHeight = enabled;
+                mEventHandler.updateWebkitPreferencesLocked();
+            }
+        }
+    }
+
+    public boolean getForceZeroLayoutHeight() {
+        synchronized (mAwSettingsLock) {
+            return getForceZeroLayoutHeightLocked();
+        }
+    }
+
+    @CalledByNative
+    private boolean getForceZeroLayoutHeightLocked() {
+        assert Thread.holdsLock(mAwSettingsLock);
+        return mForceZeroLayoutHeight;
     }
 
     @CalledByNative

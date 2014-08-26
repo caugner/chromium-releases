@@ -15,6 +15,10 @@
 #include "components/cdm/renderer/widevine_key_systems.h"
 #include "content/public/renderer/render_thread.h"
 
+#if defined(OS_ANDROID)
+#include "components/cdm/renderer/android_key_systems.h"
+#endif
+
 #include "widevine_cdm_version.h" // In SHARED_INTERMEDIATE_DIR.
 
 // The following must be after widevine_cdm_version.h.
@@ -28,19 +32,19 @@ using content::KeySystemInfo;
 using content::SupportedCodecs;
 
 #if defined(ENABLE_PEPPER_CDMS)
-static bool IsPepperCdmRegistered(
+static bool IsPepperCdmAvailable(
     const std::string& pepper_type,
     std::vector<base::string16>* additional_param_names,
     std::vector<base::string16>* additional_param_values) {
-  bool is_registered = false;
+  bool is_available = false;
   content::RenderThread::Get()->Send(
-      new ChromeViewHostMsg_IsInternalPluginRegisteredForMimeType(
+      new ChromeViewHostMsg_IsInternalPluginAvailableForMimeType(
           pepper_type,
-          &is_registered,
+          &is_available,
           additional_param_names,
           additional_param_values));
 
-  return is_registered;
+  return is_available;
 }
 
 // External Clear Key (used for testing).
@@ -61,9 +65,9 @@ static void AddExternalClearKey(
 
   std::vector<base::string16> additional_param_names;
   std::vector<base::string16> additional_param_values;
-  if (!IsPepperCdmRegistered(kExternalClearKeyPepperType,
-                             &additional_param_names,
-                             &additional_param_values)) {
+  if (!IsPepperCdmAvailable(kExternalClearKeyPepperType,
+                            &additional_param_names,
+                            &additional_param_values)) {
     return;
   }
 
@@ -137,9 +141,9 @@ static void AddPepperBasedWidevine(
 
   std::vector<base::string16> additional_param_names;
   std::vector<base::string16> additional_param_values;
-  if (!IsPepperCdmRegistered(kWidevineCdmPluginMimeType,
-                             &additional_param_names,
-                             &additional_param_values)) {
+  if (!IsPepperCdmAvailable(kWidevineCdmPluginMimeType,
+                            &additional_param_names,
+                            &additional_param_values)) {
     DVLOG(1) << "Widevine CDM is not currently available.";
     return;
   }

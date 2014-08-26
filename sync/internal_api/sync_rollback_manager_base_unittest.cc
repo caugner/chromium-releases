@@ -18,6 +18,34 @@ void OnConfigDone(bool success) {
   EXPECT_TRUE(success);
 }
 
+class SyncTestRollbackManager : public SyncRollbackManagerBase {
+ public:
+  virtual void Init(
+      const base::FilePath& database_location,
+      const WeakHandle<JsEventHandler>& event_handler,
+      const std::string& sync_server_and_path,
+      int sync_server_port,
+      bool use_ssl,
+      scoped_ptr<HttpPostProviderFactory> post_factory,
+      const std::vector<scoped_refptr<ModelSafeWorker> >& workers,
+      ExtensionsActivity* extensions_activity,
+      ChangeDelegate* change_delegate,
+      const SyncCredentials& credentials,
+      const std::string& invalidator_client_id,
+      const std::string& restored_key_for_bootstrapping,
+      const std::string& restored_keystore_key_for_bootstrapping,
+      InternalComponentsFactory* internal_components_factory,
+      Encryptor* encryptor,
+      scoped_ptr<UnrecoverableErrorHandler> unrecoverable_error_handler,
+      ReportUnrecoverableErrorFunction report_unrecoverable_error_function,
+      CancelationSignal* cancelation_signal) OVERRIDE {
+    SyncRollbackManagerBase::InitInternal(database_location,
+                                          internal_components_factory,
+                                          unrecoverable_error_handler.Pass(),
+                                          report_unrecoverable_error_function);
+  }
+};
+
 class SyncRollbackManagerBaseTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
@@ -32,7 +60,7 @@ class SyncRollbackManagerBaseTest : public testing::Test {
                   NULL, NULL);
   }
 
-  SyncRollbackManagerBase manager_;
+  SyncTestRollbackManager manager_;
   base::MessageLoop loop_;    // Needed for WeakHandle
 };
 
@@ -49,20 +77,20 @@ TEST_F(SyncRollbackManagerBaseTest, InitTypeOnConfiguration) {
   ReadTransaction trans(FROM_HERE, manager_.GetUserShare());
   ReadNode pref_root(&trans);
   EXPECT_EQ(BaseNode::INIT_OK,
-            pref_root.InitByTagLookup(ModelTypeToRootTag(PREFERENCES)));
+            pref_root.InitTypeRoot(PREFERENCES));
 
   ReadNode bookmark_root(&trans);
   EXPECT_EQ(BaseNode::INIT_OK,
-            bookmark_root.InitByTagLookup(ModelTypeToRootTag(BOOKMARKS)));
+            bookmark_root.InitTypeRoot(BOOKMARKS));
   ReadNode bookmark_bar(&trans);
   EXPECT_EQ(BaseNode::INIT_OK,
-            bookmark_bar.InitByTagLookup("bookmark_bar"));
+            bookmark_bar.InitByTagLookupForBookmarks("bookmark_bar"));
   ReadNode bookmark_mobile(&trans);
-  EXPECT_EQ(BaseNode::INIT_OK,
-            bookmark_mobile.InitByTagLookup("synced_bookmarks"));
+  EXPECT_EQ(BaseNode::INIT_FAILED_ENTRY_NOT_GOOD,
+            bookmark_mobile.InitByTagLookupForBookmarks("synced_bookmarks"));
   ReadNode bookmark_other(&trans);
   EXPECT_EQ(BaseNode::INIT_OK,
-            bookmark_other.InitByTagLookup("other_bookmarks"));
+            bookmark_other.InitByTagLookupForBookmarks("other_bookmarks"));
 }
 
 }  // anonymous namespace

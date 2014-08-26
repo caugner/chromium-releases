@@ -70,7 +70,7 @@ JavaBrowserViewRendererHelper::~JavaBrowserViewRendererHelper() {}
 bool JavaBrowserViewRendererHelper::RenderViaAuxilaryBitmapIfNeeded(
     jobject java_canvas,
     const gfx::Vector2d& scroll_correction,
-    const gfx::Rect& clip,
+    const gfx::Size& auxiliary_bitmap_size,
     RenderMethod render_source) {
   TRACE_EVENT0("android_webview", "RenderViaAuxilaryBitmapIfNeeded");
 
@@ -93,39 +93,47 @@ bool JavaBrowserViewRendererHelper::RenderViaAuxilaryBitmapIfNeeded(
       return render_source.Run(canvas.get());
     }
   }
-  return RenderViaAuxilaryBitmap(
-      env, java_canvas, scroll_correction, clip, render_source);
+  return RenderViaAuxilaryBitmap(env,
+                                 java_canvas,
+                                 scroll_correction,
+                                 auxiliary_bitmap_size,
+                                 render_source);
 }
 
 bool JavaBrowserViewRendererHelper::RenderViaAuxilaryBitmap(
     JNIEnv* env,
     jobject java_canvas,
     const gfx::Vector2d& scroll_correction,
-    const gfx::Rect& clip,
+    const gfx::Size& auxiliary_bitmap_size,
     const RenderMethod& render_source) {
   // Render into an auxiliary bitmap if pixel info is not available.
   ScopedJavaLocalRef<jobject> jcanvas(env, java_canvas);
   TRACE_EVENT0("android_webview", "RenderToAuxBitmap");
 
-  if (clip.width() <= 0 || clip.height() <= 0)
+  if (auxiliary_bitmap_size.width() <= 0 || auxiliary_bitmap_size.height() <= 0)
     return false;
 
   ScopedJavaLocalRef<jobject> jbitmap(
       Java_JavaBrowserViewRendererHelper_createBitmap(
-          env, clip.width(), clip.height(), jcanvas.obj()));
+          env,
+          auxiliary_bitmap_size.width(),
+          auxiliary_bitmap_size.height(),
+          jcanvas.obj()));
   if (!jbitmap.obj())
     return false;
 
   if (!RasterizeIntoBitmap(env,
                            jbitmap,
-                           clip.x() - scroll_correction.x(),
-                           clip.y() - scroll_correction.y(),
                            render_source)) {
     return false;
   }
 
   Java_JavaBrowserViewRendererHelper_drawBitmapIntoCanvas(
-      env, jbitmap.obj(), jcanvas.obj(), clip.x(), clip.y());
+      env,
+      jbitmap.obj(),
+      jcanvas.obj(),
+      scroll_correction.x(),
+      scroll_correction.y());
   return true;
 }
 
@@ -136,8 +144,6 @@ bool RegisterJavaBrowserViewRendererHelper(JNIEnv* env) {
 bool JavaBrowserViewRendererHelper::RasterizeIntoBitmap(
     JNIEnv* env,
     const JavaRef<jobject>& jbitmap,
-    int scroll_x,
-    int scroll_y,
     const JavaBrowserViewRendererHelper::RenderMethod& renderer) {
   DCHECK(jbitmap.obj());
 
@@ -161,7 +167,6 @@ bool JavaBrowserViewRendererHelper::RasterizeIntoBitmap(
     bitmap.installPixels(info, pixels, bitmap_info.stride);
 
     SkCanvas canvas(bitmap);
-    canvas.translate(-scroll_x, -scroll_y);
     succeeded = renderer.Run(&canvas);
   }
 

@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSIONS_BROWSER_CLIENT_H_
 #define CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSIONS_BROWSER_CLIENT_H_
 
+#include <map>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
@@ -22,6 +24,7 @@ class BrowserContext;
 
 namespace extensions {
 
+class ChromeComponentExtensionResourceManager;
 class ChromeExtensionsAPIClient;
 class ContentSettingsPrefsObserver;
 
@@ -80,6 +83,7 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   virtual scoped_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate()
       OVERRIDE;
   virtual bool DidVersionUpdate(content::BrowserContext* context) OVERRIDE;
+  virtual void PermitExternalProtocolHandler() OVERRIDE;
   virtual scoped_ptr<AppSorting> CreateAppSorting() OVERRIDE;
   virtual bool IsRunningInForcedAppMode() OVERRIDE;
   virtual ApiActivityMonitor* GetApiActivityMonitor(
@@ -89,6 +93,8 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
       ExtensionFunctionRegistry* registry) const OVERRIDE;
   virtual scoped_ptr<extensions::RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
       content::BrowserContext* context) const OVERRIDE;
+  virtual ComponentExtensionResourceManager*
+  GetComponentExtensionResourceManager() OVERRIDE;
 
  private:
   friend struct base::DefaultLazyInstanceTraits<ChromeExtensionsBrowserClient>;
@@ -100,6 +106,8 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   // Client for API implementations.
   scoped_ptr<ChromeExtensionsAPIClient> api_client_;
 #endif
+
+  scoped_ptr<ChromeComponentExtensionResourceManager> resource_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeExtensionsBrowserClient);
 };

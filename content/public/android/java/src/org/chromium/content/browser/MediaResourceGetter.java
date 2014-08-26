@@ -9,7 +9,7 @@ import android.content.pm.PackageManager;
 import android.media.MediaMetadataRetriever;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
-import android.net.Uri;
+import android.os.ParcelFileDescriptor;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -21,6 +21,7 @@ import org.chromium.base.PathUtils;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -117,6 +118,23 @@ class MediaResourceGetter {
                 context, url, cookies, userAgent);
     }
 
+    @CalledByNative
+    private static MediaMetadata extractMediaMetadataFromFd(int fd,
+                                                            long offset,
+                                                            long length) {
+        return new MediaResourceGetter().extract(fd, offset, length);
+    }
+
+    @VisibleForTesting
+    MediaMetadata extract(int fd, long offset, long length) {
+        if (!androidDeviceOk(android.os.Build.MODEL, android.os.Build.VERSION.SDK_INT)) {
+            return EMPTY_METADATA;
+        }
+
+        configure(fd, offset, length);
+        return doExtractMetadata();
+    }
+
     @VisibleForTesting
     MediaMetadata extract(final Context context, final String url,
                           final String cookies, final String userAgent) {
@@ -128,7 +146,10 @@ class MediaResourceGetter {
             Log.e(TAG, "Unable to configure metadata extractor");
             return EMPTY_METADATA;
         }
+        return doExtractMetadata();
+    }
 
+    private MediaMetadata doExtractMetadata() {
         try {
             String durationString = extractMetadata(
                     MediaMetadataRetriever.METADATA_KEY_DURATION);
@@ -188,7 +209,13 @@ class MediaResourceGetter {
 
     @VisibleForTesting
     boolean configure(Context context, String url, String cookies, String userAgent) {
-        Uri uri = Uri.parse(url);
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException  e) {
+            Log.e(TAG, "Cannot parse uri.", e);
+            return false;
+        }
         String scheme = uri.getScheme();
         if (scheme == null || scheme.equals("file")) {
             File file = uriToFile(uri.getPath());
@@ -208,7 +235,8 @@ class MediaResourceGetter {
                 return false;
             }
         } else {
-            if (!isNetworkReliable(context)) {
+            final String host = uri.getHost();
+            if (!isLoopbackAddress(host) && !isNetworkReliable(context)) {
                 Log.w(TAG, "non-file URI can't be read due to unsuitable network conditions");
                 return false;
             }
@@ -258,6 +286,14 @@ class MediaResourceGetter {
                 Log.d(TAG, "no ethernet/wifi connection detected");
                 return false;
         }
+    }
+
+    // This method covers only typcial expressions for the loopback address
+    // to resolve the hostname without a DNS loopup.
+    private boolean isLoopbackAddress(String host) {
+        return host != null && (host.equalsIgnoreCase("localhost")  // typical hostname
+                || host.equals("127.0.0.1")  // typical IP v4 expression
+                || host.equals("[::1]"));  // typical IP v6 expression
     }
 
     /**
@@ -349,6 +385,21 @@ class MediaResourceGetter {
     @VisibleForTesting
     String getExternalStorageDirectory() {
         return PathUtils.getExternalStorageDirectory();
+    }
+
+    @VisibleForTesting
+    void configure(int fd, long offset, long length) {
+        ParcelFileDescriptor parcelFd = ParcelFileDescriptor.adoptFd(fd);
+        try {
+            mRetriever.setDataSource(parcelFd.getFileDescriptor(),
+                    offset, length);
+        } finally {
+            try {
+                parcelFd.close();
+            } catch (IOException e) {
+                Log.e(TAG, "Failed to close file descriptor: " + e);
+            }
+        }
     }
 
     @VisibleForTesting

@@ -9,12 +9,14 @@
 #include <X11/Xlib.h>
 
 #include "base/basictypes.h"
+#include "base/cancelable_callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/cursor/cursor_loader_x11.h"
 #include "ui/events/event_source.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
+#include "ui/gfx/insets.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/views/views_export.h"
@@ -23,6 +25,10 @@
 namespace gfx {
 class ImageSkia;
 class ImageSkiaRep;
+}
+
+namespace ui {
+class EventHandler;
 }
 
 namespace views {
@@ -58,12 +64,23 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   // Returns the current bounds in terms of the X11 Root Window.
   gfx::Rect GetX11RootWindowBounds() const;
 
+  // Returns the current bounds in terms of the X11 Root Window including the
+  // borders provided by the window manager (if any).
+  gfx::Rect GetX11RootWindowOuterBounds() const;
+
+  // Returns the window shape if the window is not rectangular. Returns NULL
+  // otherwise.
+  ::Region GetWindowShape() const;
+
   // Called by X11DesktopHandler to notify us that the native windowing system
   // has changed our activation.
   void HandleNativeWidgetActivationChanged(bool active);
 
   void AddObserver(views::DesktopWindowTreeHostObserverX11* observer);
   void RemoveObserver(views::DesktopWindowTreeHostObserverX11* observer);
+
+  // Swaps the current handler for events in the non client view with |handler|.
+  void SwapNonClientEventHandler(scoped_ptr<ui::EventHandler> handler);
 
   // Deallocates the internal list of open windows.
   static void CleanUpWindowList();
@@ -117,7 +134,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   virtual bool ShouldUseNativeFrame() const OVERRIDE;
   virtual bool ShouldWindowContentsBeTransparent() const OVERRIDE;
   virtual void FrameTypeChanged() OVERRIDE;
-  virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
   virtual void SetFullscreen(bool fullscreen) OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
@@ -129,6 +145,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   virtual void OnNativeWidgetFocus() OVERRIDE;
   virtual void OnNativeWidgetBlur() OVERRIDE;
   virtual bool IsAnimatingClosed() const OVERRIDE;
+  virtual bool IsTranslucentWindowOpacitySupported() const OVERRIDE;
 
   // Overridden from aura::WindowTreeHost:
   virtual ui::EventSource* GetEventSource() OVERRIDE;
@@ -149,7 +166,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   // Overridden frm ui::EventSource
   virtual ui::EventProcessor* GetEventProcessor() OVERRIDE;
 
-private:
+ private:
   // Initializes our X11 surface to draw on. This method performs all
   // initialization related to talking to the X11 server.
   void InitX11Window(const Widget::InitParams& params);
@@ -157,6 +174,12 @@ private:
   // Creates an aura::WindowEventDispatcher to contain the |content_window|,
   // along with all aura client objects that direct behavior.
   aura::WindowEventDispatcher* InitDispatcher(const Widget::InitParams& params);
+
+  // Called when |xwindow_|'s _NET_WM_STATE property is updated.
+  void OnWMStateUpdated();
+
+  // Called when |xwindow_|'s _NET_FRAME_EXTENTS property is updated.
+  void OnFrameExtentsUpdated();
 
   // Updates |xwindow_|'s _NET_WM_USER_TIME if |xwindow_| is active.
   void UpdateWMUserTime(const ui::PlatformEvent& event);
@@ -204,9 +227,14 @@ private:
 
   void SetWindowTransparency();
 
+  // Relayout the widget's client and non-client views.
+  void Relayout();
+
   // ui::PlatformEventDispatcher:
   virtual bool CanDispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
   virtual uint32_t DispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
+
+  void DelayedResize(const gfx::Size& size);
 
   base::WeakPtrFactory<DesktopWindowTreeHostX11> close_widget_factory_;
 
@@ -240,8 +268,7 @@ private:
   // The window manager state bits.
   std::set< ::Atom> window_properties_;
 
-  // Local flag for fullscreen state to avoid a state mismatch between
-  // server and local window_properties_ during app-initiated fullscreen.
+  // Whether |xwindow_| was requested to be fullscreen via SetFullscreen().
   bool is_fullscreen_;
 
   // True if the window should stay on top of most other windows.
@@ -260,7 +287,7 @@ private:
   // Current Aura cursor.
   gfx::NativeCursor current_cursor_;
 
-  scoped_ptr<X11WindowEventFilter> x11_window_event_filter_;
+  scoped_ptr<ui::EventHandler> x11_non_client_event_filter_;
   scoped_ptr<X11DesktopWindowMoveClient> x11_window_move_client_;
 
   // TODO(beng): Consider providing an interface to DesktopNativeWidgetAura
@@ -278,8 +305,14 @@ private:
 
   ObserverList<DesktopWindowTreeHostObserverX11> observer_list_;
 
-  // Copy of custom window shape specified via SetShape(), if any.
-  ::Region custom_window_shape_;
+  // The window shape if the window is non-rectangular.
+  ::Region window_shape_;
+
+  // Whether |window_shape_| was set via SetShape().
+  bool custom_window_shape_;
+
+  // The size of the window manager provided borders (if any).
+  gfx::Insets native_window_frame_borders_;
 
   // The current root window host that has capture. While X11 has something
   // like Windows SetCapture()/ReleaseCapture(), it is entirely implicit and
@@ -301,6 +334,8 @@ private:
   // attention to the window or completely ignore the hint. We stop flashing
   // the frame when |xwindow_| gains focus or handles a mouse button event.
   bool urgency_hint_set_;
+
+  base::CancelableCallback<void()> delayed_resize_task_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopWindowTreeHostX11);
 };
