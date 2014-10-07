@@ -23,12 +23,37 @@
 namespace ash {
 namespace {
 
+// TODO(oshima): This feature is obsolete. Remove this after m38.
 bool allow_upgrade_to_high_dpi = false;
+
+bool use_125_dsf_for_ui_scaling = false;
+
+// Check the content of |spec| and fill |bounds| and |device_scale_factor|.
+// Returns true when |bounds| is found.
+bool GetDisplayBounds(
+    const std::string& spec, gfx::Rect* bounds, float* device_scale_factor) {
+  int width = 0;
+  int height = 0;
+  int x = 0;
+  int y = 0;
+  if (sscanf(spec.c_str(), "%dx%d*%f",
+             &width, &height, device_scale_factor) >= 2 ||
+      sscanf(spec.c_str(), "%d+%d-%dx%d*%f", &x, &y, &width, &height,
+             device_scale_factor) >= 4) {
+    bounds->SetRect(x, y, width, height);
+    return true;
+  }
+  return false;
+}
 
 }
 
 DisplayMode::DisplayMode()
-    : refresh_rate(0.0f), interlaced(false), native(false) {}
+    : refresh_rate(0.0f),
+      interlaced(false),
+      native(false),
+      ui_scale(1.0f),
+      device_scale_factor(1.0f) {}
 
 DisplayMode::DisplayMode(const gfx::Size& size,
                          float refresh_rate,
@@ -37,7 +62,23 @@ DisplayMode::DisplayMode(const gfx::Size& size,
     : size(size),
       refresh_rate(refresh_rate),
       interlaced(interlaced),
-      native(native) {}
+      native(native),
+      ui_scale(1.0f),
+      device_scale_factor(1.0f) {}
+
+gfx::Size DisplayMode::GetSizeInDIP() const {
+  gfx::SizeF size_dip(size);
+  size_dip.Scale(ui_scale);
+  size_dip.Scale(1.0f / device_scale_factor);
+  return gfx::ToFlooredSize(size_dip);
+}
+
+bool DisplayMode::IsEquivalent(const DisplayMode& other) const {
+  const float kEpsilon = 0.0001f;
+  return size == other.size &&
+      std::abs(ui_scale - other.ui_scale) < kEpsilon &&
+      std::abs(device_scale_factor - other.device_scale_factor) < kEpsilon;
+}
 
 // satic
 DisplayInfo DisplayInfo::CreateFromSpec(const std::string& spec) {
@@ -47,6 +88,11 @@ DisplayInfo DisplayInfo::CreateFromSpec(const std::string& spec) {
 // static
 void DisplayInfo::SetAllowUpgradeToHighDPI(bool enable) {
   allow_upgrade_to_high_dpi = enable;
+}
+
+// static
+void DisplayInfo::SetUse125DSFForUIScaling(bool enable) {
+  use_125_dsf_for_ui_scaling = enable;
 }
 
 // static
@@ -105,14 +151,8 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
     }
   }
 
-  int x = 0, y = 0, width, height;
   float device_scale_factor = 1.0f;
-  if (sscanf(main_spec.c_str(), "%dx%d*%f",
-             &width, &height, &device_scale_factor) >= 2 ||
-      sscanf(main_spec.c_str(), "%d+%d-%dx%d*%f", &x, &y, &width, &height,
-             &device_scale_factor) >= 4) {
-    bounds_in_native.SetRect(x, y, width, height);
-  } else {
+  if (!GetDisplayBounds(main_spec, &bounds_in_native, &device_scale_factor)) {
 #if defined(OS_WIN)
     if (gfx::IsHighDPIEnabled()) {
       device_scale_factor = gfx::GetDPIScale();
@@ -129,23 +169,23 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
     std::string resolution_list = parts[1];
     count = Tokenize(resolution_list, "|", &parts);
     for (size_t i = 0; i < count; ++i) {
-      std::string resolution = parts[i];
-      int width, height;
-      float refresh_rate = 0.0f;
-      if (sscanf(resolution.c_str(),
-                 "%dx%d%%%f",
-                 &width,
-                 &height,
-                 &refresh_rate) >= 2) {
-        if (width * height >= largest_area &&
-            refresh_rate > highest_refresh_rate) {
+      DisplayMode mode;
+      gfx::Rect mode_bounds;
+      std::vector<std::string> resolution;
+      Tokenize(parts[i], "%", &resolution);
+      if (GetDisplayBounds(
+              resolution[0], &mode_bounds, &mode.device_scale_factor)) {
+        mode.size = mode_bounds.size();
+        if (resolution.size() > 1)
+          sscanf(resolution[1].c_str(), "%f", &mode.refresh_rate);
+        if (mode.size.GetArea() >= largest_area &&
+            mode.refresh_rate > highest_refresh_rate) {
           // Use mode with largest area and highest refresh rate as native.
-          largest_area = width * height;
-          highest_refresh_rate = refresh_rate;
+          largest_area = mode.size.GetArea();
+          highest_refresh_rate = mode.refresh_rate;
           native_mode = i;
         }
-        display_modes.push_back(
-            DisplayMode(gfx::Size(width, height), refresh_rate, false, false));
+        display_modes.push_back(mode);
       }
     }
     display_modes[native_mode].native = true;
@@ -184,6 +224,7 @@ DisplayInfo::DisplayInfo()
       overscan_insets_in_dip_(0, 0, 0, 0),
       configured_ui_scale_(1.0f),
       native_(false),
+      is_aspect_preserving_scaling_(false),
       color_profile_(ui::COLOR_PROFILE_STANDARD) {
 }
 
@@ -249,20 +290,26 @@ void DisplayInfo::SetBounds(const gfx::Rect& new_bounds_in_native) {
 }
 
 float DisplayInfo::GetEffectiveDeviceScaleFactor() const {
+  if (use_125_dsf_for_ui_scaling && device_scale_factor_ == 1.25f)
+    return (configured_ui_scale_ == 0.8f) ? 1.25f : 1.0f;
+
   if (allow_upgrade_to_high_dpi && configured_ui_scale_ < 1.0f &&
       device_scale_factor_ == 1.0f) {
     return 2.0f;
-  } else if (device_scale_factor_ == 2.0f && configured_ui_scale_ == 2.0f) {
+  } else if (device_scale_factor_ == configured_ui_scale_) {
     return 1.0f;
   }
   return device_scale_factor_;
 }
 
 float DisplayInfo::GetEffectiveUIScale() const {
+  if (use_125_dsf_for_ui_scaling && device_scale_factor_ == 1.25f)
+    return (configured_ui_scale_ == 0.8f) ? 1.0f : configured_ui_scale_;
+
   if (allow_upgrade_to_high_dpi && configured_ui_scale_ < 1.0f &&
       device_scale_factor_ == 1.0f) {
     return configured_ui_scale_ * 2.0f;
-  } else if (device_scale_factor_ == 2.0f && configured_ui_scale_ == 2.0f) {
+  } else if (device_scale_factor_ == configured_ui_scale_) {
     return 1.0f;
   }
   return configured_ui_scale_;

@@ -218,6 +218,14 @@ void InitCrashReporter(const std::string& process_type) {
   [breakpad_config setObject:base::SysUTF8ToNSString(dir_crash_dumps.value())
                       forKey:@BREAKPAD_DUMP_DIRECTORY];
 
+  // Temporarily run Breakpad in-process on 10.10 and later because APIs that
+  // it depends on got broken (http://crbug.com/386208).
+  // This can catch crashes in the browser process only.
+  if (is_browser && base::mac::IsOSYosemiteOrLater()) {
+    [breakpad_config setObject:[NSNumber numberWithBool:YES]
+                        forKey:@BREAKPAD_IN_PROCESS];
+  }
+
   // Initialize Breakpad.
   gBreakpadRef = BreakpadCreate(breakpad_config);
   if (!gBreakpadRef) {
@@ -238,9 +246,9 @@ void InitCrashReporter(const std::string& process_type) {
 
   if (!is_browser) {
     // Get the guid from the command line switch.
-    std::string guid =
+    std::string client_guid =
         command_line->GetSwitchValueASCII(switches::kEnableCrashReporter);
-    GetBreakpadClient()->SetClientID(guid);
+    GetBreakpadClient()->SetBreakpadClientIdFromGUID(client_guid);
   }
 
   logging::SetLogMessageHandler(&FatalMessageHandler);

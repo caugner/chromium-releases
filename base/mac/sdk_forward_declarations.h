@@ -160,6 +160,10 @@ enum CWChannelBand {
 - (BluetoothHCIPowerState)powerState;
 @end
 
+enum {
+  kBluetoothFeatureLESupportedController = (1 << 6L),
+};
+
 @protocol IOBluetoothDeviceInquiryDelegate
 - (void)deviceInquiryStarted:(IOBluetoothDeviceInquiry*)sender;
 - (void)deviceInquiryDeviceFound:(IOBluetoothDeviceInquiry*)sender
@@ -192,6 +196,10 @@ BASE_EXPORT extern "C" NSString* const NSWindowWillEnterFullScreenNotification;
 enum {
   NSEventPhaseMayBegin    = 0x1 << 5
 };
+
+@interface NSColor (MountainLionSDK)
+- (CGColorRef)CGColor;
+@end
 
 #endif  // MAC_OS_X_VERSION_10_8
 
@@ -231,8 +239,17 @@ enum {
 
 @end
 
+// NSAppearance is a new class in the 10.9 SDK. New classes cannot be
+// forward-declared because they also require an @implementation, which would
+// produce conflicting linkage. Instead, just declare the necessary pieces of
+// the interface as a protocol, and treat objects of this type as id.
+@protocol CrNSAppearance<NSObject>
++ (id<NSObject>)appearanceNamed:(NSString*)name;
+@end
+
 @interface NSView (MavericksSDK)
 - (void)setCanDrawSubviewsIntoLayer:(BOOL)flag;
+- (id<CrNSAppearance>)effectiveAppearance;
 @end
 
 enum {
@@ -246,22 +263,19 @@ typedef NSUInteger NSWindowOcclusionState;
 
 #endif  // MAC_OS_X_VERSION_10_9
 
-
 #if !defined(MAC_OS_X_VERSION_10_10) || \
     MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_10
 
-enum {
-  NSWindowTitleVisible  = 0,
-  NSWindowTitleHidden = 1,
-  NSWindowTitleHiddenWhenActive = 2,
-};
-typedef NSInteger NSWindowTitleVisibility;
+@interface NSUserActivity : NSObject
 
-@interface NSWindow (YosemiteSDK)
-
-@property NSWindowTitleVisibility titleVisibility;
+@property (readonly, copy) NSString* activityType;
+@property (copy) NSURL* webPageURL;
 
 @end
+
+BASE_EXPORT extern "C" NSString* const NSUserActivityTypeBrowsingWeb;
+
+BASE_EXPORT extern "C" NSString* const NSAppearanceNameVibrantDark;
 
 #endif  // MAC_OS_X_VERSION_10_10
 

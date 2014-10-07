@@ -18,6 +18,7 @@
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/uninstall_reason.h"
 #include "grit/generated_resources.h"
 #include "sync/api/sync_change_processor.h"
 #include "sync/api/sync_data.h"
@@ -116,8 +117,12 @@ bool IsUnRemovableDefaultApp(const std::string& id) {
 }
 
 void UninstallExtension(ExtensionService* service, const std::string& id) {
-  if (service && service->GetInstalledExtension(id))
-    service->UninstallExtension(id, false, NULL);
+  if (service && service->GetInstalledExtension(id)) {
+    service->UninstallExtension(id,
+                                extensions::UNINSTALL_REASON_SYNC,
+                                base::Bind(&base::DoNothing),
+                                NULL);
+  }
 }
 
 bool GetAppListItemType(AppListItem* item,
@@ -210,6 +215,7 @@ AppListSyncableService::AppListSyncableService(
     : profile_(profile),
       extension_system_(extension_system),
       model_(new AppListModel),
+      initial_sync_data_processed_(false),
       first_app_list_sync_(true) {
   if (!extension_system) {
     LOG(ERROR) << "AppListSyncableService created with no ExtensionSystem";
@@ -229,7 +235,8 @@ AppListSyncableService::AppListSyncableService(
   }
 
   // The extensions for this profile have not yet all been loaded.
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
+  registrar_.Add(this,
+                 extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED,
                  content::Source<Profile>(profile));
 }
 
@@ -275,7 +282,7 @@ void AppListSyncableService::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_EXTENSIONS_READY, type);
+  DCHECK_EQ(extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED, type);
   DCHECK_EQ(profile_, content::Source<Profile>(source).ptr());
   registrar_.RemoveAll();
   BuildModel();
@@ -561,11 +568,13 @@ syncer::SyncMergeResult AppListSyncableService::MergeDataAndStartSyncing(
     }
     unsynced_items.erase(item_id);
   }
-
   result.set_num_items_after_association(sync_items_.size());
   result.set_num_items_added(new_items);
   result.set_num_items_deleted(0);
   result.set_num_items_modified(updated_items);
+
+  // Initial sync data has been processed, it is safe now to add new sync items.
+  initial_sync_data_processed_ = true;
 
   // Send unsynced items. Does not affect |result|.
   syncer::SyncChangeList change_list;
@@ -775,6 +784,16 @@ void AppListSyncableService::SendSyncChange(
     SyncChange::SyncChangeType sync_change_type) {
   if (!SyncStarted()) {
     DVLOG(2) << this << " - SendSyncChange: SYNC NOT STARTED: "
+             << sync_item->ToString();
+    return;
+  }
+  if (!initial_sync_data_processed_ &&
+      sync_change_type == SyncChange::ACTION_ADD) {
+    // This can occur if an initial item is created before its folder item.
+    // A sync item should already exist for the folder, so we do not want to
+    // send an ADD event, since that would trigger a CHECK in the sync code.
+    DCHECK(sync_item->item_type == sync_pb::AppListSpecifics::TYPE_FOLDER);
+    DVLOG(2) << this << " - SendSyncChange: ADD before initial data processed: "
              << sync_item->ToString();
     return;
   }

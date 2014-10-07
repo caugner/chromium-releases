@@ -29,7 +29,9 @@ class GlobalTileManager {
   typedef ListType::iterator Key;
   static GlobalTileManager* GetInstance();
 
-  // Requests the |num_of_tiles| from the available global pool. Calls
+  void SetTileLimit(size_t num_tiles_limit);
+
+  // Requests the |new_num_of_tiles| from the available global pool. Calls
   // GlobalTileManagerClient.SetNumTiles after the manager determines how many
   // tiles are available for the client. If the number of tiles left is not
   // enough to satisfy the request, the manager will evict tiles allocated to
@@ -60,6 +62,8 @@ class GlobalTileManager {
   // Check that the sum of all client's tiles is equal to
   // total_allocated_tiles_.
   bool IsConsistent() const;
+
+  size_t num_tiles_limit_;
 
   size_t total_allocated_tiles_;
   ListType mru_list_;

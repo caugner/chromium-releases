@@ -22,9 +22,9 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
+#include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
 #include "chrome/browser/prerender/prerender_condition.h"
@@ -238,8 +238,7 @@ struct PrerenderManager::NavigationRecord {
 
 PrerenderManager::PrerenderManager(Profile* profile,
                                    PrerenderTracker* prerender_tracker)
-    : enabled_(profile && profile->GetPrefs() &&
-          profile->GetPrefs()->GetBoolean(prefs::kNetworkPredictionEnabled)),
+    : enabled_(true),
       profile_(profile),
       prerender_tracker_(prerender_tracker),
       prerender_contents_factory_(PrerenderContents::CreateFactory()),
@@ -1123,26 +1122,20 @@ void PrerenderManager::PendingSwap::ProvisionalChangeToMainFrameUrl(
 }
 
 void PrerenderManager::PendingSwap::DidCommitProvisionalLoadForFrame(
-        int64 frame_id,
-        const base::string16& frame_unique_name,
-        bool is_main_frame,
-        const GURL& validated_url,
-        content::PageTransition transition_type,
-        content::RenderViewHost* render_view_host){
-  if (!is_main_frame)
+    content::RenderFrameHost* render_frame_host,
+    const GURL& validated_url,
+    content::PageTransition transition_type) {
+  if (render_frame_host->GetParent())
     return;
   prerender_data_->ClearPendingSwap();
 }
 
 void PrerenderManager::PendingSwap::DidFailProvisionalLoad(
-        int64 frame_id,
-        const base::string16& frame_unique_name,
-        bool is_main_frame,
-        const GURL& validated_url,
-        int error_code,
-        const base::string16& error_description,
-        content::RenderViewHost* render_view_host) {
-  if (!is_main_frame)
+    content::RenderFrameHost* render_frame_host,
+    const GURL& validated_url,
+    int error_code,
+    const base::string16& error_description) {
+  if (render_frame_host->GetParent())
     return;
   prerender_data_->ClearPendingSwap();
 }
@@ -1867,17 +1860,10 @@ void PrerenderManager::RecordNetworkBytes(Origin origin,
 
 bool PrerenderManager::IsEnabled() const {
   DCHECK(CalledOnValidThread());
+
   if (!enabled_)
     return false;
-  for (std::list<const PrerenderCondition*>::const_iterator it =
-           prerender_conditions_.begin();
-       it != prerender_conditions_.end();
-       ++it) {
-    const PrerenderCondition* condition = *it;
-    if (!condition->CanPrerender())
-      return false;
-  }
-  return true;
+  return chrome_browser_net::CanPrefetchAndPrerenderUI(profile_->GetPrefs());
 }
 
 void PrerenderManager::AddProfileNetworkBytesIfEnabled(int64 bytes) {

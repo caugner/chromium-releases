@@ -23,6 +23,7 @@
 #include "cc/test/pixel_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/compositor_observer.h"
+#include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/layer_animator.h"
@@ -94,8 +95,8 @@ class LayerWithRealCompositorTest : public testing::Test {
         InitializeContextFactoryForTests(enable_pixel_output);
 
     const gfx::Rect host_bounds(10, 10, 500, 500);
-    compositor_host_.reset(TestCompositorHost::Create(
-                               host_bounds, context_factory));
+    compositor_host_.reset(
+        TestCompositorHost::Create(host_bounds, context_factory));
     compositor_host_->Show();
   }
 
@@ -159,9 +160,7 @@ class LayerWithRealCompositorTest : public testing::Test {
     return false;
   }
 
-  void WaitForDraw() {
-    ui::DrawWaiterForTest::Wait(GetCompositor());
-  }
+  void WaitForDraw() { ui::DrawWaiterForTest::Wait(GetCompositor()); }
 
   void WaitForCommit() {
     ui::DrawWaiterForTest::WaitForCommit(GetCompositor());
@@ -448,9 +447,7 @@ class LayerWithDelegateTest : public testing::Test {
     WaitForDraw();
   }
 
-  void WaitForDraw() {
-    DrawWaiterForTest::Wait(compositor());
-  }
+  void WaitForDraw() { DrawWaiterForTest::Wait(compositor()); }
 
   void WaitForCommit() {
     DrawWaiterForTest::WaitForCommit(compositor());
@@ -842,6 +839,21 @@ TEST_F(LayerWithNullDelegateTest, SetBoundsSchedulesPaint) {
   WaitForDraw();
 }
 
+void ExpectRgba(int x, int y, SkColor expected_color, SkColor actual_color) {
+  EXPECT_EQ(expected_color, actual_color)
+      << "Pixel error at x=" << x << " y=" << y << "; "
+      << "actual RGBA=("
+      << SkColorGetR(actual_color) << ","
+      << SkColorGetG(actual_color) << ","
+      << SkColorGetB(actual_color) << ","
+      << SkColorGetA(actual_color) << "); "
+      << "expected RGBA=("
+      << SkColorGetR(expected_color) << ","
+      << SkColorGetG(expected_color) << ","
+      << SkColorGetB(expected_color) << ","
+      << SkColorGetA(expected_color) << ")";
+}
+
 // Checks that pixels are actually drawn to the screen with a read back.
 TEST_F(LayerWithRealCompositorTest, DrawPixels) {
   gfx::Size viewport_size = GetCompositor()->size();
@@ -872,18 +884,86 @@ TEST_F(LayerWithRealCompositorTest, DrawPixels) {
     for (int y = 0; y < viewport_size.height(); y++) {
       SkColor actual_color = bitmap.getColor(x, y);
       SkColor expected_color = y < blue_height ? SK_ColorBLUE : SK_ColorRED;
-      EXPECT_EQ(expected_color, actual_color)
-          << "Pixel error at x=" << x << " y=" << y << "; "
-          << "actual RGBA=("
-          << SkColorGetR(actual_color) << ","
-          << SkColorGetG(actual_color) << ","
-          << SkColorGetB(actual_color) << ","
-          << SkColorGetA(actual_color) << "); "
-          << "expected RGBA=("
-          << SkColorGetR(expected_color) << ","
-          << SkColorGetG(expected_color) << ","
-          << SkColorGetB(expected_color) << ","
-          << SkColorGetA(expected_color) << ")";
+      ExpectRgba(x, y, expected_color, actual_color);
+    }
+  }
+}
+
+// Checks that drawing a layer with transparent pixels is blended correctly
+// with the lower layer.
+TEST_F(LayerWithRealCompositorTest, DrawAlphaBlendedPixels) {
+  gfx::Size viewport_size = GetCompositor()->size();
+
+  int test_size = 200;
+  EXPECT_GE(viewport_size.width(), test_size);
+  EXPECT_GE(viewport_size.height(), test_size);
+
+  // Blue with a wee bit of transparency.
+  SkColor blue_with_alpha = SkColorSetARGBInline(40, 10, 20, 200);
+  SkColor blend_color = SkColorSetARGBInline(255, 216, 3, 32);
+
+  scoped_ptr<Layer> background_layer(
+      CreateColorLayer(SK_ColorRED, gfx::Rect(viewport_size)));
+  scoped_ptr<Layer> foreground_layer(
+      CreateColorLayer(blue_with_alpha, gfx::Rect(viewport_size)));
+
+  // This must be set to false for layers with alpha to be blended correctly.
+  foreground_layer->SetFillsBoundsOpaquely(false);
+
+  background_layer->Add(foreground_layer.get());
+  DrawTree(background_layer.get());
+
+  SkBitmap bitmap;
+  ASSERT_TRUE(ReadPixels(&bitmap, gfx::Rect(viewport_size)));
+  ASSERT_FALSE(bitmap.empty());
+
+  SkAutoLockPixels lock(bitmap);
+  for (int x = 0; x < test_size; x++) {
+    for (int y = 0; y < test_size; y++) {
+      SkColor actual_color = bitmap.getColor(x, y);
+      ExpectRgba(x, y, blend_color, actual_color);
+    }
+  }
+}
+
+// Checks that using the AlphaShape filter applied to a layer with
+// transparency, alpha-blends properly with the layer below.
+TEST_F(LayerWithRealCompositorTest, DrawAlphaThresholdFilterPixels) {
+  gfx::Size viewport_size = GetCompositor()->size();
+
+  int test_size = 200;
+  EXPECT_GE(viewport_size.width(), test_size);
+  EXPECT_GE(viewport_size.height(), test_size);
+
+  int blue_height = 10;
+  SkColor blue_with_alpha = SkColorSetARGBInline(40, 0, 0, 255);
+  SkColor blend_color = SkColorSetARGBInline(255, 215, 0, 40);
+
+  scoped_ptr<Layer> background_layer(
+      CreateColorLayer(SK_ColorRED, gfx::Rect(viewport_size)));
+  scoped_ptr<Layer> foreground_layer(
+      CreateColorLayer(blue_with_alpha, gfx::Rect(viewport_size)));
+
+  // Add a shape to restrict the visible part of the layer.
+  SkRegion shape;
+  shape.setRect(0, 0, viewport_size.width(), blue_height);
+  foreground_layer->SetAlphaShape(make_scoped_ptr(new SkRegion(shape)));
+
+  foreground_layer->SetFillsBoundsOpaquely(false);
+
+  background_layer->Add(foreground_layer.get());
+  DrawTree(background_layer.get());
+
+  SkBitmap bitmap;
+  ASSERT_TRUE(ReadPixels(&bitmap, gfx::Rect(viewport_size)));
+  ASSERT_FALSE(bitmap.empty());
+
+  SkAutoLockPixels lock(bitmap);
+  for (int x = 0; x < test_size; x++) {
+    for (int y = 0; y < test_size; y++) {
+      SkColor actual_color = bitmap.getColor(x, y);
+      ExpectRgba(x, y, actual_color,
+                 y < blue_height ? blend_color : SK_ColorRED);
     }
   }
 }
@@ -1552,6 +1632,46 @@ TEST_F(LayerWithDelegateTest, DestroyingLayerRemovesTheAnimatorFromCollection) {
 
   child.reset();
   EXPECT_FALSE(compositor()->layer_animator_collection()->HasActiveAnimators());
+}
+
+namespace {
+
+std::string Vector2dFTo100thPercisionString(const gfx::Vector2dF& vector) {
+  return base::StringPrintf("%.2f %0.2f", vector.x(), vector.y());
+}
+
+}  // namespace
+
+TEST_F(LayerWithRealCompositorTest, SnapLayerToPixels) {
+  scoped_ptr<Layer> root(CreateLayer(LAYER_TEXTURED));
+  scoped_ptr<Layer> c1(CreateLayer(LAYER_TEXTURED));
+  scoped_ptr<Layer> c11(CreateLayer(LAYER_TEXTURED));
+
+  GetCompositor()->SetScaleAndSize(1.25f, gfx::Size(100, 100));
+  GetCompositor()->SetRootLayer(root.get());
+  root->Add(c1.get());
+  c1->Add(c11.get());
+
+  root->SetBounds(gfx::Rect(0, 0, 100, 100));
+  c1->SetBounds(gfx::Rect(1, 1, 10, 10));
+  c11->SetBounds(gfx::Rect(1, 1, 10, 10));
+  SnapLayerToPhysicalPixelBoundary(root.get(), c11.get());
+  // 0.5 at 1.25 scale : (1 - 0.25 + 0.25) / 1.25 = 0.4
+  EXPECT_EQ("0.40 0.40",
+            Vector2dFTo100thPercisionString(c11->subpixel_position_offset()));
+
+  GetCompositor()->SetScaleAndSize(1.5f, gfx::Size(100, 100));
+  SnapLayerToPhysicalPixelBoundary(root.get(), c11.get());
+  // c11 must already be aligned at 1.5 scale.
+  EXPECT_EQ("0.00 0.00",
+            Vector2dFTo100thPercisionString(c11->subpixel_position_offset()));
+
+  c11->SetBounds(gfx::Rect(2, 2, 10, 10));
+  SnapLayerToPhysicalPixelBoundary(root.get(), c11.get());
+  // c11 is now off the pixel.
+  // 0.5 / 1.5 = 0.333...
+  EXPECT_EQ("0.33 0.33",
+            Vector2dFTo100thPercisionString(c11->subpixel_position_offset()));
 }
 
 }  // namespace ui

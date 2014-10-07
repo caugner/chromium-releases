@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
-#include "chrome/browser/omaha_query_params/omaha_query_params.h"
+#include "components/omaha_query_params/omaha_query_params.h"
 #include "net/base/escape.h"
 
 namespace {
@@ -30,7 +30,8 @@ ManifestFetchData::ManifestFetchData(const GURL& update_url, int request_id)
       full_url_(update_url) {
   std::string query = full_url_.has_query() ?
       full_url_.query() + "&" : std::string();
-  query += chrome::OmahaQueryParams::Get(chrome::OmahaQueryParams::CRX);
+  query += omaha_query_params::OmahaQueryParams::Get(
+      omaha_query_params::OmahaQueryParams::CRX);
   GURL::Replacements replacements;
   replacements.SetQueryStr(query);
   full_url_ = full_url_.ReplaceComponents(replacements);
@@ -66,16 +67,24 @@ bool ManifestFetchData::AddExtension(const std::string& id,
                                      const std::string& version,
                                      const PingData* ping_data,
                                      const std::string& update_url_data,
-                                     const std::string& install_source) {
+                                     const std::string& install_source,
+                                     bool force_update) {
   if (extension_ids_.find(id) != extension_ids_.end()) {
     NOTREACHED() << "Duplicate extension id " << id;
     return false;
   }
 
+  if (force_update)
+    forced_updates_.insert(id);
+
+  // If we want to force an update, we send 0.0.0.0 as the installed version
+  // number.
+  const std::string installed_version = force_update ? "0.0.0.0" : version;
+
   // Compute the string we'd append onto the full_url_, and see if it fits.
   std::vector<std::string> parts;
   parts.push_back("id=" + id);
-  parts.push_back("v=" + version);
+  parts.push_back("v=" + installed_version);
   if (!install_source.empty())
     parts.push_back("installsource=" + install_source);
   parts.push_back("uc");
@@ -160,6 +169,10 @@ bool ManifestFetchData::DidPing(const std::string& extension_id,
 void ManifestFetchData::Merge(const ManifestFetchData& other) {
   DCHECK(full_url() == other.full_url());
   request_ids_.insert(other.request_ids_.begin(), other.request_ids_.end());
+}
+
+bool ManifestFetchData::DidForceUpdate(const std::string& extension_id) const {
+  return forced_updates_.find(extension_id) != forced_updates_.end();
 }
 
 }  // namespace extensions

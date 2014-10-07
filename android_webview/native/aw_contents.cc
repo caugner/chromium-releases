@@ -297,6 +297,7 @@ void AwContents::Destroy(JNIEnv* env, jobject obj) {
   // the java peer. This is important for the popup window case, where we are
   // swapping AwContents out that share the same java AwContentsClientBridge.
   // See b/15074651.
+  AwContentsClientBridgeBase::Disassociate(web_contents_.get());
   contents_client_bridge_.reset();
 
   // We do not delete AwContents immediately. Some applications try to delete
@@ -362,13 +363,33 @@ void AwContents::DrawGL(AwDrawGLInfo* draw_info) {
           : ScopedAppGLStateRestore::MODE_RESOURCE_MANAGEMENT);
   ScopedAllowGL allow_gl;
 
+  if (draw_info->mode == AwDrawGLInfo::kModeProcessNoContext) {
+    LOG(ERROR) << "Received unexpected kModeProcessNoContext";
+  }
+
+  // kModeProcessNoContext should never happen because we tear down hardware
+  // in onTrimMemory. However that guarantee is maintained outside of chromium
+  // code. Not notifying shared state in kModeProcessNoContext can lead to
+  // immediate deadlock, which is slightly more catastrophic than leaks or
+  // corruption.
+  if (draw_info->mode == AwDrawGLInfo::kModeProcess ||
+      draw_info->mode == AwDrawGLInfo::kModeProcessNoContext) {
+    shared_renderer_state_.DidDrawGLProcess();
+  }
+
   if (shared_renderer_state_.IsInsideHardwareRelease()) {
     hardware_renderer_.reset();
+    // Flush the idle queue in tear down.
+    DeferredGpuCommandService::GetInstance()->PerformAllIdleWork();
     return;
   }
 
-  if (draw_info->mode != AwDrawGLInfo::kModeDraw)
+  if (draw_info->mode != AwDrawGLInfo::kModeDraw) {
+    if (draw_info->mode == AwDrawGLInfo::kModeProcess) {
+      DeferredGpuCommandService::GetInstance()->PerformIdleWork(true);
+    }
     return;
+  }
 
   if (!hardware_renderer_) {
     hardware_renderer_.reset(new HardwareRenderer(&shared_renderer_state_));
@@ -378,6 +399,7 @@ void AwContents::DrawGL(AwDrawGLInfo* draw_info) {
   hardware_renderer_->DrawGL(state_restore.stencil_enabled(),
                              state_restore.framebuffer_binding_ext(),
                              draw_info);
+  DeferredGpuCommandService::GetInstance()->PerformIdleWork(false);
 }
 
 namespace {
@@ -746,6 +768,11 @@ void AwContents::PostInvalidate() {
     Java_AwContents_postInvalidateOnAnimation(env, obj.obj());
 }
 
+void AwContents::UpdateParentDrawConstraints() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  browser_view_renderer_.UpdateParentDrawConstraints();
+}
+
 void AwContents::OnNewPicture() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   JNIEnv* env = AttachCurrentThread();
@@ -871,6 +898,11 @@ void AwContents::OnDetachedFromWindow(JNIEnv* env, jobject obj) {
 
 void AwContents::ReleaseHardwareDrawIfNeeded() {
   InsideHardwareReleaseReset inside_reset(&shared_renderer_state_);
+
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (!obj.is_null())
+    Java_AwContents_invalidateOnFunctorDestroy(env, obj.obj());
 
   bool hardware_initialized = browser_view_renderer_.hardware_enabled();
   if (hardware_initialized) {
@@ -1115,11 +1147,6 @@ void AwContents::SetExtraHeadersForUrl(JNIEnv* env, jobject obj,
       GetResourceContext());
   resource_context->SetExtraHeaders(GURL(ConvertJavaStringToUTF8(env, url)),
                                     extra_headers);
-}
-
-void AwContents::SendCheckRenderThreadResponsiveness(JNIEnv* env, jobject obj) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  render_view_host_ext_->SendCheckRenderThreadResponsiveness();
 }
 
 void AwContents::SetJsOnlineProperty(JNIEnv* env,

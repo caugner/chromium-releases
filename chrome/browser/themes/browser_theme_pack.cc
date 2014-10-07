@@ -43,7 +43,7 @@ namespace {
 // Version number of the current theme pack. We just throw out and rebuild
 // theme packs that aren't int-equal to this. Increment this number if you
 // change default theme assets.
-const int kThemePackVersion = 34;
+const int kThemePackVersion = 35;
 
 // IDs that are in the DataPack won't clash with the positive integer
 // uint16. kHeaderID should always have the maximum value because we want the
@@ -96,6 +96,9 @@ struct PersistingImagesTable {
 
 // IDR_* resource names change whenever new resources are added; use persistent
 // IDs when storing to a cached pack.
+//
+// TODO(erg): The cocoa port is the last user of the IDR_*_[HP] variants. These
+// should be removed once the cocoa port no longer uses them.
 PersistingImagesTable kPersistingImages[] = {
   { PRS_THEME_FRAME, IDR_THEME_FRAME,
     "theme_frame" },
@@ -109,8 +112,10 @@ PersistingImagesTable kPersistingImages[] = {
     "theme_toolbar" },
   { PRS_THEME_TAB_BACKGROUND, IDR_THEME_TAB_BACKGROUND,
     "theme_tab_background" },
+#if !defined(OS_MACOSX)
   { PRS_THEME_TAB_BACKGROUND_INCOGNITO, IDR_THEME_TAB_BACKGROUND_INCOGNITO,
     "theme_tab_background_incognito" },
+#endif
   { PRS_THEME_TAB_BACKGROUND_V, IDR_THEME_TAB_BACKGROUND_V,
     "theme_tab_background_v"},
   { PRS_THEME_NTP_BACKGROUND, IDR_THEME_NTP_BACKGROUND,
@@ -231,6 +236,24 @@ int GetPersistentIDByIDR(int idr) {
   }
   std::map<int,int>::iterator it = lookup_table->find(idr);
   return (it == lookup_table->end()) ? -1 : it->second;
+}
+
+// Returns the maximum persistent id.
+int GetMaxPersistentId() {
+  static int max_prs_id = -1;
+  if (max_prs_id == -1) {
+    for (size_t i = 0; i < kPersistingImagesLength; ++i) {
+      if (kPersistingImages[i].persistent_id > max_prs_id)
+        max_prs_id = kPersistingImages[i].persistent_id;
+    }
+#if defined(USE_ASH) && !defined(OS_CHROMEOS)
+    for (size_t i = 0; i < kPersistingImagesDesktopAuraLength; ++i) {
+      if (kPersistingImagesDesktopAura[i].persistent_id > max_prs_id)
+        max_prs_id = kPersistingImagesDesktopAura[i].persistent_id;
+    }
+#endif
+  }
+  return max_prs_id;
 }
 
 // Returns true if the scales in |input| match those in |expected|.
@@ -454,10 +477,7 @@ SkBitmap CreateLowQualityResizedBitmap(const SkBitmap& source_bitmap,
                      ui::GetScaleForScaleFactor(desired_scale_factor) /
                      ui::GetScaleForScaleFactor(source_scale_factor)));
   SkBitmap scaled_bitmap;
-  scaled_bitmap.setConfig(SkBitmap::kARGB_8888_Config,
-                          scaled_size.width(),
-                          scaled_size.height());
-  if (!scaled_bitmap.allocPixels())
+  if (!scaled_bitmap.allocN32Pixels(scaled_size.width(), scaled_size.height()))
     SK_CRASH();
   scaled_bitmap.eraseARGB(0, 0, 0, 0);
   SkCanvas canvas(scaled_bitmap);
@@ -1525,7 +1545,7 @@ int BrowserThemePack::GetRawIDByPersistentID(
 
   for (size_t i = 0; i < scale_factors_.size(); ++i) {
     if (scale_factors_[i] == scale_factor)
-      return static_cast<int>(kPersistingImagesLength * i) + prs_id;
+      return ((GetMaxPersistentId() + 1) * i) + prs_id;
   }
   return -1;
 }

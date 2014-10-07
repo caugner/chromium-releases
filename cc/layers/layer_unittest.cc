@@ -41,7 +41,7 @@ class MockLayerTreeHost : public LayerTreeHost {
  public:
   explicit MockLayerTreeHost(FakeLayerTreeHostClient* client)
       : LayerTreeHost(client, NULL, LayerTreeSettings()) {
-    InitializeSingleThreaded(client);
+    InitializeSingleThreaded(client, base::MessageLoopProxy::current());
   }
 
   MOCK_METHOD0(SetNeedsCommit, void());
@@ -55,7 +55,6 @@ class MockLayerPainter : public LayerPainter {
                      const gfx::Rect& content_rect,
                      gfx::RectF* opaque) OVERRIDE {}
 };
-
 
 class LayerTest : public testing::Test {
  public:
@@ -335,6 +334,64 @@ TEST_F(LayerTest, ReplaceChildWithNewChildThatHasOtherParent) {
   // and child2 should no longer have a parent.
   ASSERT_EQ(0U, test_layer->children().size());
   EXPECT_FALSE(child2_->parent());
+}
+
+TEST_F(LayerTest, DeleteRemovedScrollParent) {
+  scoped_refptr<Layer> parent = Layer::Create();
+  scoped_refptr<Layer> child1 = Layer::Create();
+  scoped_refptr<Layer> child2 = Layer::Create();
+
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, layer_tree_host_->SetRootLayer(parent));
+
+  ASSERT_EQ(0U, parent->children().size());
+
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, parent->InsertChild(child1, 0));
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, parent->InsertChild(child2, 1));
+
+  ASSERT_EQ(2U, parent->children().size());
+  EXPECT_EQ(child1, parent->children()[0]);
+  EXPECT_EQ(child2, parent->children()[1]);
+
+  EXPECT_SET_NEEDS_COMMIT(2, child1->SetScrollParent(child2.get()));
+
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, child2->RemoveFromParent());
+
+  child1->reset_needs_push_properties_for_testing();
+
+  EXPECT_SET_NEEDS_COMMIT(1, child2 = NULL);
+
+  EXPECT_TRUE(child1->needs_push_properties());
+
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, layer_tree_host_->SetRootLayer(NULL));
+}
+
+TEST_F(LayerTest, DeleteRemovedScrollChild) {
+  scoped_refptr<Layer> parent = Layer::Create();
+  scoped_refptr<Layer> child1 = Layer::Create();
+  scoped_refptr<Layer> child2 = Layer::Create();
+
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, layer_tree_host_->SetRootLayer(parent));
+
+  ASSERT_EQ(0U, parent->children().size());
+
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, parent->InsertChild(child1, 0));
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, parent->InsertChild(child2, 1));
+
+  ASSERT_EQ(2U, parent->children().size());
+  EXPECT_EQ(child1, parent->children()[0]);
+  EXPECT_EQ(child2, parent->children()[1]);
+
+  EXPECT_SET_NEEDS_COMMIT(2, child1->SetScrollParent(child2.get()));
+
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, child1->RemoveFromParent());
+
+  child2->reset_needs_push_properties_for_testing();
+
+  EXPECT_SET_NEEDS_COMMIT(1, child1 = NULL);
+
+  EXPECT_TRUE(child2->needs_push_properties());
+
+  EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, layer_tree_host_->SetRootLayer(NULL));
 }
 
 TEST_F(LayerTest, ReplaceChildWithSameChild) {
@@ -873,16 +930,21 @@ class LayerTreeHostFactory {
         shared_bitmap_manager_(new TestSharedBitmapManager()) {}
 
   scoped_ptr<LayerTreeHost> Create() {
-    return LayerTreeHost::CreateSingleThreaded(&client_,
-                                               &client_,
-                                               shared_bitmap_manager_.get(),
-                                               LayerTreeSettings()).Pass();
+    return LayerTreeHost::CreateSingleThreaded(
+               &client_,
+               &client_,
+               shared_bitmap_manager_.get(),
+               LayerTreeSettings(),
+               base::MessageLoopProxy::current()).Pass();
   }
 
   scoped_ptr<LayerTreeHost> Create(LayerTreeSettings settings) {
     return LayerTreeHost::CreateSingleThreaded(
-               &client_, &client_, shared_bitmap_manager_.get(), settings)
-        .Pass();
+               &client_,
+               &client_,
+               shared_bitmap_manager_.get(),
+               settings,
+               base::MessageLoopProxy::current()).Pass();
   }
 
  private:
@@ -1145,6 +1207,51 @@ TEST_F(LayerTest, SafeOpaqueBackgroundColor) {
       }
     }
   }
+}
+
+class DrawsContentChangeLayer : public Layer {
+ public:
+  static scoped_refptr<DrawsContentChangeLayer> Create() {
+    return make_scoped_refptr(new DrawsContentChangeLayer());
+  }
+
+  virtual void SetLayerTreeHost(LayerTreeHost* host) OVERRIDE {
+    Layer::SetLayerTreeHost(host);
+    SetFakeDrawsContent(!fake_draws_content_);
+  }
+
+  virtual bool HasDrawableContent() const OVERRIDE {
+    return fake_draws_content_ && Layer::HasDrawableContent();
+  }
+
+  void SetFakeDrawsContent(bool fake_draws_content) {
+    fake_draws_content_ = fake_draws_content;
+    UpdateDrawsContent(HasDrawableContent());
+  }
+
+ private:
+  DrawsContentChangeLayer() : Layer(), fake_draws_content_(false) {}
+  virtual ~DrawsContentChangeLayer() OVERRIDE {}
+
+  bool fake_draws_content_;
+};
+
+TEST_F(LayerTest, DrawsContentChangedInSetLayerTreeHost) {
+  scoped_refptr<Layer> root_layer = Layer::Create();
+  scoped_refptr<DrawsContentChangeLayer> becomes_not_draws_content =
+      DrawsContentChangeLayer::Create();
+  scoped_refptr<DrawsContentChangeLayer> becomes_draws_content =
+      DrawsContentChangeLayer::Create();
+  root_layer->SetIsDrawable(true);
+  becomes_not_draws_content->SetIsDrawable(true);
+  becomes_not_draws_content->SetFakeDrawsContent(true);
+  EXPECT_EQ(0, root_layer->NumDescendantsThatDrawContent());
+  root_layer->AddChild(becomes_not_draws_content);
+  EXPECT_EQ(0, root_layer->NumDescendantsThatDrawContent());
+
+  becomes_draws_content->SetIsDrawable(true);
+  root_layer->AddChild(becomes_draws_content);
+  EXPECT_EQ(1, root_layer->NumDescendantsThatDrawContent());
 }
 
 }  // namespace

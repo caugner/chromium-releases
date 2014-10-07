@@ -27,12 +27,12 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/auth/authentication_notification_details.h"
-#include "chrome/browser/chromeos/login/users/user_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
@@ -146,7 +146,7 @@ BootTimesLoader::Stats BootTimesLoader::Stats::GetCurrentStats() {
 }
 
 std::string BootTimesLoader::Stats::SerializeToString() const {
-  if (uptime_.empty() || disk_.empty())
+  if (uptime_.empty() && disk_.empty())
     return std::string();
   base::DictionaryValue dictionary;
   dictionary.SetString(kUptime, uptime_);
@@ -514,7 +514,7 @@ void BootTimesLoader::Observe(
       if (render_widget_hosts_loading_.find(rwh) !=
           render_widget_hosts_loading_.end()) {
         AddLoginTimeMarker("TabPaint: " + GetTabUrl(rwh), false);
-        LoginDone(UserManager::Get()->IsCurrentUserNew());
+        LoginDone(user_manager::UserManager::Get()->IsCurrentUserNew());
       }
       break;
     }

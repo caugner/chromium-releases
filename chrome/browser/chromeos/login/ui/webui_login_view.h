@@ -44,6 +44,12 @@ class WebUILoginView : public views::View,
                        public ChromeWebModalDialogManagerDelegate,
                        public web_modal::WebContentsModalDialogHost {
  public:
+  class FrameObserver {
+   public:
+    // Called when a frame failed to load.
+    virtual void OnFrameError(const std::string& frame_unique_name) = 0;
+  };
+
   // Internal class name.
   static const char kViewClassName[];
 
@@ -105,6 +111,9 @@ class WebUILoginView : public views::View,
     should_emit_login_prompt_visible_ = emit;
   }
 
+  void AddFrameObserver(FrameObserver* frame_observer);
+  void RemoveFrameObserver(FrameObserver* frame_observer);
+
  protected:
   // Overridden from views::View:
   virtual void Layout() OVERRIDE;
@@ -143,13 +152,10 @@ class WebUILoginView : public views::View,
 
   // Overridden from content::WebContentsObserver.
   virtual void DidFailProvisionalLoad(
-      int64 frame_id,
-      const base::string16& frame_unique_name,
-      bool is_main_frame,
+      content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       int error_code,
-      const base::string16& error_description,
-      content::RenderViewHost* render_view_host) OVERRIDE;
+      const base::string16& error_description) OVERRIDE;
 
   // Performs series of actions when login prompt is considered
   // to be ready and visible.
@@ -185,6 +191,7 @@ class WebUILoginView : public views::View,
   scoped_ptr<ScopedGaiaAuthExtension> auth_extension_;
 
   ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
+  ObserverList<FrameObserver> frame_observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUILoginView);
 };
