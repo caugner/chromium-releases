@@ -10,14 +10,17 @@
  * @param {boolean} isDefault Whether the task is default or not.
  * @param {string} taskId Task ID.
  * @param {string} title Title of the task.
+ * @param {boolean=} opt_isGenericFileHandler Whether the task is a generic
+ *     file handler.
  * @constructor
  */
-function FakeTask(isDefault, taskId, title) {
+function FakeTask(isDefault, taskId, title, opt_isGenericFileHandler) {
   this.driveApp = false;
   this.iconUrl = 'chrome://theme/IDR_DEFAULT_FAVICON';  // Dummy icon
   this.isDefault = isDefault;
   this.taskId = taskId;
   this.title = title;
+  this.isGenericFileHandler = opt_isGenericFileHandler || false;
   Object.freeze(this);
 }
 
@@ -51,7 +54,7 @@ var DRIVE_FAKE_TASKS = [
  */
 function setupTaskTest(rootPath, fakeTasks) {
   return setupAndWaitUntilReady(null, rootPath).then(function(windowId) {
-    return callRemoteTestUtil(
+    return remoteCall.callRemoteTestUtil(
         'overrideTasks',
         windowId,
         [fakeTasks]).then(function() {
@@ -69,12 +72,12 @@ function setupTaskTest(rootPath, fakeTasks) {
 function executeDefaultTask(expectedTaskId, windowId) {
   // Select file.
   var selectFilePromise =
-      callRemoteTestUtil('selectFile', windowId, ['hello.txt']);
+      remoteCall.callRemoteTestUtil('selectFile', windowId, ['hello.txt']);
 
   // Double-click the file.
   var doubleClickPromise = selectFilePromise.then(function(result) {
     chrome.test.assertTrue(result);
-    return callRemoteTestUtil(
+    return remoteCall.callRemoteTestUtil(
         'fakeMouseDoubleClick',
         windowId,
         ['#file-list li.table-row[selected] .filename-label span']);
@@ -83,7 +86,7 @@ function executeDefaultTask(expectedTaskId, windowId) {
   // Wait until the task is executed.
   return doubleClickPromise.then(function(result) {
     chrome.test.assertTrue(!!result);
-    return waitUntilTaskExecutes(windowId, expectedTaskId);
+    return remoteCall.waitUntilTaskExecutes(windowId, expectedTaskId);
   });
 }
 
@@ -105,18 +108,19 @@ function defaultActionDialog(expectedTaskId, windowId) {
 
   // Select file.
   var selectFilePromise =
-      callRemoteTestUtil('selectFile', windowId, ['hello.txt']);
+      remoteCall.callRemoteTestUtil('selectFile', windowId, ['hello.txt']);
 
   // Click the change default menu.
   var menuClickedPromise = selectFilePromise.
       then(function() {
-        return waitForElement(windowId, '#tasks[multiple]');
+        return remoteCall.waitForElement(windowId, '#tasks[multiple]');
       }).
       then(function() {
-        return waitForElement(windowId, '#tasks-menu .change-default');
+        return remoteCall.waitForElement(
+            windowId, '#tasks-menu .change-default');
       }).
       then(function() {
-        return callRemoteTestUtil(
+        return remoteCall.callRemoteTestUtil(
             'fakeEvent', windowId, ['#tasks', 'select', {item: {}}]);
       }).
       then(function(result) {
@@ -127,7 +131,7 @@ function defaultActionDialog(expectedTaskId, windowId) {
   var menuPreparedPromise = menuClickedPromise.then(function() {
     return repeatUntil(function() {
       // Obtains menu items.
-      var menuItemsPromise = callRemoteTestUtil(
+      var menuItemsPromise = remoteCall.callRemoteTestUtil(
           'queryAllElements',
           windowId,
           ['#default-action-dialog #default-actions-list li']);
@@ -149,7 +153,7 @@ function defaultActionDialog(expectedTaskId, windowId) {
   // Click the non default item.
   var itemClickedPromise = menuPreparedPromise.
       then(function() {
-        return callRemoteTestUtil(
+        return remoteCall.callRemoteTestUtil(
             'fakeEvent',
             windowId,
             [
@@ -159,7 +163,7 @@ function defaultActionDialog(expectedTaskId, windowId) {
             ]);
       }).
       then(function() {
-        return callRemoteTestUtil(
+        return remoteCall.callRemoteTestUtil(
             'fakeEvent',
             windowId,
             [
@@ -174,13 +178,15 @@ function defaultActionDialog(expectedTaskId, windowId) {
 
   // Wait for the dialog hidden, and the task is executed.
   var dialogHiddenPromise = itemClickedPromise.then(function() {
-    return waitForElement.bind(null, windowId, '#default-action-dialog', null);
+    return remoteCall.waitForElement.bind(
+        remoteCall, windowId, '#default-action-dialog', null);
   });
 
   // Execute the new default task.
   var taskButtonClicked = dialogHiddenPromise.
       then(function() {
-        return callRemoteTestUtil('fakeEvent', windowId, ['#tasks', 'click']);
+        return remoteCall.callRemoteTestUtil(
+            'fakeEvent', windowId, ['#tasks', 'click']);
       }).
       then(function(result) {
         chrome.test.assertTrue(result);
@@ -188,7 +194,7 @@ function defaultActionDialog(expectedTaskId, windowId) {
 
   // Check the executed tasks.
   return dialogHiddenPromise.then(function() {
-    return waitUntilTaskExecutes(windowId, expectedTaskId);
+    return remoteCall.waitUntilTaskExecutes(windowId, expectedTaskId);
   });
 }
 
@@ -211,3 +217,38 @@ testcase.defaultActionDialogOnDownloads = function() {
   testPromise(setupTaskTest(RootPath.DOWNLOADS, DOWNLOADS_FAKE_TASKS).then(
       defaultActionDialog.bind(null, 'dummytaskid-2|open-with')));
 };
+
+testcase.genericTaskIsNotExecuted = function() {
+  var tasks = [
+    new FakeTask(false, 'dummytaskid|open-with', 'DummyAction1',
+        true /* isGenericFileHandler */),
+    new FakeTask(false, 'dummytaskid-2|open-with', 'DummyAction2',
+        true /* isGenericFileHandler */)
+  ];
+
+  // When default task is not set, executeDefaultInternal_ in file_tasks.js
+  // tries to show it in a browser tab. By checking the view-in-browser task is
+  // executed, we check that default task is not set in this situation.
+  //
+  // See: src/ui/file_manager/file_manager/foreground/js/file_tasks.js&l=404
+  testPromise(setupTaskTest(RootPath.DOWNLOADS, tasks)
+    .then(function(windowId) {
+      return executeDefaultTask(
+          FILE_MANAGER_EXTENSIONS_ID + '|file|view-in-browser',
+          windowId);
+    }));
+};
+
+testcase.genericAndNonGenericTasksAreMixed = function() {
+  var tasks = [
+    new FakeTask(false, 'dummytaskid|open-with', 'DummyAction1',
+        true /* isGenericFileHandler */),
+    new FakeTask(false, 'dummytaskid-2|open-with', 'DummyAction2',
+        false /* isGenericFileHandler */),
+    new FakeTask(false, 'dummytaskid-3|open-with', 'DummyAction3',
+        true /* isGenericFileHandler */)
+  ];
+
+  testPromise(setupTaskTest(RootPath.DOWNLOADS, tasks).then(
+    executeDefaultTask.bind(null, 'dummytaskid-2|open-with')));
+}

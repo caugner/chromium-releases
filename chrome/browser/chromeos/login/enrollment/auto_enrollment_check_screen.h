@@ -16,8 +16,9 @@
 
 namespace chromeos {
 
+class BaseScreenDelegate;
+class ErrorScreensHistogramHelper;
 class ScreenManager;
-class ScreenObserver;
 
 // Handles the control flow after OOBE auto-update completes to wait for the
 // enterprise auto-enrollment check that happens as part of OOBE. This includes
@@ -26,12 +27,11 @@ class ScreenObserver;
 // doesn't actually drive a dedicated screen.
 class AutoEnrollmentCheckScreen
     : public AutoEnrollmentCheckScreenActor::Delegate,
-      public WizardScreen,
+      public BaseScreen,
       public NetworkPortalDetector::Observer {
  public:
-  AutoEnrollmentCheckScreen(
-      ScreenObserver* observer,
-      AutoEnrollmentCheckScreenActor* actor);
+  AutoEnrollmentCheckScreen(BaseScreenDelegate* base_screen_delegate,
+                            AutoEnrollmentCheckScreenActor* actor);
   virtual ~AutoEnrollmentCheckScreen();
 
   static AutoEnrollmentCheckScreen* Get(ScreenManager* manager);
@@ -44,19 +44,19 @@ class AutoEnrollmentCheckScreen
     auto_enrollment_controller_ = auto_enrollment_controller;
   }
 
-  // WizardScreen implementation:
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+  // BaseScreen implementation:
+  virtual void PrepareToShow() override;
+  virtual void Show() override;
+  virtual void Hide() override;
+  virtual std::string GetName() const override;
 
   // AutoEnrollmentCheckScreenActor::Delegate implementation:
-  virtual void OnActorDestroyed(AutoEnrollmentCheckScreenActor* actor) OVERRIDE;
+  virtual void OnActorDestroyed(AutoEnrollmentCheckScreenActor* actor) override;
 
   // NetworkPortalDetector::Observer implementation:
   virtual void OnPortalDetectionCompleted(
       const NetworkState* network,
-      const NetworkPortalDetector::CaptivePortalState& state) OVERRIDE;
+      const NetworkPortalDetector::CaptivePortalState& state) override;
 
  private:
   // Handles update notifications regarding the auto-enrollment check.
@@ -97,6 +97,8 @@ class AutoEnrollmentCheckScreen
 
   NetworkPortalDetector::CaptivePortalStatus captive_portal_status_;
   policy::AutoEnrollmentState auto_enrollment_state_;
+
+  scoped_ptr<ErrorScreensHistogramHelper> histogram_helper_;
 
   base::WeakPtrFactory<AutoEnrollmentCheckScreen> weak_ptr_factory_;
 
