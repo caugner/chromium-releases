@@ -366,9 +366,7 @@ void CrasAudioHandler::AdjustOutputVolumeToAudibleLevel() {
 }
 
 void CrasAudioHandler::SetInputMute(bool mute_on) {
-  if (!SetInputMuteInternal(mute_on))
-    return;
-
+  SetInputMuteInternal(mute_on);
   FOR_EACH_OBSERVER(AudioObserver, observers_, OnInputMuteChanged());
 }
 
@@ -431,7 +429,6 @@ CrasAudioHandler::CrasAudioHandler(
       has_alternative_input_(false),
       has_alternative_output_(false),
       output_mute_locked_(false),
-      input_mute_locked_(false),
       log_errors_(false),
       weak_ptr_factory_(this) {
   if (!audio_pref_handler.get())
@@ -606,17 +603,8 @@ void CrasAudioHandler::ApplyAudioPolicy() {
       SetOutputMuteInternal(audio_pref_handler_->GetMuteValue(*device));
   }
 
-  input_mute_locked_ = false;
-  if (audio_pref_handler_->GetAudioCaptureAllowedValue()) {
-    VLOG(1) << "Audio input allowed by policy, sets input id="
-            << "0x" << std::hex << active_input_node_id_ << " mute=false";
-    SetInputMuteInternal(false);
-  } else {
-    VLOG(0) << "Audio input NOT allowed by policy, sets input id="
-            << "0x" << std::hex << active_input_node_id_ << " mute=true";
-    SetInputMuteInternal(true);
-    input_mute_locked_ = true;
-  }
+  // Policy for audio input is handled by kAudioCaptureAllowed in the Chrome
+  // media system.
 }
 
 void CrasAudioHandler::SetOutputNodeVolume(uint64 node_id, int volume) {
@@ -678,14 +666,10 @@ void CrasAudioHandler::SetInputNodeGainPercent(uint64 node_id,
   }
 }
 
-bool CrasAudioHandler::SetInputMuteInternal(bool mute_on) {
-  if (input_mute_locked_)
-    return false;
-
+void CrasAudioHandler::SetInputMuteInternal(bool mute_on) {
   input_mute_on_ = mute_on;
   chromeos::DBusThreadManager::Get()->GetCrasAudioClient()->
       SetInputMute(mute_on);
-  return true;
 }
 
 void CrasAudioHandler::GetNodes() {
@@ -792,7 +776,16 @@ void CrasAudioHandler::NotifyActiveNodeChanged(bool is_input) {
 
 void CrasAudioHandler::UpdateDevicesAndSwitchActive(
     const AudioNodeList& nodes) {
-  size_t old_audio_devices_size = audio_devices_.size();
+  size_t old_output_device_size = 0;
+  size_t old_input_device_size = 0;
+  for (AudioDeviceMap::const_iterator it = audio_devices_.begin();
+       it != audio_devices_.end(); ++it) {
+    if (it->second.is_input)
+      ++old_input_device_size;
+    else
+      ++old_output_device_size;
+  }
+
   bool output_devices_changed = HasDeviceChange(nodes, false);
   bool input_devices_changed = HasDeviceChange(nodes, true);
   audio_devices_.clear();
@@ -804,6 +797,8 @@ void CrasAudioHandler::UpdateDevicesAndSwitchActive(
   while (!output_devices_pq_.empty())
     output_devices_pq_.pop();
 
+  size_t new_output_device_size = 0;
+  size_t new_input_device_size = 0;
   for (size_t i = 0; i < nodes.size(); ++i) {
     AudioDevice device(nodes[i]);
     audio_devices_[device.id] = device;
@@ -819,27 +814,43 @@ void CrasAudioHandler::UpdateDevicesAndSwitchActive(
       has_alternative_output_ = true;
     }
 
-    if (device.is_input)
+    if (device.is_input) {
       input_devices_pq_.push(device);
-    else
+      ++new_input_device_size;
+    } else {
       output_devices_pq_.push(device);
+      ++new_output_device_size;
+    }
   }
 
   // If audio nodes change is caused by unplugging some non-active audio
   // devices, the previously set active audio device will stay active.
   // Otherwise, switch to a new active audio device according to their priority.
   if (input_devices_changed &&
-      !NonActiveDeviceUnplugged(old_audio_devices_size,
-                                audio_devices_.size(),
-                                active_input_node_id_) &&
-      !input_devices_pq_.empty())
-    SwitchToDevice(input_devices_pq_.top(), true);
+      !NonActiveDeviceUnplugged(old_input_device_size,
+                                new_input_device_size,
+                                active_input_node_id_)) {
+    // Some devices like chromeboxes don't have the internal audio input. In
+    // that case the active input node id should be reset.
+    if (input_devices_pq_.empty()) {
+      active_input_node_id_ = 0;
+      NotifyActiveNodeChanged(true);
+    } else {
+      SwitchToDevice(input_devices_pq_.top(), true);
+    }
+  }
   if (output_devices_changed &&
-      !NonActiveDeviceUnplugged(old_audio_devices_size,
-                                audio_devices_.size(),
-                                active_output_node_id_) &&
-      !output_devices_pq_.empty()) {
-    SwitchToDevice(output_devices_pq_.top(), true);
+      !NonActiveDeviceUnplugged(old_output_device_size,
+                                new_output_device_size,
+                                active_output_node_id_)) {
+    // This is really unlikely to happen because all ChromeOS devices have the
+    // internal audio output.
+    if (output_devices_pq_.empty()) {
+      active_output_node_id_ = 0;
+      NotifyActiveNodeChanged(false);
+    } else {
+      SwitchToDevice(output_devices_pq_.top(), true);
+    }
   }
 }
 

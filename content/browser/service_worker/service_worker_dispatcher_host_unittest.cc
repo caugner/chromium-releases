@@ -127,6 +127,15 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
     dispatcher_host_->ipc_sink()->ClearMessages();
   }
 
+  ServiceWorkerProviderHost* CreateServiceWorkerProviderHost(int provider_id) {
+    return new ServiceWorkerProviderHost(kRenderProcessId,
+                                         MSG_ROUTING_NONE,
+                                         provider_id,
+                                         context()->AsWeakPtr(),
+                                         nullptr);
+  }
+
+
   TestBrowserThreadBundle browser_thread_bundle_;
   content::MockResourceContext resource_context_;
   scoped_ptr<EmbeddedWorkerTestHelper> helper_;
@@ -150,8 +159,8 @@ TEST_F(ServiceWorkerDispatcherHostTest,
       SetBrowserClientForTesting(&test_browser_client);
 
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -171,8 +180,8 @@ TEST_F(ServiceWorkerDispatcherHostTest,
 
 TEST_F(ServiceWorkerDispatcherHostTest, Register_HTTPS) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -184,8 +193,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, Register_HTTPS) {
 
 TEST_F(ServiceWorkerDispatcherHostTest, Register_NonSecureTransportLocalhost) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("http://127.0.0.3:81/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -197,8 +206,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, Register_NonSecureTransportLocalhost) {
 
 TEST_F(ServiceWorkerDispatcherHostTest, Register_InvalidScopeShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -209,8 +218,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, Register_InvalidScopeShouldFail) {
 
 TEST_F(ServiceWorkerDispatcherHostTest, Register_InvalidScriptShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -220,65 +229,113 @@ TEST_F(ServiceWorkerDispatcherHostTest, Register_InvalidScriptShouldFail) {
 
 TEST_F(ServiceWorkerDispatcherHostTest, Register_NonSecureOriginShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("http://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
-  SendRegister(kProviderId,
-               GURL("http://www.example.com/"),
-               GURL("http://www.example.com/bar"));
-  EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
+  Register(kProviderId,
+           GURL("http://www.example.com/"),
+           GURL("http://www.example.com/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
 }
 
 TEST_F(ServiceWorkerDispatcherHostTest, Register_CrossOriginShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
   // Script has a different host
-  SendRegister(kProviderId,
-               GURL("https://www.example.com/"),
-               GURL("https://foo.example.com/bar"));
-  EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
+  Register(kProviderId,
+           GURL("https://www.example.com/"),
+           GURL("https://foo.example.com/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
 
   // Scope has a different host
-  SendRegister(kProviderId,
-               GURL("https://foo.example.com/"),
-               GURL("https://www.example.com/bar"));
-  EXPECT_EQ(2, dispatcher_host_->bad_messages_received_count_);
+  Register(kProviderId,
+           GURL("https://foo.example.com/"),
+           GURL("https://www.example.com/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
 
   // Script has a different port
-  SendRegister(kProviderId,
-               GURL("https://www.example.com/"),
-               GURL("https://www.example.com:8080/bar"));
-  EXPECT_EQ(3, dispatcher_host_->bad_messages_received_count_);
+  Register(kProviderId,
+           GURL("https://www.example.com/"),
+           GURL("https://www.example.com:8080/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
 
   // Scope has a different transport
-  SendRegister(kProviderId,
-               GURL("wss://www.example.com/"),
-               GURL("https://www.example.com/bar"));
-  EXPECT_EQ(4, dispatcher_host_->bad_messages_received_count_);
+  Register(kProviderId,
+           GURL("wss://www.example.com/"),
+           GURL("https://www.example.com/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
 
   // Script and scope have a different host but match each other
-  SendRegister(kProviderId,
-               GURL("https://foo.example.com/"),
-               GURL("https://foo.example.com/bar"));
-  EXPECT_EQ(5, dispatcher_host_->bad_messages_received_count_);
+  Register(kProviderId,
+           GURL("https://foo.example.com/"),
+           GURL("https://foo.example.com/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
 
   // Script and scope URLs are invalid
   SendRegister(kProviderId,
                GURL(),
                GURL("h@ttps://@"));
-  EXPECT_EQ(6, dispatcher_host_->bad_messages_received_count_);
+  EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
+}
+
+TEST_F(ServiceWorkerDispatcherHostTest,
+       Register_FileSystemDocumentShouldFail) {
+  const int64 kProviderId = 99;  // Dummy value
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
+  host->SetDocumentUrl(GURL("filesystem:https://www.example.com/temporary/a"));
+  context()->AddProviderHost(host.Pass());
+
+  Register(kProviderId,
+           GURL("filesystem:https://www.example.com/temporary/"),
+           GURL("https://www.example.com/temporary/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
+
+  Register(kProviderId,
+           GURL("https://www.example.com/temporary/"),
+           GURL("filesystem:https://www.example.com/temporary/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
+
+  Register(kProviderId,
+           GURL("filesystem:https://www.example.com/temporary/"),
+           GURL("filesystem:https://www.example.com/temporary/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
+}
+
+TEST_F(ServiceWorkerDispatcherHostTest,
+       Register_FileSystemScriptOrScopeShouldFail) {
+  const int64 kProviderId = 99;  // Dummy value
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
+  host->SetDocumentUrl(GURL("https://www.example.com/temporary/"));
+  context()->AddProviderHost(host.Pass());
+
+  Register(kProviderId,
+           GURL("filesystem:https://www.example.com/temporary/"),
+           GURL("https://www.example.com/temporary/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
+
+  Register(kProviderId,
+           GURL("https://www.example.com/temporary/"),
+           GURL("filesystem:https://www.example.com/temporary/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
+
+  Register(kProviderId,
+           GURL("filesystem:https://www.example.com/temporary/"),
+           GURL("filesystem:https://www.example.com/temporary/bar"),
+           ServiceWorkerMsg_ServiceWorkerRegistrationError::ID);
 }
 
 TEST_F(ServiceWorkerDispatcherHostTest, Unregister_HTTPS) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -290,8 +347,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, Unregister_HTTPS) {
 TEST_F(ServiceWorkerDispatcherHostTest,
        Unregister_NonSecureTransportLocalhost) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("http://localhost/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -302,19 +359,20 @@ TEST_F(ServiceWorkerDispatcherHostTest,
 
 TEST_F(ServiceWorkerDispatcherHostTest, Unregister_CrossOriginShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
-  SendUnregister(kProviderId, GURL("https://foo.example.com/"));
-  EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
+  Unregister(kProviderId,
+             GURL("https://foo.example.com/"),
+             ServiceWorkerMsg_ServiceWorkerUnregistrationError::ID);
 }
 
 TEST_F(ServiceWorkerDispatcherHostTest, Unregister_InvalidScopeShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -324,13 +382,14 @@ TEST_F(ServiceWorkerDispatcherHostTest, Unregister_InvalidScopeShouldFail) {
 
 TEST_F(ServiceWorkerDispatcherHostTest, Unregister_NonSecureOriginShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("http://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
-  SendUnregister(kProviderId, GURL("http://www.example.com/"));
-  EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
+  Unregister(kProviderId,
+             GURL("http://www.example.com/"),
+             ServiceWorkerMsg_ServiceWorkerUnregistrationError::ID);
 }
 
 TEST_F(ServiceWorkerDispatcherHostTest, EarlyContextDeletion) {
@@ -349,12 +408,12 @@ TEST_F(ServiceWorkerDispatcherHostTest, ProviderCreatedAndDestroyed) {
   const int kProviderId = 1001;  // Test with a value != kRenderProcessId.
 
   dispatcher_host_->OnMessageReceived(
-      ServiceWorkerHostMsg_ProviderCreated(kProviderId));
+      ServiceWorkerHostMsg_ProviderCreated(kProviderId, MSG_ROUTING_NONE));
   EXPECT_TRUE(context()->GetProviderHost(kRenderProcessId, kProviderId));
 
   // Two with the same ID should be seen as a bad message.
   dispatcher_host_->OnMessageReceived(
-      ServiceWorkerHostMsg_ProviderCreated(kProviderId));
+      ServiceWorkerHostMsg_ProviderCreated(kProviderId, MSG_ROUTING_NONE));
   EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
 
   dispatcher_host_->OnMessageReceived(
@@ -369,7 +428,7 @@ TEST_F(ServiceWorkerDispatcherHostTest, ProviderCreatedAndDestroyed) {
   // Deletion of the dispatcher_host should cause providers for that
   // process to get deleted as well.
   dispatcher_host_->OnMessageReceived(
-      ServiceWorkerHostMsg_ProviderCreated(kProviderId));
+      ServiceWorkerHostMsg_ProviderCreated(kProviderId, MSG_ROUTING_NONE));
   EXPECT_TRUE(context()->GetProviderHost(kRenderProcessId, kProviderId));
   EXPECT_TRUE(dispatcher_host_->HasOneRef());
   dispatcher_host_ = NULL;
@@ -378,8 +437,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, ProviderCreatedAndDestroyed) {
 
 TEST_F(ServiceWorkerDispatcherHostTest, GetRegistration_SameOrigin) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -390,20 +449,21 @@ TEST_F(ServiceWorkerDispatcherHostTest, GetRegistration_SameOrigin) {
 
 TEST_F(ServiceWorkerDispatcherHostTest, GetRegistration_CrossOriginShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
-  SendGetRegistration(kProviderId, GURL("https://foo.example.com/"));
-  EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
+  GetRegistration(kProviderId,
+                  GURL("https://foo.example.com/"),
+                  ServiceWorkerMsg_ServiceWorkerGetRegistrationError::ID);
 }
 
 TEST_F(ServiceWorkerDispatcherHostTest,
        GetRegistration_InvalidScopeShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("https://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
@@ -414,13 +474,14 @@ TEST_F(ServiceWorkerDispatcherHostTest,
 TEST_F(ServiceWorkerDispatcherHostTest,
        GetRegistration_NotSecureOriginShouldFail) {
   const int64 kProviderId = 99;  // Dummy value
-  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
-      kRenderProcessId, kProviderId, context()->AsWeakPtr(), NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(
+      CreateServiceWorkerProviderHost(kProviderId));
   host->SetDocumentUrl(GURL("http://www.example.com/foo"));
   context()->AddProviderHost(host.Pass());
 
-  SendGetRegistration(kProviderId, GURL("http://www.example.com/"));
-  EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
+  GetRegistration(kProviderId,
+                  GURL("http://www.example.com/"),
+                  ServiceWorkerMsg_ServiceWorkerGetRegistrationError::ID);
 }
 
 TEST_F(ServiceWorkerDispatcherHostTest, GetRegistration_EarlyContextDeletion) {
@@ -438,7 +499,7 @@ TEST_F(ServiceWorkerDispatcherHostTest, CleanupOnRendererCrash) {
   // Add a provider and worker.
   const int64 kProviderId = 99;  // Dummy value
   dispatcher_host_->OnMessageReceived(
-      ServiceWorkerHostMsg_ProviderCreated(kProviderId));
+      ServiceWorkerHostMsg_ProviderCreated(kProviderId, MSG_ROUTING_NONE));
 
   GURL pattern = GURL("http://www.example.com/");
   scoped_refptr<ServiceWorkerRegistration> registration(
@@ -484,7 +545,7 @@ TEST_F(ServiceWorkerDispatcherHostTest, CleanupOnRendererCrash) {
   // the old dispatcher cleaned up the old provider host, the new one won't
   // complain.
   new_dispatcher_host->OnMessageReceived(
-      ServiceWorkerHostMsg_ProviderCreated(kProviderId));
+      ServiceWorkerHostMsg_ProviderCreated(kProviderId, MSG_ROUTING_NONE));
   EXPECT_EQ(0, new_dispatcher_host->bad_messages_received_count_);
 }
 

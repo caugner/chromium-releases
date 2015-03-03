@@ -13,11 +13,12 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/chromeos/system/automatic_reboot_manager_observer.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/update_engine_client.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "ui/wm/core/user_activity_observer.h"
+#include "ui/base/user_activity/user_activity_observer.h"
 
 class PrefRegistrySimple;
 
@@ -27,8 +28,6 @@ class TickClock;
 
 namespace chromeos {
 namespace system {
-
-class AutomaticRebootManagerObserver;
 
 // Schedules and executes automatic reboots.
 //
@@ -72,7 +71,7 @@ class AutomaticRebootManagerObserver;
 // /var/run ensures that it gets cleared automatically on every boot.
 class AutomaticRebootManager : public PowerManagerClient::Observer,
                                public UpdateEngineClient::Observer,
-                               public wm::UserActivityObserver,
+                               public ui::UserActivityObserver,
                                public content::NotificationObserver {
  public:
   // The current uptime and the uptime at which an update was applied and a
@@ -93,6 +92,11 @@ class AutomaticRebootManager : public PowerManagerClient::Observer,
   explicit AutomaticRebootManager(scoped_ptr<base::TickClock> clock);
   virtual ~AutomaticRebootManager();
 
+  AutomaticRebootManagerObserver::Reason reboot_reason() const {
+    return reboot_reason_;
+  }
+  bool reboot_requested() const { return reboot_requested_; }
+
   void AddObserver(AutomaticRebootManagerObserver* observer);
   void RemoveObserver(AutomaticRebootManagerObserver* observer);
 
@@ -103,7 +107,7 @@ class AutomaticRebootManager : public PowerManagerClient::Observer,
   virtual void UpdateStatusChanged(
       const UpdateEngineClient::Status& status) override;
 
-  // wm::UserActivityObserver:
+  // ui::UserActivityObserver:
   virtual void OnUserActivity(const ui::Event* event) override;
 
   // content::NotificationObserver:
@@ -156,6 +160,9 @@ class AutomaticRebootManager : public PowerManagerClient::Observer,
   // complete the update process, in |clock_| ticks.
   bool have_update_reboot_needed_time_;
   base::TimeTicks update_reboot_needed_time_;
+
+  // The reason for the reboot request. Updated whenever a reboot is scheduled.
+  AutomaticRebootManagerObserver::Reason reboot_reason_;
 
   // Whether a reboot has been requested.
   bool reboot_requested_;

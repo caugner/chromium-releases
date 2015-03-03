@@ -294,15 +294,14 @@ var NetInternalsTest = (function() {
       sockets: SocketsView.TAB_ID,
       spdy: SpdyView.TAB_ID,
       quic: QuicView.TAB_ID,
+      sdch: SdchView.TAB_ID,
       httpCache: HttpCacheView.TAB_ID,
       modules: ModulesView.TAB_ID,
       tests: TestView.TAB_ID,
       hsts: HSTSView.TAB_ID,
-      logs: LogsView.TAB_ID,
       prerender: PrerenderView.TAB_ID,
       bandwidth: BandwidthView.TAB_ID,
-      chromeos: CrosView.TAB_ID,
-      visualizer: CrosLogVisualizerView.TAB_ID
+      chromeos: CrosView.TAB_ID
     };
 
     assertEquals(typeof hashToTabHandleIdMap[hash], 'string',

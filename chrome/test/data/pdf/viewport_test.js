@@ -89,8 +89,9 @@ function MockDocumentDimensions(width, height) {
 
 var tests = [
   function testDocumentNeedsScrollbars() {
-    var viewport = new Viewport(new MockWindow(100, 100), new MockSizer(),
-                                function() {}, function() {}, function() {}, 0);
+    var viewport =
+        new Viewport(new MockWindow(100, 100), new MockSizer(), function() {},
+                     function() {}, function() {}, 10);
     var scrollbars;
 
     viewport.setDocumentDimensions(new MockDocumentDimensions(90, 90));
@@ -108,10 +109,25 @@ var tests = [
     chrome.test.assertTrue(scrollbars.vertical);
     chrome.test.assertTrue(scrollbars.horizontal);
 
-    viewport.setDocumentDimensions(new MockDocumentDimensions(100, 101));
+    viewport.setDocumentDimensions(new MockDocumentDimensions(90, 101));
     scrollbars = viewport.documentNeedsScrollbars_(1);
     chrome.test.assertTrue(scrollbars.vertical);
     chrome.test.assertFalse(scrollbars.horizontal);
+
+    viewport.setDocumentDimensions(new MockDocumentDimensions(101, 90));
+    scrollbars = viewport.documentNeedsScrollbars_(1);
+    chrome.test.assertFalse(scrollbars.vertical);
+    chrome.test.assertTrue(scrollbars.horizontal);
+
+    viewport.setDocumentDimensions(new MockDocumentDimensions(91, 101));
+    scrollbars = viewport.documentNeedsScrollbars_(1);
+    chrome.test.assertTrue(scrollbars.vertical);
+    chrome.test.assertTrue(scrollbars.horizontal);
+
+    viewport.setDocumentDimensions(new MockDocumentDimensions(101, 91));
+    scrollbars = viewport.documentNeedsScrollbars_(1);
+    chrome.test.assertTrue(scrollbars.vertical);
+    chrome.test.assertTrue(scrollbars.horizontal);
 
     viewport.setDocumentDimensions(new MockDocumentDimensions(40, 51));
     scrollbars = viewport.documentNeedsScrollbars_(2);
@@ -187,8 +203,8 @@ var tests = [
                                 function() {}, function() {}, 0);
 
     var documentDimensions = new MockDocumentDimensions(100, 100);
+    documentDimensions.addPage(50, 100);
     documentDimensions.addPage(100, 100);
-    documentDimensions.addPage(150, 100);
     documentDimensions.addPage(100, 200);
     viewport.setDocumentDimensions(documentDimensions);
     viewport.setZoom(1);
@@ -213,10 +229,19 @@ var tests = [
     mockWindow.scrollTo(0, 180);
     chrome.test.assertEq(2, viewport.getMostVisiblePage());
 
+    // Scrolled just past half way through the second page.
+    mockWindow.scrollTo(0, 160);
+    chrome.test.assertEq(1, viewport.getMostVisiblePage());
+
     // Scrolled just over half way through the first page with 2x zoom.
     viewport.setZoom(2);
     mockWindow.scrollTo(0, 151);
     chrome.test.assertEq(1, viewport.getMostVisiblePage());
+
+    // Zoomed out with the entire document visible.
+    viewport.setZoom(0.25);
+    mockWindow.scrollTo(0, 0);
+    chrome.test.assertEq(0, viewport.getMostVisiblePage());
     chrome.test.succeed();
   },
 

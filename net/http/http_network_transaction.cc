@@ -567,6 +567,11 @@ bool HttpNetworkTransaction::is_https_request() const {
   return request_->url.SchemeIs("https");
 }
 
+bool HttpNetworkTransaction::UsingHttpProxyWithoutTunnel() const {
+  return (proxy_info_.is_http() || proxy_info_.is_https()) &&
+         !(request_->url.SchemeIs("https") || request_->url.SchemeIsWSOrWSS());
+}
+
 void HttpNetworkTransaction::DoCallback(int rv) {
   DCHECK_NE(rv, ERR_IO_PENDING);
   DCHECK(!callback_.is_null());
@@ -746,6 +751,9 @@ int HttpNetworkTransaction::DoCreateStreamComplete(int result) {
     // Return OK and let the caller read the proxy's error page
     next_state_ = STATE_NONE;
     return OK;
+  } else if (result == ERR_HTTP_1_1_REQUIRED ||
+             result == ERR_PROXY_HTTP_1_1_REQUIRED) {
+    return HandleHttp11Required(result);
   }
 
   // Handle possible handshake errors that may have occurred if the stream
@@ -828,12 +836,13 @@ int HttpNetworkTransaction::DoGenerateServerAuthTokenComplete(int rv) {
   return rv;
 }
 
-void HttpNetworkTransaction::BuildRequestHeaders(bool using_proxy) {
+void HttpNetworkTransaction::BuildRequestHeaders(
+    bool using_http_proxy_without_tunnel) {
   request_headers_.SetHeader(HttpRequestHeaders::kHost,
                              GetHostAndOptionalPort(request_->url));
 
   // For compat with HTTP/1.0 servers and proxies:
-  if (using_proxy) {
+  if (using_http_proxy_without_tunnel) {
     request_headers_.SetHeader(HttpRequestHeaders::kProxyConnection,
                                "keep-alive");
   } else {
@@ -876,7 +885,8 @@ void HttpNetworkTransaction::BuildRequestHeaders(bool using_proxy) {
 
   request_headers_.MergeFrom(request_->extra_headers);
 
-  if (using_proxy && !before_proxy_headers_sent_callback_.is_null())
+  if (using_http_proxy_without_tunnel &&
+      !before_proxy_headers_sent_callback_.is_null())
     before_proxy_headers_sent_callback_.Run(proxy_info_, &request_headers_);
 
   response_.did_use_http_auth =
@@ -905,9 +915,8 @@ int HttpNetworkTransaction::DoBuildRequest() {
   // This is constructed lazily (instead of within our Start method), so that
   // we have proxy info available.
   if (request_headers_.IsEmpty()) {
-    bool using_proxy = (proxy_info_.is_http() || proxy_info_.is_https()) &&
-                        !is_https_request();
-    BuildRequestHeaders(using_proxy);
+    bool using_http_proxy_without_tunnel = UsingHttpProxyWithoutTunnel();
+    BuildRequestHeaders(using_http_proxy_without_tunnel);
   }
 
   return OK;
@@ -961,9 +970,9 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
       return result;
   }
 
-  if (result == ERR_QUIC_HANDSHAKE_FAILED) {
-    ResetConnectionAndRequestForResend();
-    return OK;
+  if (result == ERR_HTTP_1_1_REQUIRED ||
+      result == ERR_PROXY_HTTP_1_1_REQUIRED) {
+    return HandleHttp11Required(result);
   }
 
   // ERR_CONNECTION_CLOSED is treated differently at this point; if partial
@@ -1027,11 +1036,8 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
     return OK;
   }
 
-  HostPortPair endpoint = HostPortPair(request_->url.HostNoBrackets(),
-                                       request_->url.EffectiveIntPort());
-  ProcessAlternateProtocol(session_,
-                           *response_.headers.get(),
-                           endpoint);
+  ProcessAlternateProtocol(session_, *response_.headers.get(),
+                           HostPortPair::FromURL(request_->url));
 
   int rv = HandleAuthChallenge();
   if (rv != OK)
@@ -1200,6 +1206,19 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
   // Reset the other member variables.
   // Note: this is necessary only with SSL renegotiation.
   ResetStateForRestart();
+  return OK;
+}
+
+int HttpNetworkTransaction::HandleHttp11Required(int error) {
+  DCHECK(error == ERR_HTTP_1_1_REQUIRED ||
+         error == ERR_PROXY_HTTP_1_1_REQUIRED);
+
+  if (error == ERR_HTTP_1_1_REQUIRED) {
+    HttpServerProperties::ForceHTTP11(&server_ssl_config_);
+  } else {
+    HttpServerProperties::ForceHTTP11(&proxy_ssl_config_);
+  }
+  ResetConnectionAndRequestForResend();
   return OK;
 }
 
@@ -1401,8 +1420,7 @@ void HttpNetworkTransaction::ResetConnectionAndRequestForResend() {
 }
 
 bool HttpNetworkTransaction::ShouldApplyProxyAuth() const {
-  return !is_https_request() &&
-      (proxy_info_.is_https() || proxy_info_.is_http());
+  return UsingHttpProxyWithoutTunnel();
 }
 
 bool HttpNetworkTransaction::ShouldApplyServerAuth() const {
